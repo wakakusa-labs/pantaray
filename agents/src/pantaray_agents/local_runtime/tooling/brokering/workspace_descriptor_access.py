@@ -262,8 +262,7 @@ def _matching_lines(
         while True:
             parts: list[str] | None = []
             while part := handle.readline(_GREP_READ_CHARS):
-                if time.monotonic() >= deadline:
-                    raise TimeoutError
+                _within(deadline)
                 if parts is not None:
                     parts.append(part)
                     if sum(map(len, parts)) > GREP_MAX_SEARCHED_LINE_CHARS:
@@ -339,9 +338,9 @@ def _walk(
     with context as iterator:
         # Design limit: a directory's names are held while it is walked, so the
         # order is the same on every call; fine below 10^6 entries a directory.
-        for item in sorted(iterator, key=lambda entry: entry.name):
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError
+        listed = (entry for entry in iterator if _within(deadline))
+        for item in sorted(listed, key=lambda entry: entry.name):
+            _within(deadline)
             child_relative = item.name if relative == "." else f"{relative}/{item.name}"
             if excluded is not None and excluded(child_relative):
                 continue
@@ -411,6 +410,12 @@ def scan_skip_notes(
             f"anything under them. First error: {skips.first_unreadable_error}."
         )
     return warnings, hints
+
+
+def _within(deadline: float | None) -> bool:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError
+    return True
 
 
 def _skip_unreadable(skips: WorkspaceScanSkips, relative: str, exc: OSError) -> None:

@@ -92,7 +92,6 @@ class RipgrepGlobResult:
     truncated: bool
     truncation_reason: RipgrepTruncationReason | None
     timed_out: bool
-    # Paths ripgrep could not read; a directory among them was not walked.
     skipped_files: int
     first_skip_error: str | None
 

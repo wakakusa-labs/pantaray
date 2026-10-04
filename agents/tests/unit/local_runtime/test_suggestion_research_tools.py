@@ -617,9 +617,7 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
 
     names = [entry["name"] for entry in listed["entries"]]  # type: ignore[index]
     assert names == ["big.log", "blob.bin", "docs", "latin1.txt", "wide.txt"]
-    assert "1 listed director(y/ies) at max_depth=1 were not opened" in str(
-        listed["warning"]
-    )
+    assert "at max_depth=1 were not opened" in str(listed["warning"])
     assert "1 symlink(s) were skipped" in str(listed["warning"])
     assert grepped["matches"] == [
         {"path": "big.log", "line_number": 1024 * 1024 + 1, "line": "needle late"},

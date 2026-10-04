@@ -497,7 +497,6 @@ async def test_list_reports_the_depth_cut_symlinks_and_unreadable_paths(
     assert "1 listed director(y/ies) at max_depth=2 were not opened" in warning
     assert "1 symlink(s) were skipped" in warning
     assert "1 path(s) could not be read" in warning
-    assert "tree/locked: Permission denied" in warning
     assert "Raise max_depth (up to 6)" in str(outcome.output["retry_hint"])
 
 

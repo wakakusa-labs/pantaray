@@ -64,7 +64,6 @@ class _Page:
 @dataclass(frozen=True, slots=True)
 class _Found:
     items: list[JSONValue]
-    # "limit": stopped at the page's end while more items exist.
     reason: DescriptorTruncationReason | None = None
     skips: WorkspaceScanSkips = field(default_factory=WorkspaceScanSkips)
 
@@ -242,9 +241,7 @@ class ReadOnlyFileAccess:
                 f"shown as an excerpt around their first match; "
                 f"{GREP_OMITTED_TEXT_MARKER} marks omitted text."
             )
-            hints.append(
-                "To see more of such a line, read the file at offset=line_number."
-            )
+            hints.append("To see more of such a line, read it at offset=line_number.")
         if result.binary_match_paths:
             warnings.append(binary_match_warning(result.binary_match_paths))
         return {

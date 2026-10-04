@@ -120,6 +120,15 @@ def _profile_path(temp_dir: str) -> Path:
     return Path(temp_dir) / SANDBOX_PROFILE_NAME
 
 
+def _launch_argv(request: BrokerToSandboxCommandRequest) -> list[str]:
+    if request.run_outside_sandbox:
+        # The user approved this one command to run without the profile.
+        return list(request.argv)
+    profile_path = _profile_path(request.temp_dir)
+    profile_path.write_text(render_seatbelt_profile(request), encoding="utf-8")
+    return ["/usr/bin/sandbox-exec", "-f", str(profile_path), *request.argv]
+
+
 def _emit_spawn_failed(request_id: str, error: OSError) -> None:
     stderr = f"{type(error).__name__}: {error}\n"
     _emit_message(
@@ -139,16 +148,8 @@ def _emit_spawn_failed(request_id: str, error: OSError) -> None:
 
 async def _run_helper(request: BrokerToSandboxCommandRequest) -> int:
     try:
-        profile_path = _profile_path(request.temp_dir)
-        profile_path.write_text(
-            render_seatbelt_profile(request),
-            encoding="utf-8",
-        )
         process = await asyncio.create_subprocess_exec(
-            "/usr/bin/sandbox-exec",
-            "-f",
-            str(profile_path),
-            *request.argv,
+            *_launch_argv(request),
             cwd=request.cwd,
             env=request.env,
             stdout=asyncio.subprocess.PIPE,

@@ -7,6 +7,7 @@ from ..action_subagent_resource_authority import (
     ActionSubagentResourceActorError,
     ActionSubagentResourceWriteDeniedError,
     authorize_action_subagent_resource_writes,
+    load_claim_actor_role,
     resolve_action_subagent_command_write_roots,
 )
 from ..action_subagent_resource_identity import (
@@ -16,6 +17,7 @@ from ..action_subagent_resource_identity import (
 from .broker_common import BrokerContext, BrokerPolicyError
 
 ACTION_SUBAGENT_WRITE_DENIED = "ACTION_SUBAGENT_WRITE_DENIED"
+ACTION_SUBAGENT_UNSANDBOXED_DENIED = "ACTION_SUBAGENT_UNSANDBOXED_DENIED"
 
 
 def authorize_direct_workspace_writes(
@@ -46,6 +48,38 @@ def authorize_direct_workspace_writes(
             "workspace write is outside the broker actor's active claim authority",
             code=ACTION_SUBAGENT_WRITE_DENIED,
         ) from exc
+
+
+def authorize_unsandboxed_command(*, context: BrokerContext) -> None:
+    """Refuse a run outside the sandbox to an Action subagent.
+
+    A subagent writes only what it claimed, which an unsandboxed command cannot
+    be held to, so only the Action itself may ask the user for one.
+    """
+
+    try:
+        role = load_claim_actor_role(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            user_id=context.execution_session.user_id,
+            action_id=cast(str, context.execution_session.action_id),
+            actor_process_id=context.actor_process_id,
+        )
+    except ActionSubagentResourceActorError as exc:
+        raise BrokerPolicyError(
+            "the broker actor is not active in this Action",
+            code=ACTION_SUBAGENT_UNSANDBOXED_DENIED,
+        ) from exc
+    if role != "parent":
+        raise BrokerPolicyError(
+            f"{ACTION_SUBAGENT_UNSANDBOXED_DENIED}: a subagent cannot run a "
+            "command outside the sandbox",
+            code=ACTION_SUBAGENT_UNSANDBOXED_DENIED,
+            fix_hint=(
+                "Finish what you can inside the sandbox and report the blocked "
+                "step to the parent Action."
+            ),
+        )
 
 
 def resolve_command_workspace_write_roots(
@@ -80,7 +114,9 @@ def resolve_command_workspace_write_roots(
 
 
 __all__ = [
+    "ACTION_SUBAGENT_UNSANDBOXED_DENIED",
     "ACTION_SUBAGENT_WRITE_DENIED",
     "authorize_direct_workspace_writes",
+    "authorize_unsandboxed_command",
     "resolve_command_workspace_write_roots",
 ]

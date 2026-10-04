@@ -55,6 +55,7 @@ def build_sandbox_request(
         temp_storage_limit_bytes=request.temp_storage_limit_bytes,
         network_policy=request.network_policy,
         use_login_environment=request.use_login_environment,
+        run_outside_sandbox=request.run_outside_sandbox,
     )
 
 
@@ -75,6 +76,7 @@ def compose_sandbox_request(
     temp_storage_limit_bytes: int,
     network_policy: BrokerNetworkPolicy,
     use_login_environment: bool,
+    run_outside_sandbox: bool,
 ) -> BrokerToSandboxCommandRequest:
     """Add what every sandboxed command shares; the caller owns its write roots."""
 
@@ -112,6 +114,7 @@ def compose_sandbox_request(
         temp_storage_limit_bytes=temp_storage_limit_bytes,
         network_policy=network_policy,
         use_login_environment=use_login_environment,
+        run_outside_sandbox=run_outside_sandbox,
         protected_backend_address=f"{address}:{port}",
     )
 

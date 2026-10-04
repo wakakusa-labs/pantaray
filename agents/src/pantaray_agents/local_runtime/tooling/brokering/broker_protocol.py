@@ -174,8 +174,8 @@ class _JustifiedCommandArgs(BaseModel):
     def _justified_exactly_when_asking(self) -> _JustifiedCommandArgs:
         if self._asks_for_access() != (self.justification is not None):
             raise ValueError(
-                "justification is required with additional_write_folders "
-                "or use_login_environment, and only then"
+                "justification is required with additional_write_folders, "
+                "use_login_environment or run_outside_sandbox, and only then"
             )
         return self
 
@@ -186,9 +186,24 @@ class BashToolArgs(_JustifiedCommandArgs):
     command: str = Field(min_length=1, pattern=r"\S")
     cwd: str | None = Field(default=None, min_length=1, pattern=r"\S")
     use_login_environment: bool = False
+    run_outside_sandbox: bool = False
 
     def _asks_for_access(self) -> bool:
-        return self.use_login_environment or super()._asks_for_access()
+        return (
+            self.use_login_environment
+            or self.run_outside_sandbox
+            or super()._asks_for_access()
+        )
+
+    @model_validator(mode="after")
+    def _no_write_folders_outside_sandbox(self) -> BashToolArgs:
+        # Outside the sandbox every folder is writable; asking for one would show
+        # the user a folder approval that limits nothing.
+        if self.run_outside_sandbox and self.additional_write_folders:
+            raise ValueError(
+                "additional_write_folders cannot be combined with run_outside_sandbox"
+            )
+        return self
 
 
 class RunPythonToolArgs(_JustifiedCommandArgs):
@@ -499,6 +514,8 @@ class ValidatedCommandRequest(BaseModel):
     open_file_lease_limit: int
     network_policy: BrokerNetworkPolicy
     use_login_environment: bool
+    # Only an approved Action bash call sets it; see build_validated_command_request.
+    run_outside_sandbox: bool
     generated_python_code: str | None = None
     real_read_roots: list[str]
     real_write_roots: list[str]

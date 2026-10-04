@@ -58,6 +58,7 @@ async def test_cancelling_an_unrecorded_command_kills_it_and_removes_its_temp_di
             temp_storage_limit_bytes=1_048_576,
             network_policy="deny",
             use_login_environment=False,
+            run_outside_sandbox=False,
         )
 
     task = asyncio.create_task(

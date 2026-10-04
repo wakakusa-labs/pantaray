@@ -77,6 +77,25 @@ def authorize_action_subagent_resource_writes(
     return snapshot.actor
 
 
+def load_claim_actor_role(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    action_id: str,
+    actor_process_id: str,
+) -> Literal["parent", "child"]:
+    """Whether the active actor is the Action itself or one of its subagents."""
+
+    return _load_authority_snapshot(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=user_id,
+        action_id=action_id,
+        actor_process_id=actor_process_id,
+    ).actor.role
+
+
 def record_command_write_authority_in_connection(
     connection: sqlite3.Connection, invocation: ToolInvocationStartInput
 ) -> None:

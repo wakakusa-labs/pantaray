@@ -18,6 +18,7 @@ from ..repository.command_network_settings import load_command_network_enabled
 from ..sandbox.runtime_policy import resolve_runtime_budget
 from .action_subagent_broker_authority import (
     authorize_direct_workspace_writes,
+    authorize_unsandboxed_command,
     resolve_command_workspace_write_roots,
 )
 from .broker_common import (
@@ -241,6 +242,9 @@ def build_validated_command_request(
     executable_source_kind: BrokerExecutableSourceKind = "trusted_system_executable"
     resolved_argv = [str(resolved_executable), "--noprofile", "--norc", "-c", command]
     use_login_environment = args.use_login_environment
+    run_outside_sandbox = args.run_outside_sandbox
+    if run_outside_sandbox:
+        authorize_unsandboxed_command(context=context)
     # Commands read what the read-access setting allows, like the read tool.
     full_disk_read = context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     env = build_command_env(
@@ -264,16 +268,22 @@ def build_validated_command_request(
         cwd_relative_path=str(command_cwd),
         timeout_ms=runtime_budget.sandbox_launch.timeout_ms,
         use_login_environment=use_login_environment,
+        run_outside_sandbox=run_outside_sandbox,
         reason=args.justification,
         outside_workspace_folders=resolved_cwd.outside_workspace_folders,
     )
+    # The approval binds to this exact summary, command text included, and the
+    # argv below runs that same text. A run outside the sandbox is asked every
+    # time, whatever the approval mode.
     approval_session_id, approval_source = ensure_tool_authorization(
         context=context,
         tool_invocation_id=tool_invocation_id,
         tool_request_id=tool_request_id,
         command_summary=command_summary_json,
         requested_at=requested_at,
-        require_user_prompt=bool(resolved_cwd.outside_workspace_folders),
+        require_user_prompt=(
+            run_outside_sandbox or bool(resolved_cwd.outside_workspace_folders)
+        ),
     )
     storage = resolve_action_storage_paths(
         db_path=context.db_path,
@@ -307,6 +317,7 @@ def build_validated_command_request(
         open_file_lease_limit=runtime_budget.broker_local.open_file_lease_limit,
         network_policy=_command_network_policy(context),
         use_login_environment=use_login_environment,
+        run_outside_sandbox=run_outside_sandbox,
         # The usual roots stay listed: their ancestor metadata grants let tools
         # such as git stat the parents of a workspace inside private storage.
         real_read_roots=[
@@ -413,6 +424,7 @@ def build_validated_python_request(
         open_file_lease_limit=runtime_budget.broker_local.open_file_lease_limit,
         network_policy=_command_network_policy(context),
         use_login_environment=False,
+        run_outside_sandbox=False,
         generated_python_code=args.code,
         real_read_roots=[
             *(["/"] if full_disk_read else []),

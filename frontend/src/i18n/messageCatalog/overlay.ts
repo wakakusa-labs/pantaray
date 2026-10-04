@@ -109,6 +109,12 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.outsideWorkspace.hintMultipleFolders':
       'Add these folders to your workspace folders and this check won’t appear next time.',
     'overlay.approvalRequired.outsideWorkspace.openSettings': 'Open workspace folder settings',
+    'overlay.approvalRequired.outsideSandbox.title':
+      'This runs outside Pantaray’s protected environment',
+    'overlay.approvalRequired.outsideSandbox.purpose': 'What it does',
+    'overlay.approvalRequired.outsideSandbox.effect': 'If you allow it',
+    'overlay.approvalRequired.outsideSandbox.effectDescription':
+      'This one run has your permissions: it can read and write files on your Mac and open apps.',
     'overlay.approvalRequired.submitFailed':
       'Failed to submit approval decision. Refresh and try again.',
     'overlay.approvalRequired.resyncFailed':
@@ -220,6 +226,12 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.outsideWorkspace.hintMultipleFolders':
       'これらのフォルダを作業フォルダに登録すると、次からはこの確認は出なくなります。',
     'overlay.approvalRequired.outsideWorkspace.openSettings': '作業フォルダの設定を開く',
+    'overlay.approvalRequired.outsideSandbox.title':
+      'この操作は、Pantaray の安全な実行環境の外で動かします',
+    'overlay.approvalRequired.outsideSandbox.purpose': '何をするか',
+    'overlay.approvalRequired.outsideSandbox.effect': '許可すると',
+    'overlay.approvalRequired.outsideSandbox.effectDescription':
+      'この 1 回の操作は、あなたと同じ権限で動きます。Mac 上のファイルを読み書きしたり、アプリを起動したりできます。',
     'overlay.approvalRequired.submitFailed':
       '承認操作に失敗しました。最新の状態に更新してからもう一度お試しください。',
     'overlay.approvalRequired.resyncFailed':

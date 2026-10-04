@@ -65,13 +65,14 @@ def record_welcome_suggestion(
         ).fetchone()[0]
         if has_data:
             return False
+        # Released, not held: the welcome is shown at once.
         connection.execute(
             """
             INSERT INTO agent_suggestions(
                 suggestion_id, user_id, status, answer, prompt_name,
                 prompt_version, has_suggestion, interaction_contract,
-                created_at, updated_at
-            ) VALUES (?, ?, 'success', ?, ?, ?, 1, 'message_only', ?, ?)
+                delivery_state, created_at, updated_at
+            ) VALUES (?, ?, 'success', ?, ?, ?, 1, 'message_only', 'released', ?, ?)
             """,
             (
                 suggestion_id,

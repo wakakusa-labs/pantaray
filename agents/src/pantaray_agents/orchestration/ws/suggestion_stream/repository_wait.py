@@ -38,7 +38,11 @@ class SuggestionRepositoryWaitMixin:
         suggestion_id: str,
         process_id: str | None = None,
     ) -> SuggestionTerminalRow:
-        """Wait for a terminal suggestion row from the repository SSOT."""
+        """Wait for a terminal suggestion row from the repository SSOT.
+
+        A held Suggestion is not finished for the relay: it is shown, or ends
+        unshown, only once the release task decides.
+        """
         repo = await self._get_suggestion_repository()  # type: ignore[attr-defined]
         if repo is None:
             raise SuggestionRowFetchError("Suggestion DB repository is unavailable.")
@@ -99,7 +103,11 @@ class SuggestionRepositoryWaitMixin:
             row = coerce_suggestion_terminal_row(
                 getattr(result, "data", None) if result is not None else None
             )
-            if row and row["status"] in terminal_statuses:
+            if (
+                row
+                and row["status"] in terminal_statuses
+                and row.get("delivery_state") != "held"
+            ):
                 return row
             await asyncio.sleep(float(poll_interval))
 

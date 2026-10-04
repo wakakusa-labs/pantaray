@@ -16,6 +16,7 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
         WITH recent AS (
             SELECT suggestions.user_id, suggestions.answer,
                    suggestions.created_at, suggestions.user_reaction,
+                   suggestions.delivery_state,
                    (
                        SELECT actions.action_id
                        FROM agent_actions AS actions
@@ -34,7 +35,9 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
                    ) AS action_id
             FROM agent_suggestions AS suggestions
             WHERE suggestions.user_id = ?
-              AND suggestions.has_suggestion = 1
+              -- The held one is still waiting to be shown; one that ended
+              -- unshown was never seen, so a newer run may propose it again.
+              AND suggestions.delivery_state IN ('held', 'released')
               -- The welcome greets; it proposed nothing to build on.
               AND suggestions.prompt_name IS NOT ?
               AND suggestions.created_at >= ?
@@ -42,6 +45,7 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
             LIMIT ?
         )
         SELECT recent.answer, recent.created_at, recent.user_reaction,
+               recent.delivery_state,
                actions.status AS action_status,
                initial.user_message_json AS user_reply_json,
                -- Later turns the user sent in the same Action, such as

@@ -28,6 +28,7 @@ OWNER_SCOPED_TASK_NAMES = (
     "activity_summary",
     "short_insight",
     "memory_agent_dispatch",
+    "suggestion_release",
     "memory_embedding_projection",
 )
 
@@ -378,6 +379,11 @@ def _record_every_periodic_runner(
         record("memory_agent_dispatch"),
     )
     monkeypatch.setattr(
+        periodic_schedule,
+        "release_held_suggestion",
+        record("suggestion_release"),
+    )
+    monkeypatch.setattr(
         periodic_schedule, "run_memory_embedding_projection", run_projection
     )
 
@@ -412,6 +418,7 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
         0.0,
         0.0,
         0.0,
+        0.0,
     ]
 
     mark_configured()
@@ -428,6 +435,7 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
         "activity_summary",
         "short_insight",
         "memory_agent_dispatch",
+        "suggestion_release",
         "memory_embedding_projection",
     ]
 
@@ -587,6 +595,7 @@ def test_due_tasks_run_in_declaration_order(
         "memory_repair",
         "short_insight",
         "memory_agent_dispatch",
+        "suggestion_release",
         "memory_embedding_projection",
     ]
 

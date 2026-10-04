@@ -3,8 +3,9 @@
 The Suggestion is triggered by the short Insight's `reconsideration_reason`
 inside the runtime worker, so the WebSocket is no longer the starting owner: it
 forwards what the runtime already owns. A Suggestion that finishes while no
-session is connected is discarded by the job before it is stored, so this relay
-never owes a later session anything and keeps no ledger.
+session is connected is discarded by the job before it is stored. One stored
+is held until the release task decides, so a later session owes only a held
+Suggestion, which the row itself records; the relay keeps no ledger.
 """
 
 from __future__ import annotations
@@ -78,7 +79,9 @@ def read_relayable_suggestion_processes(
     Live processes are always candidates. A process that already finished is a
     candidate only when it finished after `since` (the session start), so a run
     shorter than one relay tick is still delivered exactly once to this session
-    without keeping a delivery ledger.
+    without keeping a delivery ledger. So is a process whose Suggestion is still
+    held, or was released after `since` (possibly before this session's first
+    tick); a reaction also moves `updated_at`, so a reacted one is not.
     """
     with contextlib.closing(sqlite3.connect(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
@@ -93,10 +96,21 @@ def read_relayable_suggestion_processes(
                 status IN (?, ?)
                 OR (completed_at IS NOT NULL
                     AND julianday(completed_at) >= julianday(?))
+                OR suggestion_id IN (
+                    SELECT suggestion_id FROM agent_suggestions
+                    WHERE user_id = ?
+                      AND (
+                        delivery_state = 'held'
+                        OR (delivery_state = 'released'
+                            AND julianday(updated_at) >= julianday(?)
+                            AND user_reaction IS NULL
+                            AND action_status IS NULL)
+                      )
+                )
               )
             ORDER BY started_at ASC
             """,
-            (user_id, *LIVE_SUGGESTION_PROCESS_STATUSES, since),
+            (user_id, *LIVE_SUGGESTION_PROCESS_STATUSES, since, user_id, since),
         ).fetchall()
     return [LiveSuggestionProcess(str(row[0]), str(row[1])) for row in rows]
 
@@ -305,15 +319,16 @@ class SuggestionRelayMixin(
     ) -> None:
         process_id, suggestion_id = process
         status_val = row["status"]
-        has_suggestion_raw = row.get("has_suggestion")
-        has_suggestion = (
-            bool(has_suggestion_raw) if has_suggestion_raw is not None else False
-        )
+        # Only a released Suggestion is shown; one that expired or was
+        # superseded while held completes like a run that found nothing.
+        withheld = status_val == "success" and row.get("delivery_state") != "released"
+        has_suggestion = bool(row.get("has_suggestion")) and not withheld
         answer = str(row.get("answer") or "")
         interaction_contract_raw = row.get("interaction_contract")
         interaction_contract = (
             interaction_contract_raw.strip()
-            if isinstance(interaction_contract_raw, str)
+            if not withheld
+            and isinstance(interaction_contract_raw, str)
             and interaction_contract_raw.strip()
             else None
         )

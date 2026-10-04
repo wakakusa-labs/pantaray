@@ -10,6 +10,7 @@ from pantaray_agents.utils.ws_observability import CircuitBreaker
 SuggestionTerminalStatus = Literal[
     "processing", "success", "error", "timeout", "canceled"
 ]
+SuggestionDeliveryState = Literal["held", "released", "expired", "superseded"]
 
 
 class SuggestionTerminalRow(TypedDict, total=False):
@@ -18,6 +19,7 @@ class SuggestionTerminalRow(TypedDict, total=False):
     answer: str | None
     error: JSONValue | None
     interaction_contract: str | None
+    delivery_state: SuggestionDeliveryState | None
 
 
 SUGGESTION_DB_DEPENDENCY = "suggestion_repository"
@@ -96,5 +98,9 @@ def coerce_suggestion_terminal_row(raw: object) -> SuggestionTerminalRow | None:
     interaction_contract = raw.get("interaction_contract")
     if interaction_contract is None or isinstance(interaction_contract, str):
         row["interaction_contract"] = interaction_contract
+
+    delivery_state = raw.get("delivery_state")
+    if delivery_state in (None, "held", "released", "expired", "superseded"):
+        row["delivery_state"] = delivery_state
 
     return row

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,6 +18,9 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
 from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
     ReconsideredInsight,
+)
+from pantaray_agents.local_runtime.runtime.suggestion_release import (
+    release_held_suggestion,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
@@ -196,7 +200,16 @@ async def test_a_discarded_suggestion_keeps_no_answer_or_run_trace(
     delivered = _rows_containing(db_path, DELIVERED_ANSWER)
     assert "agent_suggestions.answer" in delivered
     assert "agent_suggestion_run_steps.llm_response_text" in delivered
-    assert "memory_revisions.inline_body" in delivered
+    # Held until released; Memory takes the text only once it is shown.
+    assert "memory_revisions.inline_body" not in delivered
+    release_held_suggestion(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id=USER_ID,
+        now=datetime.now(UTC),
+        session_can_show=True,
+    )
+    assert "memory_revisions.inline_body" in _rows_containing(db_path, DELIVERED_ANSWER)
 
     # Another owner's session (the previous account's) delivers nothing here.
     deliverable_sessions.register_deliverable_session("previous-owner", session)

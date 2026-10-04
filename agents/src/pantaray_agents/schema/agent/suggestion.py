@@ -195,6 +195,9 @@ class SuggestionHistoryEntry(BaseModel):
         default=None,
         description="保存済みの思考プロセス",
     )
+    held: bool = Field(
+        description="True while generated but not shown yet; false once shown"
+    )
     user_reaction: Literal["accepted", "rejected"] | None = Field(
         default=None, description="承認・却下。未反応やmessage_onlyの場合はnull"
     )

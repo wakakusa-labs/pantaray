@@ -137,6 +137,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0119_approved_folder_manifest_roots.sql",
         "0120_insight_source_cursor.sql",
         "0121_memory_note_source.sql",
+        "0122_suggestion_delivery_state.sql",
     )
     return tuple(
         MigrationSpec(

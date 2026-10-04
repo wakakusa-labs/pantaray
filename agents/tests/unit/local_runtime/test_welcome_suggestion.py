@@ -144,6 +144,8 @@ def test_the_welcome_is_a_finished_message_only_suggestion_stored_once(
     assert suggestions[0]["interaction_contract"] == "message_only"
     assert suggestions[0]["answer"] == WELCOME
     assert suggestions[0]["prompt_name"] == WELCOME_SUGGESTION_PROMPT_NAME
+    # Shown at once: a held welcome would wait for the release task.
+    assert suggestions[0]["delivery_state"] == "released"
     assert len(processes) == 1
     assert processes[0]["kind"] == "suggestion"
     assert processes[0]["status"] == "completed"

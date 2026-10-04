@@ -41,9 +41,9 @@ def history_connection(tmp_path: Path) -> Iterator[sqlite3.Connection]:
         """
         UPDATE agent_suggestions SET answer='Linked answer must be deduplicated',user_reaction='accepted',
           created_at='2026-08-30T00:06:00.123Z',updated_at='2026-08-30T00:06:00.123Z' WHERE suggestion_id='sug-1';
-        INSERT INTO agent_suggestions(suggestion_id,user_id,status,answer,has_suggestion,interaction_contract,user_reaction,created_at,updated_at) VALUES
-          ('suggestion-invalid','user-1','success',NULL,1,'action_offer','accepted','2026-08-30T00:03:00.123Z','2026-08-30T00:03:00.123Z'),
-          ('suggestion-message','user-1','success','Standalone 1000Xdone ÜBER',1,'action_offer',NULL,'2026-08-30T00:03:00.123Z','2026-08-30T00:03:00.123Z');
+        INSERT INTO agent_suggestions(suggestion_id,user_id,status,answer,has_suggestion,interaction_contract,user_reaction,delivery_state,created_at,updated_at) VALUES
+          ('suggestion-invalid','user-1','success',NULL,1,'action_offer','accepted','released','2026-08-30T00:03:00.123Z','2026-08-30T00:03:00.123Z'),
+          ('suggestion-message','user-1','success','Standalone 1000Xdone ÜBER',1,'action_offer',NULL,'released','2026-08-30T00:03:00.123Z','2026-08-30T00:03:00.123Z');
         UPDATE agent_actions SET initial_user_message_id='message-running',status='processing',
           created_at='2026-08-30T00:02:00.123Z',updated_at='2026-08-30T00:04:00.123Z' WHERE action_id='act-1';
         INSERT INTO agent_actions(action_id,user_id,suggestion_id,initial_user_message_id,execution_target_json,status,final_output,prompt_name,prompt_version,created_at,updated_at) VALUES
@@ -148,6 +148,25 @@ def test_query_page_contract(history_connection: sqlite3.Connection) -> None:
         _read(history_connection, search_text="needle", cursor=first.next_cursor)
 
 
+def test_history_lists_only_suggestions_that_were_shown(
+    history_connection: sqlite3.Connection,
+) -> None:
+    history_connection.executemany(
+        """INSERT INTO agent_suggestions(suggestion_id,user_id,status,answer,
+        has_suggestion,interaction_contract,delivery_state,created_at,updated_at)
+        VALUES (?,'user-1','success','Standalone unshown',1,'message_only',?,
+                '2026-08-30T00:09:00.123Z','2026-08-30T00:09:00.123Z')""",
+        [(f"unshown-{state}", state) for state in ("held", "expired", "superseded")],
+    )
+
+    for search_text, expected in (
+        ("", {"suggestion-invalid", "suggestion-message"}),
+        ("standalone", {"suggestion-message"}),
+    ):
+        candidates = _read(history_connection, search_text=search_text).candidates
+        assert {c.stable_id for c in candidates if c.kind == "suggestion"} == expected
+
+
 def test_search_contract(history_connection: sqlite3.Connection) -> None:
     cases: tuple[tuple[str, tuple[str, ...]], ...] = (
         (" 100%_DONE ", ("act-1",)),
@@ -186,8 +205,9 @@ def test_large_lanes_filter_and_seek_before_bounded_outer_sort(
     history_connection.executemany(
         """INSERT INTO agent_suggestions(
         suggestion_id,user_id,status,answer,has_suggestion,interaction_contract,
-        user_reaction,created_at,updated_at)
-        VALUES (?,'user-1','success','irrelevant',1,'action_offer','accepted',?,?)""",
+        user_reaction,delivery_state,created_at,updated_at)
+        VALUES (?,'user-1','success','irrelevant',1,'action_offer','accepted',
+                'released',?,?)""",
         suggestion_rows,
     )
 

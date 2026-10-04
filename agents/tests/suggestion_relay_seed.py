@@ -53,7 +53,7 @@ def seed_terminal_suggestion_row(
     suggestion_id: str,
     answer: str = RELAYED_SUGGESTION_ANSWER,
 ) -> None:
-    """Store the terminal Suggestion row the worker would persist."""
+    """Store the terminal Suggestion row as it is once released to be shown."""
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     repository.data.setdefault("agent_suggestions", []).append(
         {
@@ -63,6 +63,7 @@ def seed_terminal_suggestion_row(
             "answer": answer,
             "has_suggestion": True,
             "interaction_contract": "action_offer",
+            "delivery_state": "released",
             "user_reaction": None,
             "action_status": None,
             "action_command_id": None,

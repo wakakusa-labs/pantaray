@@ -663,7 +663,7 @@ def test_execute_memory_sql_limits_result_columns(tmp_path: Path) -> None:
 
     assert all_tables_joined.error is None
     assert all_tables_joined.data is not None
-    assert len(all_tables_joined.data["columns"]) == 135
+    assert len(all_tables_joined.data["columns"]) == 136
     assert too_many_columns.data is None
     assert too_many_columns.error is not None
     assert "too many columns" in too_many_columns.error

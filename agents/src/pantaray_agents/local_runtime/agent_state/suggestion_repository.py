@@ -3,9 +3,6 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 
-from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
-    register_inline_domain_memory,
-)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     format_utc_iso,
     now_utc_iso,
@@ -117,8 +114,31 @@ class LocalSuggestionRepository(
         error_payload = (
             suggestion.error.model_dump() if suggestion.error is not None else None
         )
+        # A new Suggestion is held until the release task shows it, and it
+        # replaces the one held before: an owner holds at most one.
+        held = str(suggestion.status) == "success" and suggestion.has_suggestion
+        updated_at = now_utc_iso()
         with self._connect() as connection:
             with immediate_transaction(connection):
+                if held:
+                    connection.execute(
+                        """
+                        UPDATE agent_suggestions
+                        SET delivery_state = 'superseded', updated_at = ?
+                        WHERE user_id = ? AND delivery_state = 'held'
+                          AND EXISTS (
+                              SELECT 1 FROM agent_suggestions AS saved
+                              WHERE saved.user_id = ? AND saved.suggestion_id = ?
+                                AND saved.status = 'processing'
+                          )
+                        """,
+                        (
+                            updated_at,
+                            suggestion.user_id,
+                            suggestion.user_id,
+                            suggestion.suggestion_id,
+                        ),
+                    )
                 connection.execute(
                     """
                     UPDATE agent_suggestions
@@ -136,6 +156,7 @@ class LocalSuggestionRepository(
                         request_images_count = ?,
                         used_images_count = ?,
                         interaction_contract = ?,
+                        delivery_state = ?,
                         updated_at = ?
                     WHERE user_id = ? AND suggestion_id = ? AND status = 'processing'
                     """,
@@ -158,19 +179,12 @@ class LocalSuggestionRepository(
                         request_images_count,
                         used_images_count,
                         suggestion.interaction_contract,
-                        now_utc_iso(),
+                        "held" if held else None,
+                        updated_at,
                         suggestion.user_id,
                         suggestion.suggestion_id,
                     ),
                 )
-                if str(suggestion.status) == "success" and suggestion.answer:
-                    register_inline_domain_memory(
-                        connection=connection,
-                        user_id=str(suggestion.user_id),
-                        source="suggestion",
-                        source_record_id=str(suggestion.suggestion_id),
-                        content=suggestion.answer,
-                    )
         return await self.get_suggestion(
             user_id=str(suggestion.user_id),
             suggestion_id=str(suggestion.suggestion_id),

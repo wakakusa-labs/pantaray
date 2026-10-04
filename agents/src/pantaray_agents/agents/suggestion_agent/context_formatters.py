@@ -70,6 +70,8 @@ def format_recent_suggestions(rows: list[SuggestionHistoryEntry] | None) -> str:
     for row in rows:
         created_at = describe_utc_timestamp(row.created_at)
         lines.append(f"- [{created_at}] answer: {row.answer}")
+        if row.held:
+            lines.append("  Delivery: generated, not shown yet")
         lines.append(f"  User reaction: {row.user_reaction or 'not recorded'}")
         if row.user_reply is not None:
             reply = _bounded(row.user_reply, RECENT_SUGGESTION_REPLY_MAX_CHARS, "reply")
@@ -116,6 +118,7 @@ def normalize_recent_suggestion_entry(
             "answer": answer,
             "created_at": created_at,
             "thinking": thinking,
+            "held": row.get("delivery_state") == "held",
             "user_reaction": row.get("user_reaction"),
             "user_reply": row.get("user_reply"),
             "action_status": row.get("action_status"),

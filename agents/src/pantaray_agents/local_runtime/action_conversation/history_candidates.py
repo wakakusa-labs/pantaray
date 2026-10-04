@@ -242,7 +242,7 @@ WITH action_source AS (
     INDEXED BY idx_agent_suggestions_user_history_recency
   LEFT JOIN agent_actions AS linked
     ON linked.suggestion_id=suggestion.suggestion_id
-  WHERE suggestion.user_id=:user_id AND suggestion.has_suggestion=1
+  WHERE suggestion.user_id=:user_id AND suggestion.delivery_state='released'
     AND linked.action_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM agent_action_steps AS reply
       WHERE reply.user_id=suggestion.user_id

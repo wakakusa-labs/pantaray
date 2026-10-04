@@ -104,9 +104,10 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
               user_reaction='accepted',created_at='{_PAUSED_AT}',updated_at='{_PAUSED_AT}'
             WHERE suggestion_id='sug-1';
             INSERT INTO agent_suggestions(suggestion_id,user_id,status,answer,
-              has_suggestion,interaction_contract,user_reaction,created_at,updated_at)
+              has_suggestion,interaction_contract,user_reaction,delivery_state,
+              created_at,updated_at)
             VALUES ('suggestion-pending','{_USER_ID}','success','Pending Suggestion ÜBER',
-              1,'action_offer',NULL,'{_SUGGESTION_AT}','{_SUGGESTION_AT}');
+              1,'action_offer',NULL,'released','{_SUGGESTION_AT}','{_SUGGESTION_AT}');
             UPDATE agent_actions SET initial_user_message_id='{linked_message.message_id}',
               status='processing',created_at='{_PAUSED_AT}',updated_at='{_PAUSED_AT}'
             WHERE action_id='act-1';

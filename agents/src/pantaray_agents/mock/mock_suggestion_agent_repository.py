@@ -63,6 +63,12 @@ class MockSuggestionAgentRepository(
         record["used_images_count"] = used_images_count
         record["prompt_name"] = prompt_name
         record["prompt_version"] = prompt_version
+        # No release task runs in mock mode, so a stored Suggestion is shown at once.
+        record["delivery_state"] = (
+            "released"
+            if str(record.get("status")) == "success" and record.get("has_suggestion")
+            else None
+        )
         record["user_reaction"] = None
         record["accepted_at"] = None
         record["rejected_at"] = None

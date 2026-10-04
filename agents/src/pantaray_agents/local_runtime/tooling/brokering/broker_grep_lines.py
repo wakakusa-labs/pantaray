@@ -15,6 +15,7 @@ RIPGREP_MAX_COLUMNS = 64 * 1024
 # What grep returns of one matching line, centred on the line's first match.
 GREP_MAX_LINE_CHARS = 500
 GREP_OMITTED_TEXT_MARKER = "…"
+GREP_MAX_LISTED_BINARY_PATHS = 10
 _RIPGREP_PREVIEW_SUFFIX_PATTERN = re.compile(
     rb" \[\.\.\. (?:\d+ more match(?:es)?|omitted end of long line)\]\Z"
 )
@@ -86,4 +87,13 @@ def grep_match_from_ripgrep(
         if match_offset < len(content)
         else None,
         cut=cut,
+    )
+
+
+def binary_match_warning(paths: tuple[str, ...]) -> str:
+    listed = paths[:GREP_MAX_LISTED_BINARY_PATHS]
+    more = len(paths) - len(listed)
+    return (
+        f"{len(paths)} binary file(s) also match; their lines are not shown: "
+        f"{', '.join(listed)}" + (f" and {more} more." if more else ".")
     )

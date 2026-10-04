@@ -99,7 +99,7 @@ BROKERED_TOOL_SCHEMA_CONTRACTS = (
             "type": "object",
             "properties": {
                 "path": {"type": "string", "minLength": 1, "pattern": r"\S"},
-                "max_depth": {"type": "integer", "minimum": 0, "maximum": 6},
+                "max_depth": {"type": "integer", "minimum": 1, "maximum": 6},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
             },
             "required": ["path"],

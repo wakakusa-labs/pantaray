@@ -79,8 +79,6 @@ def test_discovery_tool_contracts_explain_read_scope_path_semantics() -> None:
     assert "Workspace Path Rules" in discovery_guides
     assert "Read/search access" in discovery_guides
     assert "Relative paths" in discovery_guides
-    assert "truncated=true" in discovery_guides
-    assert "truncation_reason" in discovery_guides
     assert "retry_hint" in discovery_guides
     assert "warning" in discovery_guides
     assert "next_action_hint" not in discovery_guides
@@ -96,7 +94,7 @@ def test_discovery_tool_contracts_explain_read_scope_path_semantics() -> None:
     assert "do not expect next_offset" in list_contract
     assert "1-500" in list_contract
     assert "not a page size" in list_contract
-    assert "narrower path or smaller max_depth" in list_contract
+    assert "default 2" in list_contract
     assert "literal text" in GREP_TOOL.guide.pitfalls
     assert "include_glob" in GREP_TOOL.guide.pitfalls
 

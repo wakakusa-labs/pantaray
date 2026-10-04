@@ -62,6 +62,8 @@ def _fake_files(
         truncated=truncated,
         truncation_reason="limit" if truncated else None,
         timed_out=False,
+        skipped_files=0,
+        first_skip_error=None,
     )
 
 

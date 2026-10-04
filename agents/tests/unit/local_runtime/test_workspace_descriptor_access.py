@@ -18,7 +18,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text imp
     read_text_descriptor_lines,
 )
 from pantaray_agents.local_runtime.tooling.brokering.workspace_descriptor_access import (
-    GREP_MAX_FILE_BYTES,
     glob_workspace_files,
     grep_workspace_files,
     open_workspace_file_descriptor,
@@ -167,7 +166,6 @@ def test_list_uses_open_base_descriptor_after_directory_replacement(
         base_path="base",
         max_depth=1,
         limit=100,
-        scan_limit=2,
     )
 
     assert [entry.root_relative_path for entry in result.entries] == ["base/inside.txt"]
@@ -255,7 +253,6 @@ def test_grep_final_file_symlink_swap_is_rejected(
             pattern="marker",
             include_glob=None,
             max_matches=10,
-            scan_limit=20,
         )
     assert swapped is True
 
@@ -290,7 +287,7 @@ def _assert_no_descriptor_leak(
     assert opened == closed
 
 
-def test_scan_limit_closes_all_descriptors(
+def test_limit_closes_all_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -304,10 +301,9 @@ def test_scan_limit_closes_all_descriptors(
             root_path=root,
             base_path=".",
             max_depth=1,
-            limit=10,
-            scan_limit=1,
+            limit=1,
         )
-        assert result.truncation_reason == "scan_budget"
+        assert result.truncation_reason == "limit"
 
     _assert_no_descriptor_leak(monkeypatch, scan)
 
@@ -326,7 +322,6 @@ def test_success_closes_all_descriptors(
             base_path=".",
             max_depth=1,
             limit=10,
-            scan_limit=10,
         )
         assert [entry.root_relative_path for entry in result.entries] == ["file.txt"]
 
@@ -357,7 +352,6 @@ def test_scandir_error_closes_all_descriptors(
                 base_path=".",
                 max_depth=1,
                 limit=10,
-                scan_limit=10,
             )
         assert exc_info.value.errno == errno.EIO
 
@@ -380,14 +374,12 @@ def test_glob_preserves_star_recursive_hidden_and_double_star_rules(
         base_path=".",
         pattern="*",
         limit=20,
-        scan_limit=20,
     )
     python = glob_workspace_files(
         root_path=root,
         base_path=".",
         pattern="**/*.py",
         limit=20,
-        scan_limit=20,
     )
 
     assert [entry.root_relative_path for entry in star.entries] == [
@@ -436,7 +428,6 @@ def test_glob_remains_on_base_descriptor_after_directory_replacement(
         base_path="base",
         pattern="**/*.py",
         limit=20,
-        scan_limit=20,
     )
 
     assert [entry.root_relative_path for entry in result.entries] == ["base/inside.py"]
@@ -478,41 +469,12 @@ def test_grep_reads_from_scanned_descriptor_after_directory_replacement(
         pattern="marker",
         include_glob="*.txt",
         max_matches=10,
-        scan_limit=20,
     )
 
-    assert [(match.path, match.line) for match in result.matches] == [
+    assert [(match.relative_path, match.line) for match in result.matches] == [
         ("base/shared.txt", "inside marker")
     ]
     assert "outside marker" not in str(result)
-
-
-def test_grep_skips_binary_invalid_utf8_and_oversize_files(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    long_match = "needle" + "あ" * 500
-    (root / "valid.txt").write_text(long_match + "\n", encoding="utf-8")
-    (root / "binary.txt").write_bytes(b"needle\0binary")
-    (root / "invalid.txt").write_bytes(b"needle\xff")
-    (root / "at-limit.txt").write_bytes(b"x" * GREP_MAX_FILE_BYTES)
-    (root / "oversize.txt").write_bytes(b"x" * (GREP_MAX_FILE_BYTES + 1))
-
-    result = grep_workspace_files(
-        root_path=root,
-        base_path=".",
-        pattern="needle",
-        include_glob="*.txt",
-        max_matches=10,
-        scan_limit=20,
-    )
-
-    assert [(match.path, match.line) for match in result.matches] == [
-        (
-            "valid.txt",
-            descriptor_access.bound_grep_line(long_match),
-        )
-    ]
-    assert result.skipped_files == 3
 
 
 def test_grep_match_limit_returns_partial_results_and_closes_descriptors(
@@ -533,34 +495,12 @@ def test_grep_match_limit_returns_partial_results_and_closes_descriptors(
             pattern="needle",
             include_glob=None,
             max_matches=2,
-            scan_limit=20,
         )
 
         assert [match.line_number for match in result.matches] == [1, 2]
         assert result.truncation_reason == "limit"
 
     _assert_no_descriptor_leak(monkeypatch, grep)
-
-
-@pytest.mark.parametrize("character", ["x", "あ"])
-def test_grep_line_bound_preserves_character_boundary(character: str) -> None:
-    assert (
-        descriptor_access.bound_grep_line(
-            character * 500,
-        )
-        == character * 500
-    )
-    assert (
-        descriptor_access.bound_grep_line(
-            character * 501,
-        )
-        == character * 500 + "... [truncated]"
-    )
-
-
-def test_grep_line_bound_trims_trailing_space_before_suffix() -> None:
-    line = "x" * 490 + " " * 11
-    assert descriptor_access.bound_grep_line(line) == ("x" * 490 + "... [truncated]")
 
 
 def test_grep_invalid_regex_is_policy_error(tmp_path: Path) -> None:
@@ -574,7 +514,6 @@ def test_grep_invalid_regex_is_policy_error(tmp_path: Path) -> None:
             pattern="(",
             include_glob=None,
             max_matches=10,
-            scan_limit=20,
         )
 
     assert exc_info.value.code == "GREP_PATTERN_INVALID"
@@ -599,7 +538,6 @@ def test_grep_regex_compile_recursion_error_is_policy_error(
             pattern="nested",
             include_glob=None,
             max_matches=10,
-            scan_limit=20,
         )
 
     assert exc_info.value.code == "GREP_PATTERN_INVALID"
@@ -621,7 +559,7 @@ def test_grep_regex_timeout_returns_partial_results_and_closes_descriptors(
             assert timeout > 0
             self.calls += 1
             if self.calls == 1:
-                return object()
+                return descriptor_access.regex.search("first", "first")
             raise TimeoutError
 
     monkeypatch.setattr(
@@ -635,7 +573,6 @@ def test_grep_regex_timeout_returns_partial_results_and_closes_descriptors(
             pattern="unused",
             include_glob=None,
             max_matches=10,
-            scan_limit=20,
         )
         assert [(match.line_number, match.line) for match in result.matches] == [
             (1, "first")
@@ -663,7 +600,6 @@ def test_missing_and_symlink_paths_close_all_descriptors(
                     base_path=base_path,
                     max_depth=1,
                     limit=10,
-                    scan_limit=10,
                 )
 
     _assert_no_descriptor_leak(monkeypatch, rejected_scans)

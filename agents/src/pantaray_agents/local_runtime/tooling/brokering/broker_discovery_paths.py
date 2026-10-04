@@ -6,11 +6,10 @@ from pathlib import Path
 from typing import Literal
 
 from .manifest_paths import ResolvedManifestPath
-from .workspace_descriptor_access import scan_workspace_entries
+from .workspace_descriptor_access import WorkspaceScanSkips, scan_workspace_entries
 
 type DiscoveryTruncationReason = Literal[
     "limit",
-    "scan_budget",
     "timeout",
     "output_bytes",
     "line_length",
@@ -27,6 +26,7 @@ class DiscoveryPath:
 class BoundedDiscoveryPaths:
     selected: list[DiscoveryPath]
     truncation_reason: DiscoveryTruncationReason | None
+    skips: WorkspaceScanSkips
 
 
 def list_discovery_paths(
@@ -34,7 +34,6 @@ def list_discovery_paths(
     base: ResolvedManifestPath,
     max_depth: int | None,
     limit: int,
-    scan_limit: int,
     include_path: Callable[[Path], bool],
     exclude_subtree: Callable[[Path], bool],
 ) -> BoundedDiscoveryPaths:
@@ -43,7 +42,6 @@ def list_discovery_paths(
         base_path=base.root_relative_path,
         max_depth=max_depth,
         limit=limit,
-        scan_limit=scan_limit,
         include_path=include_path,
         exclude_subtree=exclude_subtree,
     )
@@ -58,6 +56,7 @@ def list_discovery_paths(
             for entry in result.entries
         ],
         truncation_reason=result.truncation_reason,
+        skips=result.skips,
     )
 
 

@@ -14,6 +14,8 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
     GREP_MAX_LINE_CHARS,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    DISCOVERY_RESULT_LIMIT_MAX,
+    LIST_MAX_DEPTH,
     GlobToolArgs,
     GrepToolArgs,
     ListToolArgs,
@@ -33,8 +35,6 @@ from .broker_tool_input_schema import (
 )
 
 DISCOVERY_TIMEOUT_MS = 5_000
-DISCOVERY_RESULT_LIMIT_MAX = 500
-LIST_MAX_DEPTH = 6
 DISCOVERY_LOCAL_PATH_DESCRIPTION = (
     "Local filesystem path. Use `.` for the current working directory or an "
     "absolute path. Allowed paths follow Read/search access in Workspace Path Rules."
@@ -58,7 +58,6 @@ DISCOVERY_TRUNCATION_REASON_SCHEMA = cast(
         "type": ["string", "null"],
         "enum": [
             "limit",
-            "scan_budget",
             "timeout",
             "output_bytes",
             "line_length",
@@ -83,15 +82,17 @@ LIST_TOOL_FIELD_PRESENTATION = (
     BrokerToolFieldPresentation(
         name="max_depth",
         description=(
-            f"Maximum directory depth to include from path, 0-{LIST_MAX_DEPTH}. "
-            "Prefer 1 for an Explorer/Finder-like directory view."
+            f"Maximum directory depth to include from path, 1-{LIST_MAX_DEPTH}; "
+            f"default {ListToolArgs.model_fields['max_depth'].default}. 1 lists "
+            "only path's own entries, like an Explorer/Finder view."
         ),
     ),
     BrokerToolFieldPresentation(
         name="limit",
         description=(
-            f"Maximum number of entries to return, 1-{DISCOVERY_RESULT_LIMIT_MAX}. "
-            "This is a hard cap, not a page size; list has no offset."
+            f"Maximum number of entries to return, 1-{DISCOVERY_RESULT_LIMIT_MAX}; "
+            f"default {ListToolArgs.model_fields['limit'].default}. This is a hard "
+            "cap, not a page size; list has no offset."
         ),
     ),
 )
@@ -107,7 +108,10 @@ GLOB_TOOL_FIELD_PRESENTATION = (
     ),
     BrokerToolFieldPresentation(
         name="limit",
-        description="Maximum number of matches to return.",
+        description=(
+            f"Maximum number of matches to return, 1-{DISCOVERY_RESULT_LIMIT_MAX}; "
+            f"default {GlobToolArgs.model_fields['limit'].default}."
+        ),
     ),
 )
 
@@ -158,10 +162,14 @@ LIST_TOOL = ToolDefinition.from_spec(
                 "Allowed paths follow Read/search access in Workspace Path Rules. "
                 "Relative paths are resolved from the current working directory. "
                 "List is not paginated: do not pass offset, do not expect next_offset, "
-                f"and keep limit at {DISCOVERY_RESULT_LIMIT_MAX} or less. "
-                "Typical first call: path=., max_depth=1. If truncated=true, "
-                "inspect truncation_reason and retry with a narrower path or smaller "
-                "max_depth. Use glob for path patterns and grep for text search."
+                f"and keep limit at {DISCOVERY_RESULT_LIMIT_MAX} or less; to page "
+                "through one large directory, read it with offset. "
+                "Typical first call: path=., max_depth=1. Entries come in path "
+                "order. Limits: output stops at limit entries; a directory at "
+                "max_depth is listed without its contents; symlinks are not "
+                "followed or listed; Pantaray's private app storage is not listed. "
+                "When a limit applies, warning and retry_hint say which one and "
+                "what to do next. Use glob for path patterns and grep for text search."
             ),
         ),
         execution_policy=_discovery_policy(),
@@ -209,9 +217,11 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "access in Workspace Path Rules. pattern "
                 "is relative to base_path and must not be absolute or contain parent "
                 "directory parts. Use ** only when recursive matching is intended. "
-                "Typical first call: base_path=., "
-                "pattern=**/*.py. If truncated=true, inspect truncation_reason. If "
-                "warning or retry_hint is present, retry the same tool with narrower inputs."
+                "Typical first call: base_path=., pattern=**/*.py. Limits: symlinks "
+                "are not followed or listed; output stops at limit matches; the "
+                f"search stops after {RIPGREP_TIMEOUT_SECONDS:g} seconds. When a "
+                "limit applies, truncated, warning and retry_hint say which one and "
+                "what to do next; skipped_files counts paths that could not be read."
             ),
         ),
         execution_policy=_discovery_policy(),
@@ -229,6 +239,7 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "truncation_reason": DISCOVERY_TRUNCATION_REASON_SCHEMA,
                 "retry_hint": DISCOVERY_RETRY_HINT_SCHEMA,
                 "warning": DISCOVERY_WARNING_SCHEMA,
+                "skipped_files": {"type": "integer", "minimum": 0},
             },
             "required": [
                 "status",
@@ -237,6 +248,7 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "truncation_reason",
                 "retry_hint",
                 "warning",
+                "skipped_files",
             ],
             "additionalProperties": False,
         },

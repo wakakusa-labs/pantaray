@@ -39,11 +39,12 @@ BrokerExecutableSourceKind = Literal[
 ]
 DiscoveryTruncationReason = Literal[
     "limit",
-    "scan_budget",
     "timeout",
     "output_bytes",
     "line_length",
 ]
+DISCOVERY_RESULT_LIMIT_MAX = 500
+LIST_MAX_DEPTH = 6
 
 
 class ReadToolArgs(BaseModel):
@@ -78,8 +79,8 @@ class ListToolArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     path: str = Field(min_length=1, pattern=r"\S")
-    max_depth: int = Field(default=2, ge=0, le=6)
-    limit: int = Field(default=100, ge=1, le=500)
+    max_depth: int = Field(default=2, ge=1, le=LIST_MAX_DEPTH)
+    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class GlobToolArgs(BaseModel):
@@ -87,7 +88,7 @@ class GlobToolArgs(BaseModel):
 
     base_path: str = Field(min_length=1, pattern=r"\S")
     pattern: str = Field(min_length=1, pattern=r"\S")
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class GrepToolArgs(BaseModel):
@@ -96,7 +97,7 @@ class GrepToolArgs(BaseModel):
     base_path: str = Field(min_length=1, pattern=r"\S")
     pattern: str = Field(min_length=1, pattern=r"\S")
     include_glob: str | None = Field(default=None, min_length=1, pattern=r"\S")
-    max_matches: int = Field(default=100, ge=1, le=500)
+    max_matches: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class ApplyPatchEdit(BaseModel):
@@ -272,6 +273,7 @@ class GlobToolOutput(BaseModel):
     truncation_reason: DiscoveryTruncationReason | None = None
     retry_hint: str | None = None
     warning: str | None = None
+    skipped_files: int = Field(ge=0)
 
 
 class GrepMatch(BaseModel):

@@ -92,6 +92,9 @@ class RipgrepGlobResult:
     truncated: bool
     truncation_reason: RipgrepTruncationReason | None
     timed_out: bool
+    # Paths ripgrep could not read; a directory among them was not walked.
+    skipped_files: int
+    first_skip_error: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +183,8 @@ def run_ripgrep_files(
             result=result,
         ),
         timed_out=result.timed_out,
+        skipped_files=result.stderr_lines,
+        first_skip_error=_first_skip_error(result.stderr),
     )
 
 
@@ -468,6 +473,8 @@ def _raise_if_ripgrep_glob_failed(*, result: RipgrepRunResult) -> None:
             fix_hint=GLOB_PATTERN_FIX_HINT,
             examples=GLOB_PATTERN_EXAMPLES,
         )
+    if _only_unreadable_paths(result.stderr):
+        return
     raise BrokerPolicyError(
         "ripgrep discovery backend failed",
         code="GLOB_BACKEND_FAILED",
@@ -493,17 +500,21 @@ def _raise_if_ripgrep_grep_failed(*, result: RipgrepRunResult) -> None:
             fix_hint=GREP_INCLUDE_GLOB_FIX_HINT,
             examples=GREP_INCLUDE_GLOB_EXAMPLES,
         )
-    # ripgrep reports a path it cannot read on its own line and exits 2 once the
-    # rest is searched; those paths are reported as skipped, not as a failure.
-    error_lines = [line for line in result.stderr.splitlines() if line.strip()]
-    if error_lines and all(
-        line.startswith(RIPGREP_ERROR_PREFIX) for line in error_lines
-    ):
+    if _only_unreadable_paths(result.stderr):
         return
     raise BrokerPolicyError(
         "ripgrep grep backend failed",
         code="GREP_BACKEND_FAILED",
         fix_hint=_stderr_hint(result.stderr),
+    )
+
+
+def _only_unreadable_paths(stderr: str) -> bool:
+    # ripgrep reports a path it cannot read on its own line and exits 2 once the
+    # rest is searched; those paths are reported as skipped, not as a failure.
+    error_lines = [line for line in stderr.splitlines() if line.strip()]
+    return bool(error_lines) and all(
+        line.startswith(RIPGREP_ERROR_PREFIX) for line in error_lines
     )
 
 

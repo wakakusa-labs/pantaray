@@ -467,69 +467,39 @@ async def test_discovery_tools_do_not_materialize_full_tree_before_limit(
 
 
 @pytest.mark.asyncio
-async def test_discovery_scan_budget_applies_before_pattern_filtering(
+async def test_list_reports_the_depth_cut_symlinks_and_unreadable_paths(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    (context.workspace_path / "a.txt").write_text("alpha\n", encoding="utf-8")
-    (context.workspace_path / "b.txt").write_text("beta\n", encoding="utf-8")
+    tree = context.workspace_path / "tree"
+    (tree / "src" / "pkg").mkdir(parents=True)
+    (tree / "src" / "pkg" / "deep.py").write_text("x\n", encoding="utf-8")
+    (tree / "a.txt").write_text("a\n", encoding="utf-8")
+    (tree / "link.txt").symlink_to("a.txt")
+    (tree / "locked").mkdir(mode=0)
+    try:
+        outcome = await execute_broker_tool(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            tool_id="list",
+            user_id="user-1",
+            actor_process_id=BROKER_ACTOR_PROCESS_ID,
+            manifest_id=context.manifest_id,
+            execution_session_id=context.execution_session_id,
+            args={"path": "tree", "max_depth": 2, "limit": 10},
+        )
+    finally:
+        (tree / "locked").chmod(0o700)
 
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-
-    monkeypatch.setattr(broker_discovery, "DISCOVERY_MAX_SCANNED_PATHS", 1)
-
-    list_outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="list",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={"path": ".", "max_depth": 1, "limit": 10},
-    )
-
-    assert list_outcome.status == "success"
-    assert list_outcome.output["truncated"] is True
-    assert list_outcome.output["truncation_reason"] == "scan_budget"
-    assert "narrower path" in str(list_outcome.output["retry_hint"])
-    assert "scan budget" in str(list_outcome.output["warning"])
-    assert len(list_outcome.output["entries"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_list_scan_budget_counts_skipped_symlinks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    db_path, context = _bootstrap_runtime_db(tmp_path)
-    links_dir = context.workspace_path / "links"
-    links_dir.mkdir()
-    for index in range(3):
-        (links_dir / f"skip-{index}").symlink_to("missing.txt")
-
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-
-    monkeypatch.setattr(broker_discovery, "DISCOVERY_MAX_SCANNED_PATHS", 1)
-
-    outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="list",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={"path": "links", "max_depth": 1, "limit": 10},
-    )
-
-    assert outcome.status == "success"
-    assert outcome.output["truncated"] is True
-    assert outcome.output["truncation_reason"] == "scan_budget"
-    assert "narrower path" in str(outcome.output["retry_hint"])
-    assert "scan budget" in str(outcome.output["warning"])
-    assert outcome.output["entries"] == []
+    names = [entry["name"] for entry in outcome.output["entries"]]
+    assert names == ["a.txt", "src", "pkg"]
+    assert outcome.output["truncated"] is False
+    warning = str(outcome.output["warning"])
+    assert "1 listed director(y/ies) at max_depth=2 were not opened" in warning
+    assert "1 symlink(s) were skipped" in warning
+    assert "1 path(s) could not be read" in warning
+    assert "tree/locked: Permission denied" in warning
+    assert "Raise max_depth (up to 6)" in str(outcome.output["retry_hint"])
 
 
 @pytest.mark.asyncio
@@ -612,6 +582,6 @@ async def test_discovery_tools_report_truncation(tmp_path: Path) -> None:
     assert outcome.status == "success"
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "limit"
-    assert "narrower path" in str(outcome.output["retry_hint"])
-    assert "result limit" in str(outcome.output["warning"])
+    assert "Raise limit (up to 500)" in str(outcome.output["retry_hint"])
+    assert "Stopped at limit=1 entries" in str(outcome.output["warning"])
     assert len(outcome.output["entries"]) == 1

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
@@ -32,9 +31,12 @@ from .broker_grep_lines import (
     GREP_OMITTED_TEXT_MARKER,
     RIPGREP_MAX_COLUMNS,
     RipgrepGrepMatch,
+    binary_match_warning,
 )
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import (
+    DISCOVERY_RESULT_LIMIT_MAX,
+    LIST_MAX_DEPTH,
     ValidatedGlobRequest,
     ValidatedGrepRequest,
     ValidatedListRequest,
@@ -47,14 +49,12 @@ from .tool_path_policy import (
     hidden_read_path_filter,
     resolve_read_tool_path,
 )
+from .workspace_descriptor_access import WorkspaceScanSkips, scan_skip_notes
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
-GREP_MAX_LISTED_BINARY_PATHS = 10
-DISCOVERY_MAX_SCANNED_PATHS = 20_000
 TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {
     "line_length": 1,
     "limit": 2,
-    "scan_budget": 3,
     "timeout": 4,
     "output_bytes": 5,
 }
@@ -106,35 +106,28 @@ def run_list_executor(
     bounded = list_discovery_paths(
         base=base,
         max_depth=request.max_depth,
-        limit=request.limit + 1,
-        scan_limit=DISCOVERY_MAX_SCANNED_PATHS,
+        limit=request.limit,
         include_path=lambda path: not is_hidden(path),
         exclude_subtree=private_app_storage(context).prunes,
     )
-    visible_paths = bounded.selected
-    truncation_reason = bounded.truncation_reason
-    if len(visible_paths) > request.limit:
-        truncation_reason = _dominant_truncation_reason(
-            truncation_reason,
-            "limit",
-        )
-    entries = [
-        entry_for_discovery_path(path) for path in visible_paths[: request.limit]
-    ]
+    entries = [entry_for_discovery_path(path) for path in bounded.selected]
     entry_values: list[JSONValue] = [_discovery_entry_json(entry) for entry in entries]
     search_text = "\n".join(str(entry["path"]) for entry in entries)
+    warnings, hints = _list_notes(
+        limit_reached=bounded.truncation_reason == "limit",
+        limit=request.limit,
+        max_depth=request.max_depth,
+        skips=bounded.skips,
+    )
     return UnprojectedBrokerToolOutcome(
         status="success",
         output={
             "status": "success",
             "entries": entry_values,
-            "truncated": truncation_reason is not None,
-            "truncation_reason": truncation_reason,
-            "retry_hint": _retry_hint(
-                tool_id="list",
-                reason=truncation_reason,
-            ),
-            "warning": _warning(reason=truncation_reason),
+            "truncated": bounded.truncation_reason is not None,
+            "truncation_reason": bounded.truncation_reason,
+            "retry_hint": " ".join(hints) or None,
+            "warning": " ".join(warnings) or None,
         },
         search_text=search_text,
         file_paths=tuple(str(entry["path"]) for entry in entries),
@@ -186,6 +179,12 @@ def run_glob_executor(
     ]
     match_values: list[JSONValue] = [_discovery_entry_json(match) for match in matches]
     search_text = "\n".join(str(match["path"]) for match in matches)
+    warnings, hints = _glob_notes(
+        reason=backend_result.truncation_reason,
+        limit=request.limit,
+        skipped_files=backend_result.skipped_files,
+        first_skip_error=backend_result.first_skip_error,
+    )
     return UnprojectedBrokerToolOutcome(
         status="success",
         output={
@@ -193,11 +192,9 @@ def run_glob_executor(
             "matches": match_values,
             "truncated": backend_result.truncated,
             "truncation_reason": backend_result.truncation_reason,
-            "retry_hint": _retry_hint(
-                tool_id="glob",
-                reason=backend_result.truncation_reason,
-            ),
-            "warning": _warning(reason=backend_result.truncation_reason),
+            "retry_hint": " ".join(hints) or None,
+            "warning": " ".join(warnings) or None,
+            "skipped_files": backend_result.skipped_files,
         },
         search_text=search_text,
         file_paths=tuple(str(match["path"]) for match in matches),
@@ -430,38 +427,62 @@ def _dominant_truncation_reason(
     )
 
 
-def _retry_hint(
+def _list_notes(
     *,
-    tool_id: Literal["list", "glob"],
+    limit_reached: bool,
+    limit: int,
+    max_depth: int,
+    skips: WorkspaceScanSkips,
+) -> tuple[list[str], list[str]]:
+    """Warnings and retry hints naming everything list left out."""
+
+    warnings, hints = scan_skip_notes(
+        skips, max_depth=max_depth, depth_limit=LIST_MAX_DEPTH
+    )
+    if limit_reached:
+        warnings.insert(0, f"Stopped at limit={limit} entries; more entries exist.")
+        hints.insert(
+            0,
+            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}) or list a narrower "
+            "path; to page through one directory, read it with offset.",
+        )
+    return warnings, hints
+
+
+def _glob_notes(
+    *,
     reason: DiscoveryTruncationReason | None,
-) -> str | None:
-    if reason is None:
-        return None
-    if tool_id == "list":
-        if reason == "limit":
-            return "Retry list with a narrower path or smaller max_depth."
-        if reason == "scan_budget":
-            return "Retry list with a narrower path."
-    if tool_id == "glob":
-        if reason == "limit":
-            return "Retry glob with a narrower base_path or more specific pattern."
-        if reason == "timeout":
-            return "Retry glob with a narrower base_path."
-        if reason == "output_bytes":
-            return "Retry glob with a more specific pattern to reduce result volume."
-    return "Retry with a narrower local workspace path or more specific query."
+    limit: int,
+    skipped_files: int,
+    first_skip_error: str | None,
+) -> tuple[list[str], list[str]]:
+    """Warnings and retry hints naming every glob limit that applied."""
 
-
-def _warning(*, reason: DiscoveryTruncationReason | None) -> str | None:
+    warnings: list[str] = []
+    hints: list[str] = []
     if reason == "limit":
-        return "Results were truncated because the result limit was reached."
-    if reason == "scan_budget":
-        return "Results were truncated because the discovery scan budget was reached."
-    if reason == "timeout":
-        return "Results were truncated because the search backend timed out."
-    if reason == "output_bytes":
-        return "Results were truncated because the output byte limit was reached."
-    return None
+        warnings.append(f"Stopped at limit={limit} matches; more files match.")
+        hints.append(
+            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}) or narrow base_path "
+            "or pattern to see the rest."
+        )
+    elif reason == "output_bytes":
+        warnings.append(
+            "Stopped at the search backend's output limit; more files may match."
+        )
+        hints.append("Narrow base_path or pattern to see the rest.")
+    elif reason == "timeout":
+        warnings.append(
+            f"The search stopped after {RIPGREP_TIMEOUT_SECONDS:g} seconds; "
+            "directories it had not reached were not searched."
+        )
+        hints.append("Narrow base_path to search the rest.")
+    if skipped_files > 0:
+        warnings.append(
+            f"{skipped_files} path(s) could not be read and were not searched, so "
+            f"files in them are missing. First error: {first_skip_error}."
+        )
+    return warnings, hints
 
 
 def _grep_notes(
@@ -511,11 +532,6 @@ def _grep_notes(
             f"matches in them are missing. First error: {first_skip_error}."
         )
     if binary_match_paths:
-        listed = binary_match_paths[:GREP_MAX_LISTED_BINARY_PATHS]
-        more = len(binary_match_paths) - len(listed)
-        warnings.append(
-            f"{len(binary_match_paths)} binary file(s) also match; their lines are "
-            f"not shown: {', '.join(listed)}" + (f" and {more} more." if more else ".")
-        )
+        warnings.append(binary_match_warning(binary_match_paths))
         hints.append("Use read on a binary file that matched, such as a PDF.")
     return warnings, hints

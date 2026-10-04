@@ -554,3 +554,28 @@ def test_real_ripgrep_reports_the_match_limit_and_unreadable_paths(
     assert len(limited.matches) == 2  # of four
     assert limited.truncated is True
     assert limited.truncation_reason == "limit"
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_glob_reports_unreadable_paths_instead_of_failing(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "b.txt").write_text("b\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        result = broker_discovery_ripgrep.run_ripgrep_files(
+            cwd=tmp_path,
+            sandbox_profile=_ALLOW_ALL_PROFILE,
+            glob_pattern="**/*.txt",
+            limit=100,
+        )
+    finally:
+        locked.chmod(0o755)
+
+    assert result.relative_paths == ("./a.txt",)
+    assert result.truncation_reason is None
+    assert result.skipped_files == 1
+    assert "Permission denied" in str(result.first_skip_error)

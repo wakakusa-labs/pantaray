@@ -53,10 +53,13 @@ export function selectHistoryLiveStage(snapshot: ActionLiveSnapshot): HistoryLiv
       return { kind: 'tool', label, subject, outcome };
     }
   }
-  for (const line of [...lines].reverse()) {
-    if (line.kind !== 'assistant') continue;
-    const text = firstLine(line.text);
-    if (text !== '') return { kind: 'message', text };
-  }
+  // The message is current only while nothing has run since it; after a finished tool the model
+  // is thinking again.
+  const latest = [...lines]
+    .reverse()
+    .find(
+      (line) => line.kind === 'tool' || (line.kind === 'assistant' && firstLine(line.text) !== '')
+    );
+  if (latest?.kind === 'assistant') return { kind: 'message', text: firstLine(latest.text) };
   return { kind: 'thinking' };
 }

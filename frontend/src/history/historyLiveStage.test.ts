@@ -72,7 +72,7 @@ const blocker = {
   commandSummary: {},
 };
 
-it('prefers the running tool, then the latest message, then thinking', () => {
+it('shows the running tool, else the latest message until a tool finishes after it, else thinking', () => {
   const entries = [assistant(1, '## **Plan**\nread the notes'), tool(2, 'processing')];
   const running = page('processing', [runningRun('R1', entries)]);
 
@@ -92,10 +92,14 @@ it('prefers the running tool, then the latest message, then thinking', () => {
     outcome: 'completed',
   });
   expect(
+    selectHistoryLiveStage(snapshot({ page: page('processing', [runningRun('R1', [entries[0]])]) }))
+  ).toEqual({ kind: 'message', text: 'Plan' });
+  // Once a tool has finished after the message, the model is thinking again.
+  expect(
     selectHistoryLiveStage(
       snapshot({ page: page('processing', [runningRun('R1', [entries[0], tool(2, 'success')])]) })
     )
-  ).toEqual({ kind: 'message', text: 'Plan' });
+  ).toEqual({ kind: 'thinking' });
   expect(
     selectHistoryLiveStage(snapshot({ page: page('queued', [runningRun('R1', [])]) }))
   ).toEqual({ kind: 'thinking' });

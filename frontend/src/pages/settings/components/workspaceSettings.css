@@ -94,12 +94,6 @@
   margin-left: auto;
 }
 
-.workspace-detail-description {
-  color: var(--fog-text-2);
-  font-size: 13px;
-  margin: 0;
-}
-
 .workspace-detail-panel {
   background: rgba(170, 186, 212, 0.045);
   border-radius: 14px;

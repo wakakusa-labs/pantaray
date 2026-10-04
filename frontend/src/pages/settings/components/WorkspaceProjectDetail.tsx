@@ -82,7 +82,6 @@ export function WorkspaceProjectDetail(props: WorkspaceProjectDetailProps) {
           <Trash2 size={14} aria-hidden="true" />
         </button>
       </div>
-      <p className="workspace-detail-description">{props.t('settings.workspace.description')}</p>
 
       <div className="workspace-detail-panel">
         <div className="workspace-detail-folders">

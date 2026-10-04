@@ -229,8 +229,10 @@ async def test_grep_reports_skipped_files_as_warning(
 
     from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
     from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-        RipgrepGrepMatch,
         RipgrepGrepResult,
+    )
+    from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+        RipgrepGrepMatch,
     )
 
     def fake_grep(**_: object) -> RipgrepGrepResult:
@@ -240,12 +242,15 @@ async def test_grep_reports_skipped_files_as_warning(
                     relative_path="notes.txt",
                     line_number=1,
                     line="needle",
+                    line_truncated=False,
                 ),
             ),
             truncated=False,
             truncation_reason=None,
             timed_out=False,
             skipped_files=2,
+            first_skip_error="./locked: Permission denied (os error 13)",
+            binary_match_paths=tuple(f"blob-{index}.bin" for index in range(12)),
         )
 
     monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", fake_grep)
@@ -270,8 +275,14 @@ async def test_grep_reports_skipped_files_as_warning(
     assert outcome.output["truncated"] is False
     assert outcome.output["truncation_reason"] is None
     assert outcome.output["skipped_files"] == 2
-    assert "skipped" in str(outcome.output["warning"])
-    assert "include_glob" in str(outcome.output["retry_hint"])
+    warning = str(outcome.output["warning"])
+    assert "2 path(s) could not be read" in warning
+    assert "./locked: Permission denied (os error 13)" in warning
+    assert "12 binary file(s) also match" in warning
+    assert str(context.workspace_path / "blob-9.bin") in warning
+    assert str(context.workspace_path / "blob-10.bin") not in warning
+    assert "and 2 more." in warning
+    assert "read" in str(outcome.output["retry_hint"])
 
 
 @pytest.mark.asyncio
@@ -282,7 +293,7 @@ async def test_grep_truncates_long_matching_lines(
     install_fake_ripgrep_backend(monkeypatch)
     db_path, context = _bootstrap_runtime_db(tmp_path)
     (context.workspace_path / "minified.js").write_text(
-        "needle " + ("x" * 3_000) + "\n",
+        ("x" * 3_000) + " needle " + ("y" * 3_000) + "\n",
         encoding="utf-8",
     )
 
@@ -305,12 +316,49 @@ async def test_grep_truncates_long_matching_lines(
     assert outcome.status == "success"
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "line_length"
-    assert "include_glob" in str(outcome.output["retry_hint"])
-    assert "shortened" in str(outcome.output["warning"])
+    assert "offset=line_number" in str(outcome.output["retry_hint"])
+    assert "excerpt around their first match" in str(outcome.output["warning"])
     matches = outcome.output["matches"]
     assert isinstance(matches, list)
     assert len(matches) == 1
-    assert "(line truncated to" in matches[0]["line"]
+    line = matches[0]["line"]
+    assert line.startswith("…x") and line.endswith("y…")
+    assert " needle " in line
+
+
+@pytest.mark.asyncio
+async def test_grep_match_limit_names_the_limit_and_keeps_line_note(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_ripgrep_backend(monkeypatch)
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    (context.workspace_path / "log.txt").write_text(
+        "".join(f"needle {index} {'x' * 600}\n" for index in range(3)),
+        encoding="utf-8",
+    )
+
+    outcome = await execute_broker_tool(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_id="grep",
+        user_id="user-1",
+        actor_process_id=BROKER_ACTOR_PROCESS_ID,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session_id,
+        args={"base_path": ".", "pattern": "needle", "max_matches": 2},
+    )
+
+    assert outcome.status == "success"
+    assert len(outcome.output["matches"]) == 2
+    assert outcome.output["truncated"] is True
+    assert outcome.output["truncation_reason"] == "limit"
+    warning = str(outcome.output["warning"])
+    assert "max_matches=2" in warning
+    assert "excerpt around their first match" in warning
+    retry_hint = str(outcome.output["retry_hint"])
+    assert "Raise max_matches" in retry_hint
+    assert "offset=line_number" in retry_hint
 
 
 @pytest.mark.asyncio
@@ -350,8 +398,8 @@ async def test_grep_caps_total_output_bytes(
     )
     assert stored_output["truncated"] is True
     assert stored_output["truncation_reason"] == "output_bytes"
-    assert "narrow" in str(stored_output["retry_hint"])
-    assert "output byte limit" in str(stored_output["warning"])
+    assert "Narrow base_path" in str(stored_output["retry_hint"])
+    assert "50 KB output limit" in str(stored_output["warning"])
     matches = stored_output["matches"]
     assert isinstance(matches, list)
     assert len(str(stored_output).encode("utf-8")) <= 70_000

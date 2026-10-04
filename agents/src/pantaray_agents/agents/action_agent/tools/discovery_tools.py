@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from typing import cast
 
+from pantaray_agents.local_runtime.tooling.brokering.broker_discovery import (
+    GREP_MAX_OUTPUT_BYTES,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
+    RIPGREP_TIMEOUT_SECONDS,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+    GREP_MAX_LINE_CHARS,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     GlobToolArgs,
     GrepToolArgs,
@@ -117,7 +126,11 @@ GREP_TOOL_FIELD_PRESENTATION = (
     ),
     BrokerToolFieldPresentation(
         name="max_matches",
-        description="Maximum number of matching lines to return.",
+        description=(
+            "Maximum number of matching lines to return, "
+            f"1-{DISCOVERY_RESULT_LIMIT_MAX}; "
+            f"default {GrepToolArgs.model_fields['max_matches'].default}."
+        ),
     ),
 )
 
@@ -234,7 +247,7 @@ GREP_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id="grep",
         name="Grep Local Text",
-        description="Search readable UTF-8 local files by regular expression.",
+        description="Search readable local text files of any size by regular expression.",
         guide=ToolGuideSpec(
             what=(
                 "Use this to search text inside readable local files without running a shell "
@@ -248,8 +261,14 @@ GREP_TOOL = ToolDefinition.from_spec(
                 "pattern is a ripgrep regular expression; escape regex metacharacters "
                 "when searching literal text. Typical first call: base_path=., "
                 "pattern=TODO, include_glob=**/*.py. "
-                "If truncated=true, inspect truncation_reason. If warning or retry_hint "
-                "is present, retry the same tool with narrower inputs."
+                "Limits: symlinks are not followed; a binary file (with NUL bytes) "
+                "that matches is named in warning, without lines; output stops at "
+                f"max_matches lines or {GREP_MAX_OUTPUT_BYTES // 1024} KB; a line longer "
+                f"than {GREP_MAX_LINE_CHARS} characters comes back as an excerpt around "
+                f"its first match; the search stops after {RIPGREP_TIMEOUT_SECONDS:g} "
+                "seconds. When a limit applies, truncated, warning and retry_hint say "
+                "which one and what to do next; skipped_files counts paths that could "
+                "not be read."
             ),
         ),
         execution_policy=_discovery_policy(),

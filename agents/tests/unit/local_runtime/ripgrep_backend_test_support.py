@@ -11,9 +11,12 @@ import pytest
 from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
 from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
     RipgrepGlobResult,
-    RipgrepGrepMatch,
     RipgrepGrepResult,
     _is_excluded_relative_path,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+    RipgrepGrepMatch,
+    grep_match,
 )
 
 
@@ -101,16 +104,19 @@ def _fake_grep(
         path = cwd / relative_path
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for line_number, line in enumerate(handle, start=1):
-                if not compiled_pattern.search(line):
+                found = compiled_pattern.search(line)
+                if found is None:
                     continue
                 if len(matches) >= max_matches:
                     truncated = True
                     break
                 matches.append(
-                    RipgrepGrepMatch(
+                    grep_match(
                         relative_path=relative_path,
                         line_number=line_number,
-                        line=line.rstrip("\r\n"),
+                        text=line.rstrip("\r\n"),
+                        match_start=found.start(),
+                        cut=False,
                     )
                 )
             if truncated:
@@ -121,6 +127,8 @@ def _fake_grep(
         truncation_reason="limit" if truncated else None,
         timed_out=False,
         skipped_files=0,
+        first_skip_error=None,
+        binary_match_paths=(),
     )
 
 

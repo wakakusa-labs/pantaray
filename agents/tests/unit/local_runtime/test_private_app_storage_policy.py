@@ -387,10 +387,13 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
     result_file.write_text("needle result\n", encoding="utf-8")
     bulk = db_path.parent / "bulk"
     bulk.mkdir()
-    # Past ripgrep's whole output budget (2 MiB) in matching lines alone.
+    # Past ripgrep's whole output budget in matching lines alone.
+    line = "needle secret\n"
     for index in range(3):
         (bulk / f"big-{index}.txt").write_text(
-            "needle secret\n" * 60_000, encoding="utf-8"
+            line
+            * (broker_discovery_ripgrep.RIPGREP_MAX_STDOUT_BYTES // len(line) // 2),
+            encoding="utf-8",
         )
 
     grep = await _run(

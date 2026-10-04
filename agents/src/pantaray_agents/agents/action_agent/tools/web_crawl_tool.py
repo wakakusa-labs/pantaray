@@ -28,7 +28,8 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
             "pages in the same site area. Use this when one exact page is not enough. "
             f"It follows at most {WEB_CRAWL_MAX_BREADTH} links per page, goes at most "
             f"{WEB_CRAWL_MAX_DEPTH} levels deep, and stops after {WEB_CRAWL_PAGE_LIMIT} "
-            "links; pages beyond these limits are not returned. With instructions, "
+            "links; pages beyond these limits are not returned, and the result "
+            "cannot tell which were skipped. With instructions, "
             f"each page returns only its top {WEB_EXCERPTS_PER_PAGE} relevant "
             "excerpts instead of its full content."
         ),
@@ -103,8 +104,7 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                         "additionalProperties": False,
                     },
                 },
-                "truncated": {"type": "boolean"},
-                "retry_hint": {"type": ["string", "null"]},
+                "retry_hint": {"type": "string"},
                 "response_time": {"type": "number"},
                 "meta": {
                     "type": "object",

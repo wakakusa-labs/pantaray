@@ -102,6 +102,9 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
     )
 
     assert result.status == "success"
+    assert result.output["retry_hint"].startswith("Returned 2 pages.")
+    assert "may be missing" in result.output["retry_hint"]
+    assert "holds only up to 3 excerpts" in result.output["retry_hint"]
     assert captured["tool_id"] == "web_crawl"
     assert captured["args"] == {
         "url": "https://example.com/docs",
@@ -119,12 +122,7 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
                 "raw_content": "uvwxyz",
             },
         ],
-        "truncated": True,
-        "retry_hint": (
-            "instructions was set, so each raw_content holds only up to 3 "
-            "excerpts relevant to it, joined by [...], not the full page. Use "
-            "web_extract without query on a URL to read the full page."
-        ),
+        "retry_hint": result.output["retry_hint"],
         "response_time": 15.0,
         "meta": {
             "request_id": result.output["meta"]["request_id"],
@@ -138,11 +136,15 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("page_count", "truncated"),
-    [(WEB_CRAWL_PAGE_LIMIT - 1, False), (WEB_CRAWL_PAGE_LIMIT, True)],
+    ("page_count", "coverage"),
+    [
+        (1, "may be missing"),
+        (WEB_CRAWL_PAGE_LIMIT - 1, "may be missing"),
+        (WEB_CRAWL_PAGE_LIMIT, "reached the 50-link limit"),
+    ],
 )
-async def test_web_crawl_reports_when_it_stopped_at_the_page_limit(
-    monkeypatch, page_count: int, truncated: bool
+async def test_web_crawl_never_presents_its_pages_as_the_whole_section(
+    monkeypatch, page_count: int, coverage: str
 ) -> None:
     async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
         return {
@@ -168,13 +170,12 @@ async def test_web_crawl_reports_when_it_stopped_at_the_page_limit(
         state=_base_state(),
     )
 
+    hint = result.output["retry_hint"]
     assert result.status == "success"
-    assert result.output["truncated"] is truncated
-    if truncated:
-        assert f"returned {page_count} pages" in result.output["retry_hint"]
-        assert "narrower section URL" in result.output["retry_hint"]
-    else:
-        assert result.output["retry_hint"] is None
+    assert hint.startswith(f"Returned {page_count} pages.")
+    assert coverage in hint
+    assert "narrower section URL" in hint
+    assert "excerpts" not in hint
 
 
 @pytest.mark.asyncio

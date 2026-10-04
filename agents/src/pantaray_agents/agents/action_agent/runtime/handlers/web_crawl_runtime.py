@@ -26,6 +26,8 @@ from pantaray_llm.errors import (
     build_proxy_tool_result_meta,
 )
 from pantaray_llm.profiles import (
+    WEB_CRAWL_MAX_BREADTH,
+    WEB_CRAWL_MAX_DEPTH,
     WEB_CRAWL_PAGE_LIMIT,
     WEB_CRAWL_PROFILE_ID,
     WEB_EXCERPTS_PER_PAGE,
@@ -56,8 +58,7 @@ class WebCrawlResult(TypedDict, total=False):
 class WebCrawlPayload(TypedDict, total=False):
     base_url: NotRequired[str]
     results: Required[list[WebCrawlResult]]
-    truncated: NotRequired[bool]
-    retry_hint: NotRequired[str | None]
+    retry_hint: NotRequired[str]
     response_time: NotRequired[float]
     meta: NotRequired[ProxyToolResultMeta]
     error: NotRequired[ProxyAgentErrorPayload]
@@ -143,25 +144,31 @@ def _normalize_crawl_payload(
     return payload
 
 
-def _crawl_retry_hint(*, page_count: int, has_instructions: bool) -> str | None:
-    """Say what the crawl left out; Tavily's response itself never signals it."""
+def _crawl_retry_hint(*, page_count: int, has_instructions: bool) -> str:
+    """Say how far the crawl went; Tavily never reports what it skipped."""
 
-    notes: list[str] = []
-    if page_count >= WEB_CRAWL_PAGE_LIMIT:
-        notes.append(
-            f"The crawl returned {page_count} pages and stopped at its "
-            f"{WEB_CRAWL_PAGE_LIMIT}-link limit, so pages it had not reached are "
-            "missing. Crawl again from a narrower section URL, or use web_extract "
-            "on specific URLs, to reach them."
-        )
+    coverage = (
+        f"it reached the {WEB_CRAWL_PAGE_LIMIT}-link limit, so pages it had not "
+        "reached are missing"
+        if page_count >= WEB_CRAWL_PAGE_LIMIT
+        else "it does not report which links these limits skipped, so other "
+        "pages in the section may be missing"
+    )
+    hint = (
+        f"Returned {page_count} pages. The crawl follows at most "
+        f"{WEB_CRAWL_MAX_BREADTH} links per page and {WEB_CRAWL_MAX_DEPTH} levels "
+        f"deep and stops after {WEB_CRAWL_PAGE_LIMIT} links; {coverage}. To reach "
+        "them, crawl again from a narrower section URL or use web_extract on "
+        "specific URLs."
+    )
     if has_instructions:
-        notes.append(
-            "instructions was set, so each raw_content holds only up to "
+        hint += (
+            " instructions was set, so each raw_content holds only up to "
             f"{WEB_EXCERPTS_PER_PAGE} excerpts relevant to it, joined by [...], "
             "not the full page. Use web_extract without query on a URL to read "
             "the full page."
         )
-    return " ".join(notes) or None
+    return hint
 
 
 def _build_crawl_meta(
@@ -235,11 +242,11 @@ async def run_web_crawl_tool(
         if parsed is None:
             raise WebContentInvalidResponseError("response")
         payload = _normalize_crawl_payload(parsed)
-        payload["retry_hint"] = _crawl_retry_hint(
-            page_count=len(payload["results"]),
-            has_instructions=instructions is not None and bool(payload["results"]),
-        )
-        payload["truncated"] = payload["retry_hint"] is not None
+        if payload["results"]:
+            payload["retry_hint"] = _crawl_retry_hint(
+                page_count=len(payload["results"]),
+                has_instructions=instructions is not None,
+            )
         payload["meta"] = _build_crawl_meta(
             payload=payload,
             request_id=request_context["request_id"],

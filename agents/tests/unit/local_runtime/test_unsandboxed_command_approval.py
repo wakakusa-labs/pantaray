@@ -7,18 +7,29 @@ import pytest
 from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.tooling.action_subagent_resource_claims import (
+    ActionSubagentResourceClaimConflictError,
+    WorkspacePathResourceClaim,
+    acquire_action_subagent_resource_claims_in_connection,
+)
+from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_authority import (
-    ACTION_SUBAGENT_UNSANDBOXED_DENIED,
+    ACTION_SUBAGENT_WRITE_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
     BrokerPolicyError,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import BrokerContext
+from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
+    UnprojectedBrokerToolOutcome,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     BashToolArgs,
     ValidatedCommandRequest,
 )
+from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
     OutsideWorkspaceGrantError,
     grant_outside_workspace_folder_in_connection,
@@ -169,6 +180,7 @@ async def test_approval_runs_that_one_command_unsandboxed_once(
     assert outcome.status == "success"
     [request] = launched
     assert request.run_outside_sandbox is True
+    assert request.real_write_roots == ["/"]
     assert request.argv[-1] == "print-page"
     assert request.approval_source == "prompt"
 
@@ -274,17 +286,45 @@ async def test_an_unsandboxed_approval_cannot_be_allowed_for_the_conversation(
                 )
 
 
-@pytest.mark.asyncio
-async def test_a_subagent_cannot_ask_to_run_outside_the_sandbox(
-    tmp_path: Path, launched: list[ValidatedCommandRequest]
-) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+def _seed_child(db_path: Path) -> None:
     _seed_broker_actor_process(
         db_path,
         process_id="child-1",
         kind="action_subagent",
         parent_process_id=BROKER_ACTOR_PROCESS_ID,
     )
+
+
+def _claim(db_path: Path, context: ActionExecutionContext, folder: str) -> None:
+    (context.workspace_path / folder).mkdir(exist_ok=True)
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        with immediate_transaction(connection):
+            acquire_action_subagent_resource_claims_in_connection(
+                connection,
+                user_id="user-1",
+                action_id="action-1",
+                parent_process_id=BROKER_ACTOR_PROCESS_ID,
+                child_process_id="child-1",
+                acquired_at=BROKER_ACTOR_TIMESTAMP,
+                claims=(
+                    WorkspacePathResourceClaim(
+                        f"claim-{folder}",
+                        context.manifest_id,
+                        folder,
+                        context.workspace_path,
+                    ),
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_a_subagent_cannot_run_outside_the_sandbox(
+    tmp_path: Path, launched: list[ValidatedCommandRequest]
+) -> None:
+    db_path, context = _setup(tmp_path, "prompt_each_time")
+    _seed_child(db_path)
+    _claim(db_path, context, "claimed")
 
     with pytest.raises(BrokerPolicyError) as caught:
         await _run(
@@ -295,6 +335,72 @@ async def test_a_subagent_cannot_ask_to_run_outside_the_sandbox(
             args=_unsandboxed(),
             actor_process_id="child-1",
         )
-    assert caught.value.code == ACTION_SUBAGENT_UNSANDBOXED_DENIED
+    assert caught.value.code == ACTION_SUBAGENT_WRITE_DENIED
     assert _approval_rows(db_path) == []
     assert launched == []
+
+
+@pytest.mark.asyncio
+async def test_the_action_cannot_run_outside_the_sandbox_over_a_subagent_claim(
+    tmp_path: Path, launched: list[ValidatedCommandRequest]
+) -> None:
+    db_path, context = _setup(tmp_path, "prompt_each_time")
+    _seed_child(db_path)
+    _claim(db_path, context, "claimed")
+
+    # Refused before the user is asked: the run could write the claimed folder.
+    with pytest.raises(BrokerPolicyError) as caught:
+        await _run(
+            db_path=db_path,
+            context=context,
+            tool_id="bash",
+            request_id="r1",
+            args=_unsandboxed(),
+        )
+    assert caught.value.code == ACTION_SUBAGENT_WRITE_DENIED
+    assert _approval_rows(db_path) == []
+    assert launched == []
+
+
+@pytest.mark.asyncio
+async def test_no_subagent_claim_is_taken_while_an_unsandboxed_run_is_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = _setup(tmp_path, "prompt_each_time")
+    _seed_child(db_path)
+    refused: list[bool] = []
+
+    async def _claim_while_running(
+        *, context: BrokerContext, request: ValidatedCommandRequest, **kwargs: object
+    ) -> UnprojectedBrokerToolOutcome:
+        del kwargs
+        assert request.run_outside_sandbox
+        try:
+            _claim(db_path, action_context, "late")
+        except ActionSubagentResourceClaimConflictError:
+            refused.append(True)
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={"status": "success", "exit_code": 0, "stdout": "", "stderr": ""},
+        )
+
+    action_context = context
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", _claim_while_running)
+    with pytest.raises(BrokerApprovalRequiredError) as asked:
+        await _run(
+            db_path=db_path,
+            context=context,
+            tool_id="bash",
+            request_id="r1",
+            args=_unsandboxed(),
+        )
+    _decide(db_path, asked.value, "r1", "approved_once")
+    await _run(
+        db_path=db_path,
+        context=context,
+        tool_id="bash",
+        request_id="r1",
+        args=_unsandboxed(),
+    )
+
+    assert refused == [True]

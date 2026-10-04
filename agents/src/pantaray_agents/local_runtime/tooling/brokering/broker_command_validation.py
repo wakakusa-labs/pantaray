@@ -18,7 +18,6 @@ from ..repository.command_network_settings import load_command_network_enabled
 from ..sandbox.runtime_policy import resolve_runtime_budget
 from .action_subagent_broker_authority import (
     authorize_direct_workspace_writes,
-    authorize_unsandboxed_command,
     resolve_command_workspace_write_roots,
 )
 from .broker_common import (
@@ -49,6 +48,11 @@ from .tool_path_policy import (
 
 EXEC_CWD_RETARGETED = "EXEC_CWD_RETARGETED"
 EXEC_WRITE_FOLDER_DENIED = "EXEC_WRITE_FOLDER_DENIED"
+# What a command run outside the sandbox can write. Recorded as its write root,
+# it keeps the run and Action subagent claims apart both ways: the run is
+# refused while any claim or another actor's command is active (and always to
+# a subagent), and no claim can be taken until the run is cleaned up.
+UNSANDBOXED_WRITE_ROOTS = (Path("/"),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +248,10 @@ def build_validated_command_request(
     use_login_environment = args.use_login_environment
     run_outside_sandbox = args.run_outside_sandbox
     if run_outside_sandbox:
-        authorize_unsandboxed_command(context=context)
+        # Checked before the user is asked; the execution start checks again.
+        authorize_direct_workspace_writes(
+            context=context, resolved_paths=UNSANDBOXED_WRITE_ROOTS
+        )
     # Commands read what the read-access setting allows, like the read tool.
     full_disk_read = context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     env = build_command_env(
@@ -324,7 +331,14 @@ def build_validated_command_request(
             *(["/"] if full_disk_read else []),
             *(str(path) for path in sandbox_roots.read_roots),
         ],
-        real_write_roots=[str(path) for path in sandbox_roots.write_roots],
+        real_write_roots=[
+            str(path)
+            for path in (
+                UNSANDBOXED_WRITE_ROOTS
+                if run_outside_sandbox
+                else sandbox_roots.write_roots
+            )
+        ],
         tool_request_id=tool_request_id,
         requested_at=requested_at,
         preflight_only=preflight_only,
@@ -440,6 +454,7 @@ def build_validated_python_request(
 __all__ = [
     "EXEC_CWD_RETARGETED",
     "EXEC_WRITE_FOLDER_DENIED",
+    "UNSANDBOXED_WRITE_ROOTS",
     "build_validated_command_request",
     "build_validated_python_request",
     "verify_outside_workspace_folders_unchanged",

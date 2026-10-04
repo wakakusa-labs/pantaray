@@ -11,9 +11,11 @@ import pytest
 from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
 from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
     RipgrepGlobResult,
-    RipgrepGrepMatch,
     RipgrepGrepResult,
     _is_excluded_relative_path,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+    RipgrepGrepMatch,
     grep_match,
 )
 

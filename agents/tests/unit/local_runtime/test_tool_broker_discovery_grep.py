@@ -229,8 +229,10 @@ async def test_grep_reports_skipped_files_as_warning(
 
     from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
     from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-        RipgrepGrepMatch,
         RipgrepGrepResult,
+    )
+    from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+        RipgrepGrepMatch,
     )
 
     def fake_grep(**_: object) -> RipgrepGrepResult:

@@ -22,14 +22,16 @@ from .broker_discovery_paths import (
     list_discovery_paths,
 )
 from .broker_discovery_ripgrep import (
-    GREP_MAX_LINE_CHARS,
-    GREP_OMITTED_TEXT_MARKER,
-    RIPGREP_MAX_COLUMNS,
     RIPGREP_TIMEOUT_SECONDS,
-    RipgrepGrepMatch,
     RipgrepGrepResult,
     run_ripgrep_files,
     run_ripgrep_grep,
+)
+from .broker_grep_lines import (
+    GREP_MAX_LINE_CHARS,
+    GREP_OMITTED_TEXT_MARKER,
+    RIPGREP_MAX_COLUMNS,
+    RipgrepGrepMatch,
 )
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import (

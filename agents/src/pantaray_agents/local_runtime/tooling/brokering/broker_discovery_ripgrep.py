@@ -12,6 +12,11 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Literal
 
 from .broker_common import BrokerPolicyError
+from .broker_grep_lines import (
+    RIPGREP_MAX_COLUMNS,
+    RipgrepGrepMatch,
+    grep_match_from_ripgrep,
+)
 
 RIPGREP_COMMAND = "rg"
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -22,22 +27,12 @@ RIPGREP_TIMEOUT_SECONDS = 5.0
 # many long matching lines as GREP_MAX_OUTPUT_BYTES can show excerpts of.
 RIPGREP_MAX_STDOUT_BYTES = 8 * 1024 * 1024
 RIPGREP_MAX_STDERR_CHARS = 8_192
-# ripgrep prints a line longer than this many bytes as a preview of its first
-# this many graphemes, so no file size cap is needed to bound one match.
-# Design limit: a first match further into a line than this is not centred in
-# its excerpt; raise it when such matches are reported as hard to locate.
-RIPGREP_MAX_COLUMNS = 64 * 1024
-# What grep returns of one matching line, centred on the line's first match.
-GREP_MAX_LINE_CHARS = 500
-GREP_OMITTED_TEXT_MARKER = "…"
 _GREP_LINE_PATTERN = re.compile(rb"(\d+):(\d+):(.*)", re.DOTALL)
 # With --binary, a file holding a NUL byte is searched too and reported once,
 # by this message, instead of being skipped without a word.
 _RIPGREP_BINARY_MATCH_PATTERN = re.compile(
-    rb'(.+): binary file matches \(found "\\0" byte around offset \d+\)'
-)
-_RIPGREP_PREVIEW_SUFFIX_PATTERN = re.compile(
-    rb" \[\.\.\. (?:\d+ more match(?:es)?|omitted end of long line)\]\Z"
+    rb'(.+): binary file matches \(found "\\0" byte around offset \d+\)',
+    re.DOTALL,
 )
 RIPGREP_ERROR_PREFIX = "rg: "
 RIPGREP_REGEX_ERROR_MARKERS = (
@@ -97,14 +92,6 @@ class RipgrepGlobResult:
     truncated: bool
     truncation_reason: RipgrepTruncationReason | None
     timed_out: bool
-
-
-@dataclass(frozen=True, slots=True)
-class RipgrepGrepMatch:
-    relative_path: str
-    line_number: int
-    line: str
-    line_truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +199,9 @@ def run_ripgrep_grep(
     matches: list[RipgrepGrepMatch] = []
     binary_match_paths: list[str] = []
     truncated = False
+    # --null ends a path with NUL but keeps a newline inside it, which splits
+    # one record across lines; the start is held until the record completes.
+    pending = b""
 
     def is_hidden(relative_path: str) -> bool:
         return _is_excluded_relative_path(relative_path, excluded_relative_path) or (
@@ -220,15 +210,20 @@ def run_ripgrep_grep(
         )
 
     def handle_line(raw_line: bytes) -> bool:
-        nonlocal truncated
-        raw_path, separator, rest = raw_line.partition(b"\0")
+        nonlocal pending, truncated
+        record = pending + raw_line
+        pending = b""
+        raw_path, separator, rest = record.partition(b"\0")
         parsed = _GREP_LINE_PATTERN.fullmatch(rest) if separator else None
         if parsed is None:
-            binary = _RIPGREP_BINARY_MATCH_PATTERN.fullmatch(raw_line)
-            if binary is not None:
-                relative_path = binary.group(1).decode("utf-8", errors="replace")
-                if not is_hidden(relative_path):
-                    binary_match_paths.append(relative_path)
+            binary = _RIPGREP_BINARY_MATCH_PATTERN.fullmatch(record)
+            if binary is None:
+                if not separator:
+                    pending = record + b"\n"
+                return True
+            relative_path = binary.group(1).decode("utf-8", errors="replace")
+            if not is_hidden(relative_path):
+                binary_match_paths.append(relative_path)
             return True
         relative_path = raw_path.decode("utf-8", errors="replace")
         if is_hidden(relative_path):
@@ -237,7 +232,7 @@ def run_ripgrep_grep(
             truncated = True
             return False
         matches.append(
-            _grep_match_from_ripgrep(
+            grep_match_from_ripgrep(
                 relative_path=relative_path,
                 line_number=int(parsed.group(1)),
                 column=int(parsed.group(2)),
@@ -285,67 +280,6 @@ def run_ripgrep_grep(
         skipped_files=result.stderr_lines,
         first_skip_error=_first_skip_error(result.stderr),
         binary_match_paths=tuple(binary_match_paths),
-    )
-
-
-def grep_match(
-    *,
-    relative_path: str,
-    line_number: int,
-    text: str,
-    match_start: int | None,
-    cut: bool,
-) -> RipgrepGrepMatch:
-    """One matching line bounded to an excerpt around its first match.
-
-    ``match_start`` is the first match's character index in ``text``, or None
-    when ``text`` is a preview that ends before it; ``cut`` says that ``text``
-    is such a preview of a longer line.
-    """
-
-    if not cut and len(text) <= GREP_MAX_LINE_CHARS:
-        return RipgrepGrepMatch(relative_path, line_number, text, False)
-    start = (
-        0
-        if match_start is None
-        else max(
-            0,
-            min(
-                match_start - GREP_MAX_LINE_CHARS // 2,
-                len(text) - GREP_MAX_LINE_CHARS,
-            ),
-        )
-    )
-    end = start + GREP_MAX_LINE_CHARS
-    head = GREP_OMITTED_TEXT_MARKER if start > 0 else ""
-    tail = GREP_OMITTED_TEXT_MARKER if cut or end < len(text) else ""
-    return RipgrepGrepMatch(
-        relative_path, line_number, f"{head}{text[start:end]}{tail}", True
-    )
-
-
-def _grep_match_from_ripgrep(
-    *,
-    relative_path: str,
-    line_number: int,
-    column: int,
-    content: bytes,
-) -> RipgrepGrepMatch:
-    # A line within RIPGREP_MAX_COLUMNS bytes is printed whole; a longer one as
-    # a preview plus a suffix, which together are always longer than that.
-    cut = len(content) > RIPGREP_MAX_COLUMNS
-    if cut:
-        content = _RIPGREP_PREVIEW_SUFFIX_PATTERN.sub(b"", content)
-    # ripgrep's column is the 1-based byte offset of the line's first match.
-    match_offset = column - 1
-    return grep_match(
-        relative_path=relative_path,
-        line_number=line_number,
-        text=content.decode("utf-8", errors="replace"),
-        match_start=len(content[:match_offset].decode("utf-8", errors="replace"))
-        if match_offset < len(content)
-        else None,
-        cut=cut,
     )
 
 

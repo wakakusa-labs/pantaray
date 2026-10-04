@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery_ripgrep
+from pantaray_agents.local_runtime.tooling.brokering import (
+    broker_discovery_ripgrep,
+    broker_grep_lines,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
@@ -144,7 +147,7 @@ def test_ripgrep_grep_uses_fixed_argv(
         ".",
     )
     assert result.matches == (
-        broker_discovery_ripgrep.RipgrepGrepMatch(
+        broker_grep_lines.RipgrepGrepMatch(
             relative_path="src/app.py",
             line_number=3,
             line="needle",
@@ -359,7 +362,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
-    preview = b"a" * broker_discovery_ripgrep.RIPGREP_MAX_COLUMNS
+    preview = b"a" * broker_grep_lines.RIPGREP_MAX_COLUMNS
 
     def fake_run(
         *,
@@ -375,6 +378,13 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         # A line of exactly the cap is previewed too; its match is in the preview.
         assert handle_line(
             b"./big.jsonl\x009:1001:" + preview + b" [... 0 more matches]"
+        )
+        # A newline in a path splits its record; the parts are joined again.
+        assert handle_line(b"./odd")
+        assert handle_line(b"name.txt\x002:1:needle in odd")
+        assert handle_line(b"./odd")
+        assert handle_line(
+            b'name.bin: binary file matches (found "\\0" byte around offset 3)'
         )
         # Shift_JIS text is shown lossily rather than dropped.
         assert handle_line(b"./sjis.txt\x001:8:\x93\xfa\x96\x7b\x8c\xea needle")
@@ -401,14 +411,21 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         max_matches=10,
     )
 
-    limit = broker_discovery_ripgrep.GREP_MAX_LINE_CHARS
+    limit = broker_grep_lines.GREP_MAX_LINE_CHARS
     assert [(match.line_number, match.line) for match in result.matches] == [
         (7, "a" * limit + "…"),
         (9, "…" + "a" * limit + "…"),
+        (2, "needle in odd"),
         (1, b"\x93\xfa\x96\x7b\x8c\xea needle".decode("utf-8", errors="replace")),
     ]
-    assert [match.line_truncated for match in result.matches] == [True, True, False]
-    assert result.binary_match_paths == ("./db.sqlite",)
+    assert [match.line_truncated for match in result.matches] == [
+        True,
+        True,
+        False,
+        False,
+    ]
+    assert result.matches[2].relative_path == "./odd\nname.txt"
+    assert result.binary_match_paths == ("./odd\nname.bin", "./db.sqlite")
     assert result.skipped_files == 1
     assert result.first_skip_error == "./locked: Permission denied (os error 13)"
 
@@ -434,7 +451,7 @@ def test_grep_match_centres_long_lines_on_the_first_match(
     cut: bool,
     expected: tuple[str, bool],
 ) -> None:
-    match = broker_discovery_ripgrep.grep_match(
+    match = broker_grep_lines.grep_match(
         relative_path="a.txt",
         line_number=1,
         text=text,
@@ -504,7 +521,7 @@ def test_real_ripgrep_excerpts_very_long_lines_around_the_match(
     # Past ripgrep's preview the excerpt is the line's start, still marked cut.
     late = by_path["./late.jsonl"]
     assert late.line_truncated is True
-    assert late.line == "x" * broker_discovery_ripgrep.GREP_MAX_LINE_CHARS + "…"
+    assert late.line == "x" * broker_grep_lines.GREP_MAX_LINE_CHARS + "…"
 
 
 @_REAL_RIPGREP
@@ -512,6 +529,7 @@ def test_real_ripgrep_reports_the_match_limit_and_unreadable_paths(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "a.txt").write_text("needle 1\nneedle 2\nneedle 3\n", encoding="utf-8")
+    (tmp_path / "odd\nname.txt").write_text("needle odd\n", encoding="utf-8")
     (tmp_path / "b.bin").write_bytes(b"\0" * 100 + b" needle")
     locked = tmp_path / "locked"
     locked.mkdir()
@@ -523,15 +541,16 @@ def test_real_ripgrep_reports_the_match_limit_and_unreadable_paths(
     finally:
         locked.chmod(0o755)
 
-    assert [match.line for match in unlimited.matches] == [
-        "needle 1",
-        "needle 2",
-        "needle 3",
+    assert sorted((match.relative_path, match.line) for match in unlimited.matches) == [
+        ("./a.txt", "needle 1"),
+        ("./a.txt", "needle 2"),
+        ("./a.txt", "needle 3"),
+        ("./odd\nname.txt", "needle odd"),
     ]
     assert unlimited.truncation_reason is None
     assert unlimited.binary_match_paths == ("./b.bin",)
     assert unlimited.skipped_files == 1
     assert "Permission denied" in str(unlimited.first_skip_error)
-    assert len(limited.matches) == 2
+    assert len(limited.matches) == 2  # of four
     assert limited.truncated is True
     assert limited.truncation_reason == "limit"

@@ -8,8 +8,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_discovery import (
     GREP_MAX_OUTPUT_BYTES,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-    GREP_MAX_LINE_CHARS,
     RIPGREP_TIMEOUT_SECONDS,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+    GREP_MAX_LINE_CHARS,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     GlobToolArgs,

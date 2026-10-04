@@ -120,18 +120,14 @@ system_instruction: |
   this run.
   - `has_suggestion`: boolean.
   - `interaction_contract`: `message_only` or `action_offer` when suggesting.
-  - `key_point`: the whole suggestion in {answer_language}, as a few short
-    sentences with one point each:
-    - what it is, introducing anything the user may not know;
-    - why it matters to this person now;
-    - the deciding fact or facts;
-    - what is unconfirmed, when that matters;
-    - for `action_offer`, what Pantaray would make or do, exactly what approval
-      gives: a plan stays a plan, and writing a reply is not sending it;
-    - that the user does this work with an AI agent, when they do.
-    Use the exact names, numbers and dates, each as the record states it. Say the
-    content itself, in words the user would recognize, not a label for the idea
-    or an internal term.
+  - `key_point`: the suggestion itself in {answer_language}, as you would tell this
+    person, in a few short sentences with one point each. For `action_offer`,
+    include what Pantaray would make or do, exactly what approval gives: a plan
+    stays a plan, and writing a reply is not sending it. When the user does this
+    work with an AI agent, say so. If something unconfirmed is worth them knowing,
+    say it honestly and lightly. Use plain words the user would recognize, not a
+    label for the idea or an internal term, and the exact names, numbers and dates
+    as the record states them.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
     `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden
@@ -148,7 +144,7 @@ system_instruction: |
   {
     "has_suggestion": true,
     "interaction_contract": "action_offer",
-    "key_point": "Company A's estimate is due tomorrow (Thursday). Everything is calculated except the operating cost for servers and maintenance. It is not confirmed whether Company A wants a monthly or a yearly figure. Pantaray can calculate the operating cost and fill it into the estimate.",
+    "key_point": "Company A's estimate is due tomorrow (Thursday), and only the operating cost for servers and maintenance is left to calculate. The pricing documents are at hand, so Pantaray can calculate it and fill it into the estimate.",
     "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
     "target_context": {"organization_name": "Company A", "project_name": null}
   }

@@ -67,7 +67,7 @@ def test_real_prompt_renders_context_and_answer_language(
 
     for value in (*context.values(), "pending-work-evidence"):
         assert value in rendered
-    assert f"the whole suggestion in {label}," in instruction
+    assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction
 
 

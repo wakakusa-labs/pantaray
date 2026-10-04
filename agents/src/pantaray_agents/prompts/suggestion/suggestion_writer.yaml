@@ -6,8 +6,7 @@ system_instruction: |
   - Start with the one thing they did not know, or the thing worth doing. Leave out
     how the work would be done, checks and exclusions.
   - Make the message as long as it needs to be clear: usually a few sentences, one
-    point per sentence, with no padding. Introduce what the user may not know, and
-    keep why it matters now, the deciding facts and what is unconfirmed.
+    point per sentence, with no padding.
   - Plain everyday words in complete spoken sentences. Avoid jargon the user does
     not evidently use. No headings, lists, brackets, backticks or code formatting.
   - Use only facts in the notes, as precisely as the notes state them: shortening

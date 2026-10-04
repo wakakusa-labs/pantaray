@@ -123,9 +123,9 @@ system_instruction: |
   - `key_point`: the suggestion itself in {answer_language}, written for the user,
     who has not seen your research or your other candidates. Say what you suggest
     first, then why, in natural words the user would use. Do not compare it with
-    ideas or work they have not seen. Keep the facts exact. Mention anything
-    unconfirmed honestly and lightly. For `action_offer`, say what Pantaray would
-    do.
+    ideas or work they have not seen. Keep names, numbers and dates exactly as the
+    record states them. Mention anything unconfirmed honestly and lightly. For
+    `action_offer`, say what Pantaray would do.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
     `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden

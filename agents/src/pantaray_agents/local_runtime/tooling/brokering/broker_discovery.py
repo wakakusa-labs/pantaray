@@ -22,7 +22,12 @@ from .broker_discovery_paths import (
     list_discovery_paths,
 )
 from .broker_discovery_ripgrep import (
+    GREP_MAX_LINE_CHARS,
+    GREP_OMITTED_TEXT_MARKER,
+    RIPGREP_MAX_COLUMNS,
+    RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepMatch,
+    RipgrepGrepResult,
     run_ripgrep_files,
     run_ripgrep_grep,
 )
@@ -41,10 +46,9 @@ from .tool_path_policy import (
     resolve_read_tool_path,
 )
 
-GREP_MAX_LINE_CHARS = 2_000
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
+GREP_MAX_LISTED_BINARY_PATHS = 10
 DISCOVERY_MAX_SCANNED_PATHS = 20_000
-GREP_LINE_TRUNCATION_SUFFIX = f"... (line truncated to {GREP_MAX_LINE_CHARS} chars)"
 TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {
     "line_length": 1,
     "limit": 2,
@@ -52,13 +56,6 @@ TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {
     "timeout": 4,
     "output_bytes": 5,
 }
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedGrepLine:
-    line: str
-    byte_size: int
-    truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,12 +267,10 @@ def _append_grep_match(
     match: RipgrepGrepMatch,
 ) -> GrepAppendResult:
     path = str(_backend_path(base, match.relative_path))
-    prepared_line = _prepare_grep_line(
-        path=path,
-        line_number=match.line_number,
-        line=match.line,
+    byte_size = len(
+        f"{path}:{match.line_number}:{match.line}\n".encode("utf-8", errors="replace")
     )
-    if output_bytes + prepared_line.byte_size > GREP_MAX_OUTPUT_BYTES:
+    if output_bytes + byte_size > GREP_MAX_OUTPUT_BYTES:
         return GrepAppendResult(
             output_bytes=output_bytes,
             truncation_reason="output_bytes",
@@ -284,19 +279,22 @@ def _append_grep_match(
         {
             "path": path,
             "line_number": match.line_number,
-            "line": prepared_line.line,
+            "line": match.line,
         }
     )
     return GrepAppendResult(
-        output_bytes=output_bytes + prepared_line.byte_size,
-        truncation_reason="line_length" if prepared_line.truncated else None,
+        output_bytes=output_bytes + byte_size,
+        truncation_reason="line_length" if match.line_truncated else None,
     )
 
 
 def _build_grep_outcome(
     *,
     matches: list[dict[str, JSONValue]],
-    skipped_files: int,
+    base: ResolvedManifestPath,
+    backend_result: RipgrepGrepResult,
+    max_matches: int,
+    lines_excerpted: bool,
     truncation_reason: DiscoveryTruncationReason | None,
     include_file_references: bool,
 ) -> UnprojectedBrokerToolOutcome:
@@ -308,6 +306,17 @@ def _build_grep_outcome(
     match_values: list[JSONValue] = []
     for match in sorted_matches:
         match_values.append(dict(match))
+    warnings, retry_hints = _grep_notes(
+        reason=truncation_reason,
+        max_matches=max_matches,
+        lines_excerpted=lines_excerpted,
+        skipped_files=backend_result.skipped_files,
+        first_skip_error=backend_result.first_skip_error,
+        binary_match_paths=tuple(
+            str(_backend_path(base, relative_path))
+            for relative_path in backend_result.binary_match_paths
+        ),
+    )
     return UnprojectedBrokerToolOutcome(
         status="success",
         output={
@@ -315,16 +324,9 @@ def _build_grep_outcome(
             "matches": match_values,
             "truncated": truncation_reason is not None,
             "truncation_reason": truncation_reason,
-            "retry_hint": _retry_hint(
-                tool_id="grep",
-                reason=truncation_reason,
-                skipped_files=skipped_files,
-            ),
-            "warning": _warning(
-                reason=truncation_reason,
-                skipped_files=skipped_files,
-            ),
-            "skipped_files": skipped_files,
+            "retry_hint": " ".join(retry_hints) or None,
+            "warning": " ".join(warnings) or None,
+            "skipped_files": backend_result.skipped_files,
         },
         search_text=search_text,
         file_paths=tuple(str(match["path"]) for match in sorted_matches),
@@ -334,14 +336,6 @@ def _build_grep_outcome(
             else ()
         ),
     )
-
-
-def _prepare_grep_line(*, path: str, line_number: int, line: str) -> PreparedGrepLine:
-    truncated = len(line) > GREP_MAX_LINE_CHARS
-    if truncated:
-        line = f"{line[:GREP_MAX_LINE_CHARS]}{GREP_LINE_TRUNCATION_SUFFIX}"
-    byte_size = len(f"{path}:{line_number}:{line}\n".encode("utf-8", errors="replace"))
-    return PreparedGrepLine(line=line, byte_size=byte_size, truncated=truncated)
 
 
 def _grep_match_sort_key(match: dict[str, JSONValue]) -> tuple[str, int]:
@@ -392,6 +386,7 @@ def run_grep_executor(
         backend_result.truncation_reason
     )
     output_bytes = 0
+    lines_excerpted = False
     for backend_match in backend_result.matches:
         append_result = _append_grep_match(
             matches=matches,
@@ -406,9 +401,13 @@ def run_grep_executor(
         )
         if append_result.truncation_reason == "output_bytes":
             break
+        lines_excerpted = lines_excerpted or backend_match.line_truncated
     return _build_grep_outcome(
         matches=matches,
-        skipped_files=backend_result.skipped_files,
+        base=base,
+        backend_result=backend_result,
+        max_matches=request.max_matches,
+        lines_excerpted=lines_excerpted,
         truncation_reason=truncation_reason,
         include_file_references=base.root in context.manifest_roots,
     )
@@ -431,11 +430,10 @@ def _dominant_truncation_reason(
 
 def _retry_hint(
     *,
-    tool_id: Literal["list", "glob", "grep"],
+    tool_id: Literal["list", "glob"],
     reason: DiscoveryTruncationReason | None,
-    skipped_files: int = 0,
 ) -> str | None:
-    if reason is None and skipped_files <= 0:
+    if reason is None:
         return None
     if tool_id == "list":
         if reason == "limit":
@@ -449,46 +447,73 @@ def _retry_hint(
             return "Retry glob with a narrower base_path."
         if reason == "output_bytes":
             return "Retry glob with a more specific pattern to reduce result volume."
-    if tool_id == "grep":
-        if reason == "limit":
-            return "Retry grep with a narrower base_path, include_glob, or pattern."
-        if reason == "timeout":
-            return "Retry grep with a narrower base_path or include_glob."
-        if reason == "output_bytes":
-            return "Retry grep with a narrower base_path, include_glob, or more specific pattern."
-        if reason == "line_length":
-            return "Retry grep with include_glob or a more specific pattern."
-        if skipped_files > 0:
-            return "Retry grep with a narrower base_path or include_glob to reduce skipped files."
     return "Retry with a narrower local workspace path or more specific query."
 
 
-def _warning(
+def _warning(*, reason: DiscoveryTruncationReason | None) -> str | None:
+    if reason == "limit":
+        return "Results were truncated because the result limit was reached."
+    if reason == "scan_budget":
+        return "Results were truncated because the discovery scan budget was reached."
+    if reason == "timeout":
+        return "Results were truncated because the search backend timed out."
+    if reason == "output_bytes":
+        return "Results were truncated because the output byte limit was reached."
+    return None
+
+
+def _grep_notes(
     *,
     reason: DiscoveryTruncationReason | None,
-    skipped_files: int = 0,
-) -> str | None:
+    max_matches: int,
+    lines_excerpted: bool,
+    skipped_files: int,
+    first_skip_error: str | None,
+    binary_match_paths: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    """Warnings and retry hints naming every grep limit that applied."""
+
     warnings: list[str] = []
+    hints: list[str] = []
     if reason == "limit":
-        warnings.append("Results were truncated because the result limit was reached.")
-    elif reason == "scan_budget":
         warnings.append(
-            "Results were truncated because the discovery scan budget was reached."
+            f"Stopped at max_matches={max_matches} matching lines; more matches exist."
         )
-    elif reason == "timeout":
-        warnings.append("Results were truncated because the search backend timed out.")
+        hints.append(
+            "Raise max_matches (up to 500) or narrow base_path, include_glob, or "
+            "pattern to see the rest."
+        )
     elif reason == "output_bytes":
         warnings.append(
-            "Results were truncated because the output byte limit was reached."
+            f"Stopped at the {GREP_MAX_OUTPUT_BYTES // 1024} KB output limit; "
+            "more matches may exist."
         )
-    elif reason == "line_length":
+        hints.append("Narrow base_path, include_glob, or pattern to see the rest.")
+    elif reason == "timeout":
         warnings.append(
-            "One or more matching lines were shortened because they exceeded the line length limit."
+            f"The search stopped after {RIPGREP_TIMEOUT_SECONDS:g} seconds; files "
+            "it had not reached were not searched."
         )
+        hints.append("Narrow base_path or include_glob to search the rest.")
+    if lines_excerpted:
+        warnings.append(
+            f"Matching lines longer than {GREP_MAX_LINE_CHARS} characters are shown "
+            "as an excerpt around their first match, or from the line's start when "
+            f"that match is over {RIPGREP_MAX_COLUMNS // 1024} KB into the line; "
+            f"{GREP_OMITTED_TEXT_MARKER} marks omitted text."
+        )
+        hints.append("To see more of such a line, read the file at offset=line_number.")
     if skipped_files > 0:
         warnings.append(
-            f"{skipped_files} file(s) were skipped by the search backend, so the result is partial."
+            f"{skipped_files} path(s) could not be read and were not searched, so "
+            f"matches in them are missing. First error: {first_skip_error}."
         )
-    if not warnings:
-        return None
-    return " ".join(warnings)
+    if binary_match_paths:
+        listed = binary_match_paths[:GREP_MAX_LISTED_BINARY_PATHS]
+        more = len(binary_match_paths) - len(listed)
+        warnings.append(
+            f"{len(binary_match_paths)} binary file(s) also match; their lines are "
+            f"not shown: {', '.join(listed)}" + (f" and {more} more." if more else ".")
+        )
+        hints.append("Use read on a binary file that matched, such as a PDF.")
+    return warnings, hints

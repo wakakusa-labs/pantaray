@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import json
+import io
+import re
 import shutil
 import subprocess
 import sys
@@ -8,9 +9,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import IO, Literal, cast
-
-from pantaray_agents.schema.agent.base import JSONValue
+from typing import IO, Literal
 
 from .broker_common import BrokerPolicyError
 
@@ -19,9 +18,28 @@ SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 # Discovery runs outside the command sandbox; never select a workspace executable.
 RIPGREP_TRUSTED_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin"
 RIPGREP_TIMEOUT_SECONDS = 5.0
-RIPGREP_MAX_STDOUT_BYTES = 2 * 1024 * 1024
+# Bounds what is read from ripgrep in total. It must hold the previews of as
+# many long matching lines as GREP_MAX_OUTPUT_BYTES can show excerpts of.
+RIPGREP_MAX_STDOUT_BYTES = 8 * 1024 * 1024
 RIPGREP_MAX_STDERR_CHARS = 8_192
-RIPGREP_MAX_FILE_SIZE = "1M"
+# ripgrep prints a line longer than this many bytes as a preview of its first
+# this many graphemes, so no file size cap is needed to bound one match.
+# Design limit: a first match further into a line than this is not centred in
+# its excerpt; raise it when such matches are reported as hard to locate.
+RIPGREP_MAX_COLUMNS = 64 * 1024
+# What grep returns of one matching line, centred on the line's first match.
+GREP_MAX_LINE_CHARS = 500
+GREP_OMITTED_TEXT_MARKER = "…"
+_GREP_LINE_PATTERN = re.compile(rb"(\d+):(\d+):(.*)", re.DOTALL)
+# With --binary, a file holding a NUL byte is searched too and reported once,
+# by this message, instead of being skipped without a word.
+_RIPGREP_BINARY_MATCH_PATTERN = re.compile(
+    rb'(.+): binary file matches \(found "\\0" byte around offset \d+\)'
+)
+_RIPGREP_PREVIEW_SUFFIX_PATTERN = re.compile(
+    rb" \[\.\.\. (?:\d+ more match(?:es)?|omitted end of long line)\]\Z"
+)
+RIPGREP_ERROR_PREFIX = "rg: "
 RIPGREP_REGEX_ERROR_MARKERS = (
     "regex parse error",
     "error parsing regex",
@@ -66,6 +84,8 @@ class RipgrepRunResult:
     exit_code: int | None
     stderr: str
     stderr_truncated: bool
+    # Every stderr line, counted past the stored text too.
+    stderr_lines: int
     timed_out: bool
     stdout_truncated: bool
     stopped_early: bool
@@ -84,6 +104,7 @@ class RipgrepGrepMatch:
     relative_path: str
     line_number: int
     line: str
+    line_truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,16 +113,22 @@ class RipgrepGrepResult:
     truncated: bool
     truncation_reason: RipgrepTruncationReason | None
     timed_out: bool
+    # Paths ripgrep could not read (permission denied, sandbox denial, I/O
+    # error); a directory among them was not searched below either.
     skipped_files: int
+    first_skip_error: str | None
+    # Files with a NUL byte that match; their lines are not printed.
+    binary_match_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class StderrDrainResult:
     stderr: str
     truncated: bool
+    lines: int
 
 
-LineHandler = Callable[[str], bool]
+LineHandler = Callable[[bytes], bool]
 RipgrepTruncationReason = Literal["limit", "timeout", "output_bytes"]
 
 
@@ -120,8 +147,9 @@ def run_ripgrep_files(
     matches: list[str] = []
     truncated = False
 
-    def handle_line(line: str) -> bool:
+    def handle_line(raw_line: bytes) -> bool:
         nonlocal truncated
+        line = raw_line.decode("utf-8", errors="replace")
         if not line:
             return True
         if _is_excluded_relative_path(line, excluded_relative_path):
@@ -182,51 +210,54 @@ def run_ripgrep_grep(
     include_path: Callable[[Path], bool] | None = None,
 ) -> RipgrepGrepResult:
     matches: list[RipgrepGrepMatch] = []
+    binary_match_paths: list[str] = []
     truncated = False
-    skipped_files = 0
 
-    def handle_line(line: str) -> bool:
-        nonlocal skipped_files, truncated
-        event = _parse_json_line(line)
-        if event is None:
+    def is_hidden(relative_path: str) -> bool:
+        return _is_excluded_relative_path(relative_path, excluded_relative_path) or (
+            include_path is not None
+            and not include_path(cwd / PurePosixPath(relative_path))
+        )
+
+    def handle_line(raw_line: bytes) -> bool:
+        nonlocal truncated
+        raw_path, separator, rest = raw_line.partition(b"\0")
+        parsed = _GREP_LINE_PATTERN.fullmatch(rest) if separator else None
+        if parsed is None:
+            binary = _RIPGREP_BINARY_MATCH_PATTERN.fullmatch(raw_line)
+            if binary is not None:
+                relative_path = binary.group(1).decode("utf-8", errors="replace")
+                if not is_hidden(relative_path):
+                    binary_match_paths.append(relative_path)
             return True
-        event_type = event.get("type")
-        data = event.get("data")
-        if not isinstance(event_type, str) or not isinstance(data, dict):
+        relative_path = raw_path.decode("utf-8", errors="replace")
+        if is_hidden(relative_path):
             return True
-        if event_type == "match":
-            match = _parse_match_event(data)
-            if match is None:
-                return True
-            if _is_excluded_relative_path(
-                match.relative_path,
-                excluded_relative_path,
-            ):
-                return True
-            if include_path is not None and not include_path(
-                cwd / PurePosixPath(match.relative_path)
-            ):
-                return True
-            if len(matches) >= max_matches:
-                truncated = True
-                return False
-            matches.append(match)
-        elif event_type == "summary":
-            stats = data.get("stats")
-            if isinstance(stats, dict):
-                searches_with_errors = stats.get("searches_with_errors")
-                if isinstance(searches_with_errors, int):
-                    skipped_files = max(skipped_files, searches_with_errors)
+        if len(matches) >= max_matches:
+            truncated = True
+            return False
+        matches.append(
+            _grep_match_from_ripgrep(
+                relative_path=relative_path,
+                line_number=int(parsed.group(1)),
+                column=int(parsed.group(2)),
+                content=parsed.group(3).removesuffix(b"\r"),
+            )
+        )
         return True
 
     argv = [
         str(_resolve_ripgrep_executable()),
-        "--json",
         *RIPGREP_COMMON_ARGS,
-        "--line-number",
+        "--no-heading",
         "--with-filename",
-        "--max-filesize",
-        RIPGREP_MAX_FILE_SIZE,
+        "--null",
+        "--line-number",
+        "--column",
+        "--max-columns",
+        str(RIPGREP_MAX_COLUMNS),
+        "--max-columns-preview",
+        "--binary",
     ]
     if follow_symlinks:
         argv.append("--follow")
@@ -251,8 +282,76 @@ def run_ripgrep_grep(
             result=result,
         ),
         timed_out=result.timed_out,
-        skipped_files=skipped_files,
+        skipped_files=result.stderr_lines,
+        first_skip_error=_first_skip_error(result.stderr),
+        binary_match_paths=tuple(binary_match_paths),
     )
+
+
+def grep_match(
+    *,
+    relative_path: str,
+    line_number: int,
+    text: str,
+    match_start: int | None,
+    cut: bool,
+) -> RipgrepGrepMatch:
+    """One matching line bounded to an excerpt around its first match.
+
+    ``match_start`` is the first match's character index in ``text``, or None
+    when ``text`` is a preview that ends before it; ``cut`` says that ``text``
+    is such a preview of a longer line.
+    """
+
+    if not cut and len(text) <= GREP_MAX_LINE_CHARS:
+        return RipgrepGrepMatch(relative_path, line_number, text, False)
+    start = (
+        0
+        if match_start is None
+        else max(
+            0,
+            min(
+                match_start - GREP_MAX_LINE_CHARS // 2,
+                len(text) - GREP_MAX_LINE_CHARS,
+            ),
+        )
+    )
+    end = start + GREP_MAX_LINE_CHARS
+    head = GREP_OMITTED_TEXT_MARKER if start > 0 else ""
+    tail = GREP_OMITTED_TEXT_MARKER if cut or end < len(text) else ""
+    return RipgrepGrepMatch(
+        relative_path, line_number, f"{head}{text[start:end]}{tail}", True
+    )
+
+
+def _grep_match_from_ripgrep(
+    *,
+    relative_path: str,
+    line_number: int,
+    column: int,
+    content: bytes,
+) -> RipgrepGrepMatch:
+    # A line within RIPGREP_MAX_COLUMNS bytes is printed whole; a longer one as
+    # a preview plus a suffix, which together are always longer than that.
+    cut = len(content) > RIPGREP_MAX_COLUMNS
+    if cut:
+        content = _RIPGREP_PREVIEW_SUFFIX_PATTERN.sub(b"", content)
+    # ripgrep's column is the 1-based byte offset of the line's first match.
+    match_offset = column - 1
+    return grep_match(
+        relative_path=relative_path,
+        line_number=line_number,
+        text=content.decode("utf-8", errors="replace"),
+        match_start=len(content[:match_offset].decode("utf-8", errors="replace"))
+        if match_offset < len(content)
+        else None,
+        cut=cut,
+    )
+
+
+def _first_skip_error(stderr: str) -> str | None:
+    first_line = stderr.partition("\n")[0].strip()
+    return first_line.removeprefix(RIPGREP_ERROR_PREFIX) or None
 
 
 def _is_excluded_relative_path(path: str, excluded: str | None) -> bool:
@@ -316,9 +415,6 @@ def _run_ripgrep_lines(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
     )
     timed_out = False
     stdout_truncated = False
@@ -333,7 +429,9 @@ def _run_ripgrep_lines(
             "ripgrep backend did not expose stderr",
             code="DISCOVERY_BACKEND_FAILED",
         )
-    stderr_drain = _StderrDrain(process.stderr)
+    stderr_drain = _StderrDrain(
+        io.TextIOWrapper(process.stderr, encoding="utf-8", errors="replace")
+    )
     stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
     stderr_thread.start()
 
@@ -346,14 +444,21 @@ def _run_ripgrep_lines(
     timer.start()
     stdout_bytes = 0
     try:
-        for raw_line in process.stdout:
-            stdout_bytes += len(raw_line.encode("utf-8", errors="replace"))
+        while True:
+            # Reading at most the rest of the budget keeps one endless line
+            # from being held in memory whole.
+            raw_line = process.stdout.readline(
+                RIPGREP_MAX_STDOUT_BYTES - stdout_bytes + 1
+            )
+            if not raw_line:
+                break
+            stdout_bytes += len(raw_line)
             if stdout_bytes > RIPGREP_MAX_STDOUT_BYTES:
                 stdout_truncated = True
                 stopped_early = True
                 process.kill()
                 break
-            if not handle_line(raw_line.rstrip("\n")):
+            if not handle_line(raw_line.removesuffix(b"\n")):
                 stopped_early = True
                 process.kill()
                 break
@@ -366,6 +471,7 @@ def _run_ripgrep_lines(
         exit_code=exit_code,
         stderr=drained_stderr.stderr,
         stderr_truncated=drained_stderr.truncated,
+        stderr_lines=drained_stderr.lines,
         timed_out=timed_out,
         stdout_truncated=stdout_truncated,
         stopped_early=stopped_early,
@@ -386,50 +492,20 @@ def _sandboxed_argv(argv: tuple[str, ...], sandbox_profile: str) -> tuple[str, .
     return (SANDBOX_EXEC, "-p", sandbox_profile, *argv)
 
 
-def _parse_json_line(line: str) -> dict[str, JSONValue] | None:
-    try:
-        payload = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return cast(dict[str, JSONValue], payload)
-
-
-def _parse_match_event(data: dict[str, JSONValue]) -> RipgrepGrepMatch | None:
-    path_payload = data.get("path")
-    lines_payload = data.get("lines")
-    line_number = data.get("line_number")
-    if (
-        not isinstance(path_payload, dict)
-        or not isinstance(lines_payload, dict)
-        or not isinstance(line_number, int)
-        or isinstance(line_number, bool)
-    ):
-        return None
-    path_text = path_payload.get("text")
-    line_text = lines_payload.get("text")
-    if not isinstance(path_text, str) or not isinstance(line_text, str):
-        return None
-    return RipgrepGrepMatch(
-        relative_path=path_text,
-        line_number=line_number,
-        line=line_text.rstrip("\n"),
-    )
-
-
 class _StderrDrain:
     def __init__(self, stream: IO[str]) -> None:
         self._stream = stream
         self._chunks: list[str] = []
         self._stored_chars = 0
         self._truncated = False
+        self._lines = 0
 
     def run(self) -> None:
         while True:
             chunk = self._stream.read(4096)
             if not chunk:
                 return
+            self._lines += chunk.count("\n")
             remaining = RIPGREP_MAX_STDERR_CHARS - self._stored_chars
             if remaining <= 0:
                 self._truncated = True
@@ -443,6 +519,7 @@ class _StderrDrain:
         return StderrDrainResult(
             stderr="".join(self._chunks),
             truncated=self._truncated,
+            lines=self._lines,
         )
 
 
@@ -482,6 +559,13 @@ def _raise_if_ripgrep_grep_failed(*, result: RipgrepRunResult) -> None:
             fix_hint=GREP_INCLUDE_GLOB_FIX_HINT,
             examples=GREP_INCLUDE_GLOB_EXAMPLES,
         )
+    # ripgrep reports a path it cannot read on its own line and exits 2 once the
+    # rest is searched; those paths are reported as skipped, not as a failure.
+    error_lines = [line for line in result.stderr.splitlines() if line.strip()]
+    if error_lines and all(
+        line.startswith(RIPGREP_ERROR_PREFIX) for line in error_lines
+    ):
+        return
     raise BrokerPolicyError(
         "ripgrep grep backend failed",
         code="GREP_BACKEND_FAILED",

@@ -178,7 +178,12 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                 "only ranks results near a time and does not filter them; to "
                 "strictly restrict rows of memory_sql's tables to a time range or "
                 "type, use memory_sql. Write the query with concrete names, IDs, "
-                "paths, errors, and both Japanese/English terms when useful."
+                "paths, errors, and both Japanese/English terms when useful. Words "
+                "are matched from three characters; below that, single characters "
+                "are not matched, and two-letter ASCII words only whole and when "
+                "written in capitals (PR, UI) or with a digit (#7, v2). notes in "
+                "the result name any query term that was not matched and say when "
+                "the result list was full, so more may match."
             ),
         ),
         execution_policy=tool_execution_policy(
@@ -259,7 +264,7 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
         output_schema={
             "type": "object",
             "properties": {
-                "grouped_results": {"type": "object", "additionalProperties": True},
+                "notes": {"type": "array", "items": {"type": "string"}},
                 "semantic_status": {
                     "type": "string",
                     "enum": list(MEMORY_SEARCH_SEMANTIC_STATUS_VALUES),
@@ -306,9 +311,9 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
             },
             "required": [
                 "results",
-                "grouped_results",
                 "semantic_status",
                 "semantic_error_code",
+                "notes",
             ],
             "additionalProperties": False,
         },

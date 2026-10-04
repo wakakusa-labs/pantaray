@@ -277,11 +277,10 @@ class ThinkingPayload(TypedDict):
     text: str
 
 
-class MemorySearchPayload(TypedDict, total=False):
+class MemorySearchPayload(TypedDict):
     """memory_search の出力。"""
 
     results: list[DBRow]
-    grouped_results: dict[str, list[DBRow]]
     semantic_status: MemorySearchSemanticStatus
     semantic_error_code: str | None
     notes: list[str]

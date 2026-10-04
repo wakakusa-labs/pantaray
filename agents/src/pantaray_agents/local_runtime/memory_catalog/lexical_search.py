@@ -13,7 +13,10 @@ from .fragment_visibility import (
 )
 from .models import MemorySource
 
-_QUERY_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+# A word, or a "#" issue number. The "#" is kept only on numbers of one or two
+# digits, which are otherwise too short to tell from any other number.
+_QUERY_TOKEN_RE = re.compile(r"#?[^\W_]+", re.UNICODE)
+_SHORT_ISSUE_NUMBER_RE = re.compile(r"#[0-9]{1,2}")
 # memory_fragments_fts is tokenized with trigram, so a MATCH term is a substring
 # of three characters or more and nothing shorter resolves through the index.
 TRIGRAM_LENGTH = 3
@@ -51,7 +54,8 @@ def search_lexical_fragments(
         ),
         _scanned_lexical_rows(
             connection=connection,
-            terms=terms.scanned,
+            substrings=terms.scanned,
+            whole_words=terms.whole_words,
             visibility=visibility,
             visibility_parameters=visibility_parameters,
             candidate_limit=candidate_limit,
@@ -60,10 +64,33 @@ def search_lexical_fragments(
     )
 
 
+def lexical_query_notes(query: str) -> tuple[str, ...]:
+    """What the word matchers left out of the query, for the caller to read."""
+
+    terms = _lexical_terms(query)
+    notes: list[str] = []
+    if terms.skipped:
+        notes.append(
+            f"Not matched by words: {', '.join(terms.skipped)}. Single characters "
+            "are never matched by words, and two-letter ASCII words only when "
+            "written in capitals (PR, UI) or with a digit (#7, v2)."
+        )
+    if terms.windows_cut:
+        notes.append(
+            "Partial matching inside words written without spaces stopped after "
+            f"the first {MAX_QUERY_TRIGRAM_WINDOWS} three-character pieces; those "
+            "words were still matched whole. Search the rest in a shorter query."
+        )
+    return tuple(notes)
+
+
 @dataclass(frozen=True, slots=True)
 class _LexicalTerms:
     indexed: tuple[str, ...]
     scanned: tuple[str, ...]
+    whole_words: tuple[str, ...]
+    skipped: tuple[str, ...]
+    windows_cut: bool
 
 
 def _lexical_terms(query: str) -> _LexicalTerms:
@@ -76,15 +103,23 @@ def _lexical_terms(query: str) -> _LexicalTerms:
     windows, and bm25 orders a fragment by how many of them it holds.
 
     Below three characters the index is blind, and a full scan is worth its cost
-    only where words are written that short: 申請 and 見積 are words, whereas
-    ASCII "ai" or "db" is a piece of mail, detail and training. Those, and a
-    single character of any script, which matches nearly every fragment, reach
-    neither matcher.
+    only where words are written that short: 申請 and 見積 are words. ASCII "ai"
+    or "db" as a substring is a piece of mail, detail and training, and "is" or
+    "of" is in every English sentence, so a two-character ASCII word is matched
+    only whole, and only when it is written as an acronym (PR, UI, matched as
+    written) or holds a digit (#7, v2). A single character of any script
+    matches nearly every fragment, so it reaches no matcher; those words are
+    reported as skipped.
     """
     indexed: list[str] = []
     windows: list[str] = []
     scanned: list[str] = []
-    for word in dict.fromkeys(_QUERY_TOKEN_RE.findall(query.casefold())):
+    whole_words: list[str] = []
+    skipped: list[str] = []
+    for token in dict.fromkeys(_QUERY_TOKEN_RE.findall(query)):
+        if token.startswith("#") and not _SHORT_ISSUE_NUMBER_RE.fullmatch(token):
+            token = token[1:]
+        word = token.casefold()
         if len(word) >= TRIGRAM_LENGTH:
             indexed.append(word)
             if not word.isascii():
@@ -94,10 +129,33 @@ def _lexical_terms(query: str) -> _LexicalTerms:
                 )
         elif len(word) > 1 and not word.isascii():
             scanned.append(word)
+        elif len(word) > 1 and (token.isupper() or any(c.isdigit() for c in token)):
+            whole_words.append(token)
+        else:
+            skipped.append(token)
     return _LexicalTerms(
         indexed=tuple(dict.fromkeys((*indexed, *windows[:MAX_QUERY_TRIGRAM_WINDOWS]))),
-        scanned=tuple(scanned),
+        scanned=tuple(dict.fromkeys(scanned)),
+        whole_words=tuple(dict.fromkeys(whole_words)),
+        skipped=tuple(dict.fromkeys(skipped)),
+        windows_cut=len(windows) > MAX_QUERY_TRIGRAM_WINDOWS,
     )
+
+
+def _whole_word_glob(word: str) -> str:
+    """A GLOB pattern matching `word` with no ASCII letter or digit beside it.
+
+    An acronym is matched as written; letters next to a digit match either case.
+    The scan pads the content with a space, so a word at either end still has
+    a neighbor to test, and a leading "#" is its own boundary.
+    """
+    letters = (
+        "".join(f"[{c.lower()}{c.upper()}]" if c.isalpha() else c for c in word)
+        if any(c.isdigit() for c in word)
+        else word
+    )
+    before = "" if word.startswith("#") else "[^0-9A-Za-z]"
+    return f"*{before}{letters}[^0-9A-Za-z]*"
 
 
 def _indexed_lexical_rows(
@@ -110,8 +168,8 @@ def _indexed_lexical_rows(
 ) -> tuple[sqlite3.Row, ...]:
     if not terms:
         return ()
-    # _QUERY_TOKEN_RE keeps word characters only, so a term holds no FTS5
-    # operator and quoting it is enough to keep it a literal phrase.
+    # _QUERY_TOKEN_RE keeps word characters and a leading "#" only, so a term
+    # holds no FTS5 operator and quoting it is enough to keep it a literal phrase.
     return tuple(
         connection.execute(
             f"""
@@ -138,7 +196,8 @@ def _indexed_lexical_rows(
 def _scanned_lexical_rows(
     *,
     connection: sqlite3.Connection,
-    terms: tuple[str, ...],
+    substrings: tuple[str, ...],
+    whole_words: tuple[str, ...],
     visibility: str,
     visibility_parameters: tuple[object, ...],
     candidate_limit: int,
@@ -149,12 +208,15 @@ def _scanned_lexical_rows(
     (~14 ms over 24k fragments holding 15 MB of text). Give two-character words
     an index of their own once that scan exceeds 100 ms.
     """
-    if not terms:
+    if not substrings and not whole_words:
         return ()
-    # _QUERY_TOKEN_RE keeps word characters only, so a term carries no LIKE
-    # wildcard.
+    # _QUERY_TOKEN_RE keeps word characters and a leading "#" only, so a term
+    # carries no LIKE or GLOB wildcard.
     term_predicate = " OR ".join(
-        "fragments.content_text LIKE '%' || ? || '%'" for _ in terms
+        (
+            *("fragments.content_text LIKE '%' || ? || '%'" for _ in substrings),
+            *("(' ' || fragments.content_text || ' ') GLOB ?" for _ in whole_words),
+        )
     )
     return tuple(
         connection.execute(
@@ -167,7 +229,12 @@ def _scanned_lexical_rows(
             ORDER BY nodes.updated_at DESC, fragments.fragment_id
             LIMIT ?
             """,
-            (*terms, *visibility_parameters, candidate_limit),
+            (
+                *substrings,
+                *(_whole_word_glob(word) for word in whole_words),
+                *visibility_parameters,
+                candidate_limit,
+            ),
         ).fetchall()
     )
 

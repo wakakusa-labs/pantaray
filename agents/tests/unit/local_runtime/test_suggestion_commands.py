@@ -275,6 +275,7 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
     allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     limit = ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    stderr = "e" * limit + "fatal: the error at the end"
     _capture_request(
         monkeypatch,
         tmp_path / "temp",
@@ -282,8 +283,8 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
             status="error",
             exit_code=1,
             stdout="o" * (limit * 2),
-            stderr="e" * limit,
-            error=ToolError(type="CommandExecutionError", message="e" * limit),
+            stderr=stderr,
+            error=ToolError(type="CommandExecutionError", message=stderr),
         ),
     )
 
@@ -294,6 +295,16 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
     assert result.output["exit_code"] == 1
     assert result.output["truncated"] is True
     assert len(result.output["stdout"]) + len(result.output["stderr"]) == limit
+    # The error is printed last, so stderr keeps its end.
+    assert result.output["stderr"].endswith("fatal: the error at the end")
+    shown_stdout = len(result.output["stdout"])
+    shown_stderr = len(result.output["stderr"])
+    assert result.output["notes"] == [
+        f"stdout was cut: showing the first {shown_stdout:,} of {limit * 2:,} "
+        "characters. Narrow it with grep, head, tail or sed -n to read the rest.",
+        f"stderr was cut: showing the last {shown_stderr:,} of {len(stderr):,} "
+        "characters.",
+    ]
 
 
 @pytest.mark.asyncio

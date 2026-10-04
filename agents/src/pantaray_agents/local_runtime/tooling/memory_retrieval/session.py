@@ -39,6 +39,7 @@ from pantaray_agents.local_runtime.memory_catalog.search_policy import (
 from pantaray_agents.local_runtime.memory_catalog.search_service import (
     MemorySearchRequest,
     execute_memory_search,
+    memory_search_notes,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.memory_embeddings import (
@@ -143,7 +144,11 @@ class MemoryRetrievalSession:
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
         search_description = (
             "Search persisted memory and return matching content with stable "
-            "context handles."
+            "context handles. Words are matched from three characters; below "
+            "that, single characters are not matched, and two-letter ASCII words "
+            "only whole and when written in capitals (PR, UI) or with a digit "
+            "(#7, v2). notes in the result name any query term that was not "
+            "matched and say when the result list was full."
         )
         if self.policy.search_content_max_chars is not None:
             if self.policy.full_read_tools_available:
@@ -226,6 +231,11 @@ class MemoryRetrievalSession:
                 "results": results,
                 "semantic_status": response.semantic_status,
                 "semantic_error_code": response.semantic_error_code,
+                "notes": list[JSONValue](
+                    memory_search_notes(
+                        response, limit=limit, max_limit=self.policy.max_results
+                    )
+                ),
                 "calls_remaining": self._calls_remaining,
             },
         )
@@ -442,6 +452,7 @@ def _search_success_schema() -> dict[str, JSONValue]:
             "results",
             "semantic_status",
             "semantic_error_code",
+            "notes",
             "calls_remaining",
         ],
         "properties": {
@@ -494,6 +505,7 @@ def _search_success_schema() -> dict[str, JSONValue]:
                 "enum": list(MEMORY_SEARCH_SEMANTIC_STATUS_VALUES),
             },
             "semantic_error_code": nullable_string,
+            "notes": {"type": "array", "items": {"type": "string"}},
             "calls_remaining": {"type": ["integer", "null"], "minimum": 0},
         },
     }

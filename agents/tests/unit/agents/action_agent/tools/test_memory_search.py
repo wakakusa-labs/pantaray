@@ -61,6 +61,7 @@ async def test_memory_search_populates_results(
                 visible=(),
             ),
             semantic_status="available",
+            notes=("Not matched by words: a.",),
         )
 
     monkeypatch.setattr(
@@ -81,7 +82,7 @@ async def test_memory_search_populates_results(
                 "center": "2026-08-09T00:00:00Z",
                 "radius_hours": 24,
             },
-            "limit": 7,
+            "limit": 1,
         },
         state=state,
         tool_runtime_context=ToolRuntimeContext(max_parallel_memory_queries=4),
@@ -91,6 +92,18 @@ async def test_memory_search_populates_results(
     assert result.status == StatusType.SUCCESS.value
     assert result.output["results"], "検索結果が空です"
     assert result.output["results"][0]["observed_at"] == "2026-09-27T06:50+09:00"
+    # Each result names its source, so the output carries no second copy by source.
+    assert set(result.output) == {
+        "results",
+        "semantic_status",
+        "semantic_error_code",
+        "notes",
+    }
+    assert result.output["notes"] == [
+        "Not matched by words: a.",
+        "The results stop at limit=1; more may match. To reach others, pass a "
+        "larger limit (up to 100) or search with more specific terms.",
+    ]
     request = captured[0]
     assert request.user_id == state["user_id"]
     assert request.run_id == "step-ms"
@@ -98,6 +111,6 @@ async def test_memory_search_populates_results(
     assert request.focus == "stable_knowledge"
     assert request.center_time == "2026-08-09T00:00:00Z"
     assert request.radius_hours == 24
-    assert request.limit == 7
+    assert request.limit == 1
     assert request.pinned_revisions is None
     assert request.current_epoch is None

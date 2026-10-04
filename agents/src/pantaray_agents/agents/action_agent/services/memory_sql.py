@@ -19,6 +19,9 @@ DEFAULT_MEMORY_SQL_LIMIT = 100
 MAX_MEMORY_SQL_LIMIT = 200
 MAX_MEMORY_SQL_CELL_CHARS = 4_000
 MAX_MEMORY_SQL_OUTPUT_CHARS = 30_000
+# Opens the text appended to a cell cut at MAX_MEMORY_SQL_CELL_CHARS, so the cut
+# cannot be mistaken for the stored text ending there.
+MEMORY_SQL_CELL_CUT_MARKER = "[memory_sql cut:"
 # SQLite checks the progress handler only at jumps (about once per row), so a
 # smaller interval stops a query with heavy per-row expressions closer to the
 # deadline. At 100 a plain table scan pays about 10% for the callbacks.
@@ -455,27 +458,59 @@ def _serialize_rows(
     # Rows are serialized as they are fetched so only one raw row is held at a time.
     rows: list[dict[str, JSONValue]] = []
     output_chars = 0
-    truncated = False
+    cut_columns: dict[str, None] = {}
+    limit_notes: list[str] = []
     for raw_row in cursor:
         if len(rows) == limit:
-            return {"rows": rows, "truncated": True}
+            limit_notes.append(_row_limit_note(limit))
+            break
         row: dict[str, JSONValue] = {}
+        row_cut_columns: list[str] = []
         for column in columns:
-            value, cell_truncated = _serialize_value(raw_row[column])
-            if cell_truncated:
-                truncated = True
+            value, cell_cut = _serialize_value(raw_row[column], column=column)
             output_chars += len(str(value))
-            if output_chars > MAX_MEMORY_SQL_OUTPUT_CHARS:
-                notes.append(
-                    "memory_sql output was truncated by total character limit."
-                )
-                return {"rows": rows, "truncated": True}
             row[column] = value
+            if cell_cut:
+                row_cut_columns.append(column)
+        if output_chars > MAX_MEMORY_SQL_OUTPUT_CHARS:
+            limit_notes.append(_output_limit_note(len(rows)))
+            break
         rows.append(row)
-    return {"rows": rows, "truncated": truncated}
+        cut_columns.update(dict.fromkeys(row_cut_columns))
+    if cut_columns:
+        limit_notes.append(
+            f"Cells longer than {MAX_MEMORY_SQL_CELL_CHARS:,} characters in "
+            f"{', '.join(cut_columns)} were cut; each ends with a "
+            f"{MEMORY_SQL_CELL_CUT_MARKER} ...] marker that says how to read the rest."
+        )
+    notes.extend(limit_notes)
+    return {"rows": rows, "truncated": bool(limit_notes)}
 
 
-def _serialize_value(value: object) -> tuple[JSONValue, bool]:
+def _row_limit_note(limit: int) -> str:
+    raise_limit = (
+        f" limit can be raised to {MAX_MEMORY_SQL_LIMIT}."
+        if limit < MAX_MEMORY_SQL_LIMIT
+        else ""
+    )
+    return (
+        f"Stopped at limit={limit} rows; more rows matched and were not read. "
+        f"Read the next page with LIMIT {limit} OFFSET {limit} in the SQL (with "
+        "ORDER BY so pages are stable), narrow the WHERE clause, or SELECT "
+        f"COUNT(*) for the total.{raise_limit}"
+    )
+
+
+def _output_limit_note(row_count: int) -> str:
+    return (
+        f"Stopped after {row_count} rows: the output reached the "
+        f"{MAX_MEMORY_SQL_OUTPUT_CHARS:,}-character limit, so later rows were not "
+        "read. Select fewer or shorter columns, for example substr(column, 1, "
+        f"500), or continue with OFFSET {row_count} in the SQL."
+    )
+
+
+def _serialize_value(value: object, *, column: str) -> tuple[JSONValue, bool]:
     if value is None or isinstance(value, bool | int | float):
         return value, False
     if isinstance(value, bytes):
@@ -483,7 +518,13 @@ def _serialize_value(value: object) -> tuple[JSONValue, bool]:
     text = str(value)
     if len(text) <= MAX_MEMORY_SQL_CELL_CHARS:
         return text, False
-    return f"{text[: MAX_MEMORY_SQL_CELL_CHARS - 3]}...", True
+    omitted = len(text) - MAX_MEMORY_SQL_CELL_CHARS
+    return (
+        f"{text[:MAX_MEMORY_SQL_CELL_CHARS]}{MEMORY_SQL_CELL_CUT_MARKER} {omitted:,} more "
+        f"characters not shown; read them with substr({column}, "
+        f"{MAX_MEMORY_SQL_CELL_CHARS + 1})]",
+        True,
+    )
 
 
 def _validation_error(message: str) -> RepositoryResult[MemorySqlPayload]:
@@ -496,9 +537,12 @@ def _validation_error(message: str) -> RepositoryResult[MemorySqlPayload]:
 
 __all__ = [
     "DEFAULT_MEMORY_SQL_LIMIT",
+    "MAX_MEMORY_SQL_CELL_CHARS",
     "MAX_MEMORY_SQL_LIMIT",
+    "MAX_MEMORY_SQL_OUTPUT_CHARS",
     "MEMORY_SQL_ALLOWED_TABLES",
     "MEMORY_SQL_BLOCKED_FUNCTIONS",
+    "MEMORY_SQL_CELL_CUT_MARKER",
     "MemorySqlPayload",
     "execute_memory_sql",
     "run_local_memory_sql",

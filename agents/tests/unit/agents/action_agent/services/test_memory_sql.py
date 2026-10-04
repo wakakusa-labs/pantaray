@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 import pantaray_agents.agents.action_agent.services.memory_sql as memory_sql_module
-from pantaray_agents.agents.action_agent.services.memory_sql import execute_memory_sql
+from pantaray_agents.agents.action_agent.services.memory_sql import (
+    MAX_MEMORY_SQL_CELL_CHARS,
+    MEMORY_SQL_CELL_CUT_MARKER,
+    execute_memory_sql,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -586,8 +590,43 @@ def test_execute_memory_sql_limits_rows_and_cell_text(tmp_path: Path) -> None:
     assert result.data["truncated"] is True
     description = result.data["rows"][0]["description"]
     assert isinstance(description, str)
-    assert len(description) < 5_000
-    assert description.endswith("...")
+    stored, marker = description.split(MEMORY_SQL_CELL_CUT_MARKER)
+    assert len(stored) == MAX_MEMORY_SQL_CELL_CHARS
+    assert marker.endswith(f"substr(description, {MAX_MEMORY_SQL_CELL_CHARS + 1})]")
+    (cut_cells,) = result.data["notes"]
+    assert cut_cells.startswith(
+        f"Cells longer than {MAX_MEMORY_SQL_CELL_CHARS:,} characters in description"
+    )
+
+
+def test_execute_memory_sql_says_when_the_row_limit_stopped_it(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    _insert_bulk_activity_logs(db_path, count=3, description="short")
+
+    results = {
+        limit: execute_memory_sql(
+            db_path=str(db_path),
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            user_id="user-1",
+            sql="SELECT log_id FROM activity_logs WHERE log_id LIKE 'bulk-%'",
+            limit=limit,
+        ).data
+        for limit in (2, 3)
+    }
+
+    stopped, complete = results[2], results[3]
+    assert stopped is not None and complete is not None
+    assert stopped["row_count"] == 2
+    assert stopped["truncated"] is True
+    (row_limit,) = stopped["notes"]
+    assert row_limit.startswith("Stopped at limit=2 rows; more rows matched")
+    assert "LIMIT 2 OFFSET 2" in row_limit
+    assert "limit can be raised to 200." in row_limit
+    assert complete["row_count"] == 3
+    assert complete["truncated"] is False
+    assert complete["notes"] == []
 
 
 def _insert_bulk_activity_logs(db_path: Path, *, count: int, description: str) -> None:
@@ -719,6 +758,10 @@ def test_execute_memory_sql_holds_one_row_at_a_time(tmp_path: Path) -> None:
     assert result.data is not None
     assert 0 < result.data["row_count"] < 200
     assert result.data["truncated"] is True
+    assert result.data["notes"][0].startswith(
+        f"Stopped after {result.data['row_count']} rows: the output reached the "
+        "30,000-character limit"
+    )
     assert peak_bytes < 16 * 1024 * 1024
 
 

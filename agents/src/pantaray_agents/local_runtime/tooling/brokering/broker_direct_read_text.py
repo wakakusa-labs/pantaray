@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import stat
 from dataclasses import dataclass
 from io import StringIO
@@ -22,6 +23,8 @@ READ_FILE_PAGE_LIMIT_RETRY_HINT = (
 )
 
 _LINE_READ_AHEAD_CHARS = MAX_LINE_LENGTH + 1
+_SKIP_CHUNK_BYTES = 1024 * 1024
+_LINE_BREAK = re.compile(rb"\r\n|\r|\n")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +61,7 @@ def read_text_descriptor_lines(
     file_stat = os.fstat(descriptor)
     if not stat.S_ISREG(file_stat.st_mode):
         raise OSError(errno.EINVAL, "text descriptor is not a regular file")
+    skipped_lines = _skip_lines(descriptor, offset - 1)
     with open(descriptor, encoding="utf-8", newline="", closefd=False) as handle:
         return _read_text_lines(
             handle=handle,
@@ -66,7 +70,39 @@ def read_text_descriptor_lines(
             limit=limit,
             column=column,
             max_bytes=MAX_BYTES if max_bytes is None else max_bytes,
+            skipped_lines=skipped_lines,
         )
+
+
+def _skip_lines(descriptor: int, count: int) -> int:
+    """Seek the descriptor past up to count whole lines and return how many.
+
+    Lines are counted in bytes, which is far faster than decoding them, so a
+    read deep into a large file spends its time on the page it returns. The
+    last line of a file is left to the text reader when it has no line end.
+    """
+
+    position = os.lseek(descriptor, 0, os.SEEK_CUR)
+    passed = 0
+    while passed < count:
+        chunk = os.pread(descriptor, _SKIP_CHUNK_BYTES, position)
+        if len(chunk) == _SKIP_CHUNK_BYTES and chunk.endswith(b"\r"):
+            # Whether this \r ends a \r\n is decided with the next chunk.
+            chunk = chunk[:-1]
+        breaks = chunk.count(b"\n") + chunk.count(b"\r") - chunk.count(b"\r\n")
+        if passed + breaks < count:
+            if not chunk:
+                break
+            passed += breaks
+            position += len(chunk)
+            continue
+        for line_end in _LINE_BREAK.finditer(chunk):
+            passed += 1
+            if passed == count:
+                position += line_end.end()
+                break
+    os.lseek(descriptor, position, os.SEEK_SET)
+    return passed
 
 
 def read_text_value_lines(
@@ -95,6 +131,7 @@ def _read_text_lines(
     limit: int,
     column: int,
     max_bytes: int,
+    skipped_lines: int = 0,
 ) -> ReadLinesResult:
     if column <= 0:
         raise ValueError("column must be positive")
@@ -103,7 +140,7 @@ def _read_text_lines(
     should_count_exact_total = text_size_bytes <= MAX_TOTAL_LINE_COUNT_BYTES
     content_lines: list[str] = []
     content_bytes = 0
-    current_line = 0
+    current_line = skipped_lines
     end_line = max(offset - 1, 0)
     end_column = 0
     next_offset: int | None = None

@@ -9,6 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker_direct_read_text
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    BrokerPolicyError,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
     ReadLinesResult,
     read_text_descriptor_lines,
@@ -68,6 +71,8 @@ def _patch_path_stream(
         raising=False,
     )
     monkeypatch.setattr(broker_direct_read_text.os, "close", lambda _fd: None)
+    # The stream stands in for the text reader, which then skips lines itself.
+    monkeypatch.setattr(broker_direct_read_text, "_skip_lines", lambda _fd, _n: 0)
 
 
 def test_read_text_descriptor_lines_borrows_descriptor(tmp_path: Path) -> None:
@@ -264,6 +269,24 @@ def test_read_text_lines_pages_multibyte_line_without_stalling(
     assert result.content == "あ" * 3
     assert result.next_offset == 1
     assert result.next_column == 4
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"),
+    [(2, "second\n"), (3, "third\n"), (4, "fourth"), (5, None)],
+)
+def test_offset_skip_counts_every_line_end_across_chunks(
+    tmp_path: Path, offset: int, expected: str | None
+) -> None:
+    path = tmp_path / "mixed.txt"
+    # The \r of the first line end is the last byte of the first 1 MiB chunk.
+    first = b"a" * (1024 * 1024 - 1) + b"\r\n"
+    path.write_bytes(first + b"second\rthird\nfourth")
+    if expected is None:
+        with pytest.raises(BrokerPolicyError, match="out of range"):
+            read_text_lines(filepath=path, offset=offset, limit=1)
+        return
+    assert read_text_lines(filepath=path, offset=offset, limit=1).content == expected
 
 
 def test_multimegabyte_file_tail_is_readable_without_splitting(tmp_path: Path) -> None:

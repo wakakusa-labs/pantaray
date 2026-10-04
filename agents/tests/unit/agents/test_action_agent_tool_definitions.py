@@ -113,6 +113,18 @@ def test_nested_and_access_field_descriptions_reach_the_model() -> None:
     assert "center" in str(_property(memory_search, "time_hint")["description"])
 
 
+def test_only_the_action_itself_is_offered_a_run_outside_the_sandbox() -> None:
+    parameters_by_tool = _model_facing_parameters()
+
+    assert "Never set it pre-emptively" in str(
+        _property(parameters_by_tool["action/bash"], "run_outside_sandbox")
+    )
+    for tool in ("subagent/bash", "action/run_python", "subagent/run_python"):
+        properties = parameters_by_tool[tool]["properties"]
+        assert isinstance(properties, dict)
+        assert "run_outside_sandbox" not in properties, tool
+
+
 @pytest.mark.parametrize(
     ("tool_id", "args", "accepted"),
     [

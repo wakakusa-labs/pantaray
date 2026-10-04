@@ -31,6 +31,7 @@ def build_bash_summary(
     cwd_relative_path: str,
     timeout_ms: int,
     use_login_environment: bool,
+    run_outside_sandbox: bool,
     reason: str | None,
     outside_workspace_folders: tuple[Path, ...] = (),
 ) -> dict[str, JSONValue]:
@@ -43,6 +44,14 @@ def build_bash_summary(
         # The model's user-facing justification, shown as the approval question.
         "reason": reason,
     }
+    if run_outside_sandbox:
+        # The approval UI keys its risk wording on this, and the invocation's
+        # stored summary records that the approved call ran unsandboxed. No
+        # folder is named: the run is not confined to folders at all, and with
+        # none "Allow for this conversation" has nothing to grant, so this
+        # approval stays one time only.
+        summary["run_outside_sandbox"] = True
+        return summary
     # An outside command folder is approvable only when it could be granted.
     return _with_outside_workspace(
         summary, outside_workspace_folders, can_allow_for_conversation=True

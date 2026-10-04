@@ -40,6 +40,10 @@ class BrokerToSandboxCommandRequest(BaseModel):
     temp_storage_limit_bytes: int
     network_policy: BrokerNetworkPolicy
     use_login_environment: bool
+    # True only for an Action bash call the user approved to run unsandboxed:
+    # the helper then starts argv without the seatbelt profile and keeps every
+    # other limit (timeout, output caps, temp quota, process group).
+    run_outside_sandbox: bool
     protected_backend_address: str
 
 

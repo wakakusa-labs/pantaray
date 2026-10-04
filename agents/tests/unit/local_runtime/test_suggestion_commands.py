@@ -151,6 +151,11 @@ def test_commands_are_offered_only_while_they_run_without_asking(
         for tool_id in SUGGESTION_TOOL_IDS
         if offered or tool_id != SUGGESTION_COMMAND_TOOL_ID
     )
+    for definition in definitions:
+        if definition.name == SUGGESTION_COMMAND_TOOL_ID:
+            # Only an Action's bash can ask to run outside the sandbox.
+            assert definition.request_schema["additionalProperties"] is False
+            assert "run_outside_sandbox" not in definition.request_schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -207,6 +212,7 @@ async def test_a_command_gets_no_writable_folder_and_the_network_setting(
     await _session(allowed_db, tmp_path).run(_command("git log -1"), 1)
 
     (request,) = requests
+    assert request.run_outside_sandbox is False
     assert request.real_write_roots == []
     assert request.action_storage is None
     assert request.cwd == str(temp_dir)

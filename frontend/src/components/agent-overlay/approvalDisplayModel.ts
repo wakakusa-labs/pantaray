@@ -30,6 +30,9 @@ export type ApprovalDisplay = {
   // The operation line already says it; a reason headline replaces that line, so the
   // panel repeats this on its own.
   usesLoginEnvironment: boolean;
+  // The command runs with the user's own permissions, so the panel states that
+  // risk in Pantaray's words and offers only a one-time approval.
+  runsOutsideSandbox: boolean;
   primaryLabelKey: MessageKey;
   primaryValue: string;
   details: ApprovalDetail[];
@@ -108,11 +111,24 @@ export function buildApprovalDisplay(
 ): ApprovalDisplay {
   const toolDisplay = buildToolApprovalDisplay(approvalPanel, t);
   const reason = readStringValue(approvalPanel.commandSummary, 'reason');
+  if (approvalPanel.commandSummary.run_outside_sandbox === true) {
+    return {
+      ...toolDisplay,
+      reason,
+      runsOutsideSandbox: true,
+      outsideWorkspace: null,
+      decisionLabelKeys: {
+        approved_once: 'overlay.approvalRequired.outsideWorkspace.approveOnce',
+        denied: 'overlay.approvalRequired.outsideWorkspace.deny',
+      },
+    };
+  }
   const outsideWorkspace = readOutsideWorkspace(approvalPanel.commandSummary);
   if (!outsideWorkspace) {
     return {
       ...toolDisplay,
       reason,
+      runsOutsideSandbox: false,
       outsideWorkspace: null,
       decisionLabelKeys: {
         approved_once: 'overlay.approvalRequired.approveOnce',
@@ -133,6 +149,7 @@ export function buildApprovalDisplay(
     ...toolDisplay,
     ...question,
     reason,
+    runsOutsideSandbox: false,
     outsideWorkspace,
     decisionLabelKeys: {
       approved_once: 'overlay.approvalRequired.outsideWorkspace.approveOnce',

@@ -85,6 +85,7 @@ print('sandbox ok')
         network_policy="allow" if enabled else "deny",
         protected_backend_address=f"*:{protected_port}",
         use_login_environment=False,
+        run_outside_sandbox=False,
     )
 
 

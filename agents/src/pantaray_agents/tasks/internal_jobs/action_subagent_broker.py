@@ -9,7 +9,9 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
 )
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
-from pantaray_agents.agents.action_agent.tools.bash_tool import BASH_TOOL
+from pantaray_agents.agents.action_agent.tools.bash_tool import (
+    ACTION_SUBAGENT_BASH_TOOL,
+)
 from pantaray_agents.agents.action_agent.tools.discovery_tools import (
     GLOB_TOOL,
     GREP_TOOL,
@@ -56,7 +58,7 @@ _CHILD_BROKER_TOOLS = (
     GLOB_TOOL,
     GREP_TOOL,
     APPLY_PATCH_TOOL,
-    BASH_TOOL,
+    ACTION_SUBAGENT_BASH_TOOL,
     RUN_PYTHON_TOOL,
 )
 APPROVAL_DENIED_MESSAGE = (

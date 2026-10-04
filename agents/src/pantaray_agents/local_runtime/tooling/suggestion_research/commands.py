@@ -281,6 +281,7 @@ class SuggestionCommandSession:
                 temp_storage_limit_bytes=budget.temp_storage_limit_bytes,
                 network_policy="allow" if network_enabled else "deny",
                 use_login_environment=use_login_environment,
+                run_outside_sandbox=False,
             )
 
         terminal_outcome, output = await run_unrecorded_sandbox_command(

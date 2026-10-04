@@ -48,6 +48,11 @@ from .tool_path_policy import (
 
 EXEC_CWD_RETARGETED = "EXEC_CWD_RETARGETED"
 EXEC_WRITE_FOLDER_DENIED = "EXEC_WRITE_FOLDER_DENIED"
+# What a command run outside the sandbox can write. Recorded as its write root,
+# it keeps the run and Action subagent claims apart both ways: the run is
+# refused while any claim or another actor's command is active (and always to
+# a subagent), and no claim can be taken until the run is cleaned up.
+UNSANDBOXED_WRITE_ROOTS = (Path("/"),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +246,12 @@ def build_validated_command_request(
     executable_source_kind: BrokerExecutableSourceKind = "trusted_system_executable"
     resolved_argv = [str(resolved_executable), "--noprofile", "--norc", "-c", command]
     use_login_environment = args.use_login_environment
+    run_outside_sandbox = args.run_outside_sandbox
+    if run_outside_sandbox:
+        # Checked before the user is asked; the execution start checks again.
+        authorize_direct_workspace_writes(
+            context=context, resolved_paths=UNSANDBOXED_WRITE_ROOTS
+        )
     # Commands read what the read-access setting allows, like the read tool.
     full_disk_read = context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     env = build_command_env(
@@ -264,16 +275,22 @@ def build_validated_command_request(
         cwd_relative_path=str(command_cwd),
         timeout_ms=runtime_budget.sandbox_launch.timeout_ms,
         use_login_environment=use_login_environment,
+        run_outside_sandbox=run_outside_sandbox,
         reason=args.justification,
         outside_workspace_folders=resolved_cwd.outside_workspace_folders,
     )
+    # The approval binds to this exact summary, command text included, and the
+    # argv below runs that same text. A run outside the sandbox is asked every
+    # time, whatever the approval mode.
     approval_session_id, approval_source = ensure_tool_authorization(
         context=context,
         tool_invocation_id=tool_invocation_id,
         tool_request_id=tool_request_id,
         command_summary=command_summary_json,
         requested_at=requested_at,
-        require_user_prompt=bool(resolved_cwd.outside_workspace_folders),
+        require_user_prompt=(
+            run_outside_sandbox or bool(resolved_cwd.outside_workspace_folders)
+        ),
     )
     storage = resolve_action_storage_paths(
         db_path=context.db_path,
@@ -307,13 +324,21 @@ def build_validated_command_request(
         open_file_lease_limit=runtime_budget.broker_local.open_file_lease_limit,
         network_policy=_command_network_policy(context),
         use_login_environment=use_login_environment,
+        run_outside_sandbox=run_outside_sandbox,
         # The usual roots stay listed: their ancestor metadata grants let tools
         # such as git stat the parents of a workspace inside private storage.
         real_read_roots=[
             *(["/"] if full_disk_read else []),
             *(str(path) for path in sandbox_roots.read_roots),
         ],
-        real_write_roots=[str(path) for path in sandbox_roots.write_roots],
+        real_write_roots=[
+            str(path)
+            for path in (
+                UNSANDBOXED_WRITE_ROOTS
+                if run_outside_sandbox
+                else sandbox_roots.write_roots
+            )
+        ],
         tool_request_id=tool_request_id,
         requested_at=requested_at,
         preflight_only=preflight_only,
@@ -413,6 +438,7 @@ def build_validated_python_request(
         open_file_lease_limit=runtime_budget.broker_local.open_file_lease_limit,
         network_policy=_command_network_policy(context),
         use_login_environment=False,
+        run_outside_sandbox=False,
         generated_python_code=args.code,
         real_read_roots=[
             *(["/"] if full_disk_read else []),
@@ -428,6 +454,7 @@ def build_validated_python_request(
 __all__ = [
     "EXEC_CWD_RETARGETED",
     "EXEC_WRITE_FOLDER_DENIED",
+    "UNSANDBOXED_WRITE_ROOTS",
     "build_validated_command_request",
     "build_validated_python_request",
     "verify_outside_workspace_folders_unchanged",

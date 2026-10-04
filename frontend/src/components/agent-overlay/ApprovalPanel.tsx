@@ -221,42 +221,82 @@ export function ApprovalPanel({
     </ApprovalDetailGroup>
   );
 
+  const question = display.reason ?? t(display.operationKey, display.operationVars);
+  let body;
+  if (display.runsOutsideSandbox) {
+    // The model says what the run is for; Pantaray, not the model, says what
+    // allowing it means. The command stays one click away.
+    body = (
+      <>
+        <ApprovalDetailGroup>
+          <ApprovalDetailLabel>
+            {t('overlay.approvalRequired.outsideSandbox.purpose')}
+          </ApprovalDetailLabel>
+          <ApprovalOperationText>{question}</ApprovalOperationText>
+        </ApprovalDetailGroup>
+        <ApprovalDetailGroup>
+          <ApprovalDetailLabel>
+            {t('overlay.approvalRequired.outsideSandbox.effect')}
+          </ApprovalDetailLabel>
+          <ApprovalOperationText>
+            {t('overlay.approvalRequired.outsideSandbox.effectDescription')}
+          </ApprovalOperationText>
+        </ApprovalDetailGroup>
+        <ApprovalDisclosure>
+          <ApprovalDisclosureSummary>
+            {t('overlay.approvalRequired.details')}
+          </ApprovalDisclosureSummary>
+          {toolDetails}
+        </ApprovalDisclosure>
+      </>
+    );
+  } else if (display.reason) {
+    // A reason is for readers who cannot read commands: it leads, the folders
+    // follow, and the command stays one click away.
+    body = (
+      <>
+        <ApprovalOperationText>{question}</ApprovalOperationText>
+        {display.usesLoginEnvironment ? (
+          <ApprovalOperationText>
+            {t('overlay.approvalRequired.loginEnvironmentNotice')}
+          </ApprovalOperationText>
+        ) : null}
+        {folderPaths ? (
+          <ApprovalDetailGroup>
+            <ApprovalDetailLabel>
+              {t('overlay.approvalRequired.outsideWorkspace.folders')}
+            </ApprovalDetailLabel>
+            {folderPaths}
+          </ApprovalDetailGroup>
+        ) : null}
+        <ApprovalDisclosure>
+          <ApprovalDisclosureSummary>
+            {t('overlay.approvalRequired.details')}
+          </ApprovalDisclosureSummary>
+          {toolDetails}
+        </ApprovalDisclosure>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <ApprovalOperationText>{question}</ApprovalOperationText>
+        {folderPaths}
+        {toolDetails}
+      </>
+    );
+  }
+
   return (
     <ApprovalPanelCard>
-      <ApprovalPanelTitle>{t('overlay.approvalRequired.title')}</ApprovalPanelTitle>
-      <ApprovalOperationText>
-        {display.reason ?? t(display.operationKey, display.operationVars)}
-      </ApprovalOperationText>
-      {display.reason ? (
-        // A reason is for readers who cannot read commands: it leads, the folders
-        // follow, and the command stays one click away.
-        <>
-          {display.usesLoginEnvironment ? (
-            <ApprovalOperationText>
-              {t('overlay.approvalRequired.loginEnvironmentNotice')}
-            </ApprovalOperationText>
-          ) : null}
-          {folderPaths ? (
-            <ApprovalDetailGroup>
-              <ApprovalDetailLabel>
-                {t('overlay.approvalRequired.outsideWorkspace.folders')}
-              </ApprovalDetailLabel>
-              {folderPaths}
-            </ApprovalDetailGroup>
-          ) : null}
-          <ApprovalDisclosure>
-            <ApprovalDisclosureSummary>
-              {t('overlay.approvalRequired.details')}
-            </ApprovalDisclosureSummary>
-            {toolDetails}
-          </ApprovalDisclosure>
-        </>
-      ) : (
-        <>
-          {folderPaths}
-          {toolDetails}
-        </>
-      )}
+      <ApprovalPanelTitle>
+        {t(
+          display.runsOutsideSandbox
+            ? 'overlay.approvalRequired.outsideSandbox.title'
+            : 'overlay.approvalRequired.title'
+        )}
+      </ApprovalPanelTitle>
+      {body}
       {approvalErrorMessage ? <ApprovalErrorText>{approvalErrorMessage}</ApprovalErrorText> : null}
       <ApprovalActionRow>
         {onDecide

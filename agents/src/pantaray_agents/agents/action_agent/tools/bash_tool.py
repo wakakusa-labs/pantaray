@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import BashToolArgs
+from dataclasses import replace
+
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    BashToolArgs,
+    SandboxedBashToolArgs,
+)
 
 from .base import (
     ToolDefinition,
     ToolGuideSpec,
     ToolSpec,
+    build_validation_input_schema,
     tool_execution_policy,
 )
 from .broker_tool_input_schema import (
@@ -43,16 +49,19 @@ WRITE_FOLDER_REQUEST_FIELD_PRESENTATION = (
     BrokerToolFieldPresentation(
         name="justification",
         description=(
-            "Give justification whenever you set use_login_environment or "
-            "additional_write_folders, and only then. It is shown to the user, as "
-            "written, as the approval question: one short sentence in the language "
-            "of the user's request, for someone who does not read commands. With "
-            "use_login_environment, say which service's signed-in account it will "
-            "use and for what, naming only the service the command actually uses "
-            "(for a Japanese request, for example: "
+            "Give justification whenever you set use_login_environment, "
+            "additional_write_folders, or run_outside_sandbox, and only then. It is "
+            "shown to the user, as written, as the approval question: one short "
+            "sentence in the language of the user's request, for someone who does "
+            "not read commands. With use_login_environment, say which service's "
+            "signed-in account it will use and for what, naming only the service "
+            "the command actually uses (for a Japanese request, for example: "
             "「GitHub にログイン済みのアカウントで、PR の状態を確認します。」). "
             "With additional_write_folders, say what allowing the change lets you "
-            "do. Do not include command names, paths, or file names."
+            "do. With run_outside_sandbox, say in one or two sentences what the "
+            "command will do and what it produces (for example: "
+            "「ブラウザで資料のページを開き、PDF に書き出します。」). Do not "
+            "include command names, paths, or file names."
         ),
     ),
 )
@@ -93,8 +102,28 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "keep clone and output paths there."
         ),
     ),
+    BrokerToolFieldPresentation(
+        name="run_outside_sandbox",
+        description=(
+            "Default false. Set true only to rerun a command important to the "
+            "task that failed because of the sandbox, when "
+            "additional_write_folders and use_login_environment cannot fix it: "
+            "for example macOS denied a system service or launching an app (a "
+            "headless browser that aborts at startup), or 'Operation not "
+            "permitted' on something other than writing a folder. Never set it "
+            "pre-emptively, for convenience, or before trying the command "
+            "normally.\n"
+            "- The call waits for the user to approve this exact command once, "
+            "whatever the approval mode, then runs it with the user's own "
+            "permissions; if the user does not allow it, find another way.\n"
+            "- Keep the command to the step that needs it. Do not combine it "
+            "with additional_write_folders."
+        ),
+    ),
     *WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
 )
+
+_BASH_INPUT_DESCRIPTION = "Run a non-interactive workspace shell command or script."
 
 BASH_TOOL = ToolDefinition.from_spec(
     ToolSpec(
@@ -140,7 +169,7 @@ BASH_TOOL = ToolDefinition.from_spec(
         input_spec=broker_tool_input_spec_from_model(
             model=BashToolArgs,
             fields=BASH_TOOL_FIELD_PRESENTATION,
-            description="Run a non-interactive workspace shell command or script.",
+            description=_BASH_INPUT_DESCRIPTION,
         ),
         output_schema={
             "type": "object",
@@ -154,4 +183,21 @@ BASH_TOOL = ToolDefinition.from_spec(
             "additionalProperties": False,
         },
     )
+)
+
+# A subagent writes only what it claimed, which an unsandboxed command cannot be
+# held to, so its bash does not offer run_outside_sandbox (the broker refuses it).
+ACTION_SUBAGENT_BASH_TOOL = replace(
+    BASH_TOOL,
+    input_schema=build_validation_input_schema(
+        broker_tool_input_spec_from_model(
+            model=SandboxedBashToolArgs,
+            fields=tuple(
+                field
+                for field in BASH_TOOL_FIELD_PRESENTATION
+                if field.name != "run_outside_sandbox"
+            ),
+            description=_BASH_INPUT_DESCRIPTION,
+        )
+    ),
 )

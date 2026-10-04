@@ -385,4 +385,68 @@ describe('ApprovalPanel', () => {
       '許可',
     ]);
   });
+
+  const UNSANDBOXED_REASON = 'ブラウザで資料のページを開き、PDF に書き出します。';
+  const UNSANDBOXED_COMMAND = 'chrome --headless --print-to-pdf=out.pdf page.html';
+  const UNSANDBOXED_TEXT = {
+    ja: {
+      title: 'この操作は、Pantaray の安全な実行環境の外で動かします',
+      purpose: '何をするか',
+      effect: '許可すると',
+      effectDescription:
+        'この 1 回の操作は、あなたと同じ権限で動きます。Mac 上のファイルを読み書きしたり、アプリを起動したりできます。',
+      details: '詳細',
+      buttons: ['許可しない', '今回だけ許可'],
+    },
+    en: {
+      title: 'This runs outside Pantaray’s protected environment',
+      purpose: 'What it does',
+      effect: 'If you allow it',
+      effectDescription:
+        'This one run has your permissions: it can read and write files on your Mac and open apps.',
+      details: 'Details',
+      buttons: ['Don’t allow', 'Allow once'],
+    },
+  } as const;
+
+  it.each(['ja', 'en'] as const)(
+    'states the risk of a run outside the sandbox in fixed words (%s)',
+    (language) => {
+      const text = UNSANDBOXED_TEXT[language];
+      const handlers = renderPanel(
+        language,
+        bashBlocker({
+          command: UNSANDBOXED_COMMAND,
+          cwd: '/repo',
+          timeout_ms: 60000,
+          use_login_environment: false,
+          reason: UNSANDBOXED_REASON,
+          run_outside_sandbox: true,
+        })
+      );
+
+      expect(screen.getByText(text.title)).toBeTruthy();
+      expect(screen.getByText(text.purpose).nextElementSibling?.textContent).toBe(
+        UNSANDBOXED_REASON
+      );
+      expect(screen.getByText(text.effect).nextElementSibling?.textContent).toBe(
+        text.effectDescription
+      );
+
+      const disclosure = screen.getByText(UNSANDBOXED_COMMAND).closest('details');
+      expect(disclosure?.open).toBe(false);
+      const summary = screen.getByText(text.details);
+      expect(summary.tagName).toBe('SUMMARY');
+      fireEvent.click(summary);
+      expect(disclosure?.open).toBe(true);
+
+      // One time only: never "Allow for this conversation".
+      expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(
+        text.buttons
+      );
+      fireEvent.click(screen.getByRole('button', { name: text.buttons[0] }));
+      fireEvent.click(screen.getByRole('button', { name: text.buttons[1] }));
+      expect(handlers.onDecide.mock.calls).toEqual([['denied'], ['approved_once']]);
+    }
+  );
 });

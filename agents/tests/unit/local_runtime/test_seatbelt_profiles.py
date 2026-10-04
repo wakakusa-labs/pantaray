@@ -62,6 +62,7 @@ def _validated_command_request(*, network_policy: str) -> ValidatedCommandReques
         open_file_lease_limit=16,
         network_policy=network_policy,  # type: ignore[arg-type]
         use_login_environment=False,
+        run_outside_sandbox=False,
         real_read_roots=["/workspace"],
         real_write_roots=["/workspace"],
         tool_request_id="request-1",

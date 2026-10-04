@@ -150,6 +150,7 @@ BROKERED_TOOL_SCHEMA_CONTRACTS = (
                 "command": {"type": "string", "minLength": 1, "pattern": r"\S"},
                 "cwd": {"type": "string", "minLength": 1, "pattern": r"\S"},
                 "use_login_environment": {"type": "boolean"},
+                "run_outside_sandbox": {"type": "boolean"},
                 **WRITE_FOLDER_REQUEST_SCHEMA,
             },
             "required": ["command"],

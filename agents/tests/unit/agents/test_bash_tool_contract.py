@@ -113,8 +113,8 @@ def test_command_tools_ask_for_outside_write_folders_with_a_user_facing_reason()
     assert "rerun the same call with additional_write_folders" in description
     assert "Do not ask the user in chat first" in description
     assert (
-        "Give justification whenever you set use_login_environment or "
-        "additional_write_folders" in justification
+        "Give justification whenever you set use_login_environment, "
+        "additional_write_folders, or run_outside_sandbox" in justification
     )
     assert "language of the user's request" in justification
     assert "naming only the service the command actually uses" in justification
@@ -125,3 +125,11 @@ def test_command_tools_ask_for_outside_write_folders_with_a_user_facing_reason()
         in TOOL_REGISTRY["run_python"].prompt_contract.description
     )
     assert "approved cwd" not in _field_description("use_login_environment")
+
+
+def test_only_the_action_bash_can_ask_to_run_outside_the_sandbox() -> None:
+    assert "run_outside_sandbox" in _field_names("bash")
+    assert "run_outside_sandbox" not in _field_names("run_python")
+    description = _field_description("run_outside_sandbox")
+    assert "failed because of the sandbox" in description
+    assert "Never set it pre-emptively" in description

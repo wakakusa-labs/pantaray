@@ -17,7 +17,7 @@ Pantaray takes it on and sees it through. You can also ask it for anything, any 
 - **It thinks ahead.** From what you are working on, it proposes the work that matters before you ask.
 - **It finishes the job.** Approve a proposal, or ask for something yourself, and Pantaray carries it
   through to the result.
-- **You choose the AI.** Your own OpenAI, Anthropic, or Fireworks AI key, or your ChatGPT account.
+- **You choose the AI.** Your own OpenAI or Fireworks AI key, or your ChatGPT account.
 
 ## Install
 

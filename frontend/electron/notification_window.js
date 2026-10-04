@@ -210,10 +210,24 @@ function registerProcessAssociation(processId, suggestionId) {
   processToSuggestion.set(pid, sid);
 }
 
+// An explicit open or send binds the Action to the window the user is looking at.
 function registerActionAssociation(actionId, overlayId) {
   const aid = normalizeId(actionId);
   const oid = normalizeId(overlayId);
   if (!aid || !oid) return;
+  actionToOverlayId.set(aid, oid);
+}
+
+// A server event or Suggestion snapshot names the Action's Suggestion, which is not necessarily
+// the window showing it: a conversation opened from History is a different window, and every run
+// of the Action, follow-ups and replays included, still carries the Suggestion id. So these binds
+// take the Action only from no window, never from one that is open.
+function adoptActionAssociation(actionId, overlayId) {
+  const aid = normalizeId(actionId);
+  const oid = normalizeId(overlayId);
+  if (!aid || !oid) return;
+  const current = actionToOverlayId.get(aid);
+  if (current && current !== oid && hasOverlayWindow(current)) return;
   actionToOverlayId.set(aid, oid);
 }
 
@@ -446,7 +460,7 @@ function setOverlaySnapshot(id, payload) {
   const normalizedId = normalizeId(id);
   if (!normalizedId || !payload || typeof payload !== 'object') return;
   overlaySnapshotPayloads.set(normalizedId, payload);
-  registerActionAssociation(payload.snapshot?.actionId, normalizedId);
+  adoptActionAssociation(payload.snapshot?.actionId, normalizedId);
   const runtime = getOverlayRuntimeState(normalizedId);
   if (!runtime) return;
   const win = overlayWindows.get(normalizedId);
@@ -506,6 +520,7 @@ module.exports = {
   setOverlaySnapshot,
   registerProcessAssociation,
   registerActionAssociation,
+  adoptActionAssociation,
   cleanupMappingsForProcess,
   cleanupMappingsForAction,
   clearActionAssociations,

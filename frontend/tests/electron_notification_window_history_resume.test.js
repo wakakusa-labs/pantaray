@@ -920,3 +920,180 @@ test('closing a conversation Overlay destroys it and releases its Action associa
   assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
 });
+
+// Every run of a Suggestion's Action carries the Suggestion id, follow-ups and replays included.
+const ACTION_EVENT_META = {
+  kind: 'action',
+  suggestion_id: 'S1',
+  process_id: 'P2',
+  action_id: 'A1',
+  command_id: 'CMD1',
+};
+
+function createActionLiveBridge(notificationWindow) {
+  const {
+    createOrchestrationRendererBridge,
+  } = require('../electron/dist/orchestration/orchestrationRendererBridge.js');
+  const mainSent = [];
+  const bridge = createOrchestrationRendererBridge({
+    notificationWindow,
+    getMainWindow: () => ({
+      isDestroyed: () => false,
+      webContents: { send: (channel, payload) => mainSent.push({ channel, payload }) },
+    }),
+    readLatestActionConversationPage: async (actionId) => ({
+      action: {
+        action_id: actionId,
+        suggestion_id: 'S1',
+        status: 'processing',
+        latest_run_id: 'P2',
+        approved_suggestion: null,
+        resumable: false,
+      },
+      runs: [
+        {
+          run_id: 'P2',
+          status: 'running',
+          started_at: '2026-03-08T00:00:01Z',
+          completed_at: null,
+          completion_event_id: null,
+          entries: [],
+          final_output: null,
+          error: null,
+        },
+      ],
+      unadopted_messages: [],
+      next_cursor: null,
+    }),
+    sendFromRenderer: async () => {},
+    requestResume: () => {},
+    getUiLanguage: () => 'en',
+    normalizeId: (value) => (typeof value === 'string' && value.trim() ? value.trim() : null),
+    isConnected: () => true,
+    setConnected: () => {},
+  });
+  return { bridge, mainSent };
+}
+
+function actionProcessStarted() {
+  return {
+    event: 'process_started',
+    data: {
+      kind: 'action',
+      suggestion_id: 'S1',
+      process_id: 'P2',
+      action_id: 'A1',
+      command_id: 'CMD1',
+      accepted_at: '2026-03-08T00:00:00Z',
+      started_at: '2026-03-08T00:00:01Z',
+    },
+    meta: ACTION_EVENT_META,
+  };
+}
+
+function actionToolStep() {
+  return {
+    event: 'action_step',
+    data: {
+      action_id: 'A1',
+      process_id: 'P2',
+      step_kind: 'tool',
+      step_id: 'step-1',
+      step_number: 1,
+      tool_id: 'bash',
+      label: 'Run command',
+      status: 'processing',
+      started_at: '2026-03-08T00:00:02Z',
+      completed_at: null,
+    },
+    meta: { ...ACTION_EVENT_META, logical_run_id: 'P2' },
+  };
+}
+
+function actionApprovalPaused() {
+  return {
+    event: 'process_paused',
+    data: {
+      kind: 'action',
+      process_id: 'P2',
+      status: 'processing',
+      reason: 'approval_pending',
+      suggestion_id: 'S1',
+      action_id: 'A1',
+      command_id: 'CMD1',
+      completed_at: '2026-03-08T00:00:03Z',
+      approval_blockers: [
+        {
+          process_id: 'P2',
+          action_id: 'A1',
+          approval_session_id: 'approval-1',
+          tool_request_id: 'tool-request-1',
+          tool_id: 'bash',
+          intent_class: 'write_outside_workspace',
+          command_summary: {},
+        },
+      ],
+    },
+    meta: ACTION_EVENT_META,
+  };
+}
+
+function liveUpdates(sent) {
+  return sent
+    .filter((entry) => entry.channel === 'action:conversationUpdated')
+    .map((entry) => entry.payload.snapshot);
+}
+
+function openHistoryConversation(notificationWindow, instances) {
+  // conversationOverlay.openActionConversationOverlay binds before it opens.
+  notificationWindow.registerActionAssociation('A1', 'conversation:A1');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const conversationWindow = instances.at(-1);
+  conversationWindow.webContentsEvents.emit('did-finish-load');
+  return conversationWindow;
+}
+
+test('a follow-up from a History conversation keeps its approval in that window, not the Suggestion', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const { bridge, mainSent } = createActionLiveBridge(notificationWindow);
+  const conversationWindow = openHistoryConversation(notificationWindow, instances);
+
+  // The send binds the sender window, then the relay attached from the start delivers the run.
+  notificationWindow.registerActionAssociation('A1', 'conversation:A1');
+  bridge.forwardEventToRenderers(actionProcessStarted());
+  bridge.forwardEventToRenderers(actionApprovalPaused());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
+  assert.equal(liveUpdates(mainSent).at(-1).approvalBlockers.length, 1);
+  assert.equal(liveUpdates(conversationWindow.sent).at(-1).approvalBlockers.length, 1);
+});
+
+test('a History conversation resumed from the start after a restart keeps its progress and approval', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const { bridge } = createActionLiveBridge(notificationWindow);
+  const conversationWindow = openHistoryConversation(notificationWindow, instances);
+
+  // Nothing this session started the run, so the resume replays its process_started.
+  bridge.forwardEventToRenderers(actionProcessStarted());
+  bridge.forwardEventToRenderers(actionToolStep());
+  bridge.forwardEventToRenderers(actionApprovalPaused());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const updates = liveUpdates(conversationWindow.sent);
+  assert.equal(
+    updates.some((snapshot) => snapshot.transientToolSteps.length === 1),
+    true
+  );
+  assert.equal(updates.at(-1).approvalBlockers.length, 1);
+});
+
+test('a server event binds the Action to its Suggestion once the bound window is gone', () => {
+  const { notificationWindow } = loadNotificationWindowModule();
+  const { bridge } = createActionLiveBridge(notificationWindow);
+  notificationWindow.registerActionAssociation('A1', 'conversation:A1');
+
+  bridge.forwardEventToRenderers(actionProcessStarted());
+
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+});

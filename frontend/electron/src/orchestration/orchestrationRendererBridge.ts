@@ -290,7 +290,7 @@ export function createOrchestrationRendererBridge(params: {
           notificationWindow.registerProcessAssociation(processId, suggestionId);
         }
         if (actionId && suggestionId) {
-          notificationWindow.registerActionAssociation(actionId, suggestionId);
+          notificationWindow.adoptActionAssociation(actionId, suggestionId);
         }
       }
     } catch {

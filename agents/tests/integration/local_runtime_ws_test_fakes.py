@@ -40,8 +40,6 @@ def load_test_prompt_config(prompt_name: str) -> PromptConfig:
             prompt="suggestion writer\n{kind}\n{key_point}\n",
             system_instruction="Write one message in {answer_language}.",
         )
-    if prompt_name == "suggestion/suggestion_writer_ja":
-        return PromptConfig(prompt="", system_instruction="Japanese voice.")
     if prompt_name in (
         "suggestion/suggestion_lenses",
         "suggestion/suggestion_selector",

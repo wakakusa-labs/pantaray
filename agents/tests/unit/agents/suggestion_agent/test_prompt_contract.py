@@ -14,7 +14,6 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
-    SUGGESTION_WRITER_VOICE_PROMPT_NAMES,
     build_writer_messages,
 )
 from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
@@ -73,22 +72,16 @@ def test_real_prompt_renders_context_and_answer_language(
 
 @pytest.mark.parametrize("label", ["Japanese", "English"])
 def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None:
-    loader = PromptLoader()
-    voice_name = SUGGESTION_WRITER_VOICE_PROMPT_NAMES.get(label)
     system, prompt = build_writer_messages(
-        loader.load_config(SUGGESTION_WRITER_PROMPT_NAME),
+        PromptLoader().load_config(SUGGESTION_WRITER_PROMPT_NAME),
         {
             "interaction_contract": "action_offer",
             "key_point": "decided-point",
         },
         answer_language=label,
-        voice_instruction=(
-            loader.load_config(voice_name).system_instruction if voice_name else None
-        ),
     )
 
     assert f"natural {label}" in system
-    assert ("## Writing in Japanese" in system) is (label == "Japanese")
     assert "{" not in prompt
     for value in ("offer", "decided-point"):
         assert value in prompt

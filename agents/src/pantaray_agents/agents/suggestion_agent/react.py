@@ -152,10 +152,10 @@ def _terminal_tool() -> LlmToolDefinition:
                     "type": "string",
                     "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
                     "description": (
-                        "The whole suggestion for the writer, in a few short "
-                        "sentences: what it is, why it matters now, the deciding "
-                        "facts, what is unconfirmed and, for an offer, what "
-                        "Pantaray would make or do. Not the finished message."
+                        "The suggestion in a few concise sentences for the user, "
+                        "who has not seen your research: what you suggest, why "
+                        "it matters now, the deciding facts, what is unconfirmed "
+                        "and, for an offer, what Pantaray would do."
                     ),
                 },
                 "suggestion_summary": {"type": ["string", "null"]},

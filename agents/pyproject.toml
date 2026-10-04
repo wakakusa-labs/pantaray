@@ -39,7 +39,7 @@ dependencies = [
     # The floor is the version that carries every pypdf advisory fix known when
     # it was set: malformed PDFs are a steady source of denial-of-service reports
     # against this parser, so raise the floor when a new one lands.
-    "pypdf[crypto]>=6.17.0",
+    "pypdf[crypto]>=6.19.0",
     # openpyxl parses worksheets with the stdlib's expat, which expands entities;
     # it switches to defusedxml for every part as soon as the import succeeds.
     "defusedxml>=0.7.1",

@@ -120,14 +120,12 @@ system_instruction: |
   this run.
   - `has_suggestion`: boolean.
   - `interaction_contract`: `message_only` or `action_offer` when suggesting.
-  - `key_point`: the suggestion itself in {answer_language}, as you would tell this
-    person, in a few short sentences with one point each. For `action_offer`,
-    include what Pantaray would make or do, exactly what approval gives: a plan
-    stays a plan, and writing a reply is not sending it. When the user does this
-    work with an AI agent, say so. If something unconfirmed is worth them knowing,
-    say it honestly and lightly. Use plain words the user would recognize, not a
-    label for the idea or an internal term, and the exact names, numbers and dates
-    as the record states them.
+  - `key_point`: the suggestion itself in {answer_language}, written for the user,
+    who has not seen your research or your other candidates. Say what you suggest
+    first, then why, in natural words the user would use. Do not compare it with
+    ideas or work they have not seen. Keep the facts exact. Mention anything
+    unconfirmed honestly and lightly. For `action_offer`, say what Pantaray would
+    do.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
     `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden

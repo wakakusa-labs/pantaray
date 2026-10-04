@@ -117,11 +117,10 @@ def run_list_executor(
         bounded.skips, max_depth=request.max_depth, depth_limit=LIST_MAX_DEPTH
     )
     if bounded.truncation_reason == "limit":
-        warnings.insert(0, f"Stopped at limit={request.limit} entries; more exist.")
-        hints.insert(
-            0,
-            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}) or list a narrower "
-            "path; to page through one directory, read it with offset.",
+        warnings.append(f"Stopped at limit={request.limit} entries; more exist.")
+        hints.append(
+            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}), list a narrower "
+            "path, or page through one directory with read and offset."
         )
     return UnprojectedBrokerToolOutcome(
         status="success",

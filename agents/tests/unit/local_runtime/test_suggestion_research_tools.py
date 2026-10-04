@@ -599,7 +599,7 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
     (root / "big.log").write_bytes(b"x\n" * (1024 * 1024) + b"needle late\n")
     (root / "blob.bin").write_bytes(b"needle\0")
     (root / "latin1.txt").write_bytes(b"needle caf\xe9\n")
-    (root / "wide.txt").write_text("x" * (1024 * 1024 + 9) + " needle\n")
+    (root / "wide.txt").write_text("x" * 8 * 1024 * 1024 + " needle\nneedle 2\n")
     (root / "link.txt").symlink_to(root / "big.log")
     reader = ReadOnlyFileAccess(
         roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
@@ -615,13 +615,8 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
         max_matches=10,
     )
 
-    assert [entry["name"] for entry in listed["entries"]] == [  # type: ignore[index]
-        "big.log",
-        "blob.bin",
-        "docs",
-        "latin1.txt",
-        "wide.txt",
-    ]
+    names = [entry["name"] for entry in listed["entries"]]  # type: ignore[index]
+    assert names == ["big.log", "blob.bin", "docs", "latin1.txt", "wide.txt"]
     assert "1 listed director(y/ies) at max_depth=1 were not opened" in str(
         listed["warning"]
     )
@@ -630,9 +625,9 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
         {"path": "big.log", "line_number": 1024 * 1024 + 1, "line": "needle late"},
         {"path": "docs/deep/note.txt", "line_number": 1, "line": "needle deep"},
         {"path": "latin1.txt", "line_number": 1, "line": "needle caf\ufffd"},
-        {"path": "wide.txt", "line_number": 1, "line": "x" * 9 + " needle"},
+        {"path": "wide.txt", "line_number": 2, "line": "needle 2"},
     ]
-    assert "1 line(s) longer than 1,048,576 characters" in str(grepped["warning"])
+    assert "1 line(s) longer than 8,388,608 characters" in str(grepped["warning"])
     assert "1 binary file(s) also match" in str(grepped["warning"])
     assert "blob.bin" in str(grepped["warning"])
 

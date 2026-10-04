@@ -29,9 +29,10 @@ _WORKSPACE_FILE_POLICY_ERROR = (
     "workspace path is missing, not a regular file, or uses a symlink"
 )
 SEARCH_TIMEOUT_SECONDS = 5.0
-# Design limit: a longer line is searched in parts of this many characters, so a
-# file without newlines cannot exhaust memory; a match across parts is missed.
-GREP_LINE_PART_CHARS = 1024 * 1024
+# Design limit: a longer line is not searched, so a file without newlines
+# cannot exhaust memory; such lines are counted and reported.
+GREP_MAX_SEARCHED_LINE_CHARS = 8 * 1024 * 1024
+_GREP_READ_CHARS = 1024 * 1024
 
 type DescriptorTruncationReason = Literal["limit", "timeout"]
 
@@ -43,14 +44,12 @@ class WorkspaceDescriptorEntry(NamedTuple):
 
 @dataclass(slots=True)
 class WorkspaceScanSkips:
-    """What a scan passed over without a word in its entries."""
-
     symlinks: int = 0
     unreadable: int = 0
     first_unreadable_error: str | None = None
     # Listed directories at max_depth, whose contents were not walked.
     unexpanded_directories: int = 0
-    split_lines: int = 0
+    unsearched_lines: int = 0
 
 
 class WorkspaceDescriptorScan(NamedTuple):
@@ -254,32 +253,42 @@ def _matching_lines(
     deadline: float,
     skips: WorkspaceScanSkips,
 ) -> Generator[tuple[int, str, int, bool], None, None]:
-    # Yields each matching line with whether the file has shown a NUL byte yet.
+    # Each matching line, and whether the file has shown a NUL byte by then.
     with open(
         descriptor, encoding="utf-8", errors="replace", newline="", closefd=False
     ) as handle:
         binary = False
-        line_number, matched, split = 1, 0, 0
-        while part := handle.readline(GREP_LINE_PART_CHARS):
+        line_number = 0
+        while True:
+            parts: list[str] | None = []
+            while part := handle.readline(_GREP_READ_CHARS):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                if parts is not None:
+                    parts.append(part)
+                    if sum(map(len, parts)) > GREP_MAX_SEARCHED_LINE_CHARS:
+                        parts = None
+                if part.endswith("\r") and len(part) == _GREP_READ_CHARS:
+                    # The read stopped between the \r and \n of one line end.
+                    position = handle.tell()
+                    if handle.read(1) != "\n":
+                        handle.seek(position)
+                if part.endswith(("\n", "\r")):
+                    break
+            if parts == []:
+                return
+            line_number += 1
+            if parts is None:
+                skips.unsearched_lines += 1
+                continue
+            body = "".join(parts).rstrip("\r\n")
+            binary = binary or "\0" in body
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
-            line_ends = part.endswith(("\n", "\r"))
-            cut = not line_ends and len(part) == GREP_LINE_PART_CHARS
-            if cut and split != line_number:
-                skips.split_lines += 1
-                split = line_number
-            binary = binary or "\0" in part
-            body = part.rstrip("\r\n")
-            found = (
-                None
-                if matched == line_number
-                else expression.search(body, timeout=remaining)
-            )
+            found = expression.search(body, timeout=remaining)
             if found is not None:
-                matched = line_number
                 yield line_number, body, found.start(), binary
-            line_number += line_ends
 
 
 def matches_workspace_glob(path: str, pattern: str) -> bool:
@@ -376,8 +385,7 @@ def scan_skip_notes(
 ) -> tuple[list[str], list[str]]:
     """Warnings and retry hints for what a scan passed over."""
 
-    warnings: list[str] = []
-    hints: list[str] = []
+    warnings, hints = [], []
     if skips.unexpanded_directories:
         warnings.append(
             f"{skips.unexpanded_directories} listed director(y/ies) at "
@@ -386,11 +394,11 @@ def scan_skip_notes(
         hints.append(
             f"Raise max_depth (up to {depth_limit}) or list one of them to see inside."
         )
-    if skips.split_lines:
+    if skips.unsearched_lines:
         warnings.append(
-            f"{skips.split_lines} line(s) longer than {GREP_LINE_PART_CHARS:,} "
-            "characters were searched in parts of that size; a match across two "
-            "parts is not found."
+            f"{skips.unsearched_lines} line(s) longer than "
+            f"{GREP_MAX_SEARCHED_LINE_CHARS:,} characters were not searched; read "
+            "such a line with offset and column."
         )
     if skips.symlinks:
         warnings.append(
@@ -400,8 +408,7 @@ def scan_skip_notes(
     if skips.unreadable:
         warnings.append(
             f"{skips.unreadable} path(s) could not be read and were skipped, with "
-            "anything under them. First error: "
-            f"{skips.first_unreadable_error}."
+            f"anything under them. First error: {skips.first_unreadable_error}."
         )
     return warnings, hints
 

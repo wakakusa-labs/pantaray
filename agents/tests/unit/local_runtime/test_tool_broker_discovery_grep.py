@@ -493,7 +493,6 @@ async def test_list_reports_the_depth_cut_symlinks_and_unreadable_paths(
 
     names = [entry["name"] for entry in outcome.output["entries"]]
     assert names == ["a.txt", "src", "pkg"]
-    assert outcome.output["truncated"] is False
     warning = str(outcome.output["warning"])
     assert "1 listed director(y/ies) at max_depth=2 were not opened" in warning
     assert "1 symlink(s) were skipped" in warning

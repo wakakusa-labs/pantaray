@@ -81,6 +81,8 @@ _ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
         "byte_size": {"type": "integer", "minimum": 0},
         "character_count": {"type": "integer", "minimum": 0},
         "line_count": {"type": "integer", "minimum": 1},
+        "preview": {"type": "string"},
+        "retry_hint": {"type": "string"},
     },
 }
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {

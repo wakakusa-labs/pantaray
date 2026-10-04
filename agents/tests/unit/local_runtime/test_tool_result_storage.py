@@ -136,19 +136,29 @@ def test_large_unicode_result_is_stored_with_exact_metadata(tmp_path: Path) -> N
     assert result.output_json["byte_size"] == len(history_text.encode("utf-8"))
     assert result.output_json["character_count"] == len(history_text)
     assert result.output_json["line_count"] == history_text.count("\n") + 1
+    assert result.output_json["preview"] == history_text[:1_000]
+    assert f"path={relative_path.as_posix()}" in result.output_json["retry_hint"]
+    assert "offset=" in result.output_json["retry_hint"]
     assert "sha256" not in result.output_json
     assert result.search_text is None
     assert result.stdout_text is None
     assert result.stderr_text is None
     release_stored_tool_result(result)
 
-    loaded = load_action_file_json_result(
-        action_tool_results_path=tmp_path,
-        invocation_id="large-result",
-        metadata=result.output_json,
-        max_bytes=result.output_json["byte_size"],
-    )
-    assert loaded == output
+    # A result spilled before previews existed still loads.
+    without_preview = {
+        key: value
+        for key, value in result.output_json.items()
+        if key not in {"preview", "retry_hint"}
+    }
+    for metadata in (result.output_json, without_preview):
+        loaded = load_action_file_json_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="large-result",
+            metadata=metadata,
+            max_bytes=result.output_json["byte_size"],
+        )
+        assert loaded == output
 
 
 def test_action_file_json_load_is_bounded(tmp_path: Path) -> None:

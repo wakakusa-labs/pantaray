@@ -182,6 +182,18 @@ def pipe_table(
     return lines, cut
 
 
+def table_cut_notes(cut: bool) -> tuple[str, ...]:
+    """The note a cut table needs: no start_unit reaches the cells it dropped."""
+
+    if not cut:
+        return ()
+    return (
+        f"Tables longer than {MAX_TABLE_ROWS} rows or wider than "
+        f"{MAX_TABLE_COLUMNS} columns are cut where the text says [table cut ...]; "
+        "read cannot reach the rest, so read such a table with run_python.",
+    )
+
+
 def stored_value_text(value: object) -> str:
     """One stored value as the model reads it, not as its application shows it.
 
@@ -341,5 +353,6 @@ __all__ = [
     "continuation_note",
     "pipe_table",
     "resolve_start_unit",
+    "table_cut_notes",
     "stored_value_text",
 ]

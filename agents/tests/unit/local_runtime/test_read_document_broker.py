@@ -328,6 +328,33 @@ async def test_docx_cell_spanning_past_the_table_cap_is_cut_not_expanded(
         )
     )
     assert outcome.output["truncated"] is True
+    assert any("read cannot reach the rest" in note for note in outcome.output["notes"])
+    assert "Part of this document was left out" in outcome.output["retry_hint"]
+
+
+@pytest.mark.asyncio
+async def test_docx_reads_text_inside_content_controls(tmp_path: Path) -> None:
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    document = Document()
+    document.add_paragraph("before")
+    block = document.add_paragraph("in a block control")._p
+    sdt, content = OxmlElement("w:sdt"), OxmlElement("w:sdtContent")
+    block.addprevious(sdt)
+    sdt.append(content)
+    content.append(block)
+    inline_sdt, inline_content = OxmlElement("w:sdt"), OxmlElement("w:sdtContent")
+    paragraph = document.add_paragraph("Name: ")
+    paragraph._p.append(inline_sdt)
+    inline_sdt.append(inline_content)
+    inline_content.append(paragraph.add_run("Ada")._r)
+    document.save(context.workspace_path / "form.docx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "form.docx"}
+    )
+
+    assert outcome.output["content"] == "before\nin a block control\nName: Ada\n"
+    assert outcome.output["total_units"] == 3
 
 
 @pytest.mark.asyncio

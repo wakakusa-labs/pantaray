@@ -22,6 +22,7 @@ from .document_model import (
     ExtractedDocument,
     pipe_table,
     resolve_start_unit,
+    table_cut_notes,
 )
 
 _HEADING_STYLE: Final = re.compile(r"heading\s*([1-9])", re.IGNORECASE)
@@ -41,7 +42,8 @@ _DOCX_NOTES: Final = (
 
 def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     document = Document(source)
-    total_units = len(document.paragraphs)
+    blocks = list(_body_blocks(document.element.body))
+    total_units = sum(block.tag == qn("w:p") for block in blocks)
     start = resolve_start_unit(
         start_unit, total_units=total_units, unit_kind="paragraph"
     )
@@ -53,14 +55,12 @@ def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     paragraphs = 0
     tables = 0
     table_cut = False
-    for block in document.element.body.iterchildren():
+    for block in blocks:
         is_paragraph = block.tag == qn("w:p")
         if is_paragraph:
             paragraphs += 1
-        elif block.tag == qn("w:tbl"):
-            tables += 1
         else:
-            continue
+            tables += 1
         # A table sits between paragraphs, so it is read as part of the
         # paragraph it follows: a read resuming at a later paragraph skips it
         # because the read that reached that paragraph already carried it.
@@ -89,12 +89,37 @@ def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
         next_start_unit=budget.next_start_unit,
         outline=tuple(outline),
         images=tuple(images),
-        notes=(*_DOCX_NOTES, *budget.notes()),
+        notes=(*_DOCX_NOTES, *table_cut_notes(table_cut), *budget.notes()),
     )
 
 
+def _body_blocks(container: BaseOxmlElement) -> Iterator[BaseOxmlElement]:
+    """Paragraphs and tables in reading order, including those a block-level
+    content control (``w:sdt``) wraps."""
+
+    for child in container.iterchildren():
+        if child.tag in (qn("w:p"), qn("w:tbl")):
+            yield child
+        elif child.tag == qn("w:sdt"):
+            for content in child.iterchildren(qn("w:sdtContent")):
+                yield from _body_blocks(content)
+
+
+def _inline_text(container: BaseOxmlElement) -> str:
+    """A paragraph's text as python-docx reads it, plus inline content controls."""
+
+    parts: list[str] = []
+    for child in container.iterchildren():
+        if child.tag in (qn("w:r"), qn("w:hyperlink")):
+            parts.append(child.text or "")
+        elif child.tag == qn("w:sdt"):
+            for content in child.iterchildren(qn("w:sdtContent")):
+                parts.append(_inline_text(content))
+    return "".join(parts)
+
+
 def _paragraph_line(paragraph: Paragraph) -> str:
-    text = paragraph.text
+    text = _inline_text(paragraph._p)
     if not text.strip():
         return ""
     style = (paragraph.style.name or "") if paragraph.style is not None else ""

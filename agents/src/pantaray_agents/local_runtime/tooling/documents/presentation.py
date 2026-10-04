@@ -38,6 +38,7 @@ from .document_model import (
     pipe_table,
     resolve_start_unit,
     stored_value_text,
+    table_cut_notes,
 )
 
 # python-pptx renders a soft line break inside a paragraph as a vertical tab.
@@ -141,7 +142,12 @@ def extract_pptx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
         outline=tuple(outline),
         images=tuple(images),
         charts=tuple(charts),
-        notes=(*_PPTX_NOTES, *_unread_chart_note(unread_charts), *budget.notes()),
+        notes=(
+            *_PPTX_NOTES,
+            *_unread_chart_note(unread_charts),
+            *table_cut_notes(table_cut),
+            *budget.notes(),
+        ),
     )
 
 

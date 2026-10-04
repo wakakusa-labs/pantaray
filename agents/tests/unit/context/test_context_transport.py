@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpcore2
+import httpx
 import httpx2
 import pytest
 from httpcore2._backends.anyio import AnyIOBackend, AnyIOStream
@@ -405,10 +406,14 @@ async def test_scoped_success_uses_real_http1_and_restores_scope(post, monkeypat
         with source_transport.source_scope(gate, source):
             response = await post(url)
         assert_success(response)
-        seconds = 180.0 if post is llm_post else 30.0
-        assert timeouts == [
-            dict.fromkeys(("connect", "read", "write", "pool"), seconds)
-        ]
+        # An LLM may think silently for minutes; httpx applies `read` per socket
+        # read, so it bounds that silence and never a response still arriving.
+        expected = (
+            {"connect": 10.0, "read": 250.0, "write": 250.0, "pool": 250.0}
+            if post is llm_post
+            else dict.fromkeys(("connect", "read", "write", "pool"), 30.0)
+        )
+        assert timeouts == [expected]
         assert requests[0][0].startswith(b"POST / HTTP/1.1\r\n")
         assert b"Authorization: Bearer test-token\r\n" in requests[0][0]
         await revoke(gate)
@@ -540,7 +545,7 @@ async def sdk_post(url, *, max_requests=2):
         reasoning_effort="medium",
     )
     async with source_transport.source_http_client(
-        "alice", timeout_seconds=180, max_requests=max_requests
+        "alice", timeout=httpx.Timeout(180), max_requests=max_requests
     ) as http_client:
         sdk = AsyncOpenAI(
             api_key="test-key",

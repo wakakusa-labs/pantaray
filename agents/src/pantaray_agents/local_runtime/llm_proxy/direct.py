@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TypedDict
 
+import httpx
 from openai import AsyncOpenAI
 
 from pantaray_agents.local_runtime.context.source_transport import source_http_client
@@ -24,7 +25,10 @@ from pantaray_agents.local_runtime.llm_proxy.response_parsing import (
     read_optional_int,
     read_optional_string,
 )
-from pantaray_agents.local_runtime.llm_proxy.transport import LLM_PROXY_TIMEOUT_SECONDS
+from pantaray_agents.local_runtime.llm_proxy.transport import (
+    LLM_CONNECT_TIMEOUT_SECONDS,
+    LLM_IDLE_TIMEOUT_SECONDS,
+)
 from pantaray_agents.local_runtime.llm_proxy.types import (
     LocalLlmProxyResultMeta,
     ProxyResponse,
@@ -67,6 +71,10 @@ from pantaray_llm.providers.openai_responses.transport import (
     chatgpt_codex_transport,
     fireworks_transport,
     openai_api_transport,
+)
+
+_PROVIDER_TIMEOUT = httpx.Timeout(
+    LLM_IDLE_TIMEOUT_SECONDS, connect=LLM_CONNECT_TIMEOUT_SECONDS
 )
 
 
@@ -131,7 +139,7 @@ async def _dispatch(
             provider="anthropic", model=connection.model, request=request
         )
         async with source_http_client(
-            user_id, timeout_seconds=LLM_PROXY_TIMEOUT_SECONDS, max_requests=1
+            user_id, timeout=_PROVIDER_TIMEOUT, max_requests=1
         ) as http_client:
             return await execute_anthropic_request(
                 request=request,
@@ -148,7 +156,7 @@ async def _dispatch(
     )
     async with source_http_client(
         user_id,
-        timeout_seconds=LLM_PROXY_TIMEOUT_SECONDS,
+        timeout=_PROVIDER_TIMEOUT,
         # api.openai.com prices an input-token preflight and sends it as a
         # second POST ahead of the inference request; the others send once.
         max_requests=2 if transport.supports_input_token_count else 1,

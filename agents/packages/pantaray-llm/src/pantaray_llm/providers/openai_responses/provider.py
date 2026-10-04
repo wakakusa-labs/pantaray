@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import cast
 
+import httpx
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.responses.response import Response
 from openai.types.responses.response_create_params import (
@@ -79,7 +80,10 @@ from pantaray_llm.providers.openai_responses.tool_use import (
 from pantaray_llm.providers.openai_responses.transport import (
     OpenAiResponsesTransport,
 )
-from pantaray_llm.providers.response_error import enrich_provider_error
+from pantaray_llm.providers.response_error import (
+    enrich_provider_error,
+    transport_failure_error,
+)
 from pantaray_llm.providers.schema_compiler import (
     ProviderSchemaCompilationError,
     ProviderSchemaDecodeError,
@@ -347,6 +351,13 @@ async def execute_openai_request(
     except (OpenAIError, ValueError, RuntimeError) as exc:
         # The SDK raises RuntimeError for missing or out-of-order SSE events.
         raise map_openai_exception(request=request, provider=provider, exc=exc) from exc
+    except httpx.TransportError as exc:
+        # The SDK wraps transport failures only until the response head arrives.
+        # A stream that stalls or drops after that raises httpx's own exception
+        # here, before any of its events has reached the caller.
+        raise transport_failure_error(
+            exc, details=openai_request_details(request=request, provider=provider)
+        ) from exc
 
     response_id = response.id if isinstance(response.id, str) else None
     usage_payload = _extract_usage_payload(response)

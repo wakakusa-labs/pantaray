@@ -158,7 +158,7 @@ async def source_http_request(
 async def source_http_client(
     user_id: str,
     *,
-    timeout_seconds: float,
+    timeout: httpx.Timeout,
     max_requests: int = 1,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Lend a provider an HTTP client tracked through every send and client close."""
@@ -168,7 +168,7 @@ async def source_http_client(
             request.extensions.update(options.get("extensions", {}))
 
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=timeout,
             http1=True,
             http2=False,
             follow_redirects=False,

@@ -15,7 +15,13 @@ from pantaray_agents.local_runtime.llm_proxy.response_parsing import (
 )
 from pantaray_llm.errors import PROXY_REQUEST_FAILED, LlmProxyExecutionError
 
-LLM_PROXY_TIMEOUT_SECONDS = 180.0
+# httpx applies `read` to each socket read, so this bounds the silence between
+# bytes, never a long response that keeps arriving. A reasoning model can stay
+# silent for minutes before its first event.
+LLM_IDLE_TIMEOUT_SECONDS = 250.0
+# A host that has not accepted the connection by now is not going to; failing
+# fast hands the request to the caller's retry.
+LLM_CONNECT_TIMEOUT_SECONDS = 10.0
 
 
 async def post_request(
@@ -32,7 +38,9 @@ async def post_request(
             read_optional_string(metadata_mapping, "user_id")
         ) as options:
             async with httpx2.AsyncClient(
-                timeout=httpx2.Timeout(LLM_PROXY_TIMEOUT_SECONDS),
+                timeout=httpx2.Timeout(
+                    LLM_IDLE_TIMEOUT_SECONDS, connect=LLM_CONNECT_TIMEOUT_SECONDS
+                ),
                 http1=True,
                 http2=False,
                 follow_redirects=False,

@@ -177,13 +177,7 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
                   isPending(workspacePendingKey.folderDelete(folderId))
                 }
               />
-            ) : (
-              <div className="workspace-detail-body">
-                <p className="workspace-detail-description">
-                  {t('settings.workspace.description')}
-                </p>
-              </div>
-            )}
+            ) : null}
           </>
         )}
       </section>

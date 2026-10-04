@@ -7,7 +7,7 @@ import type { MessageKey } from '@/i18n/types';
 import { CommandNetworkSettingsSection } from './CommandNetworkSettingsSection';
 
 const translate = (key: MessageKey) => MESSAGES.ja[key];
-const title = 'ファイル変換・集計・コード実行でネット接続を許可';
+const title = 'コマンド実行時のネット接続を許可';
 
 function installApi() {
   const api = {

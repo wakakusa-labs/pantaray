@@ -209,24 +209,23 @@ def load_action_subagent_transcript(
 def build_action_subagent_conversation(
     entries: Sequence[ActionSubagentTranscriptEntry],
     *,
+    assigned_task: str,
     repair_notice: str | None,
-) -> LlmConversation | None:
+) -> LlmConversation:
     """Lay the same transcript out as provider-neutral conversation items.
 
     A prompt cache reads only what the previous request already sent as an exact
     prefix, so the turn the child sends has to grow by appending: the request's
-    own message is the assigned task and never changes, and these items are the
-    rows behind it, which are final the moment they are appended.
+    own message is the parent's context and never changes, the assigned task is
+    the first item, and the rest are the rows behind it, which are final the
+    moment they are appended.
 
     ``repair_notice`` is the retry feedback for one attempt. It goes last and is
     never recorded, so the turn after a repair appends to the request that
     preceded the notice rather than rewriting it.
-
-    ``None`` means there is nothing to send beside the request's own message,
-    which is the only way to say so: an empty conversation is invalid.
     """
 
-    items: list[LlmTurnItem] = []
+    items: list[LlmTurnItem] = [_text_item(assigned_task)]
     for entry in entries:
         if isinstance(entry, ActionSubagentParentMessage):
             items.append(_text_item(entry.content))
@@ -253,7 +252,7 @@ def build_action_subagent_conversation(
         )
     if repair_notice:
         items.append(_text_item(f"{REPAIR_NOTICE_HEADING}\n{repair_notice}"))
-    return items or None
+    return items
 
 
 def _validate_request(request: ActionSubagentMessageRequest) -> None:

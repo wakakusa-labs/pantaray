@@ -10,7 +10,9 @@ const { zaneiConfig, zaneiSubjectPaths } = require('../electron/dist/context/zan
 const {
   ALWAYS_DENIED_APP_NAMES, ALWAYS_DENIED_BUNDLE_IDS,
 } = require('../electron/dist/privacy/alwaysDeniedCaptureApps');
-const { resolveScopedSettingsPath } = require('../electron/dist/settings/scope');
+const {
+  initializeAccountSettingsScope, resolveScopedSettingsPath,
+} = require('../electron/dist/settings/scope');
 
 function fixture(t, overrides = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-zanei-test-'));
@@ -40,8 +42,8 @@ function fixture(t, overrides = {}) {
     resume: async () => { calls.push('resume'); report = { ...report, paused: false }; } };
   const manager = createScreenshotSyncManager({
     isMac: true, userDataDir: dir, getMainWindow: () => null,
-    getNotificationWindow: () => null, isBackendRuntimeReady: () => true,
-    capturePrivacy: privacy, screenshotLib: {}, execPromise: async () => ({ stdout: '' }),
+    isBackendRuntimeReady: () => true,
+    capturePrivacy: privacy,
     getManifestPath: () => manifestPath,
     readSource: async () => { await backendGate; return state; },
     transitionSource: async (user, request) => {
@@ -517,6 +519,26 @@ test('policy conversion renders each filter mode and leaves body scopes at their
   assert.equal(paths.service, `service.${suffix}`);
 });
 
+test('an empty "only these apps" list records no app, unlike an empty exclusion list', t => {
+  const f = fixture(t);
+  const base = f.privacy.getCaptureSettings();
+  // The recorder reads an empty include_only_apps as no restriction; only an explicit
+  // empty allowed_apps denies every app.
+  const recordsNothing = zaneiConfig({ ...base, apps: { mode: 'include_only', entries: [] } });
+  assert.match(recordsNothing, /\[filter\.capture_policy\]\nallowed_apps = \[\]\n\[filter\.capture_policy\.browser\]\n/);
+  const recordsEverything = zaneiConfig({ ...base, apps: { mode: 'exclude', entries: [] } });
+  assert.ok(!recordsEverything.includes('allowed_apps'));
+
+  // Settings that cannot be read fall back to recording nothing through the same path.
+  const settingsPath = resolveScopedSettingsPath({
+    userDataDir: f.dir, userId: 'bob', fileName: 'capture-privacy-settings.json' });
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, '{ this is not json');
+  const unreadable = createCapturePrivacyManager({
+    userDataDir: f.dir, initialUserId: 'bob', resolveAppBundleId: () => null });
+  assert.match(zaneiConfig(unreadable.getCaptureSettings()), /\nallowed_apps = \[\]\n/);
+});
+
 /**
  * The recorder's own built-in exclusions cover 1Password and Keychain Access only, so
  * every other password manager stays out of the store solely because the configuration
@@ -621,6 +643,94 @@ test('a start left waiting for permission stores nothing until a later start rec
   assert.equal(await f.manager.start(), 'started');
   assert.equal(f.stored(), true);
   assert.equal(f.enabled(), true);
+});
+
+test('a start is reported once it actually runs, and once per owner in a run', async t => {
+  const starts = [];
+  const f = fixture(t, { onRecordingStarted: userId => starts.push(userId) });
+  f.process.start = async () => { f.calls.push('start'); return {
+    binding: { store_id: 'store', protocol_version: 1 }, permissionsReady: false,
+  }; };
+  // Waiting for macOS permission records nothing yet.
+  assert.equal(await f.manager.start(), 'permission_pending');
+  assert.deepEqual(starts, []);
+  f.setReport({ running: true, permissions_ok: true, paused: false,
+    heartbeat_freshness: 'fresh', store_write_state: 'healthy', degraded: {} });
+  await f.manager.getCaptureStatusSnapshot();
+  assert.deepEqual(starts, ['alice']);
+  f.process.start = async () => { f.calls.push('start'); return {
+    binding: { store_id: 'store', protocol_version: 1 }, permissionsReady: true,
+  }; };
+  // Turning it off and on, and a restart that restores it, ask the runtime nothing new.
+  await f.manager.stop();
+  assert.equal(await f.manager.start(), 'started');
+  await f.manager.pause('signed_out');
+  await f.manager.restoreRecorder();
+  await f.manager.stop();
+  await f.manager.pause('shutdown');
+  await f.manager.restoreRecorder();
+  assert.equal(await f.manager.start(), 'started');
+  assert.deepEqual(starts, ['alice']);
+});
+
+test('recording restored from a stored "on" is reported, since the runtime decides', async t => {
+  // A user who upgrades already has the preference; the runtime sees their data.
+  const starts = [];
+  const f = fixture(t, { onRecordingStarted: userId => starts.push(userId) });
+  f.setStored(true);
+  await f.manager.restoreRecorder();
+  assert.equal(f.manager.getStatus(), true);
+  assert.deepEqual(starts, ['alice']);
+});
+
+test('a recorder restored paused is reported only when the user turns capture on', async t => {
+  const starts = [];
+  const f = fixture(t, { onRecordingStarted: userId => starts.push(userId) });
+  f.setStored(false);
+  await f.manager.restoreRecorder();
+  assert.deepEqual(starts, []);
+  // Lifting the pause in place is the moment capture starts.
+  assert.equal(await f.manager.start(), 'started');
+  assert.deepEqual(starts, ['alice']);
+});
+
+test('an account a guest signs in to is reported although it inherited the guest settings', async t => {
+  const starts = [];
+  const f = fixture(t, { onRecordingStarted: userId => starts.push(userId) });
+  f.manager.setOwner({ id: 'guest-1', kind: 'guest' });
+  assert.equal(await f.manager.start(), 'started');
+  // Signing in copies the guest's settings, recording preference included, to the account.
+  await f.manager.pause('signed_out');
+  initializeAccountSettingsScope({ userDataDir: f.dir, accountUserId: 'bob' });
+  assert.equal(fs.existsSync(resolveScopedSettingsPath({
+    userDataDir: f.dir, userId: 'bob', fileName: 'screenshot-settings.json' })), true);
+  f.manager.setOwner({ id: 'bob', kind: 'account' });
+  await f.manager.restoreRecorder();
+  assert.equal(f.manager.getStatus(), true);
+  assert.deepEqual(starts, ['guest-1', 'bob']);
+});
+
+test('a start hook that fails does not fail the start the user asked for', async t => {
+  const f = fixture(t, { onRecordingStarted: () => { throw new Error('greeting failed'); } });
+  const logged = [];
+  t.mock.method(console, 'error', (...args) => logged.push(args[0]));
+  assert.equal(await f.manager.start(), 'started');
+  assert.equal(f.manager.getStatus(), true);
+  assert.deepEqual(logged, ['Recording start hook failed:']);
+});
+
+test('a failed activation stores nothing and reports no start', async t => {
+  const starts = [];
+  const f = fixture(t, {
+    onRecordingStarted: userId => starts.push(userId),
+    transitionSource: async (_user, request) => request.kind === 'activate'
+      ? { kind: 'conflict', current_epoch: 'other', reason: 'stale_epoch' }
+      : { kind: 'applied', state: { kind: 'stopped', epoch: 'issued', policy_revision: 'p', reason: 'disabled' } },
+  });
+  t.mock.method(console, 'error', () => undefined);
+  await assert.rejects(f.manager.start(), /activation conflict/);
+  assert.equal(f.stored(), false);
+  assert.deepEqual(starts, []);
 });
 
 test('disabling while permission pending stops producer without activating source', async t => {

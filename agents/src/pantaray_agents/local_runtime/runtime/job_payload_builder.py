@@ -29,6 +29,7 @@ def build_action_subagent_job_payload(
         "action_id": params["action_id"],
         "parent_process_id": params["parent_process_id"],
         "inference_profile_id": params["inference_profile_id"],
+        "action_context": params["action_context"],
         "task": params["task"],
         "context_refs": list(params["context_refs"]),
         "resource_claim_ids": list(params["resource_claim_ids"]),

@@ -32,7 +32,6 @@ from pantaray_agents.repositories.action_support.initial_memory_context_contract
     InitialMemoryArtifactFile,
     InitialMemoryContext,
     InitialMemorySourceType,
-    InitialShortTermInsight,
 )
 from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResult
 from pantaray_agents.utils.memory_source_policy import build_short_lookback_range
@@ -66,8 +65,6 @@ class LocalActionRepositoryContextMixin:
         *,
         action_id: str,
         suggestion_id: str | None,
-        short_term_since_iso: str,
-        short_term_limit: int,
     ) -> RepositoryResult[InitialMemoryContext]:
         with self._connect() as connection:
             connection.execute("BEGIN")
@@ -96,18 +93,6 @@ class LocalActionRepositoryContextMixin:
                     experience_head,
                 ),
             )
-            short_rows = connection.execute(
-                """
-                SELECT insight_id, short_term_insight_data, created_at, updated_at
-                FROM agent_insights
-                WHERE user_id = ? AND status = 'success'
-                  AND short_term_insight_data IS NOT NULL
-                  AND TRIM(short_term_insight_data) != '' AND created_at >= ?
-                ORDER BY created_at DESC LIMIT ?
-                """,
-                (user_id, short_term_since_iso, short_term_limit),
-            ).fetchall()
-
             context_records: list[VisibleMemoryRecord] = []
             if suggestion_id is not None:
                 context_records.append(
@@ -132,14 +117,6 @@ class LocalActionRepositoryContextMixin:
                         catalog_source, head.node.source_record_id, label
                     )
                 )
-            context_records.extend(
-                VisibleMemoryRecord(
-                    "short_term_insight",
-                    str(row["insight_id"]),
-                    "recent short-term insight",
-                )
-                for row in short_rows
-            )
             context_epoch = build_record_context_epoch(
                 connection=connection,
                 user_id=user_id,
@@ -171,15 +148,6 @@ class LocalActionRepositoryContextMixin:
         return RepositoryResult(
             data=InitialMemoryContext(
                 insight=insight,
-                short_term_insights=tuple(
-                    InitialShortTermInsight(
-                        insight_id=str(row["insight_id"]),
-                        short_term_insight_data=str(row["short_term_insight_data"]),
-                        created_at=str(row["created_at"]),
-                        updated_at=str(row["updated_at"]),
-                    )
-                    for row in short_rows
-                ),
                 facts=facts,
                 artifacts=tuple(artifacts),
                 context_epoch=serialize_memory_epoch(context_epoch),

@@ -5,6 +5,10 @@ import os
 from unittest.mock import patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    NO_SUGGESTION,
+    prompt_configs,
+)
 
 from pantaray_agents.agents.artifact_react import (
     ReactToolCall,
@@ -20,18 +24,13 @@ from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_TOOL_IDS
 from pantaray_agents.agents.suggestion_agent.research import (
     FixedSuggestionResearchTools,
 )
+from pantaray_agents.agents.suggestion_agent.writer import (
+    SUGGESTION_WRITER_PROMPT_NAME,
+)
 from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.mock_repository import MockRepository
 from pantaray_agents.utils.prompt_loader import PromptConfig
-
-
-def _build_no_suggestion_payload() -> dict[str, object]:
-    return {
-        "has_suggestion": False,
-        "answer": "",
-        "interaction_contract": None,
-    }
 
 
 async def _execute_research_tool(
@@ -91,9 +90,7 @@ def mock_repository() -> MockSuggestionAgentRepository:
 def mock_llm_client() -> MockLLMClient:
     """MockLLMClientのフィクスチャ"""
     client = MockLLMClient()
-    client.responses["suggestion"] = json.dumps(
-        _build_no_suggestion_payload(), ensure_ascii=False
-    )
+    client.responses["suggestion"] = json.dumps(NO_SUGGESTION, ensure_ascii=False)
     return client
 
 
@@ -138,9 +135,15 @@ def suggestion_agent(
         llm_response_str = mock_llm_client.get_response_text(prompt_text)
         return MockLLMResponse(llm_response_str)
 
+    writer_prompt = PromptConfig(
+        prompt="writer: {kind} | {key_point}",
+        system_instruction="Write one message in {answer_language}.",
+    )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(
+            test_prompt, {SUGGESTION_WRITER_PROMPT_NAME: writer_prompt}
+        ),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},

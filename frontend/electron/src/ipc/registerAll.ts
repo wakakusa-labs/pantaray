@@ -16,14 +16,13 @@ import { registerApprovalHandlers } from './handlers/approval';
 import { registerActionFileHandlers } from './handlers/actionFiles';
 import { registerActionHandlers } from './handlers/actions';
 import { registerActionImageHandlers } from './handlers/actionImages';
+import { registerActionAttachmentHandlers } from './handlers/actionAttachments';
 import { registerExternalUrlHandlers } from './handlers/externalUrl';
 import { registerHistoryHandlers } from './handlers/history';
 import { registerOverlayHandlers } from './handlers/overlay';
 import { registerPrivacyHandlers } from './handlers/privacy';
 import { registerScreenshotHandlers } from './handlers/screenshot';
 import { registerShortcutHandlers } from './handlers/shortcut';
-import { registerShareHandlers } from './handlers/share';
-import { registerShareCardHandlers } from './handlers/shareCard';
 import { registerUiLanguageHandlers } from './handlers/uiLanguage';
 import { registerUpdateHandlers } from './handlers/update';
 import { registerWindowHandlers } from './handlers/window';
@@ -49,12 +48,11 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerActionFileHandlers(ctx, registrar);
   registerActionHandlers(ctx, registrar);
   registerActionImageHandlers(ctx, registrar);
+  registerActionAttachmentHandlers(ctx, registrar);
   registerHistoryHandlers(ctx, registrar);
   registerUiLanguageHandlers(ctx, registrar);
   registerUpdateHandlers(ctx, registrar);
   registerScreenshotHandlers(ctx, registrar);
-  registerShareHandlers(ctx, registrar);
-  registerShareCardHandlers(ctx, registrar);
   registerPrivacyHandlers(ctx, registrar);
 
   // send handlers

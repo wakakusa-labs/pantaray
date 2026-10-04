@@ -7,9 +7,9 @@ import stat
 import tempfile
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .agent_experience import (
@@ -398,7 +398,7 @@ def _fail_unrecoverable_intent(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms
     ) as connection:
         with immediate_transaction(connection):
-            now = _now()
+            now = now_utc_iso()
             connection.execute(
                 """
                 INSERT OR IGNORE INTO memory_artifact_deletions(
@@ -525,7 +525,3 @@ def _confined_path(root: Path, relative_path: str) -> Path:
     if candidate == resolved_root or resolved_root not in candidate.parents:
         raise MemoryCatalogIntegrityError("artifact intent path escapes runtime root")
     return candidate
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()

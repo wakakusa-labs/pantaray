@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from pantaray_agents.local_runtime.storage.migrations import MigrationError
 
 TIMESTAMP = "2026-09-08T00:00:00Z"
 CHILD_PROCESS_ID = "process:action-1:child"
+APP_NAME = "Google Chrome"
 
 
 def _announce(db_path: Path, *, process_id: str) -> None:
@@ -30,16 +32,19 @@ def _announce(db_path: Path, *, process_id: str) -> None:
         process_id=process_id,
         tool_request_id="action-1:step-1:1",
         capture_request_id="capture-1",
+        app_name=APP_NAME,
     )
 
 
-def _announced_process_ids(db_path: Path) -> list[str]:
+def _announced(db_path: Path) -> list[tuple[str, str]]:
+    """Each announcement's stream, and the app Electron is asked to capture."""
+
     with sqlite3.connect(db_path) as connection:
         rows = connection.execute(
-            "SELECT process_id FROM process_events WHERE event_name = ?",
+            "SELECT process_id, payload_json FROM process_events WHERE event_name = ?",
             (SCREEN_CAPTURE_REQUESTED_EVENT,),
         ).fetchall()
-    return [str(row[0]) for row in rows]
+    return [(str(row[0]), json.loads(row[1])["app_name"]) for row in rows]
 
 
 def _insert_child_process(db_path: Path) -> None:
@@ -72,7 +77,7 @@ def test_a_subagent_request_is_announced_on_the_root_process_stream(
 
     _announce(db_path, process_id=CHILD_PROCESS_ID)
 
-    assert _announced_process_ids(db_path) == [BROKER_ACTOR_PROCESS_ID]
+    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
 
 
 def test_a_root_request_is_announced_on_its_own_stream(tmp_path: Path) -> None:
@@ -80,7 +85,7 @@ def test_a_root_request_is_announced_on_its_own_stream(tmp_path: Path) -> None:
 
     _announce(db_path, process_id=BROKER_ACTOR_PROCESS_ID)
 
-    assert _announced_process_ids(db_path) == [BROKER_ACTOR_PROCESS_ID]
+    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
 
 
 def test_a_request_from_another_users_process_is_refused(tmp_path: Path) -> None:
@@ -95,8 +100,9 @@ def test_a_request_from_another_users_process_is_refused(tmp_path: Path) -> None
             process_id=BROKER_ACTOR_PROCESS_ID,
             tool_request_id="action-1:step-1:1",
             capture_request_id="capture-1",
+            app_name=APP_NAME,
         )
-    assert _announced_process_ids(db_path) == []
+    assert _announced(db_path) == []
 
 
 @pytest.mark.asyncio

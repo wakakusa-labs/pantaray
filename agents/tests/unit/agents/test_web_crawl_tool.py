@@ -17,6 +17,7 @@ from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentExecutionError,
 )
+from pantaray_llm.profiles import WEB_CRAWL_PAGE_LIMIT
 
 
 def _base_state() -> dict[str, Any]:
@@ -101,6 +102,9 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
     )
 
     assert result.status == "success"
+    assert result.output["retry_hint"].startswith("Returned 2 pages.")
+    assert "may be missing" in result.output["retry_hint"]
+    assert "holds only up to 3 excerpts" in result.output["retry_hint"]
     assert captured["tool_id"] == "web_crawl"
     assert captured["args"] == {
         "url": "https://example.com/docs",
@@ -118,6 +122,7 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
                 "raw_content": "uvwxyz",
             },
         ],
+        "retry_hint": result.output["retry_hint"],
         "response_time": 15.0,
         "meta": {
             "request_id": result.output["meta"]["request_id"],
@@ -127,6 +132,50 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
             "upstream_request_id": "provider-1",
         },
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_count", "coverage"),
+    [
+        (1, "may be missing"),
+        (WEB_CRAWL_PAGE_LIMIT - 1, "may be missing"),
+        (WEB_CRAWL_PAGE_LIMIT, "reached the 50-link limit"),
+    ],
+)
+async def test_web_crawl_never_presents_its_pages_as_the_whole_section(
+    monkeypatch, page_count: int, coverage: str
+) -> None:
+    async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
+        return {
+            "tool_id": "web_crawl",
+            "status": "ok",
+            "request_id": "req-1",
+            "result": {
+                "base_url": "https://example.com/docs",
+                "results": [
+                    {"url": f"https://example.com/{index}", "raw_content": "page"}
+                    for index in range(page_count)
+                ],
+            },
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        _fake_invoke,
+    )
+
+    result = await _run_tool(
+        args={"url": "https://example.com/docs"},
+        state=_base_state(),
+    )
+
+    hint = result.output["retry_hint"]
+    assert result.status == "success"
+    assert hint.startswith(f"Returned {page_count} pages.")
+    assert coverage in hint
+    assert "narrower section URL" in hint
+    assert "excerpts" not in hint
 
 
 @pytest.mark.asyncio

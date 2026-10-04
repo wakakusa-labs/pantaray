@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,7 +24,6 @@ from pantaray_agents.schema.agent.base import JSONValue
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent.agent import ActionAgent
-    from pantaray_agents.agents.action_agent.tools import ToolDefinition
 
 
 class ActionGraphRuntimeCreateInput(BaseModel):
@@ -36,16 +34,6 @@ class ActionGraphRuntimeCreateInput(BaseModel):
     request: ActionAgentRequest
     state_config: ActionAgentStateConfig
     intervening_user_step: ActionResumeUserStep | None
-
-
-def clone_runtime_tool_registry(
-    tool_registry: Mapping[str, ToolDefinition],
-) -> dict[str, ToolDefinition]:
-    return dict(tool_registry)
-
-
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def load_runtime_approval_session_by_request(

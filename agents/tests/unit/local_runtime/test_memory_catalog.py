@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.memory_catalog import (
+    publication as publication_module,
+)
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_draft,
     serialize_memory_draft,
@@ -38,10 +41,15 @@ from pantaray_agents.local_runtime.memory_catalog.publication import (
 from pantaray_agents.local_runtime.memory_catalog.reconciler import (
     reconcile_memory_catalog,
 )
+from pantaray_agents.local_runtime.memory_catalog.repair_queue import RepairJob
+from pantaray_agents.local_runtime.memory_catalog.repair_rollback import (
+    rollback_or_quarantine,
+)
 from pantaray_agents.local_runtime.memory_catalog.repository import (
     ensure_preparing_node,
     list_revision_fragments,
     load_node_by_source,
+    load_revision,
 )
 from pantaray_agents.local_runtime.memory_catalog.resolver import (
     follow_memory_reference,
@@ -499,6 +507,98 @@ def test_reconciler_removes_complete_tag_when_mapping_is_lost(tmp_path: Path) ->
         ).fetchone()[0]
     assert body == "Repeated boundary."
     assert domain_body == body
+
+
+def test_rollback_restores_the_parent_when_revisions_share_a_millisecond(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        publication_module, "now_utc_iso", lambda: "2026-07-18T00:00:00.000Z"
+    )
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        connection.execute(
+            """
+            INSERT INTO agent_suggestions(
+                suggestion_id, user_id, status, prompt_name, prompt_version,
+                created_at, updated_at
+            ) VALUES (
+                'suggestion-1', 'user-1', 'success', 'suggestion', '1.0',
+                '2026-07-18T00:00:00Z', '2026-07-18T00:00:00Z'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO agent_insights(
+                insight_id, user_id, suggestion_id, status,
+                short_term_insight_data, facts, prompt_name, prompt_version,
+                created_at, updated_at
+            ) VALUES (
+                'insight-rollback', 'user-1', 'suggestion-1', 'success',
+                'Third.', '', 'insight', '1.0',
+                '2026-07-18T00:00:00Z', '2026-07-18T00:00:00Z'
+            )
+            """
+        )
+        node = ensure_preparing_node(
+            connection=connection,
+            user_id="user-1",
+            source="short_term_insight",
+            source_record_id="insight-rollback",
+        )
+        revision_ids: list[str] = []
+        # Ascending ids make the tied created_at scan return the oldest first.
+        for number, body in enumerate(("First.", "Second.", "Third."), start=1):
+            revision = publish_inline_revision(
+                connection=connection,
+                request=MemoryPublicationRequest(
+                    source="short_term_insight",
+                    source_record_id="insight-rollback",
+                    revision_id=f"rev_{number}",
+                    draft=create_memory_draft(
+                        user_id="user-1",
+                        owner_node_id=node.node_id,
+                        base_revision_id=revision_ids[-1] if revision_ids else None,
+                        documents=(MemoryDocument("body.md", body),),
+                    ),
+                    body_kind="inline",
+                ),
+            )
+            revision_ids.append(revision.revision_id)
+    head = load_node_by_source(
+        connection=connection,
+        user_id="user-1",
+        source="short_term_insight",
+        source_record_id="insight-rollback",
+    )
+    current = load_revision(
+        connection=connection, user_id="user-1", revision_id=revision_ids[-1]
+    )
+    assert head is not None and current is not None
+
+    rollback_or_quarantine(
+        connection=connection,
+        artifact_root=tmp_path / "artifacts",
+        node=head,
+        current_revision=current,
+        job=RepairJob(
+            user_id="user-1",
+            node_id=head.node_id,
+            detected_revision_id=current.revision_id,
+            reason="revision_integrity",
+            attempt_count=0,
+        ),
+    )
+
+    restored = load_node_by_source(
+        connection=connection,
+        user_id="user-1",
+        source="short_term_insight",
+        source_record_id="insight-rollback",
+    )
+    assert restored is not None
+    assert restored.current_revision_id == revision_ids[1]
 
 
 def test_second_link_uses_parser_to_ignore_existing_tag_with_bracket_note(

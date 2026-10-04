@@ -9,7 +9,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 from pantaray_agents.agents.action_agent.runtime.state import set_status_with_updated_at
 from pantaray_agents.agents.action_agent.runtime.state.types import ActionAgentState
@@ -23,6 +22,7 @@ from pantaray_agents.local_runtime.runtime.action_final_gate import (
     read_action_finalization_blockers,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.utils.trace_context import get_trace_context
 
@@ -220,7 +220,7 @@ async def run_submit_final_answer_tool(
             "Supervisor memory draft differs from the pending final answer."
         )
     _require_settled_action_ownership(state)
-    completed_at = now_iso()
+    completed_at = now_utc_iso()
     state["final_output"] = answer
     state["next_action"] = None
     state.pop("supervisor_pending_final_answer", None)

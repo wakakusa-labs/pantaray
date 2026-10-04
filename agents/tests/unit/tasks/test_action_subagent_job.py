@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from collections.abc import Callable
@@ -55,6 +56,9 @@ from pantaray_agents.local_runtime.tooling.brokering import broker as broker_mod
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    ValidatedCommandRequest,
+)
 from pantaray_agents.local_runtime.tooling.models import (
     ApprovalPreferenceUpsertInput,
     CapabilityGrantCreateInput,
@@ -62,6 +66,9 @@ from pantaray_agents.local_runtime.tooling.models import (
 from pantaray_agents.local_runtime.tooling.repository import (
     create_capability_grant,
     upsert_approval_preference,
+)
+from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    WRITE_FOLDER_REQUEST_HINT,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
@@ -95,6 +102,7 @@ class _Models:
         assert isinstance(config, GenerateContentConfig)
         self.client.profiles.append(str(config.inference_profile))
         self.client.prompts.append(str(kwargs["contents"]))
+        self.client.system_instructions.append(str(config.system_instruction))
         self.client.tool_uses.append(config.tool_use)
         if self.client.on_call is not None:
             self.client.on_call(len(self.client.prompts))
@@ -120,7 +128,7 @@ class _Models:
             )
         )
         return SimpleNamespace(
-            tool_calls=(tool_call,),
+            tool_calls=tool_call if isinstance(tool_call, tuple) else (tool_call,),
             dropped_tool_call_names=(),
             tool_continuation=None,
             usage_metadata=None,
@@ -136,7 +144,8 @@ class _Client:
         failures: int = 0,
         retryable: bool = True,
         on_call: Callable[[int], None] | None = None,
-        calls: tuple[LlmToolCall, ...] = (),
+        # One response per entry; a tuple is one response with several calls.
+        calls: tuple[LlmToolCall | tuple[LlmToolCall, ...], ...] = (),
     ) -> None:
         self.reports = reports
         self.failures = failures
@@ -145,12 +154,17 @@ class _Client:
         self.calls = calls
         self.profiles: list[str] = []
         self.prompts: list[str] = []
+        self.system_instructions: list[str] = []
         self.tool_uses: list[LlmToolUseRequest | None] = []
         self.aio = SimpleNamespace(models=_Models(self))
 
 
 def _running_child(
-    tmp_path: Path, *, profile_id: str, claim_workspace: bool = False
+    tmp_path: Path,
+    *,
+    profile_id: str,
+    claim_workspace: bool = False,
+    task: str = "Inspect the assigned boundary",
 ) -> tuple[Path, ActionSubagentJobPayload]:
     db_path = tmp_path / "runtime.db"
     apply_migrations(db_path, 1_000, load_default_migrations())
@@ -162,7 +176,8 @@ def _running_child(
             "action_id": "action-1",
             "parent_process_id": "parent-process",
             "inference_profile_id": profile_id,
-            "task": "Inspect the assigned boundary",
+            "action_context": "# Workspace Paths\nparent context",
+            "task": task,
             "context_refs": ["conversation:step-1"],
             "resource_claim_ids": ["child-claim"] if claim_workspace else [],
         }
@@ -556,8 +571,8 @@ def test_message_between_turns_rebuilds_the_durable_prompt(
         subagent_job.run_action_subagent_job(payload)
 
     assert len(client.prompts) == 2
-    # Nothing precedes the first turn, and an empty conversation is invalid.
-    assert client.tool_uses[0] is not None and client.tool_uses[0].conversation is None
+    # The first turn already carries the assigned task behind the context.
+    assert _items(client, 0).count("Inspect the assigned boundary") == 1
     assert _items(client, 1).count("Use the corrected evidence") == 1
     assert _results(client, 1) == [("submit_subagent_report", "error")]
     assert "界" not in _items(client, 1)
@@ -1068,6 +1083,51 @@ def test_failed_command_output_stays_bounded_in_the_child_transcript(
     assert len(transcript[0]) < 3 * ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
 
 
+def test_a_likely_denied_write_does_not_tell_the_child_to_request_folders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A subagent's folder request is refused without asking, so the hint the
+    # broker adds for the parent Action would only send it into that refusal.
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _allow_workspace_commands(db_path)
+    stderr = "Error: Operation not permitted (os error 1)\n"
+
+    async def denied_command(**_kwargs: object) -> UnprojectedBrokerToolOutcome:
+        return UnprojectedBrokerToolOutcome(
+            status="error",
+            output={
+                "status": "error",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": stderr,
+                "error": {
+                    "type": "CommandExecutionError",
+                    "message": stderr,
+                    "llm_feedback": WRITE_FOLDER_REQUEST_HINT,
+                    "exit_code": 1,
+                },
+            },
+            stdout_text="",
+            stderr_text=stderr,
+        )
+
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", denied_command)
+    client = _Client(calls=(_BASH_CALL, _REPORT_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert _results(client, 1) == [("bash", "error")]
+    assert "Operation not permitted" in _items(client, 1)
+    assert "additional_write_folders" not in _items(client, 1)
+
+
 def _enqueue_sibling_child(db_path: Path) -> None:
     sibling = build_action_subagent_job_payload(
         {
@@ -1077,6 +1137,7 @@ def _enqueue_sibling_child(db_path: Path) -> None:
             "action_id": "action-1",
             "parent_process_id": "parent-process",
             "inference_profile_id": SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            "action_context": "# Workspace Paths\nparent context",
             "task": "Inspect the sibling boundary",
             "context_refs": [],
             "resource_claim_ids": [],
@@ -1208,26 +1269,31 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
         subagent_job.run_action_subagent_job(payload)
 
     assert len(client.tool_uses) == 3
-    # Nothing precedes the first turn, and an empty conversation is invalid.
-    assert client.tool_uses[0] is not None and client.tool_uses[0].conversation is None
-    second, third = (
-        _conversation(client.tool_uses[1]),
-        _conversation(client.tool_uses[2]),
+    first, second, third = (
+        _conversation(client.tool_uses[index]) for index in range(3)
     )
     # What earns the cache read: the later turn is the earlier one plus items.
+    assert second[: len(first)] == first
     assert third[: len(second)] == second
-    assert len(second) == 3 and len(third) == 5
-    # The request's own message is the task alone, byte for byte on every turn,
-    # so the durable transcript never re-renders into it.
+    assert (len(first), len(second), len(third)) == (1, 4, 6)
+    # The request's own message is the parent's context alone, byte for byte on
+    # every turn, so the durable transcript never re-renders into it.
     assert len(set(client.prompts)) == 1
 
     conversation = client.tool_uses[2].conversation
     assert conversation is not None
     kinds = [item.type for item in conversation]
-    # The parent's message landed while the first turn was still in flight, so
-    # it is ordered by the row it took, ahead of the call that turn went on to
-    # make.
-    assert kinds == ["user", "assistant", "tool_result", "assistant", "tool_result"]
+    # The assigned task comes first. The parent's message landed while the first
+    # turn was still in flight, so it is ordered by the row it took, ahead of
+    # the call that turn went on to make.
+    assert kinds == [
+        "user",
+        "user",
+        "assistant",
+        "tool_result",
+        "assistant",
+        "tool_result",
+    ]
     calls = [
         call for item in conversation if item.type == "assistant" for call in item.calls
     ]
@@ -1246,7 +1312,12 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
         and "broker evidence" in json.dumps(result.output["result"])
         for result in results
     )
-    assert conversation[0].content[0].text == "Use the corrected evidence"
+    assert (
+        conversation[0]
+        .content[0]
+        .text.startswith("# Assigned Task\nInspect the assigned boundary\n")
+    )
+    assert conversation[1].content[0].text == "Use the corrected evidence"
 
 
 def test_the_repair_notice_is_appended_without_touching_what_was_sent(
@@ -1310,3 +1381,356 @@ def test_the_repair_notice_is_appended_without_touching_what_was_sent(
     assert notice.type == "user"
     assert notice.content[0].text.startswith("# Previous Error\n")
     assert "multiple_calls" in notice.content[0].text
+
+
+def test_children_of_one_parent_send_its_context_and_differ_only_in_the_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """同じ親の子どうしは、system と親の先頭まで同じバイト列で、task だけが違う。"""
+
+    sent = []
+    for task in ("Fix module a", "Fix module b"):
+        db_path, payload = _running_child(
+            tmp_path / task.replace(" ", "-"),
+            profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            task=task,
+        )
+        client = _Client()
+        monkeypatch.setattr(
+            subagent_job, "build_local_llm_proxy_client", lambda client=client: client
+        )
+        with bind_local_runtime_db_execution_context(
+            db_path=db_path, busy_timeout_ms=1_000
+        ):
+            subagent_job.run_action_subagent_job(payload)
+        sent.append((client, payload))
+
+    (first, first_payload), (second, _) = sent
+    assert first.system_instructions == [subagent_job._subagent_system_instruction()]
+    assert first.system_instructions == second.system_instructions
+    # The request's own message is the parent's context, byte for byte.
+    assert first.prompts == second.prompts == [str([first_payload["action_context"]])]
+    first_items, second_items = _items(first, 0), _items(second, 0)
+    assert "Fix module a" in first_items and "Fix module a" not in second_items
+    assert "Fix module b" in second_items
+
+
+def test_read_only_calls_of_one_turn_all_run_and_keep_their_own_results(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """読み取りは 1 ターンでまとめて走り、結果は宣言順にそれぞれの呼び出しへ対応する。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    workspace = _workspace(db_path)
+    (workspace / "a.txt").write_text("alpha contents", "utf-8")
+    (workspace / "b.txt").write_text("bravo contents", "utf-8")
+    client = _Client(
+        calls=(
+            (
+                LlmToolCall(call_id="p1", name="read", arguments={"path": "a.txt"}),
+                LlmToolCall(call_id="p2", name="read", arguments={"path": "b.txt"}),
+                # The report must run alone, so this turn answers it as not run.
+                _REPORT_CALL,
+            ),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    first = client.tool_uses[0]
+    assert first is not None and first.max_parallel_tool_calls > 1
+    conversation = client.tool_uses[1].conversation
+    assert conversation is not None
+    calls = [
+        call for item in conversation if item.type == "assistant" for call in item.calls
+    ]
+    results = {
+        item.call_id: item
+        for item in conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    }
+    assert [(call.name, call.arguments.get("path")) for call in calls] == [
+        ("read", "a.txt"),
+        ("read", "b.txt"),
+        ("submit_subagent_report", None),
+    ]
+    outputs = [json.dumps(results[call.call_id].output) for call in calls]
+    assert "alpha contents" in outputs[0] and "bravo" not in outputs[0]
+    assert "bravo contents" in outputs[1] and "alpha" not in outputs[1]
+    assert "TOOL_CALL_NOT_RUN" in outputs[2]
+    assert "must be the only call of its turn" in outputs[2]
+    with sqlite3.connect(db_path) as connection:
+        terminal = connection.execute(
+            "SELECT payload_json FROM process_events "
+            "WHERE process_id='child-process' AND event_name='stream_end'"
+        ).fetchone()
+    assert json.loads(terminal[0]) == {"outcome": "success", "report": "Child report"}
+
+
+def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """変更系 2 件は親と同じく宣言順に 1 件ずつ走る。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _allow_workspace_commands(db_path)
+    running: list[str] = []
+    started: list[str] = []
+
+    async def command(
+        *, request: ValidatedCommandRequest, **_kwargs: object
+    ) -> UnprojectedBrokerToolOutcome:
+        script = request.argv[-1]
+        assert not running, "a changing call started while another was running"
+        running.append(script)
+        started.append(script)
+        await asyncio.sleep(0.01)
+        running.pop()
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={
+                "status": "success",
+                "exit_code": 0,
+                "stdout": script,
+                "stderr": "",
+            },
+        )
+
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", command)
+    client = _Client(
+        calls=(
+            (
+                LlmToolCall(
+                    call_id="c1",
+                    name="bash",
+                    arguments={"command": "echo one", "cwd": "."},
+                ),
+                LlmToolCall(
+                    call_id="c2",
+                    name="bash",
+                    arguments={"command": "echo two", "cwd": "."},
+                ),
+            ),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert len(started) == 2
+    assert "echo one" in started[0] and "echo two" in started[1]
+    assert _results(client, 1) == [("bash", "completed"), ("bash", "completed")]
+
+
+def _patch_call(call_id: str, path: str) -> LlmToolCall:
+    return LlmToolCall(
+        call_id=call_id,
+        name="apply_patch",
+        arguments={
+            "changes": [
+                {
+                    "op": "add",
+                    "path": path,
+                    "new_lines": [path],
+                    "trailing_newline": True,
+                }
+            ]
+        },
+    )
+
+
+@pytest.mark.parametrize("position", ("first", "middle"))
+@pytest.mark.parametrize("decision", ("approved_once", "denied"))
+def test_a_pause_inside_a_turn_answers_every_call_and_runs_none_twice(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    position: str,
+    decision: str,
+) -> None:
+    """ターンの途中で承認待ちになっても、どの呼び出しにも結果か未実行の通知が付く。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    workspace = _workspace(db_path)
+    (workspace / "notes.txt").write_text("read before the edit", "utf-8")
+    # Without a standing approval every edit asks, so the first edit pauses.
+    gated = _patch_call("gated", "gated.txt")
+    later = _patch_call("later", "later.txt")
+    turn = (
+        (gated, later)
+        if position == "first"
+        else (
+            LlmToolCall(
+                call_id="earlier", name="read", arguments={"path": "notes.txt"}
+            ),
+            gated,
+            later,
+        )
+    )
+    client = _Client(calls=(turn,))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+    assert len(client.prompts) == 1
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT approval_session_id,tool_request_id,tool_id FROM approval_sessions"
+        ).fetchone()
+    assert session is not None and session[2] == "apply_patch"
+
+    _decide(db_path, str(session[0]), str(session[1]), decision)
+    resumed = _resume_child(monkeypatch, db_path, payload)
+
+    conversation = resumed.tool_uses[0].conversation
+    assert conversation is not None
+    calls = [
+        call for item in conversation if item.type == "assistant" for call in item.calls
+    ]
+    results = {
+        item.call_id: json.dumps(item.output)
+        for item in conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    }
+    seen = {
+        (call.name, json.dumps(call.arguments, sort_keys=True)): results[call.call_id]
+        for call in calls
+    }
+    # Every call of the turn is answered exactly once in what the model reads.
+    assert len(calls) == len(turn) == len(seen)
+    for requested in turn:
+        answer = seen[(requested.name, json.dumps(requested.arguments, sort_keys=True))]
+        if requested is gated:
+            assert ('"kind": "approval_denied"' in answer) == (decision == "denied")
+            assert "TOOL_CALL_NOT_RUN" not in answer
+        elif requested is later:
+            assert "TOOL_CALL_NOT_RUN" in answer
+            assert "waited for the user's approval" in answer
+        else:
+            assert "read before the edit" in answer
+    assert (workspace / "gated.txt").exists() == (decision == "approved_once")
+    assert not (workspace / "later.txt").exists()
+    # Nothing runs twice: the read once, the gated edit once if allowed.
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT tool_id,COUNT(*) FROM tool_invocations GROUP BY tool_id "
+            "ORDER BY tool_id"
+        ).fetchall() == [
+            *([("apply_patch", 1)] if decision == "approved_once" else []),
+            *([("read", 1)] if position == "middle" else []),
+        ]
+
+
+@pytest.mark.parametrize("report_position", ("first", "last"))
+def test_a_report_mixed_with_other_calls_waits_for_a_turn_of_its_own(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report_position: str
+) -> None:
+    """報告が他の呼び出しと同じターンなら終わらせず、他を実行して報告は出し直させる。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _allow_workspace_commands(db_path)
+    launched: list[str] = []
+
+    async def command(
+        *, request: ValidatedCommandRequest, **_kwargs: object
+    ) -> UnprojectedBrokerToolOutcome:
+        launched.append(request.argv[-1])
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={"status": "success", "exit_code": 0, "stdout": "", "stderr": ""},
+        )
+
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", command)
+    mixed = (
+        (_REPORT_CALL, _BASH_CALL)
+        if report_position == "first"
+        else (_BASH_CALL, _REPORT_CALL)
+    )
+    client = _Client(calls=(mixed, _REPORT_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    # The mixed turn did not end the run; the report alone did, one turn later.
+    assert len(client.prompts) == 2
+    assert len(launched) == 1 and "pwd" in launched[0]
+    conversation = client.tool_uses[1].conversation
+    assert conversation is not None
+    answers = {
+        item.name: json.dumps(item.output)
+        for item in conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    }
+    assert set(answers) == {"bash", "submit_subagent_report"}
+    assert '"status": "completed"' in answers["bash"]
+    assert "TOOL_CALL_NOT_RUN" in answers["submit_subagent_report"]
+    assert "must be the only call of its turn" in answers["submit_subagent_report"]
+    with sqlite3.connect(db_path) as connection:
+        terminal = connection.execute(
+            "SELECT payload_json FROM process_events "
+            "WHERE process_id='child-process' AND event_name='stream_end'"
+        ).fetchone()
+    assert json.loads(terminal[0]) == {"outcome": "success", "report": "Child report"}
+
+
+def test_two_reports_in_one_turn_end_nothing_until_one_comes_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """報告を 2 件出したターンでは終わらず、単独で出し直した報告で終わる。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    first = LlmToolCall(
+        call_id="r1", name="submit_subagent_report", arguments={"report": "Draft"}
+    )
+    corrected = LlmToolCall(
+        call_id="r2", name="submit_subagent_report", arguments={"report": "Corrected"}
+    )
+    client = _Client(calls=((first, corrected), corrected))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert len(client.prompts) == 2
+    answers = [
+        json.dumps(item.output)
+        for item in client.tool_uses[1].conversation or ()
+        if isinstance(item, LlmTurnToolResultItem)
+    ]
+    assert len(answers) == 2
+    assert all(
+        "TOOL_CALL_NOT_RUN" in answer and "send exactly one, alone" in answer
+        for answer in answers
+    )
+    with sqlite3.connect(db_path) as connection:
+        terminal = connection.execute(
+            "SELECT payload_json FROM process_events "
+            "WHERE process_id='child-process' AND event_name='stream_end'"
+        ).fetchone()
+    assert json.loads(terminal[0]) == {"outcome": "success", "report": "Corrected"}

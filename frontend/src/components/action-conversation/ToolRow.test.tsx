@@ -132,7 +132,6 @@ describe('ToolRow', () => {
       },
       items: [run],
       nextCursor: null,
-      output: { lines: [], plaintext: '' },
     };
     render(
       <UiLanguageProvider initialLanguage="en">

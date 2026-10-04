@@ -143,6 +143,7 @@ def _request(
         manifest_id=context.manifest_id,
         origin=ActionToolCallOrigin(llm_step_id=llm_step_id, call_id="call-1"),
         model_selector="gpt-6-luna",
+        action_context="# Workspace Paths\nparent context",
         task="Inspect the assigned boundary",
         context_refs=("conversation:step-1",),
         resource_claims=(ExternalSpawnResourceClaim("workspace", claim_key),),

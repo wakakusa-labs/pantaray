@@ -216,17 +216,13 @@ ZANEI_QUERY_TOOL = ToolDefinition.from_spec(
                     name="event_id",
                     schema={"type": "string", "minLength": 1},
                     required=True,
-                    prompt_type="string",
                     description="event_id from this run's zanei_timeline result.",
-                    llm_order=10,
                 ),
                 field_spec(
                     name="field",
                     schema={"type": "string", "enum": list(ZANEI_EVIDENCE_FIELDS)},
                     required=True,
-                    prompt_type=f"enum[{','.join(ZANEI_EVIDENCE_FIELDS)}]",
                     description="Recorded field to read from that event.",
-                    llm_order=20,
                 ),
                 field_spec(
                     name="start",
@@ -238,12 +234,10 @@ ZANEI_QUERY_TOOL = ToolDefinition.from_spec(
                         "minimum": 0,
                         "maximum": SQLITE_INTEGER_MAX,
                     },
-                    prompt_type="integer",
                     description=(
                         "UTF-8 byte offset to start from. Default 0. Use next_start "
                         "from a previous result to continue truncated text."
                     ),
-                    llm_order=30,
                 ),
             )
         ),

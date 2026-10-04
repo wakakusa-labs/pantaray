@@ -12,8 +12,20 @@
 }
 
 :root {
-  /* 静かなブルーグレー（霧のような空気感 - ポップアップの淡い世界との接続） */
-  --app-background: linear-gradient(180deg, #1a1e24 0%, #161a20 100%);
+  /* Fog: a dark grey-indigo ground with a barely visible haze rising from the bottom edge. */
+  --app-background:
+    radial-gradient(120% 70% at 50% 110%, rgba(150, 166, 194, 0.035), rgba(0, 0, 0, 0) 60%),
+    linear-gradient(180deg, #12161e 0%, #0f131a 45%, #0b0e14 100%);
+  /* Fog tokens for the main window. Light is reserved for what needs attention. */
+  --fog-mist: rgba(170, 186, 212, 0.07);
+  --fog-mist-strong: rgba(170, 186, 212, 0.1);
+  --fog-line: rgba(214, 226, 248, 0.07);
+  --fog-text: #e3e9f4;
+  --fog-text-2: #a4aec1;
+  /* Raised from the mockup's #747f93 so small text keeps 4.5:1 on the fog and popovers. */
+  --fog-text-3: #828da1;
+  --fog-light: #f1f5fc;
+  --fog-popover: #1b2230;
   --text-primary: rgba(255, 255, 255, 0.92);
   --text-secondary: rgba(215, 225, 235, 0.78); /* わずかに冷たい白 */
   --text-muted: rgba(200, 210, 220, 0.45);
@@ -126,6 +138,9 @@ body::-webkit-scrollbar-thumb:hover {
 
 /* Electron overlay window specific styles */
 body.overlay-window {
+  /* The overlay is read at a glance beside other work, so its text runs a size up with looser lines. */
+  --text-body-size: 15px;
+  --text-body-leading: 1.75;
   background: transparent !important;
   overflow: hidden;
   color: #ffffff;
@@ -133,140 +148,6 @@ body.overlay-window {
 
 body.overlay-window #root {
   background: transparent !important;
-}
-
-/* ---- ShareCard capture mode (main-rendered screenshot) ---- */
-html.sharecard-mode,
-body.overlay-window.sharecard-mode {
-  /* stageが背景を担うので、bodyは透明に。html/bodyはBrowserWindow全体を埋める */
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  background: transparent !important;
-  overflow: hidden !important;
-}
-
-body.overlay-window.sharecard-mode #root {
-  width: 100%;
-  height: 100%;
-  background: transparent !important;
-}
-
-body.overlay-window.sharecard-mode * {
-  /* キャプチャ時の揺れ/途中状態を避ける */
-  animation: none !important;
-  transition: none !important;
-}
-
-/* ヘッダーボタン類も含めて撮影する（非表示にしない） */
-
-body.overlay-window.sharecard-mode [data-sharecard-scroll='true'] {
-  max-height: none !important;
-  overflow: visible !important;
-  padding-right: 0 !important;
-  margin-bottom: 0 !important;
-}
-
-body.overlay-window.sharecard-mode [data-sharecard-root='true'] {
-  height: auto !important;
-  max-height: none !important;
-  overflow: visible !important;
-
-  /* AgentOverlayを少し明るく、水色寄りに調整（共有時の映え意識） */
-  /* 重要: 内部のdivが背景を持っている場合に見えなくなるため、内部も透明化する */
-  background: linear-gradient(
-    145deg,
-    rgba(40, 55, 75, 0.98) 0%,
-    rgba(15, 23, 42, 0.98) 100%
-  ) !important;
-
-  /* 共有カードでは影を強化しつつ、内側に水色の光を足す */
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.15),
-    /* 輪郭 */ inset 0 0 40px rgba(56, 189, 248, 0.15),
-    /* 内側の青い光（水色っぽさを強化） */ 0 30px 60px -12px rgba(0, 0, 0, 0.7),
-    /* 濃く深い落ち影 */ 0 50px 100px -20px rgba(15, 23, 42, 0.5) /* 広がる環境影 */ !important;
-  position: relative;
-  z-index: 1; /* ノイズより上に */
-}
-
-/* 内部のコンポーネント背景を透明にして、親のグラデーションを見せる */
-body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
-  background: transparent !important;
-}
-
-.sharecard-stage {
-  --sharecard-card-width-px: 460px;
-  --sharecard-card-margin-px: 32px;
-  /*
-   * ShareCardは「通常のOverlay（横幅 460px）」と同じ折り返し/縦横比で描画する。
-   * stage は BrowserWindow 全体を埋め、card(460px)は中央配置。
-   */
-  width: 100%;
-  min-height: 100%;
-  box-sizing: border-box;
-  /* 余白はflexboxの中央配置で自動確保するため、paddingは0 */
-  padding: 0;
-  position: relative;
-
-  /* Flexboxで上下左右中央配置 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-
-  /* 背景: ダークチタンのような重厚さと、Pantarayの知的な青い光 */
-  background-color: #64748b; /* ベースを少し暗く(Slate-500) */
-  background-image:
-    /* 1. 鋭い光の筋（太さを1.5倍に、控えめに） */
-    linear-gradient(
-      125deg,
-      transparent 35%,
-      rgba(255, 255, 255, 0.15) 48%,
-      rgba(255, 255, 255, 0) 60%
-    ),
-    /* 2. Pantaray Blueの環境光（知性の表現） */
-    radial-gradient(circle at 90% 90%, rgba(56, 189, 248, 0.2) 0%, transparent 60%),
-    /* 3. 深い影（ビネット）で中央のカードに視線を集める */
-    radial-gradient(circle at 50% 50%, transparent 30%, rgba(15, 23, 42, 0.6) 100%),
-    /* 4. ベースグラデーション（金属の質感・赤みなし） */
-    linear-gradient(160deg, #9ca3af 0%, #4b5563 100%);
-
-  /* 光の筋を背景に溶け込ませる */
-  background-blend-mode: overlay, normal, normal, normal;
-}
-
-.sharecard-stage::after {
-  /* 5. 極薄のノイズ（デジタルな密度感・空気感） */
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.5'/%3E%3C/svg%3E");
-  opacity: 0.15; /* 邪魔にならないごく薄いレベル */
-  pointer-events: none;
-  mix-blend-mode: overlay;
-  z-index: 0;
-}
-
-.sharecard-card {
-  /* 通常Overlayの横幅（通知ウィンドウ幅: 460px）と揃える */
-  width: calc(100% - var(--sharecard-card-margin-px) * 2);
-  max-width: var(--sharecard-card-width-px);
-  margin: var(--sharecard-card-margin-px);
-  position: relative;
-  z-index: 1;
-}
-
-/* スクショ時のみ、AgentOverlayを少し明るく水色寄りにする（元のAgentOverlayは変えない） */
-.sharecard-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 16px; /* AgentOverlayの角丸に合わせる */
-  /* 控えめな水色ガラス風オーバーレイ */
-  background: linear-gradient(145deg, rgba(56, 189, 248, 0.1) 0%, rgba(125, 211, 252, 0.06) 100%);
-  pointer-events: none;
-  z-index: 2; /* 内容の上に被せる */
 }
 
 /* ドラッグ専用の透明ヘッダー領域 */
@@ -480,15 +361,6 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   border-radius: 8px;
 }
 
-/* App shell and header */
-.app-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: transparent;
-  overflow: hidden;
-}
-
 /* 起動時（認証状態の解決待ち）の全画面ローディング */
 .app-boot-loading {
   min-height: 100vh;
@@ -497,41 +369,6 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   justify-content: center;
   font-size: var(--text-body-size);
   color: var(--text-secondary);
-}
-
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  padding: var(--space-xl) var(--space-3xl);
-  background: rgba(26, 30, 36, 0.9); /* ベース色に合わせた半透明 */
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-  -webkit-app-region: drag;
-}
-
-.app-header::before,
-.app-header::after,
-.app-header-inner::before,
-.app-header-inner::after {
-  display: none;
-}
-
-.app-header-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2xl);
-}
-
-/* ユーザーボタンと同幅のスペーサーで nav を正確に中央に配置 */
-.app-header-spacer {
-  width: 40px;
-  flex-shrink: 0;
 }
 
 /* ------------------------------
@@ -568,47 +405,7 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   margin: 0 0 var(--space-sm);
 }
 
-.app-header-nav {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex: 1;
-  justify-content: center;
-}
-
-.app-nav-link {
-  padding: var(--space-sm) var(--space-lg);
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  text-decoration: none;
-  color: var(--text-secondary);
-  font-size: var(--text-body-size);
-  font-weight: 500;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  font-family: inherit;
-  line-height: inherit;
-  appearance: none;
-  -webkit-app-region: no-drag;
-}
-
-.app-nav-link:hover {
-  background: var(--surface-bg-hover);
-  color: var(--text-primary);
-}
-
-.app-nav-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.app-nav-link--active {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-}
-
-.app-header-user {
+.app-rail-user {
   position: relative;
   display: flex;
   align-items: center;
@@ -639,10 +436,11 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
 
 .app-user-dropdown {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  /* Opens upward from the bottom of the rail. */
+  bottom: calc(100% + 8px);
+  left: 0;
   min-width: 220px;
-  /* 右上ユーザーメニューは可読性優先で、ほぼ透過しない（背景を見せない） */
+  /* ユーザーメニューは可読性優先で、ほぼ透過しない（背景を見せない） */
   background: rgb(26, 30, 36);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -657,7 +455,7 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
 @keyframes dropdownFadeIn {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -693,42 +491,7 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   color: var(--text-primary);
 }
 
-/* App main content */
-.app-main {
-  flex: 1;
-  padding: var(--space-2xl) var(--space-3xl) var(--space-3xl);
-  display: flex;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.app-surface {
-  width: 100%;
-  max-width: 1200px;
-  flex: 1;
-  min-height: 0;
-  background: transparent;
-  border-radius: 0;
-  padding: 0;
-  border: none;
-  box-shadow: none;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 /* Dashboard styles */
-.dashboard-container {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0;
-  scrollbar-width: none; /* Firefox */
-}
-.dashboard-container::-webkit-scrollbar {
-  display: none; /* Chrome / Electron */
-}
-
 .dashboard-section {
   padding: var(--space-xl) 0;
   border-bottom: 1px solid var(--border-color);
@@ -801,24 +564,6 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   cursor: not-allowed;
 }
 
-.history-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.history-header {
-  padding: var(--space-md) var(--space-lg) var(--space-md) var(--space-lg);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 /* Text fields shared by the history search and the settings page. */
 .history-filter-input,
 .history-filter-select {
@@ -826,11 +571,11 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
   height: 34px;
   width: 100%;
   padding: var(--space-xs) var(--space-sm);
-  background: var(--surface-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  font-size: var(--text-meta-size);
+  background-color: var(--fog-mist);
+  color: var(--fog-text);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 13px;
   font-weight: 400;
   transition: all 0.15s ease;
   -webkit-appearance: none;
@@ -838,14 +583,15 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
 }
 
 .history-filter-input::placeholder {
-  color: var(--text-muted);
+  color: var(--fog-text-3);
 }
 
+/* Colour only, so the select keeps its arrow image. */
 .history-filter-input:focus,
 .history-filter-select:focus {
   outline: none;
   border-color: var(--border-color-hover);
-  background: var(--surface-bg-hover);
+  background-color: var(--fog-mist-strong);
 }
 
 .history-filter-input:disabled,
@@ -895,269 +641,6 @@ body.overlay-window.sharecard-mode [data-sharecard-root='true'] > * {
 .history-filter-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.history-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-meta-size);
-  color: var(--text-muted);
-  background: transparent;
-  border-radius: 0;
-  padding: 0;
-  border: none;
-}
-
-.history-sync-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #34c759;
-  animation: pulse 1.8s infinite;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
-  flex: 1;
-  padding-bottom: 116px;
-  padding-top: var(--space-sm);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-}
-
-.history-capture-panel {
-  background: rgba(29, 33, 39, 0.94);
-  border: 1px solid rgba(125, 171, 220, 0.24);
-  border-radius: 8px;
-  bottom: var(--space-lg);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-  display: grid;
-  gap: 7px;
-  padding: 10px;
-  position: fixed;
-  right: var(--space-xl);
-  width: min(280px, calc(100% - 24px));
-  z-index: 5;
-}
-
-.history-capture-row {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.history-capture-copy {
-  min-width: 0;
-}
-
-.history-capture-title {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.3;
-}
-
-.history-capture-status {
-  color: var(--text-muted);
-  font-size: var(--text-meta-size);
-  line-height: 1.4;
-  margin-top: 2px;
-}
-
-.history-capture-empty,
-.history-capture-error {
-  color: var(--text-muted);
-  font-size: var(--text-meta-size);
-  line-height: 1.45;
-}
-
-.history-capture-error {
-  color: var(--danger-color);
-}
-
-.history-capture-settings-link {
-  align-items: center;
-  align-self: flex-start;
-  background: transparent;
-  border: 0;
-  color: #bcd3ec;
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: var(--text-meta-size);
-  font-weight: 700;
-  gap: 6px;
-  padding: 0;
-}
-
-.history-capture-settings-link:hover {
-  color: var(--text-primary);
-}
-
-.history-capture-settings-link:focus-visible {
-  border-radius: 4px;
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.history-list::-webkit-scrollbar {
-  width: 6px;
-}
-.history-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-.history-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-}
-.history-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.history-item {
-  border-radius: 0;
-  border: none;
-  border-bottom: 1px solid var(--border-color);
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
-  transition: background 0.15s ease;
-}
-
-.history-item:hover {
-  background: var(--surface-bg-hover);
-  box-shadow: none;
-}
-
-/* Settings は行全体クリックではないため、ホバー背景は無効化する */
-.dashboard-container .history-item:hover {
-  background: transparent;
-}
-
-.history-item:last-child {
-  border-bottom: none;
-}
-
-.history-item-button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  /* Hover/クリック領域に余白を持たせ、要素が端まで詰まる“窮屈さ”を軽減 */
-  padding: var(--space-md) var(--space-lg);
-  box-sizing: border-box;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  /* Settings でも使うため、過度な固定高さは持たせない */
-  min-height: 0;
-}
-
-.history-item-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-}
-
-@media (min-width: 768px) {
-  .history-item-body {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    gap: 24px;
-  }
-}
-
-.history-item-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.history-item-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin: 0;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.history-item-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: var(--text-meta-size);
-  letter-spacing: var(--text-meta-tracking);
-  color: var(--text-muted);
-}
-
-.history-item-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-end;
-}
-
-@media (max-width: 767px) {
-  .history-item-status {
-    align-items: flex-start;
-  }
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: var(--text-meta-size);
-  font-weight: 500;
-  border: none;
-}
-
-.badge--success {
-  background: rgba(134, 239, 172, 0.15);
-  color: #bbf7d0;
-}
-
-.badge--warning {
-  background: rgba(253, 216, 53, 0.15);
-  color: #fef08a;
-}
-
-.badge--danger {
-  background: rgba(252, 165, 165, 0.15);
-  color: #fecaca;
-}
-
-.badge--info {
-  background: rgba(125, 211, 252, 0.15);
-  color: #bae6fd;
-}
-
-.badge--neutral {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.5);
 }
 
 .history-loading,

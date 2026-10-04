@@ -1,4 +1,8 @@
-import type { ActionMessageRequest, ActionProjectRef } from '../actions/actionContracts';
+import type {
+  ActionFileAttachment,
+  ActionMessageRequest,
+  ActionProjectRef,
+} from '../actions/actionContracts';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -24,6 +28,7 @@ export type AcceptActionRequest = {
   supplementProjectRefs: ActionProjectRef[];
   approvalMode: 'prompt_each_time' | 'always_allow';
   images: ActionMessageRequest['message']['images'];
+  files?: ActionFileAttachment[];
 };
 
 export type ActionErrorStage =
@@ -106,6 +111,7 @@ export type ExecuteActionClientEvent = {
     supplement_project_refs: AcceptActionRequest['supplementProjectRefs'];
     approval_mode: AcceptActionRequest['approvalMode'];
     images: AcceptActionRequest['images'];
+    files?: AcceptActionRequest['files'];
   };
 };
 
@@ -345,6 +351,7 @@ export type ScreenCaptureRequestedEvent = OrchestrationEventEnvelope<
     action_id: string;
     tool_request_id: string;
     capture_request_id: string;
+    app_name: string;
   }
 >;
 

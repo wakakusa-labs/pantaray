@@ -60,7 +60,7 @@ export function SuggestionDecisionControls({
     </FooterActionGroup>
   );
   return (
-    <DecisionFooter ref={footerRef} $compact={compact} data-sharecard-hide="true">
+    <DecisionFooter ref={footerRef} $compact={compact}>
       <SuggestionInputDisclosure
         label={t('overlay.supplement.label')}
         inputRef={decision.inputRef}

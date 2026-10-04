@@ -104,17 +104,26 @@ class SuggestionPromptInsightItem(TypedDict, total=False):
     confidence: float
 
 
+class SuggestionDecidedContent(TypedDict):
+    """What the decision run decided to say: the writer's only input."""
+
+    interaction_contract: SuggestionInteractionContract
+    key_point: str
+
+
 class SuggestionExtraction(TypedDict):
     """LLM抽出結果（内部処理用）。
 
     - thinking: 提案に至った思考プロセス（best-effort、取得できない場合はNone）。
-    - answer: LLMが返した最終提案テキスト（提案なしの場合は空文字）。
+    - answer: 利用者に見せる提案文。判断の時点では空で、文面の LLM 呼び出しが埋める。
+    - decided: 判断が決めた伝える中身（提案なしの場合は None）。
     - has_suggestion: 提案有無（True: 提案あり, False: 提案なし）。
     - interaction_contract: 提案の操作契約（提案なしの場合は None）。
     """
 
     thinking: str | None
     answer: str
+    decided: SuggestionDecidedContent | None
     suggestion_summary: str | None
     target_context: SuggestionTargetContext | None
     prompt_text: str
@@ -123,18 +132,30 @@ class SuggestionExtraction(TypedDict):
     interaction_contract: SuggestionInteractionContract | None
 
 
+class SuggestionCandidate(BaseModel):
+    """判断中に検討した候補と、その扱い。診断用で利用者には見せない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate: str = Field(description="候補の短い説明")
+    decision: Literal["suggested", "skipped"] = Field(
+        description="提案したか見送ったか"
+    )
+    reason: str = Field(description="提案・見送りの短い理由")
+
+
 class SuggestionStructuredOutput(BaseModel):
     """Suggestion LLM の JSON-only 出力。"""
 
     model_config = ConfigDict(extra="forbid")
 
     has_suggestion: bool = Field(description="提案の有無")
-    answer: str = Field(
-        max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-        description="提案本文。提案なしの場合は空文字列",
-    )
     interaction_contract: SuggestionInteractionContract | None = Field(
         default=None, description="提案の操作契約"
+    )
+    key_point: str = Field(
+        max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
+        description="利用者に伝える提案の中身すべて（何か・なぜ今か・決め手の事実・未確認の点・承認で行うこと）。提案なしの場合は空文字列",
     )
     suggestion_summary: str | None = Field(
         description=(
@@ -143,6 +164,10 @@ class SuggestionStructuredOutput(BaseModel):
     )
     target_context: SuggestionTargetContext | None = Field(
         description="対象 organization / project。判断できない場合は null",
+    )
+    # Stored with the raw response for diagnosing why a run stayed quiet.
+    candidates: list[SuggestionCandidate] = Field(
+        default_factory=list, description="検討した候補と扱い（診断用）"
     )
 
 
@@ -169,6 +194,10 @@ class SuggestionHistoryEntry(BaseModel):
     )
     action_result: str | None = Field(
         default=None, description="対応する Action の最後に成功したターンの最終出力"
+    )
+    action_followups: list[str] = Field(
+        default_factory=list,
+        description="Action の途中でユーザーが送った指示（古い順、最初の依頼を除く）",
     )
 
 

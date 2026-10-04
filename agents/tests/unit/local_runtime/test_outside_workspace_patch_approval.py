@@ -151,8 +151,7 @@ async def test_outside_workspace_patch_asks_in_every_approval_mode(
                 "summary_kind": "apply_patch",
                 "target_paths": [str(target)],
                 "outside_workspace": {
-                    "folder_path": str(outside),
-                    "folder_display_name": outside.name,
+                    "folders": [{"path": str(outside), "display_name": outside.name}],
                     "can_allow_for_conversation": True,
                 },
             },
@@ -308,7 +307,7 @@ async def test_protected_paths_stay_hard_denied(tmp_path: Path, outside: Path) -
         "symlink escape from the workspace": "escape/notes.txt",
         "tool results through an outside link": str(outside / "results-link/x.txt"),
         "memory storage": str(memory_users / "notes.txt"),
-        "app database folder": str(tmp_path / "notes.txt"),
+        "app database folder": str(db_path.parent / "notes.txt"),
         "missing parent folder": str(outside / "missing/notes.txt"),
     }
     for index, (label, path) in enumerate(denied_paths.items()):

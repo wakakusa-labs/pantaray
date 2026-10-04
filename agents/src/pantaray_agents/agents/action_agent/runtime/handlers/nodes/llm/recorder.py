@@ -60,6 +60,7 @@ async def record_llm_step(
     checkpoint_state: ActionAgentState | None = None,
     llm_turn: ActionLlmTurnCommit | None = None,
     turn_context: str | None = None,
+    world_state: dict[str, str] | None = None,
     provider_turn: ActionProviderTurnRecord | None = None,
 ) -> None:
     """LLM ステップを DB と state.history_by_scope に同時反映する。
@@ -93,6 +94,7 @@ async def record_llm_step(
         args=args,
         short_step_id=short_step_id,
         turn_context=turn_context,
+        world_state=world_state,
     )
     history_entries = [
         build_assistant_history_entry(message, phase=phase)

@@ -26,6 +26,12 @@ const EDGE_FADE_PX = 22;
 /** 帯の最外周の不透明度。ここから `EDGE_FADE_PX` 内側で完全な不透明に戻る。 */
 const EDGE_FADE_ALPHA = 0.58;
 
+/**
+ * 明るいティントの上に一様に重ねる暗さ。白い本文の読みやすさのために面全体を少しだけ沈める。
+ * 縁の透け方（`EDGE_FADE_ALPHA`）は変えない。
+ */
+const SHADE_ALPHA = 0.12;
+
 /** 帯を折れ線で近似するときの分割数。曲線の折れ目が見えない程度に細かくする。 */
 const EDGE_FADE_SEGMENTS = 8;
 
@@ -107,13 +113,13 @@ export const PopupContainer = styled.div<{
   &::before {
     content: '';
     position: absolute;
-    /* ShareCard capture overrides parent clipping, so this layer owns its rounded edge. */
     inset: -${TINT_BLEED_PX}px;
     clip-path: inset(${TINT_BLEED_PX}px round ${PANEL_RADIUS_PX}px);
     mask-image: ${edgeFadeMask(TINT_BLEED_PX)};
     mask-composite: intersect;
     background-image: ${(props) =>
-      `linear-gradient(135deg,
+      `linear-gradient(rgba(6, 10, 18, ${SHADE_ALPHA}), rgba(6, 10, 18, ${SHADE_ALPHA})),
+        linear-gradient(135deg,
           rgba(228, 240, 255, 0.20),
           rgba(170, 205, 245, 0.10),
           rgba(205, 228, 255, 0.14)
@@ -125,7 +131,7 @@ export const PopupContainer = styled.div<{
       if (ms <= 0) return 'none';
       return `opacity ${ms}ms cubic-bezier(0.25, 0.1, 0.25, 1)`;
     }};
-    background-size: auto, cover;
+    background-size: auto, auto, cover;
     background-position: center;
     background-repeat: no-repeat;
     filter: none;

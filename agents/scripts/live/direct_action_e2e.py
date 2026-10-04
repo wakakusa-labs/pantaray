@@ -205,19 +205,22 @@ async def approve_pending_tools(
     """Approve exactly what the renderer's approval panel would approve."""
     for event in session.of("process_paused"):
         data = event.get("data") or {}
-        approval_session_id = str(data.get("approval_session_id") or "")
-        if not approval_session_id or approval_session_id in session.approved:
-            continue
-        session.approved.add(approval_session_id)
-        await client.post(
-            f"/v1/agents/users/{owner_id}/actions/{action_id}/approvals",
-            json={
-                "decision": "approved_once",
-                "process_id": str(data.get("process_id") or ""),
-                "tool_request_id": str(data.get("tool_request_id") or ""),
-                "approval_session_id": approval_session_id,
-            },
-        )
+        # ProcessPausedMessage carries every pending approval in approval_blockers.
+        for blocker in data.get("approval_blockers") or []:
+            approval_session_id = str(blocker["approval_session_id"])
+            if approval_session_id in session.approved:
+                continue
+            session.approved.add(approval_session_id)
+            response = await client.post(
+                f"/v1/agents/users/{owner_id}/actions/{action_id}/approvals",
+                json={
+                    "decision": "approved_once",
+                    "process_id": str(blocker["process_id"]),
+                    "tool_request_id": str(blocker["tool_request_id"]),
+                    "approval_session_id": approval_session_id,
+                },
+            )
+            response.raise_for_status()
 
 
 async def submit_action(

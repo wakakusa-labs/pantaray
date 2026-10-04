@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import secrets
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
@@ -17,20 +19,28 @@ DEFAULT_MEMORY_SQL_LIMIT = 100
 MAX_MEMORY_SQL_LIMIT = 200
 MAX_MEMORY_SQL_CELL_CHARS = 4_000
 MAX_MEMORY_SQL_OUTPUT_CHARS = 30_000
-MEMORY_SQL_PROGRESS_HANDLER_OPCODES = 1_000
-MEMORY_SQL_MAX_PROGRESS_CALLBACKS = 20_000
+# Opens the text appended to a cell cut at MAX_MEMORY_SQL_CELL_CHARS, so the cut
+# cannot be mistaken for the stored text ending there.
+MEMORY_SQL_CELL_CUT_MARKER = "[memory_sql cut:"
+# SQLite checks the progress handler only at jumps (about once per row), so a
+# smaller interval stops a query with heavy per-row expressions closer to the
+# deadline. At 100 a plain table scan pays about 10% for the callbacks.
+MEMORY_SQL_PROGRESS_HANDLER_OPCODES = 100
+# Seconds. One query runs on a worker thread; this bounds how long it holds it.
+MEMORY_SQL_MAX_SECONDS = 10.0
+# Bytes. Caps every string or blob SQLite builds, so a query cannot inflate a cell
+# (nested hex(), replace()) to gigabytes before the cell truncation runs. Real
+# stores stay well below this; a stored value above it fails even length(x).
+MEMORY_SQL_MAX_VALUE_BYTES = 4 * 1024 * 1024
+# SQLite materializes a whole result row, so the worst row is this many columns
+# times MEMORY_SQL_MAX_VALUE_BYTES. The largest legitimate row, SELECT * over all
+# seven allowed tables joined, has 135 columns.
+MEMORY_SQL_MAX_COLUMNS = 200
+# Bytes. The progress handler cannot interrupt a row's expressions between jumps,
+# so this caps how many heavy calls one statement can chain and keeps that overrun
+# finite. Queries the model writes are far shorter.
+MEMORY_SQL_MAX_SQL_BYTES = 20_000
 _SQL_IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
-_SQL_SCHEMA_QUALIFIER_PATTERN = re.compile(
-    r"\b(?:main|temp|sqlite_master|sqlite_temp_master)\s*\.",
-    re.IGNORECASE,
-)
-_SQL_CTE_NAME_PATTERN = re.compile(
-    r"(?:\bWITH\b|,)\s*(?:RECURSIVE\s+)?"
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\)\s*)?\bAS\s*\(",
-    re.IGNORECASE,
-)
-_SQL_FORBIDDEN_SCHEMA_TOKEN = "pragma"
-_PRIVATE_VIEW_PREFIX = "__memory_sql_"
 
 MEMORY_SQL_ALLOWED_TABLES = frozenset(
     {
@@ -40,6 +50,7 @@ MEMORY_SQL_ALLOWED_TABLES = frozenset(
         "agent_facts",
         "agent_insights",
         "agent_suggestions",
+        "source_records",
     }
 )
 
@@ -51,6 +62,7 @@ _MEMORY_SQL_USER_SCOPED_TABLES = frozenset(
         "agent_facts",
         "agent_insights",
         "agent_suggestions",
+        "source_records",
     }
 )
 
@@ -104,7 +116,6 @@ def run_local_memory_sql(
     *,
     user_id: str,
     sql: str,
-    params: list[JSONValue] | None,
     limit: int,
 ) -> RepositoryResult[MemorySqlPayload]:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
@@ -113,7 +124,6 @@ def run_local_memory_sql(
         busy_timeout_ms=busy_timeout_ms,
         user_id=user_id,
         sql=sql,
-        params=params,
         limit=limit,
     )
 
@@ -124,7 +134,6 @@ def execute_memory_sql(
     busy_timeout_ms: int,
     user_id: str,
     sql: str,
-    params: list[JSONValue] | None,
     limit: int,
 ) -> RepositoryResult[MemorySqlPayload]:
     normalized_user_id = user_id.strip()
@@ -134,12 +143,10 @@ def execute_memory_sql(
     validated_sql = _validate_sql(normalized_sql)
     if isinstance(validated_sql, str):
         return _validation_error(validated_sql)
-    normalized_params = _normalize_params(params or [])
-    if isinstance(normalized_params, str):
-        return _validation_error(normalized_params)
     normalized_limit = _normalize_limit(limit)
 
     notes: list[str] = []
+    timed_out = False
     try:
         with _connect_read_only(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms
@@ -149,12 +156,12 @@ def execute_memory_sql(
                 user_id=normalized_user_id,
                 table_names=validated_sql["referenced_tables"],
             )
-            progress_count = 0
+            deadline = time.monotonic() + MEMORY_SQL_MAX_SECONDS
 
             def _progress_handler() -> int:
-                nonlocal progress_count
-                progress_count += 1
-                return int(progress_count > MEMORY_SQL_MAX_PROGRESS_CALLBACKS)
+                nonlocal timed_out
+                timed_out = time.monotonic() > deadline
+                return int(timed_out)
 
             observed_base_reads: set[str] = set()
             conn.set_authorizer(
@@ -167,31 +174,34 @@ def execute_memory_sql(
                 _progress_handler,
                 MEMORY_SQL_PROGRESS_HANDLER_OPCODES,
             )
-            cursor = conn.execute(normalized_sql, tuple(normalized_params))
+            cursor = conn.execute(normalized_sql)
             columns = [description[0] for description in cursor.description or ()]
-            raw_rows = cursor.fetchmany(normalized_limit + 1)
             if not observed_base_reads:
                 return _validation_error(
                     "memory_sql: query must read at least one allowed memory table."
                 )
+            serialized = _serialize_rows(
+                cursor=cursor,
+                columns=columns,
+                limit=normalized_limit,
+                notes=notes,
+            )
     except sqlite3.DatabaseError as exc:
+        if timed_out:
+            return _validation_error(
+                "memory_sql rejected query: it ran longer than "
+                f"{MEMORY_SQL_MAX_SECONDS:g} seconds. Read fewer rows (WHERE, "
+                "LIMIT) or compute less per row."
+            )
         return _validation_error(f"memory_sql rejected query: {exc}")
 
-    truncated = len(raw_rows) > normalized_limit
-    serialized = _serialize_rows(
-        columns=columns,
-        raw_rows=raw_rows[:normalized_limit],
-        notes=notes,
-    )
     rows = serialized["rows"]
-    if serialized["truncated"] or len(rows) < min(len(raw_rows), normalized_limit):
-        truncated = True
     return RepositoryResult(
         data={
             "columns": columns,
             "rows": rows,
             "row_count": len(rows),
-            "truncated": truncated,
+            "truncated": serialized["truncated"],
             "notes": notes,
         }
     )
@@ -200,6 +210,9 @@ def execute_memory_sql(
 def _connect_read_only(*, db_path: str, busy_timeout_ms: int) -> sqlite3.Connection:
     uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
+    conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MEMORY_SQL_MAX_VALUE_BYTES)
+    conn.setlimit(sqlite3.SQLITE_LIMIT_COLUMN, MEMORY_SQL_MAX_COLUMNS)
+    conn.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, MEMORY_SQL_MAX_SQL_BYTES)
     conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
     conn.row_factory = sqlite3.Row
     return conn
@@ -212,9 +225,13 @@ def _install_user_scoped_temp_views(
     table_names: frozenset[str],
 ) -> _ScopedViewPlan:
     user_id_literal = _quote_sql_literal(user_id)
+    # The authorizer lets a main table be read only from inside its private view,
+    # identified by the innermost view name SQLite reports. A CTE name is reported
+    # the same way, so the name must be one the query cannot guess.
+    private_view_nonce = secrets.token_hex(16)
     private_view_base_tables: dict[str, frozenset[str]] = {}
     for table_name in sorted(table_names & _MEMORY_SQL_USER_SCOPED_TABLES):
-        private_view_name = _private_view_name(table_name)
+        private_view_name = f"memory_sql_{private_view_nonce}_{table_name}"
         private_view_base_tables[private_view_name] = frozenset({table_name})
         conn.execute(
             f"""
@@ -251,10 +268,6 @@ def _install_public_scoped_view(
     )
 
 
-def _private_view_name(table_name: str) -> str:
-    return f"{_PRIVATE_VIEW_PREFIX}{table_name}"
-
-
 def _quote_identifier(identifier: str) -> str:
     escaped = identifier.replace('"', '""')
     return f'"{escaped}"'
@@ -282,18 +295,6 @@ def _validate_sql(sql: str) -> _ValidatedSql | str:
     first_token = first_token_match.group(0).casefold()
     if first_token not in {"select", "with"}:
         return "memory_sql: only SELECT or WITH ... SELECT is allowed."
-    if _SQL_SCHEMA_QUALIFIER_PATTERN.search(masked_sql):
-        return "memory_sql: schema-qualified table names are not allowed."
-    identifiers = _extract_sql_identifiers(masked_sql)
-    if _SQL_FORBIDDEN_SCHEMA_TOKEN in identifiers or any(
-        identifier.startswith("sqlite_") for identifier in identifiers
-    ):
-        return "memory_sql: sqlite internal schema access is not allowed."
-    if any(identifier.startswith(_PRIVATE_VIEW_PREFIX) for identifier in identifiers):
-        return "memory_sql: internal memory_sql view names are not allowed."
-    cte_names = _extract_cte_names(masked_sql)
-    if cte_names & MEMORY_SQL_ALLOWED_TABLES:
-        return "memory_sql: CTE names must not shadow memory tables."
     referenced_tables = _extract_referenced_memory_tables(masked_sql)
     if not referenced_tables:
         return "memory_sql: query must reference at least one allowed memory table."
@@ -378,12 +379,6 @@ def _extract_sql_identifiers(sql: str) -> frozenset[str]:
     )
 
 
-def _extract_cte_names(sql: str) -> frozenset[str]:
-    return frozenset(
-        match.group(1).casefold() for match in _SQL_CTE_NAME_PATTERN.finditer(sql)
-    )
-
-
 def _extract_referenced_memory_tables(sql: str) -> frozenset[str]:
     identifiers = _extract_sql_identifiers(sql)
     return frozenset(
@@ -391,15 +386,6 @@ def _extract_referenced_memory_tables(sql: str) -> frozenset[str]:
         for table_name in MEMORY_SQL_ALLOWED_TABLES
         if table_name.casefold() in identifiers
     )
-
-
-def _normalize_params(params: list[JSONValue]) -> list[JSONValue] | str:
-    normalized: list[JSONValue] = []
-    for param in params:
-        if isinstance(param, (list, dict)):
-            return "memory_sql: params may only contain scalar JSON values."
-        normalized.append(param)
-    return normalized
 
 
 def _normalize_limit(limit: int) -> int:
@@ -464,31 +450,67 @@ def _is_private_view_base_read(
 
 def _serialize_rows(
     *,
+    cursor: sqlite3.Cursor,
     columns: list[str],
-    raw_rows: list[sqlite3.Row],
+    limit: int,
     notes: list[str],
 ) -> _SerializedRows:
+    # Rows are serialized as they are fetched so only one raw row is held at a time.
     rows: list[dict[str, JSONValue]] = []
     output_chars = 0
-    truncated = False
-    for raw_row in raw_rows:
+    cut_columns: dict[str, None] = {}
+    limit_notes: list[str] = []
+    for raw_row in cursor:
+        if len(rows) == limit:
+            limit_notes.append(_row_limit_note(limit))
+            break
         row: dict[str, JSONValue] = {}
+        row_cut_columns: list[str] = []
         for column in columns:
-            value, cell_truncated = _serialize_value(raw_row[column])
-            if cell_truncated:
-                truncated = True
+            value, cell_cut = _serialize_value(raw_row[column], column=column)
             output_chars += len(str(value))
-            if output_chars > MAX_MEMORY_SQL_OUTPUT_CHARS:
-                notes.append(
-                    "memory_sql output was truncated by total character limit."
-                )
-                return {"rows": rows, "truncated": True}
             row[column] = value
+            if cell_cut:
+                row_cut_columns.append(column)
+        if output_chars > MAX_MEMORY_SQL_OUTPUT_CHARS:
+            limit_notes.append(_output_limit_note(len(rows)))
+            break
         rows.append(row)
-    return {"rows": rows, "truncated": truncated}
+        cut_columns.update(dict.fromkeys(row_cut_columns))
+    if cut_columns:
+        limit_notes.append(
+            f"Cells longer than {MAX_MEMORY_SQL_CELL_CHARS:,} characters in "
+            f"{', '.join(cut_columns)} were cut; each ends with a "
+            f"{MEMORY_SQL_CELL_CUT_MARKER} ...] marker that says how to read the rest."
+        )
+    notes.extend(limit_notes)
+    return {"rows": rows, "truncated": bool(limit_notes)}
 
 
-def _serialize_value(value: object) -> tuple[JSONValue, bool]:
+def _row_limit_note(limit: int) -> str:
+    raise_limit = (
+        f" limit can be raised to {MAX_MEMORY_SQL_LIMIT}."
+        if limit < MAX_MEMORY_SQL_LIMIT
+        else ""
+    )
+    return (
+        f"Stopped at limit={limit} rows; more rows matched and were not read. "
+        f"Read the next page with LIMIT {limit} OFFSET {limit} in the SQL (with "
+        "ORDER BY so pages are stable), narrow the WHERE clause, or SELECT "
+        f"COUNT(*) for the total.{raise_limit}"
+    )
+
+
+def _output_limit_note(row_count: int) -> str:
+    return (
+        f"Stopped after {row_count} rows: the output reached the "
+        f"{MAX_MEMORY_SQL_OUTPUT_CHARS:,}-character limit, so later rows were not "
+        "read. Select fewer or shorter columns, for example substr(column, 1, "
+        f"500), or continue with OFFSET {row_count} in the SQL."
+    )
+
+
+def _serialize_value(value: object, *, column: str) -> tuple[JSONValue, bool]:
     if value is None or isinstance(value, bool | int | float):
         return value, False
     if isinstance(value, bytes):
@@ -496,7 +518,13 @@ def _serialize_value(value: object) -> tuple[JSONValue, bool]:
     text = str(value)
     if len(text) <= MAX_MEMORY_SQL_CELL_CHARS:
         return text, False
-    return f"{text[: MAX_MEMORY_SQL_CELL_CHARS - 3]}...", True
+    omitted = len(text) - MAX_MEMORY_SQL_CELL_CHARS
+    return (
+        f"{text[:MAX_MEMORY_SQL_CELL_CHARS]}{MEMORY_SQL_CELL_CUT_MARKER} {omitted:,} more "
+        f"characters not shown; read them with substr({column}, "
+        f"{MAX_MEMORY_SQL_CELL_CHARS + 1})]",
+        True,
+    )
 
 
 def _validation_error(message: str) -> RepositoryResult[MemorySqlPayload]:
@@ -509,9 +537,12 @@ def _validation_error(message: str) -> RepositoryResult[MemorySqlPayload]:
 
 __all__ = [
     "DEFAULT_MEMORY_SQL_LIMIT",
+    "MAX_MEMORY_SQL_CELL_CHARS",
     "MAX_MEMORY_SQL_LIMIT",
+    "MAX_MEMORY_SQL_OUTPUT_CHARS",
     "MEMORY_SQL_ALLOWED_TABLES",
     "MEMORY_SQL_BLOCKED_FUNCTIONS",
+    "MEMORY_SQL_CELL_CUT_MARKER",
     "MemorySqlPayload",
     "execute_memory_sql",
     "run_local_memory_sql",

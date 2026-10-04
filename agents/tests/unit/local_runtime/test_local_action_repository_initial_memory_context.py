@@ -177,8 +177,6 @@ async def test_initial_memory_context_resolves_three_catalog_heads(
         USER_ID,
         action_id="action-1",
         suggestion_id="suggestion-1",
-        short_term_since_iso="2026-07-17T00:00:00Z",
-        short_term_limit=5,
     )
 
     assert result.data is not None
@@ -230,8 +228,6 @@ async def test_initial_memory_context_skips_categories_without_a_head(
         USER_ID,
         action_id="action-1",
         suggestion_id="suggestion-1",
-        short_term_since_iso="2026-07-17T00:00:00Z",
-        short_term_limit=5,
     )
 
     assert result.data is not None
@@ -261,8 +257,6 @@ async def test_initial_memory_context_ignores_other_users_heads(
         USER_ID,
         action_id="action-1",
         suggestion_id="suggestion-1",
-        short_term_since_iso="2026-07-17T00:00:00Z",
-        short_term_limit=5,
     )
 
     assert result.data is not None

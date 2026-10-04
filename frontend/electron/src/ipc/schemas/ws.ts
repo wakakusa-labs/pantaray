@@ -9,7 +9,11 @@
  */
 
 import { z } from 'zod';
-import { ActionMessageRequestSchema, ActionProjectRefsSchema } from '../../actions/actionContracts';
+import {
+  ActionFileAttachmentsSchema,
+  ActionMessageRequestSchema,
+  ActionProjectRefsSchema,
+} from '../../actions/actionContracts';
 
 import {
   isActionSupplementWithinLimit,
@@ -106,5 +110,6 @@ export const AcceptActionRequestSchema = z
     supplementProjectRefs: ActionProjectRefsSchema,
     approvalMode: z.enum(['prompt_each_time', 'always_allow']),
     images: ActionMessageRequestSchema.shape.message.shape.images,
+    files: ActionFileAttachmentsSchema.optional(),
   })
   .strict();

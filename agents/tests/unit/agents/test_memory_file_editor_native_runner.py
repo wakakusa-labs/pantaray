@@ -960,3 +960,40 @@ async def _completed_awaitable() -> None:
 
 async def _record_step(recorded: list[ReactLoopStep], step: ReactLoopStep) -> None:
     recorded.append(step)
+
+
+@pytest.mark.asyncio
+async def test_memory_editor_returns_the_requests_completed_reports_applied(
+    tmp_path: Path,
+) -> None:
+    async def call_llm(
+        prompt: str,
+        tools: tuple[LlmToolDefinition, ...],
+        continuation: LlmToolContinuation | None,
+        tool_result: LlmToolResult | None,
+    ) -> LlmToolCallTurn:
+        del prompt, continuation, tool_result
+        completed = next(tool for tool in tools if tool.name == "completed")
+        assert completed.parameters["required"] == ["applied_memory_requests"]
+        return _turn(
+            "completed",
+            {"applied_memory_requests": ["R2"]},
+            call_id="call-completed",
+            with_continuation=False,
+        )
+
+    result = await run_memory_file_editor(
+        MemoryFileEditorRunInput(
+            run_id="run-applied-requests",
+            tool_result_directory_fd=_tool_result_directory(tmp_path),
+            tool_definitions=(),
+            build_prompt=lambda _results, _error: "prompt",
+            call_llm=call_llm,
+            record_step=lambda _step: _completed_awaitable(),
+            policy=ReactLoopPolicy(max_llm_turns=2, max_tool_calls=1),
+            memory_request_ids=("R1", "R2"),
+        )
+    )
+
+    assert result.loop_result.status == "success"
+    assert result.applied_memory_request_ids == ("R2",)

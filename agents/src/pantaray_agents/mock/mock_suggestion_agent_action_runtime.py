@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import UTC, datetime
 from typing import Any
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from ..action_status import ACTION_STATUS_SUCCESS, FinalizeActionTerminalCommand
 from ..repositories.suggestion_runtime_results import (
@@ -72,7 +73,7 @@ class MockSuggestionAgentActionRuntimeMixin:
                 "sequence": next_sequence,
                 "event_name": event_name,
                 "payload": payload,
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": now_utc_iso(),
             },
         )
         return RepositoryResult(

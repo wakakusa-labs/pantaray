@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.memory_catalog.resolver import (
     follow_memory_reference,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
@@ -35,7 +36,6 @@ from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 from .validation import validate_tool_args
 
@@ -171,7 +171,7 @@ def _required_int(args: ToolArgs, name: str) -> int:
 def _result(
     *, step_id: str, tool_def: ToolDefinition, payload: JSONValue
 ) -> UnprojectedToolExecutionResult:
-    timestamp = now_iso()
+    timestamp = now_utc_iso()
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,

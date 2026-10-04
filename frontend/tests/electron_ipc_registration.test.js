@@ -114,14 +114,11 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
     privacy: {
       getCaptureSettings: () => ({ mode: 'allow_only', apps: [] }),
       updateCaptureSettings: (next) => next,
-      getActiveAppName: async () => 'DummyApp',
-      getActiveWindowInfo: async () => ({ name: 'DummyApp', title: 'DummyTitle' }),
       getBrowserUrlRules: () => ({ mode: 'all_sites' }),
       getIdeFileRules: () => ({ mode: 'on' }),
       setCaptureEditing: (v) => Boolean(v),
       updateBrowserUrlRules: (next) => next,
       updateIdeFileRules: (next) => next,
-      getActiveBrowserUrl: async () => ({ url: null, appName: null, error: null }),
     },
     externalUrl: {
       open: async (_rawUrl) => {},
@@ -147,7 +144,6 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
       createNotificationIpcHandlers: (options) => {
         overlayFactoryCalls.push(options);
         return {
-          onShowNotification: () => {},
           onResizeNotificationWindow: () => {},
           onNotificationActionAccept: () => {},
           onNotificationActionReject: () => {},
@@ -265,14 +261,11 @@ test('IPC registration: window:move rejects invalid payload', async () => {
     privacy: {
       getCaptureSettings: () => ({}),
       updateCaptureSettings: (next) => next,
-      getActiveAppName: async () => null,
-      getActiveWindowInfo: async () => null,
       getBrowserUrlRules: () => ({}),
       getIdeFileRules: () => ({}),
       setCaptureEditing: () => false,
       updateBrowserUrlRules: (next) => next,
       updateIdeFileRules: (next) => next,
-      getActiveBrowserUrl: async () => ({ url: null, appName: null, error: null }),
     },
     externalUrl: { open: async () => {} },
     ws: { send: async () => {} },
@@ -280,7 +273,6 @@ test('IPC registration: window:move rejects invalid payload', async () => {
     overlay: {
       resumeLiveProcess: () => {},
       createNotificationIpcHandlers: () => ({
-        onShowNotification: () => {},
         onResizeNotificationWindow: () => {},
         onNotificationActionAccept: () => {},
         onNotificationActionReject: () => {},

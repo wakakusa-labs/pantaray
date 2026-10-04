@@ -390,6 +390,7 @@ def insert_approved_folder_root_in_connection(
     *,
     manifest_id: str,
     approval_session_id: str,
+    ordinal: int,
     folder: Path,
     created_at: str,
 ) -> None:
@@ -415,7 +416,8 @@ def insert_approved_folder_root_in_connection(
         ON CONFLICT(manifest_id, canonical_real_path) DO NOTHING
         """,
         (
-            f"root:{manifest_id}:approved:{approval_session_id}",
+            # One approval can open several folders; each needs its own root.
+            f"root:{manifest_id}:approved:{approval_session_id}:{ordinal}",
             manifest_id,
             approval_session_id,
             folder.name or folder_path,

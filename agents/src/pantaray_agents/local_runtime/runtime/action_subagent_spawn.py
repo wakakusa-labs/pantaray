@@ -67,6 +67,7 @@ class ActionSubagentSpawnRequest:
     manifest_id: str
     origin: ActionToolCallOrigin
     model_selector: str
+    action_context: str
     task: str
     context_refs: tuple[str, ...]
     resource_claims: tuple[ActionSubagentSpawnResourceClaim, ...]
@@ -111,6 +112,7 @@ def spawn_action_subagent(
             action_id=request.action_id,
             parent_process_id=request.parent_process_id,
             inference_profile_id=inference_profile_id,
+            action_context=request.action_context,
             task=request.task,
             context_refs=list(request.context_refs),
             resource_claim_ids=[claim.claim_id for claim in claims],
@@ -175,6 +177,7 @@ def _validate_request_identity(request: ActionSubagentSpawnRequest) -> None:
         "root_execution_session_id": request.root_execution_session_id,
         "manifest_id": request.manifest_id,
         "model_selector": request.model_selector,
+        "action_context": request.action_context,
         "task": request.task,
         "spawned_at": request.spawned_at,
     }

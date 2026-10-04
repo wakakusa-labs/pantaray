@@ -14,9 +14,11 @@ import { useI18n } from '@/context/useI18n';
 
 import type { ImageGridCopy } from './AttachedImages';
 import { UserItem } from './UserMessage';
+import { CopyAnswerButton } from './CopyAnswerButton';
 import { ToolRow, type ToolRowStatus } from './ToolRow';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
 import {
+  foldsCommentary,
   groupAgentWork,
   groupRunLines,
   type AgentWorkSection,
@@ -62,14 +64,17 @@ type LabeledToolStatus = Exclude<ToolStatus, 'success'>;
  * 承認されなかった呼び出しと、記録がオフのまま呼ばれた読み取りは、成功したステップとして
  * 残る。停止が届いたとき発行前だった呼び出しは、失敗したステップとして残る。どれも
  * 走らなかったことに変わりはないので、状態語より先に「未実行」を出す。行を眺めるだけの
- * 人にも分かるよう、失敗の色は使わない。
+ * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページも失敗ではなく、行の文が
+ * そう言うので状態語は出さない。
  */
 function toolRowStatus(entry: ToolEntry, copy: Copy): ToolRowStatus | null {
   if (entry.outcome === 'not_executed') return { label: copy.toolNotRun, failed: false };
   if (entry.status !== 'success') {
     return { label: copy.toolStatus[entry.status], failed: entry.status !== 'processing' };
   }
-  return entry.outcome === 'completed' ? null : { label: copy.toolNotRun, failed: false };
+  return entry.outcome === 'completed' || entry.outcome === 'preparing'
+    ? null
+    : { label: copy.toolNotRun, failed: false };
 }
 
 /** 連続する同じツールをまとめた行の見出し。数え方は言語を問わない。 */
@@ -243,6 +248,7 @@ export function StepItem({
       ) : (
         <p>{line.text}</p>
       )}
+      {line.kind === 'final_output' ? <CopyAnswerButton markdown={line.text} /> : null}
     </section>
   );
 }
@@ -404,8 +410,8 @@ export function RunItem({
   const { language, formatDateTime } = useI18n();
   const copy = COPY[language];
   const settled = stopped || (run.status !== 'running' && run.status !== 'approval_pending');
-  const finalAnswerVisible = run.lines.some((line) => line.kind === 'final_output');
-  const sections = groupAgentWork(run.lines, finalAnswerVisible);
+  const finalAnswerVisible = foldsCommentary(run.lines);
+  const sections = groupAgentWork(run.lines);
   const expansionKey = `${settled}:${finalAnswerVisible}`;
   const runRef = useRef<HTMLElement>(null);
   const disclosures = useRef(new Map<string, HTMLButtonElement>());

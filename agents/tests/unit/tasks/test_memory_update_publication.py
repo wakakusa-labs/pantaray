@@ -198,6 +198,7 @@ async def _publish(
         prompt_name=PROMPT_NAME,
         prompt_version=PROMPT_VERSION,
         build_profile_brief=_brief,
+        applied_memory_request_ids=(),
     )
 
 
@@ -828,6 +829,7 @@ async def test_plain_todos_persist_without_becoming_the_long_term_profile(
             prompt_name=PROMPT_NAME,
             prompt_version=PROMPT_VERSION,
             build_profile_brief=build_brief,
+            applied_memory_request_ids=(),
         )
     if has_direction:
         assert len(brief_inputs) == 1
@@ -913,8 +915,10 @@ async def test_memory_completion_queues_latest_insight_atomically_and_once(
         )
         == []
     )
-    completion.complete_memory_update_run(runtime=runtime, payload=payload)
-    completion.complete_memory_update_run(runtime=runtime, payload=payload)
+    for _ in range(2):
+        completion.complete_memory_update_run(
+            runtime=runtime, payload=payload, applied_note_record_ids=()
+        )
     queued = _rows(
         runtime,
         "SELECT payload_json FROM job_payloads JOIN jobs USING(job_id) WHERE job_type='generate_suggestion'",

@@ -19,7 +19,7 @@ notes send to a rendering step instead.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import BinaryIO, Final
 
 from pypdf import PageObject, PasswordType, PdfReader
@@ -38,16 +38,28 @@ from .document_model import (
 # shape stops at two levels, while a PDF may nest as deep as it likes.
 type _OutlineTree = Sequence[Destination | _OutlineTree]
 
+
+class _PastDeadline(BaseException):
+    """Raised from inside pypdf's extraction to abandon a page past the deadline.
+
+    A BaseException, because pypdf catches every Exception raised while it
+    draws a form and carries on with the next operator.
+    """
+
+
 # pypdf parses one page at a time and nothing bounds how long a single page
 # takes; malformed objects turning into very long or endless loops are a steady
 # stream of advisories against this parser. A read runs on a thread that cannot
 # be killed, and a thread that never returns holds the one action worker slot
-# and keeps the process from exiting, so extraction gives up between pages once
-# it has spent this long. A real document never reaches it -- 492 pages of a
-# dense standards document extract in 9.4 s, and the text budget ends that read
-# after 2.3 s. The runtime applies the read tool's declared 30 s only when
-# read-only calls share a turn, so for a read called on its own this is the
-# only limit there is. It cannot interrupt one page that hangs.
+# and keeps the process from exiting, so extraction gives up once it has spent
+# this long. A real document never reaches it -- 492 pages of a dense standards
+# document extract in 9.4 s, and the text budget ends that read after 2.3 s.
+# The runtime applies the read tool's declared 30 s only when read-only calls
+# share a turn, so for a read called on its own this is the only limit there is.
+# The limit is checked between pages and before each operator a page draws,
+# which is what stops a page that draws one form thousands of times, since
+# pypdf parses the form's stream again on every draw. It cannot interrupt the
+# parse of one content stream, which the stream's own size bounds.
 MAX_PDF_EXTRACTION_SECONDS: Final = 20.0
 # Each note stands alone and stays short, because the read tool's summary caps
 # how long a single note may be and silently shortens one that runs past it.
@@ -88,11 +100,15 @@ def extract_pdf(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
             gave_up_at = number
             break
         page = reader.pages[number - 1]
+        try:
+            text = page.extract_text(visitor_operand_before=_stop_after(deadline))
+        except _PastDeadline:
+            gave_up_at = number
+            break
         count = _image_count(page)
         if count:
             location = f"page {number}"
             images.append(DocumentImage(location=location, ref=location, count=count))
-        text = page.extract_text()
         if not text.strip():
             pages_without_text.append(number)
         # A page the budget cannot hold ends this read; total_units still counts
@@ -118,6 +134,16 @@ def extract_pdf(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
             *budget.notes(),
         ),
     )
+
+
+def _stop_after(deadline: float) -> Callable[[object, object, object, object], None]:
+    """A pypdf operator visitor that abandons the page once ``deadline`` passes."""
+
+    def check(operator: object, operands: object, cm: object, tm: object) -> None:
+        if time.monotonic() > deadline:
+            raise _PastDeadline
+
+    return check
 
 
 def _open_without_password(reader: PdfReader) -> None:

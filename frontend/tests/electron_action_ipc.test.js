@@ -88,6 +88,9 @@ test('Action IPC validates each renderer payload before calling the main fetcher
       content: ' hello ',
       images: [],
       language: 'ja',
+      files: [
+        { attachment_id: '22222222-2222-4222-8222-222222222222', name: 'plan.pdf', byte_size: 42 },
+      ],
     },
   };
   const page = { actionId: 'action-1', cursor: null, limit: 25 };
@@ -103,6 +106,7 @@ test('Action IPC validates each renderer payload before calling the main fetcher
 
   assert.equal(submitMessage.calls[0].message.message_id, 'message-1');
   assert.equal(submitMessage.calls[0].message.content, 'hello');
+  assert.deepEqual(submitMessage.calls[0].message.files, submit.message.files);
   assert.deepEqual(readConversationPage.calls, [page]);
   assert.deepEqual(readToolOutputPage.calls, [output]);
 });

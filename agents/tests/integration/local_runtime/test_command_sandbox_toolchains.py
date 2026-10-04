@@ -70,11 +70,14 @@ async def test_real_toolchain_builds_inside_command_sandbox(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("exit_code", [0, 7])
 async def test_child_file_denial_preserves_recovered_or_failed_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
+    tmp_path: Path,
+    outside_temp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_code: int,
 ) -> None:
     app_data = tmp_path / "app"
     app_data.mkdir()
-    user_home = tmp_path / "home"
+    user_home = outside_temp_path / "home"
     credentials = user_home / ".cargo/credentials.toml"
     credentials.parent.mkdir(parents=True)
     credentials.write_text("synthetic-private-token")

@@ -50,6 +50,7 @@ from pantaray_agents.agents.action_agent.tools import (
 )
 from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
+    deserialize_memory_draft,
     serialize_memory_draft,
     serialize_memory_epoch,
 )
@@ -230,6 +231,9 @@ async def test_supervisor_draft_final_answer_stores_pending_draft(
 
     assert result.status == "success"
     assert state["supervisor_pending_final_answer"] == "draft v1"
+    # link_memory checks this value against the stored draft before editing it.
+    assert isinstance(result.output, dict)
+    assert result.output["draft_revision"] == _stored_draft_revision(state)
 
 
 @pytest.mark.asyncio
@@ -244,7 +248,17 @@ async def test_supervisor_draft_final_answer_replaces_pending_draft(
         lambda **_kwargs: _preparing_action_node(),
     )
 
-    await run_validated_tool_impl(
+    first = await run_validated_tool_impl(
+        MagicMock(),
+        DRAFT_FINAL_ANSWER_TOOL,
+        {"answer": "first draft"},
+        state,
+        sink=CountingSink(),
+        runtime=SimpleNamespace(),
+        actor="supervisor",
+        step_id="step-draft-1",
+    )
+    second = await run_validated_tool_impl(
         MagicMock(),
         DRAFT_FINAL_ANSWER_TOOL,
         {"answer": "new draft"},
@@ -256,6 +270,13 @@ async def test_supervisor_draft_final_answer_replaces_pending_draft(
     )
 
     assert state["supervisor_pending_final_answer"] == "new draft"
+    assert isinstance(first.output, dict) and isinstance(second.output, dict)
+    assert second.output["draft_revision"] == _stored_draft_revision(state)
+    assert second.output["draft_revision"] != first.output["draft_revision"]
+
+
+def _stored_draft_revision(state: ActionAgentState) -> str:
+    return deserialize_memory_draft(state["supervisor_memory_draft"]).draft_revision
 
 
 def _drafted_state() -> ActionAgentState:

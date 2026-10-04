@@ -21,6 +21,7 @@ from .action_history_contract import (
     history_fetch_step,
     history_fetch_success_schema,
     memory_tool_output_json,
+    parse_from_step,
     parse_history_refs,
     parse_page,
     parse_search_request,
@@ -37,7 +38,12 @@ HISTORY_FETCH_TOOL_NAME = "history_fetch"
 
 @dataclass(frozen=True, slots=True)
 class ActionTurnWindow:
-    """One completed Action turn the run may read as evidence."""
+    """The steps of one Action the run may read.
+
+    Listing and search start at the turns the run records; ``from_step`` reaches
+    earlier steps, down to step 1, as context. Reading ends with the newest turn
+    the run completed, so a turn still in progress stays out.
+    """
 
     action_id: str
     turn_start_step_number: int
@@ -142,13 +148,14 @@ class AgentExperienceActionHistoryTools:
         try:
             turn = self._require_turn(call.tool_args)
             offset, limit = parse_page(call.tool_args)
+            from_step = parse_from_step(call.tool_args, turn.turn_start_step_number)
             with self._connect() as connection:
                 rows = connection.execute(
                     _LIST_LATEST_STEPS_SQL,
                     (
                         self.user_id,
                         turn.action_id,
-                        turn.turn_start_step_number,
+                        from_step,
                         turn.turn_end_step_number,
                         limit + 1,
                         offset,
@@ -174,13 +181,14 @@ class AgentExperienceActionHistoryTools:
         try:
             turn = self._require_turn(call.tool_args)
             query, offset, limit = parse_search_request(call.tool_args)
+            from_step = parse_from_step(call.tool_args, turn.turn_start_step_number)
             with self._connect() as connection:
                 rows = connection.execute(
                     _SEARCH_LATEST_STEPS_SQL,
                     (
                         self.user_id,
                         turn.action_id,
-                        turn.turn_start_step_number,
+                        from_step,
                         turn.turn_end_step_number,
                         query,
                         limit + 1,
@@ -214,7 +222,6 @@ class AgentExperienceActionHistoryTools:
                     (
                         self.user_id,
                         turn.action_id,
-                        turn.turn_start_step_number,
                         turn.turn_end_step_number,
                         *refs,
                     ),
@@ -257,6 +264,14 @@ class AgentExperienceActionHistoryTools:
             "required": ["action_id"],
             "properties": {
                 "action_id": self._action_id_schema(),
+                "from_step": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "First step to read; defaults to the first new step. "
+                        "Lower it, down to 1, to read earlier steps as context."
+                    ),
+                },
                 "offset": {"type": "integer", "minimum": 0},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
             },
@@ -439,7 +454,7 @@ WITH ranked_steps AS (
     FROM agent_action_steps
     WHERE user_id = ?
       AND action_id = ?
-      AND step_number BETWEEN ? AND ?
+      AND step_number <= ?
       AND short_step_id IN ({placeholders})
 )
 SELECT

@@ -32,6 +32,7 @@ from pantaray_agents.tasks.action_user_message import (
     render_action_user_request_text,
 )
 
+from .action_checkpoint_retention import prune_action_checkpoints_in_connection
 from .action_invalidation_events import append_action_invalidation_event
 from .action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
@@ -227,6 +228,9 @@ def adopt_pending_action_user_steps_in_connection(
     )
     if checkpoint_cursor.rowcount != 1:
         raise MigrationError("adopted USER checkpoint owner disappeared")
+    prune_action_checkpoints_in_connection(
+        connection, user_id=user_id, action_id=action_id
+    )
     return projected_state
 
 

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
-from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
+from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType, iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.memory_catalog.connection import (
@@ -49,10 +49,6 @@ def short_insight_window_start(now: datetime) -> datetime:
     return datetime.fromtimestamp(aligned, UTC)
 
 
-def _iso_z(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
 def _window_id(kind: str, *, user_id: str, window_start: str) -> str:
     return str(uuid.uuid5(NAMESPACE_SHORT_INSIGHT, f"{kind}:{user_id}:{window_start}"))
 
@@ -65,14 +61,14 @@ def build_short_insight_job_payload(
     Every field is derived from the window because `enqueue_local_job` compares
     the whole stored payload when a job id already exists.
     """
-    period_start = _iso_z(window_start)
+    period_start = iso_z(window_start)
     return {
         "job_id": _window_id("job", user_id=user_id, window_start=period_start),
         "process_id": _window_id("process", user_id=user_id, window_start=period_start),
         "insight_id": _window_id("insight", user_id=user_id, window_start=period_start),
         "user_id": user_id,
         "period_start": period_start,
-        "period_end": _iso_z(
+        "period_end": iso_z(
             window_start + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS)
         ),
         "enqueued_at": period_start,

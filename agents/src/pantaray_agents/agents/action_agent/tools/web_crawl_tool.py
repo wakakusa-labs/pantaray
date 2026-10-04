@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from pantaray_llm.profiles import (
+    WEB_CRAWL_MAX_BREADTH,
+    WEB_CRAWL_MAX_DEPTH,
+    WEB_CRAWL_PAGE_LIMIT,
+    WEB_EXCERPTS_PER_PAGE,
+)
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -18,7 +25,13 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
         name="Web Crawl",
         description=(
             "Crawl outward from one starting URL to collect content across nearby "
-            "pages in the same site area. Use this when one exact page is not enough."
+            "pages in the same site area. Use this when one exact page is not enough. "
+            f"It follows at most {WEB_CRAWL_MAX_BREADTH} links per page, goes at most "
+            f"{WEB_CRAWL_MAX_DEPTH} levels deep, and stops after {WEB_CRAWL_PAGE_LIMIT} "
+            "links; pages beyond these limits are not returned, and the result "
+            "cannot tell which were skipped. With instructions, "
+            f"each page returns only its top {WEB_EXCERPTS_PER_PAGE} relevant "
+            "excerpts instead of its full content."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -49,20 +62,13 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                         "minLength": 1,
                         "format": "uri",
                         "pattern": r"^https?://\S+$",
-                        "description": (
-                            "Starting URL for the cloud crawl wrapper. This app blocks "
-                            "obvious local/internal forms, and the cloud wrapper "
-                            "enforces the final fetch policy."
-                        ),
                     },
                     required=True,
-                    prompt_type="string",
                     description=(
                         "Starting URL for the cloud crawl wrapper. This app blocks "
                         "obvious local/internal forms, and the cloud wrapper "
                         "enforces the final fetch policy."
                     ),
-                    llm_order=10,
                 ),
                 field_spec(
                     name="instructions",
@@ -70,19 +76,15 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                         "type": "string",
                         "minLength": 1,
                         "pattern": r"\S",
-                        "description": (
-                            "Optional natural-language crawl instructions. Use this "
-                            "to tell the crawler what pages or topics to prioritize "
-                            "within the site area."
-                        ),
                     },
                     required=False,
-                    prompt_type="string",
                     description=(
-                        "Optional natural-language instructions that narrow what the "
-                        "crawler should look for."
+                        "Optional natural-language crawl instructions telling "
+                        "the crawler what pages or topics to prioritize. When "
+                        f"set, each page returns only its top {WEB_EXCERPTS_PER_PAGE} "
+                        "excerpts relevant to them (up to 500 characters each) "
+                        "instead of its full content."
                     ),
-                    llm_order=20,
                 ),
             )
         ),
@@ -102,6 +104,7 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                         "additionalProperties": False,
                     },
                 },
+                "retry_hint": {"type": "string"},
                 "response_time": {"type": "number"},
                 "meta": {
                     "type": "object",

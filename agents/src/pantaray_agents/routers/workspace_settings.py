@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -10,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.repository import (
     ReadAccessScope,
@@ -128,10 +128,6 @@ class CommandNetworkSettings(BaseModel):
     command_network_enabled: bool
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 def _assert_user_allowed(*, user_id: str, resolved_user_id: str) -> None:
     if resolved_user_id and user_id and resolved_user_id != user_id:
         raise HTTPException(
@@ -244,7 +240,7 @@ async def put_read_access_scope(
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
             read_access_scope=body.read_access_scope,
-            now=_utc_now_iso(),
+            now=now_utc_iso(),
         )
         return {"read_access_scope": read_access_scope}
     except MigrationError as exc:
@@ -287,7 +283,7 @@ async def put_command_network_settings(
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
             command_network_enabled=body.command_network_enabled,
-            now=_utc_now_iso(),
+            now=now_utc_iso(),
         )
     except (MigrationError, sqlite3.Error) as exc:
         raise HTTPException(
@@ -315,7 +311,7 @@ async def post_workspace_organization(
                 busy_timeout_ms=busy_timeout_ms,
                 user_id=user_id,
                 display_name=body.display_name,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except MigrationError as exc:
@@ -344,7 +340,7 @@ async def post_workspace_project(
                 user_id=user_id,
                 display_name=body.display_name,
                 organization_ids=body.organization_ids,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except MigrationError as exc:
@@ -372,7 +368,7 @@ async def put_workspace_project_order(
                 busy_timeout_ms=busy_timeout_ms,
                 user_id=user_id,
                 project_ids=body.project_ids,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except MigrationError as exc:
@@ -478,7 +474,7 @@ async def post_workspace_folder(
                 display_name=body.display_name,
                 organization_ids=body.organization_ids,
                 project_ids=body.project_ids,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except (MigrationError, OSError) as exc:
@@ -508,7 +504,7 @@ async def put_workspace_project_links(
                 user_id=user_id,
                 project_id=project_id,
                 organization_ids=body.organization_ids,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except MigrationError as exc:
@@ -539,7 +535,7 @@ async def put_workspace_folder_links(
                 folder_id=folder_id,
                 organization_ids=body.organization_ids,
                 project_ids=body.project_ids,
-                now=_utc_now_iso(),
+                now=now_utc_iso(),
             )
         )
     except MigrationError as exc:

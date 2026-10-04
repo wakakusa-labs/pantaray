@@ -198,12 +198,6 @@ def make_snippet(text: str, *, needle: str | None) -> str:
     return snippet
 
 
-def safe_sort_value(value: object) -> str:
-    if isinstance(value, datetime):
-        return value.astimezone(UTC).isoformat()
-    return str(value or "")
-
-
 def parse_time_hint_center(value: object) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None

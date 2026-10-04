@@ -5,7 +5,7 @@ import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent, WebContents } fro
 
 import type { ValidInvokeChannel, ValidSendChannel } from './channels';
 
-export type IpcWindowRole = 'main' | 'overlay' | 'share_card';
+export type IpcWindowRole = 'main' | 'overlay';
 export type AuxiliaryIpcWindowRole = Exclude<IpcWindowRole, 'main'>;
 export type IpcChannel = ValidInvokeChannel | ValidSendChannel;
 export type IpcSenderEvent = IpcMainEvent | IpcMainInvokeEvent;
@@ -29,8 +29,6 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'workspaceSettings:get',
   'action:readConversationPage',
   'action:readToolOutputPage',
-  'share:savePng',
-  'share:captureShareCard',
   'ui:getLanguage',
   'ws:send',
   'ws:acceptAction',
@@ -42,6 +40,8 @@ const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'action:submitMessage',
   'action:resume',
   'action:attachImage',
+  'action:attachFile',
+  'action:discardAttachment',
   'actionImage:reveal',
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
@@ -69,7 +69,6 @@ export class IpcSenderRejectedError extends Error {
 }
 
 function allowedRoles(channel: IpcChannel): ReadonlySet<IpcWindowRole> {
-  if (channel === 'sharecard:ready') return new Set(['share_card']);
   if (OVERLAY_ONLY_CHANNELS.has(channel)) return new Set(['overlay']);
   if (MAIN_AND_OVERLAY_CHANNELS.has(channel)) return new Set(['main', 'overlay']);
   return new Set(['main']);
@@ -108,7 +107,7 @@ function classifyDocument(params: {
     }
   }
 
-  return url.searchParams.get('mode') === 'sharecard' ? 'share_card' : 'overlay';
+  return 'overlay';
 }
 
 export function createIpcSenderSecurity(params: {
@@ -174,10 +173,6 @@ export function createIpcSenderSecurity(params: {
     registerWindow: (role, sender) => {
       if (!Number.isInteger(sender.id)) {
         throw new TypeError('IPC window sender must have an integer WebContents id.');
-      }
-      const existingRole = auxiliaryRoleBySender.get(sender);
-      if (existingRole && existingRole !== role) {
-        throw new Error('IPC window sender is already registered with another role.');
       }
       auxiliaryRoleBySender.set(sender, role);
     },

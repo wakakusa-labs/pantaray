@@ -10,7 +10,7 @@ from pantaray_agents.mock.mock_suggestion_agent_repository import (
     MockSuggestionAgentRepository,
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
-from pantaray_agents.utils.prompt_loader import PromptConfig
+from pantaray_agents.utils.prompt_loader import PromptConfig, PromptLoader
 
 
 def load_test_prompt_config(prompt_name: str) -> PromptConfig:
@@ -35,6 +35,16 @@ def load_test_prompt_config(prompt_name: str) -> PromptConfig:
             ),
             system_instruction=None,
         )
+    if prompt_name == "suggestion/suggestion_writer":
+        return PromptConfig(
+            prompt="suggestion writer\n{kind}\n{key_point}\n",
+            system_instruction="Write one message in {answer_language}.",
+        )
+    if prompt_name in (
+        "suggestion/suggestion_lenses",
+        "suggestion/suggestion_selector",
+    ):
+        return PromptLoader().load_config(prompt_name)
     raise AssertionError(f"Unexpected prompt requested in E2E test: {prompt_name}")
 
 

@@ -138,7 +138,8 @@ class LLMGenerationMixin:  # pylint: disable=too-few-public-methods
 
         if isinstance(exc, LlmProxyExecutionError):
             raise exc
-        raise RuntimeError(f"LLM upstream error: {exc}") from exc
+        # repr names the exception class, which is all some failures carry.
+        raise RuntimeError(f"LLM upstream error: {exc!r}") from exc
 
     @classmethod
     async def _sleep_llm_retry_backoff(cls, attempt_index: int) -> None:

@@ -37,14 +37,11 @@ from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.errors import LlmProxyExecutionError
 
-_TOOL_USE_RULES = {
-    "supervisor_soft_orchestration": (
+_ROLE_RULES = {
+    "supervisor": (
         "- Use subagents only when independent delegation adds clear value."
     ),
-    "supervisor_goal_worker": (
-        "- Use `run_next_goal` only when you want the next ready goal wave to run.\n"
-        "- Do not perform goal work directly when it should be handled by a goal worker."
-    ),
+    "subagent": "- Report with `submit_subagent_report`.",
 }
 
 
@@ -61,8 +58,8 @@ def _make_agent() -> ActionAgent:
         if prompt_name == "action/executing":
             return PromptConfig(
                 prompt="{current_time}",
-                system_instruction="SYS {tool_use_rules}",
-                tool_use_rules=_TOOL_USE_RULES,
+                system_instruction="SYS {role_rules}",
+                role_rules=_ROLE_RULES,
             )
         return PromptConfig(prompt="{current_time}", system_instruction="SYS")
 
@@ -144,8 +141,8 @@ def test_supervisor_act_tool_ids_are_parent_executable_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execution_think_renders_parent_tool_use_rules() -> None:
-    """親ランタイムでは soft orchestration ルールだけを system prompt に差し込む。"""
+async def test_execution_think_renders_the_supervisor_role_rules() -> None:
+    """親ランタイムでは Supervisor の役割の節だけを system prompt に差し込む。"""
 
     agent = _make_agent()
     agent._cancellation_service.check_cancellation = AsyncMock(  # type: ignore[attr-defined]
@@ -198,7 +195,6 @@ async def test_execution_think_renders_parent_tool_use_rules() -> None:
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["context"]["use_goal_workers"] = False
 
     await execution_think_step(
@@ -208,8 +204,8 @@ async def test_execution_think_renders_parent_tool_use_rules() -> None:
     assert captured_system_instructions
     system_instruction = captured_system_instructions[0]
     assert "subagents only when independent delegation" in system_instruction
-    assert "run_next_goal" not in system_instruction
-    assert "{tool_use_rules}" not in system_instruction
+    assert "submit_subagent_report" not in system_instruction
+    assert "{role_rules}" not in system_instruction
 
 
 @pytest.mark.asyncio
@@ -279,7 +275,6 @@ async def test_execution_think_accounts_repair_usage_and_stops_at_budget(
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["context"]["use_goal_workers"] = False
 
     sink = create_state_token_sink(state)
@@ -363,7 +358,6 @@ async def test_execution_think_rejects_initialize_plan() -> None:
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["context"]["use_goal_workers"] = False
 
     updated = await execution_think_step(
@@ -508,7 +502,6 @@ async def test_execution_think_stops_with_error_after_five_invalid_outputs() -> 
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["context"]["use_goal_workers"] = False
 
     updated = await execution_think_step(

@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Literal
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
@@ -265,7 +266,7 @@ def apply_cloud_session_import(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             user_id=session.user_id,
-            timestamp=_now_utc().isoformat().replace("+00:00", "Z"),
+            timestamp=format_utc_iso(_now_utc()),
         )
         _CREDENTIAL_GENERATION += 1
         _ACTIVE_SESSION = ActiveDesktopSession(
@@ -444,7 +445,7 @@ def restore_expired_cloud_identity(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             user_id=normalized_user_id,
-            timestamp=_now_utc().isoformat().replace("+00:00", "Z"),
+            timestamp=format_utc_iso(_now_utc()),
         )
         _CREDENTIAL_GENERATION += 1
         _ACTIVE_SESSION = None

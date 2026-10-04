@@ -1,27 +1,27 @@
 import pytest
 
 from pantaray_agents.utils.timestamps import (
-    normalize_iso8601_utc_z,
+    normalize_iso8601_utc_z_microseconds,
     parse_iso8601_utc,
 )
 
 
-def test_normalize_iso8601_utc_z_preserves_microseconds_and_utc() -> None:
+def test_normalize_iso8601_utc_z_microseconds_preserves_microseconds_and_utc() -> None:
     assert (
-        normalize_iso8601_utc_z("2026-03-14T15:48:13.126491+00:00")
+        normalize_iso8601_utc_z_microseconds("2026-03-14T15:48:13.126491+00:00")
         == "2026-03-14T15:48:13.126491Z"
     )
 
 
-def test_normalize_iso8601_utc_z_normalizes_offset() -> None:
+def test_normalize_iso8601_utc_z_microseconds_normalizes_offset() -> None:
     assert (
-        normalize_iso8601_utc_z("2026-03-15T00:48:13.126491+09:00")
+        normalize_iso8601_utc_z_microseconds("2026-03-15T00:48:13.126491+09:00")
         == "2026-03-14T15:48:13.126491Z"
     )
 
 
-def test_normalize_iso8601_utc_z_zero_pads_year() -> None:
-    assert normalize_iso8601_utc_z("0002-01-01T00:00:00Z") == (
+def test_normalize_iso8601_utc_z_microseconds_zero_pads_year() -> None:
+    assert normalize_iso8601_utc_z_microseconds("0002-01-01T00:00:00Z") == (
         "0002-01-01T00:00:00.000000Z"
     )
 

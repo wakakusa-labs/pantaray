@@ -11,6 +11,10 @@ from tests.unit.agents.action_agent.fixtures import build_action_request
 from tests.unit.local_runtime.action_seed import insert_agent_action
 
 from pantaray_agents.agents.action_agent import ActionAgent
+from pantaray_agents.agents.action_agent.runtime.agents_md import (
+    PANTARAY_DEFAULT_AGENTS_MD,
+    load_pantaray_agents_md,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.initial import (
     initialize_context,
 )
@@ -106,6 +110,8 @@ async def test_initialize_context_uses_profile_briefs_for_action_prompt(
 
     assert "BRIEF-LT" in ctx["insight_data"]
     assert "FULL-LT" not in ctx["insight_data"]
+    # Recent short-term insights are looked up with tools, not shown up front.
+    assert "short-1" not in ctx["insight_data"]
     assert ctx["structured_fact_data"] == "BRIEF-FACTS"
     assert "FULL-FACTS" not in ctx["structured_fact_data"]
     assert ctx["request_summary"] == "SUM"
@@ -228,6 +234,9 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     )
     coverage_reader = AsyncMock(wraps=repo.get_memory_source_coverage_snapshot)
     repo.get_memory_source_coverage_snapshot = coverage_reader  # type: ignore[method-assign]
+    memory_reader = AsyncMock(wraps=repo.get_initial_memory_context)
+    repo.get_initial_memory_context = memory_reader  # type: ignore[method-assign]
+    first["context"]["insight_data"] = "insight read when the Action started"
     request = build_action_request(
         action_id="action-1",
         suggestion_id="sug-1",
@@ -253,15 +262,16 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     assert history[-1]["short_step_id"] == "S-2-USER"
     assert history[-1]["user_request_text"] == "Follow up"
     assert updated["step"] == 3
-    assert updated["context"]["user_request"] == "Follow up"
     assert updated["context"]["request_summary"] == "Prior summary"
     assert updated["context"]["target_context"] == {
         "organization_name": "Prior org",
         "project_name": "Prior project",
     }
-    assert coverage_reader.await_args.kwargs["suggestion_created_at"] == (
-        "2026-03-22T00:30:00Z"
-    )
+    # Memory and its source coverage are read once per Action; a follow-up
+    # keeps what the head shows.
+    coverage_reader.assert_not_awaited()
+    memory_reader.assert_not_awaited()
+    assert updated["context"]["insight_data"] == "insight read when the Action started"
     assert repo.data.get("action_steps", []) == []
 
     replay = await initialize_context(  # type: ignore[arg-type]
@@ -800,7 +810,7 @@ async def test_assistant_utterance_precedes_reply_and_survives_checkpoint(
     state = _state_with_execution_context(context)
     state["suggestion_id"] = None
     updated = await initialize_context(agent, state, _runtime(agent, request=request))  # type: ignore[arg-type]
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     first = formatter.format_history(updated, omit_before_step_number=10)
     assert first.index("- Assistant Message (phase: commentary):") < first.index(
         "- User Request:"
@@ -860,3 +870,127 @@ async def test_assistant_utterance_precedes_reply_and_survives_checkpoint(
     assert len(continued["history_by_scope"]["S"]) == 4
     assert continued["context"]["local_step_counters"]["S"] == 4
     assert history.count("- Assistant Message (phase: commentary):") == 1
+
+
+def _executing_agent() -> SimpleNamespace:
+    """The production executing template, as the agent reads it."""
+
+    import yaml
+
+    config = yaml.safe_load(
+        (
+            Path(__file__).parents[3]
+            / "src/pantaray_agents/prompts/action/executing.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    return SimpleNamespace(
+        executing_prompt=config["prompt"],
+        executing_system_instruction="SYS",
+        DEFAULT_SYSTEM_INSTRUCTION="SYS",
+        executing_role_rule=lambda key: "",
+        executing_world_state_update=lambda key: config["world_state_updates"][key],
+    )
+
+
+async def _initialized_with_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, user_agents_md: str | None
+) -> tuple[ActionAgentState, SimpleNamespace]:
+    home = tmp_path / "home"
+    (home / ".pantaray").mkdir(parents=True)
+    if user_agents_md is not None:
+        (home / ".pantaray" / "AGENTS.md").write_text(user_agents_md, encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    repo = MockActionAgentRepository()
+    agent = _build_agent(repo)
+    await _save_suggestion(repo)
+    state = _state_with_execution_context(
+        _bootstrap_execution_context(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    )
+    runtime = _runtime(agent)
+    updated = await initialize_context(agent, state, runtime)  # type: ignore[arg-type]
+    return updated, runtime
+
+
+@pytest.mark.asyncio
+async def test_pantaray_default_agents_md_leads_the_head_without_a_user_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+        build_executing_turn,
+    )
+
+    updated, runtime = await _initialized_with_home(
+        tmp_path, monkeypatch, user_agents_md=None
+    )
+
+    head = build_executing_turn(_executing_agent(), updated, runtime, tools=()).head  # type: ignore[arg-type]
+    assert PANTARAY_DEFAULT_AGENTS_MD.startswith(
+        "# AGENTS.md instructions (Pantaray default)\n\n"
+        "<INSTRUCTIONS>\n# Working principles\n"
+    )
+    assert (
+        head.index("### Workspace Context Rules")
+        < head.index(PANTARAY_DEFAULT_AGENTS_MD)
+        < head.index("## Suggestion Summary")
+    )
+    assert "AGENTS.md instructions for ~/.pantaray" not in head
+
+
+@pytest.mark.asyncio
+async def test_pantaray_agents_md_rides_in_a_head_that_resume_keeps_identical(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.agents.action_agent.runtime.checkpoint import (
+        build_runtime_state_checkpoint,
+        restore_runtime_state_checkpoint,
+    )
+    from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+        build_executing_turn,
+    )
+
+    updated, runtime = await _initialized_with_home(
+        tmp_path, monkeypatch, user_agents_md="Be brief.\n"
+    )
+    executing = _executing_agent()
+
+    def head(of: ActionAgentState) -> bytes:
+        turn = build_executing_turn(executing, of, runtime, tools=())  # type: ignore[arg-type]
+        return turn.head.encode("utf-8")
+
+    first = head(updated).decode("utf-8")
+    block = (
+        "# AGENTS.md instructions for ~/.pantaray\n\n"
+        "<INSTRUCTIONS>\nBe brief.\n\n</INSTRUCTIONS>"
+    )
+    # Pantaray's default comes first, so the user's file is read as overriding it.
+    assert (
+        first.index("### Workspace Context Rules")
+        < first.index(PANTARAY_DEFAULT_AGENTS_MD + "\n\n" + block)
+        < first.index("## Suggestion Summary")
+    )
+    # Editing the file mid-run must not reach the cached head; resume restores it.
+    (tmp_path / "home" / ".pantaray" / "AGENTS.md").write_text(
+        "Changed.\n", encoding="utf-8"
+    )
+    restored = restore_runtime_state_checkpoint(
+        build_runtime_state_checkpoint(updated),
+        expected_action_id="action-1",
+        expected_suggestion_id="sug-1",
+        expected_user_id="user-1",
+    )
+    assert head(updated) == head(restored) == first.encode("utf-8")
+    # A later run reads the edited file: the head stays, the turn appends it.
+    restored["context"]["agents_md_instructions"] = load_pantaray_agents_md()
+    turn = build_executing_turn(executing, restored, runtime, tools=())  # type: ignore[arg-type]
+    assert turn.head == first
+    prepared = turn.prepare(
+        restored,
+        rendering=runtime.services.rendering,
+        repair_notice="",
+        provider_turns={},
+    )
+    assert prepared.turn_context is not None
+    assert "## AGENTS.md Update" in prepared.turn_context
+    assert "Changed." in prepared.turn_context

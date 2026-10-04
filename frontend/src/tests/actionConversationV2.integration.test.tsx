@@ -46,7 +46,6 @@ it('renders the backend contract through the shared History and Overlay renderer
   expect(conversation).not.toHaveTextContent('Private App');
   expect(within(conversation).queryByText('Inspect repository')).toBeNull();
   expect(agentWork).toHaveAttribute('aria-expanded', 'false');
-  expect(view.output.plaintext).toBe('Canonical final answer');
 
   agentWork.focus();
   await userEvent.keyboard('{Enter}');
@@ -139,5 +138,11 @@ it('projects the newest-first backend page as chronological history', () => {
     'tool',
     'final_output',
   ]);
-  expect(view.output.plaintext).toBe('First answer\n\nSecond answer');
+  expect(
+    view.items.flatMap((item) =>
+      item.kind === 'run'
+        ? item.lines.flatMap((line) => (line.kind === 'final_output' ? [line.text] : []))
+        : []
+    )
+  ).toEqual(['First answer', 'Second answer']);
 });

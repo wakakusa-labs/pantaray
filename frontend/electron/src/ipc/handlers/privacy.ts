@@ -28,23 +28,6 @@ export function registerPrivacyHandlers(ctx: MainContext, registrar: IpcRegistra
     );
   });
 
-  registrar.handle('privacy:getActiveAppName', async () => {
-    try {
-      const name = await ctx.privacy.getActiveAppName();
-      return name ?? null;
-    } catch {
-      return null;
-    }
-  });
-
-  registrar.handle('privacy:getActiveWindowInfo', async () => {
-    try {
-      return await ctx.privacy.getActiveWindowInfo();
-    } catch {
-      return null;
-    }
-  });
-
   registrar.handle('privacy:listInstalledApps', () => ctx.privacy.listInstalledApps());
 
   registrar.handle('privacy:getIdeFileRules', () => ctx.privacy.getIdeFileRules());
@@ -61,18 +44,5 @@ export function registerPrivacyHandlers(ctx: MainContext, registrar: IpcRegistra
     return runAuditedMutation(ctx, 'privacy.updateIdeFileRules', () =>
       ctx.privacy.updateIdeFileRules(parsed)
     );
-  });
-
-  registrar.handle('privacy:getActiveBrowserUrl', async () => {
-    try {
-      return await ctx.privacy.getActiveBrowserUrl();
-    } catch {
-      return {
-        url: null,
-        appName: null,
-        windowName: null,
-        error: 'Failed to get active browser URL.',
-      };
-    }
   });
 }

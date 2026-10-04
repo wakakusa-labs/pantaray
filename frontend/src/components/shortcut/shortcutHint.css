@@ -22,8 +22,3 @@
   font-size: var(--text-meta-size);
   line-height: 1;
 }
-
-.shortcut-hint-status {
-  color: var(--text-muted);
-  font-size: var(--text-meta-size);
-}

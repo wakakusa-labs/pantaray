@@ -4,13 +4,13 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.process_lock import (
     acquire_runtime_process_lock,
     release_runtime_process_lock,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.memory_update_lock import (
     memory_update_lock_path,
 )
@@ -147,7 +147,7 @@ def _start_erasure(*, db_path: Path, busy_timeout_ms: int, user_id: str) -> str 
                 )
             deletion_id = f"erase_{uuid.uuid4().hex}"
             relative_path = f"memory_catalog/erasure/{user_id}-{deletion_id}"
-            now = _now()
+            now = now_utc_iso()
             connection.execute(
                 """
                 INSERT INTO memory_artifact_deletions(
@@ -254,7 +254,7 @@ def _detach_tenant_database(
                 SET state = 'database_detached', updated_at = ?
                 WHERE user_id = ? AND deletion_id = ? AND state = 'quarantined'
                 """,
-                (_now(), job.user_id, job.deletion_id),
+                (now_utc_iso(), job.user_id, job.deletion_id),
             )
             if cursor.rowcount != 1:
                 raise MemoryCatalogIntegrityError("user erasure state changed")
@@ -348,7 +348,7 @@ def _set_state(
                 UPDATE memory_artifact_deletions SET state = ?, updated_at = ?
                 WHERE user_id = ? AND deletion_id = ? AND state = ?
                 """,
-                (state, _now(), job.user_id, job.deletion_id, expected),
+                (state, now_utc_iso(), job.user_id, job.deletion_id, expected),
             )
             if cursor.rowcount != 1:
                 raise MemoryCatalogIntegrityError("user erasure state changed")
@@ -416,7 +416,3 @@ def _validate_user_erasure_job_path(job: UserErasureJob) -> None:
     expected = f"memory_catalog/erasure/{job.user_id}-{job.deletion_id}"
     if job.artifact_path != expected:
         raise MemoryCatalogIntegrityError("user erasure artifact path is invalid")
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()

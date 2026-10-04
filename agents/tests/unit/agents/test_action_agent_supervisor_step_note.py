@@ -110,7 +110,6 @@ async def _build_supervisor_fixture(
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     install_local_runtime_tool_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import json
+import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery_ripgrep
+from pantaray_agents.local_runtime.tooling.brokering import (
+    broker_discovery_ripgrep,
+    broker_grep_lines,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
@@ -27,17 +30,19 @@ def test_ripgrep_files_uses_fixed_argv(
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        sandbox_profile: str,
         handle_line: broker_discovery_ripgrep.LineHandler,
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
-        assert handle_line("src/action[1]/PLAN.MD") is True
-        assert handle_line("src/app.py") is True
-        assert handle_line("src/other.py") is False
+        assert handle_line(b"src/action[1]/PLAN.MD") is True
+        assert handle_line(b"src/app.py") is True
+        assert handle_line(b"src/other.py") is False
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=0,
             stderr="",
             stderr_truncated=False,
+            stderr_lines=0,
             timed_out=False,
             stdout_truncated=False,
             stopped_early=True,
@@ -47,6 +52,7 @@ def test_ripgrep_files_uses_fixed_argv(
 
     result = broker_discovery_ripgrep.run_ripgrep_files(
         cwd=tmp_path,
+        sandbox_profile="",
         glob_pattern="src/*.py",
         limit=1,
         excluded_relative_path="src/action[1]/plan.md",
@@ -56,6 +62,7 @@ def test_ripgrep_files_uses_fixed_argv(
     assert captured["argv"] == (
         "/trusted/bin/rg",
         "--files",
+        "--no-config",
         "--hidden",
         "--no-ignore",
         "--color",
@@ -63,7 +70,9 @@ def test_ripgrep_files_uses_fixed_argv(
         "--glob",
         "src/*.py",
         "--glob",
-        r"!/src/action\[1\]/[pP][lL][aA][nN].[mM][dD]",
+        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]/[pP][lL][aA][nN].[mM][dD]",
+        "--",
+        ".",
     )
     assert result.relative_paths == ("src/app.py",)
     assert result.truncated is True
@@ -84,38 +93,18 @@ def test_ripgrep_grep_uses_fixed_argv(
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        sandbox_profile: str,
         handle_line: broker_discovery_ripgrep.LineHandler,
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
-        assert handle_line(
-            json.dumps(
-                {
-                    "type": "match",
-                    "data": {
-                        "path": {"text": "src/action[1]/PLAN.MD"},
-                        "line_number": 1,
-                        "lines": {"text": "private needle\n"},
-                    },
-                }
-            )
-        )
-        assert handle_line(
-            json.dumps(
-                {
-                    "type": "match",
-                    "data": {
-                        "path": {"text": "src/app.py"},
-                        "line_number": 3,
-                        "lines": {"text": "needle\n"},
-                    },
-                }
-            )
-        )
+        assert handle_line(b"src/action[1]/PLAN.MD\x001:9:private needle")
+        assert handle_line(b"src/app.py\x003:1:needle\r")
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=0,
             stderr="",
             stderr_truncated=False,
+            stderr_lines=0,
             timed_out=False,
             stdout_truncated=False,
             stopped_early=False,
@@ -125,6 +114,7 @@ def test_ripgrep_grep_uses_fixed_argv(
 
     result = broker_discovery_ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        sandbox_profile="",
         pattern="needle",
         include_glob="**/*.py",
         max_matches=10,
@@ -134,28 +124,34 @@ def test_ripgrep_grep_uses_fixed_argv(
     assert captured["cwd"] == tmp_path
     assert captured["argv"] == (
         "/trusted/bin/rg",
-        "--json",
+        "--no-config",
         "--hidden",
         "--no-ignore",
         "--color",
         "never",
-        "--line-number",
+        "--no-heading",
         "--with-filename",
-        "--max-filesize",
-        "1M",
+        "--null",
+        "--line-number",
+        "--column",
+        "--max-columns",
+        "65536",
+        "--max-columns-preview",
+        "--binary",
         "--glob",
         "**/*.py",
         "--glob",
-        r"!/src/action\[1\]/[pP][lL][aA][nN].[mM][dD]",
+        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]/[pP][lL][aA][nN].[mM][dD]",
         "--",
         "needle",
         ".",
     )
     assert result.matches == (
-        broker_discovery_ripgrep.RipgrepGrepMatch(
+        broker_grep_lines.RipgrepGrepMatch(
             relative_path="src/app.py",
             line_number=3,
             line="needle",
+            line_truncated=False,
         ),
     )
 
@@ -174,12 +170,14 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        sandbox_profile: str,
         handle_line: broker_discovery_ripgrep.LineHandler,
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=-9,
             stderr="",
             stderr_truncated=False,
+            stderr_lines=0,
             timed_out=True,
             stdout_truncated=False,
             stopped_early=False,
@@ -189,6 +187,7 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
 
     result = broker_discovery_ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        sandbox_profile="",
         pattern="needle",
         include_glob=None,
         max_matches=10,
@@ -212,12 +211,14 @@ def test_ripgrep_files_classifies_glob_parse_errors(
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        sandbox_profile: str,
         handle_line: broker_discovery_ripgrep.LineHandler,
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=2,
             stderr="rg: error parsing glob '[': unclosed character class",
             stderr_truncated=False,
+            stderr_lines=0,
             timed_out=False,
             stdout_truncated=False,
             stopped_early=False,
@@ -228,6 +229,7 @@ def test_ripgrep_files_classifies_glob_parse_errors(
     with pytest.raises(BrokerPolicyError) as exc_info:
         broker_discovery_ripgrep.run_ripgrep_files(
             cwd=tmp_path,
+            sandbox_profile="",
             glob_pattern="[",
             limit=10,
         )
@@ -252,6 +254,7 @@ def test_ripgrep_runner_drains_stderr_without_timeout(
     result = broker_discovery_ripgrep._run_ripgrep_lines(
         argv=(sys.executable, "-c", script),
         cwd=tmp_path,
+        sandbox_profile="(version 1)\n(allow default)",
         handle_line=lambda line: True,
     )
 
@@ -269,7 +272,8 @@ def test_ripgrep_runner_drains_stderr_without_timeout(
             "glob parse error:\n    [\nerror: unclosed character class",
             "GREP_INCLUDE_GLOB_INVALID",
         ),
-        ("rg: ./secret: Permission denied", "GREP_BACKEND_FAILED"),
+        ("sandbox-exec: sandbox_apply: Operation not permitted", "GREP_BACKEND_FAILED"),
+        ("", "GREP_BACKEND_FAILED"),
     ],
 )
 def test_ripgrep_grep_classifies_backend_failures(
@@ -288,12 +292,14 @@ def test_ripgrep_grep_classifies_backend_failures(
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        sandbox_profile: str,
         handle_line: broker_discovery_ripgrep.LineHandler,
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=2,
             stderr=stderr,
             stderr_truncated=False,
+            stderr_lines=0,
             timed_out=False,
             stdout_truncated=False,
             stopped_early=False,
@@ -304,6 +310,7 @@ def test_ripgrep_grep_classifies_backend_failures(
     with pytest.raises(BrokerPolicyError) as exc_info:
         broker_discovery_ripgrep.run_ripgrep_grep(
             cwd=tmp_path,
+            sandbox_profile="",
             pattern="needle",
             include_glob="**/*.py",
             max_matches=10,
@@ -344,3 +351,231 @@ def test_ripgrep_selection_never_uses_parent_path(
         with pytest.raises(BrokerPolicyError) as exc_info:
             broker_discovery_ripgrep._resolve_ripgrep_executable()
         assert exc_info.value.code == "DISCOVERY_BACKEND_UNAVAILABLE"
+
+
+def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        broker_discovery_ripgrep,
+        "_resolve_ripgrep_executable",
+        lambda: Path("/trusted/bin/rg"),
+    )
+    preview = b"a" * broker_grep_lines.RIPGREP_MAX_COLUMNS
+
+    def fake_run(
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        sandbox_profile: str,
+        handle_line: broker_discovery_ripgrep.LineHandler,
+    ) -> broker_discovery_ripgrep.RipgrepRunResult:
+        # A preview of a longer line whose first match is past its end.
+        assert handle_line(
+            b"./big.jsonl\x007:70001:" + preview + b" [... 1 more match]"
+        )
+        # A line of exactly the cap is previewed too; its match is in the preview.
+        assert handle_line(
+            b"./big.jsonl\x009:1001:" + preview + b" [... 0 more matches]"
+        )
+        # A newline in a path splits its record; the parts are joined again.
+        assert handle_line(b"./odd")
+        assert handle_line(b"name.txt\x002:1:needle in odd")
+        assert handle_line(b"./odd")
+        assert handle_line(
+            b'name.bin: binary file matches (found "\\0" byte around offset 3)'
+        )
+        # Shift_JIS text is shown lossily rather than dropped.
+        assert handle_line(b"./sjis.txt\x001:8:\x93\xfa\x96\x7b\x8c\xea needle")
+        assert handle_line(
+            b'./db.sqlite: binary file matches (found "\\0" byte around offset 9)'
+        )
+        return broker_discovery_ripgrep.RipgrepRunResult(
+            exit_code=2,
+            stderr="rg: ./locked: Permission denied (os error 13)\n",
+            stderr_truncated=False,
+            stderr_lines=1,
+            timed_out=False,
+            stdout_truncated=False,
+            stopped_early=False,
+        )
+
+    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+
+    result = broker_discovery_ripgrep.run_ripgrep_grep(
+        cwd=tmp_path,
+        sandbox_profile="",
+        pattern="needle",
+        include_glob=None,
+        max_matches=10,
+    )
+
+    limit = broker_grep_lines.GREP_MAX_LINE_CHARS
+    assert [(match.line_number, match.line) for match in result.matches] == [
+        (7, "a" * limit + "…"),
+        (9, "…" + "a" * limit + "…"),
+        (2, "needle in odd"),
+        (1, b"\x93\xfa\x96\x7b\x8c\xea needle".decode("utf-8", errors="replace")),
+    ]
+    assert [match.line_truncated for match in result.matches] == [
+        True,
+        True,
+        False,
+        False,
+    ]
+    assert result.matches[2].relative_path == "./odd\nname.txt"
+    assert result.binary_match_paths == ("./odd\nname.bin", "./db.sqlite")
+    assert result.skipped_files == 1
+    assert result.first_skip_error == "./locked: Permission denied (os error 13)"
+
+
+@pytest.mark.parametrize(
+    ("text", "match_start", "cut", "expected"),
+    [
+        ("short needle", 6, False, ("short needle", False)),
+        (
+            "x" * 1_000 + "needle" + "y" * 1_000,
+            1_000,
+            False,
+            ("…" + "x" * 250 + "needle" + "y" * 244 + "…", True),
+        ),
+        ("needle" + "y" * 1_000, 0, False, ("needle" + "y" * 494 + "…", True)),
+        ("x" * 1_000 + "needle", 1_000, False, ("…" + "x" * 494 + "needle", True)),
+        ("x" * 10, None, True, ("x" * 10 + "…", True)),
+    ],
+)
+def test_grep_match_centres_long_lines_on_the_first_match(
+    text: str,
+    match_start: int | None,
+    cut: bool,
+    expected: tuple[str, bool],
+) -> None:
+    match = broker_grep_lines.grep_match(
+        relative_path="a.txt",
+        line_number=1,
+        text=text,
+        match_start=match_start,
+        cut=cut,
+    )
+
+    assert (match.line, match.line_truncated) == expected
+
+
+_REAL_RIPGREP = pytest.mark.skipif(
+    shutil.which("rg", path=broker_discovery_ripgrep.RIPGREP_TRUSTED_PATH) is None,
+    reason="ripgrep is not installed in a trusted location",
+)
+_ALLOW_ALL_PROFILE = "(version 1)\n(allow default)"
+
+
+def _real_grep(
+    cwd: Path, *, max_matches: int = 100
+) -> broker_discovery_ripgrep.RipgrepGrepResult:
+    return broker_discovery_ripgrep.run_ripgrep_grep(
+        cwd=cwd,
+        sandbox_profile=_ALLOW_ALL_PROFILE,
+        pattern="needle",
+        include_glob=None,
+        max_matches=max_matches,
+    )
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_finds_matches_in_files_over_one_megabyte(tmp_path: Path) -> None:
+    filler = '{"role":"tool","content":"' + "x" * 1_000 + '"}\n'
+    lines = [filler] * 3_000
+    for index in range(5):
+        lines[600 * index + 599] = f'{{"role":"user","content":"needle {index}"}}\n'
+    (tmp_path / "transcript.jsonl").write_text("".join(lines), encoding="utf-8")
+    assert (tmp_path / "transcript.jsonl").stat().st_size > 2 * 1024 * 1024
+
+    result = _real_grep(tmp_path)
+
+    assert [(match.line_number, match.line) for match in result.matches] == [
+        (600 * index + 600, f'{{"role":"user","content":"needle {index}"}}')
+        for index in range(5)
+    ]
+    assert result.truncation_reason is None
+    assert result.skipped_files == 0
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_excerpts_very_long_lines_around_the_match(
+    tmp_path: Path,
+) -> None:
+    # Multibyte text before the match: ripgrep's column counts bytes.
+    (tmp_path / "wide.jsonl").write_text(
+        "あ" * 30_000 + "needle" + "い" * 200_000 + "\n", encoding="utf-8"
+    )
+    (tmp_path / "late.jsonl").write_text(
+        "x" * 200_000 + "needle" + "\n", encoding="utf-8"
+    )
+
+    result = _real_grep(tmp_path)
+
+    by_path = {match.relative_path: match for match in result.matches}
+    wide = by_path["./wide.jsonl"]
+    assert wide.line_truncated is True
+    assert wide.line == "…" + "あ" * 250 + "needle" + "い" * 244 + "…"
+    # Past ripgrep's preview the excerpt is the line's start, still marked cut.
+    late = by_path["./late.jsonl"]
+    assert late.line_truncated is True
+    assert late.line == "x" * broker_grep_lines.GREP_MAX_LINE_CHARS + "…"
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_reports_the_match_limit_and_unreadable_paths(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("needle 1\nneedle 2\nneedle 3\n", encoding="utf-8")
+    (tmp_path / "odd\nname.txt").write_text("needle odd\n", encoding="utf-8")
+    (tmp_path / "b.bin").write_bytes(b"\0" * 100 + b" needle")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "b.txt").write_text("needle hidden\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        unlimited = _real_grep(tmp_path)
+        limited = _real_grep(tmp_path, max_matches=2)
+    finally:
+        locked.chmod(0o755)
+
+    assert sorted((match.relative_path, match.line) for match in unlimited.matches) == [
+        ("./a.txt", "needle 1"),
+        ("./a.txt", "needle 2"),
+        ("./a.txt", "needle 3"),
+        ("./odd\nname.txt", "needle odd"),
+    ]
+    assert unlimited.truncation_reason is None
+    assert unlimited.binary_match_paths == ("./b.bin",)
+    assert unlimited.skipped_files == 1
+    assert "Permission denied" in str(unlimited.first_skip_error)
+    assert len(limited.matches) == 2  # of four
+    assert limited.truncated is True
+    assert limited.truncation_reason == "limit"
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_glob_reports_unreadable_paths_instead_of_failing(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "b.txt").write_text("b\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        result = broker_discovery_ripgrep.run_ripgrep_files(
+            cwd=tmp_path,
+            sandbox_profile=_ALLOW_ALL_PROFILE,
+            glob_pattern="**/*.txt",
+            limit=100,
+        )
+    finally:
+        locked.chmod(0o755)
+
+    assert result.relative_paths == ("./a.txt",)
+    assert result.truncation_reason is None
+    assert result.skipped_files == 1
+    assert "Permission denied" in str(result.first_skip_error)

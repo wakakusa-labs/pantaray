@@ -18,6 +18,19 @@ const {
 
 const START_CURRENT = '2026-08-30T03:00:00.000000Z';
 
+/** The run outcomes (final answers and terminal sentences) in display order. */
+function outcomes(view) {
+  return view.items.flatMap((item) =>
+    item.kind === 'run'
+      ? item.lines.flatMap((line) =>
+          line.kind === 'final_output' || line.kind === 'terminal_outcome'
+            ? [[line.status, line.text]]
+            : []
+        )
+      : []
+  );
+}
+
 function user(stepId, messageId, acceptedSequence, status = 'adopted') {
   return {
     step_kind: 'user',
@@ -79,6 +92,22 @@ function activeRun(entries, status = 'running') {
     error: null,
   };
 }
+
+test('USER entry parses with or without the files it was sent with', () => {
+  const files = [{ name: 'plan.pdf', byte_size: 42 }];
+  const withFiles = page({ runs: [activeRun([{ ...user('step-a', 'message-a', 1), files }])] });
+  assert.deepStrictEqual(withFiles.runs[0].entries[0].files, files);
+
+  const withoutFiles = page({ runs: [activeRun([user('step-a', 'message-a', 1)])] });
+  assert.equal(withoutFiles.runs[0].entries[0].files, undefined);
+
+  for (const invalid of [[{ name: 'plan.pdf', byte_size: 0 }], [{ ...files[0], path: '/x' }]]) {
+    assert.throws(
+      () => page({ runs: [activeRun([{ ...user('step-a', 'message-a', 1), files: invalid }])] }),
+      ActionWireContractError
+    );
+  }
+});
 
 test('未取得のrunに属する承認提案をActionメタデータに保持し、別の提案IDを拒否する', () => {
   const approvedSuggestion = { suggestion_id: 'suggestion-1', content: 'Review the changes?' };
@@ -240,7 +269,7 @@ test('paged conversation はexact tailだけを追記しrun/entry identityを安
     ['step-2', 'step-3', 'step-4']
   );
   assert.equal(view.nextCursor, null);
-  assert.equal(view.output.plaintext, 'Older answer');
+  assert.deepStrictEqual(outcomes(view), [['success', 'Older answer']]);
 });
 
 test('paged conversation はinvalid extensionを拒否しAction切替で表示を置換する', () => {
@@ -279,12 +308,12 @@ test('paged conversation はinvalid extensionを拒否しAction切替で表示�
     view.items.map((item) => (item.kind === 'run' ? item.runId : item.entry.status)),
     ['run-current', 'not_executed']
   );
-  assert.equal(view.output.plaintext, 'Stopped');
+  assert.deepStrictEqual(outcomes(view), [['canceled', 'Stopped']]);
 
   const paged = buildPagedConversation();
   const switched = mergeActionConversationLivePage(paged, page({ actionId: 'action-2' }));
   assert.equal(projectActionConversationView(switched).action.action_id, 'action-2');
-  assert.equal(projectActionConversationView(switched).output.plaintext, '');
+  assert.deepStrictEqual(outcomes(projectActionConversationView(switched)), []);
 });
 
 test('optimistic USER はcanonical message identityでdedupし会話の末尾へ投影する', () => {
@@ -333,7 +362,7 @@ test('optimistic USER はcanonical message identityでdedupし会話の末尾へ
   assert.equal(newConversation.items[0].kind, 'user');
 });
 
-test('view はUSER/outcomeを常時表示しterminal agent workとplaintextを一意に投影する', () => {
+test('view はUSER/outcomeを常時表示しterminal agent workとoutcomeを一意に投影する', () => {
   const runs = [
     terminalRun({
       runId: 'run-current',
@@ -376,15 +405,11 @@ test('view はUSER/outcomeを常時表示しterminal agent workとplaintextを�
     assert.equal(run.lines.find((line) => line.kind === 'user').visibility, 'always');
     assert.equal(run.lines.find((line) => line.kind === 'tool').visibility, 'agent_work');
   }
-  assert.deepStrictEqual(
-    terminal.output.lines.map((line) => [line.status, line.text]),
-    [
-      ['canceled', 'Canceled publicly'],
-      ['error', 'Older failure'],
-      ['success', 'Latest answer'],
-    ]
-  );
-  assert.equal(terminal.output.plaintext, 'Canceled publicly\n\nOlder failure\n\nLatest answer');
+  assert.deepStrictEqual(outcomes(terminal), [
+    ['canceled', 'Canceled publicly'],
+    ['error', 'Older failure'],
+    ['success', 'Latest answer'],
+  ]);
 
   const active = projectActionConversationView(
     applyActionConversationPage(
@@ -393,7 +418,7 @@ test('view はUSER/outcomeを常時表示しterminal agent workとplaintextを�
       page({ runs: [activeRun([tool('live', 1, 'processing')])] })
     )
   );
-  assert.deepStrictEqual(active.output, { lines: [], plaintext: '' });
+  assert.deepStrictEqual(outcomes(active), []);
 });
 
 test('transient Tool はshared precedenceでcanonical位置だけを更新する', () => {
@@ -639,7 +664,9 @@ test('live run replacement retains all loaded answers and removes adopted pendin
     nextCursor: 'new-cursor',
   });
   const merged = mergeActionConversationLivePage([prior, cached], live);
-  assert.equal(projectActionConversationView(merged).output.plaintext, 'old answer');
+  assert.deepStrictEqual(outcomes(projectActionConversationView(merged)), [
+    ['success', 'old answer'],
+  ]);
   assert.deepEqual(
     merged.flatMap((item) => item.unadopted_messages),
     []

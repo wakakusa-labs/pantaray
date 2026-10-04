@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import shutil
-from datetime import UTC, datetime
 from pathlib import Path
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from ...descriptor_access import (
     DescriptorPathError,
@@ -164,7 +165,7 @@ def _persist_cleanup_outcome(
         busy_timeout_ms=busy_timeout_ms,
         resource=resource,
         status=status,
-        timestamp=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        timestamp=now_utc_iso(),
         cleanup_error=cleanup_error,
         event=ToolRuntimeResourceEventInput(
             event_type=f"action_session_temp_{status}",

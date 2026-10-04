@@ -1,7 +1,29 @@
+.history-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.history-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding-bottom: var(--space-md);
+}
+
 .history-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 10px;
+}
+
+.history-sync {
+  font-size: var(--text-meta-size);
+  color: var(--fog-text-3);
 }
 
 .history-search {
@@ -21,7 +43,10 @@
 }
 
 .history-search .history-search__input {
-  padding-left: 32px;
+  height: 38px;
+  padding-left: 34px;
+  border-radius: 10px;
+  font-size: 13.5px;
 }
 
 /* Chromium's default clear button is blue; draw it in the field's muted text color. */
@@ -44,49 +69,56 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  color: var(--text-muted);
+  border-radius: 10px;
+  color: var(--fog-text-2);
   cursor: pointer;
 }
 
 .history-toolbar__icon-button:hover {
-  background: var(--surface-bg-hover);
-  color: var(--text-primary);
+  background: var(--fog-mist);
+  color: var(--fog-text);
 }
 
-.history-toolbar .shortcut-keycaps,
-.history-toolbar .shortcut-hint-status {
-  flex: 0 0 auto;
-  margin-left: var(--space-xs);
-}
-
-/* Same colors as the settings page's .workspace-button-primary. */
 .history-new-conversation-button {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  height: 34px;
-  padding: 0 var(--space-md);
-  border: 0;
-  border-radius: 8px;
-  background: rgba(125, 171, 220, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(125, 171, 220, 0.4);
-  color: var(--text-primary);
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(214, 226, 248, 0.14);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fog-text);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-meta-size);
-  font-weight: var(--weight-medium);
+  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 
 .history-new-conversation-button:hover {
-  background: rgba(125, 171, 220, 0.32);
+  background: var(--fog-mist);
+}
+
+/* Dimmed keycaps after the label, the way menus show a shortcut. */
+.history-new-conversation-keys {
+  display: inline-flex;
+  margin-left: 6px;
+}
+
+.history-new-conversation-keys .shortcut-keycap {
+  min-width: 20px;
+  height: 20px;
+  background: transparent;
+  border-color: rgba(214, 226, 248, 0.12);
+  color: var(--fog-text-3);
+  font-weight: var(--weight-regular);
 }
 
 .history-toolbar__icon-button:focus-visible,
@@ -105,14 +137,138 @@
   text-align: center;
 }
 
+.history-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* The rows fade out at the bottom edge by masking the list itself: a coloured overlay
+     cannot match the window's gradient and haze, and showed as a band. */
+  mask-image: linear-gradient(180deg, #000 calc(100% - 56px), transparent);
+  padding-bottom: 64px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.history-day {
+  margin: 18px 0 4px;
+  padding: 0 12px;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: var(--ui-label-transform);
+}
+
+.history-day:first-child {
+  margin-top: 4px;
+}
+
+html:lang(ja) .history-day {
+  letter-spacing: 0;
+}
+
 .history-item {
   display: flex;
   align-items: center;
+  border-bottom: 1px solid var(--fog-line);
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+
+.history-item:hover {
+  background: var(--fog-mist);
 }
 
 .history-item-button {
   flex: 1;
   min-width: 0;
+  padding: 11px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.history-item-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.history-item-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-item-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fog-text);
+  font-size: 14px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item-meta {
+  margin-top: 2px;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  letter-spacing: var(--text-meta-tracking);
+}
+
+.history-item-live {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  letter-spacing: var(--text-meta-tracking);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--fog-mist);
+  color: var(--fog-text-2);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-medium);
+}
+
+.badge--warning {
+  background: rgba(232, 239, 250, 0.11);
+  color: #eef2f9;
+}
+
+.badge--info {
+  color: #cfe0f7;
+}
+
+.history-list > .history-filter-button {
+  align-self: center;
+  margin-top: 14px;
 }
 
 .history-item-delete {
@@ -120,9 +276,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-right: var(--space-md);
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
   padding: 0;
   background: transparent;
   border: none;
@@ -132,7 +288,7 @@
 }
 
 .history-item-delete:hover:not(:disabled) {
-  background: var(--surface-bg-hover);
+  background: var(--fog-mist);
   color: var(--danger-color);
 }
 

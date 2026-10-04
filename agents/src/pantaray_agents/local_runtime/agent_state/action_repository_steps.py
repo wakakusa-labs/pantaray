@@ -8,6 +8,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     ActionSubagentWaitInputError,
     collect_action_subagent_results_in_connection,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.repository.tool_invocation_links import (
     link_tool_invocations_to_action_step_in_connection,
 )
@@ -34,12 +35,13 @@ from pantaray_agents.schema.repositories.repository import (
 )
 from pantaray_llm.contracts.conversation import LlmProviderTurn
 
+from ..runtime.action_checkpoint_retention import prune_action_checkpoints_in_connection
 from .action_llm_turn_commit import (
     ActionLlmTurnCommitError,
     save_action_llm_turn_in_connection,
 )
 from .action_provider_turns import read_action_provider_turns_in_connection
-from .shared import encode_json_column, normalize_row, utc_now_iso
+from .shared import encode_json_column, normalize_row
 
 _ACTION_STEP_JSON_COLUMNS = {
     "tool_args",
@@ -173,7 +175,7 @@ class LocalActionRepositoryStepsMixin:
             completed_at=completed_at,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            created_at=utc_now_iso(),
+            created_at=now_utc_iso(),
             short_step_id=short_step_id,
             local_step_number=local_step_number,
         )
@@ -262,6 +264,10 @@ class LocalActionRepositoryStepsMixin:
                     else:
                         save_action_llm_turn_in_connection(
                             connection, payload=payload, turn=llm_turn
+                        )
+                    if runtime_state_checkpoint is not None:
+                        prune_action_checkpoints_in_connection(
+                            connection, user_id=user_id, action_id=action_id
                         )
                     if (
                         step_type

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 from pantaray_agents.agents.artifact_react import (
@@ -143,7 +144,10 @@ class ReadOnlyFileToolSession:
                         "retry_hint": page.retry_hint,
                     },
                 )
-            output = self._files.read(
+            # A file read can stream far into a large file, so it stays off the
+            # event loop like the search tools below.
+            output = await asyncio.to_thread(
+                self._files.read,
                 root_id=root_id,
                 path=path,
                 offset=offset,
@@ -169,7 +173,8 @@ class ReadOnlyFileToolSession:
     ) -> ReactToolResult:
         args = _arguments(call)
         try:
-            output = self._files.list(
+            output = await asyncio.to_thread(
+                self._files.list,
                 root_id=_string_arg(args, "root"),
                 path=_string_arg(args, "path"),
                 max_depth=_integer_arg(args, "max_depth"),
@@ -187,7 +192,8 @@ class ReadOnlyFileToolSession:
     async def glob(self, call: ReactToolCall, _step_number: int) -> ReactToolResult:
         args = _arguments(call)
         try:
-            output = self._files.glob(
+            output = await asyncio.to_thread(
+                self._files.glob,
                 root_id=_string_arg(args, "root"),
                 base_path=_string_arg(args, "base_path"),
                 pattern=_string_arg(args, "pattern"),
@@ -205,7 +211,8 @@ class ReadOnlyFileToolSession:
     async def grep(self, call: ReactToolCall, _step_number: int) -> ReactToolResult:
         args = _arguments(call)
         try:
-            output = self._files.grep(
+            output = await asyncio.to_thread(
+                self._files.grep,
                 root_id=_string_arg(args, "root"),
                 base_path=_string_arg(args, "base_path"),
                 pattern=_string_arg(args, "pattern"),

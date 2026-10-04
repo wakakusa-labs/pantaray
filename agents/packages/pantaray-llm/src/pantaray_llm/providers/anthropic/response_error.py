@@ -98,24 +98,6 @@ def build_anthropic_status_error(
     )
 
 
-def map_anthropic_transport_error(
-    *,
-    request: LlmRequest,
-    exc: httpx.TransportError,
-) -> ProviderError:
-    timed_out = isinstance(exc, httpx.TimeoutException)
-    return ProviderError(
-        status_code=408 if timed_out else 502,
-        code=PROXY_UPSTREAM_UNAVAILABLE,
-        message=(
-            "The model provider request timed out."
-            if timed_out
-            else "The model provider is temporarily unavailable."
-        ),
-        details=anthropic_request_details(request=request),
-    )
-
-
 def anthropic_stop_reason_error(
     *, stop_reason: str | None, details: dict[str, JSONValue]
 ) -> ProviderError | None:

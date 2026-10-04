@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
+    MAX_BYTES,
+    MAX_LINE_LENGTH,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import ReadToolArgs
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+)
 
 from .base import (
     ToolDefinition,
@@ -18,46 +25,37 @@ from .broker_tool_input_schema import (
 READ_TOOL_FIELD_PRESENTATION = (
     BrokerToolFieldPresentation(
         name="path",
-        prompt_type="string",
         description=(
             "Local path such as `.`, `README.md`, `src/app.py`, or an "
             "absolute path. Allowed paths follow Read/search access in "
             "Workspace Path Rules."
         ),
-        llm_order=10,
     ),
     BrokerToolFieldPresentation(
         name="offset",
-        prompt_type="integer",
         description=(
             "Optional 1-based starting line or directory entry index. "
             "Omit or use 1 for the first page. Use next_offset from a "
             "prior read result when continuing."
         ),
-        llm_order=20,
     ),
     BrokerToolFieldPresentation(
         name="column",
-        prompt_type="integer",
         description=(
             "Optional 1-based starting column for a text file. Omit or use 1 "
             "for a new line; when next_column is not null, continue with both "
             "next_offset and next_column."
         ),
-        llm_order=30,
     ),
     BrokerToolFieldPresentation(
         name="limit",
-        prompt_type="integer",
         description=(
             "Optional count of lines or directory entries to return "
             "starting at offset. Defaults to 2000."
         ),
-        llm_order=40,
     ),
     BrokerToolFieldPresentation(
         name="start_unit",
-        prompt_type="integer",
         description=(
             "Documents only: the 1-based unit the extracted text starts at "
             "(a page, sheet, slide, cell or paragraph, as unit_kind says), so "
@@ -65,7 +63,6 @@ READ_TOOL_FIELD_PRESENTATION = (
             "the first unit, and continue with next_start_unit. Keep the same "
             "start_unit while paging that text with offset."
         ),
-        llm_order=50,
     ),
 )
 
@@ -106,9 +103,17 @@ READ_TOOL = ToolDefinition.from_spec(
                 "If truncated=true, treat the result as incomplete and follow "
                 "truncation_reason and retry_hint instead of treating "
                 "next_offset=null as EOF. "
-                "Text results are automatically paged to fit the inline output "
-                "limit, including metadata. Follow the returned cursor to read "
-                "the remaining text."
+                "Each call returns at most limit lines, "
+                f"{MAX_BYTES // 1024} KB of text, and what fits the "
+                f"{ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT:,}-character inline "
+                "result with its metadata; follow the returned cursor for the "
+                "rest. Every line of a text file of any size is reachable by "
+                f"offset, and a line longer than {MAX_LINE_LENGTH} characters "
+                "continues with next_column. A directory read pages through "
+                "every entry in the directory's own order, and offset counts the "
+                "entries it skips too: symlinks without full read access, "
+                "Pantaray's private app storage, and its .runtime-temp folder in "
+                "the scratch workspace. warning says what a page skipped."
             ),
         ),
         execution_policy=tool_execution_policy(
@@ -197,15 +202,12 @@ READ_TOOL = ToolDefinition.from_spec(
                     "type": ["string", "null"],
                     "enum": [
                         "page_limit",
-                        "scan_budget",
                         "line_count_budget",
                         "document_budget",
                         None,
                     ],
                     "description": (
                         "page_limit means more entries or lines are available. "
-                        "scan_budget means the safe text scan or directory traversal "
-                        "limit was reached; follow retry_hint. "
                         "line_count_budget means a text file was "
                         "too large to count total_lines safely. "
                         "document_budget means document extraction stopped before "
@@ -218,6 +220,10 @@ READ_TOOL = ToolDefinition.from_spec(
                     "description": (
                         "Guidance for continuing or retrying when truncated=true."
                     ),
+                },
+                "warning": {
+                    "type": ["string", "null"],
+                    "description": "Directory entries this read skipped, and why.",
                 },
                 "document_format": {
                     "type": "string",

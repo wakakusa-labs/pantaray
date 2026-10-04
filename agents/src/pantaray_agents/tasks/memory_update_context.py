@@ -7,6 +7,7 @@ rerun cannot republish them.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
-    distinct_action_terminals,
+    merged_action_terminals,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryDocument,
@@ -83,12 +84,26 @@ INSIGHTS_INDEX_PATH: Final[str] = "insights/index.md"
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryRequest:
+    """One note the Action's remember tool recorded in a turn this run binds."""
+
+    request_id: str
+    action_id: str
+    short_step_id: str
+    # The memory_note node's source_record_id, which the remember tool keys by
+    # the step that recorded it.
+    note_record_id: str
+    note: str
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedMemoryUpdateRun:
     context: MemoryUpdateContext
     router: MemoryDraftRouter
     fact_id: str
     base_drafts: tuple[tuple[MemorySource, MemoryDraftCheckpoint], ...]
     tool_definitions: tuple[ReactToolDefinition, ...]
+    memory_requests: tuple[MemoryRequest, ...]
 
     @property
     def editable_sources(self) -> tuple[MemorySource, ...]:
@@ -141,9 +156,7 @@ def prepare_memory_update_run(
         # An Action deleted from history since the run was queued is skipped.
         terminals = tuple(
             terminal
-            for terminal in distinct_action_terminals(
-                tuple(payload["action_terminals"])
-            )
+            for terminal in merged_action_terminals(tuple(payload["action_terminals"]))
             if connection.execute(
                 "SELECT 1 FROM agent_actions WHERE user_id = ? AND action_id = ?",
                 (user_id, terminal["action_id"]),
@@ -158,6 +171,9 @@ def prepare_memory_update_run(
             connection=connection,
             user_id=user_id,
             summary_ids=tuple(payload["summary_ids"]),
+        )
+        memory_requests = _load_memory_requests(
+            connection=connection, user_id=user_id, terminals=terminals
         )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
@@ -236,6 +252,8 @@ def prepare_memory_update_run(
         short_term_insights=short_term_insights,
         activity_summaries=activity_summaries,
         action_turns=_render_action_turns(terminals),
+        memory_requests=_render_memory_requests(memory_requests),
+        memory_request_ids=tuple(request.request_id for request in memory_requests),
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
@@ -256,6 +274,7 @@ def prepare_memory_update_run(
         fact_id=fact_id,
         base_drafts=tuple(base_drafts),
         tool_definitions=(*file_tools, *retrieval_tools, *history_tools),
+        memory_requests=memory_requests,
     )
 
 
@@ -328,6 +347,73 @@ def _render_action_turns(
     )
 
 
+def _load_memory_requests(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    terminals: tuple[MemoryUpdateActionTerminal, ...],
+) -> tuple[MemoryRequest, ...]:
+    requests: list[MemoryRequest] = []
+    for terminal in terminals:
+        rows = connection.execute(
+            _REMEMBER_STEPS_SQL,
+            (
+                user_id,
+                terminal["action_id"],
+                terminal["turn_start_step_number"],
+                terminal["turn_end_step_number"],
+            ),
+        ).fetchall()
+        for row in rows:
+            requests.append(
+                MemoryRequest(
+                    request_id=f"R{len(requests) + 1}",
+                    action_id=terminal["action_id"],
+                    short_step_id=str(row["short_step_id"]),
+                    note_record_id=f"{terminal['action_id']}:{row['step_id']}",
+                    note=str(row["note"]),
+                )
+            )
+    return tuple(requests)
+
+
+def _render_memory_requests(requests: tuple[MemoryRequest, ...]) -> str:
+    # The note is the Action's own wording; JSON keeps it one literal string.
+    return "\n".join(
+        f"- request_id: {request.request_id} (action_id: {request.action_id}, "
+        f"step {request.short_step_id}) note: "
+        f"{json.dumps(request.note, ensure_ascii=False)}"
+        for request in requests
+    )
+
+
+# A step retried under one short_step_id resolves to its latest attempt, as the
+# Action history tools resolve it, so only a remember call that finally
+# succeeded counts.
+_REMEMBER_STEPS_SQL = """
+WITH ranked_steps AS (
+    SELECT
+        step_id, short_step_id, step_number, local_step_number, step_name,
+        status, created_at, json_extract(tool_args, '$.args.note') AS note,
+        ROW_NUMBER() OVER (
+            PARTITION BY short_step_id
+            ORDER BY
+                completed_at IS NULL ASC,
+                completed_at DESC,
+                created_at DESC,
+                step_id DESC
+        ) AS resolution_rank
+    FROM agent_action_steps
+    WHERE user_id = ? AND action_id = ? AND step_number BETWEEN ? AND ?
+      AND short_step_id IS NOT NULL
+)
+SELECT step_id, short_step_id, note
+FROM ranked_steps
+WHERE resolution_rank = 1 AND step_name = 'tool::remember' AND status = 'success'
+ORDER BY step_number, local_step_number, created_at, short_step_id
+"""
+
+
 def _render_short_insights(
     *, connection: sqlite3.Connection, user_id: str, insight_ids: tuple[str, ...]
 ) -> str:
@@ -389,6 +475,7 @@ def _render_activity_summaries(
 
 
 __all__ = [
+    "MemoryRequest",
     "PreparedMemoryUpdateRun",
     "derived_first_fact_id",
     "prepare_memory_update_run",

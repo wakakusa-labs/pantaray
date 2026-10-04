@@ -46,7 +46,7 @@ export const AnswerArea = styled.div`
   font-family: var(--font-sans);
   font-size: var(--text-body-size);
   font-weight: var(--weight-medium);
-  line-height: 1.58;
+  line-height: var(--text-body-leading);
   letter-spacing: var(--text-body-tracking);
   white-space: normal;
   word-break: break-word;

@@ -36,6 +36,7 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.context_source import SourceBinding
 from pantaray_agents.schema.tool_result import (
@@ -43,7 +44,7 @@ from pantaray_agents.schema.tool_result import (
     serialize_json_tool_output,
 )
 
-from .shared import UnprojectedToolExecutionResult, now_iso
+from .shared import UnprojectedToolExecutionResult
 
 RECORDING_UNAVAILABLE_MESSAGE = (
     "Computer activity recording is not available, so recent activity cannot be "
@@ -159,8 +160,8 @@ async def _run_zanei_tool(
             step_id=step_id,
             tool_id=tool_def.tool_id,
             status="error",
-            started_at=now_iso(),
-            completed_at=now_iso(),
+            started_at=now_utc_iso(),
+            completed_at=now_utc_iso(),
             output=build_runtime_tool_error_output(
                 error_type=ZANEI_READ_FAILED_ERROR_TYPE,
                 message=str(exc),
@@ -224,8 +225,8 @@ def _projected(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success" if success else "error",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=_fit_inline(result.output) if success else _error_output(result),
     )
 
@@ -319,8 +320,8 @@ def _unavailable(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=output,
     )
 

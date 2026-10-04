@@ -8,13 +8,7 @@
 
 import type { BrowserWindow } from 'electron';
 
-import type {
-  AuthState,
-  BrowserUrlProbeResult,
-  CaptureGateState,
-  MainContext,
-  UiLanguage,
-} from './context';
+import type { AuthState, CaptureGateState, MainContext, UiLanguage } from './context';
 import type { ResumeProcessRequest } from '../orchestration/contracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import { INITIAL_LOCAL_RUNTIME_STATE } from '../auth/localRuntimeState';
@@ -30,15 +24,6 @@ import type {
 import { buildFrontendDevOrigin } from '../runtime/devFrontendEnv';
 import { createIpcSenderSecurity } from './senderTrust';
 import { restoreAndFocusWindow } from '../windows/windowVisibility';
-
-type ExecPromise = (cmd: string) => Promise<{ stdout: string; stderr?: string }>;
-
-type ScreenshotLib = {
-  getActiveBrowserUrl?: (
-    execPromise: ExecPromise,
-    activeAppName: string | null
-  ) => Promise<BrowserUrlProbeResult>;
-};
 
 export function buildMainContext(params: {
   ipcMain: MainContext['ipcMain'];
@@ -106,8 +91,6 @@ export function buildMainContext(params: {
   /** Answers the recording screen with "later" and drops what it deferred. */
   dismissRecordingIntro: () => CaptureGateState;
   openCapturePermissionSettings: MainContext['screenshot']['openPermissionSettings'];
-  screenshotLib: ScreenshotLib;
-  execPromise: ExecPromise;
   onCaptureSettingsChanged?: () => void;
 
   // external
@@ -334,8 +317,6 @@ export function buildMainContext(params: {
       },
       updateCaptureSettings: (next) =>
         updatePrivacy(() => params.capturePrivacy.updateCaptureSettings(next)),
-      getActiveAppName: async () => params.screenshotSync.getCurrentActiveAppName(),
-      getActiveWindowInfo: async () => params.screenshotSync.getActiveWindowInfo(),
       listInstalledApps: () => listInstalledAppOptions(params.readAppIcon),
       getIdeFileRules: () => {
         requireOwner();
@@ -349,22 +330,6 @@ export function buildMainContext(params: {
       },
       updateIdeFileRules: (nextRules) =>
         updatePrivacy(() => params.capturePrivacy.updateIdeFileRules(nextRules)),
-      getActiveBrowserUrl: async () => {
-        try {
-          const getActiveBrowserUrl = params.screenshotLib.getActiveBrowserUrl;
-          if (!getActiveBrowserUrl) {
-            throw new Error('getActiveBrowserUrl is unavailable');
-          }
-          return await getActiveBrowserUrl(params.execPromise, null);
-        } catch {
-          return {
-            url: null,
-            appName: null,
-            windowName: null,
-            error: 'Failed to get active browser URL.',
-          };
-        }
-      },
     },
 
     externalUrl: { open: async (rawUrl) => params.openExternalUrl(rawUrl) },

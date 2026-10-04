@@ -6,7 +6,6 @@ import logging
 import traceback
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from pantaray_agents.agents.action_agent.runtime.log_safety import exception_type_name
@@ -42,6 +41,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.core import TokenBudgetExceeded
 from pantaray_agents.application.action.ports import ActionStepEventPersistenceError
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     APPLY_PATCH_TOOL_ID,
 )
@@ -179,7 +179,7 @@ async def execute_tool_call(
 
     tool_def = slot.tool_def
     tool_id = slot.tool_id
-    started_at = datetime.now(UTC).isoformat()
+    started_at = now_utc_iso()
     args_payload: ToolArgsPayload = dict(slot.call.args)
 
     exec_result: ToolExecutionPayload | None = None
@@ -364,6 +364,7 @@ async def execute_tool_call(
         attachments=exec_result.attachments,
         short_step_id=slot.short_step_id,
         origin=slot.origin,
+        agents_md=exec_result.agents_md,
     )
     common.append_history_entry(
         state,

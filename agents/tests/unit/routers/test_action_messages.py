@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 
 from pantaray_agents.app.shared import install_common_exception_handlers
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    ActionFileAttachmentUnavailableError,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     ActionMessageConflictError,
     ActionNotFoundError,
@@ -26,6 +29,7 @@ from pantaray_agents.routers.local.registry import register_local_routers
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
     ACTION_MESSAGE_ID_MAX_CODEPOINTS,
+    ACTION_MESSAGE_MAX_FILES,
     ACTION_MESSAGE_MAX_IMAGES,
     ACTION_MESSAGE_MAX_PROJECT_REFS,
     ACTION_PROJECT_REF_MAX_PATHS,
@@ -495,6 +499,98 @@ def test_out_of_scope_image_paths_reject_before_canonical_submit(
     assert response.json() == {
         "type": "ActionMessageValidationError",
         "field": "message.images",
+        "reason": "invalid",
+        "limit": None,
+        "unit": None,
+    }
+
+
+ATTACHMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+
+def _file(**overrides: object) -> dict[str, object]:
+    return {"attachment_id": ATTACHMENT_ID, "name": "report.pdf", "byte_size": 3} | (
+        overrides
+    )
+
+
+def test_attached_files_reach_the_canonical_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[SubmitActionMessageCommand] = []
+
+    def submit(command: SubmitActionMessageCommand) -> StartedActionMessageResult:
+        commands.append(command)
+        return _started(command, inserted=True)
+
+    monkeypatch.setattr(router_module, "submit_canonical_action_message", submit)
+    body = _request()
+    message = body["message"]
+    assert isinstance(message, dict)
+    message["files"] = [_file()]
+
+    with _client() as client:
+        response = client.post("/v1/agents/users/user-1/actions/messages", json=body)
+
+    assert response.status_code == 200
+    (submitted,) = commands[0].message.files
+    assert (submitted.attachment_id, submitted.name, submitted.byte_size) == (
+        ATTACHMENT_ID,
+        "report.pdf",
+        3,
+    )
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        ([_file(attachment_id="../escape")], ("message.files.0.attachment_id", None)),
+        ([_file(name="notes.txt")], ("message.files.0.name", None)),
+        ([_file(name="a/b.pdf")], ("message.files.0.name", None)),
+        ([_file(byte_size=0)], ("message.files.0.byte_size", None)),
+        (
+            [_file() for _ in range(ACTION_MESSAGE_MAX_FILES + 1)],
+            ("message.files", ACTION_MESSAGE_MAX_FILES),
+        ),
+    ],
+)
+def test_invalid_files_reject_before_canonical_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    files: list[dict[str, object]],
+    expected: tuple[str, int | None],
+) -> None:
+    monkeypatch.setattr(router_module, "submit_canonical_action_message", pytest.fail)
+    body = _request()
+    message = body["message"]
+    assert isinstance(message, dict)
+    message["files"] = files
+
+    with _client() as client:
+        response = client.post("/v1/agents/users/user-1/actions/messages", json=body)
+
+    assert response.status_code == 422
+    assert (response.json()["field"], response.json()["limit"]) == expected
+
+
+def test_unavailable_staged_file_is_a_files_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_command: SubmitActionMessageCommand) -> Never:
+        raise ActionFileAttachmentUnavailableError("private staging detail")
+
+    monkeypatch.setattr(router_module, "submit_canonical_action_message", fail)
+    body = _request()
+    message = body["message"]
+    assert isinstance(message, dict)
+    message["files"] = [_file()]
+
+    with _client() as client:
+        response = client.post("/v1/agents/users/user-1/actions/messages", json=body)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "type": "ActionMessageValidationError",
+        "field": "message.files",
         "reason": "invalid",
         "limit": None,
         "unit": None,

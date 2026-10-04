@@ -158,7 +158,7 @@ def test_startup_recovery_fails_only_interrupted_activity_summary_runs(
     assert row == (
         "failed",
         "SCHEDULER_PROCESS_RESTARTED",
-        "2026-08-16T02:00:00Z",
+        "2026-08-16T02:00:00.000Z",
     )
 
 

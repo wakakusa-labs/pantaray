@@ -45,6 +45,7 @@ def _request(*, purpose: str = "action.executing", image: bool = False) -> LlmRe
         ("openai", "gpt-5.6", "high", 65536),
         ("openai_codex", "gpt-6-luna", "high", None),
         ("openai_codex", "gpt-6-astra", "high", None),
+        ("openai_codex", "gpt-6.1-sol", "high", None),
         ("openai_codex", "gpt-6-sol", "high", None),
         ("openai_codex", "gpt-5.6-luna", "high", None),
         ("openai_codex", "gpt-5.5", "high", None),

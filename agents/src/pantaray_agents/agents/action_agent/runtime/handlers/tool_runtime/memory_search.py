@@ -31,8 +31,10 @@ from pantaray_agents.local_runtime.memory_catalog.search_policy import (
 from pantaray_agents.local_runtime.memory_catalog.search_service import (
     MemorySearchRequest,
     execute_memory_search,
+    memory_search_notes,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.repositories.repository import DBRow
 from pantaray_agents.utils.local_time import describe_utc_timestamp
@@ -42,7 +44,6 @@ from .shared import (
     MemorySearchPayload,
     ToolRuntimeContext,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 from .validation import validate_tool_args
 
@@ -64,6 +65,7 @@ async def run_memory_search_tool(
     if runtime_cfg is None:
         raise RuntimeError("memory_search runtime config is required")
     default_limit = _required_runtime_limit(runtime_cfg.get("default_limit"))
+    max_limit = _required_runtime_limit(runtime_cfg.get("max_limit"))
 
     query = _require_string_arg(args, "query")
     focus = _optional_string_arg(args, "focus") or "all"
@@ -97,19 +99,11 @@ async def run_memory_search_tool(
     epoch = response.epoch
     state["memory_context_epoch"] = serialize_memory_epoch(epoch)
 
-    grouped: dict[str, list[DBRow]] = {}
-    for row in records:
-        source_value = row.get("source")
-        if not isinstance(source_value, str) or not source_value:
-            raise RuntimeError("Memory Catalog search returned an invalid source")
-        source = source_value
-        grouped.setdefault(source, []).append(row)
-
     payload: MemorySearchPayload = {
         "results": records,
-        "grouped_results": grouped,
         "semantic_status": response.semantic_status,
         "semantic_error_code": response.semantic_error_code,
+        "notes": memory_search_notes(response, limit=limit, max_limit=max_limit),
     }
     serialized_payload = to_json_value(payload)
 
@@ -117,8 +111,8 @@ async def run_memory_search_tool(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=serialized_payload,
     )
 
@@ -141,7 +135,7 @@ def _time_hint_radius_hours(time_hint: dict[str, JSONValue]) -> int:
 
 def _required_runtime_limit(value: object) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise RuntimeError("memory_search default_limit runtime config is invalid")
+        raise RuntimeError("memory_search limit runtime config is invalid")
     return value
 
 

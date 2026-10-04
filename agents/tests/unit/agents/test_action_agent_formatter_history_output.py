@@ -30,7 +30,7 @@ def test_format_history_includes_falsy_tool_output(
     output_value: object, expected_fragment: str
 ) -> None:
     """直近ツール結果の output が falsy でも表示されること。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -54,7 +54,7 @@ def test_format_history_includes_falsy_tool_output(
 
 def test_format_history_omits_output_section_when_key_missing() -> None:
     """output キーが無い場合は Output セクションを出さないこと。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -75,7 +75,7 @@ def test_format_history_omits_output_section_when_key_missing() -> None:
 
 
 def test_format_history_omits_attachment_data_urls() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -109,7 +109,7 @@ def test_format_history_omits_attachment_data_urls() -> None:
 
 def test_format_history_filters_by_scope() -> None:
     """scope_handle が指定された場合、該当スコープの履歴のみが出力されること。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -151,7 +151,7 @@ def test_format_history_filters_by_scope() -> None:
 
 
 def test_format_history_preserves_tool_history_ref() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "G1": [
@@ -175,7 +175,7 @@ def test_format_history_preserves_tool_history_ref() -> None:
 
 
 def test_format_history_keeps_earlier_user_turn_visible_after_tool_steps() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -231,7 +231,7 @@ def test_format_history_preserves_requests_and_attachment_refs_when_pruning(
 ) -> None:
     """本文を省略しても画像参照を保ち、USER 指示は全文を保持する。"""
 
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     ref = "user_attachment:" + "c" * 24
     storage_path = "user-1/2026-09-08/1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed.png"
     state = {
@@ -280,7 +280,7 @@ def test_format_history_preserves_requests_and_attachment_refs_when_pruning(
 
 
 def test_format_history_omits_note_and_result_lines_when_unset() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [

@@ -12,7 +12,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerPolicyError,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import BrokerContext
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    BrokerApprovalRequiredError,
+    BrokerContext,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_registry import (
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
@@ -548,7 +551,8 @@ async def test_full_access_read_scope_does_not_expand_write_or_exec_scope(
     outside = tmp_path / "outside"
     outside.mkdir()
 
-    with pytest.raises(BrokerPolicyError) as patch_error:
+    # Paths outside the workspace still wait for the user's approval.
+    with pytest.raises(BrokerApprovalRequiredError):
         await execute_broker_tool(
             db_path=db_path,
             busy_timeout_ms=1_000,
@@ -570,9 +574,8 @@ async def test_full_access_read_scope_does_not_expand_write_or_exec_scope(
                 ]
             },
         )
-    assert patch_error.value.code == "WRITE_PATH_DENIED"
 
-    with pytest.raises(BrokerPolicyError) as bash_error:
+    with pytest.raises(BrokerApprovalRequiredError):
         await execute_broker_tool(
             db_path=db_path,
             busy_timeout_ms=1_000,
@@ -585,4 +588,3 @@ async def test_full_access_read_scope_does_not_expand_write_or_exec_scope(
             preflight_only=True,
             args={"command": "pwd", "cwd": str(outside)},
         )
-    assert bash_error.value.code == EXEC_CWD_DENIED

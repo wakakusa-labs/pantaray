@@ -21,6 +21,9 @@ class ReactLoopPolicy:
     max_llm_turns: int = 100
     max_tool_calls: int = 100
     max_consecutive_llm_errors: int = LLM_TOOL_CALL_MAX_CONSECUTIVE_ERRORS
+    # UTF-8 bytes of the conversation a turn may resend. Past it the run starts a
+    # fresh turn from the prompt transcript with the oldest tool outputs omitted.
+    max_input_bytes: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_llm_turns < 1:
@@ -29,6 +32,8 @@ class ReactLoopPolicy:
             raise ValueError("max_tool_calls must be >= 0")
         if self.max_consecutive_llm_errors < 1:
             raise ValueError("max_consecutive_llm_errors must be >= 1")
+        if self.max_input_bytes is not None and self.max_input_bytes < 1:
+            raise ValueError("max_input_bytes must be >= 1")
 
 
 @dataclass(frozen=True)

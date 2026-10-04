@@ -436,7 +436,7 @@ test('tool entry の images は省略時に空で、載っていれば storage_p
   );
 });
 
-test('tool entry の outcome は省略時 completed で、denied/unavailable はそのまま通る', async () => {
+test('tool entry の outcome は省略時 completed で、denied/unavailable/preparing はそのまま通る', async () => {
   const legacy = await createFetcher(async () => CONVERSATION_PAGE).readConversationPage({
     actionId: 'action-1',
     cursor: null,
@@ -444,7 +444,7 @@ test('tool entry の outcome は省略時 completed で、denied/unavailable は
   });
   assert.strictEqual(legacy.runs[0].entries[1].outcome, 'completed');
 
-  for (const outcome of ['denied', 'unavailable']) {
+  for (const outcome of ['denied', 'unavailable', 'preparing']) {
     const page = structuredClone(CONVERSATION_PAGE);
     page.runs[0].entries[1].outcome = outcome;
     const parsed = await createFetcher(async () => page).readConversationPage({

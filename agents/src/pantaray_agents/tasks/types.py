@@ -56,6 +56,8 @@ class ActionSubagentJobPayload(TypedDict):
     action_id: str
     parent_process_id: str
     inference_profile_id: str
+    # The parent's frozen Executing head: the context message the child starts from.
+    action_context: str
     task: str
     context_refs: list[str]
     resource_claim_ids: list[str]

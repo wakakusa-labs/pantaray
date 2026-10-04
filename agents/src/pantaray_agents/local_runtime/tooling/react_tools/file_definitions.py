@@ -5,7 +5,15 @@ from pantaray_agents.agents.artifact_react import (
     ReactToolExecutor,
     react_tool_response_schema,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+    GREP_MAX_LINE_CHARS,
+)
+from pantaray_agents.local_runtime.tooling.brokering.workspace_descriptor_access import (
+    SEARCH_TIMEOUT_SECONDS,
+)
 from pantaray_agents.schema.agent.base import JSONValue
+
+from .file_access import LIST_MAX_DEPTH
 
 READ_MAX_LINES = 200
 DISCOVERY_MAX_RESULTS = 100
@@ -16,6 +24,16 @@ _PAGE_PROPERTIES: dict[str, JSONValue] = {
     "truncated": {"type": "boolean"},
     "truncation_reason": _NULLABLE_STRING,
 }
+_SEARCH_NOTE_PROPERTIES: dict[str, JSONValue] = {
+    "warning": _NULLABLE_STRING,
+    "retry_hint": _NULLABLE_STRING,
+}
+_SEARCH_LIMITS = (
+    "Results come in path order. Symlinks are not followed, listed or "
+    "searched; a directory at max_depth is listed without its contents; glob "
+    f"and grep stop after {SEARCH_TIMEOUT_SECONDS:g} seconds. When something "
+    "is left out, warning and retry_hint say what and how to reach it."
+)
 
 
 def _success_schema(
@@ -125,11 +143,15 @@ def build_read_only_file_definitions(
         ),
         _definition(
             name="list",
-            description="List bounded paths in an explicit readable root.",
+            description="List paths in an explicit readable root. " + _SEARCH_LIMITS,
             properties={
                 "root": root,
                 "path": path,
-                "max_depth": {"type": "integer", "minimum": 0, "maximum": 4},
+                "max_depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": LIST_MAX_DEPTH,
+                },
                 "offset": offset,
                 "limit": {
                     "type": "integer",
@@ -156,7 +178,8 @@ def build_read_only_file_definitions(
         ),
         _definition(
             name="glob",
-            description="Find files by glob in an explicit readable root.",
+            description="Find files by glob in an explicit readable root. "
+            + _SEARCH_LIMITS,
             properties={
                 "root": root,
                 "base_path": path,
@@ -178,7 +201,13 @@ def build_read_only_file_definitions(
         ),
         _definition(
             name="grep",
-            description="Search text in an explicit readable root.",
+            description=(
+                "Search text files of any size in an explicit readable root. A "
+                f"line over {GREP_MAX_LINE_CHARS} characters comes back as an "
+                "excerpt around its first match; a matching binary file is named "
+                "in warning; skipped_files counts unreadable files. Skipped "
+                "symlinks are not counted or named. " + _SEARCH_LIMITS
+            ),
             properties={
                 "root": root,
                 "base_path": path,
@@ -215,6 +244,7 @@ def _discovery_schema(
             path_key: {"type": "string"},
             collection_name: {"type": "array", "items": item_schema},
             **_PAGE_PROPERTIES,
+            **_SEARCH_NOTE_PROPERTIES,
         },
         required=(
             "root",
@@ -223,6 +253,8 @@ def _discovery_schema(
             "next_offset",
             "truncated",
             "truncation_reason",
+            "warning",
+            "retry_hint",
         ),
     )
 
@@ -246,6 +278,7 @@ def _grep_schema() -> dict[str, JSONValue]:
                 },
             },
             **_PAGE_PROPERTIES,
+            **_SEARCH_NOTE_PROPERTIES,
             "skipped_files": {"type": "integer", "minimum": 0},
         },
         required=(
@@ -255,6 +288,8 @@ def _grep_schema() -> dict[str, JSONValue]:
             "next_offset",
             "truncated",
             "truncation_reason",
+            "warning",
+            "retry_hint",
             "skipped_files",
         ),
     )

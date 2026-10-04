@@ -3,16 +3,18 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, cast
 
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.tasks.types import MemoryUpdateActionTerminal
 from pantaray_agents.utils.structured_logging import log_structured_event
 
+from .insight_queue import SHORT_INSIGHT_WINDOW_SECONDS
 from .job_payload_models import MEMORY_UPDATE_SOURCE_MAX_ITEMS
 from .job_status import ACTIVE_DEDUPE_JOB_STATUSES
 from .job_types import LOCAL_MEMORY_UPDATE_JOB_TYPE
@@ -37,6 +39,12 @@ _JOB_ENQUEUED: Final[str] = "JOB_ENQUEUED"
 MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS: Final[float] = 30.0
 
 MEMORY_UPDATE_MAX_COALESCED_TRIGGERS: Final[int] = MEMORY_UPDATE_SOURCE_MAX_ITEMS
+# Finished Action turns ride along with the next Insight or summary run instead
+# of starting one each. One Insight window bounds the wait, which matters when
+# recording is off and no Insight run comes.
+ACTION_TERMINAL_MAX_DEFERRAL: Final[timedelta] = timedelta(
+    seconds=SHORT_INSIGHT_WINDOW_SECONDS
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +69,8 @@ def dispatch_memory_agent_triggers_once(
 ) -> MemoryAgentDispatchResult:
     if not user_id.strip():
         raise ValueError("user_id must not be empty")
-    handled_at = _iso_z(datetime.now(UTC) if now is None else now)
+    current = datetime.now(UTC) if now is None else now
+    handled_at = format_utc_iso(current)
     with open_memory_catalog_connection(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -71,6 +80,7 @@ def dispatch_memory_agent_triggers_once(
             outcomes = _dispatch_coalesced_memory_update(
                 connection=connection,
                 user_id=user_id,
+                now=current,
                 handled_at=handled_at,
             )
             connection.commit()
@@ -86,12 +96,13 @@ def _dispatch_coalesced_memory_update(
     *,
     connection: sqlite3.Connection,
     user_id: str,
+    now: datetime,
     handled_at: str,
 ) -> tuple[MemoryAgentDispatchOutcome, ...]:
     if _has_active_memory_update_job(connection=connection, user_id=user_id):
         return ()
     pending = _select_pending_unified_triggers(connection=connection, user_id=user_id)
-    if not pending:
+    if not _is_due(pending, now=now):
         return ()
     payload = build_coalesced_memory_update_payload(
         user_id=user_id,
@@ -105,6 +116,18 @@ def _dispatch_coalesced_memory_update(
         _mark_dispatched(connection, entry.trigger, job_id, handled_at)
         for entry in pending
     )
+
+
+def _is_due(pending: tuple[PendingMemoryTrigger, ...], *, now: datetime) -> bool:
+    if not pending:
+        return False
+    if any(
+        entry.trigger.trigger_kind != ACTION_TERMINAL_MEMORY_TRIGGER_KIND
+        for entry in pending
+    ):
+        return True
+    oldest = min(datetime.fromisoformat(entry.created_at) for entry in pending)
+    return now - oldest >= ACTION_TERMINAL_MAX_DEFERRAL
 
 
 def _select_pending_unified_triggers(
@@ -209,10 +232,6 @@ def _mark_dispatched(
             "pending Memory Agent trigger ownership was lost"
         )
     return MemoryAgentDispatchOutcome(trigger=trigger, job_id=job_id)
-
-
-def _iso_z(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _log_dispatch_result(result: MemoryAgentDispatchResult) -> None:

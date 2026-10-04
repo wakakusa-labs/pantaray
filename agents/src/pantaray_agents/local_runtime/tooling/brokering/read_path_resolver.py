@@ -21,7 +21,6 @@ class ReadTarget:
     real_path: Path
     canonical_root_path: Path
     root_relative_path: str
-    allow_directory: bool
     action_reference_path: str | None
     allow_symlink_directory_entries: bool = False
 
@@ -38,7 +37,6 @@ def resolve_read_target(*, context: BrokerContext, raw_path: str) -> ReadTarget:
         real_path=resolved.path,
         canonical_root_path=resolved.root.canonical_real_path,
         root_relative_path=resolved.root_relative_path,
-        allow_directory=True,
         action_reference_path=(
             str(resolved.path) if resolved.root in context.manifest_roots else None
         ),

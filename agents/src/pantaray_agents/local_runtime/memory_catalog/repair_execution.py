@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
     extract_markdown_references,
     remove_reference_occurrences,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from . import repair_rollback, revision_inspection
@@ -44,7 +44,7 @@ def repair_job(
                 complete_repair_job(
                     connection=connection,
                     job=job,
-                    completed_at=datetime.now(UTC).isoformat(),
+                    completed_at=now_utc_iso(),
                 )
             return True
         revision = load_revision(
@@ -60,7 +60,7 @@ def repair_job(
                 complete_repair_job(
                     connection=connection,
                     job=job,
-                    completed_at=datetime.now(UTC).isoformat(),
+                    completed_at=now_utc_iso(),
                 )
             return True
         if job.reason == "revision_integrity":
@@ -82,7 +82,7 @@ def repair_job(
                 complete_repair_job(
                     connection=connection,
                     job=job,
-                    completed_at=datetime.now(UTC).isoformat(),
+                    completed_at=now_utc_iso(),
                 )
             return True
         if node.source == "agent_experience":
@@ -153,7 +153,7 @@ def repair_job(
             complete_repair_job(
                 connection=connection,
                 job=job,
-                completed_at=datetime.now(UTC).isoformat(),
+                completed_at=now_utc_iso(),
             )
     emit_memory_catalog_event(
         "memory_link_repaired",

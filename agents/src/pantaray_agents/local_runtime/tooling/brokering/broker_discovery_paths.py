@@ -6,11 +6,10 @@ from pathlib import Path
 from typing import Literal
 
 from .manifest_paths import ResolvedManifestPath
-from .workspace_descriptor_access import scan_workspace_entries
+from .workspace_descriptor_access import WorkspaceScanSkips, scan_workspace_entries
 
 type DiscoveryTruncationReason = Literal[
     "limit",
-    "scan_budget",
     "timeout",
     "output_bytes",
     "line_length",
@@ -27,6 +26,7 @@ class DiscoveryPath:
 class BoundedDiscoveryPaths:
     selected: list[DiscoveryPath]
     truncation_reason: DiscoveryTruncationReason | None
+    skips: WorkspaceScanSkips
 
 
 def list_discovery_paths(
@@ -34,16 +34,16 @@ def list_discovery_paths(
     base: ResolvedManifestPath,
     max_depth: int | None,
     limit: int,
-    scan_limit: int,
-    include_path: Callable[[Path], bool] | None = None,
+    include_path: Callable[[Path], bool],
+    exclude_subtree: Callable[[Path], bool],
 ) -> BoundedDiscoveryPaths:
     result = scan_workspace_entries(
         root_path=base.root.canonical_real_path,
         base_path=base.root_relative_path,
         max_depth=max_depth,
         limit=limit,
-        scan_limit=scan_limit,
         include_path=include_path,
+        exclude_subtree=exclude_subtree,
     )
     return BoundedDiscoveryPaths(
         selected=[
@@ -56,6 +56,7 @@ def list_discovery_paths(
             for entry in result.entries
         ],
         truncation_reason=result.truncation_reason,
+        skips=result.skips,
     )
 
 
@@ -65,30 +66,3 @@ def entry_for_discovery_path(path: DiscoveryPath) -> dict[str, object]:
         "kind": path.kind,
         "name": path.path.name,
     }
-
-
-def discovery_child_path(
-    *,
-    base: ResolvedManifestPath,
-    child: Path,
-    kind: Literal["file", "directory"],
-) -> DiscoveryPath:
-    del base
-    return DiscoveryPath(path=child, kind=kind)
-
-
-def is_safe_discovery_path(*, base: ResolvedManifestPath, path: Path) -> bool:
-    if path.is_symlink():
-        return False
-    try:
-        path.resolve(strict=True).relative_to(base.root.canonical_real_path)
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-def safe_is_file(path: Path) -> bool:
-    try:
-        return path.is_file()
-    except OSError:
-        return False

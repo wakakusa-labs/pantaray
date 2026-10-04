@@ -237,3 +237,53 @@ export function getStartupDialogCopy(lang: UiLanguage): StartupDialogCopy {
         startupBody: (detail) => `An error occurred while starting the app: ${detail}`,
       };
 }
+
+/** macOS draws modifiers as ⌃⌥⇧⌘ in that order, e.g. `Option+Space` → `⌥Space`. */
+const MAC_MODIFIER_GLYPHS: Readonly<Record<string, { order: number; glyph: string }>> = {
+  Control: { order: 0, glyph: '⌃' },
+  Ctrl: { order: 0, glyph: '⌃' },
+  Option: { order: 1, glyph: '⌥' },
+  Alt: { order: 1, glyph: '⌥' },
+  Shift: { order: 2, glyph: '⇧' },
+  Command: { order: 3, glyph: '⌘' },
+  Cmd: { order: 3, glyph: '⌘' },
+  Super: { order: 3, glyph: '⌘' },
+  CommandOrControl: { order: 3, glyph: '⌘' },
+  CmdOrCtrl: { order: 3, glyph: '⌘' },
+};
+
+export function formatMacAccelerator(accelerator: string): string {
+  const tokens = accelerator.split('+');
+  const key = tokens.pop() ?? '';
+  const modifiers = tokens
+    .map((token, index) => ({ index, known: MAC_MODIFIER_GLYPHS[token], token }))
+    .sort(
+      (left, right) =>
+        (left.known?.order ?? 4) - (right.known?.order ?? 4) || left.index - right.index
+    )
+    .map(({ known, token }) => known?.glyph ?? token);
+  return `${modifiers.join('')}${key}`;
+}
+
+/**
+ * The message shown when recording starts for an owner with no data, before there is anything
+ * to suggest.
+ * It names the shortcut the user actually has, or only the button when none is set.
+ */
+export function getWelcomeSuggestionText(lang: UiLanguage, accelerator: string | null): string {
+  const shortcut = accelerator ? formatMacAccelerator(accelerator) : null;
+  if (lang === 'ja') {
+    const how = shortcut ? ` ${shortcut} か新しい会話ボタン` : '新しい会話ボタン';
+    return [
+      'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。',
+      `それまでも、任せたい仕事があればいつでも${how}で声をかけてください。`,
+    ].join('\n\n');
+  }
+  const how = shortcut
+    ? `press ${shortcut} or use the New conversation button`
+    : 'use the New conversation button';
+  return [
+    "I'll start by getting to know your work. When I find something I can help with, I'll suggest it.",
+    `Until then, whenever you have work to hand off, just ${how}.`,
+  ].join('\n\n');
+}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import secrets
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
@@ -11,6 +10,7 @@ from pantaray_agents.local_runtime.memory_references.reference_parser import (
     has_reference_markup,
     remove_reference_ids,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .epoch import resolve_context_handle
 from .errors import MemoryLinkValidationError, MemoryPublicationConflictError
@@ -251,7 +251,7 @@ def link_memory(
         note=command.note,
     )
     new_revision = _draft_revision(new_documents)
-    created_at = datetime.now(UTC).isoformat()
+    created_at = now_utc_iso()
     link = DraftLink(
         local_ref_id=command.local_ref_id,
         target_fragment_id=command.target_fragment_id,

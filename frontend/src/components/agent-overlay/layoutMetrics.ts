@@ -1,6 +1,7 @@
-export const COLLAPSED_PREVIEW_EM = 3.2;
+/** The collapsed preview shows two lines of body text, whatever the overlay's line height. */
+export const COLLAPSED_PREVIEW_LINES = 2;
 export const COLLAPSED_PREVIEW_EXTRA_PX = 12;
-export const COLLAPSED_PREVIEW_MAX_HEIGHT_CSS = `calc(${COLLAPSED_PREVIEW_EM}em + ${COLLAPSED_PREVIEW_EXTRA_PX}px)`;
+export const COLLAPSED_PREVIEW_MAX_HEIGHT_CSS = `calc(${COLLAPSED_PREVIEW_LINES}lh + ${COLLAPSED_PREVIEW_EXTRA_PX}px)`;
 
 export type ScrollableExpansionMetrics = {
   contentHeightPx: number;
@@ -8,11 +9,11 @@ export type ScrollableExpansionMetrics = {
   thresholdPx: number;
 };
 
-export function getCollapsedPreviewHeightPx(fontSizePx: number): number {
-  if (!Number.isFinite(fontSizePx) || fontSizePx <= 0) {
+export function getCollapsedPreviewHeightPx(lineHeightPx: number): number {
+  if (!Number.isFinite(lineHeightPx) || lineHeightPx <= 0) {
     return COLLAPSED_PREVIEW_EXTRA_PX;
   }
-  return fontSizePx * COLLAPSED_PREVIEW_EM + COLLAPSED_PREVIEW_EXTRA_PX;
+  return lineHeightPx * COLLAPSED_PREVIEW_LINES + COLLAPSED_PREVIEW_EXTRA_PX;
 }
 
 export function shouldExpandScrollableContent({

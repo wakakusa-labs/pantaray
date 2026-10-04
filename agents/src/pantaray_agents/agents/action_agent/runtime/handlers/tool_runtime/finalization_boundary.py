@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Literal, cast
 
 from pantaray_agents.agents.action_agent.runtime.log_safety import (
@@ -15,6 +14,7 @@ from pantaray_agents.agents.action_agent.runtime.log_safety import (
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.invocation_audit import (
     start_local_tool_invocation_audit,
 )
@@ -172,7 +172,7 @@ def finalize_action_tool_invocation(
             request=ToolResultFinalizationRequest(
                 owner=InvocationToolResultOwner(
                     invocation_id=invocation_id,
-                    completed_at=datetime.now(UTC).isoformat(),
+                    completed_at=now_utc_iso(),
                     status=error_status,
                     completion_scope=completion_scope,
                 ),

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, cast
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.repositories.repository import (
     RepositoryErrorKind,
@@ -84,7 +85,7 @@ class LocalActionRepositoryMemoryMixin:
             )
         return RepositoryResult(
             data={
-                "evaluated_at": now.isoformat(),
+                "evaluated_at": format_utc_iso(now),
                 "slots": slots,
             }
         )

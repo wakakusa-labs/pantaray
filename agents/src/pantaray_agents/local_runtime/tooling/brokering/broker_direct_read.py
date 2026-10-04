@@ -10,6 +10,7 @@ from typing import cast
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 
+from ..action_session_temp_paths import SCRATCH_SESSION_TEMP_DIRNAME
 from .attachment_reference import build_workspace_file_attachment
 from .broker_common import (
     BrokerContext,
@@ -26,7 +27,7 @@ from .broker_direct_read_page import (
     bound_text_page,
     text_page_output,
 )
-from .broker_direct_read_text import read_text_lines
+from .broker_direct_read_text import read_text_descriptor_lines
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedReadRequest
 from .read_path_resolver import (
@@ -34,7 +35,8 @@ from .read_path_resolver import (
     action_reference_paths,
     resolve_read_target,
 )
-from .tool_path_policy import is_private_action_plan_path
+from .tool_path_policy import hidden_read_path_filter
+from .workspace_descriptor_access import open_workspace_entry_descriptor
 
 SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -42,11 +44,6 @@ READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
 READ_ATTACHMENT_TOO_LARGE = "READ_ATTACHMENT_TOO_LARGE"
 READ_START_UNIT_UNSUPPORTED = "READ_START_UNIT_UNSUPPORTED"
-READ_DIRECTORY_SCAN_LIMIT = 20_000
-READ_DIRECTORY_SCAN_BUDGET_RETRY_HINT = (
-    "Use a narrower directory path, or use list/glob with a more specific base path "
-    "before reading this directory again."
-)
 READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT = "Continue with offset=next_offset."
 
 _BINARY_EXTENSIONS = frozenset(
@@ -72,7 +69,6 @@ _BINARY_EXTENSIONS = frozenset(
         ".zip",
     }
 )
-_INTERNAL_DIRECTORY_NAMES = frozenset({".runtime-temp", ".venv"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +78,7 @@ class DirectoryReadResult:
     truncated: bool
     truncation_reason: str | None
     retry_hint: str | None
+    warning: str | None
 
 
 def run_read_executor(
@@ -91,23 +88,45 @@ def run_read_executor(
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
     target = resolve_read_target(context=context, raw_path=request.path)
-    if target.real_path.is_dir():
-        if not target.allow_directory:
-            raise BrokerPolicyError("read.path must reference an existing file")
-        return _read_directory(context=context, target=target, request=request)
-    return _read_file(target=target, request=request)
+    descriptor = open_read_target(target)
+    try:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            return _read_directory(
+                context=context,
+                target=target,
+                request=request,
+                descriptor=descriptor,
+            )
+        return _read_file(target=target, request=request, descriptor=descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def open_read_target(target: ReadTarget) -> int:
+    """Open the checked target once, walking down from its root.
+
+    Every component below the root is opened without following a symlink, so
+    a directory swapped for a link after the check cannot redirect the read;
+    every branch reads this one descriptor instead of the path name again.
+    """
+
+    return open_workspace_entry_descriptor(
+        root_path=target.canonical_root_path,
+        relative_path=target.root_relative_path,
+    )
 
 
 def _read_file(
     *,
     target: ReadTarget,
     request: ValidatedReadRequest,
+    descriptor: int,
 ) -> UnprojectedBrokerToolOutcome:
-    sample = read_leading_bytes(target, limit=SAMPLE_BYTES)
+    sample = read_leading_bytes(descriptor, target=target, limit=SAMPLE_BYTES)
     mime_type = _sniff_image_mime(filepath=target.real_path, sample=sample)
     if mime_type is not None:
         _reject_start_unit(request)
-        byte_size = target.real_path.stat().st_size
+        byte_size = os.fstat(descriptor).st_size
         if byte_size > MAX_ATTACHMENT_BYTES:
             raise BrokerPolicyError(
                 (
@@ -116,7 +135,7 @@ def _read_file(
                 ),
                 code=READ_ATTACHMENT_TOO_LARGE,
             )
-        payload = _read_attachment_payload(target=target)
+        payload = _read_attachment_payload(target=target, descriptor=descriptor)
         workspace_attachment = build_workspace_file_attachment(
             canonical_root_path=target.canonical_root_path,
             root_relative_path=target.root_relative_path,
@@ -167,7 +186,10 @@ def _read_file(
     extracted_format = document_format(filepath=target.real_path, sample=sample)
     if extracted_format is not None:
         return read_document(
-            target=target, request=request, document_format=extracted_format
+            target=target,
+            request=request,
+            document_format=extracted_format,
+            descriptor=descriptor,
         )
     if _is_binary_file(filepath=target.real_path, sample=sample):
         raise BrokerPolicyError(
@@ -179,8 +201,8 @@ def _read_file(
     offset = request.offset or 1
     column = request.column or 1
     limit = request.limit or DEFAULT_READ_LIMIT
-    result = read_text_lines(
-        filepath=target.real_path,
+    result = read_text_descriptor_lines(
+        descriptor=descriptor,
         offset=offset,
         column=column,
         limit=limit,
@@ -211,6 +233,7 @@ def _read_directory(
     context: BrokerContext,
     target: ReadTarget,
     request: ValidatedReadRequest,
+    descriptor: int,
 ) -> UnprojectedBrokerToolOutcome:
     if request.column not in {None, 1}:
         raise BrokerPolicyError("read.column is valid only for text files")
@@ -220,6 +243,7 @@ def _read_directory(
     result = _read_bounded_directory_entries(
         context=context,
         target=target,
+        descriptor=descriptor,
         offset=offset,
         limit=limit,
     )
@@ -238,6 +262,7 @@ def _read_directory(
             "truncated": result.truncated,
             "truncation_reason": result.truncation_reason,
             "retry_hint": result.retry_hint,
+            "warning": result.warning,
         },
         search_text=search_text,
         file_paths=(target.display_path,),
@@ -249,68 +274,62 @@ def _read_bounded_directory_entries(
     *,
     context: BrokerContext,
     target: ReadTarget,
+    descriptor: int,
     offset: int,
     limit: int,
 ) -> DirectoryReadResult:
+    """One page of entries, from the offset-th entry in the directory's order.
+
+    offset counts every entry, shown or skipped, so a page only checks its own
+    entries and offset reaches any entry of a directory left unchanged.
+    """
+
     entries: list[dict[str, JSONValue]] = []
-    visible_index = 0
-    scanned = 0
-    with os.scandir(target.real_path) as iterator:
-        for child in iterator:
-            scanned += 1
-            if scanned > READ_DIRECTORY_SCAN_LIMIT:
-                return DirectoryReadResult(
-                    entries=entries,
-                    next_offset=(offset + len(entries) if entries else None),
-                    truncated=True,
-                    truncation_reason="scan_budget",
-                    retry_hint=(
-                        READ_DIRECTORY_SCAN_BUDGET_RETRY_HINT if not entries else None
-                    ),
-                )
-            entry = _directory_entry(child, context=context, target=target)
-            if entry is None:
-                continue
-            visible_index += 1
-            if visible_index < offset:
+    skipped_symlinks = 0
+    unreadable = 0
+    first_error: str | None = None
+    is_hidden = hidden_read_path_filter(context)
+    session_temp = context.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
+    next_offset: int | None = None
+    with os.scandir(descriptor) as iterator:
+        for index, child in enumerate(iterator, start=1):
+            if index < offset:
                 continue
             if len(entries) >= limit:
-                return DirectoryReadResult(
-                    entries=entries,
-                    next_offset=offset + len(entries),
-                    truncated=True,
-                    truncation_reason="page_limit",
-                    retry_hint=READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT,
-                )
-            entries.append(entry)
+                next_offset = index
+                break
+            child_path = target.real_path / child.name
+            try:
+                if child_path == session_temp or is_hidden(child_path):
+                    continue
+                if child.is_symlink() and not target.allow_symlink_directory_entries:
+                    skipped_symlinks += 1
+                    continue
+                kind = "directory" if child.is_dir() else "file"
+            except OSError as exc:
+                unreadable += 1
+                first_error = first_error or f"{child.name}: {exc.strerror or exc}"
+                continue
+            entries.append({"name": child.name, "kind": kind})
+    warnings: list[str] = []
+    if skipped_symlinks:
+        warnings.append(
+            f"This page skipped {skipped_symlinks} symlink(s): symlinks are listed "
+            "only with full read access."
+        )
+    if unreadable:
+        warnings.append(
+            f"This page skipped {unreadable} entr(y/ies) that could not be read. "
+            f"First error: {first_error}."
+        )
     return DirectoryReadResult(
         entries=entries,
-        next_offset=None,
-        truncated=False,
-        truncation_reason=None,
-        retry_hint=None,
+        next_offset=next_offset,
+        truncated=next_offset is not None,
+        truncation_reason="page_limit" if next_offset is not None else None,
+        retry_hint=READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT if next_offset else None,
+        warning=" ".join(warnings) or None,
     )
-
-
-def _directory_entry(
-    child: os.DirEntry[str],
-    *,
-    context: BrokerContext,
-    target: ReadTarget,
-) -> dict[str, JSONValue] | None:
-    if child.name in _INTERNAL_DIRECTORY_NAMES:
-        return None
-    child_path = Path(child.path)
-    try:
-        if child.is_symlink():
-            if not target.allow_symlink_directory_entries:
-                return None
-        if is_private_action_plan_path(context=context, path=child_path):
-            return None
-        kind = "directory" if child.is_dir() else "file"
-    except OSError:
-        return None
-    return {"name": child.name, "kind": kind}
 
 
 def _reject_start_unit(request: ValidatedReadRequest) -> None:
@@ -334,30 +353,23 @@ def _reject_start_unit(request: ValidatedReadRequest) -> None:
     )
 
 
-def read_leading_bytes(target: ReadTarget, *, limit: int) -> bytes:
-    """The first ``limit`` bytes of a regular file, opened so it cannot block.
+def read_leading_bytes(descriptor: int, *, target: ReadTarget, limit: int) -> bytes:
+    """The first ``limit`` bytes of a regular file, left rewound for the next read.
 
-    Every read starts here, before the file's kind is known. A FIFO with no
-    writer blocks a plain open forever, on a thread nothing can stop, and the
-    one Action worker with it; O_NONBLOCK returns at once and the descriptor
-    says what was opened. The text and document branches open their files the
-    same way.
+    Every read of a file starts here, before its kind is known. The target was
+    opened non-blocking, so a FIFO with no writer is refused here instead of
+    blocking the one Action worker on a thread nothing can stop.
     """
 
-    descriptor = os.open(
-        target.real_path,
-        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
-    )
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise BrokerPolicyError(
-                f"Cannot read {target.display_path}: it is not a regular file",
-                code=READ_NOT_A_REGULAR_FILE,
-            )
-        with open(descriptor, "rb", closefd=False) as handle:
-            return handle.read(limit)
-    finally:
-        os.close(descriptor)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        raise BrokerPolicyError(
+            f"Cannot read {target.display_path}: it is not a regular file",
+            code=READ_NOT_A_REGULAR_FILE,
+        )
+    with open(descriptor, "rb", closefd=False) as handle:
+        payload = handle.read(limit)
+        handle.seek(0)
+    return payload
 
 
 def _sniff_image_mime(*, filepath: Path, sample: bytes) -> str | None:
@@ -379,8 +391,10 @@ def _sniff_image_mime(*, filepath: Path, sample: bytes) -> str | None:
     return guessed if guessed in IMAGE_MIME_TYPES else None
 
 
-def _read_attachment_payload(*, target: ReadTarget) -> bytes:
-    payload = read_leading_bytes(target, limit=MAX_ATTACHMENT_BYTES + 1)
+def _read_attachment_payload(*, target: ReadTarget, descriptor: int) -> bytes:
+    payload = read_leading_bytes(
+        descriptor, target=target, limit=MAX_ATTACHMENT_BYTES + 1
+    )
     if len(payload) > MAX_ATTACHMENT_BYTES:
         raise BrokerPolicyError(
             (
@@ -406,4 +420,9 @@ def _is_binary_file(*, filepath: Path, sample: bytes) -> bool:
     return non_printable / len(sample) > 0.3
 
 
-__all__ = ["SAMPLE_BYTES", "read_leading_bytes", "run_read_executor"]
+__all__ = [
+    "SAMPLE_BYTES",
+    "open_read_target",
+    "read_leading_bytes",
+    "run_read_executor",
+]

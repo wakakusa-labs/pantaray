@@ -1,6 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { ActionConversationPage } from '../../electron/src/actions/actionContracts';
+import type {
+  ActionLiveSnapshot,
+  ActionLiveUpdate,
+} from '../../electron/src/actions/actionLiveCore';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 
 import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
@@ -16,9 +21,6 @@ const mocks = vi.hoisted(() => ({
   removeItem: vi.fn(),
   setSearchText: vi.fn(),
   unreadActionId: 'A1' as string | null,
-}));
-vi.mock('@/components/history/HistoryCaptureControls', () => ({
-  HistoryCaptureControls: () => null,
 }));
 vi.mock('@/context/useI18n', async () => {
   const { formatDateTime } = await import('@/i18n/translate');
@@ -119,7 +121,7 @@ it('空状態でも起動ボタンは右上の1つだけで、keyboardから開�
   expect(await screen.findByRole('alert')).toHaveTextContent('history.openOverlayFailed');
 });
 
-it('CTAの隣に設定中のショートカットをキーキャップで表示する', async () => {
+it('設定中のショートカットはCTAの中に薄いキーキャップで出し、名前は変えない', async () => {
   const getState = vi.fn(async () => ({ accelerator: 'Option+Space', failure: null }));
   window.electron = {
     process: { platform: 'darwin' },
@@ -128,16 +130,16 @@ it('CTAの隣に設定中のショートカットをキーキャップで表示�
   } as unknown as Window['electron'];
   const { container, rerender } = render(<SuggestionHistoryPage />);
 
-  expect(screen.getByText('shortcut.hint.loading')).toBeInTheDocument();
-  const keycaps = await screen.findByRole('img', { name: 'shortcut.hint.label' });
-  expect([...keycaps.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual([
-    '⌥',
-    'Space',
-  ]);
-  expect(keycaps.closest('.history-toolbar')).not.toBeNull();
-  expect(keycaps.nextElementSibling).toBe(
-    screen.getByRole('button', { name: 'history.newConversation' })
-  );
+  const cta = screen.getByRole('button', { name: 'history.newConversation' });
+  // While the shortcut loads, the button shows nothing extra.
+  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
+  expect(cta).not.toHaveAttribute('title');
+  await waitFor(() => expect(cta).toHaveAttribute('aria-keyshortcuts', 'Alt+Space'));
+  const keys = cta.querySelector('.history-new-conversation-keys');
+  expect(keys).toHaveAttribute('aria-hidden', 'true');
+  expect([...keys!.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['⌥', 'Space']);
+  expect(cta).toHaveAccessibleName('history.newConversation');
+  expect(container.querySelectorAll('.shortcut-keycaps')).toHaveLength(1);
   expect(translate('ja', 'shortcut.hint.label', { keys: 'Option Space' })).toBe(
     'ショートカット: Option Space'
   );
@@ -157,7 +159,7 @@ it('CTAの隣に設定中のショートカットをキーキャップで表示�
   );
 });
 
-it('ショートカットが登録できていないときはキーキャップを出さない', async () => {
+it('ショートカットが登録できていないときはキーキャップを出さず、CTAの説明で伝える', async () => {
   window.electron = {
     process: { platform: 'darwin' },
     shortcut: {
@@ -169,8 +171,48 @@ it('ショートカットが登録できていないときはキーキャップ�
   } as unknown as Window['electron'];
   render(<SuggestionHistoryPage />);
 
-  expect(await screen.findByText('shortcut.hint.unavailable')).toBeInTheDocument();
-  expect(screen.queryByRole('img', { name: 'shortcut.hint.label' })).toBeNull();
+  const cta = screen.getByRole('button', { name: 'history.newConversation' });
+  await waitFor(() => expect(cta).toHaveAttribute('title', 'shortcut.hint.unavailable'));
+  expect(cta).toHaveAccessibleDescription('shortcut.hint.unavailable');
+  expect(cta).not.toHaveAttribute('aria-keyshortcuts');
+  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
+});
+
+it('行は最終更新の日ごとに、今日・昨日・日付の見出しの下にまとめる', () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 2, 9));
+  window.electron = {} as unknown as Window['electron'];
+  mocks.error = null;
+  mocks.unreadActionId = null;
+  const row = (id: string, updatedAt: Date) => ({
+    kind: 'suggestion' as const,
+    suggestion_id: id,
+    title: id,
+    updated_at: updatedAt.toISOString(),
+    status: 'idle' as const,
+  });
+  mocks.itemsOverride = [
+    row('T1', new Date(2026, 9, 2, 8)),
+    row('T2', new Date(2026, 9, 2, 0)),
+    row('Y1', new Date(2026, 9, 1, 23)),
+    row('O1', new Date(2026, 8, 29, 8)),
+  ];
+  try {
+    render(<SuggestionHistoryPage />);
+
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'history.day.today',
+      'history.day.yesterday',
+      '9月29日',
+    ]);
+    // Under today and yesterday a row shows its time; older rows keep the full date.
+    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(/^T108:00$/);
+    expect(screen.getByRole('button', { name: /^O1/ })).toHaveTextContent('2026年9月29日 08:00');
+    expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
+    expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('Conversation行はOverlayを開き、実際の表示前に既読にしない', async () => {
@@ -269,6 +311,185 @@ it('バッジは running / approval_pending だけに出し、idle には出さ�
     'history.status.running',
     'history.status.approvalPending',
   ]);
+});
+
+function livePage(
+  actionId: string,
+  status: ActionConversationPage['action']['status'],
+  entries: ActionConversationPage['runs'][number]['entries']
+): ActionConversationPage {
+  return {
+    action: {
+      action_id: actionId,
+      suggestion_id: null,
+      approved_suggestion: null,
+      status,
+      latest_run_id: `${actionId}-run`,
+      resumable: false,
+    },
+    runs: [
+      {
+        run_id: `${actionId}-run`,
+        status: status === 'success' ? 'success' : 'running',
+        started_at: '2026-10-02T00:00:00.000000Z',
+        completed_at: status === 'success' ? '2026-10-02T00:01:00.000000Z' : null,
+        completion_event_id: status === 'success' ? 'C' : null,
+        entries,
+        final_output: status === 'success' ? 'Done' : null,
+        error: null,
+      },
+    ],
+    unadopted_messages: [],
+    next_cursor: null,
+  };
+}
+
+function liveUpdate(
+  page: ActionConversationPage,
+  approvalBlockers: ActionLiveSnapshot['approvalBlockers'] = []
+): ActionLiveUpdate {
+  const snapshot: ActionLiveSnapshot = {
+    actionId: page.action.action_id,
+    page,
+    pageVersion: 1,
+    transientToolSteps: [],
+    approvalBlockers,
+    lifecycle: null,
+  };
+  return { kind: 'action_updated', snapshot };
+}
+
+it('実行中の会話だけ行の下に今の動きを1行で出し、終われば消す。行は作り直さない', () => {
+  const listeners = new Set<(update: ActionLiveUpdate) => void>();
+  window.electron = {
+    actions: {
+      onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {
+        listeners.add(callback);
+        return () => listeners.delete(callback);
+      },
+    },
+  } as unknown as Window['electron'];
+  const publish = (update: ActionLiveUpdate) =>
+    act(() => listeners.forEach((listener) => listener(update)));
+  mocks.error = null;
+  mocks.unreadActionId = null;
+  const conversation = (actionId: string): ConversationHistoryListItem => ({
+    kind: 'conversation',
+    action_id: actionId,
+    title: actionId,
+    updated_at: '2026-08-30T01:02:03.000Z',
+    status: 'running',
+    latest_completion_event_id: null,
+  });
+  mocks.itemsOverride = [conversation('A1'), conversation('A2')];
+  const { container } = render(<SuggestionHistoryPage />);
+  const lines = () =>
+    [...container.querySelectorAll('.history-item')].map(
+      (row) => row.querySelector('.history-item-live')?.textContent ?? null
+    );
+  const row = screen.getByRole('button', { name: /^A1/ });
+  row.focus();
+  expect(lines()).toEqual([null, null]);
+
+  publish(
+    liveUpdate(
+      livePage('A1', 'processing', [
+        {
+          step_kind: 'tool',
+          step_id: 'tool-2',
+          step_number: 2,
+          label: 'read',
+          status: 'processing',
+          outcome: 'completed',
+          subject: 'notes.md',
+          output_preview: null,
+          output_available: false,
+          images: [],
+        },
+        { step_kind: 'assistant', step_id: 'assistant-1', step_number: 1, content: 'Looking' },
+      ])
+    )
+  );
+  publish(liveUpdate(livePage('A2', 'queued', [])));
+  expect(lines()).toEqual(['notes.md を読み取っています', 'overlay.thinking']);
+  // Visual only: the line stays out of the row's accessible name and is not a live region.
+  expect(row).toHaveAccessibleName(/^A1/);
+  expect(row).not.toHaveAccessibleName(/読み取っています/);
+  expect(container.querySelector('.history-item-live')).toHaveAttribute('aria-hidden', 'true');
+
+  const found = livePage('A1', 'processing', [
+    { step_kind: 'assistant', step_id: 'assistant-3', step_number: 3, content: 'Found it\nmore' },
+  ]);
+  publish(liveUpdate(found));
+  publish(liveUpdate(livePage('A2', 'success', [])));
+  expect(lines()).toEqual(['Found it', null]);
+  expect(screen.getByRole('button', { name: /^A1/ })).toBe(row);
+  expect(row).toHaveFocus();
+
+  // While an approval is pending the badge says so; the line would only repeat it.
+  publish(
+    liveUpdate(found, [
+      {
+        actionId: 'A1',
+        processId: 'A1-run',
+        approvalSessionId: 'session-1',
+        toolRequestId: 'request-1',
+        toolId: 'bash',
+        intentClass: 'write',
+        commandSummary: {},
+      },
+    ])
+  );
+  expect(lines()).toEqual([null, null]);
+  publish(liveUpdate(found));
+  expect(lines()).toEqual(['Found it', null]);
+
+  publish({ kind: 'reset' });
+  expect(lines()).toEqual([null, null]);
+});
+
+it('日の見出しが増えたり行が別の日へ移ったりしても、残った行はフォーカスを保つ', () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 2, 9));
+  window.electron = {} as unknown as Window['electron'];
+  mocks.error = null;
+  mocks.unreadActionId = null;
+  const row = (id: string, updatedAt: Date) => ({
+    kind: 'suggestion' as const,
+    suggestion_id: id,
+    title: id,
+    updated_at: updatedAt.toISOString(),
+    status: 'idle' as const,
+  });
+  mocks.itemsOverride = [
+    row('Y1', new Date(2026, 9, 1, 8)),
+    row('O1', new Date(2026, 8, 29, 8)),
+    row('O2', new Date(2026, 8, 29, 7)),
+  ];
+  try {
+    const { rerender } = render(<SuggestionHistoryPage />);
+    const older = screen.getByRole('button', { name: /^O1/ });
+    older.focus();
+
+    // A live update brings a first row for today, and O2 moves to today as well.
+    mocks.itemsOverride = [
+      row('N1', new Date(2026, 9, 2, 8)),
+      row('O2', new Date(2026, 9, 2, 7)),
+      row('Y1', new Date(2026, 9, 1, 8)),
+      row('O1', new Date(2026, 8, 29, 8)),
+    ];
+    rerender(<SuggestionHistoryPage />);
+
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'history.day.today',
+      'history.day.yesterday',
+      '9月29日',
+    ]);
+    expect(screen.getByRole('button', { name: /^O1/ })).toBe(older);
+    expect(older).toHaveFocus();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 function installDeleteBridge(result: { ok: true } | { ok: false; errorCode: string | null }) {

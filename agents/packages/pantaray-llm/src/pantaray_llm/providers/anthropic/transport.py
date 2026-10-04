@@ -11,7 +11,9 @@ from pantaray_llm.contracts.json_value import JSONValue
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION_HEADER = "2023-06-01"
 ANTHROPIC_MAX_REQUEST_BYTES = 32 * 1024 * 1024
-# ローカル LLM プロキシと同じ上限。これを超える非ストリーミング応答は呼び出し元が待てない。
+# Applies only when no client is lent, which the desktop never does. It stays
+# below the desktop's LLM read timeout so a caller waiting on this response gets
+# an error back instead of giving up first.
 ANTHROPIC_REQUEST_TIMEOUT_SECONDS = 180.0
 
 

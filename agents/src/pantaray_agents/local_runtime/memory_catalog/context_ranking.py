@@ -196,6 +196,7 @@ def _rerank_activity_windows(
             for index, candidate in enumerate(window)
             if candidate.node.source in ACTIVITY_SOURCES
         ]
+        # sorted() is stable, so equal times keep the window's relevance order.
         activity_candidates = sorted(
             (window[index] for index in activity_positions),
             key=lambda item: _time_prior_key(
@@ -217,17 +218,13 @@ def _time_prior_key(
     candidate: RankedMemoryCandidate,
     center_time: datetime | None,
     radius_hours: int | None,
-) -> tuple[int, float, str]:
+) -> tuple[int, float]:
     updated_at = parse_iso8601_utc(candidate.updated_at)
     if center_time is None or radius_hours is None:
-        return (0, -updated_at.timestamp(), candidate.fragment.fragment_id)
+        return (0, -updated_at.timestamp())
     distance_seconds = abs((updated_at - center_time).total_seconds())
     radius_seconds = radius_hours * 3600
-    return (
-        0 if distance_seconds <= radius_seconds else 1,
-        distance_seconds,
-        candidate.fragment.fragment_id,
-    )
+    return (0 if distance_seconds <= radius_seconds else 1, distance_seconds)
 
 
 def _with_lane_rank(

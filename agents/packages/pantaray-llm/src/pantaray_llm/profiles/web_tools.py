@@ -10,6 +10,14 @@ WEB_SEARCH_ADVANCED_DEPTH = "advanced"
 WEB_EXTRACT_ADVANCED_DEPTH = "advanced"
 WEB_CRAWL_ADVANCED_EXTRACT_DEPTH = "advanced"
 WEB_CRAWL_MAX_DEPTH = 5
+# The counts below are the Tavily API defaults (docs.tavily.com, 2026-10), passed
+# explicitly so the limits the tool descriptions state stay true on every route.
+WEB_SEARCH_RESULT_LIMIT = 10
+WEB_CRAWL_MAX_BREADTH = 20
+WEB_CRAWL_PAGE_LIMIT = 50
+# Excerpts (at most 500 characters each) returned per page when web_extract has
+# a query or web_crawl has instructions.
+WEB_EXCERPTS_PER_PAGE = 3
 
 WEB_SEARCH_TOPIC_GENERAL = "general"
 WEB_SEARCH_TOPIC_NEWS = "news"
@@ -57,8 +65,11 @@ type WebSearchCountry = Literal[
 
 __all__ = [
     "WEB_CRAWL_ADVANCED_EXTRACT_DEPTH",
+    "WEB_CRAWL_MAX_BREADTH",
     "WEB_CRAWL_MAX_DEPTH",
+    "WEB_CRAWL_PAGE_LIMIT",
     "WEB_CRAWL_PROFILE_ID",
+    "WEB_EXCERPTS_PER_PAGE",
     "WEB_EXTRACT_ADVANCED_DEPTH",
     "WEB_EXTRACT_PROFILE_ID",
     "WEB_SEARCH_ADVANCED_DEPTH",
@@ -72,6 +83,7 @@ __all__ = [
     "WEB_SEARCH_COUNTRY_UNITED_KINGDOM",
     "WEB_SEARCH_COUNTRY_UNITED_STATES",
     "WEB_SEARCH_PROFILE_ID",
+    "WEB_SEARCH_RESULT_LIMIT",
     "WEB_SEARCH_TOPICS",
     "WEB_SEARCH_TOPIC_FINANCE",
     "WEB_SEARCH_TOPIC_GENERAL",

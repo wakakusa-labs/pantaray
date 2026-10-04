@@ -52,9 +52,6 @@ HISTORY_FETCH_TOOL = ToolDefinition.from_spec(
                     name="refs",
                     schema=history_fetch_refs_schema(),
                     required=True,
-                    prompt_type="string[]",
-                    description="Displayed short step IDs to fetch, in output order.",
-                    llm_order=10,
                 ),
                 field_spec(
                     name="cursor",
@@ -65,9 +62,7 @@ HISTORY_FETCH_TOOL = ToolDefinition.from_spec(
                         "maxLength": 85,
                     },
                     required=False,
-                    prompt_type="string | null",
                     description="Use next_cursor from the preceding page with the same refs; omit for the first page.",
-                    llm_order=20,
                 ),
             )
         ),

@@ -94,6 +94,10 @@ test('helper runtime verifies migrations and sqlite-vec after installation', () 
   );
   assert.match(VERIFY_MIGRATIONS_INLINE_SCRIPT, /import sqlite_vec/);
   assert.match(VERIFY_MIGRATIONS_INLINE_SCRIPT, /import pypdfium2/);
+  assert.match(
+    VERIFY_MIGRATIONS_INLINE_SCRIPT,
+    /import pantaray_agents\.agents\.action_agent\.runtime\.agents_md/
+  );
   assert.match(VERIFY_MIGRATIONS_INLINE_SCRIPT, /enable_load_extension\(True\)/);
   assert.match(VERIFY_MIGRATIONS_INLINE_SCRIPT, /enable_load_extension\(False\)/);
   assert.match(VERIFY_MIGRATIONS_INLINE_SCRIPT, /vec_version\(\)/);

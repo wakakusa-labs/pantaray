@@ -41,7 +41,9 @@ def bootstrap_read_runtime_db(
     *,
     read_access_scope: str = "workspace",
 ) -> tuple[Path, ReadRuntimeContext]:
-    db_path = tmp_path / "runtime.db"
+    # App storage lives apart from the files a test reads as the user's own.
+    db_path = tmp_path / "app-data" / "runtime.db"
+    db_path.parent.mkdir()
     prepare_test_database(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -71,7 +73,9 @@ def bootstrap_read_runtime_db(
 def bootstrap_read_runtime_db_with_registered_folder(
     tmp_path: Path,
 ) -> tuple[Path, ReadRuntimeContext, WorkspaceFolderRecord]:
-    db_path = tmp_path / "runtime.db"
+    # App storage lives apart from the files a test reads as the user's own.
+    db_path = tmp_path / "app-data" / "runtime.db"
+    db_path.parent.mkdir()
     prepare_test_database(
         db_path=db_path,
         busy_timeout_ms=1_000,

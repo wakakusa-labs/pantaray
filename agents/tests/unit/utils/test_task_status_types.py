@@ -5,10 +5,7 @@ from pydantic import ValidationError
 
 from pantaray_agents.schema.agent.base import TaskStatusType
 from pantaray_agents.schema.agent.streaming import ActionStreamEndData, StreamEndData
-from pantaray_agents.utils.streaming_helpers import (
-    coerce_task_status,
-    make_stream_end_for_suggestion,
-)
+from pantaray_agents.utils.streaming_helpers import coerce_task_status
 
 
 def test_coerce_task_status_maps_queued_to_processing() -> None:
@@ -42,17 +39,3 @@ def test_action_stream_end_data_rejects_queued_status() -> None:
             total_chunks=0,
             duration_ms=1,
         )
-
-
-def test_make_stream_end_for_suggestion_outputs_json_serializable_status() -> None:
-    """StreamEndData は model_dump 経由で JSON 化できる（Enumが残らない）こと。"""
-    end = make_stream_end_for_suggestion(
-        suggestion_id="sug-1",
-        user_id="user-1",
-        has_suggestion=True,
-        total_chunks=1,
-        status=coerce_task_status("queued"),
-        duration_ms=123,
-    )
-    dumped = end.model_dump()
-    assert dumped["status"] == "processing"

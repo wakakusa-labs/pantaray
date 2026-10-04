@@ -55,6 +55,39 @@
   white-space: pre-wrap;
 }
 
+/* 回答の下に小さく控えめに置く。 */
+.action-conversation__answer-actions {
+  display: flex;
+  margin-top: var(--space-xs);
+}
+
+.action-conversation__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.action-conversation__copy:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/*
+ * ヘッダーのアイコンボタンと同じ色と太さのフォーカスの輪。本文の左端に接していて外側へ出すと
+ * スクロール領域に切られるので、ボタンの内側に描く。
+ */
+.action-conversation__copy:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /*
  * Matches the composer's project mentions. The overlay panel behind the bubble is mid-dark,
  * so a deeper blue such as #7dabdc falls near 3:1; this one measures about 4.6:1 on the

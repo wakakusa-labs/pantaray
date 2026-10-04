@@ -3,9 +3,9 @@ from __future__ import annotations
 import shutil
 import sqlite3
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import register_after_commit
 
 from .errors import MemoryCatalogIntegrityError, MemoryPublicationConflictError
@@ -15,7 +15,7 @@ from .observability import emit_memory_catalog_event
 def archive_memory(
     *, connection: sqlite3.Connection, user_id: str, node_id: str
 ) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     cursor = connection.execute(
         """
         UPDATE memory_nodes
@@ -42,7 +42,7 @@ def mark_memory_corrupt(
         UPDATE memory_nodes SET integrity = 'corrupt', updated_at = ?
         WHERE user_id = ? AND node_id = ? AND lifecycle != 'preparing'
         """,
-        (datetime.now(UTC).isoformat(), user_id, node_id),
+        (now_utc_iso(), user_id, node_id),
     )
     if cursor.rowcount != 1:
         raise MemoryCatalogIntegrityError("corrupt node is absent or still preparing")
@@ -102,7 +102,7 @@ def plan_revision_garbage_collection(
     if row is None:
         return None
     deletion_id = f"del_{uuid.uuid4().hex}"
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     connection.execute(
         """
         INSERT INTO memory_artifact_deletions(

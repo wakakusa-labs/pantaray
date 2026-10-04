@@ -57,6 +57,7 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"screen pixels"
 PNG_SHA256 = hashlib.sha256(PNG_BYTES).hexdigest()
 REQUESTED_AT = "2026-09-08T00:00:00Z"
 TOOL_REQUEST_ID = "action-1:step-1:1"
+APP_NAME = "Finder"
 
 
 def _state(context: object) -> dict[str, object]:
@@ -157,6 +158,7 @@ async def _preflight(state: dict[str, object]):
         step_id="step-1",
         tool_def=CAPTURE_SCREEN_TOOL,
         state=state,
+        app_name=APP_NAME,
         tool_request_id=TOOL_REQUEST_ID,
         requested_at=REQUESTED_AT,
     )
@@ -186,7 +188,10 @@ def _record_invocation(
             timeout_ms=15_000,
             intent_class="screen_capture",
             network_policy="deny",
-            command_summary_json={"summary_kind": "screen_capture"},
+            command_summary_json={
+                "summary_kind": "screen_capture",
+                "app_name": APP_NAME,
+            },
             capability_snapshot_json={"required_capabilities": ["screen_capture"]},
             request_json={},
             status="running",
@@ -207,6 +212,7 @@ async def _run(
         step_id="step-1",
         tool_def=CAPTURE_SCREEN_TOOL,
         state=state,
+        app_name=APP_NAME,
         tool_request_id=TOOL_REQUEST_ID,
         tool_invocation_id=_record_invocation(
             db_path, context, invocation_id=invocation_id
@@ -236,6 +242,15 @@ async def test_prompt_each_time_pauses_before_any_capture_is_requested(
 
     assert isinstance(preparation.control, ApprovalRequiredToolControl)
     assert preparation.result.status == "processing"
+    # The user approves the named app, which is exactly what Electron is asked for.
+    pending = load_approval_session_by_request(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        tool_request_id=TOOL_REQUEST_ID,
+    )
+    assert pending is not None
+    assert pending.command_summary_json["app_name"] == APP_NAME
     # The capture is what needs consent, so nothing may have been asked of the
     # desktop client before the user answered.
     assert _capture_request_events(db_path) == []
@@ -323,7 +338,7 @@ async def test_captured_image_becomes_a_verified_tool_attachment(
     assert isinstance(output, dict)
     assert output["captured_at"] == "2026-09-27T06:50+09:00"
     assert output["message"] == (
-        f"Captured the screen of Finder at 2026-09-27T06:50+09:00. {attachment['ref']}"
+        f"Captured the window of Finder at 2026-09-27T06:50+09:00. {attachment['ref']}"
     )
     # The durable output is the only per-step record the conversation read model has.
     assert output["attachments"] == [
@@ -415,7 +430,9 @@ async def test_unanswered_request_times_out_instead_of_waiting_forever(
     result = await _run(_state(context), db_path, context)
 
     assert result.output["error"]["error_type"] == "CAPTURE_TIMED_OUT"
-    assert _capture_request_events(db_path)[0]["capture_request_id"]
+    event = _capture_request_events(db_path)[0]
+    assert event["capture_request_id"]
+    assert event["app_name"] == APP_NAME
 
 
 @pytest.mark.asyncio

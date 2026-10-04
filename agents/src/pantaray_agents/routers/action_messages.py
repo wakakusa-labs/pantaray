@@ -9,6 +9,9 @@ from pydantic import ValidationError
 from pydantic.json_schema import JsonSchemaValue
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    ActionFileAttachmentUnavailableError,
+)
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
 )
@@ -138,9 +141,11 @@ async def submit_action_message(
     try:
         command = _canonical_command(user_id=user_id, request=body)
     except _ImageStoragePathError:
-        return _image_storage_path_failure()
+        return _message_field_failure("message.images")
     try:
         result = await asyncio.to_thread(submit_canonical_action_message, command)
+    except ActionFileAttachmentUnavailableError:
+        return _message_field_failure("message.files")
     except ActionNotFoundError:
         return _not_found_failure()
     except ActionMessageConflictError as exc:
@@ -240,6 +245,7 @@ def _canonical_command(
             images=message.images,
             language=message.language,
             project_refs=message.project_refs,
+            files=message.files,
         ),
     )
 
@@ -264,9 +270,9 @@ def _response(result: SubmitActionMessageResult) -> ActionMessageHttpResponse:
     )
 
 
-def _image_storage_path_failure() -> JSONResponse:
+def _message_field_failure(field: str) -> JSONResponse:
     failure = ActionMessageValidationError(
-        field="message.images",
+        field=field,
         reason="invalid",
         limit=None,
         unit=None,

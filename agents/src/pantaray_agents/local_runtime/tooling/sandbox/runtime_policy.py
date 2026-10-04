@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from ..action_session_temp_paths import resolve_local_runtime_storage_base
 
 SandboxProfile = Literal[
     "agent_generated_python",
@@ -116,10 +117,14 @@ def _read_free_disk_bytes(root: Path) -> int:
 def resolve_runtime_budget(
     *,
     sandbox_profile: SandboxProfile,
+    db_path: Path,
 ) -> RuntimeBudgetResolution:
     memory_tier_bytes = resolve_memory_tier_bytes()
     cpu_count = _read_cpu_count()
-    free_disk_bytes = _read_free_disk_bytes(Path(tempfile.gettempdir()))
+    # Command temp dirs live in private app storage (create_private_temp_dir).
+    free_disk_bytes = _read_free_disk_bytes(
+        resolve_local_runtime_storage_base(db_path=db_path)
+    )
     output_budget = _clamp(
         int(memory_tier_bytes * OUTPUT_MEMORY_RATIO),
         lower=OUTPUT_FLOOR_BYTES,

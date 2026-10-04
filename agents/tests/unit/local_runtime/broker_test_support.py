@@ -86,7 +86,9 @@ def _bootstrap_runtime_db(
     read_access_scope: str = "workspace",
     allowed_tool_ids: tuple[str, ...] = BROKER_ALLOWED_TOOL_IDS,
 ) -> tuple[Path, object]:
-    db_path = tmp_path / "runtime.db"
+    # App storage lives apart from the files a test reads as the user's own.
+    db_path = tmp_path / "app-data" / "runtime.db"
+    db_path.parent.mkdir()
     prepare_test_database(
         db_path=db_path,
         busy_timeout_ms=1_000,

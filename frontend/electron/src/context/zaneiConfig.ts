@@ -92,14 +92,17 @@ function excludedAppKeys(settings: CapturePrivacySettings): string[] {
 /**
  * Renders the recorder configuration for the current filter.
  *
- * App selection is the top-level `[filter]` lists, so `capture_policy.allowed_apps` is
- * never written — writing it would add a second, stricter app gate. The
- * `[filter.text_content]` and `[filter.content_snapshot]` scopes are left out so the
- * recorder's own defaults keep browser bodies (Safari, Firefox, Brave, Edge, Vivaldi,
- * Arc) out of the store.
+ * App selection is the top-level `[filter]` lists. `capture_policy.allowed_apps` is a
+ * second, stricter gate keyed by display name, so it is written only for "only these
+ * apps" with no apps: the recorder reads an empty `include_only_apps` as no restriction,
+ * whereas an empty `allowed_apps` denies every app. The unreadable-settings fallback takes
+ * the same path. The `[filter.text_content]` and `[filter.content_snapshot]` scopes are
+ * left out so the recorder's own defaults keep browser bodies (Safari, Firefox, Brave,
+ * Edge, Vivaldi, Arc) out of the store.
  */
 export function zaneiConfig(settings: CapturePrivacySettings): string {
   const isAppIncludeOnly = settings.apps.mode === 'include_only';
+  const recordsNoApp = isAppIncludeOnly && settings.apps.entries.length === 0;
   const isWebsiteIncludeOnly = settings.websites.mode === 'include_only';
   const hosts = settings.websites.hosts;
   return `[capture]
@@ -111,7 +114,7 @@ retention_hours = 48
 exclude_apps = ${quotedList(excludedAppKeys(settings))}
 include_only_apps = ${quotedList(isAppIncludeOnly ? settings.apps.entries.map(captureAppKey) : [])}
 [filter.capture_policy]
-[filter.capture_policy.browser]
+${recordsNoApp ? 'allowed_apps = []\n' : ''}[filter.capture_policy.browser]
 mode = ${quote(isWebsiteIncludeOnly ? 'rules' : 'all_sites')}
 default_policy = ${quote(isWebsiteIncludeOnly ? 'block' : 'allow')}
 on_url_unavailable = ${quote(isWebsiteIncludeOnly ? 'block' : 'allow')}

@@ -17,6 +17,8 @@ class MemoryUpdateContext(BaseModel):
     short_term_insights: str
     activity_summaries: str
     action_turns: str
+    memory_requests: str
+    memory_request_ids: tuple[str, ...]
     local_time_note: str = Field(min_length=1)
     memory_file_manifest: str = Field(min_length=1)
     workspace_context_prompt: str

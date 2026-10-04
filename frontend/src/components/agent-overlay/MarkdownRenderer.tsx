@@ -11,7 +11,7 @@ const MarkdownWrapper = styled.div`
   font-family: var(--font-sans);
   font-size: var(--text-body-size);
   font-weight: var(--text-body-weight);
-  line-height: 1.56;
+  line-height: var(--text-body-leading);
   letter-spacing: var(--text-body-tracking);
   text-wrap: pretty;
   word-break: break-word;
@@ -52,7 +52,6 @@ const MarkdownWrapper = styled.div`
   }
   li {
     margin: 0.18em 0;
-    line-height: 1.62;
   }
 
   /* 画像の実寸でパネル幅を超えると、会話全体が横にずれて左端が切れる */

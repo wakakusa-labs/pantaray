@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import NoReturn
 
@@ -13,6 +13,7 @@ from pantaray_agents.local_runtime.runtime.job_control import (
     LocalJobDeferEvent,
     defer_local_job,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso, utc_now
 from pantaray_agents.schema.repository_errors import (
     is_retryable_repository_exception,
 )
@@ -34,13 +35,8 @@ async def defer_local_job_if_retryable(
 ) -> None:
     if not is_retryable_repository_exception(exc):
         return
-    scheduled_at = (
-        (
-            datetime.now(UTC)
-            + timedelta(seconds=LOCAL_JOB_OPERATIONAL_RETRY_DELAY_SECONDS)
-        )
-        .isoformat()
-        .replace("+00:00", "Z")
+    scheduled_at = format_utc_iso(
+        utc_now() + timedelta(seconds=LOCAL_JOB_OPERATIONAL_RETRY_DELAY_SECONDS)
     )
     await defer_local_job_transition_with_retry(
         job_id=job_id,

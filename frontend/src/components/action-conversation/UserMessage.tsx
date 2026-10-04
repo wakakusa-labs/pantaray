@@ -2,11 +2,13 @@ import type { ReactNode } from 'react';
 
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
+import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages, type ImageGridCopy } from './AttachedImages';
 
 type Copy = {
   you: string;
   userImages: ImageGridCopy;
+  userFiles: (count: number) => string;
   userStatus: Record<
     'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
     string
@@ -27,6 +29,7 @@ const COPY: Record<'en' | 'ja', Copy> = {
         reveal: 'Show in Finder',
       },
     },
+    userFiles: (count) => `${count} attached file${count === 1 ? '' : 's'}`,
     userStatus: {
       pending: 'Pending',
       not_executed: 'Not executed',
@@ -48,6 +51,7 @@ const COPY: Record<'en' | 'ja', Copy> = {
         reveal: 'Finder で表示',
       },
     },
+    userFiles: (count) => `添付ファイル ${count} 件`,
     userStatus: {
       pending: '保留',
       not_executed: '未実行',
@@ -92,6 +96,8 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
   const status = item.source === 'canonical' ? item.entry.status : item.submission.state;
   const images =
     item.source === 'canonical' ? item.entry.images : item.submission.request.message.images;
+  const files =
+    (item.source === 'canonical' ? item.entry.files : item.submission.request.message.files) ?? [];
   const projectRefs =
     item.source === 'canonical'
       ? item.entry.project_refs
@@ -106,11 +112,21 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
       </span>
     ) : null;
 
-  if (content === null && images.length === 0) return state;
+  if (content === null && images.length === 0 && files.length === 0) return state;
   return (
     <article className="action-conversation__user" aria-label={copy.you}>
       {content !== null ? <p>{withProjectRefs(content, projectRefs)}</p> : null}
       {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
+      {files.length > 0 ? (
+        <ul className="action-conversation__attachments" aria-label={copy.userFiles(files.length)}>
+          {files.map((file, index) => (
+            // A message may carry two files with the same name; the order is stable.
+            <li key={index}>
+              <AttachedFileChip name={file.name} byteSize={file.byte_size} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {state}
     </article>
   );

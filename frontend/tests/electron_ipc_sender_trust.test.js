@@ -56,10 +56,7 @@ test('Overlay reads the workspace approval default but cannot write it', () => {
     security.authorize('approval:getWorkspaceEditCommandPreference', overlayEvent),
     'overlay'
   );
-  assert.equal(
-    security.authorize('approval:setWorkspaceEditCommandPreference', mainEvent),
-    'main'
-  );
+  assert.equal(security.authorize('approval:setWorkspaceEditCommandPreference', mainEvent), 'main');
   assert.throws(
     () => security.authorize('approval:setWorkspaceEditCommandPreference', overlayEvent),
     (error) =>
@@ -91,14 +88,17 @@ test('Overlay reads workspace projects but cannot change them', () => {
 test('Conversation submission and read receipts belong to Overlay; History opens belong to main', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
-  const shareCardEvent = createSender('http://127.0.0.1:3001/notification.html?mode=sharecard', 3);
   security.registerWindow('overlay', overlayEvent.sender);
-  security.registerWindow('share_card', shareCardEvent.sender);
 
   assert.equal(security.authorize('action:submitMessage', overlayEvent), 'overlay');
-  assert.equal(security.authorize('action:attachImage', overlayEvent), 'overlay');
-  assert.equal(security.authorize('actionImage:reveal', overlayEvent), 'overlay');
-  for (const channel of ['action:attachImage', 'actionImage:reveal']) {
+  const attachmentChannels = [
+    'action:attachImage',
+    'actionImage:reveal',
+    'action:attachFile',
+    'action:discardAttachment',
+  ];
+  for (const channel of attachmentChannels) {
+    assert.equal(security.authorize(channel, overlayEvent), 'overlay');
     assert.throws(
       () => security.authorize(channel, mainEvent),
       (error) =>
@@ -124,18 +124,6 @@ test('Conversation submission and read receipts belong to Overlay; History opens
   assert.equal(security.authorize('history:markCompletionViewed', overlayEvent), 'overlay');
   assert.throws(
     () => security.authorize('history:markCompletionViewed', mainEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
-  for (const channel of ['auth:getState', 'history:markCompletionViewed']) {
-    assert.throws(
-      () => security.authorize(channel, shareCardEvent),
-      (error) =>
-        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-    );
-  }
-  assert.throws(
-    () => security.authorize('action:readToolOutputPage', shareCardEvent),
     (error) =>
       error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
   );
@@ -204,16 +192,13 @@ test('IPC sender guard rejects subframes even under the trusted origin', () => {
   );
 });
 
-test('IPC sender guard distinguishes packaged main, overlay, and share-card documents', () => {
+test('IPC sender guard distinguishes packaged main and overlay documents', () => {
   const { mainEvent, security } = createSecurityHarness({ isDev: false });
   const overlayEvent = createSender('file:///app/dist/notification.html', 2);
-  const shareCardEvent = createSender('file:///app/dist/notification.html?mode=sharecard', 3);
   security.registerWindow('overlay', overlayEvent.sender);
-  security.registerWindow('share_card', shareCardEvent.sender);
 
   assert.equal(security.authorize('auth:getState', mainEvent), 'main');
   assert.equal(security.authorize('overlay:submitApprovalDecision', overlayEvent), 'overlay');
-  assert.equal(security.authorize('sharecard:ready', shareCardEvent), 'share_card');
 });
 
 test('IPC sender guard revokes auxiliary capabilities when the window is unregistered', () => {
@@ -273,14 +258,8 @@ test('privacy/capture mutation wrapper audits success and failure without swallo
     },
   };
 
-  assert.equal(
-    await runAuditedMutation(context, 'screenshot.start', () => true),
-    true
-  );
-  assert.equal(
-    await runAuditedMutation(context, 'screenshot.start', () => false),
-    false
-  );
+  assert.equal(await runAuditedMutation(context, 'screenshot.start', () => true), true);
+  assert.equal(await runAuditedMutation(context, 'screenshot.start', () => false), false);
   await assert.rejects(
     () =>
       runAuditedMutation(context, 'privacy.updateCaptureSettings', () => {

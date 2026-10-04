@@ -32,7 +32,7 @@ class ActionPlanTooLargeError(ActionPlanDocumentError):
 
 
 def is_action_plan_artifact_path(*, scratch_root: Path, path: Path) -> bool:
-    relative = _relative_to_directory_identity(path=path, directory=scratch_root)
+    relative = relative_to_directory_identity(path=path, directory=scratch_root)
     if relative is not None and relative.parts:
         if relative.parts[0].casefold() == ACTION_PLAN_FILENAME.casefold():
             return True
@@ -68,7 +68,7 @@ def action_plan_has_external_hardlinks(*, scratch_root: Path) -> bool:
     return _has_external_hardlinks(current)
 
 
-def _relative_to_directory_identity(*, path: Path, directory: Path) -> Path | None:
+def relative_to_directory_identity(*, path: Path, directory: Path) -> Path | None:
     try:
         return path.relative_to(directory)
     except ValueError:
@@ -295,6 +295,7 @@ __all__ = [
     "is_action_plan_artifact_path",
     "is_action_plan_temporary_name",
     "read_action_plan",
+    "relative_to_directory_identity",
     "remove_abandoned_action_plan_write",
     "write_action_plan",
 ]

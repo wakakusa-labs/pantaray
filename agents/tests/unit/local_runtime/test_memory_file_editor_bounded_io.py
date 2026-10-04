@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.models import MemoryDocument
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    MAX_TEXT_SCAN_BYTES,
-)
 from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     EditablePathPolicy,
     TextFileError,
@@ -144,30 +145,43 @@ def test_search_does_not_follow_file_symlinks(tmp_path: Path) -> None:
     assert result.matches == ()
 
 
-def test_search_rejects_file_replaced_by_symlink_before_open(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _swap_tree(tmp_path: Path) -> tuple[Path, Callable[[str], None]]:
+    """A workspace and a swap of one of its entries for a link outside it."""
+
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside"
-    workspace.mkdir()
-    outside.mkdir()
-    secret = outside / "secret.md"
-    secret.write_text("private-token", encoding="utf-8")
-    candidate = workspace / "candidate.md"
-    candidate.write_text("public", encoding="utf-8")
-    real_open = bounded_workspace_io.os.open
-    replaced = False
+    (workspace / "sub").mkdir(parents=True)
+    (outside / "sub").mkdir(parents=True)
+    (workspace / "candidate.md").write_text("public", encoding="utf-8")
+    (workspace / "sub" / "candidate.md").write_text("public", encoding="utf-8")
+    (outside / "candidate.md").write_text("private-token", encoding="utf-8")
+    (outside / "sub" / "candidate.md").write_text("private-token", encoding="utf-8")
 
-    def replace_before_open(path: str, flags: int) -> int:
-        nonlocal replaced
-        if Path(path) == candidate and not replaced:
-            candidate.unlink()
-            candidate.symlink_to(secret)
-            replaced = True
-        return real_open(path, flags)
+    def swap(name: str) -> None:
+        entry = workspace / name
+        entry.rename(workspace / f"{name}-moved")
+        entry.symlink_to(outside / name, target_is_directory=name == "sub")
 
-    monkeypatch.setattr(bounded_workspace_io.os, "open", replace_before_open)
+    return workspace, swap
+
+
+@pytest.mark.parametrize("swapped", ["candidate.md", "sub"])
+def test_search_does_not_follow_an_entry_swapped_after_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swapped: str
+) -> None:
+    workspace, swap = _swap_tree(tmp_path)
+    real_scandir = os.scandir
+    swaps: list[str] = []
+
+    def list_then_swap(target: Any) -> Any:
+        with real_scandir(target) as iterator:
+            listing = list(iterator)
+        if not swaps:
+            swap(swapped)
+            swaps.append(swapped)
+        return nullcontext(iter(listing))
+
+    monkeypatch.setattr(bounded_workspace_io.os, "scandir", list_then_swap)
 
     result = search_text(
         sandbox_root=workspace,
@@ -177,48 +191,40 @@ def test_search_rejects_file_replaced_by_symlink_before_open(
         match_paths=False,
     )
 
-    assert replaced is True
+    assert swaps == [swapped]
     assert result.matches == ()
     assert result.skipped_files == 1
 
 
-def test_read_page_rejects_file_replaced_by_symlink_before_open(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("swapped", "path"),
+    [("candidate.md", "candidate.md"), ("sub", "sub/candidate.md")],
+)
+def test_read_page_does_not_follow_an_entry_swapped_after_the_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swapped: str, path: str
 ) -> None:
-    workspace = tmp_path / "workspace"
-    outside = tmp_path / "outside"
-    workspace.mkdir()
-    outside.mkdir()
-    secret = outside / "secret.md"
-    secret.write_text("private-token", encoding="utf-8")
-    candidate = workspace / "candidate.md"
-    candidate.write_text("public", encoding="utf-8")
-    real_open = bounded_workspace_io.os.open
-    replaced = False
+    workspace, swap = _swap_tree(tmp_path)
+    check = bounded_workspace_io.resolve_sandbox_path
 
-    def replace_before_open(path: str | Path, flags: int) -> int:
-        nonlocal replaced
-        if Path(path) == candidate and not replaced:
-            candidate.unlink()
-            candidate.symlink_to(secret)
-            replaced = True
-        return real_open(path, flags)
+    def check_then_swap(**kwargs: Any) -> Any:
+        resolved = check(**kwargs)
+        swap(swapped)
+        return resolved
 
-    monkeypatch.setattr(bounded_workspace_io.os, "open", replace_before_open)
+    monkeypatch.setattr(bounded_workspace_io, "resolve_sandbox_path", check_then_swap)
 
     with pytest.raises(TextFileError) as exc_info:
         read_text_page(
             sandbox_root=workspace,
             canonical_sandbox_root=None,
-            path="candidate.md",
+            path=path,
             offset=1,
             column=1,
             limit=20,
         )
 
-    assert replaced is True
     assert exc_info.value.code == TextFileErrorCode.IO_FAILED
+    assert "private-token" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -231,7 +237,7 @@ async def test_read_file_converts_oserror_to_tool_error(
     def fail_read(**_kwargs: object) -> None:
         raise OSError("temporary read failure")
 
-    monkeypatch.setattr(bounded_workspace_io, "read_text_lines", fail_read)
+    monkeypatch.setattr(bounded_workspace_io, "read_text_descriptor_lines", fail_read)
     policy = EditablePathPolicy(("draft.md",))
     session = _memory_session(path="draft.md", text="draft\n", policy=policy)
     tools = build_local_memory_file_tools(
@@ -289,55 +295,6 @@ def _tool_call(tool_name: str, args: dict[str, object]) -> ReactToolCall:
             args=args,  # type: ignore[arg-type]
         ),
     )
-
-
-@pytest.mark.asyncio
-async def test_workspace_read_returns_offset_limit_error_and_accepts_retry(
-    tmp_path: Path,
-) -> None:
-    line = "x" * 1_023 + "\n"
-    last_start = MAX_TEXT_SCAN_BYTES // len(line)
-    (tmp_path / "large.txt").write_text(line * (last_start + 2))
-    policy = EditablePathPolicy(("draft.md",))
-    tools = build_local_memory_file_tools(
-        editable_policy=policy,
-        memory_session=_memory_session(path="draft.md", text="draft", policy=policy),
-        readable_roots=(
-            ReadableFileRoot("workspace", "workspace", tmp_path, tmp_path.resolve()),
-        ),
-    )
-    read = next(tool for tool in tools if tool.name == "read_file")
-    result = await read.execute(
-        _tool_call(
-            "read_file",
-            {
-                "root": "workspace",
-                "path": "large.txt",
-                "offset": last_start + 1,
-                "limit": 1,
-            },
-        ),
-        1,
-    )
-    assert result.status == "error"
-    assert result.output["error_code"] == "READ_OFFSET_SCAN_LIMIT"
-    assert "smaller offset or column" in result.output["message"]
-    retry = await read.execute(
-        _tool_call(
-            "read_file",
-            {
-                "root": "workspace",
-                "path": "large.txt",
-                "offset": last_start,
-                "limit": 1,
-            },
-        ),
-        2,
-    )
-    assert retry.status == "success"
-    assert retry.output["text"] == line
-    assert retry.output["truncation_reason"] == "scan_budget"
-    assert retry.output["next_offset"] is None
 
 
 @pytest.mark.asyncio

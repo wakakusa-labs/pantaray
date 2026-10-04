@@ -29,7 +29,6 @@ from .updates import (
     append_non_fatal_state_error,
     append_state_error,
     append_state_error_payload,
-    now_iso,
     set_status_with_updated_at,
     touch_updated_at,
 )
@@ -58,7 +57,6 @@ __all__ = [
     "create_initial_state",
     "ensure_context",
     "get_context_view",
-    "now_iso",
     "require_context",
     "set_status_with_updated_at",
     "touch_updated_at",

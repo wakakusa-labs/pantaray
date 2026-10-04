@@ -1,3 +1,282 @@
+/* Shell: the rail and the page beside it, over the fog ground that body paints. */
+.app-shell {
+  position: relative;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  /* Muted text keeps 4.5:1 on the dark ground and on dialogs. Scoped to the main window so
+     the overlay's own text colours stay as they are. */
+  --text-muted: rgba(200, 210, 220, 0.6);
+}
+
+/* Grain keeps the fog from banding. The rail and the page are positioned after it in tree
+   order, so it paints under them and never tints text; neither opens a stacking context, so
+   the rail's popovers stack above the page. */
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.22;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.8  0 0 0 0 0.85  0 0 0 0 0.95  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* The traffic lights sit in this row; nothing interactive may enter it. */
+.app-titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 2;
+  -webkit-app-region: drag;
+}
+
+.app-rail {
+  position: relative;
+  width: 64px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 58px 0 16px;
+}
+
+.app-rail-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 11px;
+  padding: 0;
+  background: transparent;
+  color: #7d889c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.app-rail-item:hover {
+  background: var(--fog-mist);
+  color: var(--fog-text);
+}
+
+.app-rail-item--active,
+.app-rail-item--active:hover {
+  background: var(--fog-mist-strong);
+  color: #eef3fb;
+}
+
+.app-rail-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.app-rail-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 46px 56px 0 48px;
+}
+
+/* A page with its own columns runs edge to edge and pads each column itself. */
+.app-surface--split {
+  flex-direction: row;
+  padding: 0;
+}
+
+/* A split page: its own navigation column, then its content. */
+.app-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The split pages' second column: a darker band with the page's own navigation. */
+.app-split-master {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 260px;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  /* Without it a long item's single line widens the column past 260px. */
+  min-width: 0;
+  padding: 52px 12px 16px;
+  /* A shade lighter than the ground, like the other surfaces. */
+  background: rgba(170, 186, 212, 0.03);
+  border-left: 1px solid var(--fog-line);
+  border-right: 1px solid var(--fog-line);
+}
+
+.app-split-title {
+  color: var(--fog-text);
+  font-size: 17px;
+  font-weight: var(--weight-bold);
+  margin: 0;
+}
+
+/* The split pages' right column, which scrolls on its own. */
+.app-split-detail {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 46px 56px 32px 40px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.app-split-detail .app-connection-notice {
+  margin-bottom: 0;
+}
+
+/* Narrow effective widths (a small window zoomed in): the second column stacks above the
+   content and the page scrolls as one, starting below the drag strip so nothing scrolls under
+   it. */
+@media (max-width: 760px) {
+  .app-split {
+    flex-direction: column;
+    margin-top: 40px;
+    overflow-y: auto;
+  }
+
+  .app-split-master {
+    flex: 0 0 auto;
+    padding-top: 12px;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--fog-line);
+  }
+
+  .app-split-detail {
+    flex: 0 0 auto;
+    overflow-y: visible;
+    padding: 24px 24px 32px;
+  }
+}
+
+/* Recording: a light in the rail that opens the recording controls. */
+.app-recording {
+  position: relative;
+}
+
+.app-recording-light {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4d576a;
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.app-recording-light--on {
+  background: var(--fog-light);
+  box-shadow: 0 0 6px 2px rgba(241, 245, 252, 0.3);
+}
+
+.app-recording-popover {
+  position: absolute;
+  left: calc(100% + 20px);
+  bottom: -2px;
+  z-index: 20;
+  width: 300px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--fog-popover);
+  box-shadow:
+    0 0 0 1px rgba(214, 226, 248, 0.1),
+    0 18px 40px rgba(0, 0, 0, 0.45);
+  -webkit-app-region: no-drag;
+}
+
+.app-recording-popover:focus {
+  outline: none;
+}
+
+.app-recording-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-recording-title {
+  min-width: 0;
+  /* Japanese wraps between phrases, never inside a word. */
+  word-break: auto-phrase;
+  color: var(--fog-text);
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+}
+
+.app-recording-status {
+  word-break: auto-phrase;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  line-height: 1.4;
+}
+
+.app-recording-settings-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-meta-size);
+}
+
+.app-recording-settings-link:hover {
+  color: var(--fog-text);
+}
+
+.app-recording-settings-link:focus-visible {
+  border-radius: 4px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .app-user-dropdown a.app-user-dropdown-item {
   display: block;
   text-decoration: none;
@@ -8,7 +287,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-header .app-user-dropdown {
+  .app-rail .app-user-dropdown {
     animation: none;
   }
 }
@@ -30,6 +309,7 @@
 .app-connection-notice p {
   flex: 1 1 280px;
   margin: 0;
+  word-break: auto-phrase;
 }
 
 .app-connection-notice a {

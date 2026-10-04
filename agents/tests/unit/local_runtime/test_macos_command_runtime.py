@@ -23,7 +23,7 @@ from pantaray_agents.local_runtime.tooling.sandbox.macos_runtime import (
 def test_command_environment_keeps_trusted_path_and_isolates_cache_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: BrokerExecutionKind
 ) -> None:
-    monkeypatch.setenv("PATH", "/trusted/node/bin:/usr/bin:/bin")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("PANTARAY_SYNTHETIC_SECRET", "not-for-the-child")
     monkeypatch.setenv("USER", "someone")
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
@@ -36,7 +36,7 @@ def test_command_environment_keeps_trusted_path_and_isolates_cache_home(
         use_login_environment=False,
         full_disk_read=False,
     )
-    assert env["PATH"].endswith("/trusted/node/bin:/usr/bin:/bin")
+    assert env["PATH"].endswith("/usr/bin:/bin")
     assert "PANTARAY_SYNTHETIC_SECRET" not in env
     assert "USER" not in env
     assert env["GIT_CONFIG_NOSYSTEM"] == "1"
@@ -123,7 +123,7 @@ def test_shell_path_prefers_nearest_repo_environment_and_stops_at_root(
     for directory in (nearest_env, outer_env, outside_env):
         directory.mkdir(parents=True)
     (cwd / ".venv").symlink_to(outside_env.parent, target_is_directory=True)
-    monkeypatch.setenv("PATH", "/trusted/tools:/usr/bin:/bin")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = build_command_env(
         command_cwd=cwd,
         execution_kind="workspace_command",
@@ -135,4 +135,9 @@ def test_shell_path_prefers_nearest_repo_environment_and_stops_at_root(
     entries = env["PATH"].split(":")
     assert entries.index(str(nearest_env)) < entries.index(str(outer_env))
     assert str(outside_env) not in entries
-    assert env["PATH"].endswith("/trusted/tools:/usr/bin:/bin")
+    assert entries == [
+        "/bin",
+        str(nearest_env.resolve()),
+        str(outer_env.resolve()),
+        "/usr/bin",
+    ]

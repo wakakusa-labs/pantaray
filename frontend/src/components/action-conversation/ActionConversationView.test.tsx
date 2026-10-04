@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   ActionConversationRunItem,
@@ -83,7 +83,6 @@ const viewWith = (
   },
   items,
   nextCursor: null,
-  output: { lines: [], plaintext: '' },
 });
 
 function renderView(
@@ -876,6 +875,24 @@ describe('ActionConversationView', () => {
     expect(marker).not.toHaveClass('action-conversation__state--failed');
   });
 
+  it('shows pages still being prepared without a status word or the failed colour', async () => {
+    const run: ActionConversationRunItem = {
+      kind: 'run',
+      runId: 'run-1',
+      status: 'success',
+      startedAt: '2026-08-30T00:00:00.000000Z',
+      completedAt: '2026-08-30T00:00:30.000000Z',
+      lines: [tool('t1', 'render_pdf_page', 'success', 1, [], 'slides.pptx', null, 'preparing')],
+    };
+    renderView(viewWith([run], 'success'), 'ja');
+    await userEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 1,/ }));
+
+    const line = toolLineOf(screen.getByText('slides.pptx を表示する準備をしています'));
+    expect(line).toBeVisible();
+    expect(line.querySelector('.action-conversation__state')).toBeNull();
+    expect(line.querySelector('.action-conversation__state--failed')).toBeNull();
+  });
+
   it('announces that a run started or waits for approval without showing it', () => {
     const run: ActionConversationRunItem = {
       kind: 'run',
@@ -1019,6 +1036,36 @@ describe('ActionConversationView', () => {
     expect(thumbnail).toHaveFocus();
   });
 
+  it('shows the documents a message carried, sent or still sending, without an open control', () => {
+    const sent = canonicalUser('sent', '');
+    sent.entry.content = null;
+    sent.entry.files = [
+      { name: '見積書.pdf', byte_size: 1_258_291 },
+      { name: '見積書.pdf', byte_size: 512 },
+    ];
+    const sending: ActionConversationUserItem = {
+      kind: 'user',
+      source: 'optimistic',
+      key: 'sending',
+      visibility: 'always',
+      // prettier-ignore
+      submission: { state: 'submitting', request: { target: { kind: 'existing', action_id: 'action-1', expected_process_id: null }, message: { version: 1, message_id: 'sending', content: '要約して', images: [], files: [{ attachment_id: '22222222-2222-4222-8222-222222222222', name: 'analysis.ipynb', byte_size: 2048 }] } } },
+    };
+    renderView(viewWith([sent, sending]), 'ja');
+
+    const [sentBubble, sendingBubble] = screen.getAllByRole('article', { name: 'あなた' });
+    const sentFiles = within(sentBubble).getByRole('list', { name: '添付ファイル 2 件' });
+    expect(
+      within(sentFiles)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['見積書.pdf1.2 MB', '見積書.pdf512 B']);
+    expect(
+      within(sendingBubble).getByRole('list', { name: '添付ファイル 1 件' })
+    ).toHaveTextContent('analysis.ipynb2 KB');
+    expect(within(sentBubble).queryByRole('button')).toBeNull();
+  });
+
   it('renders attached images as counted thumbnails served over the image scheme', () => {
     renderView(viewWith([withImages('images', STORED_IMAGES)]));
 
@@ -1105,13 +1152,13 @@ describe('ActionConversationView', () => {
       status: 'success',
       startedAt: '2026-08-30T00:00:00.000000Z',
       completedAt: '2026-08-30T00:00:01.000000Z',
-      lines: [tool('capture', 'capture_screen', 'success', 1, STORED_IMAGES)],
+      lines: [tool('capture', 'capture_screen', 'success', 1, STORED_IMAGES, 'Google Chrome')],
     };
     renderView(viewWith([run], 'success'));
 
     expect(screen.queryByRole('img')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work 1, Run 1:/ }));
-    await userEvent.click(screen.getByRole('button', { name: /^Captured the screen, Step 1,/ }));
+    await userEvent.click(screen.getByRole('button', { name: /^Captured Google Chrome, Step 1,/ }));
 
     expect(screen.getByRole('list', { name: '2 screenshots' })).toBeVisible();
     const thumbnails = screen.getAllByRole('img');
@@ -1136,5 +1183,76 @@ describe('ActionConversationView', () => {
     expect(screen.getByText('Image unavailable')).toBeVisible();
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.queryByRole('button', { name: /^Open attached image/ })).toBeNull();
+  });
+
+  describe('per-answer copy', () => {
+    const answered = (runId: string, text: string): ActionConversationRunItem => ({
+      kind: 'run',
+      runId,
+      status: 'success',
+      startedAt: '2026-08-30T00:00:00.000000Z',
+      completedAt: '2026-08-30T00:01:00.000000Z',
+      lines: [
+        canonicalUser(`ask-${runId}`, 'Summarize'),
+        { kind: 'assistant', key: `note-${runId}`, visibility: 'always', text: 'Reading first' },
+        { kind: 'final_output', runId, status: 'success', visibility: 'always', text },
+      ],
+    });
+    const failed: ActionConversationRunItem = {
+      kind: 'run',
+      runId: 'run-failed',
+      status: 'error',
+      startedAt: '2026-08-30T00:02:00.000000Z',
+      completedAt: '2026-08-30T00:03:00.000000Z',
+      lines: [
+        canonicalUser('ask-failed', 'Retry'),
+        { kind: 'assistant', key: 'note-failed', visibility: 'always', text: 'Trying again' },
+        {
+          kind: 'terminal_outcome',
+          runId: 'run-failed',
+          status: 'error',
+          visibility: 'always',
+          code: 'ACTION_FAILED',
+          text: 'It failed.',
+        },
+      ],
+    };
+    const writeText = vi.fn<(text: string) => Promise<void>>();
+    beforeEach(() => {
+      writeText.mockReset().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    });
+
+    it('copies the Markdown source of that answer only, and only final answers offer it', async () => {
+      renderView(
+        viewWith(
+          [answered('run-1', 'First'), answered('run-2', '- **Done**\n- Moved 3 files'), failed],
+          'error'
+        )
+      );
+      const buttons = screen.getAllByRole('button', { name: 'Copy this answer' });
+      expect(buttons).toHaveLength(2);
+
+      await userEvent.click(
+        within(screen.getByRole('region', { name: /^Final answer, Run 2:/ })).getByRole('button', {
+          name: 'Copy this answer',
+        })
+      );
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith('- **Done**\n- Moved 3 files');
+    });
+
+    it('reports a clipboard failure instead of looking copied', async () => {
+      writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+      renderView(viewWith([answered('run-1', 'First')], 'success'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Copy this answer' }));
+
+      expect(await screen.findByText('Couldn’t copy this answer. Try again.')).toHaveAttribute(
+        'role',
+        'alert'
+      );
+    });
   });
 });

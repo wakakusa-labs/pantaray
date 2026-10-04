@@ -38,6 +38,7 @@ def shorter_summary_types(summary_type: SummaryType) -> tuple[SummaryType, ...]:
 
 
 def iso_z(value: datetime) -> str:
+    # Not the ms form: period bounds and scheduler cursors match stored strings.
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 

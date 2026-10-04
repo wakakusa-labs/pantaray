@@ -111,6 +111,8 @@ class HistoryEntryModel(BaseModel):
     call_id: str | None = None
     llm_step_id: str | None = None
     turn_context: str | None = None
+    world_state: dict[str, str] | None = None
+    agents_md: str | None = None
 
     _validate_step_id = field_validator("step_id")(_require_non_blank)
     _validate_started_at = field_validator("started_at")(_require_non_blank)

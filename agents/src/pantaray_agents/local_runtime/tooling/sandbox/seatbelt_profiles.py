@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from .command_sandbox_protocol import BrokerToSandboxCommandRequest
+from .macos_runtime import toolchain_read_roots
 
 PROFILE_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -32,6 +33,8 @@ def render_seatbelt_profile(
 ) -> str:
     template = PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
     network_clause = _render_network_clause(request)
+    storage = request.action_storage
+    plan_path = None if storage is None else storage.plan_path
     replacements = {
         "{{NETWORK_CLAUSE}}": network_clause,
         "{{PATH_ANCESTOR_CLAUSES}}": _render_clause_block(
@@ -46,13 +49,15 @@ def render_seatbelt_profile(
             if path != "/"
         ),
         "{{SYSTEM_RUNTIME_READ_ROOTS}}": _render_system_runtime_read_roots(),
-        "{{RUNTIME_READ_ROOT_CLAUSES}}": (
-            _render_runtime_read_root_clauses(request.runtime_read_roots)
+        "{{RUNTIME_READ_ROOT_CLAUSES}}": _render_subpath_block(
+            request.runtime_read_roots
         ),
         "{{FILE_READ_ROOT_CLAUSES}}": _render_file_read_root_clauses(request),
         "{{FILE_WRITE_ROOT_CLAUSES}}": _render_file_write_root_clauses(request),
-        "{{ACTION_PLAN_READ_DENY}}": _render_action_plan_deny(request, "file-read*"),
-        "{{ACTION_PLAN_WRITE_DENY}}": _render_action_plan_deny(request, "file-write*"),
+        "{{ACTION_PLAN_READ_DENY}}": _render_action_plan_deny(plan_path, "file-read*"),
+        "{{ACTION_PLAN_WRITE_DENY}}": _render_action_plan_deny(
+            plan_path, "file-write*"
+        ),
         "{{PRIVATE_STORAGE_DENY_RULES}}": _render_private_storage_deny_rules(request),
         "{{LOGIN_ENVIRONMENT_CLAUSE}}": _render_login_environment_clause(request),
     }
@@ -70,32 +75,23 @@ def _render_system_runtime_read_roots() -> str:
     )
 
 
-def _render_runtime_read_root_clauses(paths: list[str]) -> str:
+def _render_subpath_block(paths: Iterable[str]) -> str:
     return _render_clause_block(_render_subpath_clause(path) for path in paths)
 
 
 def _render_file_read_root_clauses(request: BrokerToSandboxCommandRequest) -> str:
-    roots = (
-        *request.real_read_roots,
-        request.app_runtime_root,
-    )
-    return _render_clause_block(_render_subpath_clause(path) for path in roots)
+    return _render_subpath_block((*request.real_read_roots, request.app_runtime_root))
 
 
 def _render_file_write_root_clauses(request: BrokerToSandboxCommandRequest) -> str:
-    return _render_clause_block(
-        _render_subpath_clause(path) for path in request.real_write_roots
-    )
+    return _render_subpath_block(request.real_write_roots)
 
 
-def _render_action_plan_deny(
-    request: BrokerToSandboxCommandRequest, operation: str
-) -> str:
+def _render_action_plan_deny(plan_path: str | None, operation: str) -> str:
     # An empty filter list would deny the operation everywhere, so a request
     # without an Action plan renders no statement at all.
-    if request.action_storage is None:
+    if plan_path is None:
         return ""
-    plan_path = request.action_storage.plan_path
     clauses = _render_clause_block(
         (_render_literal_clause(plan_path), _render_subpath_clause(plan_path))
     )
@@ -103,23 +99,73 @@ def _render_action_plan_deny(
 
 
 def _render_private_storage_deny_rules(request: BrokerToSandboxCommandRequest) -> str:
-    private_roots = _render_clause_block(
-        _render_subpath_clause(path) for path in request.private_storage_roots
-    )
+    # The command's own temp dir lives in private storage too.
+    readable = [request.temp_dir]
+    writable = [request.temp_dir]
     storage = request.action_storage
-    if storage is None:
-        return (
-            f"(deny file-read* (require-any\n{private_roots}\n))\n"
-            f"(deny file-write* (require-any\n{private_roots}\n))"
+    if storage is not None:
+        readable += [storage.workspace_root, storage.published_results_root]
+        writable.append(storage.workspace_root)
+    return "\n".join(
+        (
+            _render_private_storage_deny(
+                "file-read*", request.private_storage_roots, readable
+            ),
+            _render_private_storage_deny(
+                "file-write*", request.private_storage_roots, writable
+            ),
         )
-    workspace = _render_subpath_clause(storage.workspace_root)
-    results = _render_subpath_clause(storage.published_results_root)
+    )
+
+
+def _render_private_storage_deny(
+    operation: str, private_roots: Sequence[str], exceptions: Sequence[str]
+) -> str:
+    denied = f"(require-any\n{_render_subpath_block(private_roots)}\n)"
+    # sandbox-exec rejects an empty (require-any), so no exceptions means none.
+    if not exceptions:
+        return f"(deny {operation} {denied})"
     # Exceptions remove this deny only; the ordinary read/write roots still apply.
     return (
-        f"(deny file-read* (require-all (require-any\n{private_roots}\n) "
-        f"(require-not (require-any\n{workspace}\n{results}\n))))\n"
-        f"(deny file-write* (require-all (require-any\n{private_roots}\n) "
-        f"(require-not\n{workspace}\n)))"
+        f"(deny {operation} (require-all {denied} "
+        f"(require-not (require-any\n{_render_subpath_block(exceptions)}\n))))"
+    )
+
+
+def render_ripgrep_seatbelt_profile(
+    *,
+    read_roots: Sequence[str],
+    private_storage_roots: Sequence[str],
+    readable_private_roots: Sequence[str],
+    action_plan_path: str | None,
+) -> str:
+    """Let the discovery search read ``read_roots`` and run, and do nothing else.
+
+    ripgrep walks and reopens directories by name itself, so a check Pantaray
+    makes beforehand cannot bind what it reads: a directory swapped for a link
+    mid-search would lead it anywhere. The kernel checks every path it really
+    opens instead, with the private-storage and Action plan denies of commands.
+    """
+
+    read_allow = _render_subpath_block(
+        (*MACOS_SYSTEM_RUNTIME_READ_ROOTS, *toolchain_read_roots(), *read_roots)
+    )
+    return "\n".join(
+        (
+            "(version 1)",
+            '(import "system.sb")',
+            "(allow process-exec process-fork)",
+            "(allow file-map-executable)",
+            "(deny file-read*)",
+            f"(allow file-read*\n{read_allow}\n)",
+            _render_action_plan_deny(action_plan_path, "file-read*"),
+            _render_private_storage_deny(
+                "file-read*", private_storage_roots, readable_private_roots
+            ),
+            "(deny file-write*)",
+            "(deny network*)",
+            "",
+        )
     )
 
 

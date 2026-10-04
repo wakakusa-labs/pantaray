@@ -183,12 +183,9 @@ test('IPC accepts a Codex picker model and keeps API key model names configurabl
 test('only the registered main top frame can read or change device credentials', async (t) => {
   const f = fixture(t);
   const overlay = sender('file:///app/notification.html', 2);
-  const share = sender('file:///app/notification.html?mode=sharecard', 3);
   f.security.registerWindow('overlay', overlay.sender);
-  f.security.registerWindow('share_card', share.sender);
   for (const event of [
     overlay,
-    share,
     sender('https://untrusted.example/?private=secret', 4),
     { sender: f.main.sender, senderFrame: { url: 'file:///app/index.html' } },
     sender('file:///app/index.html', 5),

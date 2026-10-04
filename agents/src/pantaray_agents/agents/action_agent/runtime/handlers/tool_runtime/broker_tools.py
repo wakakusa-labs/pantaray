@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
+from pantaray_agents.agents.action_agent.runtime.agents_md import (
+    attach_repository_agents_md,
+)
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
     coerce_tool_attachments,
 )
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
@@ -17,6 +19,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerPolicyError,
     FinalizedBrokerPolicyError,
     execute_broker_tool,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    READ_TOOL_ID,
+    load_broker_context,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerPreflightOutcome,
@@ -48,7 +54,7 @@ def _build_error_preparation(
     tool_def: ToolDefinition,
     error: BaseException,
 ) -> ToolExecutionPreparation:
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     effective_error = (
         error.cause if isinstance(error, FinalizedBrokerPolicyError) else error
     )
@@ -202,7 +208,7 @@ async def run_broker_tool_wrapper(
     except (BrokerPolicyError, BrokerExecutionError) as exc:
         return _build_error_preparation(step_id=step_id, tool_def=tool_def, error=exc)
 
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     if isinstance(outcome, BrokerPreflightOutcome):
         return ToolExecutionPreparation(
             result=UnprojectedToolExecutionResult(
@@ -225,6 +231,26 @@ async def run_broker_tool_wrapper(
         if outcome.failure is not None
         else CompletedToolControl()
     )
+    agents_md: str | None = None
+    if outcome.status == "success" and outcome.failure is None:
+        try:
+            read_context = load_broker_context(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                tool_id=READ_TOOL_ID,
+                path_access_kind="read",
+                user_id=user_id,
+                actor_process_id=actor_process_id,
+                manifest_id=manifest_id,
+                execution_session_id=execution_session_id,
+            )
+        except BrokerPolicyError:
+            # An Action that may not read files gets no AGENTS.md either.
+            read_context = None
+        if read_context is not None:
+            agents_md = attach_repository_agents_md(
+                state, tool_id=tool_def.tool_id, args=args, read_context=read_context
+            )
     return ToolExecutionPreparation(
         result=UnprojectedToolExecutionResult(
             step_id=step_id,
@@ -235,6 +261,7 @@ async def run_broker_tool_wrapper(
             output=outcome.output,
             attachments=coerce_tool_attachments(outcome.attachments),
             tool_invocation_id=outcome.tool_invocation_id,
+            agents_md=agents_md,
         ),
         control=failure_control,
         finalized_output=FinalizedToolOutput(

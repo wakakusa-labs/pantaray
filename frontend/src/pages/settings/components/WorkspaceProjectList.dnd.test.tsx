@@ -38,26 +38,18 @@ function DndHarness({
     onFailure: () => setFailed(true),
   });
   return (
-    <WorkspaceProjectList
-      disabled={disabled}
-      statusMessage={failed ? 'save failed' : undefined}
-      dragController={dragController}
-      folders={[]}
-      organizationCreateBusy={false}
-      organizations={[]}
-      projects={projects}
-      t={translate}
-      onCreateFolder={async () => true}
-      onCreateOrganization={async () => null}
-      onDeleteFolder={async () => {}}
-      onDeleteProject={async () => {}}
-      onSelectFolder={async () => null}
-      onUpdateProjectOrganizations={async () => true}
-      isCreateFolderBusy={() => false}
-      isDeleteFolderBusy={() => false}
-      isDeleteProjectBusy={() => false}
-      isProjectLinksBusy={() => false}
-    />
+    <>
+      {failed ? <div role="alert">save failed</div> : null}
+      <WorkspaceProjectList
+        disabled={disabled}
+        dragController={dragController}
+        folders={[]}
+        projects={projects}
+        selectedProjectId={null}
+        t={translate}
+        onSelect={() => {}}
+      />
+    </>
   );
 }
 

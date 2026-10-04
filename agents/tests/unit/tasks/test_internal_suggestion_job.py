@@ -37,6 +37,7 @@ from pantaray_agents.local_runtime.runtime.job_enqueue import (
 )
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     bind_job_route_identity,
+    require_current_route_identity,
 )
 from pantaray_agents.local_runtime.runtime.job_types import LOCAL_SUGGESTION_JOB_TYPE
 from pantaray_agents.local_runtime.runtime.session_store import (
@@ -51,6 +52,7 @@ from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
 from pantaray_agents.local_runtime.runtime.suggestion_queue import (
     build_local_suggestion_enqueue_request,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -120,6 +122,11 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "pantaray_agents.tasks.internal_jobs.suggestion.capture_paused_for_user",
         lambda **_kwargs: False,
+    )
+    # The desktop app is connected unless a test says otherwise.
+    monkeypatch.setattr(
+        "pantaray_agents.tasks.internal_jobs.suggestion.owner_has_deliverable_session",
+        lambda _owner_id: True,
     )
     monkeypatch.setattr(
         "pantaray_agents.tasks.internal_jobs.suggestion.read_reconsidered_insight",
@@ -256,7 +263,7 @@ async def test_run_suggestion_job_defers_a_locked_recording_state_read(
                 }
             )
         ),
-        cancel_suggestion_if_processing=AsyncMock(),
+        discard_suggestion_if_processing=AsyncMock(),
         finalize_suggestion_start_error_if_processing=AsyncMock(
             return_value=RepositoryResult(data=None)
         ),
@@ -292,7 +299,7 @@ async def test_run_suggestion_job_defers_a_locked_recording_state_read(
     with pytest.raises(DeferredLocalJob):
         await _run_suggestion_job(_payload())
 
-    repository.cancel_suggestion_if_processing.assert_not_awaited()
+    repository.discard_suggestion_if_processing.assert_not_awaited()
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
 
 
@@ -317,7 +324,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
             )
         ),
         save_suggestion=AsyncMock(return_value=SimpleNamespace(error=None)),
-        cancel_suggestion_if_processing=AsyncMock(
+        discard_suggestion_if_processing=AsyncMock(
             return_value=SimpleNamespace(error=None)
         ),
         finalize_suggestion_start_error_if_processing=AsyncMock(
@@ -362,7 +369,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
     # before the toggle, and the job leaves no error behind.
     get_agent.assert_not_awaited()
     repository.save_suggestion.assert_not_awaited()
-    repository.cancel_suggestion_if_processing.assert_awaited_once()
+    repository.discard_suggestion_if_processing.assert_awaited_once()
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
 
     _persist_source(db_path, capture_paused=False)
@@ -381,7 +388,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
     await _run_suggestion_job(_payload())
 
     repository.save_suggestion.assert_awaited_once()
-    assert repository.cancel_suggestion_if_processing.await_count == 2
+    assert repository.discard_suggestion_if_processing.await_count == 2
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
 
 
@@ -954,7 +961,7 @@ async def test_waiting_or_superseded_review_does_not_call_the_agent(
                 "SELECT status,scheduled_at FROM jobs WHERE job_id='job-1'"
             ).fetchone() == (
                 "queued",
-                due.isoformat().replace("+00:00", "Z"),
+                format_utc_iso(due),
             )
     agent.process.assert_not_awaited()
     saved = await repository.get_suggestion(
@@ -1126,7 +1133,7 @@ def _readable_insight_job(
             )
         ),
         save_suggestion=AsyncMock(return_value=SimpleNamespace(error=None)),
-        cancel_suggestion_if_processing=AsyncMock(
+        discard_suggestion_if_processing=AsyncMock(
             return_value=SimpleNamespace(error=None)
         ),
         finalize_suggestion_start_error_if_processing=AsyncMock(
@@ -1194,7 +1201,7 @@ async def test_a_revoked_activity_permit_publishes_nothing(
 
     assert finished == ([] if revoked == "during_the_run" else [True])
     repository.save_suggestion.assert_not_awaited()
-    repository.cancel_suggestion_if_processing.assert_awaited_once()
+    repository.discard_suggestion_if_processing.assert_awaited_once()
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
 
 
@@ -1218,4 +1225,178 @@ async def test_a_model_request_started_after_revocation_is_refused(
 
     assert sent == []
     repository.save_suggestion.assert_not_awaited()
-    repository.cancel_suggestion_if_processing.assert_awaited_once()
+    repository.discard_suggestion_if_processing.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "switched",
+    [
+        "owner_after_the_answer",
+        "owner_during_the_run",
+        "permit_revoked",
+        "permit_revoked_during_the_run",
+    ],
+)
+async def test_a_run_that_lost_its_access_is_discarded_not_requeued(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    switched: str,
+) -> None:
+    """A run that lost its owner or its activity permit must not wait in the queue.
+
+    A plain route change requeues the run (see the replaced-route test). After
+    an account switch the previous owner's job is never claimed again, and a
+    revoked permit is not restored by a requeue, so the row and the run steps
+    are ended here instead.
+    """
+    db_path = tmp_path / "runtime.db"
+    apply_migrations(db_path, 1_000, load_default_migrations())
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            "INSERT INTO users(user_id, ui_language, created_at, updated_at)"
+            " VALUES (?, 'ja', '2026-03-27T00:00:00Z', '2026-03-27T00:00:00Z')",
+            [("user-1",), ("user-2",)],
+        )
+
+    def _sign_in(user_id: str, session_version: str) -> None:
+        import_desktop_session(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id=user_id,
+            desktop_access_token="header.payload.signature",
+            expires_at="2099-03-27T01:00:00Z",
+            session_version=session_version,
+        )
+
+    register_logged_out_owner("local-owner")
+    mark_configured()
+    _sign_in("user-1", "1")
+    repository = LocalSuggestionRepository(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        activity_repository=SimpleNamespace(),  # type: ignore[arg-type]
+    )
+    await repository.create_processing_suggestion_row(
+        user_id="user-1", suggestion_id="suggestion-1"
+    )
+    payload = _payload()
+    enqueue_local_job_with_connection(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        request=build_local_suggestion_enqueue_request(payload),
+    )
+    claim_next_pending_job(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        job_type=LOCAL_SUGGESTION_JOB_TYPE,
+        owner_user_id="user-1",
+        claimed_by="worker-1",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    gate = SourceGate()
+    gate.activate(
+        SourceBinding(
+            user_id="user-1",
+            epoch=UUID(int=1),
+            policy_revision="policy-1",
+            store_id="store-1",
+            protocol_version=1,
+        )
+    )
+    job = "pantaray_agents.tasks.internal_jobs.suggestion"
+    if switched in ("permit_revoked", "permit_revoked_during_the_run"):
+        # The run reads activity under a permit; the same account signs in again.
+        monkeypatch.setattr(f"{job}.context_source_control", SimpleNamespace(gate=gate))
+        monkeypatch.setattr(
+            f"{job}.read_reconsidered_insight",
+            lambda **_kwargs: ReconsideredInsight(
+                short_term_insight="# Insight",
+                reconsideration_reason="The user switched goals.",
+                source_cursor="insight-cursor",
+            ),
+        )
+    recording_reads: list[bool] = []
+
+    def _recording_paused(**_kwargs: object) -> bool:
+        # The read right before publishing is where this test changes the world.
+        recording_reads.append(False)
+        if len(recording_reads) == 2 and switched == "permit_revoked":
+            gate.revoke("user-1")
+            _sign_in("user-1", "2")
+        if len(recording_reads) == 2 and switched == "owner_after_the_answer":
+            _sign_in("user-2", "2")
+        return False
+
+    async def _process(_request: object) -> SuggestionAgentResponse:
+        await repository.save_suggestion_run_step(
+            suggestion_id="suggestion-1",
+            step_number=1,
+            step_kind="llm",
+            status="success",
+            llm_response_text="answer for the previous owner",
+        )
+        if switched == "owner_during_the_run":
+            _sign_in("user-2", "2")
+            # The next model call is where a run without an activity permit notices.
+            await require_current_route_identity()
+        if switched == "permit_revoked_during_the_run":
+            # Same owner: only the permit and the route change mid-run.
+            gate.revoke("user-1")
+            _sign_in("user-1", "2")
+            await require_current_route_identity()
+        return SuggestionAgentResponse(
+            suggestion_id="suggestion-1",
+            user_id="user-1",
+            created_at="2026-03-27T00:00:00Z",
+            answer="answer for the previous owner",
+            thinking="thinking",
+            status=StatusType.SUCCESS,
+            has_suggestion=True,
+            interaction_contract="message_only",
+        )
+
+    for name, replacement in (
+        ("capture_paused_for_user", _recording_paused),
+        ("read_local_runtime_db_config", lambda: (db_path, 1_000)),
+        ("deps.get_suggestion_repository", AsyncMock(return_value=repository)),
+        (
+            "deps.get_suggestion_agent",
+            AsyncMock(return_value=SimpleNamespace(process=_process)),
+        ),
+    ):
+        monkeypatch.setattr(f"{job}.{name}", replacement)
+
+    try:
+        with bind_job_route_identity(
+            job_id=payload["job_id"],
+            process_id=payload["process_id"],
+            process_pending_status="enqueued",
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            requeue_on_change=True,
+        ):
+            if switched.endswith("_during_the_run"):
+                with pytest.raises(DeferredLocalJob):
+                    await _run_suggestion_job(payload)
+            else:
+                await _run_suggestion_job(payload)
+    finally:
+        reset_logged_out_owner()
+
+    with sqlite3.connect(db_path) as connection:
+        suggestion = connection.execute(
+            "SELECT status, answer FROM agent_suggestions WHERE suggestion_id = ?",
+            ("suggestion-1",),
+        ).fetchone()
+        (steps,) = connection.execute(
+            "SELECT COUNT(*) FROM agent_suggestion_run_steps"
+        ).fetchone()
+        (job_status,) = connection.execute(
+            "SELECT status FROM jobs WHERE job_id = 'job-1'"
+        ).fetchone()
+    assert (suggestion, steps) == (("canceled", None), 0)
+    if not switched.endswith("_during_the_run"):
+        # Decided before the route check, so the job is not put back in the queue.
+        assert job_status == "running"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import MutableMapping
 from typing import cast
 
@@ -15,9 +16,10 @@ from pantaray_agents.agents.action_agent.services.memory_sql import (
     run_local_memory_sql,
 )
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .shared import ToolValidationError, UnprojectedToolExecutionResult, now_iso
+from .shared import ToolValidationError, UnprojectedToolExecutionResult
 from .validation import validate_tool_args
 
 
@@ -38,14 +40,13 @@ async def run_memory_sql_tool(
         else DEFAULT_MEMORY_SQL_LIMIT
     )
     sql = require_string_arg(args, "sql")
-    params = _optional_scalar_params(args)
     limit = require_int_arg(args, "limit", default_limit)
     user_id = _current_user_id(state)
 
-    repo_result = run_local_memory_sql(
+    repo_result = await asyncio.to_thread(
+        run_local_memory_sql,
         user_id=user_id,
         sql=sql,
-        params=params,
         limit=limit,
     )
     if repo_result.error:
@@ -71,19 +72,10 @@ async def run_memory_sql_tool(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, payload),
     )
-
-
-def _optional_scalar_params(args: ToolArgs) -> list[JSONValue]:
-    raw = args.get("params")
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise RuntimeError("params must be a list after validation")
-    return list(raw)
 
 
 def _current_user_id(state: MutableMapping[str, object]) -> str:

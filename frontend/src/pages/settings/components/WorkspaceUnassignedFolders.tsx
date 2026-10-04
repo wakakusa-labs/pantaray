@@ -1,4 +1,3 @@
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
 import type { Translate } from '../types';
@@ -26,44 +25,27 @@ interface WorkspaceUnassignedFoldersProps {
 }
 
 export function WorkspaceUnassignedFolders(props: WorkspaceUnassignedFoldersProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
   const folders = getUnassignedFolders(props.folders, props.projects);
-  if (folders.length === 0) return null;
 
   return (
-    <section className="workspace-unassigned-folders">
-      <button
-        type="button"
-        className="workspace-unassigned-disclosure"
-        aria-expanded={isExpanded}
-        onClick={() => setIsExpanded((current) => !current)}
-      >
-        {isExpanded ? (
-          <ChevronDown size={15} aria-hidden="true" />
-        ) : (
-          <ChevronRight size={15} aria-hidden="true" />
-        )}
-        <span>{props.t('settings.workspace.unassigned.title')}</span>
-        <span className="workspace-unassigned-count">{folders.length}</span>
-      </button>
-      {isExpanded ? (
-        <div className="workspace-unassigned-list">
-          {folders.map((folder) => (
-            <UnassignedFolder
-              key={folder.folder_id}
-              folder={folder}
-              folderIds={folders.map((candidate) => candidate.folder_id)}
-              organizations={props.organizations}
-              projects={props.projects}
-              assignBusy={props.isAssignBusy(folder.folder_id)}
-              deleteBusy={props.isDeleteFolderBusy(folder.folder_id)}
-              t={props.t}
-              onAssign={props.onAssign}
-              onDelete={props.onDeleteFolder}
-            />
-          ))}
-        </div>
-      ) : null}
+    <section className="workspace-detail-body workspace-unassigned-folders">
+      <h1 className="workspace-detail-title">{props.t('settings.workspace.unassigned.title')}</h1>
+      <div className="workspace-detail-panel workspace-unassigned-list">
+        {folders.map((folder) => (
+          <UnassignedFolder
+            key={folder.folder_id}
+            folder={folder}
+            folderIds={folders.map((candidate) => candidate.folder_id)}
+            organizations={props.organizations}
+            projects={props.projects}
+            assignBusy={props.isAssignBusy(folder.folder_id)}
+            deleteBusy={props.isDeleteFolderBusy(folder.folder_id)}
+            t={props.t}
+            onAssign={props.onAssign}
+            onDelete={props.onDeleteFolder}
+          />
+        ))}
+      </div>
     </section>
   );
 }

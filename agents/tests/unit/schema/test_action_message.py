@@ -5,6 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from pantaray_agents.agents.suggestion_agent.writer import check_written_answer
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ExistingActionTarget,
     NewActionTarget,
@@ -19,7 +20,6 @@ from pantaray_agents.schema.agent.action_message import (
     SuggestionApprovalInput,
 )
 from pantaray_agents.schema.agent.image import ImageInput
-from pantaray_agents.schema.agent.suggestion import SuggestionStructuredOutput
 from pantaray_agents.schema.websocket.client_messages import ExecuteActionMessage
 from pantaray_agents.tasks.action_user_message import parse_action_user_message
 
@@ -280,13 +280,5 @@ def test_execute_action_websocket_bounds_suggestion_supplement() -> None:
 
 
 def test_suggestion_generation_rejects_unapprovable_answer() -> None:
-    with pytest.raises(ValidationError) as captured:
-        SuggestionStructuredOutput(
-            has_suggestion=True,
-            answer="x" * (ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS + 1),
-            interaction_contract="action_offer",
-            suggestion_summary=None,
-            target_context=None,
-        )
-
-    assert captured.value.errors(include_url=False)[0]["loc"] == ("answer",)
+    with pytest.raises(ValueError, match="more than"):
+        check_written_answer("x" * (ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS + 1))

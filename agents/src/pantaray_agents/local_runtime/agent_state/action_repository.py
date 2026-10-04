@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Protocol
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.budget_validation import (
     validate_optional_positive_int,
 )
@@ -22,7 +23,6 @@ from .shared import (
     build_audit_timestamps,
     encode_json_column,
     normalize_row,
-    utc_now_iso,
 )
 
 _ACTION_JSON_COLUMNS = {"error", "execution_target_json"}
@@ -282,7 +282,7 @@ class LocalActionRepository(
                     SET status = ?, updated_at = ?
                     WHERE user_id = ? AND action_id = ? AND status = 'processing'
                     """,
-                    (status, utc_now_iso(), user_id, action_id),
+                    (status, now_utc_iso(), user_id, action_id),
                 )
         return RepositoryResult(data=cursor.rowcount > 0)
 
@@ -306,7 +306,7 @@ class LocalActionRepository(
                         updated_at = ?
                     WHERE user_id = ? AND action_id = ?
                     """,
-                    (utc_now_iso(), user_id, action_id),
+                    (now_utc_iso(), user_id, action_id),
                 )
                 row = connection.execute(
                     """

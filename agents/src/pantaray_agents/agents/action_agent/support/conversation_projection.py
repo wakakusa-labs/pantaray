@@ -73,12 +73,17 @@ OMITTED_OUTPUT_MARK = "…"
 TURN_CONTEXT_HEADING = (
     "# Turn Context\nThe state as of this turn. Anything below it is newer.\n\n"
 )
+# Sent when nothing changed but the items would otherwise end on the assistant,
+# which a provider reads as a turn to continue rather than one to answer.
+UNCHANGED_TURN_CONTEXT = "# Turn Context\nNothing has changed since the last one."
 _NOTICE_PREFIX = "System Notice: "
 
 
 @dataclass(frozen=True, slots=True)
 class ActionConversationProjection:
     conversation: LlmConversation
+    # The context message this turn appended, if any; the caller records it.
+    turn_context: str | None
     # The media the items reference, which the request uploads alongside them.
     file_inputs: tuple[LlmFileInput, ...]
 
@@ -96,14 +101,15 @@ def project_action_conversation(
     entries: Sequence[HistoryEntry],
     *,
     omit_before_step_number: int,
-    turn_context: str,
+    turn_context: str | None,
     repair_notice: str,
     provider_turns: Mapping[str, LlmProviderTurn],
 ) -> ActionConversationProjection | None:
     """Lay one scope's history out as conversation items, or decline to.
 
-    ``turn_context`` is this turn's own context message, which the caller
-    records on the THINK row it is about to write; ``repair_notice`` is the
+    ``turn_context`` is this turn's own context message, or None when nothing
+    changed; the caller records what was appended on the THINK row it is about
+    to write. ``repair_notice`` is the
     retry feedback, which follows it as its own item and is never recorded, so
     that a retry is itself an append to the request that preceded it.
 
@@ -150,11 +156,17 @@ def project_action_conversation(
             case StepType.TOOL_EXECUTION:
                 pass  # emitted with the THINK row that declared it
     items.extend(_spoken_items(commentary))
-    items.append(_text_item(turn_context))
+    if turn_context is None and (
+        not items or isinstance(items[-1], LlmTurnAssistantItem)
+    ):
+        turn_context = UNCHANGED_TURN_CONTEXT
+    if turn_context is not None:
+        items.append(_text_item(turn_context))
     if repair_notice:
         items.append(_text_item(repair_notice))
     return ActionConversationProjection(
         conversation=items,
+        turn_context=turn_context,
         # ``collect_prompt_file_inputs`` resolves the refs that appear in a text
         # against the rows that own them. The text here is the refs the items
         # placed, so the request uploads exactly that media and nothing else.
@@ -243,9 +255,7 @@ def _think_items(
 
     items: list[LlmTurnItem] = []
     recorded_context = entry.get("turn_context")
-    # Past the boundary the window was rebuilt, and old context does not come
-    # back into it. A THINK from before the field existed has none to replay.
-    if recorded_context and entry["step_number"] >= omit_before_step_number:
+    if recorded_context and replays_turn_context(entry, omit_before_step_number):
         items.append(_text_item(recorded_context))
     if commentary or rows:
         calls = [_tool_call(row) for row in rows]
@@ -273,6 +283,18 @@ def _think_items(
         # model as its own message behind the results it belongs with.
         items.append(_text_item(_NOTICE_PREFIX + notice))
     return items
+
+
+def replays_turn_context(entry: HistoryEntry, omit_before_step_number: int) -> bool:
+    """Whether the conversation still sends the context this THINK recorded."""
+
+    # Past the boundary the window was rebuilt, and old context does not come
+    # back into it. A THINK from before the field existed has none to replay.
+    return (
+        entry["step_type"] == StepType.LLM_OUTPUT
+        and bool(entry.get("turn_context"))
+        and entry["step_number"] >= omit_before_step_number
+    )
 
 
 def _replayable_turn(
@@ -327,6 +349,10 @@ def _tool_result_item(row: _ToolRow, *, omit: bool) -> LlmTurnToolResultItem:
         body["output"] = (
             OMITTED_OUTPUT_MARK if omit else omit_attachment_data_urls(entry["output"])
         )
+    agents_md = entry.get("agents_md")
+    if agents_md:
+        # Each file is attached once per Action, so omission keeps it.
+        body["agents_md"] = agents_md
     history_ref = entry.get("short_step_id")
     if history_ref:
         body["history_ref"] = history_ref
@@ -385,6 +411,8 @@ def _media_block(attachment: ToolAttachment) -> LlmInputBlock:
 __all__ = [
     "OMITTED_OUTPUT_MARK",
     "TURN_CONTEXT_HEADING",
+    "UNCHANGED_TURN_CONTEXT",
     "ActionConversationProjection",
     "project_action_conversation",
+    "replays_turn_context",
 ]

@@ -29,6 +29,7 @@ from pantaray_agents.tasks.action_user_message import (
     serialize_action_user_message,
 )
 
+from .action_file_attachments import ActionFileAttachmentLinks
 from .action_invalidation_events import append_action_invalidation_event
 from .action_message_models import (
     ACTION_RESUME_STEP_NAME,
@@ -68,7 +69,10 @@ from .action_suggestion_reply import insert_suggestion_reply_message
 from .identity import verify_current_owner
 from .job_enqueue import enqueue_local_job
 from .job_payload_builder import build_action_job_payload
-from .runtime_env import read_local_runtime_db_config
+from .runtime_env import (
+    read_local_runtime_artifact_root,
+    read_local_runtime_db_config,
+)
 from .utc_timestamps import now_utc_iso
 
 ACTION_QUEUED_STATUS = "queued"
@@ -91,7 +95,10 @@ def submit_action_message(
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
         configure_connection(connection, busy_timeout_ms)
-        with immediate_transaction(connection):
+        with (
+            ActionFileAttachmentLinks() as attachment_links,
+            immediate_transaction(connection),
+        ):
             existing = _load_existing_submission(
                 connection=connection,
                 command=command,
@@ -218,6 +225,15 @@ def submit_action_message(
                         message=command.message,
                         created_at=created_at,
                     )
+            if command.message.files:
+                attachment_links.link(
+                    connection=connection,
+                    db_path=db_path,
+                    artifact_root=read_local_runtime_artifact_root(),
+                    user_id=command.user_id,
+                    action_id=action_id,
+                    files=command.message.files,
+                )
 
     if starts_run:
         assert process_id is not None and job_id is not None

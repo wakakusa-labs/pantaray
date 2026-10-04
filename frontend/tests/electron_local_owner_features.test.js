@@ -82,7 +82,7 @@ test('desktop features bind guest and expired-account requests, preferences, rea
     updateUi: { rebuildTrayMenu: () => {}, rebuildAppMenu: () => {}, refreshCaptureStatus: async () => {} },
     getMainWindow: () => null, createMainWindow: () => {},
     resolveUiSettingsPath: uiPath, getUiLanguage: () => language,
-    setUiLanguage: next => { language = next; }, screenshotLib: {}, execPromise: async () => ({ stdout: '' }), logger: null,
+    setUiLanguage: next => { language = next; }, logger: null,
   });
   feature.registerMainIpc();
   await assert.rejects(context.workspaceSettings.getCommandNetwork(), /Missing authenticated user id/);

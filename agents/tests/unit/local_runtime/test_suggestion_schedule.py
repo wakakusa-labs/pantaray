@@ -154,3 +154,24 @@ def test_unchanged_insight_is_a_valid_periodic_review_input(tmp_path: Path) -> N
     )
     assert source.short_term_insight == "Still working on the proposal."
     assert "Periodic review" in source.reconsideration_reason
+
+
+def test_the_welcome_neither_delays_nor_supersedes_the_first_real_suggestion(
+    tmp_path: Path,
+) -> None:
+    from pantaray_agents.local_runtime.runtime.welcome_suggestion import (
+        record_welcome_suggestion,
+    )
+
+    db_path = _db(tmp_path)
+    with open_memory_catalog_connection(db_path=db_path, busy_timeout_ms=1_000) as conn:
+        assert record_welcome_suggestion(
+            connection=conn,
+            user_id="user-1",
+            answer="Welcome",
+            now=NOW.isoformat().replace("+00:00", "Z"),
+        )
+    _queue(db_path, "first-insight", at=NOW + timedelta(minutes=5))
+    first = _claim(db_path)
+    # Five minutes after the welcome, the first real suggestion starts at once.
+    assert _reserve(db_path, first, NOW + timedelta(minutes=5)) == "start"

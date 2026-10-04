@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import pantaray_agents.local_runtime.tooling.react_tools.file_access as file_access_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
 from pantaray_agents.agents.artifact_react import (
     ReactToolCall,
@@ -73,6 +74,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.react_tools import (
+    MemoryReadRoot,
     ReadOnlyFileAccess,
     WorkspaceReadRoot,
     memory_revision_by_source,
@@ -96,7 +98,8 @@ from .test_memory_artifact_publication import (
     _publication,
     _runtime,
 )
-from .test_workspace_settings_repository import TIMESTAMP, _bootstrap_db
+from .test_workspace_settings_repository import TIMESTAMP
+from .test_workspace_settings_repository import _bootstrap_db as _bootstrap_app_db
 
 BUSY_TIMEOUT_MS = 1_000
 QUERY_EMBEDDING = (1.0, *(0.0 for _ in range(511)))
@@ -144,6 +147,13 @@ def _search_result(
             "context_handle": item.item.context_handle,
         }
     ], epoch
+
+
+def _bootstrap_db(tmp_path: Path) -> Path:
+    # App storage lives apart from the folders a test registers as the user's own.
+    app_data = tmp_path / "app-data"
+    app_data.mkdir()
+    return _bootstrap_app_db(app_data)
 
 
 def _register_workspace(*, db_path: Path, root: Path) -> None:
@@ -199,15 +209,6 @@ def test_read_only_file_access_reads_only_registered_roots(
         column=1,
         limit=1,
     )
-    grep_result = reader.grep(
-        root_id=root_id,
-        base_path=".",
-        pattern="shared contract",
-        include_glob="**/*.md",
-        offset=1,
-        max_matches=10,
-    )
-
     assert read_result["content"] == "shared contract\n"
     assert read_result["next_offset"] == 3
     assert read_result["truncated"] is True
@@ -215,13 +216,6 @@ def test_read_only_file_access_reads_only_registered_roots(
     assert read_result["retry_hint"] == (
         "Continue with offset=next_offset and column=next_column."
     )
-    assert grep_result["matches"] == [
-        {
-            "path": "design.md",
-            "line_number": 2,
-            "line": "shared contract",
-        }
-    ]
     with pytest.raises(BrokerPolicyError, match="root-relative"):
         reader.read(
             root_id=root_id,
@@ -240,6 +234,84 @@ def test_read_only_file_access_reads_only_registered_roots(
             column=1,
             limit=1,
         )
+
+
+def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    storage = db_path.parent
+    (storage / "notes.txt").write_text("needle secret\n", encoding="utf-8")
+    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
+    _register_workspace(db_path=db_path, root=tmp_path)
+    snapshot = _snapshot(db_path=db_path)
+    reader = ReadOnlyFileAccess(roots=snapshot.roots)
+    root_id = snapshot.roots[-1].root_id
+
+    listed = reader.list(root_id=root_id, path=".", max_depth=3, offset=1, limit=50)
+    globbed = reader.glob(
+        root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
+    )
+
+    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
+    assert globbed["matches"] == ["sibling.txt"]
+    alias = storage.with_name(storage.name.upper())
+    private_paths = [f"{storage.name}/notes.txt", f"{storage.name}/{db_path.name}"]
+    if alias.exists() and alias.samefile(storage):
+        private_paths.append(f"{alias.name}/notes.txt")
+    for path in private_paths:
+        with pytest.raises(BrokerPolicyError) as caught:
+            reader.read(root_id=root_id, path=path, offset=1, column=1, limit=10)
+        assert "private app storage" in str(caught.value), path
+        assert "memory_search" in str(caught.value), path
+        assert "memory_sql" not in str(caught.value), path
+    for search in (
+        lambda: reader.list(
+            root_id=root_id, path=storage.name, max_depth=1, offset=1, limit=10
+        ),
+        lambda: reader.glob(
+            root_id=root_id, base_path=storage.name, pattern="*", offset=1, limit=10
+        ),
+    ):
+        with pytest.raises(BrokerPolicyError, match="private app storage"):
+            search()
+
+
+def test_read_only_file_access_never_walks_into_private_app_storage(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    storage = db_path.parent
+    records = storage / "records"
+    records.mkdir()
+    for index in range(60):
+        (records / f"{index}.txt").write_text("needle secret\n", encoding="utf-8")
+    # Opening this would fail the whole scan, so the scan must not reach it.
+    unreadable = storage / "unreadable.txt"
+    unreadable.write_text("needle secret\n", encoding="utf-8")
+    unreadable.chmod(0)
+    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
+    _register_workspace(db_path=db_path, root=tmp_path)
+    snapshot = _snapshot(db_path=db_path)
+    reader = ReadOnlyFileAccess(roots=snapshot.roots)
+    root_id = snapshot.roots[-1].root_id
+
+    try:
+        results = (
+            reader.list(root_id=root_id, path=".", max_depth=4, offset=1, limit=50),
+            reader.glob(
+                root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
+            ),
+        )
+    finally:
+        unreadable.chmod(0o600)
+
+    listed, globbed = results
+    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
+    assert globbed["matches"] == ["sibling.txt"]
+    for result in results:
+        assert result["truncated"] is False
+        assert result["warning"] is None
 
 
 def test_workspace_read_remains_pinned_after_parent_replacement(
@@ -272,7 +344,7 @@ def test_workspace_read_remains_pinned_after_parent_replacement(
 
     monkeypatch.setattr(descriptor_access.os, "open", racing_open)
     reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
+        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
     )
 
     result = reader.read(
@@ -314,7 +386,7 @@ def test_workspace_list_remains_pinned_after_base_replacement(
 
     monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
     reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
+        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
     )
 
     result = reader.list(
@@ -357,7 +429,7 @@ def test_workspace_glob_remains_pinned_after_base_replacement(
 
     monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
     reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
+        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
     )
 
     result = reader.glob(
@@ -370,109 +442,6 @@ def test_workspace_glob_remains_pinned_after_base_replacement(
 
     assert result["matches"] == ["base/inside.py"]
     assert "outside.py" not in str(result)
-
-
-def test_workspace_grep_reads_scanned_file_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "shared.txt").write_text("inside marker\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "shared.txt").write_text("outside marker\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path="base",
-        pattern="marker",
-        include_glob="*.txt",
-        offset=1,
-        max_matches=100,
-    )
-
-    assert result["matches"] == [
-        {
-            "path": "base/shared.txt",
-            "line_number": 1,
-            "line": "inside marker",
-        }
-    ]
-    assert "outside marker" not in str(result)
-
-
-def test_workspace_grep_preserves_one_based_pagination(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    (root / "matches.txt").write_text(
-        "needle one\nneedle two\nneedle three\n",
-        encoding="utf-8",
-    )
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path=".",
-        pattern="needle",
-        include_glob="*.txt",
-        offset=2,
-        max_matches=1,
-    )
-
-    assert result["matches"] == [
-        {"path": "matches.txt", "line_number": 2, "line": "needle two"}
-    ]
-    assert result["next_offset"] == 3
-    assert result["truncated"] is True
-    assert result["truncation_reason"] == "page_limit"
-
-
-def test_workspace_grep_preserves_bounded_multibyte_line_output(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    line = "needle" + "あ" * 600
-    (root / "matches.txt").write_text(line + "\n", encoding="utf-8")
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path=".",
-        pattern="needle",
-        include_glob="*.txt",
-        offset=1,
-        max_matches=1,
-    )
-
-    assert result["matches"] == [
-        {
-            "path": "matches.txt",
-            "line_number": 1,
-            "line": line[:500] + "... [truncated]",
-        }
-    ]
 
 
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
@@ -571,6 +540,47 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
         )["content"]
         == "# Topic\nInsight leaf detail\n"
     )
+
+
+def test_memory_grep_stops_a_backtracking_pattern_at_the_search_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A plain backtracking engine needs ~0.3 s here and the timed engine ~0.7 s,
+    # so the shortened deadline must cut the search off instead of finishing it.
+    monkeypatch.setattr(file_access_module, "SEARCH_TIMEOUT_SECONDS", 0.05)
+    backtracking_line = ("来週の定例で見積もりの件を先方に確認" * 2)[:24]
+    reader = ReadOnlyFileAccess(
+        roots=(
+            MemoryReadRoot(
+                root_id="facts",
+                display_name="Facts",
+                revision_id="revision-1",
+                node_id="node-1",
+                entry_path="facts/index.md",
+                documents=(
+                    MemoryDocument(
+                        "facts/notes.md",
+                        f"release 2\n{backtracking_line}\nrelease 3\n",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    result = reader.grep(
+        root_id="facts",
+        base_path=".",
+        pattern=r"(?:\w|\w\w|\w\w\w)*[0-9]$",
+        include_glob=None,
+        offset=1,
+        max_matches=10,
+    )
+
+    assert result["matches"] == [
+        {"path": "facts/notes.md", "line_number": 1, "line": "release 2"}
+    ]
+    assert result["truncated"] is True
+    assert result["truncation_reason"] == "timeout"
 
 
 def test_stable_memory_bounds_include_truncation_markers() -> None:
@@ -942,6 +952,7 @@ def test_suggestion_research_tool_set_is_read_only(
     assert names == {
         "memory_search",
         "get_memory_reference",
+        "memory_sql",
         "read",
         "list",
         "glob",
@@ -1065,6 +1076,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
             step_number,
         )
         assert result.status == "success"
+        assert result.output["notes"][-1].startswith("The results stop at limit=1;")
 
     reference = await registry.execute(
         _tool_call(
@@ -1460,6 +1472,59 @@ async def test_suggestion_web_extract_pages_content_from_one_snapshot(
     )
 
 
+@pytest.mark.asyncio
+async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    excerpts = "pricing table [...] plan limits"
+
+    async def invoke_web_tools_wrapper(**_kwargs):
+        return {
+            "status": "success",
+            "result": {
+                "results": [
+                    {"url": "https://example.com/page", "raw_content": excerpts}
+                ],
+                "failed_results": [],
+            },
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        invoke_web_tools_wrapper,
+    )
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=_snapshot(db_path=db_path),
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    result = await registry.execute(
+        _tool_call(
+            "web_extract",
+            {
+                "urls": ["https://example.com/page"],
+                "query": "pricing",
+                "offset": 1,
+                "limit": 1_000,
+            },
+        ),
+        1,
+    )
+
+    row = result.output["results"][0]
+    assert row["raw_content"] == excerpts
+    assert row["next_offset"] is None
+    assert row["truncated"] is True
+    assert row["truncation_reason"] == "query_excerpts"
+    assert "query=null" in row["retry_hint"]
+
+
 def _publish_insight_tree(
     *,
     db_path: Path,
@@ -1595,7 +1660,7 @@ def _publish_second_fact_revision(
 
 
 @pytest.mark.parametrize("has_direction", [False, True])
-def test_todo_preview_and_full_read_do_not_invent_long_term_context(
+def test_todo_file_and_full_read_do_not_invent_long_term_context(
     tmp_path: Path,
     has_direction: bool,
 ) -> None:
@@ -1618,10 +1683,8 @@ def test_todo_preview_and_full_read_do_not_invent_long_term_context(
     )
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
     assert snapshot.stable_memory.has_insights is has_direction
-    preview = snapshot.stable_memory.pending_work
-    assert "a concrete pending commitment" in preview
-    assert "[truncated; continue with read]" in preview
-    assert len(preview) <= snapshot_module.PENDING_WORK_PREVIEW_MAX_CHARS
+    # A file within the bound reaches the prompt whole.
+    assert snapshot.stable_memory.pending_work == todo.strip()
     reader = ReadOnlyFileAccess(roots=snapshot.roots)
     full = reader.read(
         root_id="insights", path="insights/todos.md", offset=1, column=1, limit=200
@@ -1637,3 +1700,58 @@ def test_todo_preview_and_full_read_do_not_invent_long_term_context(
     assert remainder["truncated"] is False
     assert full["content"] + remainder["content"] == todo
     assert "Other project: submit the estimate." in remainder["content"]
+
+
+def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
+    tmp_path: Path,
+) -> None:
+    from pantaray_agents.agents.suggestion_agent import SuggestionAgent
+    from pantaray_agents.agents.suggestion_agent.agent import (
+        SUGGESTION_INITIAL_PROMPT_MAX_CHARS,
+    )
+    from pantaray_agents.mock.mock_agent_repository import (
+        MockSuggestionAgentRepository,
+    )
+    from pantaray_agents.mock.mock_llm_client import MockLLMClient
+    from pantaray_agents.mock.suggestion_research import (
+        build_mock_suggestion_research_tools,
+    )
+
+    db_path, artifact_root = _runtime(tmp_path)
+    todo = "# TODOs\n" + "- **Item**: next step and evidence.\n" * 5_000
+    _publish_insight_tree(
+        db_path=db_path,
+        artifact_root=artifact_root,
+        documents=(
+            MemoryDocument("insights/index.md", "# Direction\n"),
+            MemoryDocument("insights/todos.md", todo),
+        ),
+    )
+    snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
+    pending = snapshot.stable_memory.pending_work
+    assert len(pending) <= snapshot_module.PENDING_WORK_MAX_CHARS < len(todo)
+    assert pending.endswith("[truncated; continue with read]")
+
+    agent = SuggestionAgent(
+        config={"llm_client": MockLLMClient()},
+        repository=MockSuggestionAgentRepository(),
+        research_tools=build_mock_suggestion_research_tools(),
+        stable_memory=snapshot.stable_memory,
+    )
+    # The rest of the prompt near the old 64k budget, which no real run reached.
+    prompt = agent._build_prompt(  # noqa: SLF001
+        {
+            "short_term_insight": "insight",
+            "reconsideration_reason": "reason",
+            "stable_memory_context": snapshot.stable_memory.prompt,
+            "action_agent_capabilities": "capabilities",
+            "recent_suggestions": "suggestions",
+            "recent_activity_descriptions": "activities",
+            "recent_activity_summary_1h": "hourly",
+            "recent_activity_summaries_24h_1w_1m": "summaries",
+            "context_density_signal": "context_density: high",
+            "workspace_context_prompt": "w" * 50_000,
+        }
+    )
+    assert len(prompt) <= SUGGESTION_INITIAL_PROMPT_MAX_CHARS
+    assert "[truncated; continue with read]" in prompt

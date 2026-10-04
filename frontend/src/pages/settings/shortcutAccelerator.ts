@@ -24,6 +24,8 @@ const CODE_KEYS: Readonly<Record<string, string>> = {
   Quote: "'",
   Semicolon: ';',
   Slash: '/',
+  // Option+Space reports a no-break space as its key on macOS.
+  Space: 'Space',
 };
 
 const NAMED_KEYS: Readonly<Record<string, string>> = {
@@ -49,17 +51,28 @@ function isAvailableFunctionKey(key: string): boolean {
   return key !== RELEASE_DEVTOOLS_KEY && FUNCTION_KEY_PATTERN.test(key);
 }
 
+function physicalKeyToken(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return CODE_KEYS[code] ?? null;
+}
+
 function keyToken(event: ShortcutKeyEvent): string | null {
   const { key } = event;
   if (/^Numpad[0-9]$/.test(event.code)) return `num${event.code.slice(6)}`;
   if (event.code.startsWith('Numpad') && CODE_KEYS[event.code]) return CODE_KEYS[event.code];
+  // Option turns a key into another character (Option+L is "@" on some layouts),
+  // so the key that was pressed is its code.
+  if (event.altKey) {
+    const physical = physicalKeyToken(event.code);
+    if (physical) return physical;
+  }
   if (/^[a-z]$/i.test(key)) return key.toUpperCase();
   if (/^[0-9]$/.test(key)) return key;
   if (PRINTABLE_PUNCTUATION_KEYS.has(key)) return key === '+' ? 'Plus' : key;
 
-  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
-  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
-  if (CODE_KEYS[event.code]) return CODE_KEYS[event.code];
+  const physical = physicalKeyToken(event.code);
+  if (physical) return physical;
 
   if (isAvailableFunctionKey(key)) return key;
   return NAMED_KEYS[key] ?? null;

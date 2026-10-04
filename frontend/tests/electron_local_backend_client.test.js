@@ -168,6 +168,8 @@ test('local backend client は未許可 path/method を token 送信前に拒否
       ['/api/agent/history/items/process/process-1', 'DELETE'],
       ['/api/agent/history/items/conversation/action-1/extra', 'DELETE'],
       ['/api/agent/history', 'DELETE'],
+      ['/v1/agents/users/user-1/suggestions/welcome', 'GET'],
+      ['/v1/agents/users/user-1/suggestions/sug-1', 'POST'],
     ]) {
       await assert.rejects(
         () => client.requestJson({ path, method }),
@@ -204,6 +206,7 @@ test('local backend client の route allowlist は現在の全 call site を許�
   });
   const routes = [
     ['/local/action-screen-capture', 'POST'],
+    ['/v1/agents/users/user-1/suggestions/welcome', 'POST'],
     ['/api/agent/history', 'GET'],
     ['/api/agent/history/suggestion-1/overlay-bootstrap', 'GET'],
     ['/api/agent/history/items/conversation/action-1', 'DELETE'],

@@ -23,6 +23,7 @@ from pantaray_agents.local_runtime.tooling.documents.page_render import (
     PageOutOfRangeError,
     PageRenderTimeoutError,
     RenderedPage,
+    RenderedPages,
     render_pdf_pages,
 )
 
@@ -82,7 +83,7 @@ async def render(
     path: Path,
     pages: list[int],
     timeout_seconds: float = MAX_PAGE_RENDER_SECONDS,
-) -> tuple[RenderedPage, ...]:
+) -> RenderedPages:
     return await render_pdf_pages(
         pdf_path=path,
         pages=pages,
@@ -98,7 +99,7 @@ async def test_a_page_is_drawn_to_the_long_edge_whichever_way_it_is_turned(
     path = tmp_path / "page.pdf"
     write_pdf(path, marks=[(0, 0, 1)], size_pt=size_pt)
 
-    (page,) = await render(path, [1])
+    (page,) = (await render(path, [1])).pages
 
     assert max(page.width_px, page.height_px) == RENDERED_PAGE_LONG_EDGE_PX
     assert page.width_px / page.height_px == pytest.approx(
@@ -116,8 +117,10 @@ async def test_pages_come_back_in_the_order_they_were_asked_for(tmp_path: Path) 
 
     drawn = await render(path, [3, 1])
 
-    assert [page.number for page in drawn] == [3, 1]
-    blue, red = (ink_at_bottom_left(page) for page in drawn)
+    # The whole document's length, which a laid-out Word file has nowhere else.
+    assert drawn.page_count == 3
+    assert [page.number for page in drawn.pages] == [3, 1]
+    blue, red = (ink_at_bottom_left(page) for page in drawn.pages)
     assert blue[2] > _INK_THRESHOLD > blue[0]
     assert red[0] > _INK_THRESHOLD > red[2]
 
@@ -148,7 +151,7 @@ async def test_a_pdf_that_only_restricts_editing_is_drawn(tmp_path: Path) -> Non
     path = tmp_path / "restricted.pdf"
     write_pdf(path, marks=[(0, 0, 1)], user_password="")
 
-    (page,) = await render(path, [1])
+    (page,) = (await render(path, [1])).pages
 
     assert ink_at_bottom_left(page)[2] > _INK_THRESHOLD
 

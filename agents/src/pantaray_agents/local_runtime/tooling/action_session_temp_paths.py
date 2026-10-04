@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .tool_result_storage import ACTION_TOOL_RESULTS_DIRNAME
 LOCAL_RUNTIME_WORKSPACE_DIRNAME = "local_runtime_workspaces"
 SCRATCH_WORKSPACE_DIRNAME = "scratch"
 SCRATCH_SESSION_TEMP_DIRNAME = ".runtime-temp"
+PRIVATE_TEMP_DIRNAME = "temp"
 MANAGED_DIRECTORY_MODE = 0o700
 
 
@@ -30,6 +32,20 @@ def resolve_local_runtime_storage_base(*, db_path: Path) -> Path:
     """Return the canonical directory that owns local-runtime sidecar storage."""
 
     return db_path.resolve().parent
+
+
+def create_private_temp_dir(*, db_path: Path, prefix: str) -> Path:
+    """A fresh directory for one command or conversion, inside private app storage.
+
+    Sandboxed commands may read and write the OS temp dirs, so what Pantaray
+    keeps there for one of them would be open to every other command.
+    """
+
+    # Design limit: a crash leaves the dirs of unrecorded commands and office
+    # conversions behind; sweep this root at startup if it is seen to grow.
+    root = resolve_local_runtime_storage_base(db_path=db_path) / PRIVATE_TEMP_DIRNAME
+    root.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=root)).resolve()
 
 
 def resolve_managed_action_workspace_root(*, db_path: Path) -> Path:
@@ -109,8 +125,10 @@ __all__ = [
     "ActionStoragePaths",
     "LOCAL_RUNTIME_WORKSPACE_DIRNAME",
     "MANAGED_DIRECTORY_MODE",
+    "PRIVATE_TEMP_DIRNAME",
     "SCRATCH_SESSION_TEMP_DIRNAME",
     "SCRATCH_WORKSPACE_DIRNAME",
+    "create_private_temp_dir",
     "open_durable_action_storage_child",
     "resolve_action_session_temp_leaf",
     "resolve_action_storage_paths",

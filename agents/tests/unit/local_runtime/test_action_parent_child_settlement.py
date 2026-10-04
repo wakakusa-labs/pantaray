@@ -84,6 +84,7 @@ def _seed_child(db_path: Path, *, ordinal: int = 1) -> ActionSubagentJobPayload:
             "action_id": "action-1",
             "parent_process_id": PARENT_PROCESS_ID,
             "inference_profile_id": "action.subagent.luna",
+            "action_context": "# Workspace Paths\nparent context",
             "task": f"inspect boundary {ordinal}",
             "context_refs": [],
             "resource_claim_ids": [claim_id],

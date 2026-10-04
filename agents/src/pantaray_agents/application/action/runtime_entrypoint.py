@@ -16,7 +16,6 @@ from pantaray_agents.agents.action_agent.agent_runtime_facade import (
     ActionGraphRuntimeCreateInput,
     coerce_action_token_budget,
     create_action_graph_runtime,
-    now_iso,
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.application.action.execution_service import (
@@ -30,6 +29,7 @@ from pantaray_agents.application.action.failure_recovery import (
 from pantaray_agents.application.action.ports import ActionStepEmitter
 from pantaray_agents.application.action.response_service import ActionResponseService
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.action import (
     ActionAgentRequest,
     ActionAgentResponse,
@@ -80,7 +80,7 @@ def build_action_runtime_execution_service(
         ExecutionDeps(
             repository=agent.repository,
             logger=agent._logger,
-            now_provider=now_iso,
+            now_provider=now_utc_iso,
             action_agent_tunables=load_local_runtime_tunables().action_agent,
             coerce_action_token_budget=coerce_action_token_budget,
             build_agent_error=response_service.build_agent_error,
@@ -116,7 +116,7 @@ def build_action_runtime_entrypoint(
             execution_service=execution_service,
             executing_prompt_name=agent.executing_prompt_name,
             coerce_request=agent.coerce_request,
-            now_provider=now_iso,
+            now_provider=now_utc_iso,
             request_id_factory=lambda: str(uuid4()),
         )
     )

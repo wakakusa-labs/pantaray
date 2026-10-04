@@ -1,0 +1,123 @@
+"""The writer call turns the decided content into the user-facing Suggestion text."""
+
+import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
+
+from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
+from pantaray_agents.agents.suggestion_agent import SuggestionAgent
+from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
+from pantaray_agents.mock.mock_llm_client import MockLLMClient
+from pantaray_agents.schema.agent.base import StatusType
+from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
+
+POINT = (
+    "The client asked twice for the March invoice; it is still unsent. "
+    "Pantaray can write a reply with the invoice attached."
+)
+SUMMARY = "ACTION-ONLY summary: procedure, conditions and ambiguity."
+INSIGHT = "RUN-ONLY insight: the user reviewed the billing sheet."
+WRITTEN = "3月の請求書、先方から2回催促が来ています。添付して返信文を書きましょうか？"
+
+
+def _request() -> SuggestionAgentRequest:
+    return SuggestionAgentRequest(
+        suggestion_id="sug-writer",
+        user_id="user-test",
+        short_term_insight=INSIGHT,
+        reconsideration_reason="The invoice is overdue.",
+    )
+
+
+def _decision() -> dict[str, object]:
+    return {
+        "has_suggestion": True,
+        "interaction_contract": "action_offer",
+        "key_point": POINT,
+        "suggestion_summary": SUMMARY,
+        "target_context": {"organization_name": None, "project_name": None},
+    }
+
+
+class _SpyConfig:
+    calls: list[dict[str, object]] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).calls.append(kwargs)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+def _steps(repository: MockSuggestionAgentRepository) -> list[dict[str, object]]:
+    rows = repository.data.get("suggestion_run_steps", [])
+    return sorted(
+        (row for row in rows if row["suggestion_id"] == "sug-writer"),
+        key=lambda row: row["step_number"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_writer_receives_only_the_decided_content(
+    suggestion_agent: SuggestionAgent,
+    mock_llm_client: MockLLMClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _SpyConfig.calls = []
+    monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
+    serve_lens_runs(mock_llm_client, _decision())
+    mock_llm_client.responses["default"] = WRITTEN
+
+    response = await suggestion_agent.process(_request())
+
+    assert response.status == StatusType.SUCCESS
+    writer_prompt = mock_llm_client.last_prompt
+    assert writer_prompt is not None
+    assert POINT in writer_prompt
+    for leaked in (SUMMARY, INSIGHT, "suggestion task"):
+        assert leaked not in writer_prompt
+    writer_config = _SpyConfig.calls[-1]
+    assert writer_config["system_instruction"] == "Write one message in English."
+    assert writer_config["inference_profile"] == "suggestion"
+
+
+@pytest.mark.asyncio
+async def test_the_published_answer_comes_from_the_writer(
+    suggestion_agent: SuggestionAgent,
+    mock_repository: MockSuggestionAgentRepository,
+    mock_llm_client: MockLLMClient,
+) -> None:
+    serve_lens_runs(mock_llm_client, _decision())
+    mock_llm_client.responses["default"] = WRITTEN
+
+    response = await suggestion_agent.process(_request())
+
+    assert response.status == StatusType.SUCCESS
+    assert response.has_suggestion is True
+    assert response.answer == WRITTEN
+    assert response.suggestion_summary == SUMMARY
+    writer_step = _steps(mock_repository)[-1]
+    assert writer_step["step_kind"] == "llm"
+    assert writer_step["status"] == "success"
+    assert writer_step["llm_response_text"] == WRITTEN
+
+
+@pytest.mark.asyncio
+async def test_a_writer_failure_publishes_nothing(
+    suggestion_agent: SuggestionAgent,
+    mock_repository: MockSuggestionAgentRepository,
+    mock_llm_client: MockLLMClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_writer(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("writer model unavailable")
+
+    serve_lens_runs(mock_llm_client, _decision())
+    monkeypatch.setattr(suggestion_agent, "_generate_llm_response", failing_writer)
+
+    response = await suggestion_agent.process(_request())
+
+    assert response.status == StatusType.ERROR
+    assert response.has_suggestion is False
+    assert response.answer == ""
+    writer_step = _steps(mock_repository)[-1]
+    assert writer_step["status"] == "error"
+    assert "writer model unavailable" in str(writer_step["error_message"])

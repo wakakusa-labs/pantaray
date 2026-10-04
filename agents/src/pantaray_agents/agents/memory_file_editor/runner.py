@@ -44,6 +44,8 @@ type MemoryThoughtConsumer = Callable[[], str | None]
 type MemoryCompletionValidator = Callable[[], str | None]
 type SyncOperation[T] = Callable[[], T]
 
+APPLIED_MEMORY_REQUESTS_ARG = "applied_memory_requests"
+
 
 @dataclass(frozen=True, slots=True)
 class MemoryFileEditorRunInput:
@@ -57,14 +59,28 @@ class MemoryFileEditorRunInput:
     policy: ReactLoopPolicy
     consume_llm_thoughts: MemoryThoughtConsumer | None = None
     validate_completion: MemoryCompletionValidator | None = None
+    # The memory requests this run renders; `completed` reports which it applied.
+    memory_request_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryFileEditorRunResult:
     loop_result: ReactLoopResult
+    applied_memory_request_ids: tuple[str, ...]
 
 
-def _completed_tool() -> LlmToolDefinition:
+def _completed_tool(memory_request_ids: tuple[str, ...]) -> LlmToolDefinition:
+    properties: dict[str, JSONValue] = {}
+    if memory_request_ids:
+        properties[APPLIED_MEMORY_REQUESTS_ARG] = {
+            "type": "array",
+            "items": {"type": "string", "enum": list(memory_request_ids)},
+            "uniqueItems": True,
+            "description": (
+                "request_id of every memory request now reflected in memory. "
+                "Leave out a request you did not apply."
+            ),
+        }
     return LlmToolDefinition(
         name=COMPLETED_TOOL_NAME,
         description=(
@@ -74,7 +90,8 @@ def _completed_tool() -> LlmToolDefinition:
         parameters={
             "type": "object",
             "additionalProperties": False,
-            "properties": {},
+            "required": list(properties),
+            "properties": properties,
         },
     )
 
@@ -94,9 +111,24 @@ async def run_memory_file_editor(
     )
 
     def complete(
-        _arguments: dict[str, JSONValue],
+        arguments: dict[str, JSONValue],
         _final_turn: bool,
-    ) -> NativeReactCompletion[bool]:
+    ) -> NativeReactCompletion[tuple[str, ...]]:
+        applied = arguments.get(APPLIED_MEMORY_REQUESTS_ARG, [])
+        applied_ids = (
+            tuple(item for item in applied if isinstance(item, str))
+            if isinstance(applied, list)
+            else ()
+        )
+        if not isinstance(applied, list) or len(applied_ids) != len(applied):
+            return NativeReactCompletion(
+                value=None,
+                final_text="",
+                error_message=(
+                    f"{APPLIED_MEMORY_REQUESTS_ARG} must be a list of request_id "
+                    "strings."
+                ),
+            )
         completion_error = (
             run_input.validate_completion()
             if run_input.validate_completion is not None
@@ -108,7 +140,7 @@ async def run_memory_file_editor(
                 final_text="",
                 error_message=completion_error,
             )
-        return NativeReactCompletion(value=True, final_text="")
+        return NativeReactCompletion(value=applied_ids, final_text="")
 
     async def project_result(result: ReactToolResult) -> ReactToolResult:
         return await _run_sync_to_completion(
@@ -123,7 +155,7 @@ async def run_memory_file_editor(
                     *run_input.tool_definitions,
                     result_store.fetch_definition(),
                 ),
-                terminal_tool=_completed_tool(),
+                terminal_tool=_completed_tool(run_input.memory_request_ids),
                 complete=complete,
                 build_prompt=run_input.build_prompt,
                 call_llm=run_input.call_llm,
@@ -144,7 +176,10 @@ async def run_memory_file_editor(
         raise
     else:
         result_store.close()
-        return MemoryFileEditorRunResult(loop_result=result.loop_result)
+        return MemoryFileEditorRunResult(
+            loop_result=result.loop_result,
+            applied_memory_request_ids=result.value or (),
+        )
 
 
 async def _run_sync_to_completion[T](operation: SyncOperation[T]) -> T:
@@ -170,6 +205,7 @@ async def _run_sync_to_completion[T](operation: SyncOperation[T]) -> T:
 
 
 __all__ = [
+    "APPLIED_MEMORY_REQUESTS_ARG",
     "MemoryFileEditorRunInput",
     "MemoryFileEditorRunResult",
     "run_memory_file_editor",

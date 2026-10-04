@@ -1,20 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import get_close_matches
 from itertools import islice
 from pathlib import Path
 
-from pantaray_agents.local_runtime.runtime.runtime_env import (
-    read_local_runtime_artifact_root,
-)
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
 )
 
 from ..action_plan_document import is_action_plan_artifact_path
-from ..outside_workspace_grant import path_is_within
 from ..workspace_manifest_roots import path_belongs_to_manifest_root
 from .broker_common import BrokerContext, BrokerPolicyError
 from .manifest_paths import (
@@ -34,6 +31,7 @@ from .outside_workspace import (
     resolve_outside_workspace_cwd,
     resolve_outside_workspace_patch_target,
 )
+from .private_app_storage import private_app_storage_error, private_app_storage_filter
 
 READ_PATH_NOT_FOUND = "READ_PATH_NOT_FOUND"
 READ_PATH_DENIED = "READ_PATH_DENIED"
@@ -92,7 +90,17 @@ def resolve_read_tool_path(
             full_access=context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS,
         ) from exc
     reject_private_action_plan_path(context=context, path=resolved.path)
+    if private_app_storage_filter(context)(resolved.path):
+        raise private_app_storage_error(code=READ_PATH_DENIED)
     return resolved
+
+
+def hidden_read_path_filter(context: BrokerContext) -> Callable[[Path], bool]:
+    is_private_storage = private_app_storage_filter(context)
+    return lambda path: (
+        is_private_storage(path)
+        or is_private_action_plan_path(context=context, path=path)
+    )
 
 
 def resolve_write_tool_path(
@@ -108,6 +116,7 @@ def resolve_write_tool_path(
             f"tool {context.tool_definition.tool_id} is not a workspace write tool",
             code=WRITE_PATH_DENIED,
         )
+    is_private_storage = private_app_storage_filter(context)
     try:
         resolved = resolve_local_path(
             roots=context.manifest_roots,
@@ -131,38 +140,24 @@ def resolve_write_tool_path(
         ) from exc
     except BrokerPolicyError as exc:
         if exc.code == WORKSPACE_PATH_OUTSIDE_ROOTS:
+            candidate = _candidate_path(
+                raw_path=raw_path,
+                cwd_path=Path(context.execution_session.cwd_path),
+            )
             outside = resolve_outside_workspace_patch_target(
-                context=context,
-                candidate=_candidate_path(
-                    raw_path=raw_path,
-                    cwd_path=Path(context.execution_session.cwd_path),
-                ),
+                context=context, candidate=candidate
             )
             if outside is not None:
                 return outside
+            if is_private_storage(candidate.resolve(strict=False)):
+                raise private_app_storage_error(code=WRITE_PATH_DENIED) from exc
         raise _write_path_denied_error() from exc
     reject_private_action_plan_path(context=context, path=resolved.path)
-    _reject_unmanaged_memory_write(context=context, resolved=resolved)
+    # Manifest roots match the most specific root first, so a path in the
+    # Action's own storage roots resolves to them and gets their permissions.
+    if is_private_storage(resolved.path):
+        raise private_app_storage_error(code=WRITE_PATH_DENIED)
     return resolved
-
-
-def _reject_unmanaged_memory_write(
-    *,
-    context: BrokerContext,
-    resolved: ResolvedManifestPath,
-) -> None:
-    if not any(
-        root.source_type == "agent_experience" and root.can_apply_patch
-        for root in context.manifest_roots
-    ):
-        return
-    if resolved.root.source_type == "agent_experience":
-        return  # The dedicated writer verifies the configured tenant root.
-    private_users = (
-        read_local_runtime_artifact_root().resolve() / "memory_catalog/users"
-    )
-    if path_is_within(path=resolved.path, root=private_users):
-        raise _write_path_denied_error()
 
 
 def is_private_action_plan_path(
@@ -199,8 +194,9 @@ def resolve_exec_tool_cwd(
             f"tool {context.tool_definition.tool_id} is not a workspace exec tool",
             code=EXEC_CWD_DENIED,
         )
+    is_private_storage = private_app_storage_filter(context)
     try:
-        return resolve_process_cwd(
+        resolved = resolve_process_cwd(
             roots=context.manifest_roots,
             raw_cwd=raw_cwd,
             default_cwd=Path(context.execution_session.cwd_path),
@@ -219,16 +215,21 @@ def resolve_exec_tool_cwd(
         ) from exc
     except BrokerPolicyError as exc:
         if exc.code == WORKSPACE_PATH_OUTSIDE_ROOTS:
+            candidate = _candidate_path(
+                raw_path=raw_cwd or ".",
+                cwd_path=Path(context.execution_session.cwd_path),
+            )
             outside = resolve_outside_workspace_cwd(
-                context=context,
-                candidate=_candidate_path(
-                    raw_path=raw_cwd or ".",
-                    cwd_path=Path(context.execution_session.cwd_path),
-                ),
+                context=context, candidate=candidate
             )
             if outside is not None:
                 return outside
+            if is_private_storage(candidate.resolve(strict=False)):
+                raise private_app_storage_error(code=EXEC_CWD_DENIED) from exc
         raise _exec_cwd_denied_error() from exc
+    if is_private_storage(resolved.path):
+        raise private_app_storage_error(code=EXEC_CWD_DENIED)
+    return resolved
 
 
 def resolve_exec_sandbox_roots(
@@ -338,7 +339,10 @@ def _resolve_full_access_path(
                     path=resolved, root_path=root.canonical_real_path
                 ),
             )
-    root_path = resolved if resolved.is_dir() else resolved.parent
+    # Outside every registered folder no directory is trusted, so the reader
+    # walks the whole resolved path down from "/" without following a link: a
+    # directory on the way swapped for one after this check cannot redirect it.
+    root_path = Path(resolved.anchor)
     root = ManifestRoot(
         root_id=f"full_access:{root_path}",
         manifest_id="full_access",
@@ -378,16 +382,16 @@ def _resolve_missing_path_suggestions(
     _ensure_missing_path_is_in_read_scope(
         context=context, raw_path=str(resolved_parent)
     )
+    if private_app_storage_filter(context)(resolved_parent):
+        raise private_app_storage_error(code=READ_PATH_DENIED)
+    is_hidden = hidden_read_path_filter(context)
     visible_suggestions: list[str] = []
     for suggestion in _suggest_local_paths(parent=resolved_parent, raw_path=raw_path):
         try:
             resolved_suggestion = Path(suggestion).resolve(strict=False)
         except RuntimeError:
             continue
-        if not is_private_action_plan_path(
-            context=context,
-            path=resolved_suggestion,
-        ):
+        if not is_hidden(resolved_suggestion):
             visible_suggestions.append(suggestion)
     return tuple(visible_suggestions)
 
@@ -570,6 +574,7 @@ __all__ = [
     "SUGGESTION_SCAN_LIMIT",
     "WRITE_PATH_DENIED",
     "WRITE_PATH_NOT_FOUND",
+    "hidden_read_path_filter",
     "resolve_exec_sandbox_roots",
     "resolve_exec_tool_cwd",
     "resolve_read_tool_path",

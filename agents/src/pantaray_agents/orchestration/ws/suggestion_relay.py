@@ -2,9 +2,9 @@
 
 The Suggestion is triggered by the short Insight's `reconsideration_reason`
 inside the runtime worker, so the WebSocket is no longer the starting owner: it
-forwards what the runtime already owns. A Suggestion produced while no session
-was connected stays reachable through the Suggestion history API, so this relay
-carries no durable delivery guarantee of its own and keeps no ledger.
+forwards what the runtime already owns. A Suggestion that finishes while no
+session is connected is discarded by the job before it is stored, so this relay
+never owes a later session anything and keeps no ledger.
 """
 
 from __future__ import annotations
@@ -17,12 +17,19 @@ import sqlite3
 from pathlib import Path
 from typing import Final, NamedTuple
 
+from starlette.websockets import WebSocketState
+
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.orchestration.common.errors import error_from_payload
 from pantaray_agents.orchestration.ws.background_task import spawn_ws_background_task
+from pantaray_agents.orchestration.ws.deliverable_sessions import (
+    register_deliverable_session,
+    unregister_deliverable_session,
+)
 from pantaray_agents.orchestration.ws.error_meta import build_suggestion_error_meta
 from pantaray_agents.orchestration.ws.suggestion_stream.events import (
     SuggestionStreamEventsMixin,
@@ -38,7 +45,6 @@ from pantaray_agents.orchestration.ws.suggestion_stream.types import (
 )
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.utils.public_error import public_ws_error
-from pantaray_agents.utils.timestamps import utc_now_iso8601_utc_z
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +111,7 @@ class SuggestionRelayMixin(
         # Session-scoped: a process delivered once is never delivered again, and
         # a new session re-discovers whatever the runtime still has in flight.
         self._relayed_suggestion_processes: set[str] = set()
-        self._relay_since = utc_now_iso8601_utc_z()
+        self._relay_since = now_utc_iso()
 
     def _register_suggestion_process(
         self,
@@ -151,6 +157,13 @@ class SuggestionRelayMixin(
             ),
         )
 
+    def can_deliver(self) -> bool:
+        """Whether this session can still send; a failed send closes it for good."""
+        return (
+            not self._is_closed
+            and self.websocket.client_state == WebSocketState.CONNECTED
+        )
+
     def start_suggestion_relay(self) -> None:
         """Start forwarding runtime Suggestion processes for this session."""
         spawn_ws_background_task(
@@ -158,9 +171,13 @@ class SuggestionRelayMixin(
             task_key=SUGGESTION_RELAY_TASK_KEY,
             coro=self._suggestion_relay_loop(),
         )
+        # Only now: `_relay_since` is fixed, so whatever finishes from here on
+        # falls inside this session's relay window.
+        register_deliverable_session(str(self.user_id), self)
 
     def stop_suggestion_relay(self) -> None:
         """Stop the relay tick (called from the handler's close path)."""
+        unregister_deliverable_session(str(self.user_id), self)
         self._task_supervisor.cancel(SUGGESTION_RELAY_TASK_KEY)
 
     async def _suggestion_relay_loop(self) -> None:

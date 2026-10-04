@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from ..storage.migrations import MigrationError
+from .utc_timestamps import now_utc_iso
 
 LOCAL_RUNTIME_ALREADY_ACTIVE_ERROR = "LOCAL_RUNTIME_ALREADY_ACTIVE"
 RUNTIME_LOCK_FILE_SUFFIX = ".runtime.lock"
@@ -29,7 +29,7 @@ def acquire_runtime_process_lock(*, db_path: Path) -> RuntimeProcessLock:
         {
             "owner_pid": owner_pid,
             "lock_id": lock_id,
-            "acquired_at": _utc_now_iso(),
+            "acquired_at": now_utc_iso(),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -142,10 +142,6 @@ def _process_exists(pid: int) -> bool:
 
 def runtime_process_exists(pid: int) -> bool:
     return _process_exists(pid)
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 __all__ = [

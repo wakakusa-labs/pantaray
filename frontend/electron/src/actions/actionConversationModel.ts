@@ -89,10 +89,6 @@ export type ActionConversationView = Readonly<{
   action: ActionConversationPage['action'] | null;
   items: readonly (ActionConversationRunItem | ActionConversationUserItem)[];
   nextCursor: string | null;
-  output: Readonly<{
-    lines: readonly ActionConversationOutputLine[];
-    plaintext: string;
-  }>;
 }>;
 
 type RunAccumulator = {
@@ -316,27 +312,13 @@ export function projectActionConversationView(
   // ページ連鎖は「現在の run → 未採用のUSER → 過去の run」の順に、各スコープ内は新しい順で積まれる。
   // 未採用のUSERはどの run よりも後に送られたものなので、スコープごとに古い順へ反転したうえで
   // run 群 → 未採用のUSER → 送信中の順に並べる。
-  const projectedItems: (ActionConversationRunItem | ActionConversationUserItem)[] = [
-    ...runOrder.map(projectRun).reverse(),
-    ...pendingMessages.reverse(),
-    ...optimisticItems,
-  ];
-  const outputLines = projectedItems.flatMap((item) =>
-    item.kind === 'run'
-      ? item.lines.filter(
-          (line): line is ActionConversationOutputLine =>
-            line.kind === 'final_output' || line.kind === 'terminal_outcome'
-        )
-      : []
-  );
-
   return {
     action: chain?.[0].action ?? null,
-    items: projectedItems,
+    items: [
+      ...runOrder.map(projectRun).reverse(),
+      ...pendingMessages.reverse(),
+      ...optimisticItems,
+    ],
     nextCursor: chain?.[chain.length - 1].next_cursor ?? null,
-    output: {
-      lines: outputLines,
-      plaintext: outputLines.map((line) => line.text).join('\n\n'),
-    },
   };
 }

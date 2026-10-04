@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
@@ -16,6 +15,7 @@ from pantaray_agents.agents.action_agent.runtime.steps.tool import (
     TerminalStepEmission,
     record_tool_step,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
 from ...tool_runtime.formal_step import finalize_error_step, finalize_synthetic_step
@@ -120,7 +120,7 @@ async def handle_malformed_next_action(
                     state,
                     tool_id=raw_tool_id,
                     tool_def=raw_tool_def,
-                    started_at=datetime.now(UTC).isoformat(),
+                    started_at=now_utc_iso(),
                 )
     return await handle_invalid_tool_call(
         agent,
@@ -149,8 +149,8 @@ async def handle_invalid_tool_call(
 ) -> ActionAgentState:
     context = _ensure_context(state)
     streak = _increment_tool_validation_error_streak(context)
-    started_at = datetime.now(UTC).isoformat()
-    completed_at = datetime.now(UTC).isoformat()
+    started_at = now_utc_iso()
+    completed_at = now_utc_iso()
     error_step_id = str(uuid.uuid4())
 
     validation_path: list[JSONValue] = ["next_action", "tool", "tool_id"]
@@ -268,7 +268,7 @@ async def handle_invalid_tool_args_shape(
     )
     context = _ensure_context(state)
     streak = _increment_tool_validation_error_streak(context)
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     error_step_id = str(uuid.uuid4())
     error_payload = common._build_tool_error_payload(
         malformed_args,
@@ -380,7 +380,7 @@ async def handle_tool_validation_error(
 
     context = _ensure_context(state)
     streak = _increment_tool_validation_error_streak(context)
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     error_step_id = step_id
     error_payload = common._build_tool_error_payload(
         exc,

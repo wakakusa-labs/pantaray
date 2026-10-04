@@ -31,7 +31,9 @@ def bootstrap_path_policy_runtime_db(
     allowed_tool_ids: tuple[str, ...],
     read_access_scope: str = READ_ACCESS_SCOPE_WORKSPACE,
 ) -> tuple[Path, object]:
-    db_path = tmp_path / "runtime.db"
+    # App storage lives apart from the files a test reads as the user's own.
+    db_path = tmp_path / "app-data" / "runtime.db"
+    db_path.parent.mkdir()
     prepare_test_database(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -72,6 +74,7 @@ def build_path_policy_context(
         manifest_roots=manifest_roots
         or (build_manifest_root(path=cwd_path, name=cwd_path.name),),
         read_access_scope=READ_ACCESS_SCOPE_WORKSPACE,
+        db_path=cwd_path.resolve().parent / "app-data" / "runtime.db",
     )
 
 

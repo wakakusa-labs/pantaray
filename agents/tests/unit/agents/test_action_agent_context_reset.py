@@ -46,7 +46,7 @@ from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResu
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
-_FORMATTER = ActionAgentFormatter(tool_registry={})
+_FORMATTER = ActionAgentFormatter()
 _PROMPT_TEMPLATE = "{action_history}"
 
 
@@ -280,7 +280,6 @@ async def _build_fixture(
         token_budget=None,
     )
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["history_by_scope"]["S"] = cast(Any, _turns(prior_turns))
     state["context"]["local_step_counters"] = {"S": prior_turns}
     state = project_request_user_step(state, request)
@@ -348,11 +347,13 @@ async def test_reaching_85_percent_rebuilds_at_the_next_think_boundary(
     agent, runtime, state = await _build_fixture(
         monkeypatch, tmp_path, action_id="act-reset-85"
     )
-    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 30_000)
+    # The real tool definitions (about 55 KB) are part of the fixed input, so the
+    # window leaves room for them plus one body inside the 50% target.
+    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 40_000)
     for entry in state["history_by_scope"]["S"]:
         if entry["step_type"] == StepType.TOOL_EXECUTION:
             entry["output"] = f"body {entry['step_number']} " + "x" * 16_000
-    _install_think(agent, prompt_tokens=25_800)
+    _install_think(agent, prompt_tokens=34_400)
 
     state = await execution_think_step(
         agent, state, runtime, sink=create_state_token_sink(state)
@@ -377,7 +378,7 @@ async def test_reaching_85_percent_rebuilds_at_the_next_think_boundary(
         assert f"- Note: note {index}" in rebuilt_prompt
         assert f"- History Ref: S-{index}-TOOL (use history_fetch)" in rebuilt_prompt
         assert (f'"body {index} ' in rebuilt_prompt) is (index == 4)
-    assert state["context"]["context_input_baseline"]["rendered_bytes"] <= 15_000 * 4
+    assert state["context"]["context_input_baseline"]["rendered_bytes"] <= 20_000 * 4
     assert state["context"]["context_reset_pending"] is False
     assert _think_entries(state)[-1]["result_line"] == (
         context_budget.CONTEXT_RESET_RESULT_LINE
@@ -639,7 +640,6 @@ def test_complete_input_is_counted_and_protected_parts_can_exceed_target(
     )
     prepared = turn_input.ExecutingTurn(
         head=memory,
-        tail="",
         system_instruction=system,
         tool_bytes=sum(len(tool.model_dump_json().encode("utf-8")) for tool in tools),
         scope_handles=("S",),
@@ -683,10 +683,7 @@ async def test_oversized_protected_input_stops_before_any_provider_call(
     )
     monkeypatch.setattr(context_budget, "_window_tokens", lambda: 30_000)
     # User instructions are a real protected input and cannot be discarded.
-    state["context"]["user_request"] = "x" * 120_000
-    state["history_by_scope"]["S"][-1]["user_request_text"] = state["context"][
-        "user_request"
-    ]
+    state["history_by_scope"]["S"][-1]["user_request_text"] = "x" * 120_000
     _install_think(agent, prompt_tokens=1_000)
     await execution_think_step(
         agent, state, runtime, sink=create_state_token_sink(state)
@@ -695,7 +692,7 @@ async def test_oversized_protected_input_stops_before_any_provider_call(
     assert state["status"] == "error"
     assert state["next_action"] is None
     assert state["errors"][-1]["error_code"] == "ACTION_CONTEXT_CAPACITY_EXCEEDED"
-    assert len(state["context"]["user_request"]) == 120_000
+    assert len(state["history_by_scope"]["S"][-1]["user_request_text"]) == 120_000
 
 
 @pytest.mark.parametrize("blocked", [False, True])
@@ -708,7 +705,8 @@ async def test_repair_attempt_uses_latest_usage_and_records_the_sent_prompt(
     agent, runtime, state = await _build_fixture(
         monkeypatch, tmp_path, action_id="act-repair-window"
     )
-    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 30_000)
+    # Sized like the 85% test: the real tool definitions are part of the input.
+    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 40_000)
     for entry in state["history_by_scope"]["S"]:
         if entry["step_type"] == StepType.TOOL_EXECUTION:
             entry["output"] = f"body {entry['step_number']} " + "x" * 16_000
@@ -718,7 +716,7 @@ async def test_repair_attempt_uses_latest_usage_and_records_the_sent_prompt(
         prompts.append(prompt)
         sink.record(
             LlmUsage(
-                prompt_tokens=(40_000 if blocked else 25_800)
+                prompt_tokens=(53_400 if blocked else 34_400)
                 if len(prompts) == 1
                 else 14_000,
                 completion_tokens=32,

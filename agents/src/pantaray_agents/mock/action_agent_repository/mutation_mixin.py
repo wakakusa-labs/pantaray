@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -13,6 +12,7 @@ from pantaray_agents.action_status import (
     ActionRuntimeStatus,
     ActionTerminalStatus,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.budget_validation import (
     validate_optional_positive_int,
 )
@@ -97,8 +97,8 @@ class MockActionAgentMutationMixin:
                     "prompt_version": prompt_version,
                     "status": status,
                     "error": None,
-                    "created_at": created_at or datetime.now(UTC).isoformat(),
-                    "updated_at": updated_at or datetime.now(UTC).isoformat(),
+                    "created_at": created_at or now_utc_iso(),
+                    "updated_at": updated_at or now_utc_iso(),
                     "steps_budget": steps_budget,
                     "llm_steps_budget": llm_steps_budget,
                     "tool_steps_budget": tool_steps_budget,
@@ -260,7 +260,7 @@ class MockActionAgentMutationMixin:
             "completed_at": completed_at,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": now_utc_iso(),
         }
 
         try:
@@ -321,7 +321,7 @@ class MockActionAgentMutationMixin:
 
         updated = dict(row)
         updated["status"] = status
-        updated["updated_at"] = datetime.now(UTC).isoformat()
+        updated["updated_at"] = now_utc_iso()
         await self.save_data("actions", updated)
         return RepositoryResult(data=True)
 
@@ -348,6 +348,6 @@ class MockActionAgentMutationMixin:
             return RepositoryResult(data=False)
         updated = dict(row)
         updated["action_status"] = status
-        updated["updated_at"] = datetime.now(UTC).isoformat()
+        updated["updated_at"] = now_utc_iso()
         await self.save_data("suggestions", updated)
         return RepositoryResult(data=True)

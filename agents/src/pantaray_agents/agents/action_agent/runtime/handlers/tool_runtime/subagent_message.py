@@ -12,13 +12,13 @@ from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
     send_action_subagent_message,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 
 
@@ -45,7 +45,7 @@ async def run_send_message_to_subagent_tool(
     ):
         raise RuntimeError("active Action job trace is required for subagent messages")
 
-    accepted_at = now_iso()
+    accepted_at = now_utc_iso()
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     try:
         child_process_id = require_string_arg(args, "child_process_id")
@@ -70,6 +70,6 @@ async def run_send_message_to_subagent_tool(
         tool_id=tool_def.tool_id,
         status="success",
         started_at=accepted_at,
-        completed_at=now_iso(),
+        completed_at=now_utc_iso(),
         output=True,
     )

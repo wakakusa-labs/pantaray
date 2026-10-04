@@ -93,7 +93,7 @@ def _foreign_child(db_path: Path) -> str:
             INSERT INTO jobs(job_id,user_id,job_type,process_id,status,attempt,claimed_by,claimed_at,heartbeat_at,scheduled_at,started_at,logical_key) VALUES ('foreign-parent-job','user-1','execute_action','foreign-parent','running',1,'worker','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','action-2');
             INSERT INTO processes(process_id,user_id,kind,status,action_id,started_at,updated_at,heartbeat_at,next_event_seq,parent_process_id) VALUES ('foreign-child','user-1','action_subagent','enqueued','action-2','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z',1,'foreign-parent');
             INSERT INTO jobs(job_id,user_id,job_type,process_id,status,attempt,heartbeat_at,scheduled_at,logical_key) VALUES ('foreign-child-job','user-1','execute_action_subagent','foreign-child','queued',0,'2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','foreign-child-job');
-            INSERT INTO job_payloads(job_id,payload_json) VALUES ('foreign-child-job','{"action_id":"action-2","context_refs":[],"inference_profile_id":"action.subagent.luna","job_id":"foreign-child-job","parent_process_id":"foreign-parent","process_id":"foreign-child","resource_claim_ids":[],"task":"private","user_id":"user-1"}');
+            INSERT INTO job_payloads(job_id,payload_json) VALUES ('foreign-child-job','{"action_context":"parent context","action_id":"action-2","context_refs":[],"inference_profile_id":"action.subagent.luna","job_id":"foreign-child-job","parent_process_id":"foreign-parent","process_id":"foreign-child","resource_claim_ids":[],"task":"private","user_id":"user-1"}');
             """
         )
     return "foreign-child"

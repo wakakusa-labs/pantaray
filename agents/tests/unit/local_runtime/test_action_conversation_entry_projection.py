@@ -26,6 +26,7 @@ from pantaray_agents.schema.action_conversation import ActionStepStatus
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionUserMessageInput,
+    FileAttachmentInput,
     SuggestionApprovalInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -137,6 +138,30 @@ def test_project_refs_follow_the_text_the_entry_shows(
     assert entry.model_dump(mode="json")["project_refs"] == [
         {"display_name": "Demo App", "start": 6, "end": 14}
     ]
+
+
+def test_attached_files_show_by_name_and_size_without_the_model_note() -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Summarize this",
+        files=(
+            FileAttachmentInput(
+                attachment_id="0f8fad5b-d9cb-469f-a165-70867728950e",
+                name="report.pdf",
+                byte_size=2_048,
+            ),
+        ),
+    )
+    row = replace(
+        _modern_user_row(),
+        user_message_json=serialize_action_user_message(message),
+        user_request_text=render_action_user_request_text(message),
+    )
+
+    entry = project_action_user_entry(row).model_dump(mode="json")
+
+    assert entry["content"] == "Summarize this"
+    assert entry["files"] == [{"name": "report.pdf", "byte_size": 2_048}]
 
 
 def test_ordinary_user_text_is_not_interpreted_as_proposal_metadata() -> None:
@@ -507,6 +532,49 @@ def test_projects_what_the_tool_actually_did(
     )
 
     assert (entry.status, entry.outcome) == ("success", expected)
+
+
+_RENDERER_PREPARING_BODY = {
+    "kind": "renderer_preparing",
+    "path": "slides.pptx",
+    "message": "Continue with read and try again later.",
+}
+
+
+@pytest.mark.parametrize(
+    ("status", "output", "expected"),
+    [
+        pytest.param("success", _RENDERER_PREPARING_BODY, "preparing", id="preparing"),
+        pytest.param(
+            "error",
+            _RENDERER_PREPARING_BODY,
+            "completed",
+            id="failed-step-is-not-preparing",
+        ),
+        pytest.param(
+            "success",
+            {**_RENDERER_PREPARING_BODY, "kind": "pdf_pages"},
+            "completed",
+            id="drawn-pages",
+        ),
+    ],
+)
+def test_projects_a_page_render_waiting_for_its_renderer(
+    status: ActionStepStatus, output: object, expected: str
+) -> None:
+    entry = project_action_tool_entry(
+        ActionHistoryToolRow(
+            "step-1",
+            1,
+            "render_pdf_page",
+            status,
+            _tool_output(status=status, output=output),
+            '{"tool_id":"render_pdf_page","args":{"path":"slides.pptx","pages":[1]}}',
+            "run-1",
+        )
+    )
+
+    assert (entry.outcome, entry.subject) == (expected, "slides.pptx")
 
 
 def test_projects_a_denied_approval_the_gated_tool_actually_persists() -> None:

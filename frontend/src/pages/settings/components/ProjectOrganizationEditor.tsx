@@ -22,7 +22,9 @@ interface ProjectOrganizationEditorProps {
   project: WorkspaceProject;
   t: Translate;
   onCreateOrganization: (displayName: string) => Promise<string | null>;
+  onDeleteOrganization: (organizationId: string, focus: FocusRequest) => Promise<void>;
   onUpdate: (projectId: string, organizationIds: string[], focus: FocusRequest) => Promise<boolean>;
+  isOrganizationDeleteBusy: (organizationId: string) => boolean;
 }
 
 export function ProjectOrganizationEditor(props: ProjectOrganizationEditorProps) {
@@ -142,7 +144,9 @@ export function ProjectOrganizationEditor(props: ProjectOrganizationEditorProps)
             organizations={props.organizations}
             t={props.t}
             onCreate={createOrganization}
+            onDelete={props.onDeleteOrganization}
             onSelect={(organizationId) => void selectOrganization(organizationId)}
+            isDeleteBusy={props.isOrganizationDeleteBusy}
           />
         </div>
       ) : null}
@@ -155,7 +159,9 @@ interface OrganizationPickerProps {
   organizations: WorkspaceOrganization[];
   t: Translate;
   onCreate: (displayName: string) => Promise<void>;
+  onDelete: (organizationId: string, focus: FocusRequest) => Promise<void>;
   onSelect: (organizationId: string) => void;
+  isDeleteBusy: (organizationId: string) => boolean;
 }
 
 // Mounted only while the popover is open, so an abandoned draft is discarded with it.
@@ -181,12 +187,16 @@ function OrganizationPicker(props: OrganizationPickerProps) {
         <OrganizationSelect
           organizations={props.organizations}
           selectedOrganizationId={null}
+          emptyFocusKey={workspaceFocusId.organizationCreateOption}
           t={props.t}
           onSelect={props.onSelect}
+          onDelete={props.onDelete}
+          isDeleteBusy={props.isDeleteBusy}
         />
         <button
           ref={createOptionRef}
           type="button"
+          id={workspaceFocusId.organizationCreateOption}
           className="workspace-organization-create-option"
           onClick={startCreating}
         >

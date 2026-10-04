@@ -192,8 +192,6 @@ class ActionRepositoryPort(Protocol):
         *,
         action_id: str,
         suggestion_id: str | None,
-        short_term_since_iso: str,
-        short_term_limit: int,
     ) -> RepositoryResult[InitialMemoryContext]: ...
 
     async def get_memory_source_coverage_snapshot(
@@ -260,7 +258,7 @@ class SuggestionRepositoryPort(Protocol):
         metadata: dict[str, object] | None = None,
     ) -> RepositoryResult[DBRow]: ...
 
-    async def cancel_suggestion_if_processing(
+    async def discard_suggestion_if_processing(
         self,
         *,
         user_id: str,

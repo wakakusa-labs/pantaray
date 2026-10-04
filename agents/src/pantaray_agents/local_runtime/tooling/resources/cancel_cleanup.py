@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .cancel_cleanup_persistence import (
     CleanupPersistenceError,
@@ -53,10 +54,6 @@ class ActionCleanupPassResult:
             f"failed to clean up {self.failure_count} post-terminal action resources "
             f"(kinds: {kinds}; {count_summary}{abandoned_suffix})"
         )
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 async def cancel_action_runtime_resources(
@@ -111,7 +108,7 @@ def cleanup_action_runtime_resources(
             failed_resource_kinds.append(resource.resource_kind)
             abandoned_count += 1
             continue
-        timestamp = _utc_now_iso()
+        timestamp = now_utc_iso()
         execution_failed = False
         persistence_failed = False
         cleanup_error: str | None = None

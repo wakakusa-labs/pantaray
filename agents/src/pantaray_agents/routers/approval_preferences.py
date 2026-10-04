@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.brokering.approval_identity import (
     build_approval_preference_id,
@@ -29,10 +29,6 @@ _APPROVAL_MODE_PROMPT_EACH_TIME = "prompt_each_time"
 _APPROVAL_MODE_ALWAYS_ALLOW = "always_allow"
 _GLOBAL_SCOPE_TYPE = "global"
 _GLOBAL_REQUIRED_CAPABILITIES = ("scoped_write", "process_exec_local")
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 class ApprovalPreferenceResponse(BaseModel):
@@ -96,7 +92,7 @@ async def update_workspace_edit_and_command_approval_preference(
         )
 
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    updated_at = _utc_now_iso()
+    updated_at = now_utc_iso()
     preference = ApprovalPreferenceUpsertInput(
         preference_id=build_approval_preference_id(
             user_id=user_id,

@@ -151,6 +151,11 @@ def test_commands_are_offered_only_while_they_run_without_asking(
         for tool_id in SUGGESTION_TOOL_IDS
         if offered or tool_id != SUGGESTION_COMMAND_TOOL_ID
     )
+    for definition in definitions:
+        if definition.name == SUGGESTION_COMMAND_TOOL_ID:
+            # Only an Action's bash can ask to run outside the sandbox.
+            assert definition.request_schema["additionalProperties"] is False
+            assert "run_outside_sandbox" not in definition.request_schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -175,7 +180,7 @@ def _capture_request(
 ) -> list[BrokerToSandboxCommandRequest]:
     requests: list[BrokerToSandboxCommandRequest] = []
 
-    async def fake_run(*, build_request):  # type: ignore[no-untyped-def]
+    async def fake_run(*, db_path, build_request):  # type: ignore[no-untyped-def]
         requests.append(build_request(temp_dir))
         return ("exited", output)
 
@@ -207,6 +212,7 @@ async def test_a_command_gets_no_writable_folder_and_the_network_setting(
     await _session(allowed_db, tmp_path).run(_command("git log -1"), 1)
 
     (request,) = requests
+    assert request.run_outside_sandbox is False
     assert request.real_write_roots == []
     assert request.action_storage is None
     assert request.cwd == str(temp_dir)
@@ -218,23 +224,26 @@ async def test_a_command_gets_no_writable_folder_and_the_network_setting(
         assert len(re.findall(rf"\(deny file-{operation}\*\s*\)", profile)) == 1
     write_allow = profile.split("(allow file-write*", 1)[1].split(")\n", 1)[0]
     assert write_allow.strip() == '(literal "/dev/null"'
-    # The database's folder stays unreadable even though "/" is not requested.
+    # The database's folder stays unreadable even though "/" is not requested;
+    # only the command's own temp dir inside it is excepted.
     assert (
-        f'(deny file-read* (require-any\n    (subpath "{allowed_db.parent.resolve()}")'
-        in profile
-    )
+        "(deny file-read* (require-all (require-any\n"
+        f'    (subpath "{allowed_db.parent.resolve()}")'
+    ) in profile
+    assert f'(require-not (require-any\n    (subpath "{temp_dir}")\n))))' in profile
 
 
 @pytest.mark.parametrize(
     ("login", "scope", "whole_disk"),
     [
         (True, "full_access", True),
-        (False, "full_access", False),
+        (False, "full_access", True),
         (True, "workspace", False),
+        (False, "workspace", False),
     ],
 )
 @pytest.mark.asyncio
-async def test_only_a_login_command_extends_full_read_access_to_the_disk(
+async def test_command_reads_follow_the_read_access_setting(
     allowed_db: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,6 +281,7 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
     allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     limit = ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    stderr = "e" * limit + "fatal: the error at the end"
     _capture_request(
         monkeypatch,
         tmp_path / "temp",
@@ -279,8 +289,8 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
             status="error",
             exit_code=1,
             stdout="o" * (limit * 2),
-            stderr="e" * limit,
-            error=ToolError(type="CommandExecutionError", message="e" * limit),
+            stderr=stderr,
+            error=ToolError(type="CommandExecutionError", message=stderr),
         ),
     )
 
@@ -291,13 +301,23 @@ async def test_long_output_is_cut_to_what_an_action_keeps_inline(
     assert result.output["exit_code"] == 1
     assert result.output["truncated"] is True
     assert len(result.output["stdout"]) + len(result.output["stderr"]) == limit
+    # The error is printed last, so stderr keeps its end.
+    assert result.output["stderr"].endswith("fatal: the error at the end")
+    shown_stdout = len(result.output["stdout"])
+    shown_stderr = len(result.output["stderr"])
+    assert result.output["notes"] == [
+        f"stdout was cut: showing the first {shown_stdout:,} of {limit * 2:,} "
+        "characters. Narrow it with grep, head, tail or sed -n to read the rest.",
+        f"stderr was cut: showing the last {shown_stderr:,} of {len(stderr):,} "
+        "characters.",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_a_command_that_did_not_finish_is_a_bounded_error(
     allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def timed_out(*, build_request):  # type: ignore[no-untyped-def]
+    async def timed_out(*, db_path, build_request):  # type: ignore[no-untyped-def]
         return (
             "timed_out",
             BashToolOutput(

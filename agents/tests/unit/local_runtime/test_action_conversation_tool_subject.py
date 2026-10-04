@@ -54,6 +54,11 @@ def _args(tool_id: str, **args: JSONValue) -> str:
             id="apply-patch-names-every-touched-file",
         ),
         pytest.param(
+            "capture_screen",
+            _args("capture_screen", app_name="Google Chrome"),
+            "Google Chrome",
+        ),
+        pytest.param(
             "web_search",
             _args(
                 "web_search", query="Japanese information retrieval", topic="general"
@@ -121,7 +126,6 @@ def test_projects_the_one_salient_argument(
 @pytest.mark.parametrize(
     ("tool_id", "tool_args"),
     [
-        pytest.param("capture_screen", _args("capture_screen"), id="whole-screen"),
         pytest.param("zanei_timeline", _args("zanei_timeline"), id="no-arguments"),
         pytest.param(
             "draft_final_answer",

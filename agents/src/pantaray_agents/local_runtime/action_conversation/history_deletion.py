@@ -78,7 +78,9 @@ WHERE user_id = :user_id AND (
       AND source_record_id IN (SELECT value FROM json_each(:suggestion_ids)))
   OR (source_type = 'action_file_read' AND source_record_id IN (
       SELECT invocation_id FROM tool_invocations
-      WHERE user_id = :user_id AND action_id = :action_id)))
+      WHERE user_id = :user_id AND action_id = :action_id))
+  OR (source_type = 'memory_note'
+      AND substr(source_record_id, 1, length(:action_id) + 1) = :action_id || ':'))
 """
 _COPY_REVISIONS = f"""
 SELECT revision_id FROM memory_revisions

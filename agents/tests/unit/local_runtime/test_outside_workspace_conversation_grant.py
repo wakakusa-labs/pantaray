@@ -27,6 +27,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
+from pantaray_agents.local_runtime.tooling.brokering.command_approval_summaries import (
+    build_bash_summary,
+)
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
     OutsideWorkspaceGrantError,
@@ -330,6 +333,49 @@ async def test_grant_survives_a_new_run_and_gives_way_to_registration(
 
 
 @pytest.mark.asyncio
+async def test_conversation_grant_opens_every_folder_of_the_approval(
+    tmp_path: Path,
+    outside: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    launched: list[ValidatedCommandRequest],
+) -> None:
+    db_path, context = _setup(tmp_path, "always_allow")
+    second = tmp_path_factory.mktemp("second-outside-folder").resolve()
+    asked = await _ask(db_path, context, "bash", "req-1", _bash_args(outside))
+    two_folders = build_bash_summary(
+        command="touch made.txt",
+        cwd_relative_path=str(outside),
+        timeout_ms=1_000,
+        use_login_environment=False,
+        run_outside_sandbox=False,
+        reason=None,
+        outside_workspace_folders=(outside, second),
+    )
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            "UPDATE approval_sessions SET command_summary_json = ? "
+            "WHERE approval_session_id = ?",
+            (json.dumps(two_folders), asked.approval_session_id),
+        )
+
+    _allow_for_conversation(db_path, asked, "req-1")
+
+    assert sorted(_approved_roots(db_path)) == sorted(
+        [(context.manifest_id, str(outside)), (context.manifest_id, str(second))]
+    )
+    await _call(
+        db_path=db_path,
+        context=context,
+        tool_id="bash",
+        request_id="req-2",
+        args=_bash_args(second),
+    )
+    [command] = launched
+    assert str(second) in command.real_write_roots
+    assert "outside_workspace" not in _summary(db_path, "req-2")
+
+
+@pytest.mark.asyncio
 async def test_other_action_still_asks(tmp_path: Path, outside: Path) -> None:
     db_path, context = _setup(tmp_path, "always_allow")
     asked = await _ask(db_path, context, "bash", "req-1", _bash_args(outside))
@@ -392,6 +438,21 @@ async def test_only_a_grantable_outside_folder_can_be_granted(
     assert _approved_roots(db_path) == []
 
 
+def _root(source_type: str, path: Path) -> ManifestRoot:
+    return ManifestRoot(
+        root_id=f"root:{source_type}:{path}",
+        manifest_id="manifest:action-1",
+        source_type=source_type,
+        display_name=path.name,
+        canonical_real_path=path,
+        real_path=path,
+        can_read=True,
+        can_apply_patch=True,
+        can_process_read=True,
+        can_process_write=True,
+    )
+
+
 def test_registered_folder_root_still_covers_an_approved_outside_call(
     tmp_path: Path,
 ) -> None:
@@ -405,8 +466,7 @@ def test_registered_folder_root_still_covers_an_approved_outside_call(
         "summary_kind": "apply_patch",
         "target_paths": [str(folder / "q3.md")],
         "outside_workspace": {
-            "folder_path": str(folder),
-            "folder_display_name": "Reports",
+            "folders": [{"path": str(folder), "display_name": "Reports"}],
             "can_allow_for_conversation": True,
         },
     }
@@ -415,27 +475,55 @@ def test_registered_folder_root_still_covers_an_approved_outside_call(
         "target_paths": [str(folder / "q3.md")],
     }
 
-    def root(source_type: str, path: Path) -> ManifestRoot:
-        return ManifestRoot(
-            root_id=f"root:{source_type}:{path}",
-            manifest_id="manifest:action-1",
-            source_type=source_type,
-            display_name=path.name,
-            canonical_real_path=path,
-            real_path=path,
-            can_read=True,
-            can_apply_patch=True,
-            can_process_read=True,
-            can_process_write=True,
-        )
-
     assert approved_summary_covers_request(
         approved=approved,
         requested=requested,
-        manifest_roots=(root("folder", folder),),
+        manifest_roots=(_root("folder", folder),),
     )
     assert not approved_summary_covers_request(
         approved=approved,
         requested=requested,
-        manifest_roots=(root("folder", tmp_path / "Other"),),
+        manifest_roots=(_root("folder", tmp_path / "Other"),),
+    )
+
+
+def test_an_approval_of_several_folders_covers_a_call_only_once_each_is_open(
+    tmp_path: Path,
+) -> None:
+    first, second, other = tmp_path / "first", tmp_path / "second", tmp_path / "other"
+
+    def summary(*folders: Path) -> dict[str, JSONValue]:
+        return build_bash_summary(
+            command="touch made.txt",
+            cwd_relative_path=str(first),
+            timeout_ms=1_000,
+            use_login_environment=False,
+            run_outside_sandbox=False,
+            reason=None,
+            outside_workspace_folders=folders,
+        )
+
+    approved = summary(first, second)
+    both_open = (_root("approved_folder", first), _root("approved_folder", second))
+
+    assert approved_summary_covers_request(
+        approved=approved, requested=summary(), manifest_roots=both_open
+    )
+    # One approved folder is still outside and was never opened.
+    assert not approved_summary_covers_request(
+        approved=approved,
+        requested=summary(),
+        manifest_roots=(_root("approved_folder", first),),
+    )
+    # A folder registered meanwhile covers its part; the other is still asked.
+    assert approved_summary_covers_request(
+        approved=approved,
+        requested=summary(second),
+        manifest_roots=(_root("folder", first),),
+    )
+    # The call may not reach a folder the user never saw.
+    assert not approved_summary_covers_request(
+        approved=approved,
+        requested=summary(second, other),
+        manifest_roots=(_root("folder", first),),
     )

@@ -21,7 +21,6 @@ from .broker_tool_input_schema import (
 APPLY_PATCH_TOOL_FIELD_PRESENTATION = (
     BrokerToolFieldPresentation(
         name="changes",
-        prompt_type="array",
         description=(
             "Exactly one structured workspace file operation.\n"
             "- add: {op, path, new_lines, trailing_newline}.\n"
@@ -32,7 +31,6 @@ APPLY_PATCH_TOOL_FIELD_PRESENTATION = (
             "- path may be absolute or relative to the current workspace cwd; the resolved target must be writable.\n"
             "- Do not use patch DSL or unified diff text."
         ),
-        llm_order=10,
     ),
 )
 

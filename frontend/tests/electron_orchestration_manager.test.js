@@ -65,7 +65,6 @@ function createManagerHarness(overrides = {}) {
       setOverlaySnapshot: (id, payload) => {
         overlayPayloads.set(String(id), payload);
       },
-      getNotificationWindow: () => null,
       sendToAllOverlays: (channel, payload) => overlayWindowMessages.push({ channel, payload }),
       sendResetToAllOverlays: (channel, payload) =>
         overlayWindowMessages.push({ channel, payload }),
@@ -75,7 +74,7 @@ function createManagerHarness(overrides = {}) {
         overrides.onSendToOverlay?.(id, channel);
       },
       registerProcessAssociation: () => {},
-      registerActionAssociation: () => {},
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: (id) => overrides.onCleanupProcess?.(id),
       cleanupMappingsForAction: (id) => overrides.onCleanupAction?.(id),
       clearActionAssociations: () => overrides.onClearActionAssociations?.(),
@@ -275,12 +274,11 @@ test('OrchestrationManager: runtimeBackendUrl が無い場合は暗黙フォー�
     notificationWindow: {
       setActionLiveSnapshotGetter: () => {},
       setOverlaySnapshot: () => {},
-      getNotificationWindow: () => null,
       sendToAllOverlays: () => {},
       dispatchEventToOverlay: () => false,
       sendToOverlay: () => {},
       registerProcessAssociation: () => {},
-      registerActionAssociation: () => {},
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
       cleanupMappingsForAction: () => {},
       resolveOverlayId: () => null,
@@ -314,12 +312,11 @@ test('OrchestrationManager: runtime が ready でない場合は接続せず既�
     notificationWindow: {
       setActionLiveSnapshotGetter: () => {},
       setOverlaySnapshot: () => {},
-      getNotificationWindow: () => null,
       sendToAllOverlays: () => {},
       dispatchEventToOverlay: () => false,
       sendToOverlay: () => {},
       registerProcessAssociation: () => {},
-      registerActionAssociation: () => {},
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
       cleanupMappingsForAction: () => {},
       resolveOverlayId: () => null,
@@ -358,12 +355,11 @@ test('OrchestrationManager: Action conversation reader未注入ではfail-fast�
         notificationWindow: {
           setActionLiveSnapshotGetter: () => {},
           setOverlaySnapshot: () => {},
-          getNotificationWindow: () => null,
           sendToAllOverlays: () => {},
           dispatchEventToOverlay: () => false,
           sendToOverlay: () => {},
           registerProcessAssociation: () => {},
-          registerActionAssociation: () => {},
+          adoptActionAssociation: () => {},
           cleanupMappingsForProcess: () => {},
           cleanupMappingsForAction: () => {},
           resolveOverlayId: () => null,
@@ -394,12 +390,11 @@ test('OrchestrationManager: acceptAction は send 例外時にも snapshot を�
       setOverlaySnapshot: (id, payload) => {
         overlayPayloads.set(String(id), payload);
       },
-      getNotificationWindow: () => null,
       sendToAllOverlays: () => {},
       dispatchEventToOverlay: () => false,
       sendToOverlay: () => {},
       registerProcessAssociation: () => {},
-      registerActionAssociation: () => {},
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
       cleanupMappingsForAction: () => {},
       resolveOverlayId: () => null,
@@ -463,7 +458,8 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
   const harness = createManagerHarness({ getUiLanguage: () => language });
 
   const images = [{ kind: 'image', storage_path: 'user-1/2026-09-11/11111111-1111-4111-8111-111111111111.png' }];
-  const snapshot = await harness.manager.acceptAction({ ...actionRequest('Keep this condition'), approvalMode: 'always_allow', images });
+  const files = [{ attachment_id: '22222222-2222-4222-8222-222222222222', name: 'plan.pdf', byte_size: 42 }];
+  const snapshot = await harness.manager.acceptAction({ ...actionRequest('Keep this condition'), approvalMode: 'always_allow', images, files });
   assert.ok(snapshot);
   const executeEnvelope = {
     event: 'execute_action',
@@ -475,6 +471,7 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
       supplement_project_refs: [],
       approval_mode: 'always_allow',
       images,
+      files,
     },
   };
   assert.deepEqual(harness.sentMessages, [executeEnvelope]);

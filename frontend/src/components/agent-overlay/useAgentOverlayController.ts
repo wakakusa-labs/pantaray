@@ -2,47 +2,18 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { MIN_HEIGHT, getMaxHeight } from './Styled';
 import type { AgentOverlayState, OverlaySnapshotPayload } from './model/overlayTypes';
 import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model/reducer';
-import { useI18n } from '@/context/useI18n';
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
 
-type ShareToastKind = 'success' | 'warning' | 'error';
-
-export type ShareToastState = {
-  kind: ShareToastKind;
-  message: string;
-};
-
-type ShareCaptureResult = {
-  ok: boolean;
-  clipboardOk: boolean;
-  downloadOk: boolean;
-};
-
-const COPY_STATUS_RESET_DELAY_MS = 1500;
-const SHARE_TOAST_RESET_DELAY_MS = 1700;
 const RESIZE_EXPAND_THRESHOLD_PX = 4;
 const ACTION_RESIZE_BUFFER_PX = 32;
 const SUGGESTION_RESIZE_BUFFER_PX = 18;
 const REQUEST_STATE_IDLE: AgentOverlayState['requestState'] = 'idle';
 const REQUEST_STATE_REQUESTING: AgentOverlayState['requestState'] = 'requesting';
 
-function isShareCaptureResult(value: unknown): value is ShareCaptureResult {
-  return (
-    isRecord(value) &&
-    typeof value.ok === 'boolean' &&
-    typeof value.clipboardOk === 'boolean' &&
-    typeof value.downloadOk === 'boolean'
-  );
-}
-
 export type AgentOverlayController = {
   state: AgentOverlayState;
-  copyStatusAnswer: boolean;
-  isContentVisible: boolean;
-  isSharing: boolean;
-  shareToast: ShareToastState | null;
   // refs
   headerRef: React.RefObject<HTMLDivElement>;
   scrollableContentRef: React.RefObject<HTMLDivElement>;
@@ -58,15 +29,6 @@ export type AgentOverlayController = {
   acceptFailed: boolean;
   onReject: () => void;
   onStop: (processId?: string) => void;
-  onCopyAnswer: (canonicalPlaintext: string) => void;
-  onShareScreenshot: (
-    canonicalPlaintext: string,
-    suggestion: {
-      suggestionText: string;
-      isSuggestionStreamFinished: boolean;
-      isSuggestionAccepted: boolean;
-    }
-  ) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,7 +45,6 @@ function isOverlaySnapshotPayload(value: unknown): value is OverlaySnapshotPaylo
 }
 
 export function useAgentOverlayController(isStandalone: boolean): AgentOverlayController {
-  const { t } = useI18n();
   const [state, dispatch] = useReducer(
     reduceAgentOverlayState,
     undefined,
@@ -100,14 +61,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [isContentVisible, setIsContentVisible] = useState<boolean>(false);
-  const [copyStatusAnswer, setCopyStatusAnswer] = useState<boolean>(false);
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
-  const [isSharing, setIsSharing] = useState<boolean>(false);
-  const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
-  const shareToastTimerRef = useRef<number | null>(null);
-  const copyStatusTimerRef = useRef<number | null>(null);
-  const isSharingRef = useRef<boolean>(false);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
 
@@ -220,7 +174,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     // Auto expand/collapse (既存挙動互換)
     if (historyExpandOverrideRef.current === null && !manualResizeRef.current) {
       const collapsedPreviewHeight = scrollableEl
-        ? getCollapsedPreviewHeightPx(px(window.getComputedStyle(scrollableEl).fontSize))
+        ? getCollapsedPreviewHeightPx(px(window.getComputedStyle(scrollableEl).lineHeight))
         : MIN_HEIGHT;
       const contentRequiresExpansion = shouldExpandScrollableContent({
         contentHeightPx: fullContentHeight,
@@ -234,15 +188,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       }
     }
   }, []);
-
-  // オーバーレイ表示と同時にテキストをフェードイン開始（背景と同期して「ふわっと」浮き上がる）
-  useEffect(() => {
-    if (state.isOverlayVisible) {
-      setIsContentVisible(true);
-    } else {
-      setIsContentVisible(false);
-    }
-  }, [state.isOverlayVisible]);
 
   // IPC: orchestration events
   useEffect(() => {
@@ -365,18 +310,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     };
   }, []);
 
-  // タイマーのアンマウント時クリーンアップ
-  useEffect(() => {
-    return () => {
-      if (copyStatusTimerRef.current) {
-        window.clearTimeout(copyStatusTimerRef.current);
-      }
-      if (shareToastTimerRef.current) {
-        window.clearTimeout(shareToastTimerRef.current);
-      }
-    };
-  }, []);
-
   const onToggleExpand = useCallback(() => {
     manualResizeRef.current = true;
     dispatch({ type: 'TOGGLE_EXPAND' });
@@ -391,23 +324,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       setTimeout(finalizeResize, 0);
     }
   }, [measureAndResize]);
-
-  const onCopyAnswer = useCallback(async (canonicalPlaintext: string) => {
-    if (!canonicalPlaintext) return;
-    try {
-      await navigator.clipboard.writeText(canonicalPlaintext);
-      setCopyStatusAnswer(true);
-      if (copyStatusTimerRef.current) {
-        window.clearTimeout(copyStatusTimerRef.current);
-      }
-      copyStatusTimerRef.current = window.setTimeout(() => {
-        setCopyStatusAnswer(false);
-        copyStatusTimerRef.current = null;
-      }, COPY_STATUS_RESET_DELAY_MS);
-    } catch {
-      // no-op
-    }
-  }, []);
 
   const onReject = useCallback(() => {
     if (decisionLockedRef.current) return;
@@ -473,69 +389,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, []);
 
-  const showShareToast = useCallback((next: ShareToastState | null) => {
-    if (shareToastTimerRef.current) {
-      window.clearTimeout(shareToastTimerRef.current);
-      shareToastTimerRef.current = null;
-    }
-    setShareToast(next);
-    if (next) {
-      shareToastTimerRef.current = window.setTimeout(() => {
-        setShareToast(null);
-        shareToastTimerRef.current = null;
-      }, SHARE_TOAST_RESET_DELAY_MS);
-    }
-  }, []);
-
-  const onShareScreenshot: AgentOverlayController['onShareScreenshot'] = async (
-    text,
-    suggestion
-  ) => {
-    if (isSharingRef.current) return;
-    isSharingRef.current = true;
-    setIsSharing(true);
-
-    try {
-      const capturer = window.electron?.share?.captureShareCard;
-      if (!capturer) {
-        showShareToast({ kind: 'error', message: t('overlay.shareScreenshot.failed') });
-        return;
-      }
-
-      const res = await capturer({
-        content: state.content,
-        ...suggestion,
-        actionText: text,
-        isActionStreamFinished: state.isActionStreamFinished,
-        isActionPhase: state.isActionPhase,
-      });
-
-      const shareResult = isShareCaptureResult(res) ? res : null;
-
-      // 結果トースト
-      if (shareResult?.ok && shareResult.clipboardOk && shareResult.downloadOk) {
-        showShareToast({ kind: 'success', message: t('overlay.shareScreenshot.done') });
-      } else if (shareResult?.ok && shareResult.clipboardOk && !shareResult.downloadOk) {
-        showShareToast({ kind: 'warning', message: t('overlay.shareScreenshot.copiedOnly') });
-      } else if (shareResult?.ok && !shareResult.clipboardOk && shareResult.downloadOk) {
-        showShareToast({ kind: 'warning', message: t('overlay.shareScreenshot.downloadedOnly') });
-      } else {
-        showShareToast({ kind: 'error', message: t('overlay.shareScreenshot.failed') });
-      }
-    } catch {
-      showShareToast({ kind: 'error', message: t('overlay.shareScreenshot.failed') });
-    } finally {
-      setIsSharing(false);
-      isSharingRef.current = false;
-    }
-  };
-
   return {
     state,
-    copyStatusAnswer,
-    isContentVisible,
-    isSharing,
-    shareToast,
     headerRef,
     scrollableContentRef,
     contentInnerRef,
@@ -549,7 +404,5 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
     onReject,
     onStop,
-    onCopyAnswer,
-    onShareScreenshot,
   };
 }

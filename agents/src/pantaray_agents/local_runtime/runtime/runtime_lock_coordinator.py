@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from .process_lock import (
@@ -22,6 +21,7 @@ from .runtime_lock_repository import (
     mark_runtime_lock_resource_cleanup_failed,
     record_runtime_lock_event,
 )
+from .utc_timestamps import now_utc_iso
 
 MAX_RUNTIME_LOCK_CLEANUP_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ def attach_runtime_lock_lease(
     event_type: str,
     event_message: str,
 ) -> RuntimeLockLeaseAttachment:
-    timestamp = _utc_now_iso()
+    timestamp = now_utc_iso()
     resource_id = create_runtime_lock_resource(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -104,7 +104,7 @@ def release_runtime_lock_lease(
     busy_timeout_ms: int,
     lease: RuntimeProcessLockLease,
 ) -> RuntimeLockReleaseResult:
-    timestamp = _utc_now_iso()
+    timestamp = now_utc_iso()
     release_runtime_process_lock(runtime_lock=lease.runtime_lock)
     try:
         mark_runtime_lock_resource_cleaned(
@@ -182,7 +182,7 @@ def _reconcile_runtime_lock_resources(
             continue
         if _resource_is_live(resource):
             continue
-        timestamp = _utc_now_iso()
+        timestamp = now_utc_iso()
         try:
             _cleanup_runtime_lock_resource(resource)
         except Exception as exc:
@@ -256,10 +256,6 @@ def _record_matches_resource(
     resource: RuntimeLockResource,
 ) -> bool:
     return record.owner_pid == resource.owner_pid and record.lock_id == resource.lock_id
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 __all__ = [

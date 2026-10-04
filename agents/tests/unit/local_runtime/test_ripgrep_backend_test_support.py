@@ -28,6 +28,7 @@ def test_fake_glob_backend_stops_before_next_directory_after_limit(
 
     result = broker_discovery.run_ripgrep_files(
         cwd=tmp_path,
+        sandbox_profile="",
         glob_pattern="*.txt",
         limit=1,
     )
@@ -54,6 +55,7 @@ def test_fake_grep_backend_stops_before_next_directory_after_limit(
 
     result = broker_discovery.run_ripgrep_grep(
         cwd=tmp_path,
+        sandbox_profile="",
         pattern="needle",
         include_glob="*.txt",
         max_matches=1,

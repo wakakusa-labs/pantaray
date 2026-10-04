@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, TypedDict
 
+from pantaray_agents.agents.action_agent.runtime.agents_md import (
+    load_pantaray_agents_md,
+)
 from pantaray_agents.agents.action_agent.runtime.config import (
     require_positive_state_config_int,
 )
@@ -37,6 +40,7 @@ from pantaray_agents.agents.action_agent.support.repository_result import (
 )
 from pantaray_agents.agents.workspace_context import render_workspace_context_prompt
 from pantaray_agents.tasks.action_user_message import render_action_user_request_text
+from pantaray_agents.utils.memory_source_policy import MemorySourceCoverageSnapshot
 
 from .assistant_message import project_persisted_assistant_messages
 from .workspace_mount_catalog import load_required_local_workspace_manifest_catalog
@@ -75,85 +79,6 @@ async def initialize_context(
     )
     suggestion_approval = context_user_message.suggestion_approval
     is_continuation = any(state.get("history_by_scope", {}).values())
-    raw_parallel = require_positive_state_config_int(
-        runtime.state_config,
-        key="max_parallel_memory_queries",
-        error_message=(
-            "initialize_context: state_config.max_parallel_memory_queries "
-            "must be a positive int"
-        ),
-    )
-
-    context_anchor = (
-        suggestion_approval.approved_at
-        if suggestion_approval is not None
-        else context_user_step_created_at
-    )
-    coverage_result = await agent.repository.get_memory_source_coverage_snapshot(
-        user_id=str(request.user_id),
-        suggestion_created_at=context_anchor,
-        max_parallel_queries=raw_parallel,
-    )
-    memory_source_coverage = ensure_repository_result(
-        coverage_result,
-        "Failed to fetch memory source coverage snapshot.",
-    )
-
-    initial_memory_result = await agent.repository.get_initial_memory_context(
-        request.user_id,
-        action_id=str(request.action_id),
-        suggestion_id=request.suggestion_id,
-        short_term_since_iso=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        short_term_limit=5,
-    )
-    initial_memory = ensure_repository_result(
-        initial_memory_result,
-        "Failed to fetch atomic initial memory context.",
-    )
-    long_term_data = (
-        {
-            "insight_id": initial_memory.insight.insight_id,
-            "insight_profile_brief": initial_memory.insight.insight_profile_brief,
-            "created_at": initial_memory.insight.created_at,
-            "updated_at": initial_memory.insight.updated_at,
-        }
-        if initial_memory.insight is not None
-        else None
-    )
-    short_term_rows = [
-        {
-            "insight_id": row.insight_id,
-            "short_term_insight_data": row.short_term_insight_data,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
-        for row in initial_memory.short_term_insights
-    ]
-    state["memory_artifact_references"] = tuple(
-        MemoryArtifactReferenceModel(
-            source_type=artifact.source_type,
-            source_record_id=artifact.source_record_id,
-            artifact_id=artifact.artifact_id,
-            memory_key=f"memory_artifact:{artifact.artifact_id}",
-            logical_updated_at=artifact.logical_updated_at,
-            files=tuple(
-                MemoryArtifactFileReferenceModel(
-                    storage_path=file.storage_path,
-                    sha256=file.sha256,
-                    byte_size=file.byte_size,
-                    mime_type=file.mime_type,
-                )
-                for file in artifact.files
-            ),
-        )
-        for artifact in initial_memory.artifacts
-    )
-    if initial_memory.context_epoch is not None:
-        state["memory_context_epoch"] = initial_memory.context_epoch.model_copy(
-            deep=True
-        )
-    else:
-        state.pop("memory_context_epoch", None)
 
     request_summary = (
         _normalize_optional_text(suggestion_approval.summary)
@@ -176,22 +101,27 @@ async def initialize_context(
     previous_local_step_counters = dict(context.get("local_step_counters", {}))
     context.update(
         {
-            "user_request": current_user_message.content,
             "request_summary": request_summary,
             "target_context": target_context,
-            "insight_data": runtime.services.rendering.build_insight_text(
-                long_term_data, short_term_rows or []
-            ),
-            "structured_fact_data": (
-                initial_memory.facts.facts_profile_brief
-                if initial_memory.facts is not None
-                else ""
-            ),
-            "memory_source_coverage": memory_source_coverage,
             "prompt_name": runtime.state_config["prompt_name"],
             "prompt_version": runtime.state_config["prompt_version"],
         }
     )
+    if not is_continuation:
+        # Read once per Action: the head shows this memory for the whole Action
+        # and the model looks up anything newer with its memory tools.
+        context.update(
+            await _load_action_memory(
+                agent,
+                state,
+                runtime,
+                coverage_anchor=(
+                    suggestion_approval.approved_at
+                    if suggestion_approval is not None
+                    else context_user_step_created_at
+                ),
+            )
+        )
     context["additional_notes"] = []
     context["local_step_counters"] = (
         previous_local_step_counters if is_continuation else {}
@@ -209,6 +139,7 @@ async def initialize_context(
     context["workspace_context_prompt"] = render_workspace_context_prompt(
         workspace_manifest_catalog.workspace_context
     )
+    context["agents_md_instructions"] = load_pantaray_agents_md()
 
     # 親ランタイムは単一 ReAct のみ。mandatory planning phase を経由せず executing に
     # 直行する。
@@ -252,6 +183,84 @@ async def initialize_context(
             images=current_user_message.images,
         ),
     )
+
+
+class _ActionMemoryContext(TypedDict):
+    insight_data: str
+    structured_fact_data: str
+    memory_source_coverage: MemorySourceCoverageSnapshot
+
+
+async def _load_action_memory(
+    agent: ActionAgent,
+    state: ActionAgentState,
+    runtime: ActionGraphRuntime,
+    *,
+    coverage_anchor: str,
+) -> _ActionMemoryContext:
+    """Read the memory the Action starts from into the state and its context."""
+
+    request = runtime.request
+    memory_source_coverage = ensure_repository_result(
+        await agent.repository.get_memory_source_coverage_snapshot(
+            user_id=str(request.user_id),
+            suggestion_created_at=coverage_anchor,
+            max_parallel_queries=require_positive_state_config_int(
+                runtime.state_config,
+                key="max_parallel_memory_queries",
+                error_message=(
+                    "initialize_context: state_config.max_parallel_memory_queries "
+                    "must be a positive int"
+                ),
+            ),
+        ),
+        "Failed to fetch memory source coverage snapshot.",
+    )
+    initial_memory = ensure_repository_result(
+        await agent.repository.get_initial_memory_context(
+            request.user_id,
+            action_id=str(request.action_id),
+            suggestion_id=request.suggestion_id,
+        ),
+        "Failed to fetch atomic initial memory context.",
+    )
+    state["memory_artifact_references"] = tuple(
+        MemoryArtifactReferenceModel(
+            source_type=artifact.source_type,
+            source_record_id=artifact.source_record_id,
+            artifact_id=artifact.artifact_id,
+            memory_key=f"memory_artifact:{artifact.artifact_id}",
+            logical_updated_at=artifact.logical_updated_at,
+            files=tuple(
+                MemoryArtifactFileReferenceModel(
+                    storage_path=file.storage_path,
+                    sha256=file.sha256,
+                    byte_size=file.byte_size,
+                    mime_type=file.mime_type,
+                )
+                for file in artifact.files
+            ),
+        )
+        for artifact in initial_memory.artifacts
+    )
+    if initial_memory.context_epoch is not None:
+        state["memory_context_epoch"] = initial_memory.context_epoch.model_copy(
+            deep=True
+        )
+    else:
+        state.pop("memory_context_epoch", None)
+    insight = initial_memory.insight
+    return {
+        "insight_data": runtime.services.rendering.build_insight_text(
+            insight.insight_profile_brief if insight is not None else None
+        ),
+        "structured_fact_data": (
+            initial_memory.facts.facts_profile_brief
+            if initial_memory.facts is not None
+            else ""
+        ),
+        "memory_source_coverage": memory_source_coverage,
+    }
 
 
 def _reset_turn_plan(context: ActionAgentContext) -> None:

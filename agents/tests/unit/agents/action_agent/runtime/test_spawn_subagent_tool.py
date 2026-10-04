@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -59,6 +59,10 @@ def _args(model: str = "gpt-6-luna") -> dict[str, JSONValue]:
     }
 
 
+# The parent's template and the head fields its first turn froze.
+_AGENT = SimpleNamespace(executing_prompt="Context at {current_time}\n{action_history}")
+
+
 def _state() -> ActionAgentState:
     return cast(
         ActionAgentState,
@@ -67,6 +71,7 @@ def _state() -> ActionAgentState:
             "action_id": "action-1",
             "execution_session_id": "session-1",
             "manifest_id": "manifest-1",
+            "context": {"executing_head_fields": {"current_time": "T0"}},
         },
     )
 
@@ -135,7 +140,7 @@ async def test_spawn_tool_binds_durable_think_trace_and_configured_selector(
         extra={"process_id": "parent-process"},
     ):
         result = await run_validated_tool_impl(
-            MagicMock(),
+            _AGENT,
             SPAWN_SUBAGENT_TOOL,
             args,
             state,
@@ -155,6 +160,7 @@ async def test_spawn_tool_binds_durable_think_trace_and_configured_selector(
             )
             with pytest.raises(ToolValidationError):
                 await subagent_spawn.run_spawn_subagent_tool(
+                    cast(Any, _AGENT),
                     step_id="retry",
                     tool_def=SPAWN_SUBAGENT_TOOL,
                     args=args,
@@ -167,6 +173,8 @@ async def test_spawn_tool_binds_durable_think_trace_and_configured_selector(
     assert request.origin == origin
     assert request.logical_request_id != result.step_id
     assert request.model_selector == selector
+    # The child starts from the head the parent froze, not from a fresh read.
+    assert request.action_context == "Context at T0\n"
     assert result.output == {"child_process_id": "child-1"}
     claim = request.resource_claims[0]
     if selector == "gpt-5.6-sol":
@@ -192,6 +200,7 @@ async def test_spawn_tool_rejects_requests_without_adopted_origin(
     monkeypatch.setattr(subagent_spawn, "spawn_action_subagent", _spawn)
     with pytest.raises(ToolValidationError, match="adopted call origin"):
         await subagent_spawn.run_spawn_subagent_tool(
+            cast(Any, _AGENT),
             step_id="execution-step",
             tool_def=SPAWN_SUBAGENT_TOOL,
             args=_args(),
@@ -206,6 +215,7 @@ async def test_spawn_tool_rejects_requests_without_adopted_origin(
 async def test_spawn_tool_rejects_goal_worker_before_runtime_mutation() -> None:
     with pytest.raises(ToolValidationError, match="only available to the Supervisor"):
         await subagent_spawn.run_spawn_subagent_tool(
+            cast(Any, _AGENT),
             step_id="execution-step",
             tool_def=SPAWN_SUBAGENT_TOOL,
             args=_args(),

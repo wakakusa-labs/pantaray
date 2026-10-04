@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
     extract_markdown_references,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
     register_after_commit,
@@ -176,7 +176,7 @@ def enqueue_memory_repair(
     detected_revision_id: str,
     reason: str,
 ) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     cursor = connection.execute(
         """
         INSERT INTO memory_repair_queue(

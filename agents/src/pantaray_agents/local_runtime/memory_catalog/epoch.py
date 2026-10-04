@@ -3,7 +3,8 @@ from __future__ import annotations
 import secrets
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .errors import MemoryContextExpiredError, MemoryReferenceDepthError
 from .models import (
@@ -27,7 +28,7 @@ def build_memory_context_epoch(
 ) -> MemoryContextEpoch:
     if not run_id.strip() or not user_id.strip():
         raise ValueError("run_id and user_id must not be empty")
-    observed_at = datetime.now(UTC).isoformat()
+    observed_at = now_utc_iso()
     items: list[ResolvedContextItem] = []
     for node, fragment, label in visible:
         if node.user_id != user_id or fragment.user_id != user_id:
@@ -116,7 +117,7 @@ def append_memory_context_item(
             source_path=source_path,
             heading_path=heading_path,
             content=content,
-            observed_at=datetime.now(UTC).isoformat(),
+            observed_at=now_utc_iso(),
         ),
         user_id=epoch.user_id,
         fragment_id=fragment_id,

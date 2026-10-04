@@ -5,13 +5,19 @@ import shlex
 import shutil
 import sqlite3
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
 from tests.unit.local_runtime.broker_test_support import BROKER_ACTOR_PROCESS_ID
 
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    create_private_temp_dir,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
+    SANDBOX_TEMP_DIR_PREFIX,
+)
+from pantaray_agents.schema.read_access import ReadAccessScope
 
 from .support import (
     INTEGRATION_APPROVAL_TIMESTAMP,
@@ -147,11 +153,19 @@ async def test_workspace_executable_runs_via_helper(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("read_access_scope", ["workspace", "full_access"])
 async def test_action_plan_remains_private_inside_broad_workspace_sandbox(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    read_access_scope: ReadAccessScope,
 ) -> None:
-    testbed = bootstrap_runtime_testbed(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    # Under full access the profile also allows reading "/"; the plan deny must
+    # still win.
+    testbed = bootstrap_runtime_testbed(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        read_access_scope=read_access_scope,
+    )
     plan_path = testbed.context.workspace_path / "plan.md"
     symlink_path = testbed.context.workspace_path / "plan-alias.md"
     hardlink_path = testbed.context.workspace_path / "plan-hardlink.md"
@@ -188,67 +202,68 @@ async def test_invocation_temp_is_outside_workspace_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     testbed = bootstrap_runtime_testbed(tmp_path=tmp_path, monkeypatch=monkeypatch)
-    with tempfile.TemporaryDirectory(
-        prefix="pantaray-command-sandbox-sibling-"
-    ) as leaf:
-        sibling_path = Path(leaf) / "owned"
-        sibling_path.write_text("private", encoding="utf-8")
-        compile_workspace_binary(
-            workspace_path=testbed.context.workspace_path,
-            executable_name="tempprobe",
-            source_code=TEMP_ISOLATION_PROBE_SOURCE.replace(
-                "__SIBLING_PATH__", json.dumps(str(sibling_path))
-            ),
-        )
-        with sqlite3.connect(testbed.db_path) as connection, connection:
-            action_id = str(
-                connection.execute(
-                    "SELECT action_id FROM execution_sessions WHERE execution_session_id = ?",
-                    (testbed.context.execution_session_id,),
-                ).fetchone()[0]
-            )
-            for child_id in ("child-unclaimed", "child-workspace"):
-                connection.execute(
-                    """INSERT INTO processes(
-                           process_id, user_id, kind, status, action_id, started_at,
-                           updated_at, heartbeat_at, next_event_seq, parent_process_id
-                       ) VALUES (?, 'user-1', 'action_subagent', 'running', ?, ?, ?, ?, 1, ?)""",
-                    (
-                        child_id,
-                        action_id,
-                        *([INTEGRATION_APPROVAL_TIMESTAMP] * 3),
-                        BROKER_ACTOR_PROCESS_ID,
-                    ),
-                )
+    # Another invocation's temp dir, where Pantaray creates them.
+    leaf = create_private_temp_dir(
+        db_path=testbed.db_path, prefix=SANDBOX_TEMP_DIR_PREFIX
+    )
+    sibling_path = leaf / "owned"
+    sibling_path.write_text("private", encoding="utf-8")
+    compile_workspace_binary(
+        workspace_path=testbed.context.workspace_path,
+        executable_name="tempprobe",
+        source_code=TEMP_ISOLATION_PROBE_SOURCE.replace(
+            "__SIBLING_PATH__", json.dumps(str(sibling_path))
+        ),
+    )
+    with sqlite3.connect(testbed.db_path) as connection, connection:
+        action_id = str(
             connection.execute(
-                """INSERT INTO action_subagent_resource_claims(
-                       claim_id, user_id, action_id, parent_process_id, child_process_id,
-                       resource_kind, root_identity, normalized_key, acquired_at
-                   ) VALUES ('claim-workspace', 'user-1', ?, ?, 'child-workspace',
-                             'workspace_path', ?, ?, ?)""",
+                "SELECT action_id FROM execution_sessions WHERE execution_session_id = ?",
+                (testbed.context.execution_session_id,),
+            ).fetchone()[0]
+        )
+        for child_id in ("child-unclaimed", "child-workspace"):
+            connection.execute(
+                """INSERT INTO processes(
+                       process_id, user_id, kind, status, action_id, started_at,
+                       updated_at, heartbeat_at, next_event_seq, parent_process_id
+                   ) VALUES (?, 'user-1', 'action_subagent', 'running', ?, ?, ?, ?, 1, ?)""",
                 (
+                    child_id,
                     action_id,
+                    *([INTEGRATION_APPROVAL_TIMESTAMP] * 3),
                     BROKER_ACTOR_PROCESS_ID,
-                    testbed.context.manifest_id,
-                    str(testbed.context.workspace_path),
-                    INTEGRATION_APPROVAL_TIMESTAMP,
                 ),
             )
-        for child_id in ("child-unclaimed", "child-workspace"):
-            outcome = await execute_broker_tool(
-                db_path=testbed.db_path,
-                busy_timeout_ms=ONE_SECOND_MS,
-                tool_id="bash",
-                user_id="user-1",
-                actor_process_id=child_id,
-                manifest_id=testbed.context.manifest_id,
-                execution_session_id=testbed.context.execution_session_id,
-                tool_request_id=f"request-{child_id}",
-                args={"command": "tempprobe"},
-            )
-            assert outcome.status == "success", outcome.output
-            assert outcome.output["stdout"] == "private-temp-isolated\n"
-        assert sibling_path.read_text(encoding="utf-8") == "private"
+        connection.execute(
+            """INSERT INTO action_subagent_resource_claims(
+                   claim_id, user_id, action_id, parent_process_id, child_process_id,
+                   resource_kind, root_identity, normalized_key, acquired_at
+               ) VALUES ('claim-workspace', 'user-1', ?, ?, 'child-workspace',
+                         'workspace_path', ?, ?, ?)""",
+            (
+                action_id,
+                BROKER_ACTOR_PROCESS_ID,
+                testbed.context.manifest_id,
+                str(testbed.context.workspace_path),
+                INTEGRATION_APPROVAL_TIMESTAMP,
+            ),
+        )
+    for child_id in ("child-unclaimed", "child-workspace"):
+        outcome = await execute_broker_tool(
+            db_path=testbed.db_path,
+            busy_timeout_ms=ONE_SECOND_MS,
+            tool_id="bash",
+            user_id="user-1",
+            actor_process_id=child_id,
+            manifest_id=testbed.context.manifest_id,
+            execution_session_id=testbed.context.execution_session_id,
+            tool_request_id=f"request-{child_id}",
+            args={"command": "tempprobe"},
+        )
+        assert outcome.status == "success", outcome.output
+        assert outcome.output["stdout"] == "private-temp-isolated\n"
+    assert sibling_path.read_text(encoding="utf-8") == "private"
 
     with sqlite3.connect(testbed.db_path) as connection:
         paths = connection.execute(

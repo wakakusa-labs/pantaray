@@ -1,43 +1,23 @@
 import { DndContext } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { GripVertical } from 'lucide-react';
 
 import type { Translate } from '../types';
 import type { WorkspaceProjectDragController } from '../useWorkspaceProjectDragController';
-import { SortableProjectCard } from './SortableProjectCard';
-import type {
-  FocusRequest,
-  WorkspaceFolder,
-  WorkspaceFolderCreateInput,
-  WorkspaceOrganization,
-  WorkspaceProject,
-} from './workspaceSettingsModel';
-import { successorFocusKey, workspaceFocusId } from './workspaceSettingsModel';
+import type { WorkspaceFolder, WorkspaceProject } from './workspaceSettingsModel';
 
 interface WorkspaceProjectListProps {
   disabled: boolean;
   dragController: WorkspaceProjectDragController;
   folders: WorkspaceFolder[];
-  organizationCreateBusy: boolean;
-  organizations: WorkspaceOrganization[];
   projects: WorkspaceProject[];
-  statusMessage?: string;
+  selectedProjectId: string | null;
   t: Translate;
-  onCreateFolder: (input: WorkspaceFolderCreateInput) => Promise<boolean>;
-  onCreateOrganization: (displayName: string) => Promise<string | null>;
-  onDeleteFolder: (folderId: string, focus: FocusRequest) => Promise<void>;
-  onDeleteProject: (projectId: string, focus: FocusRequest) => Promise<void>;
-  onSelectFolder: () => Promise<string | null>;
-  onUpdateProjectOrganizations: (
-    projectId: string,
-    organizationIds: string[],
-    focus: FocusRequest
-  ) => Promise<boolean>;
-  isCreateFolderBusy: (projectId: string) => boolean;
-  isDeleteFolderBusy: (folderId: string) => boolean;
-  isDeleteProjectBusy: (projectId: string) => boolean;
-  isProjectLinksBusy: (projectId: string) => boolean;
+  onSelect: (projectId: string) => void;
 }
 
+/** The project list in the master column: select a project, or drag it into a new order. */
 export function WorkspaceProjectList(props: WorkspaceProjectListProps) {
   return (
     <DndContext
@@ -56,47 +36,77 @@ export function WorkspaceProjectList(props: WorkspaceProjectListProps) {
           className="workspace-project-list"
           aria-label={props.t('settings.workspace.structureAriaLabel')}
         >
-          {props.statusMessage ? (
-            <div className="workspace-status-error" role="alert">
-              {props.statusMessage}
-            </div>
-          ) : null}
           {props.projects.map((project) => (
-            <SortableProjectCard
+            <SortableProjectItem
               key={project.project_id}
               project={project}
-              organizations={props.organizations}
-              folders={props.folders.filter((folder) =>
-                folder.project_ids.includes(project.project_id)
-              )}
+              folderCount={
+                props.folders.filter((folder) => folder.project_ids.includes(project.project_id))
+                  .length
+              }
               disabled={props.disabled}
+              isSelected={project.project_id === props.selectedProjectId}
               t={props.t}
-              onCreateFolder={props.onCreateFolder}
-              onCreateOrganization={props.onCreateOrganization}
-              onDeleteFolder={props.onDeleteFolder}
-              onDeleteProject={(projectId) => {
-                const projectIds = props.projects.map((candidate) => candidate.project_id);
-                return props.onDeleteProject(projectId, {
-                  onSuccess: successorFocusKey(
-                    projectIds,
-                    projectId,
-                    workspaceFocusId.projectDelete,
-                    workspaceFocusId.projectAdd
-                  ),
-                  onFailure: workspaceFocusId.projectDelete(projectId),
-                });
-              }}
-              onSelectFolder={props.onSelectFolder}
-              onUpdateOrganizations={props.onUpdateProjectOrganizations}
-              createFolderBusy={props.isCreateFolderBusy(project.project_id)}
-              deleteProjectBusy={props.isDeleteProjectBusy(project.project_id)}
-              isDeleteFolderBusy={props.isDeleteFolderBusy}
-              organizationCreateBusy={props.organizationCreateBusy}
-              projectLinksBusy={props.isProjectLinksBusy(project.project_id)}
+              onSelect={props.onSelect}
             />
           ))}
         </div>
       </SortableContext>
     </DndContext>
+  );
+}
+
+function SortableProjectItem(props: {
+  disabled: boolean;
+  folderCount: number;
+  isSelected: boolean;
+  project: WorkspaceProject;
+  t: Translate;
+  onSelect: (projectId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.project.project_id,
+    disabled: props.disabled,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={[
+        'workspace-master-item',
+        props.isSelected ? 'is-selected' : null,
+        isDragging ? 'is-dragging' : null,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      data-project-id={props.project.project_id}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+    >
+      <button
+        type="button"
+        className="workspace-project-drag-handle"
+        disabled={props.disabled}
+        aria-label={props.t('settings.workspace.drag.handle', {
+          name: props.project.display_name,
+        })}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="workspace-master-select"
+        aria-current={props.isSelected ? 'true' : undefined}
+        onClick={() => props.onSelect(props.project.project_id)}
+      >
+        {props.project.display_name}
+      </button>
+      <span
+        className={`workspace-project-folder-count${props.folderCount === 0 ? ' is-empty' : ''}`}
+      >
+        {props.t('settings.workspace.folderCount', { count: props.folderCount })}
+      </span>
+    </div>
   );
 }

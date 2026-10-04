@@ -115,6 +115,9 @@ class HistoryFormattingMixin:
                     lines += self._json_lines(
                         "Output", omit_attachment_data_urls(display.output_value)
                     )
+            if agents_md := entry.get("agents_md"):
+                # Each file is attached once per Action, so omission keeps it.
+                lines.append("- AGENTS.md:\n" + self._indent_text(agents_md, 4))
         if display.attachment_refs:
             # File-input interleaving needs these refs even when output is omitted.
             lines.append("- Attached images: " + ", ".join(display.attachment_refs))

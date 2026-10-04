@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import os
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,9 +13,17 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
+    ReadLinesResult,
     read_text_descriptor_lines,
-    read_text_lines,
 )
+
+
+def read_text_lines(*, filepath: Path, **position: int) -> ReadLinesResult:
+    descriptor = os.open(filepath, os.O_RDONLY)
+    try:
+        return read_text_descriptor_lines(descriptor=descriptor, **position)
+    finally:
+        os.close(descriptor)
 
 
 class _CountingLineStream:
@@ -62,28 +71,8 @@ def _patch_path_stream(
         raising=False,
     )
     monkeypatch.setattr(broker_direct_read_text.os, "close", lambda _fd: None)
-
-
-def test_read_text_lines_reads_regular_file(tmp_path: Path) -> None:
-    path = tmp_path / "regular.txt"
-    path.write_text("first\nsecond\n", encoding="utf-8")
-
-    result = read_text_lines(filepath=path, offset=1, limit=1)
-
-    assert result.content == "first\n"
-    assert result.total_lines == 2
-
-
-def test_read_text_lines_rejects_symlink(tmp_path: Path) -> None:
-    target = tmp_path / "target.txt"
-    target.write_text("secret\n", encoding="utf-8")
-    link = tmp_path / "link.txt"
-    link.symlink_to(target)
-
-    with pytest.raises(OSError) as exc_info:
-        read_text_lines(filepath=link, offset=1, limit=1)
-
-    assert exc_info.value.errno == errno.ELOOP
+    # The stream stands in for the text reader, which then skips lines itself.
+    monkeypatch.setattr(broker_direct_read_text, "_skip_lines", lambda _fd, _n: 0)
 
 
 def test_read_text_descriptor_lines_borrows_descriptor(tmp_path: Path) -> None:
@@ -282,28 +271,22 @@ def test_read_text_lines_pages_multibyte_line_without_stalling(
     assert result.next_column == 4
 
 
-@pytest.mark.parametrize("offset", [4, 5])
-def test_unreachable_start_returns_retryable_error_including_boundary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    offset: int,
+@pytest.mark.parametrize(
+    ("offset", "expected"),
+    [(2, "second\n"), (3, "third\n"), (4, "fourth"), (5, None)],
+)
+def test_offset_skip_counts_every_line_end_across_chunks(
+    tmp_path: Path, offset: int, expected: str | None
 ) -> None:
-    path = tmp_path / "bounded.txt"
-    path.write_text("".join(f"{n:03}\n" for n in range(1, 8)))
-    monkeypatch.setattr(broker_direct_read_text, "MAX_TEXT_SCAN_BYTES", 12)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_TOTAL_LINE_COUNT_BYTES", 12)
-    with pytest.raises(BrokerPolicyError) as raised:
-        read_text_lines(filepath=path, offset=offset, limit=2)
-    assert raised.value.code == "READ_OFFSET_SCAN_LIMIT"
-    assert "smaller offset or column" in str(raised.value)
-    retry = read_text_lines(filepath=path, offset=3, limit=2)
-    assert retry.content == "003\n"
-    assert retry.end_line == 3
-    assert retry.truncated is True
-    assert retry.next_offset is None
-    assert retry.next_column is None
-    assert retry.truncation_reason == "scan_budget"
-    assert "scan limit" in retry.retry_hint
+    path = tmp_path / "mixed.txt"
+    # The \r of the first line end is the last byte of the first 1 MiB chunk.
+    first = b"a" * (1024 * 1024 - 1) + b"\r\n"
+    path.write_bytes(first + b"second\rthird\nfourth")
+    if expected is None:
+        with pytest.raises(BrokerPolicyError, match="out of range"):
+            read_text_lines(filepath=path, offset=offset, limit=1)
+        return
+    assert read_text_lines(filepath=path, offset=offset, limit=1).content == expected
 
 
 def test_multimegabyte_file_tail_is_readable_without_splitting(tmp_path: Path) -> None:
@@ -313,59 +296,6 @@ def test_multimegabyte_file_tail_is_readable_without_splitting(tmp_path: Path) -
     assert result.content == "LAST MARKER"
     assert result.total_lines == 5_001
     assert result.next_offset is None
-
-
-@pytest.mark.parametrize("position", [{"offset": 2}, {"offset": 1, "column": 500_000}])
-def test_scan_stops_inside_a_long_line(
-    monkeypatch: pytest.MonkeyPatch,
-    position: dict[str, int],
-) -> None:
-    stream = _CountingLineStream("x" * 1_000_000 + "\nnext\n")
-    _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_TEXT_SCAN_BYTES", 4_096)
-    with pytest.raises(BrokerPolicyError) as raised:
-        read_text_lines(filepath=Path("unused.txt"), limit=1, **position)
-    assert raised.value.code == "READ_OFFSET_SCAN_LIMIT"
-    assert stream.position <= 4_096
-
-
-@pytest.mark.parametrize(
-    ("tail", "budget", "expected"),
-    [("abcdefgh\n", 7, "abc"), ("あいうえお\n", 11, "あい")],
-)
-def test_scan_limit_returns_available_partial_line(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tail: str,
-    budget: int,
-    expected: str,
-) -> None:
-    path = tmp_path / "partial.txt"
-    path.write_text("one\n" + tail, encoding="utf-8")
-    monkeypatch.setattr(broker_direct_read_text, "MAX_TEXT_SCAN_BYTES", budget)
-    result = read_text_lines(filepath=path, offset=1, limit=10)
-    assert result.content == "one\n" + expected
-    assert result.end_line == 2
-    assert result.end_column == len(expected)
-    assert result.truncated is True
-    assert result.next_offset is None
-    assert result.next_column is None
-    assert result.truncation_reason == "scan_budget"
-    assert "scan limit" in result.retry_hint
-
-
-@pytest.mark.parametrize("newline", ["\r\n", "\r"])
-def test_scan_budget_counts_original_newline_bytes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    newline: str,
-) -> None:
-    path = tmp_path / "newlines.txt"
-    path.write_bytes((newline * 10).encode("utf-8"))
-    monkeypatch.setattr(broker_direct_read_text, "MAX_TEXT_SCAN_BYTES", 4)
-    with pytest.raises(BrokerPolicyError) as raised:
-        read_text_lines(filepath=path, offset=4 // len(newline) + 1, limit=1)
-    assert raised.value.code == "READ_OFFSET_SCAN_LIMIT"
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])

@@ -197,7 +197,7 @@ async def test_recording_persists_ordered_messages_and_pending_calls_once(
     assert [entry["step_number"] for entry in history] == list(
         range(1, 3 + message_count)
     )
-    formatted = ActionAgentFormatter(tool_registry={}).format_history(restored)
+    formatted = ActionAgentFormatter().format_history(restored)
     if has_messages:
         assert formatted.index("確認します。") < formatted.index("関連資料も調べます。")
         assert formatted.count("phase: commentary") == 2

@@ -1,18 +1,33 @@
 """Render a .xlsx workbook as one pipe table per sheet, using openpyxl.
 
-openpyxl's read-only mode drops the drawing parts, so the workbook is loaded
-whole: it is the only way to report where pictures and charts sit. Every sheet
-is therefore read under both a row/column cap and the shared text budget.
+The workbook is opened in openpyxl's read-only mode, which streams each sheet's
+cells instead of building an object for every cell the file declares. Loading
+it whole would let a few bytes of XML expand without bound: a merged range or a
+hyperlink is bound to every cell its reference covers, so one ``A1:XFD1048576``
+asks for seventeen billion cell objects. Read-only mode leaves out the drawing
+parts, so where pictures and charts sit is read from the drawing XML directly.
+Every sheet is read under both a row/column cap and the shared text budget.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import BinaryIO, Final
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
+from openpyxl.chart.chartspace import ChartSpace
+from openpyxl.drawing.spreadsheet_drawing import SpreadsheetDrawing
+from openpyxl.packaging.relationship import (
+    Relationship,
+    get_dependents,
+    get_rels_path,
+)
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet._read_only import ReadOnlyWorksheet
+from openpyxl.xml.constants import IMAGE_NS
+from openpyxl.xml.functions import fromstring
 
 from .document_model import (
     MAX_DOCUMENT_TEXT_CHARS,
@@ -36,16 +51,22 @@ _XLSX_NOTES: Final = (
     "an empty cell, and a merged range carries its value in its first cell.",
     f"Each sheet is read up to {MAX_SHEET_ROWS} rows and {MAX_SHEET_COLUMNS} "
     "columns, and trailing empty rows and columns are dropped.",
-    "An image is listed by the cell it is anchored at, because the library "
-    "does not keep the package part it was loaded from. A chart title taken "
-    "from a cell is not resolved.",
+    "An image is listed by the cell it is anchored at. A chart title taken from "
+    "a cell is not resolved.",
 )
 
 
 def extract_xlsx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     # data_only asks for the result Excel stored beside each formula; the
     # formula text itself is not what the model was asked to read.
-    workbook = load_workbook(source, data_only=True)
+    workbook = load_workbook(source, read_only=True, data_only=True)
+    try:
+        return _extract_workbook(workbook, start_unit)
+    finally:
+        workbook.close()
+
+
+def _extract_workbook(workbook: Workbook, start_unit: int | None) -> ExtractedDocument:
     sheets = workbook.worksheets
     total_units = len(sheets)
     start = resolve_start_unit(start_unit, total_units=total_units, unit_kind="sheet")
@@ -59,8 +80,9 @@ def extract_xlsx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     for number, sheet in enumerate(sheets[start - 1 :], start=start):
         name = _sheet_name(sheet)
         outline.append(name)
-        images.extend(_sheet_images(sheet, name))
-        charts.extend(_sheet_charts(sheet, name))
+        sheet_images, sheet_charts = _sheet_drawings(workbook, sheet, name)
+        images.extend(sheet_images)
+        charts.extend(sheet_charts)
         lines, cut = pipe_table(
             _sheet_rows(sheet),
             max_rows=MAX_SHEET_ROWS,
@@ -86,28 +108,29 @@ def extract_xlsx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     )
 
 
-def _sheet_name(sheet: Worksheet) -> str:
+def _sheet_name(sheet: ReadOnlyWorksheet) -> str:
     """The sheet's title, marked when Excel does not show the sheet."""
 
     title = str(sheet.title)
     return title if sheet.sheet_state == "visible" else f"{title} (hidden)"
 
 
-def _sheet_rows(sheet: Worksheet) -> Iterator[list[str]]:
+def _sheet_rows(sheet: ReadOnlyWorksheet) -> Iterator[list[str]]:
     """Cell text row by row, bounded so no sheet is expanded in full.
 
-    Excel counts a cell that carries only formatting, so the declared extent is
-    trusted as an upper bound and trailing empty rows and columns are dropped
-    from what it reports. One column past the cap is read so that a sheet wider
-    than the cap is reported as cut rather than silently narrowed.
+    The extent a sheet declares is ignored: a writer may omit it or understate
+    it, and the stream ends at the sheet's last row anyway. Trailing empty rows
+    and columns are dropped. One row and one column past the caps are read so
+    that a sheet larger than the caps is reported as cut rather than silently
+    narrowed.
     """
 
-    last_row = min(int(sheet.max_row), MAX_SHEET_ROWS + 1)
-    last_column = min(int(sheet.max_column), MAX_SHEET_COLUMNS + 1)
     blank_rows = 0
     chars = 0
-    for row in sheet.iter_rows(min_row=1, max_row=last_row, max_col=last_column):
-        cells = [stored_value_text(cell.value) for cell in row]
+    for row in sheet.iter_rows(
+        max_row=MAX_SHEET_ROWS + 1, max_col=MAX_SHEET_COLUMNS + 1, values_only=True
+    ):
+        cells = [stored_value_text(value) for value in row]
         while cells and not cells[-1]:
             cells.pop()
         if not cells:
@@ -124,28 +147,78 @@ def _sheet_rows(sheet: Worksheet) -> Iterator[list[str]]:
             return
 
 
-def _sheet_images(sheet: Worksheet, name: str) -> Iterator[DocumentImage]:
-    """Pictures on this sheet, counted per anchor cell.
+def _sheet_drawings(
+    workbook: Workbook, sheet: ReadOnlyWorksheet, name: str
+) -> tuple[list[DocumentImage], list[DocumentChart]]:
+    """Where the pictures and charts on one sheet are anchored.
 
-    ``_images`` is how openpyxl exposes a loaded sheet's pictures; it keeps no
-    public accessor for them.
+    Read-only mode skips the drawing step of openpyxl's worksheet reader, and
+    that step is not reused either: it reads a picture's whole image part into
+    a buffer of its own for every anchor that shows it, so one large image
+    drawn a thousand times holds that many copies. Only the drawing XML and its
+    relationships are read here, which name the anchor cell of each picture
+    without opening it, and a chart part is parsed once however many anchors
+    show it. openpyxl keeps no public accessor for the package or for the part
+    a read-only sheet streams from.
     """
 
-    counts: dict[str, int] = {}
-    for image in sheet._images:
-        cell = _anchor_cell(image.anchor)
-        counts[cell] = counts.get(cell, 0) + 1
-    for cell, count in counts.items():
-        yield DocumentImage(location=name, ref=cell, count=count)
+    archive = workbook._archive
+    parts = set(archive.namelist())
+    relationships_path = get_rels_path(sheet._worksheet_path)
+    if relationships_path not in parts:
+        return [], []
+    image_counts: dict[str, int] = {}
+    charts: list[DocumentChart] = []
+    chart_titles: dict[str, str] = {}
+    relationships = get_dependents(archive, relationships_path)
+    for drawing_part in relationships.find(SpreadsheetDrawing._rel_type):
+        try:
+            drawing = SpreadsheetDrawing.from_tree(
+                fromstring(archive.read(drawing_part.target))
+            )
+        except TypeError:
+            # openpyxl's reader passes over a drawing it cannot model the same
+            # way, keeping the rest of the sheet.
+            continue
+        targets = _relationship_targets(archive, parts, drawing_part.target)
+        for chart in drawing._chart_rels:
+            target = targets[chart.id]
+            if target.target not in chart_titles:
+                chart_titles[target.target] = _chart_title(
+                    ChartSpace.from_tree(
+                        fromstring(archive.read(target.target))
+                    ).chart.title
+                )
+            cell = _anchor_cell(chart.anchor)
+            charts.append(
+                DocumentChart(
+                    location=f"{name}!{cell}" if cell else name,
+                    title=chart_titles[target.target],
+                )
+            )
+        for picture in drawing._blip_rels:
+            if targets[picture.embed].Type == IMAGE_NS:
+                cell = _anchor_cell(picture.anchor)
+                image_counts[cell] = image_counts.get(cell, 0) + 1
+    images = [
+        DocumentImage(location=name, ref=cell, count=count)
+        for cell, count in image_counts.items()
+    ]
+    return images, charts
 
 
-def _sheet_charts(sheet: Worksheet, name: str) -> Iterator[DocumentChart]:
-    for chart in sheet._charts:
-        cell = _anchor_cell(chart.anchor)
-        yield DocumentChart(
-            location=f"{name}!{cell}" if cell else name,
-            title=_chart_title(chart.title),
-        )
+def _relationship_targets(
+    archive: ZipFile, parts: set[str], part: str
+) -> dict[str, Relationship]:
+    """A part's relationships by id, so each anchor finds its target directly."""
+
+    relationships_path = get_rels_path(part)
+    if relationships_path not in parts:
+        return {}
+    return {
+        relationship.Id: relationship
+        for relationship in get_dependents(archive, relationships_path)
+    }
 
 
 def _anchor_cell(anchor: object) -> str:

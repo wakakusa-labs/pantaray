@@ -8,10 +8,6 @@ import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore
 import type { OverlaySnapshotPayload } from '../../src/components/agent-overlay/model/overlayTypes';
 import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
 
-type SharePayload = Parameters<
-  NonNullable<NonNullable<typeof window.electron>['share']>['captureShareCard']
->[0];
-
 // Production renderer with deterministic IPC pages, isolated from live accounts and storage.
 let vite: ViteDevServer;
 let baseUrl: string;
@@ -21,7 +17,7 @@ test.beforeAll(async () => {
   baseUrl = vite.resolvedUrls!.local[0];
 });
 test.afterAll(async () => vite.close());
-test.use({ viewport: { width: 460, height: 800 }, deviceScaleFactor: 2 });
+test.use({ viewport: { width: 520, height: 800 }, deviceScaleFactor: 2 });
 
 function conversation(settled: boolean, includeLastTool = true): ActionConversationPage {
   const assistant = (step: number, content: string) => ({
@@ -117,7 +113,7 @@ async function capture(page: Page, info: TestInfo, name: string) {
         .map((animation) => animation.finished)
     );
   });
-  await page.locator('[data-sharecard-root]').screenshot({ path: info.outputPath(`${name}.png`) });
+  await page.locator('[data-overlay-panel]').screenshot({ path: info.outputPath(`${name}.png`) });
 }
 
 async function installBridge(page: Page, language: 'ja' | 'en') {
@@ -130,20 +126,8 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
     const noop = () => {};
     Object.defineProperty(window, 'electron', {
       value: {
-        ipcRenderer: {
-          on: () => noop,
-          send: (channel: string) => {
-            if (channel === 'sharecard:ready')
-              document.documentElement.dataset.sharecardReady = 'true';
-          },
-        },
+        ipcRenderer: { on: () => noop, send: noop },
         agentOverlay: {
-          onSetContent: (callback: (payload: string) => void) => {
-            const listener = (event: Event) => callback((event as CustomEvent<string>).detail);
-            window.addEventListener('test:sharecard', listener);
-            document.documentElement.dataset.sharecardInputReady = 'true';
-            return () => window.removeEventListener('test:sharecard', listener);
-          },
           onSnapshot: (callback: (payload: OverlaySnapshotPayload) => void) => {
             const listener = (event: Event) =>
               callback((event as CustomEvent<OverlaySnapshotPayload>).detail);
@@ -153,12 +137,6 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           },
           resize: noop,
           getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
-        },
-        share: {
-          captureShareCard: async (payload: SharePayload) => {
-            document.documentElement.dataset.shared = JSON.stringify(payload);
-            return { ok: true, clipboardOk: true, downloadOk: true };
-          },
         },
         orchestration: {
           onEvent: () => noop,
@@ -258,7 +236,7 @@ for (const language of ['ja', 'en'] as const) {
 }
 
 async function backgroundStyle(page: Page) {
-  return page.locator('[data-sharecard-root]').evaluate((element) => {
+  return page.locator('[data-overlay-panel]').evaluate((element) => {
     const style = getComputedStyle(element, '::before');
     return [style.backgroundImage, style.filter, style.backgroundSize];
   });
@@ -392,33 +370,6 @@ for (const language of ['ja', 'en'] as const) {
     await expect(bubbles).toHaveCount(1);
     await expect(bubbles).toHaveText('変更の影響も確認して');
     await capture(page, info, 'approved-history-no-comment');
-    await page
-      .getByRole('button', {
-        name: language === 'ja' ? 'スクリーンショットを共有' : 'Share Screenshot',
-      })
-      .click();
-    const shared = await page.locator('html').getAttribute('data-shared');
-    expect(JSON.parse(shared!)).toMatchObject({
-      suggestionText: PROPOSAL,
-      isSuggestionStreamFinished: true,
-      isSuggestionAccepted: true,
-    });
-    await page.goto(`${baseUrl}notification.html?mode=sharecard`);
-    await expect(page.locator('html')).toHaveAttribute('data-sharecard-input-ready', 'true');
-    await page.evaluate(
-      (detail) => window.dispatchEvent(new CustomEvent('test:sharecard', { detail })),
-      shared
-    );
-    await expect(page.locator('html')).toHaveAttribute('data-sharecard-ready', 'true');
-    await expect(page.locator('a').filter({ hasText: '設定ファイルの変更' })).toHaveCount(1);
-    await expect(badge).toHaveCount(1);
-    const shareBadgeBox = (await badge.boundingBox())!;
-    const shareTextBox = (await badge.locator('..').boundingBox())!;
-    expect(
-      Math.abs(shareBadgeBox.x + shareBadgeBox.width - shareTextBox.x - shareTextBox.width)
-    ).toBeLessThan(2);
-    expect(await backgroundStyle(page)).toEqual(initialBackground);
-    await capture(page, info, 'approved-share-card');
     expect(errors).toEqual([]);
   });
 }
@@ -485,7 +436,7 @@ for (const language of ['ja', 'en'] as const) {
       await expect(page.locator('html')).toHaveAttribute('data-pending-cursor', `cursor-${index}`);
       await page.evaluate(() => window.dispatchEvent(new Event('test:release-history')));
     };
-    const scroll = page.locator('[data-sharecard-scroll]');
+    const scroll = page.locator('[data-overlay-scroll]');
     const bottomGap = () =>
       scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
     await open(page);
@@ -595,7 +546,7 @@ for (const language of ['ja', 'en'] as const) {
       await publish(page, 1, active);
       await expect(page.getByText(request.content!, { exact: true })).toBeAttached();
     };
-    const scroll = page.locator('[data-sharecard-scroll]');
+    const scroll = page.locator('[data-overlay-scroll]');
     const bottomGap = () =>
       scroll.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
     await open();

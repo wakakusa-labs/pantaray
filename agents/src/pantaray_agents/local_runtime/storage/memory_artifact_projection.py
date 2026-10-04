@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from pantaray_agents.utils.memory_source_policy import EMPTY_TEXT_SHA256_HEX
+from pantaray_agents.utils.timestamps import format_iso8601_utc_z_milliseconds
 
 MemoryProjectionSource = Literal["long_term_insight", "facts"]
 MemoryBlockKind = Literal["heading", "paragraph", "list_item"]
@@ -472,5 +473,6 @@ def _projection_byte_size(projection: MemoryArtifactProjection) -> int:
     return len((projection.content or "").encode("utf-8"))
 
 
+# Storage sits below local_runtime.runtime, so it formats with the primitive.
 def _utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return format_iso8601_utc_z_milliseconds(datetime.now(UTC))

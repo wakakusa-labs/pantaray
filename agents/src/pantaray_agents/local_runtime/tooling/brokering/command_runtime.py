@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from .broker_protocol import BrokerExecutionKind
+from .login_shell_path import login_shell_path
 
 PATH_ENV_ALLOWLIST = ("LANG", "LC_ALL")
 LOGIN_ENV_ALLOWLIST = ("USER", "LOGNAME", "SSH_AUTH_SOCK")
@@ -47,7 +48,9 @@ def build_command_env(
                 candidate = (current / relative).resolve()
                 if candidate.is_dir() and candidate.is_relative_to(workspace_root):
                     path_entries.append(str(candidate))
-    env["PATH"] = os.pathsep.join(dict.fromkeys([*path_entries, os.environ["PATH"]]))
+    env["PATH"] = os.pathsep.join(
+        dict.fromkeys([*path_entries, *login_shell_path().split(os.pathsep)])
+    )
     return env
 
 

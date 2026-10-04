@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.tooling.react_tools import (
 )
 
 from .commands import SuggestionCommandSession
+from .memory_sql import SuggestionMemorySqlSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
 
@@ -67,6 +68,11 @@ class LocalSuggestionResearchTools:
         )
         return (
             *memory_tools.definitions(),
+            SuggestionMemorySqlSession(
+                db_path=self.db_path,
+                busy_timeout_ms=self.busy_timeout_ms,
+                user_id=user_id,
+            ).definition(),
             *ReadOnlyFileToolSession(
                 roots=self.snapshot.roots,
                 user_id=user_id,

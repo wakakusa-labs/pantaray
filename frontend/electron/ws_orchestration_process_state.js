@@ -142,7 +142,7 @@ function createProcessResumeState({
     if (shownOverlayForSuggestion.has(sid)) return;
     shownOverlayForSuggestion.add(sid);
     try {
-      showNotification('', sid);
+      showNotification(sid);
     } catch (_) {
       try { shownOverlayForSuggestion.delete(sid); } catch {}
     }

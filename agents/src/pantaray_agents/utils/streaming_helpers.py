@@ -1,32 +1,20 @@
 """ストリーミング用の共通ヘルパ。
 
-NDJSON行の生成、UTC現在時刻の付与、標準チャンク/終了イベントの生成を提供する。
+NDJSON行の生成とタスクステータスの正規化を提供する。
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 
 from pantaray_agents.schema.agent.base import JSONValue, TaskStatusType
-from pantaray_agents.schema.agent.streaming import CompletionChunk, StreamEndData
 
 type StreamPayload = dict[str, JSONValue]
-
-
-def now_iso_utc() -> str:
-    """UTC現在時刻をISO 8601文字列で返す。"""
-    return datetime.now(UTC).isoformat()
 
 
 def ndjson_line(event: str, data: StreamPayload) -> str:
     """`{"event": ..., "data": ...}` 形式のNDJSON行を生成する。"""
     return json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n"
-
-
-def make_completion_chunk(content: str, index: int) -> CompletionChunk:
-    """`CompletionChunk` を現在時刻付きで生成する。"""
-    return CompletionChunk(content=content, chunk_index=index, timestamp=now_iso_utc())
 
 
 def coerce_task_status(value: object) -> TaskStatusType:
@@ -61,24 +49,3 @@ def coerce_task_status(value: object) -> TaskStatusType:
     if text in {"processing", "success", "error", "canceled", "timeout"}:
         return TaskStatusType(text)
     return TaskStatusType.ERROR
-
-
-def make_stream_end_for_suggestion(
-    *,
-    suggestion_id: str,
-    user_id: str,
-    has_suggestion: bool,
-    total_chunks: int,
-    status: TaskStatusType = TaskStatusType.SUCCESS,
-    duration_ms: int = 0,
-) -> StreamEndData:
-    """Suggestion用の `StreamEndData` を現在時刻付きで生成する。"""
-    return StreamEndData(
-        suggestion_id=suggestion_id,
-        has_suggestion=has_suggestion,
-        user_id=user_id,
-        completed_at=now_iso_utc(),
-        status=status,
-        total_chunks=total_chunks,
-        duration_ms=duration_ms,
-    )

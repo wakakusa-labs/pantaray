@@ -36,14 +36,6 @@ class InitialInsightBrief:
 
 
 @dataclass(frozen=True, slots=True)
-class InitialShortTermInsight:
-    insight_id: str
-    short_term_insight_data: str
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True, slots=True)
 class InitialFactsBrief:
     fact_id: str
     facts_profile_brief: str
@@ -54,7 +46,6 @@ class InitialFactsBrief:
 @dataclass(frozen=True, slots=True)
 class InitialMemoryContext:
     insight: InitialInsightBrief | None
-    short_term_insights: tuple[InitialShortTermInsight, ...]
     facts: InitialFactsBrief | None
     artifacts: tuple[InitialMemoryArtifact, ...]
     context_epoch: MemoryContextEpochCheckpoint | None
@@ -67,5 +58,4 @@ __all__ = [
     "InitialMemoryArtifactFile",
     "InitialMemoryContext",
     "InitialMemorySourceType",
-    "InitialShortTermInsight",
 ]

@@ -38,8 +38,6 @@ function createMainContextForAuthTests(overrides = {}) {
       updateBrowserUrlRules: () => [],
       updateIdeFileRules: () => [],
     },
-    screenshotLib: {},
-    execPromise: async () => ({ stdout: '' }),
     openExternalUrl: async () => ({ ok: true }),
     wsSend: async () => {},
     wsAcceptAction: async () => ({ ok: true }),

@@ -118,7 +118,6 @@ async def test_parent_execution_surface_offers_children_without_legacy_tools() -
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "Complete the task"
 
     captured = _CapturedParentSurface()
 

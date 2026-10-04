@@ -53,9 +53,6 @@ def _build_runtime_services() -> SimpleNamespace:
             render_workspace_path_contract=MagicMock(return_value=""),
             render_workspace_context_rules=MagicMock(return_value=""),
             render_workspace_context_prompt=MagicMock(return_value=""),
-            render_supervisor_pending_final_answer=MagicMock(
-                return_value="No pending final-answer draft."
-            ),
         ),
     )
 
@@ -85,8 +82,8 @@ async def test_execution_think_injects_final_answer_language_ja() -> None:
 
     # minimal prompt/instruction
     agent.executing_prompt = (
-        "{user_request}{request_summary}{target_context}"
-        "{insight_data}{structured_fact_data}{action_history}{current_time}"
+        "{request_summary}{target_context}"
+        "{insight_data}{structured_fact_data}{current_time}{action_history}"
     )
     agent.executing_system_instruction = (
         "BASE\n"
@@ -94,6 +91,7 @@ async def test_execution_think_injects_final_answer_language_ja() -> None:
         "Other outputs (tool-call JSON) may be in any language.\n"
     )
     agent.DEFAULT_SYSTEM_INSTRUCTION = "DEFAULT"
+    agent.executing_world_state_update.return_value = "UPDATE"
 
     agent._generate_llm_action_turn = AsyncMock(
         return_value=native_tool_turn("draft_final_answer", {"answer": "ok"})
@@ -127,8 +125,8 @@ async def test_execution_think_injects_final_answer_language_en() -> None:
     agent = MagicMock()
 
     agent.executing_prompt = (
-        "{user_request}{request_summary}{target_context}"
-        "{insight_data}{structured_fact_data}{action_history}{current_time}"
+        "{request_summary}{target_context}"
+        "{insight_data}{structured_fact_data}{current_time}{action_history}"
     )
     agent.executing_system_instruction = (
         "BASE\n"
@@ -136,6 +134,7 @@ async def test_execution_think_injects_final_answer_language_en() -> None:
         "Other outputs (tool-call JSON) may be in any language.\n"
     )
     agent.DEFAULT_SYSTEM_INSTRUCTION = "DEFAULT"
+    agent.executing_world_state_update.return_value = "UPDATE"
 
     agent._generate_llm_action_turn = AsyncMock(
         return_value=native_tool_turn("draft_final_answer", {"answer": "ok"})

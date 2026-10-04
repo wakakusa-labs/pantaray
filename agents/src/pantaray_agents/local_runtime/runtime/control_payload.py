@@ -107,6 +107,7 @@ def validate_cloud_session_fields(
         desktop_access_token=require_non_empty(
             desktop_access_token, field_name="desktop_access_token"
         ),
+        # Keeps the Cloud-issued expiry precision; readers parse it before comparing.
         expires_at=expires_at_dt.isoformat().replace("+00:00", "Z"),
         session_version=normalize_session_version(session_version),
     )

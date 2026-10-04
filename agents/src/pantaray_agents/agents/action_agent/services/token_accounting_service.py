@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.log_safety import safe_value_shape
@@ -21,6 +20,7 @@ from pantaray_agents.agents.core.mixins.llm_usage import (
     TokenBudgetExceeded,
     add_llm_usage,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import AgentError
 
 type AgentErrorBuilder = Callable[..., AgentError]
@@ -165,7 +165,7 @@ class ActionTokenAccountingService:
             set_status_with_updated_at(
                 state,
                 status="error",
-                updated_at=datetime.now(UTC).isoformat(),
+                updated_at=now_utc_iso(),
             )
             state["final_output"] = ""
             state["next_action"] = None

@@ -16,7 +16,7 @@ def write_inline_repair_projection(
     if source == "source_records":
         # Search projections never rewrite the immutable captured records.
         return
-    if source in {"action_file_read", "agent_experience"}:
+    if source in {"action_file_read", "agent_experience", "memory_note"}:
         # Catalog-native records have no second domain projection to mutate.
         return
     body = revision.inline_body

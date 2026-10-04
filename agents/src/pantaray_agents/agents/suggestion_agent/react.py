@@ -34,14 +34,20 @@ from pantaray_llm.contracts.tool_use import (
 
 from .research import SuggestionResearchTools
 
-SUGGESTION_MAX_LLM_TURNS = 30
-SUGGESTION_MAX_RESEARCH_TOOL_CALLS = 30
+# Deep research is the point of the run: quality comes before cost or duration.
+SUGGESTION_MAX_LLM_TURNS = 300
+SUGGESTION_MAX_RESEARCH_TOOL_CALLS = 300
+# Design limit: replays measured about 5 bytes per input token over a run and 2.4 at
+# worst for Japanese tool output, so 400 kB stays under a 200k-token context with the
+# system prompt and tools. Raise it when a supported model's measured ratio allows.
+SUGGESTION_MAX_INPUT_BYTES = 400_000
 SUBMIT_SUGGESTION_TOOL_NAME = "submit_suggestion"
 # Offered only while the user lets commands run without asking.
 SUGGESTION_COMMAND_TOOL_ID = "bash"
 SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "memory_search",
     "get_memory_reference",
+    "memory_sql",
     "read",
     "list",
     "glob",
@@ -130,20 +136,27 @@ def _terminal_tool() -> LlmToolDefinition:
             "additionalProperties": False,
             "required": [
                 "has_suggestion",
-                "answer",
                 "interaction_contract",
+                "key_point",
                 "suggestion_summary",
                 "target_context",
+                "candidates",
             ],
             "properties": {
                 "has_suggestion": {"type": "boolean"},
-                "answer": {
-                    "type": "string",
-                    "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-                },
                 "interaction_contract": {
                     "type": ["string", "null"],
                     "enum": ["action_offer", "message_only", None],
+                },
+                "key_point": {
+                    "type": "string",
+                    "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
+                    "description": (
+                        "The suggestion in a few concise sentences for the user, "
+                        "who has not seen your research: what you suggest, why "
+                        "it matters now, the deciding facts, what is unconfirmed "
+                        "and, for an offer, what Pantaray would do."
+                    ),
                 },
                 "suggestion_summary": {"type": ["string", "null"]},
                 "target_context": {
@@ -159,6 +172,28 @@ def _terminal_tool() -> LlmToolDefinition:
                             },
                         },
                     ]
+                },
+                "candidates": {
+                    "type": "array",
+                    "description": (
+                        "Up to eight candidates you considered, including the one "
+                        "you suggest and the best one for each endeavor, each with "
+                        "why it was suggested or skipped and the shift it came from. "
+                        "Diagnostic only; never shown to the user."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["candidate", "decision", "reason"],
+                        "properties": {
+                            "candidate": {"type": "string"},
+                            "decision": {
+                                "type": "string",
+                                "enum": ["suggested", "skipped"],
+                            },
+                            "reason": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
@@ -266,6 +301,7 @@ async def run_suggestion_react(
             policy=ReactLoopPolicy(
                 max_llm_turns=SUGGESTION_MAX_LLM_TURNS,
                 max_tool_calls=SUGGESTION_MAX_RESEARCH_TOOL_CALLS,
+                max_input_bytes=SUGGESTION_MAX_INPUT_BYTES,
             ),
             consume_llm_thoughts=discard_thoughts,
             final_turn_prompt=(

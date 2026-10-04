@@ -1,7 +1,11 @@
 const assert = require('assert');
 const { test } = require('node:test');
 
-const { getTrayMenuCopy } = require('../electron/dist/ui/mainProcessCopy.js');
+const {
+  formatMacAccelerator,
+  getTrayMenuCopy,
+  getWelcomeSuggestionText,
+} = require('../electron/dist/ui/mainProcessCopy.js');
 
 function status(overrides) {
   return {
@@ -84,4 +88,24 @@ test('tray copy keeps recorder failure text out of the unavailable status', () =
       if (!screenshotsEnabled) assert.doesNotMatch(detail, /一時停止|pause/i);
     }
   }
+});
+
+test('accelerators read as macOS draws them, modifiers in ⌃⌥⇧⌘ order', () => {
+  assert.equal(formatMacAccelerator('Option+Space'), '⌥Space');
+  assert.equal(formatMacAccelerator('Command+Shift+Alt+K'), '⌥⇧⌘K');
+  assert.equal(formatMacAccelerator('Hyper+Space'), 'HyperSpace');
+});
+
+test('the welcome names the shortcut the user has, or only the button', () => {
+  assert.equal(
+    getWelcomeSuggestionText('ja', 'Option+Space'),
+    'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。\n\n' +
+      'それまでも、任せたい仕事があればいつでも ⌥Space か新しい会話ボタンで声をかけてください。'
+  );
+  assert.match(getWelcomeSuggestionText('ja', null), /いつでも新しい会話ボタンで声をかけてください。$/);
+  assert.match(
+    getWelcomeSuggestionText('en', 'Option+Space'),
+    /just press ⌥Space or use the New conversation button\.$/
+  );
+  assert.match(getWelcomeSuggestionText('en', null), /just use the New conversation button\.$/);
 });

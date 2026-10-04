@@ -101,6 +101,35 @@ def test_time_prior_reorders_only_activity_candidates_in_bounded_window() -> Non
     ]
 
 
+def test_time_prior_keeps_relevance_order_for_activity_with_equal_times() -> None:
+    # Millisecond timestamps tie for records written together; the fragment id
+    # must not outrank relevance then.
+    near = _hit(
+        "z-near",
+        source="activity_log",
+        rank=0,
+        updated_at="2026-01-01T00:00:00.000Z",
+    )
+    far = _hit(
+        "a-far",
+        source="activity_log",
+        rank=1,
+        updated_at="2026-01-01T00:00:00.000Z",
+    )
+
+    ranked = rank_memory_candidates(
+        candidates=merge_candidate_lanes(exact=(), lexical=(), semantic=(near, far)),
+        center_time=None,
+        radius_hours=None,
+        limit=10,
+    )
+
+    assert [item.fragment.fragment_id for item in ranked] == [
+        "fragment-z-near",
+        "fragment-a-far",
+    ]
+
+
 def test_time_prior_never_reorders_exact_activity_candidates() -> None:
     old_activity = _hit(
         "old-activity",

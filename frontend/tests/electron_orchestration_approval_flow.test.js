@@ -36,7 +36,6 @@ function createManagerHarness(overrides = {}) {
       setOverlaySnapshot: (id, payload) => {
         overlayPayloads.set(String(id), payload);
       },
-      getNotificationWindow: () => null,
       sendToAllOverlays: () => {},
       sendResetToAllOverlays: () => {},
       dispatchEventToOverlay: () => false,
@@ -44,7 +43,7 @@ function createManagerHarness(overrides = {}) {
         if (channel === 'action:conversationUpdated') liveUpdates.push(payload);
       },
       registerProcessAssociation: () => {},
-      registerActionAssociation: () => {},
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
       cleanupMappingsForAction: () => {},
       resolveOverlayId: ({ actionId }) => (actionId === 'act-1' ? 'sug-1' : null),

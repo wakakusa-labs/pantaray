@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    prompt_configs,
+    serve_lens_runs,
+)
 
 from pantaray_agents.agents.capability_envelopes import (
     ACTION_AGENT_CAPABILITY_ENVELOPE,
@@ -31,7 +35,6 @@ from pantaray_agents.schema.agent.suggestion import (
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_agents.schema.repository_errors import FetchContextError
-from pantaray_agents.utils.prompt_loader import PromptConfig
 
 _STABLE_MEMORY = SuggestionStableMemoryContext(
     prompt="Stable memory summary",
@@ -58,18 +61,18 @@ def _prompt_context() -> SuggestionFetchedContext:
 def _no_suggestion_output() -> dict[str, object]:
     return {
         "has_suggestion": False,
-        "answer": "",
         "interaction_contract": None,
+        "key_point": "",
         "suggestion_summary": None,
         "target_context": None,
     }
 
 
-def _suggestion_output(answer: str) -> dict[str, object]:
+def _suggestion_output(point: str) -> dict[str, object]:
     return {
         "has_suggestion": True,
-        "answer": answer,
         "interaction_contract": "action_offer",
+        "key_point": point,
         "suggestion_summary": "Action handoff summary",
         "target_context": {
             "organization_name": "Wakakusa",
@@ -99,7 +102,7 @@ def test_suggestion_agent_build_prompt_rejects_unknown_placeholders(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -118,7 +121,7 @@ def test_suggestion_agent_build_prompt_requires_context_density_signal(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -132,7 +135,7 @@ def test_suggestion_agent_build_prompt_requires_context_density_signal(
             _ = agent._build_prompt(context)  # type: ignore[arg-type]  # noqa: SLF001
 
 
-@pytest.mark.parametrize("prompt_chars", [64_000, 64_001])
+@pytest.mark.parametrize("prompt_chars", [124_000, 124_001])
 def test_suggestion_agent_build_prompt_character_budget(
     prompt_chars: int,
     mock_repository: MockSuggestionAgentRepository,
@@ -149,13 +152,13 @@ def test_suggestion_agent_build_prompt_character_budget(
     template_chars = len(agent._build_prompt(context))
     context["workspace_context_prompt"] = "文" * (prompt_chars - template_chars)
 
-    if prompt_chars == 64_000:
+    if prompt_chars == 124_000:
         rendered = agent._build_prompt(context)
         assert len(rendered) == prompt_chars
         assert context["workspace_context_prompt"] in rendered
     else:
         with pytest.raises(
-            ValueError, match="64001 characters.*64000-character budget"
+            ValueError, match="124001 characters.*124000-character budget"
         ):
             agent._build_prompt(context)
 
@@ -199,7 +202,7 @@ async def test_suggestion_agent_sends_large_activity_context_without_truncation(
         research_tools=build_mock_suggestion_research_tools(),
         stable_memory=_STABLE_MEMORY,
     )
-    mock_llm_client.set_next_response(_suggestion_output("次の作業を進めますか？"))
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     response = await agent.process(
         SuggestionAgentRequest(
@@ -213,7 +216,7 @@ async def test_suggestion_agent_sends_large_activity_context_without_truncation(
     assert response.status == StatusType.SUCCESS
     prompt = mock_llm_client.last_prompt
     assert prompt is not None
-    assert 16_000 < len(prompt) < 64_000
+    assert 16_000 < len(prompt) < 124_000
     for summary in summaries.values():
         assert summary in prompt
     for i in range(3):
@@ -252,7 +255,7 @@ async def test_suggestion_agent_process_includes_action_capabilities_in_prompt(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -268,7 +271,7 @@ async def test_suggestion_agent_process_includes_action_capabilities_in_prompt(
             short_term_insight="# Insight\nThe user is fixing a parser bug.",
             reconsideration_reason="The user switched goals.",
         )
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await agent.process(req)
         prompt_used = mock_llm_client.last_prompt or ""
         assert "Capabilities:" in prompt_used
@@ -305,7 +308,7 @@ async def test_suggestion_agent_process_no_suggestion(
         reconsideration_reason="The user switched goals.",
     )
 
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     response = await suggestion_agent.process(request)
 
@@ -343,7 +346,8 @@ async def test_suggestion_agent_process_with_suggestion(
         reconsideration_reason="The user switched goals.",
     )
 
-    mock_llm_client.set_next_response(_suggestion_output("Try task 1?"))
+    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
+    mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
 
     response = await suggestion_agent.process(request)
 
@@ -385,7 +389,7 @@ async def test_suggestion_agent_uses_preloaded_stable_memory(
             wraps=suggestion_agent._build_prompt,
         ) as mock_build_prompt,
     ):
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await suggestion_agent.process(request)
 
         assert mock_build_prompt.call_count >= 1
@@ -587,7 +591,8 @@ async def test_suggestion_agent_repository_error_on_save(
         short_term_insight="# Insight\nThe user is fixing a parser bug.",
         reconsideration_reason="The user switched goals.",
     )
-    mock_llm_client.set_next_response(_suggestion_output("Try task 1?"))
+    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
+    mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
 
     response = await suggestion_agent.process(request)
 

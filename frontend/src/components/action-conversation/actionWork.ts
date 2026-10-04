@@ -12,11 +12,19 @@ export type AgentWorkSection = {
   lines: [WorkLine, ...WorkLine[]];
 };
 
+/**
+ * A run folds its commentary into Pantaray's work once its final answer is shown; until
+ * then, and in a run that failed or stopped, the commentary stays in the conversation.
+ */
+export function foldsCommentary(lines: readonly ActionConversationRunLine[]): boolean {
+  return lines.some((line) => line.kind === 'final_output');
+}
+
 /** Group only adjacent work; user messages and final answers always remain boundaries. */
 export function groupAgentWork(
-  lines: readonly ActionConversationRunLine[],
-  foldCommentary: boolean
+  lines: readonly ActionConversationRunLine[]
 ): (ActionConversationRunLine | AgentWorkSection)[] {
+  const foldCommentary = foldsCommentary(lines);
   const sections: (ActionConversationRunLine | AgentWorkSection)[] = [];
   // A message-only Suggestion precedes the initial USER and remains conversation context.
   const initialUserIndex = lines.findIndex(

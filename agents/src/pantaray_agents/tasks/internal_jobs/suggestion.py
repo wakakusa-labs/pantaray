@@ -10,7 +10,9 @@ from pantaray_agents.local_runtime.context.source_control import context_source_
 from pantaray_agents.local_runtime.context.source_gate import SourceInvalidated
 from pantaray_agents.local_runtime.context.source_transport import source_scope
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.job_control import DeferredLocalJob
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
+    job_owner_changed,
     require_current_route_identity,
 )
 from pantaray_agents.local_runtime.runtime.runtime_env import (
@@ -21,6 +23,7 @@ from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
     read_reconsidered_insight,
     reserve_suggestion_start,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     build_workspace_context_prompt,
 )
@@ -30,6 +33,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     InsightActivityStart,
     build_suggestion_research_snapshot,
+)
+from pantaray_agents.orchestration.ws.deliverable_sessions import (
+    owner_has_deliverable_session,
 )
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
 from pantaray_agents.schema.repository_errors import repository_data_or_raise
@@ -65,6 +71,20 @@ async def _finalize_suggestion_start_error(
         raise RuntimeError(result.error)
 
 
+async def _discard_suggestion(*, repository, payload, reason: str) -> None:
+    """End the row and delete whatever the run recorded; nothing is published.
+
+    The log names the reason, never the content.
+    """
+    logger.info("Dropping Suggestion job %s because %s", payload["job_id"], reason)
+    result = await repository.discard_suggestion_if_processing(
+        user_id=payload["user_id"],
+        suggestion_id=payload["suggestion_id"],
+    )
+    if result.error:
+        raise RuntimeError(result.error)
+
+
 async def _drop_if_capture_paused(
     *,
     repository,
@@ -76,11 +96,9 @@ async def _drop_if_capture_paused(
 
     Turning recording off stops new Suggestions. This job is the one path that
     could still make one out of the tail recorded before the toggle, so it
-    produces nothing. The row the enqueueing transaction created is ended as
-    canceled rather than left `processing`, which the suggestion route reports
-    as a stream still in progress.
+    produces nothing, and any answer it already generated is discarded.
 
-    Callers keep both the read and the cancel inside a block that defers, so a
+    Callers keep both the read and the discard inside a block that defers, so a
     locked database retries the job instead of failing it for good.
     """
     if not capture_paused_for_user(
@@ -89,16 +107,11 @@ async def _drop_if_capture_paused(
         user_id=payload["user_id"],
     ):
         return False
-    logger.info(
-        "Dropping Suggestion job %s because activity recording is paused",
-        payload["job_id"],
+    await _discard_suggestion(
+        repository=repository,
+        payload=payload,
+        reason="activity recording is paused",
     )
-    result = await repository.cancel_suggestion_if_processing(
-        user_id=payload["user_id"],
-        suggestion_id=payload["suggestion_id"],
-    )
-    if result.error:
-        raise RuntimeError(result.error)
     return True
 
 
@@ -192,6 +205,22 @@ async def _publish_while_readable(
     except SourceInvalidated:
         return False
     return True
+
+
+def _run_access_revoked(
+    *, user_id: str, activity_start: InsightActivityStart | None
+) -> bool:
+    """Whether this run lost the access it generated under.
+
+    An account switch forgets the previous owner's permit and hands the local
+    data to someone else, and neither is undone by requeueing the job.
+    """
+    if job_owner_changed():
+        return True
+    return (
+        activity_start is not None
+        and context_source_control.gate.current(user_id) != activity_start.source
+    )
 
 
 async def _resolve_ui_language(user_id: str) -> str | None:
@@ -288,12 +317,11 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
             now=datetime.now(UTC),
         )
         if decision == "superseded":
-            canceled = await repository.cancel_suggestion_if_processing(
-                user_id=payload["user_id"],
-                suggestion_id=payload["suggestion_id"],
+            await _discard_suggestion(
+                repository=repository,
+                payload=payload,
+                reason="a newer review superseded it",
             )
-            if canceled.error:
-                raise RuntimeError(canceled.error)
             return
         if isinstance(decision, datetime):
             await defer_local_job_transition_with_retry(
@@ -302,11 +330,24 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
                 process_pending_status="enqueued",
                 db_path=db_path,
                 busy_timeout_ms=timeout_ms,
-                scheduled_at=decision.isoformat().replace("+00:00", "Z"),
+                scheduled_at=format_utc_iso(decision),
             )
         response = await _process_while_readable(
             agent=agent, request=request, activity_start=activity_start
         )
+    except DeferredLocalJob:
+        # A model call saw the route change and put the job back in the queue.
+        # A requeue restores neither a switched owner nor a revoked permit, so
+        # what this run recorded is discarded here, as after the answer below.
+        if _run_access_revoked(
+            user_id=payload["user_id"], activity_start=activity_start
+        ):
+            await _discard_suggestion(
+                repository=repository,
+                payload=payload,
+                reason="access was lost during the run",
+            )
+        raise
     except Exception as exc:
         await defer_local_job_if_retryable(
             exc=exc,
@@ -338,27 +379,46 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
             payload=payload,
         ):
             return
+        # A run that lost its access is discarded before the route check below:
+        # that check requeues the job, and an account switch means the previous
+        # owner's job is never claimed again, which would keep its run steps.
+        if response is None or _run_access_revoked(
+            user_id=payload["user_id"], activity_start=activity_start
+        ):
+            await _discard_suggestion(
+                repository=repository,
+                payload=payload,
+                reason="activity access was revoked",
+            )
+            return
         # The same reasoning for the route: the Suggestion row is the only
         # thing this job publishes, and it belongs to whoever the run started
         # for, on the account the answer was inferred on.
         await require_current_route_identity()
-        if response is not None and await _publish_while_readable(
+        # A Suggestion is only useful when it is made. With no session to relay
+        # it now, it is discarded with its run trace rather than stored, listed
+        # or remembered, and nothing delivers it later. A session that opens or
+        # closes during this check can still lose one delivered Suggestion or
+        # drop one; accepted.
+        if not owner_has_deliverable_session(payload["user_id"]):
+            await _discard_suggestion(
+                repository=repository,
+                payload=payload,
+                reason="no session can deliver it",
+            )
+            return
+        if await _publish_while_readable(
             repository=repository,
             agent=agent,
             response=response,
             activity_start=activity_start,
         ):
             return
-        logger.info(
-            "Dropping Suggestion job %s because activity access was revoked",
-            payload["job_id"],
+        await _discard_suggestion(
+            repository=repository,
+            payload=payload,
+            reason="activity access was revoked",
         )
-        canceled = await repository.cancel_suggestion_if_processing(
-            user_id=payload["user_id"],
-            suggestion_id=payload["suggestion_id"],
-        )
-        if canceled.error:
-            raise RuntimeError(canceled.error)
     except Exception as exc:
         await defer_local_job_if_retryable(
             exc=exc,

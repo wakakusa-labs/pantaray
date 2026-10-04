@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from pydantic import ValidationError
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import AgentError, JSONValue
 
 from .types import ActionAgentState, ActionStatus, AgentErrorState
@@ -18,18 +17,13 @@ class StateErrorInvariantError(RuntimeError):
 type AgentErrorPayload = dict[str, JSONValue]
 
 
-def now_iso() -> str:
-    """現在時刻（UTC, ISO8601）を返す。"""
-    return datetime.now(UTC).isoformat()
-
-
 def touch_updated_at(
     state: ActionAgentState,
     *,
     updated_at: str | None = None,
 ) -> str:
     """state.updated_at を更新する。"""
-    resolved = updated_at or now_iso()
+    resolved = updated_at or now_utc_iso()
     state["updated_at"] = resolved
     return resolved
 
@@ -41,7 +35,7 @@ def set_status_with_updated_at(
     updated_at: str | None = None,
 ) -> str:
     """state.status と state.updated_at を同時更新する。"""
-    resolved = updated_at or now_iso()
+    resolved = updated_at or now_utc_iso()
     state["status"] = status
     state["updated_at"] = resolved
     return resolved
@@ -134,7 +128,6 @@ __all__ = [
     "append_state_error",
     "append_state_error_payload",
     "append_non_fatal_state_error",
-    "now_iso",
     "StateErrorInvariantError",
     "set_status_with_updated_at",
     "touch_updated_at",

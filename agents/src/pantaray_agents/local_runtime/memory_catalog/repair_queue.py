@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso, utc_now
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .connection import open_memory_catalog_connection
@@ -76,7 +77,7 @@ def schedule_repair_retry(
     error_code: str,
 ) -> None:
     delay_seconds = _retry_delay_seconds(job.attempt_count)
-    next_attempt_at = (datetime.now(UTC) + timedelta(seconds=delay_seconds)).isoformat()
+    next_attempt_at = format_utc_iso(utc_now() + timedelta(seconds=delay_seconds))
     with open_memory_catalog_connection(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms
     ) as connection:

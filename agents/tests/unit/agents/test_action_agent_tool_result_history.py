@@ -70,7 +70,7 @@ async def test_missing_read_is_failed_in_history_and_checkpoint(
         if entry["step_id"] == failed["step_id"]
     )
     assert saved_entry["result_line"] == expected
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     assert f"- Result: {expected}" in formatter.format_history(state)
     assert f"- Result: {expected}" in formatter.format_history(
         state, omit_before_step_number=state["step"]

@@ -663,3 +663,88 @@ async def test_recent_suggestions_keep_dismissal_distinct_from_no_reply(
     assert recent.data is not None
     assert recent.data[0]["user_reaction"] == "rejected"
     assert recent.data[0]["user_reply"] is None
+
+
+@pytest.mark.asyncio
+async def test_recent_suggestions_carry_the_users_later_instructions_in_the_action(
+    tmp_path: Path,
+) -> None:
+    from pantaray_agents.schema.agent.action_message import (
+        ActionUserMessageInput,
+        SuggestionApprovalInput,
+    )
+
+    db_path = _bootstrap_db(tmp_path)
+    repo = _repo(db_path)
+    now = "2099-01-01T00:00:00Z"
+    await repo.create_processing_suggestion_row(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, created_at=now
+    )
+    await repo.save_suggestion(
+        _success_response(answer="Investigate fast-uri and update it?"),
+        prompt_name="suggestion",
+        prompt_version="react_v2",
+    )
+
+    def message(message_id: str, content: str, *, approval: bool = False) -> str:
+        return ActionUserMessageInput(
+            message_id=message_id,
+            content=content,
+            suggestion_approval=SuggestionApprovalInput(
+                suggestion_id=SUGGESTION_ID, approved_at=now
+            )
+            if approval
+            else None,
+        ).model_dump_json()
+
+    rows = [
+        (
+            1,
+            "m-1",
+            message("m-1", "Investigate fast-uri and update it?", approval=True),
+        ),
+        (2, "m-2", message("m-2", "Investigate only, do not update")),
+        # The same instruction sent twice is one instruction.
+        (3, "m-3", message("m-3", "Investigate only, do not update")),
+        (4, "m-4", message("m-4", "Keep going")),
+    ]
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            f"""INSERT INTO agent_actions(action_id,user_id,suggestion_id,initial_user_message_id,
+              execution_target_json,status,final_output,prompt_name,prompt_version,created_at,updated_at)
+            VALUES ('action-1','{USER_ID}','{SUGGESTION_ID}','m-1','{{"kind":"scratch"}}',
+              'processing','','action','1','{now}','{now}')"""
+        )
+        connection.execute(
+            f"""INSERT INTO processes(process_id,user_id,kind,status,action_id,started_at,
+              updated_at,heartbeat_at,next_event_seq)
+            VALUES ('run-1','{USER_ID}','action','running','action-1','{now}','{now}','{now}',1)"""
+        )
+        for index, (step_number, message_id, payload) in enumerate(rows, start=1):
+            connection.execute(
+                """INSERT INTO agent_action_steps(step_id,action_id,user_id,step_number,
+                  local_step_number,short_step_id,step_type,step_name,status,goal_handle,
+                  user_message_id,user_message_json,user_request_text,accepted_sequence,
+                  adopted_process_id,created_at)
+                VALUES (?, 'action-1', ?, ?, ?, ?, 'user_request', 'user_request',
+                  'success', 'S', ?, ?, 'text', ?, 'run-1', ?)""",
+                (
+                    f"step-{index}",
+                    USER_ID,
+                    step_number,
+                    step_number,
+                    f"S-{index}-USER",
+                    message_id,
+                    payload,
+                    index,
+                    now,
+                ),
+            )
+
+    recent = await repo.get_recent_suggestions(USER_ID)
+
+    assert recent.data is not None
+    assert recent.data[0]["action_followups"] == [
+        "Investigate only, do not update",
+        "Keep going",
+    ]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
@@ -13,6 +12,7 @@ from pantaray_agents.agents.action_agent.runtime.steps.tool import (
     record_tool_step,
 )
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import ToolAttachment
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
     CanceledCommandOutput,
 )
@@ -317,7 +317,7 @@ async def _record_stopped_call(
     outcome_status: OutcomeStatus,
 ) -> None:
     state["next_action"] = None
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     tool_error = runtime.services.response.build_agent_error(
         error_type="canceled_error",
         error_code=error_code,
@@ -379,7 +379,7 @@ async def _finalize_unreturned_call(
     finalized_error: FinalizedToolOutput | None,
     tool_invocation_ids: tuple[str, ...],
 ) -> None:
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     append_state_error(state, error=tool_error)
     error_payload = common._build_tool_error_payload(  # noqa: SLF001
         exc,

@@ -41,6 +41,7 @@ def normalize_iso_to_iso_z(value: str) -> str:
         raise ValueError("invalid ISO8601 datetime") from exc
     if dt.tzinfo is None:
         raise ValueError("timezone information is required")
+    # Not the ms form: summary ids are derived from this exact period string.
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 

@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
 import type { LocalOwner } from '../auth/localRuntimeState';
-import type { BrowserUrlProbeResult } from '../ipc/context';
 import type { CapturePrivacyManager } from '../privacy/capturePrivacy';
 import { resolveScopedSettingsPath, SCOPED_PREFERENCE_FILES } from '../settings/scope';
 import type { CaptureStatusSnapshot } from './captureStatus';
@@ -20,28 +19,6 @@ import type {
   SourceTransitionResult,
   StopReason,
 } from '../context/sourceControl';
-type ExecPromise = (command: string) => Promise<{ stdout: string; stderr?: string }>;
-type CaptureActiveWindowInfoFn = (
-  execPromise: ExecPromise,
-  mainWindow: BrowserWindow | null,
-  notificationWindow: BrowserWindow | null
-) => Promise<{ name: string; title: string } | null>;
-
-type GetActiveBrowserUrlFn = (
-  execPromise: ExecPromise,
-  activeAppName: string | null
-) => Promise<BrowserUrlProbeResult>;
-type ProbeBrowserUrlForAppFn = (
-  execPromise: ExecPromise,
-  activeAppName: string | null
-) => Promise<BrowserUrlProbeResult>;
-
-export type ScreenshotLib = {
-  captureActiveWindowInfo?: CaptureActiveWindowInfoFn;
-  getActiveBrowserUrl?: GetActiveBrowserUrlFn;
-  probeBrowserUrlForApp?: ProbeBrowserUrlForAppFn;
-};
-
 export type ScreenshotSyncManager = ReturnType<typeof createScreenshotSyncManager>;
 
 /**
@@ -57,11 +34,8 @@ export function createScreenshotSyncManager(params: {
   isMac: boolean;
   userDataDir: string;
   getMainWindow: () => BrowserWindow | null;
-  getNotificationWindow: () => BrowserWindow | null;
   isBackendRuntimeReady: () => boolean;
   capturePrivacy: CapturePrivacyManager;
-  screenshotLib: ScreenshotLib;
-  execPromise: ExecPromise;
   getManifestPath: () => string;
   requestPermissions: (missing: CapturePermission[]) => Promise<void>;
   readSource: (userId: string) => Promise<SourceState>;
@@ -71,6 +45,8 @@ export function createScreenshotSyncManager(params: {
   ) => Promise<SourceTransitionResult>;
   containSource: (userId: string) => Promise<void>;
   onCaptureStatusChanged?: () => void;
+  /** Capture started for this owner; called once per owner in a run, after the start succeeded. */
+  onRecordingStarted?: (userId: string) => void;
   createProcess?: typeof createZaneiProcess;
 }) {
   let owner: LocalOwner | null = null;
@@ -88,6 +64,18 @@ export function createScreenshotSyncManager(params: {
     request: Extract<SourceTransition, { kind: 'activate' }>;
   } | null = null;
   let pending = Promise.resolve();
+  /** Owners `onRecordingStarted` already heard about in this run. */
+  const reportedStarts = new Set<string>();
+  const reportRecordingStarted = (userId: string) => {
+    if (reportedStarts.has(userId)) return;
+    reportedStarts.add(userId);
+    try {
+      params.onRecordingStarted?.(userId);
+    } catch (error) {
+      // The hook is a courtesy; the start the user asked for already succeeded.
+      console.error('Recording start hook failed:', error);
+    }
+  };
   const settingsPath = () =>
     resolveScopedSettingsPath({
       userDataDir: params.userDataDir,
@@ -330,6 +318,7 @@ export function createScreenshotSyncManager(params: {
   async function activate(): Promise<void> {
     if (!activation) return;
     const restorePaused = activation.request.capture_paused;
+    const activatedFor = activation.userId;
     try {
       const result = await params.transitionSource(activation.userId, activation.request);
       if (result.kind !== 'applied' || result.state.kind !== 'ready') {
@@ -351,6 +340,7 @@ export function createScreenshotSyncManager(params: {
       await suspend('shutdown');
       throw error;
     }
+    if (!restorePaused) reportRecordingStarted(activatedFor);
   }
   /**
    * Starts the recorder this user's stored preference calls for.
@@ -424,15 +414,6 @@ export function createScreenshotSyncManager(params: {
     report.permissions_ok &&
     report.heartbeat_freshness === 'fresh' &&
     report.store_write_state === 'healthy';
-  async function getActiveWindowInfo() {
-    return (
-      (await params.screenshotLib.captureActiveWindowInfo?.(
-        params.execPromise,
-        params.getMainWindow(),
-        params.getNotificationWindow()
-      )) ?? null
-    );
-  }
   return {
     setOwner: (next: LocalOwner) => {
       owner = next;
@@ -501,6 +482,7 @@ export function createScreenshotSyncManager(params: {
         capturePaused = false;
         markEnabled();
         notify();
+        reportRecordingStarted(startedFor.id);
         return 'started';
       }),
     stop: () =>
@@ -541,8 +523,6 @@ export function createScreenshotSyncManager(params: {
         await restoreFromPreference();
         return result;
       }),
-    getCurrentActiveAppName: async () => (await getActiveWindowInfo())?.name ?? null,
-    getActiveWindowInfo,
     getCaptureStatusSnapshot: (): Promise<CaptureStatusSnapshot> =>
       enqueue(async () => {
         const report = await readReport();

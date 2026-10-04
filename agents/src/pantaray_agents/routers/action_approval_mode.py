@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +12,7 @@ from pantaray_agents.local_runtime.runtime.identity import (
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
 )
@@ -97,7 +97,7 @@ async def update_action_approval_mode(
             user_id=user_id,
             action_id=action_id,
             approval_mode=body.approval_mode,
-            updated_at=datetime.now(UTC).isoformat(),
+            updated_at=now_utc_iso(),
         )
     except ActionApprovalModeOwnerError as exc:
         raise HTTPException(

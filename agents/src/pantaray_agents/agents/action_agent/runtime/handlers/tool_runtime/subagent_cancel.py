@@ -17,6 +17,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     ActionSubagentWaitInputError,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.action_subagent import (
     ActionSubagentCollectionReceipt,
 )
@@ -26,7 +27,6 @@ from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 from .subagent_wait import _build_wait_request, _poll_wait
 
@@ -44,7 +44,7 @@ async def run_cancel_subagent_tool(
     child_process_id = require_string_arg(args, "child_process_id")
     request = _build_wait_request(state=state, child_process_ids=(child_process_id,))
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    started_at = now_iso()
+    started_at = now_utc_iso()
     try:
         request_action_subagent_cancellation(
             db_path=db_path,
@@ -64,7 +64,7 @@ async def run_cancel_subagent_tool(
         )
     except (ActionSubagentCancelInputError, ActionSubagentWaitInputError) as exc:
         raise ToolValidationError(str(exc)) from exc
-    completed_at = now_iso()
+    completed_at = now_utc_iso()
     receipt = (
         ActionSubagentCollectionReceipt(request=request, collected_at=completed_at)
         if snapshot.terminal_child_process_ids

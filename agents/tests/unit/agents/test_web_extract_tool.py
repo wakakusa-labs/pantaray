@@ -11,6 +11,9 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tools import (
     _run_validated_tool_impl,
     _validate_tool_args,
 )
+from pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime import (
+    QUERY_EXCERPTS_RETRY_HINT,
+)
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools.web_extract_tool import WEB_EXTRACT_TOOL
 from pantaray_agents.agents.core import CountingSink
@@ -132,6 +135,8 @@ async def test_web_extract_returns_normalized_payload(monkeypatch) -> None:
                 "error": "Timed out",
             }
         ],
+        "truncated": True,
+        "retry_hint": QUERY_EXCERPTS_RETRY_HINT,
         "response_time": 12.5,
         "meta": {
             "request_id": result.output["meta"]["request_id"],
@@ -141,6 +146,34 @@ async def test_web_extract_returns_normalized_payload(monkeypatch) -> None:
             "upstream_request_id": "provider-1",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_web_extract_without_query_reports_full_pages(monkeypatch) -> None:
+    async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
+        return {
+            "tool_id": "web_extract",
+            "status": "ok",
+            "request_id": "req-1",
+            "result": {
+                "results": [{"url": "https://example.com/a", "raw_content": "body"}],
+                "failed_results": [],
+            },
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        _fake_invoke,
+    )
+
+    result = await _run_tool(
+        args={"urls": ["https://example.com/a"]},
+        state=_base_state(),
+    )
+
+    assert result.status == "success"
+    assert result.output["truncated"] is False
+    assert result.output["retry_hint"] is None
 
 
 @pytest.mark.asyncio

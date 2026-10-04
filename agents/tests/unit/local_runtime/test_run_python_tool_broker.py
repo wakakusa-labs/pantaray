@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 from hashlib import sha256
 from pathlib import Path
 
@@ -19,6 +18,9 @@ from pantaray_agents.local_runtime.tooling import (
     ensure_action_scratch_execution_context,
     start_local_tool_invocation_audit,
     upsert_approval_preference,
+)
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    PRIVATE_TEMP_DIRNAME,
 )
 from pantaray_agents.local_runtime.tooling.audit_payloads import (
     build_run_python_request_audit_args,
@@ -234,7 +236,8 @@ async def test_run_python_tool_writes_generated_code_to_invocation_temp_dir(
     assert outcome.status == "success"
     assert outcome.output["stdout"] == "3\n"
     assert captured_argv[0] == str(context.app_runtime_python)
-    assert Path(captured_argv[1]).parent.parent == Path(tempfile.gettempdir()).resolve()
+    script_temp_root = Path(captured_argv[1]).parent.parent
+    assert script_temp_root == db_path.resolve().parent / PRIVATE_TEMP_DIRNAME
     assert not Path(captured_argv[1]).is_relative_to(context.action_temp_dir)
     assert captured_script_text == ["print(1 + 2)"]
 

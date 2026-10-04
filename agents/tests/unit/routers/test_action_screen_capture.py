@@ -98,6 +98,31 @@ async def test_refusal_answer_carries_its_code_and_axis(
 
 
 @pytest.mark.asyncio
+async def test_target_not_found_answer_carries_the_apps_that_can_be_captured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = _bind(monkeypatch)
+    capture_request_id = broker.open(user_id="user-1")
+    waiting = _waiter(broker, capture_request_id)
+
+    await _post(
+        {
+            "capture_request_id": capture_request_id,
+            "result": {
+                "status": "refused",
+                "code": "CAPTURE_TARGET_NOT_FOUND",
+                "available_apps": ["Notes", "Google Chrome"],
+            },
+        }
+    )
+
+    outcome = await waiting
+    assert isinstance(outcome, ScreenCaptureRefused)
+    assert outcome.code == "CAPTURE_TARGET_NOT_FOUND"
+    assert outcome.details == {"available_apps": ["Notes", "Google Chrome"]}
+
+
+@pytest.mark.asyncio
 async def test_unknown_request_id_is_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

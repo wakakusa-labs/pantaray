@@ -5,6 +5,7 @@ import { projectActionConversationView } from '../../../electron/src/actions/act
 import {
   createConversationPaging,
   EMPTY_CONVERSATION_PAGING,
+  readWholeConversation,
   type ConversationPagingState,
 } from './conversationPaging';
 
@@ -38,6 +39,16 @@ function page(
     next_cursor: cursor,
   };
 }
+/** Every run's answer in display order, joined the way the pages used to read. */
+function answers(pages: ConversationPagingState['pages']): string {
+  return projectActionConversationView(pages)
+    .items.flatMap((item) =>
+      item.kind === 'run'
+        ? item.lines.flatMap((line) => (line.kind === 'final_output' ? [line.text] : []))
+        : []
+    )
+    .join('\n\n');
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -60,6 +71,7 @@ function setup() {
     publications,
     state: () => state,
     view: () => projectActionConversationView(state.pages),
+    answers: () => answers(state.pages),
   };
 }
 
@@ -149,7 +161,7 @@ describe('conversation paging', () => {
       .mockResolvedValueOnce(page('older', 'fresh-unseen'));
     s.controller.update(page('two', 'fresh-past'));
     await vi.waitFor(() => expect(s.state().olderPageState).toBe('idle'));
-    expect(s.view().output.plaintext).toContain('answer one');
+    expect(s.answers()).toContain('answer one');
     s.readConversationPage.mockResolvedValueOnce(page('ancient'));
     await s.controller.loadOlder();
     expect(s.readConversationPage.mock.calls.map(([request]) => request.cursor)).toEqual([
@@ -166,19 +178,15 @@ describe('conversation paging', () => {
     const pending = deferred<ActionConversationPage>();
     s.readConversationPage.mockReturnValueOnce(pending.promise).mockResolvedValue(page('one'));
     s.controller.update(page('two', 'past'));
-    expect(s.view().output.plaintext).toBe('answer one\n\nanswer two');
+    expect(s.answers()).toBe('answer one\n\nanswer two');
     expect(s.view().nextCursor).toBeNull();
     const live = page('two', 'past');
     live.runs[0].final_output = 'updated answer two';
     s.controller.update(live);
     pending.resolve(page('one'));
     await vi.waitFor(() => expect(s.state().olderPageState).toBe('idle'));
-    expect(s.view().output.plaintext).toBe('answer one\n\nupdated answer two');
-    expect(
-      s.publications.every((state) =>
-        projectActionConversationView(state.pages).output.plaintext.includes('answer one')
-      )
-    ).toBe(true);
+    expect(s.answers()).toBe('answer one\n\nupdated answer two');
+    expect(s.publications.every((state) => answers(state.pages).includes('answer one'))).toBe(true);
   });
 
   it('coalesces a moving cursor and recovers a stale in-flight read without dropping the loaded past', async () => {
@@ -190,7 +198,7 @@ describe('conversation paging', () => {
     s.controller.update(page('two', 'new-boundary'));
     pending.resolve({ kind: 'stale_cursor' });
     await vi.waitFor(() => expect(s.state().olderPageState).toBe('idle'));
-    expect(s.view().output.plaintext).toBe('answer one\n\nanswer two');
+    expect(s.answers()).toBe('answer one\n\nanswer two');
     expect(s.readConversationPage.mock.calls.map(([request]) => request.cursor)).toEqual([
       'old-boundary',
       'new-boundary',
@@ -207,7 +215,7 @@ describe('conversation paging', () => {
     pending.resolve(page('old-private-answer'));
     await pending.promise;
     await Promise.resolve();
-    expect(s.view().output.plaintext).toBe('answer new');
+    expect(s.answers()).toBe('answer new');
     expect(s.view().action?.action_id).toBe('another-action');
   });
 
@@ -227,7 +235,7 @@ describe('conversation paging', () => {
       .mockResolvedValueOnce(page('one'));
     s.controller.update(page('five', 'c5'));
     await vi.waitFor(() => expect(s.state().olderPageState).toBe('idle'));
-    expect(s.view().output.plaintext).toBe(
+    expect(s.answers()).toBe(
       'answer one\n\nanswer two\n\nanswer three\n\nanswer four\n\nanswer five'
     );
     expect(s.view().nextCursor).toBeNull();
@@ -239,14 +247,14 @@ describe('conversation paging', () => {
     s.readConversationPage.mockRejectedValueOnce(new Error('connection lost'));
     s.controller.update(page('two', 'past'));
     await vi.waitFor(() => expect(s.state().olderPageState).toBe('failed'));
-    expect(s.view().output.plaintext).toBe('answer one\n\nanswer two');
+    expect(s.answers()).toBe('answer one\n\nanswer two');
     s.readConversationPage
       .mockResolvedValueOnce(page('two', 'fresh-past'))
       .mockResolvedValueOnce(page('one'));
     await s.controller.loadOlder();
     expect(s.state().olderPageState).toBe('idle');
     expect(s.view().nextCursor).toBeNull();
-    expect(s.view().output.plaintext).toBe('answer one\n\nanswer two');
+    expect(s.answers()).toBe('answer one\n\nanswer two');
   });
   it('refreshes pending messages even when the latest page and cursor are unchanged', async () => {
     const s = setup();
@@ -296,6 +304,31 @@ describe('conversation paging', () => {
       .mockRejectedValueOnce(new Error('still unavailable'));
     expect(await s.controller.loadOlder()).toBeNull();
     expect(s.state().olderPageState).toBe('failed');
-    expect(s.view().output.plaintext).toBe('answer one\n\nanswer two');
+    expect(s.answers()).toBe('answer one\n\nanswer two');
+  });
+});
+
+describe('readWholeConversation', () => {
+  it('reads from the newest page to the first, following each cursor', async () => {
+    const { readConversationPage } = setup();
+    readConversationPage
+      .mockResolvedValueOnce(page('three', 'c2'))
+      .mockResolvedValueOnce(page('two', 'c1'))
+      .mockResolvedValueOnce(page('one'));
+    const chain = await readWholeConversation({ readConversationPage }, 'action');
+    expect(readConversationPage.mock.calls.map(([request]) => request.cursor)).toEqual([
+      null,
+      'c2',
+      'c1',
+    ]);
+    expect(answers(chain)).toBe('answer one\n\nanswer two\n\nanswer three');
+  });
+
+  it('returns nothing when a page in the middle cannot be read', async () => {
+    const { readConversationPage } = setup();
+    readConversationPage
+      .mockResolvedValueOnce(page('three', 'c2'))
+      .mockResolvedValueOnce({ kind: 'stale_cursor' });
+    expect(await readWholeConversation({ readConversationPage }, 'action')).toBeNull();
   });
 });

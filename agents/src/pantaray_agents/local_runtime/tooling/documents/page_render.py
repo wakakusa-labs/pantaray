@@ -66,6 +66,14 @@ class RenderedPage:
     payload: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedPages:
+    """The pages drawn, and how many the document has in all."""
+
+    page_count: int
+    pages: tuple[RenderedPage, ...]
+
+
 class PageOutOfRangeError(DocumentExtractionError):
     """A page was asked for that the document does not have."""
 
@@ -84,7 +92,7 @@ async def render_pdf_pages(
     pages: Sequence[int],
     python_executable: Path,
     timeout_seconds: float = MAX_PAGE_RENDER_SECONDS,
-) -> tuple[RenderedPage, ...]:
+) -> RenderedPages:
     """Draw ``pages`` of one PDF, in the order given, one image each.
 
     ``pages`` are 1-based, as the read tool numbers them, and at most
@@ -146,7 +154,7 @@ async def render_pdf_pages(
 
 async def _exchange(
     process: Process, *, request: bytes, pages: Sequence[int]
-) -> tuple[RenderedPage, ...]:
+) -> RenderedPages:
     assert process.stdin is not None
     assert process.stdout is not None
     try:
@@ -161,7 +169,7 @@ async def _exchange(
     if not line:
         await process.wait()
         raise DocumentExtractionError(_died(process.returncode))
-    headers = _page_headers(line, pages=pages)
+    page_count, headers = _page_headers(line, pages=pages)
     declared = sum(header.byte_size for header in headers)
     if not 0 <= declared <= MAX_RENDERED_PAGES * MAX_RENDERED_PAGE_BYTES:
         raise DocumentExtractionError(
@@ -178,7 +186,7 @@ async def _exchange(
         raise DocumentExtractionError(
             f"page renderer sent {len(error.partial)} image bytes of {declared}"
         ) from error
-    return tuple(_split(headers, payload))
+    return RenderedPages(page_count=page_count, pages=tuple(_split(headers, payload)))
 
 
 def _split(headers: Sequence[_PageHeader], payload: bytes) -> list[RenderedPage]:
@@ -206,8 +214,10 @@ class _PageHeader:
     byte_size: int
 
 
-def _page_headers(line: bytes, *, pages: Sequence[int]) -> tuple[_PageHeader, ...]:
-    """The worker's one reply line, as the page table or as the failure it names.
+def _page_headers(
+    line: bytes, *, pages: Sequence[int]
+) -> tuple[int, tuple[_PageHeader, ...]]:
+    """The worker's one reply line, as the page count and table or as the failure.
 
     The worker is the process that ran an untrusted file through a C++ parser,
     so this reads its reply rather than trusting it: a password and a page past
@@ -238,6 +248,7 @@ def _page_headers(line: bytes, *, pages: Sequence[int]) -> tuple[_PageHeader, ..
             )
             for page in reply["pages"]
         )
+        page_count = int(reply["total_units"])
     except (KeyError, TypeError, ValueError) as error:
         raise DocumentExtractionError(
             f"page renderer sent a reply that cannot be read: {error}"
@@ -246,7 +257,7 @@ def _page_headers(line: bytes, *, pages: Sequence[int]) -> tuple[_PageHeader, ..
         raise DocumentExtractionError(
             "page renderer returned pages other than the ones it was asked for"
         )
-    return headers
+    return page_count, headers
 
 
 def _died(returncode: int | None) -> str:
@@ -263,5 +274,6 @@ __all__ = [
     "PageOutOfRangeError",
     "PageRenderTimeoutError",
     "RenderedPage",
+    "RenderedPages",
     "render_pdf_pages",
 ]

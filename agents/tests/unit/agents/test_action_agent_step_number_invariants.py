@@ -98,7 +98,6 @@ async def test_step_number_is_shared_between_think_and_action(
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
     state["context"]["use_goal_workers"] = False
-    state["context"]["user_request"] = "dummy"
     state["context"]["desires"] = [{"id": "D1", "type": "explicit", "content": "D"}]
     state["context"]["check_items"] = [{"id": "C1", "title": "T", "status": "open"}]
     state["context"]["requirements"] = [

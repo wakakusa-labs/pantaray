@@ -12,10 +12,10 @@ import asyncio
 import logging
 import shutil
 import signal
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from ..action_session_temp_paths import create_private_temp_dir
 from ..brokering.broker_protocol import BashToolOutput
 from ..repository.command_invocation_audits import TerminalOutcome
 from ..resources.cleanup import CleanupFailure, terminate_process_group
@@ -34,12 +34,13 @@ logger = logging.getLogger(__name__)
 
 async def run_unrecorded_sandbox_command(
     *,
+    db_path: Path,
     build_request: Callable[[Path], BrokerToSandboxCommandRequest],
     create_subprocess_exec: CreateSubprocessExec = asyncio.create_subprocess_exec,
 ) -> tuple[TerminalOutcome, BashToolOutput]:
     """Run one command in a fresh temp dir that `build_request` receives."""
 
-    temp_dir = Path(tempfile.mkdtemp(prefix=SANDBOX_TEMP_DIR_PREFIX)).resolve()
+    temp_dir = create_private_temp_dir(db_path=db_path, prefix=SANDBOX_TEMP_DIR_PREFIX)
     try:
         sandbox_request = build_request(temp_dir)
         process = await spawn_sandbox_helper(create_subprocess_exec)

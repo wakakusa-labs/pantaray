@@ -98,18 +98,18 @@ function createFakeWebSocketClass({ withPing = true } = {}) {
   return { FakeWebSocket, instances };
 }
 
-test('WS: suggestion_chunk(非空) の最初の1回だけ空 content で showNotification を呼ぶ（suggestion_id単位）', () => {
+test('WS: suggestion_chunk(非空) の最初の1回だけ showNotification を呼ぶ（suggestion_id単位）', () => {
   const timers = createFakeTimers();
   const { FakeWebSocket, instances } = createFakeWebSocketClass({ withPing: false });
 
-  /** @type {Array<{ content: string, id: string }>} */
+  /** @type {string[]} */
   const calls = [];
 
   const client = createOrchestrationWS({
     forwardEventToRenderers: () => {},
     forwardStatusToRenderers: () => {},
-    showNotification: (content, id) => {
-      calls.push({ content: String(content ?? ''), id: String(id ?? '') });
+    showNotification: (id) => {
+      calls.push(id);
     },
     WebSocketImpl: FakeWebSocket,
     timers,
@@ -122,7 +122,7 @@ test('WS: suggestion_chunk(非空) の最初の1回だけ空 content で showNot
   ws.readyState = FakeWebSocket.OPEN;
   ws.emit('open');
 
-  // 1st chunk: 本文は ws:event を SSOT にするため、空 content で showNotification を呼ぶ
+  // 1st chunk: suggestion_id のオーバーレイを開く
   ws.emit(
     'message',
     JSON.stringify({
@@ -132,7 +132,7 @@ test('WS: suggestion_chunk(非空) の最初の1回だけ空 content で showNot
       data: { content: 'hello' },
     })
   );
-  assert.deepEqual(calls, [{ content: '', id: 'Sug1' }]);
+  assert.deepEqual(calls, ['Sug1']);
 
   // 2nd chunk (same suggestion): 追加で呼ばれない
   ws.emit(
@@ -157,21 +157,21 @@ test('WS: suggestion_chunk(非空) の最初の1回だけ空 content で showNot
     })
   );
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1], { content: '', id: 'Sug2' });
+  assert.equal(calls[1], 'Sug2');
 });
 
 test('WS: suggestion_chunk が空/空白のみなら showNotification を呼ばない', () => {
   const timers = createFakeTimers();
   const { FakeWebSocket, instances } = createFakeWebSocketClass({ withPing: false });
 
-  /** @type {Array<{ content: string, id: string }>} */
+  /** @type {string[]} */
   const calls = [];
 
   const client = createOrchestrationWS({
     forwardEventToRenderers: () => {},
     forwardStatusToRenderers: () => {},
-    showNotification: (content, id) => {
-      calls.push({ content: String(content ?? ''), id: String(id ?? '') });
+    showNotification: (id) => {
+      calls.push(id);
     },
     WebSocketImpl: FakeWebSocket,
     timers,
@@ -200,19 +200,19 @@ test('WS: showNotification が例外なら、次の suggestion_chunk で再試�
   const timers = createFakeTimers();
   const { FakeWebSocket, instances } = createFakeWebSocketClass({ withPing: false });
 
-  /** @type {Array<{ content: string, id: string }>} */
+  /** @type {string[]} */
   const calls = [];
   let shouldThrow = true;
 
   const client = createOrchestrationWS({
     forwardEventToRenderers: () => {},
     forwardStatusToRenderers: () => {},
-    showNotification: (content, id) => {
+    showNotification: (id) => {
       if (shouldThrow) {
         shouldThrow = false;
         throw new Error('boom');
       }
-      calls.push({ content: String(content ?? ''), id: String(id ?? '') });
+      calls.push(id);
     },
     WebSocketImpl: FakeWebSocket,
     timers,
@@ -247,5 +247,5 @@ test('WS: showNotification が例外なら、次の suggestion_chunk で再試�
     })
   );
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { content: '', id: 'Sug1' });
+  assert.equal(calls[0], 'Sug1');
 });

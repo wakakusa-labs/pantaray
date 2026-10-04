@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from enum import Enum
 from typing import Protocol, cast
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.proxy_errors import build_llm_proxy_agent_error
 from pantaray_agents.schema.agent.base import (
     AgentError,
@@ -113,7 +113,7 @@ class ErrorHandlingMixin:
         host = cast(_ErrorHandlingHost, self)
         response_class = host.get_response_class()
         params = {
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": now_utc_iso(),
             "status": StatusType.ERROR.value
             if hasattr(StatusType, "ERROR")
             else "error",

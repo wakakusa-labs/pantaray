@@ -3,7 +3,10 @@ const TRANSPARENT_APP_STYLES = `
     background-color: transparent !important;
   }
 
-  input, select {
+  /* Glass fields belong to the transparent overlay (notification.html); the main window's
+     fields use their own styles. */
+  body.overlay-window input,
+  body.overlay-window select {
     background-color: rgba(255, 255, 255, 0.2) !important;
     border: 1px solid rgba(255, 255, 255, 0.3) !important;
     color: #ffffff !important;
@@ -11,16 +14,8 @@ const TRANSPARENT_APP_STYLES = `
     -webkit-backdrop-filter: blur(5px);
   }
 
-  input::placeholder {
+  body.overlay-window input::placeholder {
     color: rgba(255, 255, 255, 0.6) !important;
-  }
-
-  .transparent-container {
-    background-color: rgba(255, 255, 255, 0.1) !important;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
   }
 `;
 

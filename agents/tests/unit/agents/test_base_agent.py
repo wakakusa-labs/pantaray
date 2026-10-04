@@ -402,7 +402,9 @@ async def test_generate_llm_response_api_error(agent_for_process, mocker):  # py
     )
 
     prompt = "Test prompt for error"
-    with pytest.raises(RuntimeError, match="LLM upstream error: Gemini API failed"):
+    with pytest.raises(
+        RuntimeError, match=r"LLM upstream error: Exception\('Gemini API failed'\)"
+    ):
         await agent_for_process._generate_llm_response(
             prompt=prompt,
             sink=CountingSink(),

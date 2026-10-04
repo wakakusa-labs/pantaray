@@ -78,6 +78,8 @@ import sqlite_vec
 # PDF page has to be drawn.
 import pypdfium2
 import pantaray_llm.errors
+# Reads Pantaray's default AGENTS.md at import, so a wheel without it fails here.
+import pantaray_agents.agents.action_agent.runtime.agents_md
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 
 # The Cloud distribution is commercial and its SDKs are Cloud-only: none may ship.

@@ -5,7 +5,6 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -22,6 +21,7 @@ from pantaray_agents.local_runtime.runtime.identity import (
 from pantaray_agents.local_runtime.runtime.process_events import (
     append_local_process_event,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     ActionSessionTempPathError,
@@ -79,10 +79,6 @@ class ActionToolInvocationCancelWarning:
             f"canceled={self.canceled_invocation_count} "
             f"persistence_failures={self.persistence_failure_count}"
         )
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _session_root_is_cleaned(
@@ -185,7 +181,7 @@ def _persist_action_cleanup_warning(
         "failed_resource_kinds": list(cleanup_result.failed_resource_kinds),
         "abandoned_count": cleanup_result.abandoned_count,
         "message": warning_message,
-        "created_at": _utc_now_iso(),
+        "created_at": now_utc_iso(),
     }
     if suggestion_id is not None:
         payload["suggestion_id"] = suggestion_id
@@ -219,7 +215,7 @@ def _persist_action_tool_invocation_warning(
         "persistence_failure_count": warning.persistence_failure_count,
         "failed_invocation_ids": list(warning.failed_invocation_ids),
         "message": warning.warning_message,
-        "created_at": _utc_now_iso(),
+        "created_at": now_utc_iso(),
     }
     if suggestion_id is not None:
         payload["suggestion_id"] = suggestion_id
@@ -303,7 +299,7 @@ async def execute_action_cancel(
             user_id=user_id,
             action_id=action_id,
             expected_process_id=expected_process_id,
-            completed_at=_utc_now_iso(),
+            completed_at=now_utc_iso(),
             process_completed_event_id=str(uuid.uuid4()),
         )
     except ActionCancelNotFoundError as exc:
@@ -387,7 +383,7 @@ async def _cleanup_canceled_action_session(
             user_id=user_id,
             action_id=action_id,
             execution_session_id=execution_session_id,
-            completed_at=_utc_now_iso(),
+            completed_at=now_utc_iso(),
             suggestion_id=suggestion_id,
         )
     except (MigrationError, OSError, sqlite3.Error) as exc:

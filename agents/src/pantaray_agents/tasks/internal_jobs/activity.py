@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse_iso_z
+from pantaray_agents.local_runtime.activity_summary_schedule import parse_iso_z
 from pantaray_agents.local_runtime.runtime.activity_local_executor import (
     run_local_activity_summary_agent,
 )
@@ -19,6 +19,10 @@ from pantaray_agents.local_runtime.runtime.activity_summary_execution import (
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
+)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import (
+    format_utc_iso,
+    now_utc_iso,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     load_workspace_context_prompt,
@@ -81,7 +85,7 @@ async def _run_activity_summary_job(
                 prompt_text="",
                 thinking=None,
                 source_ids=[],
-                updated_at=iso_z(claimed_at),
+                updated_at=format_utc_iso(claimed_at),
             )
             return
         workspace_context_prompt = load_workspace_context_prompt(
@@ -105,7 +109,7 @@ async def _run_activity_summary_job(
             busy_timeout_ms=timeout_ms,
             summary_id=payload["summary_id"],
             user_id=payload["user_id"],
-            updated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            updated_at=now_utc_iso(),
             error_code="ACTIVITY_SUMMARY_PREFLIGHT_FAILED",
             error_message=(
                 f"ActivitySummaryAgent preflight failed: {exc.__class__.__name__}"
@@ -143,7 +147,7 @@ async def _run_activity_summary_job(
             busy_timeout_ms=timeout_ms,
             summary_id=payload["summary_id"],
             user_id=payload["user_id"],
-            updated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            updated_at=now_utc_iso(),
             error_code="ACTIVITY_SUMMARY_EXECUTION_FAILED",
             error_message=(
                 f"ActivitySummaryAgent failed before response: {exc.__class__.__name__}"

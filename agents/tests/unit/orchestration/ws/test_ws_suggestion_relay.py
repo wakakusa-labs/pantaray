@@ -11,7 +11,11 @@ from starlette.websockets import WebSocketState
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
-from pantaray_agents.orchestration.ws import suggestion_job_timing, suggestion_relay
+from pantaray_agents.orchestration.ws import (
+    deliverable_sessions,
+    suggestion_job_timing,
+    suggestion_relay,
+)
 from pantaray_agents.orchestration.ws.handler import WSOrchestrationHandler
 from pantaray_agents.orchestration.ws.suggestion_relay import LiveSuggestionProcess
 from pantaray_agents.repositories.suggestion_runtime_results import (
@@ -256,3 +260,142 @@ async def test_a_process_the_tick_attached_first_is_not_replaced_by_the_resume(
 
     assert events.count("process_started") == 1
     assert "process_completed" not in events
+
+
+def _bare_handler(
+    monkeypatch: pytest.MonkeyPatch, *, session_id: str, db_path: Path
+) -> tuple[WSOrchestrationHandler, MagicMock]:
+    """A handler that passed the handshake; its relay has not been started."""
+    monkeypatch.setattr(deps, "is_mock_mode", lambda: False)
+    monkeypatch.setattr(suggestion_relay, "SUGGESTION_RELAY_TICK_SECONDS", 0.01)
+    monkeypatch.setattr(
+        suggestion_relay, "read_local_runtime_db_config", lambda: (db_path, 1000)
+    )
+    websocket = MagicMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.send_json = AsyncMock()
+    handler = WSOrchestrationHandler(
+        websocket=websocket,
+        session_store=InMemorySessionStore(max_age_seconds=3600),
+        session_id=session_id,
+        user_id="user-1",
+    )
+    repository = _ProcessingRepository()
+    handler._get_suggestion_repository = AsyncMock(return_value=repository)  # type: ignore[method-assign]
+    handler._get_action_state_repository = AsyncMock(return_value=repository)  # type: ignore[method-assign]
+    return handler, websocket
+
+
+def _migrated_db(tmp_path: Path) -> Path:
+    import sqlite3
+
+    from pantaray_agents.local_runtime.storage.migrations import (
+        apply_migrations,
+        load_default_migrations,
+    )
+
+    db_path = tmp_path / "runtime.db"
+    apply_migrations(db_path, 1000, load_default_migrations())
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO users(user_id, ui_language, created_at, updated_at)"
+            " VALUES ('user-1', 'ja', '2026-09-30T00:00:00Z', '2026-09-30T00:00:00Z')"
+        )
+    return db_path
+
+
+@pytest.mark.asyncio
+async def test_a_welcome_waits_until_a_session_can_relay_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A socket is bound before its relay window starts; a welcome saved then is lost."""
+    import sqlite3
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from pantaray_agents.app.shared import install_common_exception_handlers
+    from pantaray_agents.auth_http import get_current_user_id_from_token
+    from pantaray_agents.local_runtime.runtime.welcome_suggestion import (
+        welcome_suggestion_id,
+    )
+    from pantaray_agents.routers import suggestion as suggestion_router
+
+    db_path = _migrated_db(tmp_path)
+    monkeypatch.setattr(
+        suggestion_router, "read_local_runtime_db_config", lambda: (db_path, 1000)
+    )
+    monkeypatch.setattr(suggestion_router, "verify_current_owner", lambda _user: None)
+    app = FastAPI()
+    install_common_exception_handlers(app)
+    app.include_router(suggestion_router.router)
+    app.dependency_overrides[get_current_user_id_from_token] = lambda: "user-1"
+    client = TestClient(app)
+
+    def _post_welcome() -> int:
+        return client.post(
+            "/v1/agents/users/user-1/suggestions/welcome", json={"answer": "Hello"}
+        ).status_code
+
+    def _stored() -> int:
+        with sqlite3.connect(db_path) as connection:
+            return connection.execute(
+                "SELECT COUNT(*) FROM agent_suggestions"
+            ).fetchone()[0]
+
+    handler, websocket = _bare_handler(
+        monkeypatch, session_id="sess-1", db_path=db_path
+    )
+    try:
+        assert (_post_welcome(), _stored()) == (503, 0)
+
+        handler.start_suggestion_relay()
+        assert (_post_welcome(), _stored()) == (200, 1)
+        for _ in range(100):
+            if "process_started" in _sent_events(websocket):
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        await handler.close()
+        client.close()
+
+    started = [
+        call.args[0]
+        for call in websocket.send_json.call_args_list
+        if call.args[0].get("event") == "process_started"
+    ]
+    assert [event["data"]["suggestion_id"] for event in started] == [
+        welcome_suggestion_id("user-1")
+    ]
+    assert not deliverable_sessions.owner_has_deliverable_session("user-1")
+
+
+@pytest.mark.asyncio
+async def test_a_session_whose_send_failed_no_longer_counts_as_deliverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pantaray_agents.schema.websocket import SessionStartedMessage
+
+    db_path = _migrated_db(tmp_path)
+    broken, broken_socket = _bare_handler(
+        monkeypatch, session_id="sess-broken", db_path=db_path
+    )
+    healthy, _ = _bare_handler(monkeypatch, session_id="sess-healthy", db_path=db_path)
+    broken_socket.send_json = AsyncMock(side_effect=RuntimeError("socket is gone"))
+    message = SessionStartedMessage(session_id="sess-broken", issued_at="now")
+    try:
+        broken.start_suggestion_relay()
+        assert deliverable_sessions.owner_has_deliverable_session("user-1")
+        await broken._send(
+            "session_started",
+            message,
+            store_in_session_store=False,
+            persist_public_event=False,
+        )
+        assert not deliverable_sessions.owner_has_deliverable_session("user-1")
+
+        healthy.start_suggestion_relay()
+        assert deliverable_sessions.owner_has_deliverable_session("user-1")
+    finally:
+        await broken.close()
+        await healthy.close()

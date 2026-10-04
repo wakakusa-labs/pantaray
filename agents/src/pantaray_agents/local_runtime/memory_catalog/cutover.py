@@ -4,13 +4,13 @@ import json
 import shutil
 import sqlite3
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
     extract_markdown_references,
     remove_reference_occurrences,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.utils.ephemeral_cleanup import remove_ephemeral_tree
 
@@ -282,7 +282,7 @@ def _import_plans(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms
     ) as connection:
         with immediate_transaction(connection):
-            now = datetime.now(UTC).isoformat()
+            now = now_utc_iso()
             connection.execute(
                 """
                 INSERT INTO memory_catalog_cutovers(
@@ -316,7 +316,7 @@ def _import_plans(
                 """,
                 (
                     json.dumps(inventory, sort_keys=True),
-                    datetime.now(UTC).isoformat(),
+                    now_utc_iso(),
                     CUTOVER_NAME,
                 ),
             )
@@ -510,7 +510,7 @@ def _insert_links_and_quarantine(
                     item.source_markup,
                     item.target_memory_key,
                     item.reason,
-                    datetime.now(UTC).isoformat(),
+                    now_utc_iso(),
                 ),
             )
 

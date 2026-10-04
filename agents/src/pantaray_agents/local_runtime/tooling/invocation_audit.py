@@ -124,6 +124,8 @@ def _build_valid_command_summary_json_for_audit(
             cwd_relative_path=cwd if isinstance(cwd, str) and cwd.strip() else ".",
             timeout_ms=default_timeout_ms or 0,
             use_login_environment=args.get("use_login_environment") is True,
+            run_outside_sandbox=args.get("run_outside_sandbox") is True,
+            reason=_justification(args),
         )
     if tool_id == RUN_PYTHON_TOOL_ID:
         code = args.get("code")
@@ -136,8 +138,14 @@ def _build_valid_command_summary_json_for_audit(
             code=code,
             args_count=len(run_args) if isinstance(run_args, list) else 0,
             timeout_ms=default_timeout_ms or 0,
+            reason=_justification(args),
         )
     return None
+
+
+def _justification(args: dict[str, JSONValue]) -> str | None:
+    justification = args.get("justification")
+    return justification if isinstance(justification, str) else None
 
 
 def start_local_tool_invocation_audit(

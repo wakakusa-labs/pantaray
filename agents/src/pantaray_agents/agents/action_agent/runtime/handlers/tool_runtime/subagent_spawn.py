@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+    frozen_executing_head,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
     require_string_arg,
@@ -18,6 +21,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_spawn import (
     spawn_action_subagent,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_action_storage_paths,
 )
@@ -34,11 +38,14 @@ from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from pantaray_agents.agents.action_agent import ActionAgent
 
 
 async def run_spawn_subagent_tool(
+    agent: ActionAgent,
     *,
     step_id: str,
     tool_def: ToolDefinition,
@@ -88,10 +95,11 @@ async def run_spawn_subagent_tool(
                 manifest_id=state["manifest_id"],
                 origin=origin,
                 model_selector=require_string_arg(args, "model"),
+                action_context=frozen_executing_head(agent, state),
                 task=require_string_arg(args, "task"),
                 context_refs=tuple(require_string_list_arg(args, "context_refs")),
                 resource_claims=_resource_claims(args, current_cwd=current_cwd),
-                spawned_at=now_iso(),
+                spawned_at=now_utc_iso(),
             ),
         )
     except (
@@ -100,7 +108,7 @@ async def run_spawn_subagent_tool(
         ActionSubagentResourceIdentityError,
     ) as exc:
         raise ToolValidationError(str(exc)) from exc
-    completed_at = now_iso()
+    completed_at = now_utc_iso()
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,

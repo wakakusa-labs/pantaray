@@ -18,6 +18,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     read_action_subagent_wait_snapshot,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.action_subagent import (
     ActionSubagentCollectionReceipt,
     ActionSubagentWaitRequest,
@@ -29,7 +30,6 @@ from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 
 _WAIT_POLL_SECONDS = 0.1
@@ -86,7 +86,7 @@ async def run_wait_subagents_tool(
 ) -> UnprojectedToolExecutionResult:
     if actor != "supervisor":
         raise ToolValidationError("Only the Supervisor can wait for subagents.")
-    started_at = now_iso()
+    started_at = now_utc_iso()
     request = _build_wait_request(
         state=state,
         child_process_ids=tuple(require_string_list_arg(args, "child_process_ids")),
@@ -100,7 +100,7 @@ async def run_wait_subagents_tool(
         )
     except ActionSubagentWaitInputError as exc:
         raise ToolValidationError(str(exc)) from exc
-    completed_at = now_iso()
+    completed_at = now_utc_iso()
     receipt = (
         ActionSubagentCollectionReceipt(
             request=replace(

@@ -4,6 +4,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    prompt_configs,
+    serve_lens_runs,
+)
 
 from pantaray_agents.agents.activity_summary_agent.agent import NO_ACTIVITY_TEMPLATE
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -40,7 +44,6 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentRequest,
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
-from pantaray_agents.utils.prompt_loader import PromptConfig
 
 _STABLE_MEMORY = SuggestionStableMemoryContext(
     prompt="Stable memory summary",
@@ -82,7 +85,7 @@ async def test_fetch_context_data_propagates_summary_fetch_connection_error(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -140,7 +143,7 @@ async def test_fetch_context_data_raises_unexpected_summary_fetch_exception(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -457,7 +460,7 @@ async def test_suggestion_agent_process_includes_context_density_in_prompt(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -529,7 +532,7 @@ async def test_suggestion_agent_process_includes_context_density_in_prompt(
             short_term_insight="# Insight\nThe user is fixing a parser bug.",
             reconsideration_reason="The user switched goals.",
         )
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await agent.process(req)
         prompt_used = mock_llm_client.last_prompt or ""
         assert f"context_density: {expected_density}" in prompt_used
@@ -566,7 +569,7 @@ async def test_fetch_context_data_counts_facts_in_context_density(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -670,7 +673,7 @@ async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_conte
             wraps=suggestion_agent._build_prompt,
         ) as mock_build_prompt,
     ):
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await suggestion_agent.process(request)
 
         ctx = mock_build_prompt.call_args[0][0]
@@ -686,6 +689,7 @@ async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_conte
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tokyo_local_zone")
 async def test_prompt_receives_pending_work_direction_and_user_feedback(
     suggestion_agent,
 ) -> None:
@@ -700,7 +704,10 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
         prompt="Long-term direction: grow sustainably.",
         has_facts=False,
         has_insights=True,
-        pending_work="Observed: prepare the estimate for the other project.",
+        pending_work=(
+            "Observed: prepare the estimate for the other project.\n"
+            "- **Contract**: return it by 9/12.\n"
+        ),
     )
     suggestion_agent.repository.get_recent_suggestions = AsyncMock(
         return_value=RepositoryResult(
@@ -712,6 +719,7 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
                     "user_reply": "The review is complete.",
                     "action_status": "success",
                     "action_result": "Review finished; no findings remain.",
+                    "action_followups": ["Only review,\n do not merge."],
                 }
             ]
         )
@@ -724,13 +732,25 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
             reconsideration_reason="Periodic review.",
         )
     )
-    prompt = suggestion_agent._build_prompt(context)
+    with patch.object(
+        suggestion_agent,
+        "_get_reference_time",
+        return_value=datetime(2026, 9, 10, tzinfo=UTC),
+    ):
+        prompt = suggestion_agent._build_prompt(context)
+    # Deadlines in the TODO file are counted from the run's own date.
+    assert "## Now\n2026-09-10T09:00+09:00 (Asia/Tokyo)." in prompt
+    assert "- **Contract**: return it by 9/12." in prompt
     assert "prepare the estimate for the other project" in prompt
     assert "grow sustainably" in prompt
     assert "User reaction: rejected" in prompt
     assert "The review is complete." in prompt
     assert "Action status: success" in prompt
     assert "Latest Action result: Review finished; no findings remain." in prompt
+    assert (
+        "  User instructions during the Action (oldest first):\n"
+        "    - Only review, do not merge.\n"
+    ) in prompt
 
 
 def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejection() -> (
@@ -756,6 +776,31 @@ def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejec
     assert "x" * (RECENT_SUGGESTION_REPLY_MAX_CHARS + 1) not in rendered
     assert "[result truncated]" in rendered
     assert "y" * (RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS + 1) not in rendered
+
+
+def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None:
+    from pantaray_agents.agents.suggestion_agent.context_formatters import (
+        RECENT_SUGGESTIONS_MAX_CHARS,
+    )
+
+    entries = [
+        normalize_recent_suggestion_entry(
+            {
+                "answer": f"Suggestion {number:02d} " + "a" * 500,
+                "created_at": "2026-09-10T00:00:00Z",
+                "user_reply": "x" * 3_000,
+                "action_status": "success",
+                "action_result": "y" * 3_000,
+                "action_followups": ["z" * 900] * 8,
+            }
+        )
+        for number in range(12)  # newest first, as the repository returns them
+    ]
+    rendered = format_recent_suggestions([e for e in entries if e is not None])
+    assert len(rendered) <= RECENT_SUGGESTIONS_MAX_CHARS
+    assert "Suggestion 00" in rendered
+    assert "Suggestion 04" in rendered
+    assert "Suggestion 11" not in rendered
 
 
 @pytest.mark.usefixtures("tokyo_local_zone")

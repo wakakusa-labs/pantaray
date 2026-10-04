@@ -6,14 +6,15 @@ import os
 import shutil
 import signal
 import sys
-import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+
 from ...storage.migrations import MigrationError
+from ..action_session_temp_paths import create_private_temp_dir
 from ..brokering.broker_common import (
     BROKER_TOOL_TIMEOUT_ERROR_TYPE,
     BrokerContext,
@@ -44,6 +45,7 @@ from .command_sandbox_protocol import (
     iter_decoded_messages,
 )
 from .command_sandbox_request import build_sandbox_request
+from .sandbox_denial import WRITE_FOLDER_REQUEST_HINT, is_likely_sandbox_denied
 
 SANDBOX_TEMP_DIR_PREFIX = "pantaray-command-sandbox-"
 type CreateSubprocessExec = Callable[..., Awaitable[asyncio.subprocess.Process]]
@@ -90,10 +92,6 @@ def canceled_command_output(error: BaseException) -> CanceledCommandOutput | Non
     return value if isinstance(value, CanceledCommandOutput) else None
 
 
-def _now_utc() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
 def _cleanup_temp_dir(temp_dir: Path) -> str | None:
     try:
         shutil.rmtree(temp_dir)
@@ -114,7 +112,7 @@ def _finalize_temp_dir_resource(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
             resource_id=temp_resource_id,
-            failed_at=_now_utc(),
+            failed_at=now_utc_iso(),
             cleanup_error=temp_cleanup_error,
         )
         return
@@ -122,7 +120,7 @@ def _finalize_temp_dir_resource(
         db_path=context.db_path,
         busy_timeout_ms=context.busy_timeout_ms,
         resource_id=temp_resource_id,
-        cleaned_at=_now_utc(),
+        cleaned_at=now_utc_iso(),
     )
 
 
@@ -342,11 +340,9 @@ async def run_command_via_sandbox(
     tool_invocation_id = request.tool_invocation_id
     if tool_invocation_id is None:
         raise BrokerExecutionError("command execution requires an invocation id")
-    temp_dir = Path(
-        tempfile.mkdtemp(
-            prefix=SANDBOX_TEMP_DIR_PREFIX,
-        )
-    ).resolve()
+    temp_dir = create_private_temp_dir(
+        db_path=context.db_path, prefix=SANDBOX_TEMP_DIR_PREFIX
+    )
     try:
         temp_resource_id = register_path_resource_fn(
             db_path=context.db_path,
@@ -386,7 +382,7 @@ async def run_command_via_sandbox(
             budget_exceeded_kind=None,
             sandbox_violation_kind=None,
             sandbox_violation_summary=str(exc),
-            updated_at=_now_utc(),
+            updated_at=now_utc_iso(),
         )
         _finalize_temp_dir_resource(
             context=context,
@@ -425,7 +421,7 @@ async def run_command_via_sandbox(
             budget_exceeded_kind=None,
             sandbox_violation_kind=None,
             sandbox_violation_summary="failed to register command sandbox cleanup resource",
-            updated_at=_now_utc(),
+            updated_at=now_utc_iso(),
         )
         _finalize_temp_dir_resource(
             context=context,
@@ -459,7 +455,7 @@ async def run_command_via_sandbox(
                     db_path=context.db_path,
                     busy_timeout_ms=context.busy_timeout_ms,
                     resource_id=process_resource_id,
-                    failed_at=_now_utc(),
+                    failed_at=now_utc_iso(),
                     cleanup_error=str(exc),
                 )
         terminating_signal = (
@@ -481,7 +477,7 @@ async def run_command_via_sandbox(
                 budget_exceeded_kind=None,
                 sandbox_violation_kind=None,
                 sandbox_violation_summary=None,
-                updated_at=_now_utc(),
+                updated_at=now_utc_iso(),
             )
         except Exception:
             # The kill already happened; a lost audit row must not replace the
@@ -516,6 +512,21 @@ async def run_command_via_sandbox(
         stdout_text=stdout_text,
         stderr_text=stderr_text,
     )
+    # Only here: an Action command can ask for write folders. A suggestion
+    # command cannot, and a subagent is refused them without asking (its
+    # failed call shows the error message alone, without this feedback). An
+    # unsandboxed run was blocked by something other than the sandbox.
+    if (
+        output.error is not None
+        and not request.run_outside_sandbox
+        and is_likely_sandbox_denied(
+            terminal_outcome=terminal_outcome,
+            exit_code=output.exit_code,
+            stdout=stdout_text,
+            stderr=stderr_text,
+        )
+    ):
+        output.error.llm_feedback = WRITE_FOLDER_REQUEST_HINT
     _write_command_invocation_audit(
         context=context,
         request=request,
@@ -529,7 +540,7 @@ async def run_command_via_sandbox(
         else None,
         sandbox_violation_kind=None,
         sandbox_violation_summary=None,
-        updated_at=_now_utc(),
+        updated_at=now_utc_iso(),
     )
     return UnprojectedBrokerToolOutcome(
         status="success" if output.error is None else "error",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import UTC, datetime
 from typing import TypedDict
 
 from pantaray_agents.local_runtime.runtime.activity_queue import (
@@ -19,6 +18,7 @@ from pantaray_agents.local_runtime.runtime.job_payload_models import (
     parse_activity_summary_job_payload_json,
 )
 from pantaray_agents.local_runtime.runtime.job_reads import read_local_job_payload_json
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
@@ -31,10 +31,6 @@ class ActivitySummaryEnqueueResult(TypedDict):
     summary_id: str
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
 def enqueue_activity_summary_job(
     *,
     user_id: str,
@@ -45,7 +41,7 @@ def enqueue_activity_summary_job(
 ) -> ActivitySummaryEnqueueResult:
     process_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
-    enqueued_at = _utc_now_iso()
+    enqueued_at = now_utc_iso()
     db_path, timeout_ms = read_local_runtime_db_config()
     payload = build_activity_summary_job_payload(
         {

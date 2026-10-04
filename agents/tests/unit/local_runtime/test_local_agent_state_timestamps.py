@@ -8,7 +8,6 @@ import pytest
 from pantaray_agents.local_runtime.agent_state.action_repository import (
     LocalActionRepository,
 )
-from pantaray_agents.local_runtime.agent_state.shared import utc_now_iso
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
@@ -21,13 +20,6 @@ BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
 SUGGESTION_ID = "sug-1"
 ACTIVITY_SUMMARY_ID = "summary-1"
-
-
-def test_agent_state_timestamp_uses_millisecond_utc_shape() -> None:
-    timestamp = utc_now_iso()
-
-    assert len(timestamp) == len("2026-08-30T00:00:00.000Z")
-    assert timestamp.endswith("Z")
 
 
 def _bootstrap_db(tmp_path: Path) -> Path:

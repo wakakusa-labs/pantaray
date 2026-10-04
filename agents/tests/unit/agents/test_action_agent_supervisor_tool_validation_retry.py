@@ -127,7 +127,6 @@ async def test_supervisor_retries_tool_validation_error_up_to_five_then_aborts(
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     state["context"]["use_goal_workers"] = False
     install_local_runtime_tool_context(
         monkeypatch=monkeypatch,

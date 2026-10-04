@@ -4,9 +4,11 @@ import json
 
 import pytest
 from pydantic import ValidationError
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
+from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionStructuredOutput,
@@ -17,18 +19,18 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 def _no_suggestion_output() -> dict[str, object]:
     return {
         "has_suggestion": False,
-        "answer": "",
         "interaction_contract": None,
+        "key_point": "",
         "suggestion_summary": None,
         "target_context": None,
     }
 
 
-def _suggestion_output(answer: str) -> dict[str, object]:
+def _suggestion_output(point: str) -> dict[str, object]:
     return {
         "has_suggestion": True,
-        "answer": answer,
         "interaction_contract": "action_offer",
+        "key_point": point,
         "suggestion_summary": "Action handoff summary",
         "target_context": {
             "organization_name": "Wakakusa",
@@ -149,13 +151,14 @@ def test_parse_suggestion_output_without_suggestion(
     suggestion_agent: SuggestionAgent,
 ) -> None:
     payload = _no_suggestion_output()
-    result = suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+    result = parse_suggestion_output(
         raw_text=json.dumps(payload, ensure_ascii=False),
         parsed_output=SuggestionStructuredOutput.model_validate(payload),
     )
 
     assert result["thinking"] is None
     assert result["answer"] == ""
+    assert result["decided"] is None
     assert result["has_suggestion"] is False
 
 
@@ -165,16 +168,20 @@ def test_parse_suggestion_output_with_plain_suggestion(
     payload = _suggestion_output(
         "I want my schedule to be structured so that I can focus in the morning."
     )
-    result = suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+    result = parse_suggestion_output(
         raw_text=json.dumps(payload, ensure_ascii=False),
         parsed_output=SuggestionStructuredOutput.model_validate(payload),
     )
 
     assert result["thinking"] is None
-    assert (
-        result["answer"]
-        == "I want my schedule to be structured so that I can focus in the morning."
-    )
+    # The decision carries no user-facing text; the writer call adds it.
+    assert result["answer"] == ""
+    assert result["decided"] == {
+        "interaction_contract": "action_offer",
+        "key_point": (
+            "I want my schedule to be structured so that I can focus in the morning."
+        ),
+    }
     assert result["has_suggestion"] is True
     assert result["suggestion_summary"] == "Action handoff summary"
 
@@ -186,7 +193,7 @@ def test_parse_suggestion_output_rejects_missing_suggestion_summary(
     payload["suggestion_summary"] = None
 
     with pytest.raises(ValueError, match="suggestion_summary must be non-empty"):
-        suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+        parse_suggestion_output(
             raw_text=json.dumps(payload, ensure_ascii=False),
             parsed_output=SuggestionStructuredOutput.model_validate(payload),
         )
@@ -199,7 +206,7 @@ def test_parse_suggestion_output_rejects_blank_suggestion_summary(
     payload["suggestion_summary"] = "   "
 
     with pytest.raises(ValueError, match="suggestion_summary must be non-empty"):
-        suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+        parse_suggestion_output(
             raw_text=json.dumps(payload, ensure_ascii=False),
             parsed_output=SuggestionStructuredOutput.model_validate(payload),
         )
@@ -212,7 +219,7 @@ def test_parse_suggestion_output_rejects_null_target_context_when_suggestion_exi
     payload["target_context"] = None
 
     with pytest.raises(ValueError, match="target_context must be an object"):
-        suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+        parse_suggestion_output(
             raw_text=json.dumps(payload, ensure_ascii=False),
             parsed_output=SuggestionStructuredOutput.model_validate(payload),
         )
@@ -266,14 +273,14 @@ def test_system_instruction_renders_answer_language(
     suggestion_agent._prompt_config = PromptConfig(  # noqa: SLF001
         prompt="prompt",
         system_instruction=(
-            "`answer` must be written in natural {answer_language}.\n"
+            "`key_point` must be written in {answer_language}.\n"
             'JSON example: {"has_suggestion": true}'
         ),
     )
     suggestion_agent._current_language = "ja"  # noqa: SLF001
 
     system_instruction = suggestion_agent._system_instruction_for_request()  # noqa: SLF001
-    assert "`answer` must be written in natural Japanese." in system_instruction
+    assert "`key_point` must be written in Japanese." in system_instruction
     assert '{"has_suggestion": true}' in system_instruction
     assert "You must respond in Japanese" not in system_instruction
 
@@ -282,7 +289,7 @@ def test_parse_suggestion_output_empty_text(
     suggestion_agent: SuggestionAgent,
 ) -> None:
     with pytest.raises(ValueError, match="Empty structured suggestion response"):
-        suggestion_agent._parse_suggestion_output(  # noqa: SLF001
+        parse_suggestion_output(
             raw_text="   ",
             parsed_output=None,
         )
@@ -299,7 +306,7 @@ async def test_suggestion_agent_reasoning_mode_omits_temperature_and_sets_thinki
     monkeypatch.setattr(
         mixin_mod.types, "GenerateContentConfig", _SpyGenerateContentConfig
     )
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     suggestion_agent._current_user_id = "user-test"  # noqa: SLF001
     suggestion_agent._current_suggestion_id = "suggestion-test"  # noqa: SLF001

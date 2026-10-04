@@ -26,6 +26,7 @@ _PRIVATE_PROMPT = "private-prompt-marker:" + "embedded history " * 50_000
 _PRIVATE_THOUGHT = "private-thought-marker"
 _RESPONSE = "Verify the repository directory before invoking Git."
 _TOOL_OUTPUT = {"exit_code": 128, "stderr": "not a git repository"}
+_IN_PROGRESS = "in-progress-turn-marker"
 
 
 @pytest.fixture
@@ -54,6 +55,10 @@ def history_tools(tmp_path: Path) -> AgentExperienceActionHistoryTools:
                    started_at='2026-09-26T21:50:30.000Z'
                WHERE step_id='step-2'""",
             (json.dumps({"cmd": "git status"}), json.dumps(_TOOL_OUTPUT)),
+        )
+        connection.execute(
+            "UPDATE agent_action_steps SET llm_response_text=? WHERE step_id='step-3'",
+            (_IN_PROGRESS,),
         )
     return AgentExperienceActionHistoryTools(
         db_path=db_path,
@@ -145,13 +150,26 @@ async def test_memory_history_shows_step_times_in_the_local_zone(
     )
 
 
-async def test_memory_fetch_stays_within_the_bound_turn(
+async def test_memory_history_stays_within_the_bound_turn(
     history_tools: AgentExperienceActionHistoryTools,
 ) -> None:
-    result = await history_tools.fetch_history(
+    # Step 3 belongs to a turn still in progress when the run was bound.
+    fetched = await history_tools.fetch_history(
         _call("history_fetch", refs=["G1-3-THINK"]), 1
     )
+    listed = await history_tools.list_steps(_call("list_action_steps"), 1)
+    searched = await history_tools.search_steps(
+        _call("search_action_steps", query=_IN_PROGRESS), 1
+    )
 
-    assert result.status == "error"
-    assert isinstance(result.output, dict)
-    assert result.output["error_code"] == "ACTION_HISTORY_NOT_FOUND"
+    assert fetched.status == "error"
+    assert isinstance(fetched.output, dict)
+    assert fetched.output["error_code"] == "ACTION_HISTORY_NOT_FOUND"
+    assert isinstance(listed.output, dict)
+    steps = listed.output["steps"]
+    assert isinstance(steps, list)
+    assert [step["short_step_id"] for step in steps] == [
+        "G1-1-THINK",
+        "G1-2-TOOL",
+    ]
+    assert searched.output == {"status": "success", "matches": [], "next_offset": None}

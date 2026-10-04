@@ -7,9 +7,6 @@ LOCAL_ACTION_SUBAGENT_JOB_TYPE: Final[str] = "execute_action_subagent"
 LOCAL_SUGGESTION_JOB_TYPE: Final[str] = "generate_suggestion"
 LOCAL_ACTIVITY_SUMMARY_JOB_TYPE: Final[str] = "summarize_activity"
 LOCAL_INSIGHT_JOB_TYPE: Final[str] = "generate_insight"
-# Retired job type: no producer remains, but the legacy Action shared-temp
-# purge still reads it off durable rows.
-LOCAL_AGENT_EXPERIENCE_JOB_TYPE: Final[str] = "extract_agent_experience"
 LOCAL_MEMORY_UPDATE_JOB_TYPE: Final[str] = "memory_update"
 
 ACTION_PROCESS_KIND: Final[str] = "action"

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .artifact_intent_payload import decode_artifact_intent_payload
 from .artifact_manifest import validate_intent_kind
@@ -61,7 +62,7 @@ def ensure_preparing_node(
     )
     if existing is not None:
         return existing
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     allocated = node_id or f"mem_{uuid.uuid4().hex}"
     connection.execute(
         """

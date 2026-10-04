@@ -34,6 +34,7 @@ import type {
 } from '../../electron/src/actions/actionFetch';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
+import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
@@ -170,36 +171,6 @@ declare global {
         /** OS 権限を今すぐ読み直す合図（main がこのウィンドウを前面に出したとき） */
         onGateStateChanged?: (callback: () => void) => () => void;
       };
-      share?: {
-        /**
-         * 共有スクリーンショット画像（PNG）を Downloads に保存する。
-         * main 側で保存先は固定し、ファイル名は `pantaray-YYYYMMDD-HHMMSS.png` のみ許可される。
-         */
-        savePng: (payload: {
-          pngBytes: Uint8Array | number[] | ArrayBuffer;
-          filename: string;
-        }) => Promise<{ ok: boolean; path?: string; error?: string }>;
-        /**
-         * 共有カードを main 側で「実描画キャプチャ」して、クリップボード + Downloads 保存まで行う。
-         * 出力サイズは main 側で統一（例: 幅1600px、高さ上限6000px）。
-         */
-        captureShareCard: (payload: {
-          content: string | null;
-          suggestionText: string;
-          isSuggestionStreamFinished: boolean;
-          isSuggestionAccepted: boolean;
-          actionText: string;
-          isActionStreamFinished: boolean;
-          isActionPhase: boolean;
-        }) => Promise<{
-          ok: boolean;
-          clipboardOk?: boolean;
-          downloadOk?: boolean;
-          filename?: string;
-          path?: string;
-          error?: string;
-        }>;
-      };
       window: {
         getPosition: () => Promise<{ x: number; y: number }>;
         move: (position: { x: number; y: number }) => void;
@@ -257,6 +228,12 @@ declare global {
           declaredMimeType: ActionImageMimeType;
         }) => Promise<ActionImageAttachResult>;
         revealImage: (request: { storagePath: string }) => Promise<{ revealed: boolean }>;
+        /** Stages a document; the returned id goes into the next message's `files`. */
+        attachFile: (request: {
+          bytes: ArrayBuffer;
+          name: string;
+        }) => Promise<ActionAttachFileResult>;
+        discardAttachment: (request: { attachmentId: string }) => Promise<void>;
         readConversationPage: (
           request: ActionConversationPageRequest
         ) => Promise<ActionConversationPageReadResult>;
@@ -342,26 +319,18 @@ declare global {
         updateCaptureSettings: (
           settings: CapturePrivacySettingsInput
         ) => Promise<CapturePrivacySettings>;
-        getActiveAppName: () => Promise<string | null>;
         /** アクティブウィンドウの完全情報を取得（appName + title） */
-        getActiveWindowInfo: () => Promise<{ name: string | null; title: string | null } | null>;
         /** 記録フィルタのアプリ候補（インストール済みアプリ + アイコン） */
         listInstalledApps: () => Promise<ElectronInstalledApp[]>;
         /** IDE file rules（VSCode/Cursor） */
         getIdeFileRules: () => Promise<IdeFileRules>;
         updateIdeFileRules: (rules: IdeFileRulesInput) => Promise<IdeFileRules>;
         /** Chrome/Safari のアクティブタブURL（取得できない場合は url=null + error） */
-        getActiveBrowserUrl: () => Promise<{
-          url: string | null;
-          appName: string | null;
-          error: string | null;
-        }>;
         /** 編集モード（フィルタ編集中は全アプリのキャプチャを一時停止） */
         setCaptureEditing: (request: CaptureEditingRequest) => Promise<boolean>;
         onCaptureSettingsUpdated?: (cb: (settings: CapturePrivacySettings) => void) => () => void;
       };
       agentOverlay?: {
-        show: (content: string) => Promise<unknown>;
         /** 履歴オーバーレイ表示（main 側で通知ウィンドウを開く） */
         showHistory?: (payload: {
           suggestionId: string;
@@ -370,7 +339,6 @@ declare global {
         }) => void;
         close: () => Promise<unknown>;
         resize: (height: number) => Promise<unknown>;
-        onSetContent: (func: (content: string) => void) => (() => void) | undefined;
         onSnapshot?: (
           func: (payload: ElectronOverlaySnapshotPayload) => void
         ) => (() => void) | undefined;

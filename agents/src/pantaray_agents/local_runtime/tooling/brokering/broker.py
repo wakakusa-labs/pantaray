@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
 from ..resources.resource_tracking import (
@@ -26,7 +26,7 @@ from ..tool_result_validation import ToolOutputValidationError
 from .broker_command_validation import (
     build_validated_command_request,
     build_validated_python_request,
-    verify_command_cwd_unchanged,
+    verify_outside_workspace_folders_unchanged,
 )
 from .broker_common import (
     APPLY_PATCH_TOOL_ID,
@@ -478,7 +478,9 @@ async def execute_broker_tool(
                 request=validated,
             )
         else:
-            verify_command_cwd_unchanged(context=context, request=validated)
+            verify_outside_workspace_folders_unchanged(
+                context=context, request=validated
+            )
             outcome = await run_command_via_sandbox(
                 context=context,
                 request=validated,
@@ -537,7 +539,7 @@ async def execute_broker_tool(
             request=ToolResultFinalizationRequest(
                 owner=InvocationToolResultOwner(
                     invocation_id=completion_invocation_id,
-                    completed_at=datetime.now(UTC).isoformat(),
+                    completed_at=now_utc_iso(),
                     status=("completed" if outcome.status == "success" else "failed"),
                     completion_scope="execution",
                 ),

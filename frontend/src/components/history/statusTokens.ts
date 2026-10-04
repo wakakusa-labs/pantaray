@@ -2,7 +2,7 @@ import type { MessageKey } from '@/i18n/types';
 
 import type { ConversationHistoryStatus } from '../../../electron/src/history/historyContracts';
 
-type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+type BadgeTone = 'warning' | 'info';
 
 /**
  * 履歴一覧のバッジは「いま注意が必要か」だけを表す。`idle` は会話が走っていない

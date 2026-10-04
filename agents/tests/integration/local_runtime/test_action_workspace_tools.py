@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(not seatbelt_available(), reason=SEATBELT_SKIP_R
 
 @pytest.mark.asyncio
 async def test_python_copies_to_other_authorized_root_and_denies_outside(
-    tmp_path: Path,
+    tmp_path: Path, outside_temp_path: Path
 ) -> None:
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path, allowed_tool_ids=("read", "apply_patch", "bash", "run_python")
@@ -46,7 +46,9 @@ async def test_python_copies_to_other_authorized_root_and_denies_outside(
         execution_session_id=context.execution_session_id,
         tool_id="run_python",
     )
-    for index, destination in enumerate((repo / "report.md", tmp_path / "outside.md")):
+    for index, destination in enumerate(
+        (repo / "report.md", outside_temp_path / "outside.md")
+    ):
         outcome = await execute(
             tool_request_id=f"copy-{index}",
             args={
@@ -63,10 +65,11 @@ async def test_python_copies_to_other_authorized_root_and_denies_outside(
 
 @pytest.mark.asyncio
 async def test_parent_can_read_during_child_claim_but_only_child_can_write(
-    tmp_path: Path,
+    outside_temp_path: Path,
 ) -> None:
+    # A claim narrows the write roots; a temp root above the workspace would not.
     db_path, context = _bootstrap_runtime_db(
-        tmp_path, allowed_tool_ids=("bash", "run_python")
+        outside_temp_path, allowed_tool_ids=("bash", "run_python")
     )
     _grant_workspace_full_access(
         db_path=db_path,

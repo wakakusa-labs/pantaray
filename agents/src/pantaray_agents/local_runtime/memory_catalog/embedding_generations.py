@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.local_runtime.embedding_local import LocalEmbeddingManifest
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .connection import open_memory_catalog_connection
@@ -197,7 +197,7 @@ def activate_embedding_generation_in_transaction(
     normalized_user_id = _require_non_empty(user_id, field_name="user_id")
     selected_generation_id = require_generation_id(generation_id)
     timestamp = _require_non_empty(
-        activated_at or _utc_now(), field_name="activated_at"
+        activated_at or now_utc_iso(), field_name="activated_at"
     )
     state = connection.execute(
         """
@@ -379,7 +379,7 @@ def _create_generation(
             "SELECT COALESCE(MAX(generation_id), 0) + 1 FROM memory_embedding_generations"
         ).fetchone()[0]
     )
-    created_at = _utc_now()
+    created_at = now_utc_iso()
     connection.execute(
         """
         INSERT INTO memory_embedding_generations(
@@ -409,7 +409,7 @@ def _create_generation(
 def _create_user_build(
     connection: sqlite3.Connection, *, user_id: str, generation_id: int
 ) -> None:
-    timestamp = _utc_now()
+    timestamp = now_utc_iso()
     connection.execute(
         """
         INSERT INTO memory_embedding_user_generations(
@@ -503,10 +503,6 @@ def _require_non_empty(value: str, *, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} must not be empty")
     return normalized
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 __all__ = [

@@ -1,13 +1,10 @@
 import { BrowserWindow, Menu, app, dialog, protocol, safeStorage, screen, shell } from 'electron';
 import path from 'path';
-import { exec } from 'child_process';
 import { createRequire } from 'module';
-import { promisify } from 'util';
 
 import type { UiLanguage } from './ipc/context';
 import { loadUiLanguage } from './ui/uiLanguage';
 import { getStartupDialogCopy } from './ui/mainProcessCopy';
-import type { ScreenshotLib } from './screenshot/screenshotSync';
 import {
   initializeAccountSettingsScope,
   resolveScopedSettingsPath,
@@ -61,7 +58,6 @@ type ProcessWithDefaultApp = NodeJS.Process & { defaultApp?: boolean };
 type GlobalWithOptionalWebSocket = typeof globalThis & {
   WebSocket?: typeof WebSocket;
 };
-const execPromise = promisify(exec);
 const loadNodeModule = createRequire(__filename);
 
 // dist/main.js から見たルート解決
@@ -195,8 +191,6 @@ const { createOrchestrationWS } = require('../ws_orchestration') as {
 const { createMainWindow } = require('../window_lifecycle') as {
   createMainWindow: (options: { initialUiLanguage: UiLanguage }) => BrowserWindow;
 };
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const screenshotLib = require('../screenshot') as ScreenshotLib;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createClient } = require('@supabase/supabase-js') as {
   createClient: (url: string, key: string, options?: unknown) => unknown;
@@ -453,8 +447,6 @@ const featureRuntime = createDesktopFeatureRuntime({
   resolveUiSettingsPath,
   getUiLanguage: () => uiLanguage,
   setUiLanguage: (language) => (uiLanguage = language),
-  screenshotLib,
-  execPromise,
   logger,
 });
 

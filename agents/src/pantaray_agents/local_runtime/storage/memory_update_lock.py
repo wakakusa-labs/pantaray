@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.utils.timestamps import format_iso8601_utc_z_milliseconds
+
 LOCKS_DIRNAME = "locks"
 
 
@@ -77,8 +79,9 @@ def _require_user_id(user_id: str) -> None:
         raise ValueError("user_id contains forbidden path characters")
 
 
+# Storage sits below local_runtime.runtime, so it formats with the primitive.
 def _utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return format_iso8601_utc_z_milliseconds(datetime.now(UTC))
 
 
 __all__ = [

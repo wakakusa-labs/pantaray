@@ -16,7 +16,8 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.assistant_messag
     prepare_llm_turn_commit,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    ExclusionReason,
+    EXCLUSION_NOTICES,
+    PROVIDER_DROPPED_NOTICE,
     ToolBatchPlan,
     plan_tool_batch,
 )
@@ -59,6 +60,7 @@ from pantaray_agents.agents.core.tool_call_repair import (
 )
 from pantaray_agents.application.action.ports import ActionAssistantMessageEmission
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
@@ -142,14 +144,6 @@ def _accept_native_calls(
     return tuple(accepted), None
 
 
-_EXCLUSION_NOTICES: dict[ExclusionReason, str] = {
-    "solo_turn_tool": "must be the only call of its turn",
-    "after_solo_turn_tool": "was queued behind a call that must run alone",
-    "max_parallel_exceeded": "exceeded the parallel tool call limit of this turn",
-    "tool_step_budget_exhausted": "exceeded the remaining tool step budget",
-}
-
-
 def _build_batch_notice(
     plan: ToolBatchPlan[PendingToolCallModel],
     *,
@@ -158,12 +152,11 @@ def _build_batch_notice(
     """このターンで実行しない呼び出しをモデルへ伝える結果行を作る。"""
 
     excluded = [
-        f"{entry.call.tool_id} ({_EXCLUSION_NOTICES[entry.reason]})"
+        f"{entry.call.tool_id} ({EXCLUSION_NOTICES[entry.reason]})"
         for entry in (*plan.deferred, *plan.dropped)
     ]
     excluded.extend(
-        f"{name} (was dropped by the model provider above the requested limit)"
-        for name in provider_dropped_call_names
+        f"{name} ({PROVIDER_DROPPED_NOTICE})" for name in provider_dropped_call_names
     )
     if not excluded:
         return None
@@ -413,7 +406,13 @@ async def execution_think_step(  # noqa: C901
                 max_parallel=max_parallel_tool_calls,
                 remaining_tool_steps=remaining_tool_steps,
             )
-            batch = PendingToolBatchModel(calls=plan.calls, mode=plan.mode)
+            # A turn of nothing but held-back calls runs nothing; its notice
+            # still reaches the model, as a turn without calls does.
+            batch = (
+                PendingToolBatchModel(calls=plan.calls, mode=plan.mode)
+                if plan.calls
+                else None
+            )
             batch_notice = _build_batch_notice(
                 plan,
                 provider_dropped_call_names=native_turn.dropped_call_names,
@@ -448,7 +447,7 @@ async def execution_think_step(  # noqa: C901
     if await runtime.services.cancellation.check_cancellation(state):
         return state
 
-    decided_at = step_completed_at.isoformat()
+    decided_at = format_utc_iso(step_completed_at)
     adopted_state = state
     state = copy.deepcopy(state)
     llm_turn = (
@@ -520,7 +519,7 @@ async def execution_think_step(  # noqa: C901
                 else cast(dict[str, object], dict(batch.calls[0].call.args))
             ),
             status="error" if parse_failed else "success",
-            started_at=step_started_at.isoformat(),
+            started_at=format_utc_iso(step_started_at),
             completed_at=decided_at,
             history_started_at=_resolve_history_started_at(state),
             history_completed_at=decided_at,
@@ -532,6 +531,7 @@ async def execution_think_step(  # noqa: C901
             # attempt that was rejected, and a later turn replaying it would
             # break the append-only input the prompt cache reads.
             turn_context=prepared.turn_context,
+            world_state=prepared.world_state,
             # Held for the rest of this run as it is written, so the next turn
             # hands back the same bytes whether it reads them from here or,
             # after a restart, from the row this writes.

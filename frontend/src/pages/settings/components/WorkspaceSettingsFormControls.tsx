@@ -21,7 +21,8 @@ export function InlineTextForm(props: {
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') onSubmit();
+          // The Enter that commits a kana-kanji conversion belongs to the IME.
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) onSubmit();
         }}
         placeholder={placeholder}
         aria-label={placeholder}

@@ -11,11 +11,11 @@ import sqlite3
 import uuid
 from collections import Counter
 from dataclasses import replace
-from datetime import UTC, datetime
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
     extract_markdown_references,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import (
     SQLiteTransactionOwnershipError,
 )
@@ -107,7 +107,7 @@ def _refresh_category(
     )
     relative_root = editable_memory_relative_path(user_id)
     digest = artifact_content_sha256(documents)
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     if node.current_revision_id is None:
         revision = MemoryRevision(
             user_id=user_id,

@@ -1,8 +1,10 @@
 """MockSuggestionAgentRepository の分離定義。"""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from ..repositories.runtime_ports import PatchRunStepKind, PatchRunStepStatus
 from ..schema.agent.base import JSONValue
@@ -54,7 +56,7 @@ class MockSuggestionAgentRepository(
             record = dict(suggestion)
 
         record.setdefault("suggestion_id", str(uuid.uuid4()))
-        record.setdefault("created_at", datetime.now(UTC).isoformat())
+        record.setdefault("created_at", now_utc_iso())
         record["prompt_text"] = prompt_text
         record["response_text"] = response_text
         record["request_images_count"] = request_images_count
@@ -105,7 +107,7 @@ class MockSuggestionAgentRepository(
             "tool_output": tool_output,
             "error_code": error_code,
             "error_message": error_message,
-            "created_at": created_at or datetime.now(UTC).isoformat(),
+            "created_at": created_at or now_utc_iso(),
         }
         rows = self.data.setdefault("suggestion_run_steps", [])
         rows[:] = [

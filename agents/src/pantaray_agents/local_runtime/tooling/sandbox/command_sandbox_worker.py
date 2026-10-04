@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import os
 import signal
 import sys
 from contextlib import suppress
@@ -9,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+
+from pantaray_agents.utils.timestamps import format_iso8601_utc_z_milliseconds
 
 from .command_sandbox_protocol import (
     BrokerToSandboxCommandRequest,
@@ -23,6 +26,9 @@ from .seatbelt_profiles import render_seatbelt_profile
 SANDBOX_PROFILE_NAME = "command.sb"
 OUTPUT_CHUNK_SIZE_BYTES = 4096
 TEMP_QUOTA_POLL_INTERVAL_SECONDS = 0.25
+BROKER_EXIT_POLL_INTERVAL_SECONDS = 0.5
+# macOS has no subreaper: a process whose parent exits is reparented to launchd.
+LAUNCHD_PID = 1
 
 
 @dataclass
@@ -32,7 +38,8 @@ class StreamCapture:
 
 
 def _utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    # The sandbox worker stays off the runtime package; the event time is unread.
+    return format_iso8601_utc_z_milliseconds(datetime.now(UTC))
 
 
 def _emit_message(message: object) -> None:
@@ -113,6 +120,15 @@ def _profile_path(temp_dir: str) -> Path:
     return Path(temp_dir) / SANDBOX_PROFILE_NAME
 
 
+def _launch_argv(request: BrokerToSandboxCommandRequest) -> list[str]:
+    if request.run_outside_sandbox:
+        # The user approved this one command to run without the profile.
+        return list(request.argv)
+    profile_path = _profile_path(request.temp_dir)
+    profile_path.write_text(render_seatbelt_profile(request), encoding="utf-8")
+    return ["/usr/bin/sandbox-exec", "-f", str(profile_path), *request.argv]
+
+
 def _emit_spawn_failed(request_id: str, error: OSError) -> None:
     stderr = f"{type(error).__name__}: {error}\n"
     _emit_message(
@@ -132,16 +148,8 @@ def _emit_spawn_failed(request_id: str, error: OSError) -> None:
 
 async def _run_helper(request: BrokerToSandboxCommandRequest) -> int:
     try:
-        profile_path = _profile_path(request.temp_dir)
-        profile_path.write_text(
-            render_seatbelt_profile(request),
-            encoding="utf-8",
-        )
         process = await asyncio.create_subprocess_exec(
-            "/usr/bin/sandbox-exec",
-            "-f",
-            str(profile_path),
-            *request.argv,
+            *_launch_argv(request),
             cwd=request.cwd,
             env=request.env,
             stdout=asyncio.subprocess.PIPE,
@@ -269,17 +277,36 @@ async def _run_helper(request: BrokerToSandboxCommandRequest) -> int:
     return 0
 
 
-async def main() -> int:
+async def _kill_group_when_broker_exits() -> None:
+    """End the command once the broker that owns this group is gone.
+
+    The helper leads its own session, so a broker that exits without reaping it
+    (app quit, crash, SIGKILL) would leave the group running until the next
+    startup recovery - or for good, for a command no resource row records.
+    """
+
+    while os.getppid() != LAUNCHD_PID:
+        await asyncio.sleep(BROKER_EXIT_POLL_INTERVAL_SECONDS)
+    os.killpg(os.getpgrp(), signal.SIGKILL)
+
+
+async def _serve_request() -> None:
     raw_line = await asyncio.to_thread(sys.stdin.buffer.readline)
     request = decode_request(raw_line.decode("utf-8"))
     try:
         await _run_helper(request)
     finally:
         # EOF also lets the broker classify helper failures without losing the
-        # tracked group leader. After a disconnect, recovery still owns the group.
+        # tracked group leader, which waits here for the broker to reap it.
         with suppress(BrokenPipeError):
             sys.stdout.close()
         await asyncio.Future()
+
+
+async def main() -> int:
+    async with asyncio.TaskGroup() as group:
+        group.create_task(_kill_group_when_broker_exits())
+        await _serve_request()
     return 0
 
 

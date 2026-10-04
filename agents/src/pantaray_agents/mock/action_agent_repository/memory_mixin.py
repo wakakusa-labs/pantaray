@@ -14,6 +14,7 @@ from pantaray_agents.local_runtime.memory_references import build_memory_key
 from pantaray_agents.local_runtime.memory_references.reference_ids import (
     build_activity_reference_ids_for_targets,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.repositories.repository import (
     DBRow,
@@ -332,7 +333,7 @@ class MockActionAgentMemoryMixin:
                 retryable=False,
             )
         return RepositoryResult(
-            data={"evaluated_at": now_dt.isoformat(), "slots": slots}
+            data={"evaluated_at": format_utc_iso(now_dt), "slots": slots}
         )
 
     async def memory_search(

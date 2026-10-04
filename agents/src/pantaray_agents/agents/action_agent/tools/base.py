@@ -12,7 +12,6 @@ from jsonschema import Draft7Validator  # type: ignore[import-untyped]
 
 from pantaray_agents.schema.agent.base import JSONValue
 
-from . import prompt_contract as _prompt_contract
 from . import schema_types as _schema_types
 
 type SchemaScalar = _schema_types.SchemaScalar
@@ -26,12 +25,6 @@ FrozenSchemaSequence = _schema_types.FrozenSchemaSequence
 ToolValidationDetails = _schema_types.ToolValidationDetails
 freeze_schema_node = _schema_types.freeze_schema_node
 schema_to_plain_json = _schema_types.schema_to_plain_json
-
-PromptArgSpec = _prompt_contract.PromptArgSpec
-PromptContract = _prompt_contract.PromptContract
-PromptVariantSpec = _prompt_contract.PromptVariantSpec
-build_description_from_guide = _prompt_contract.build_description_from_guide
-prompt_arg = _prompt_contract.prompt_arg
 
 type ToolArgsValidator = Callable[[Mapping[str, JSONValue]], None]
 type ToolCapability = str
@@ -55,6 +48,27 @@ class ToolGuideSpec:
     what: str
     when: str
     pitfalls: str
+
+
+@dataclass(frozen=True, slots=True)
+class PromptContract:
+    """LLM に提示するツール契約。フィールドの説明は入力スキーマが運ぶ。"""
+
+    description: str
+
+
+def build_description_from_guide(guide: ToolGuideSpec) -> str:
+    """Guide から複数行の description 文を生成する。"""
+
+    def section_text(text: str) -> str:
+        return "\n".join(line.rstrip() for line in text.strip().splitlines()).strip()
+
+    sections = [
+        ("Purpose", section_text(guide.what)),
+        ("When", section_text(guide.when)),
+        ("Avoid", section_text(guide.pitfalls)),
+    ]
+    return "\n\n".join(f"{title}:\n{body}" for title, body in sections if body)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +107,8 @@ class ReferenceGroupSpec:
 
     canonical_name: str
     aliases: tuple[FieldAliasSpec, ...]
-    prompt_type: str
     description: str
     required: bool = False
-    llm_visible: bool = True
-    llm_advanced: bool = False
-    llm_order: int = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,15 +118,7 @@ class FieldSpec:
     name: str
     schema: SchemaMapping
     required: bool = False
-    prompt_type: str = "json"
     description: str = ""
-    llm_visible: bool = True
-    llm_advanced: bool = False
-    llm_order: int = 100
-    runtime_injected: bool = False
-    prompt_name: str | None = None
-    prompt_children: tuple[PromptArgSpec, ...] = ()
-    prompt_flatten_children: bool = False
     children: tuple[InputMember, ...] = ()
 
 
@@ -258,36 +260,20 @@ class ToolDefinition:
     def from_spec(cls, spec: ToolSpec) -> ToolDefinition:
         """ToolSpec から公開用 ToolDefinition を生成する。"""
 
-        input_schema = build_validation_input_schema(spec.input_spec)
-        prompt_contract = build_prompt_contract(spec)
         return cls(
             tool_id=spec.tool_id,
             name=spec.name,
             description=spec.description,
-            prompt_contract=prompt_contract,
+            prompt_contract=PromptContract(
+                description=build_description_from_guide(spec.guide)
+            ),
             guide=spec.guide,
             execution_policy=spec.execution_policy,
-            input_schema=input_schema,
+            input_schema=build_validation_input_schema(spec.input_spec),
             output_schema=spec.output_schema,
             runtime_config=spec.runtime_config,
             pre_validate_args=spec.pre_validate_args,
         )
-
-
-def build_prompt_contract(spec: ToolSpec) -> PromptContract:
-    """ToolSpec から prompt-visible contract を生成する。"""
-
-    from . import validation_schema as _validation_schema
-
-    _validation_schema.validate_input_spec(spec.input_spec)
-    return _prompt_contract.build_prompt_contract(
-        spec,
-        is_reference_member=_is_reference_group_member,
-    )
-
-
-def _is_reference_group_member(member: object) -> bool:
-    return isinstance(member, ReferenceGroupSpec)
 
 
 def build_validation_input_schema(input_spec: InputSpec) -> dict[str, JSONValue]:
@@ -303,15 +289,7 @@ def field_spec(
     name: str,
     schema: Mapping[str, SchemaNode],
     required: bool = False,
-    prompt_type: str = "json",
     description: str = "",
-    llm_visible: bool = True,
-    llm_advanced: bool = False,
-    llm_order: int = 100,
-    runtime_injected: bool = False,
-    prompt_name: str | None = None,
-    prompt_children: Sequence[PromptArgSpec] = (),
-    prompt_flatten_children: bool = False,
     children: Sequence[InputMember] = (),
 ) -> FieldSpec:
     """FieldSpec の簡易ヘルパー。"""
@@ -320,15 +298,7 @@ def field_spec(
         name=name,
         schema=FrozenSchemaMapping(dict(schema)),
         required=required,
-        prompt_type=prompt_type,
         description=description,
-        llm_visible=llm_visible,
-        llm_advanced=llm_advanced,
-        llm_order=llm_order,
-        runtime_injected=runtime_injected,
-        prompt_name=prompt_name,
-        prompt_children=tuple(prompt_children),
-        prompt_flatten_children=prompt_flatten_children,
         children=tuple(children),
     )
 
@@ -343,22 +313,14 @@ def reference_group_spec(
     *,
     canonical_name: str,
     aliases: Sequence[FieldAliasSpec],
-    prompt_type: str,
     description: str,
     required: bool = False,
-    llm_visible: bool = True,
-    llm_advanced: bool = False,
-    llm_order: int = 100,
 ) -> ReferenceGroupSpec:
     """ReferenceGroupSpec の簡易ヘルパー。"""
 
     return ReferenceGroupSpec(
         canonical_name=canonical_name,
         aliases=tuple(aliases),
-        prompt_type=prompt_type,
         description=description,
         required=required,
-        llm_visible=llm_visible,
-        llm_advanced=llm_advanced,
-        llm_order=llm_order,
     )

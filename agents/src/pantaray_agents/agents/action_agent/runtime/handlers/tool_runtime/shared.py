@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import ToolAttachment
@@ -144,6 +143,8 @@ class UnprojectedToolExecutionResult:
     tool_request_id: str | None = None
     tool_invocation_id: str | None = None
     subagent_collection_receipt: ActionSubagentCollectionReceipt | None = None
+    # AGENTS.md blocks this call is the first to reach; rendered with its result.
+    agents_md: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +178,7 @@ class ToolExecutionResult:
     tool_request_id: str | None = None
     tool_invocation_id: str | None = None
     subagent_collection_receipt: ActionSubagentCollectionReceipt | None = None
+    agents_md: str | None = None
 
     def __post_init__(self) -> None:
         _validate_tool_execution_control(status=self.status, control=self.control)
@@ -225,6 +227,7 @@ def build_tool_execution_result(
         tool_request_id=result.tool_request_id,
         tool_invocation_id=result.tool_invocation_id,
         subagent_collection_receipt=result.subagent_collection_receipt,
+        agents_md=result.agents_md,
     )
 
 
@@ -274,11 +277,10 @@ class ThinkingPayload(TypedDict):
     text: str
 
 
-class MemorySearchPayload(TypedDict, total=False):
+class MemorySearchPayload(TypedDict):
     """memory_search の出力。"""
 
     results: list[DBRow]
-    grouped_results: dict[str, list[DBRow]]
     semantic_status: MemorySearchSemanticStatus
     semantic_error_code: str | None
     notes: list[str]
@@ -292,9 +294,3 @@ class HistoryFetchPayload(TypedDict):
     offset: int
     total_characters: int
     next_cursor: str | None
-
-
-def now_iso() -> str:
-    """現在UTC時刻を ISO8601 文字列で返す。"""
-
-    return datetime.now(UTC).isoformat()

@@ -151,6 +151,12 @@ class HistoryEntry(TypedDict):
     # byte for byte. Absent on a THINK recorded before the field existed and on
     # every turn sent as one string.
     turn_context: NotRequired[str]
+    # The head sections that turn context brought up to date, by field, as
+    # sent; a later turn compares against them instead of re-sending.
+    world_state: NotRequired[dict[str, str]]
+    # AGENTS.md blocks first reached by this tool call. Kept when the output is
+    # omitted, since each file is attached only once per Action.
+    agents_md: NotRequired[str]
 
 
 class TargetContextState(TypedDict):
@@ -166,7 +172,6 @@ class ContextInputBaseline(TypedDict):
 class ActionAgentContext(TypedDict, total=False):
     """ActionAgent が維持する文脈情報。"""
 
-    user_request: str
     request_summary: str | None
     target_context: TargetContextState
     insight_data: str
@@ -181,6 +186,13 @@ class ActionAgentContext(TypedDict, total=False):
     workspace_root_catalog: str
     read_access_scope: ReadAccessScope
     workspace_context_prompt: str
+    # ~/.pantaray/AGENTS.md as this run read it ("" when absent).
+    agents_md_instructions: str
+    # The Executing head's field values from the Action's first conversation
+    # turn. Every later turn renders the head from them, byte for byte.
+    executing_head_fields: dict[str, str]
+    # Real paths of the repository AGENTS.md files already attached to a result.
+    agents_md_attached_paths: list[str]
     additional_notes: list[str]
     # --- Supervisor self-repair bookkeeping ---
     # jsonschema（ToolValidationError）により tool 実行が拒否された回数（連続回数）。
@@ -346,7 +358,6 @@ def create_initial_state(
         suggestion_id=suggestion_id,
         action_id=action_id,
         context=ActionAgentContext(
-            user_request="",
             request_summary=None,
             target_context={"organization_name": None, "project_name": None},
             memory_source_coverage=build_unknown_memory_source_coverage_snapshot(

@@ -129,7 +129,7 @@ function installOrganizationPickerSettings(
 }
 
 async function openProjectOrganizationPicker(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByText('Project A');
+  await screen.findByRole('heading', { name: 'Project A' });
   await user.click(screen.getByRole('button', { name: 'Project Aの組織を選択' }));
   return screen.getByRole('dialog', { name: 'Project Aの組織を選択' });
 }
@@ -210,6 +210,13 @@ function installDeletionFocusSettings(
   return workspaceSettings;
 }
 
+/** The detail column of the selected project, found by its heading. */
+async function findProjectDetail(name: string): Promise<HTMLElement> {
+  const detail = (await screen.findByRole('heading', { name })).closest('article');
+  if (!(detail instanceof HTMLElement)) throw new Error(`Project detail ${name} was not rendered.`);
+  return detail;
+}
+
 function openProjectCreatePopover() {
   fireEvent.click(screen.getByRole('button', { name: 'settings.workspace.addProject' }));
   return screen.getByRole('dialog', { name: 'settings.workspace.projectCreate.title' });
@@ -237,6 +244,7 @@ describe('WorkspaceSettingsSection', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     clearWorkspaceSettingsCache();
     delete window.electron;
     if (originalShowModal) {
@@ -284,7 +292,7 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.workspace.selectFolder' }));
 
@@ -327,8 +335,7 @@ describe('WorkspaceSettingsSection', () => {
     renderWorkspaceSettingsSection();
 
     expect(await screen.findByText('settings.workspace.gettingStarted')).toBeInTheDocument();
-    const addProject = screen.getByRole('button', { name: 'settings.workspace.addProject' });
-    expect(addProject).toHaveClass('workspace-button-primary');
+    expect(screen.getByRole('button', { name: 'settings.workspace.addProject' })).toBeEnabled();
 
     const popover = openProjectCreatePopover();
     fireEvent.change(
@@ -382,7 +389,7 @@ describe('WorkspaceSettingsSection', () => {
       expect(addFolder).toHaveFocus();
     });
     expect(screen.getByRole('button', { name: 'New Project' })).toHaveAttribute(
-      'aria-expanded',
+      'aria-current',
       'true'
     );
   });
@@ -427,7 +434,7 @@ describe('WorkspaceSettingsSection', () => {
     expect(
       await screen.findByRole('button', { name: 'settings.workspace.addProject' })
     ).toBeInTheDocument();
-    expect(screen.getByText('Project A')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Project A' })).toBeInTheDocument();
   });
 
   it('uses cached workspace settings immediately when remounted', async () => {
@@ -460,12 +467,12 @@ describe('WorkspaceSettingsSection', () => {
     window.electron = { workspaceSettings } as unknown as Window['electron'];
 
     const firstRender = renderWorkspaceSettingsSection();
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     firstRender.unmount();
 
     renderWorkspaceSettingsSection();
 
-    expect(screen.getByText('Project A')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Project A' })).toBeInTheDocument();
     expect(screen.queryByText('common.loading')).toBeNull();
     await waitFor(() => {
       expect(workspaceSettings.get).toHaveBeenCalledTimes(2);
@@ -538,6 +545,61 @@ describe('WorkspaceSettingsSection', () => {
       expect(organizationInput).toHaveValue('');
       expect(within(organizationDialog).getByText('New Org')).toBeInTheDocument();
       expect(workspaceSettings.get).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('leaves the Enter that commits an IME conversion to the IME in workspace name fields', async () => {
+    const workspaceSettings = {
+      get: vi.fn(async () => emptySettings),
+      createOrganization: vi.fn(async () => ({
+        organization_id: 'org-new',
+        display_name: '新しい組織',
+      })),
+      createProject: vi.fn(async () => ({
+        project_id: 'project-new',
+        display_name: '新しい案件',
+        organization_ids: [],
+      })),
+      createFolder: vi.fn(),
+      deleteOrganization: vi.fn(),
+      deleteProject: vi.fn(),
+      deleteFolder: vi.fn(),
+      updateProjectLinks: vi.fn(),
+      updateFolderLinks: vi.fn(),
+      updateReadAccessScope: vi.fn(),
+      selectFolder: vi.fn(),
+    };
+    window.electron = { workspaceSettings } as unknown as Window['electron'];
+
+    renderWorkspaceSettingsSection();
+
+    await screen.findByRole('button', { name: 'settings.workspace.addProject' });
+    const organizationDialog = openOrganizationDialog();
+    const organizationInput = within(organizationDialog).getByLabelText(
+      'settings.workspace.organizationPlaceholder'
+    );
+    fireEvent.change(organizationInput, { target: { value: '新しい組織' } });
+    fireEvent.keyDown(organizationInput, { key: 'Enter', isComposing: true });
+    expect(workspaceSettings.createOrganization).not.toHaveBeenCalled();
+    fireEvent.keyDown(organizationInput, { key: 'Enter' });
+    await waitFor(() => {
+      expect(workspaceSettings.createOrganization).toHaveBeenCalledWith({
+        displayName: '新しい組織',
+      });
+    });
+    // Closing the manager returns to the project popover it was opened from.
+    fireEvent.click(within(organizationDialog).getByRole('button', { name: 'common.close' }));
+
+    const popover = screen.getByRole('dialog', { name: 'settings.workspace.projectCreate.title' });
+    const projectInput = within(popover).getByRole('textbox', {
+      name: 'settings.workspace.projectPlaceholder',
+    });
+    fireEvent.change(projectInput, { target: { value: '新しい案件' } });
+    fireEvent.keyDown(projectInput, { key: 'Enter', isComposing: true });
+    expect(workspaceSettings.createProject).not.toHaveBeenCalled();
+    fireEvent.keyDown(projectInput, { key: 'Enter' });
+    await waitFor(() => {
+      expect(workspaceSettings.createProject).toHaveBeenCalledOnce();
     });
   });
 
@@ -661,18 +723,11 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    const projectTitle = (await screen.findAllByText('Project A')).find((element) =>
-      element.closest('.workspace-project-card')
-    );
-    const projectCard = projectTitle?.closest('.workspace-project-card');
-    if (!(projectCard instanceof HTMLElement)) {
-      throw new Error('Project card was not rendered.');
-    }
-    fireEvent.click(within(projectCard).getByRole('button', { name: 'Project A' }));
+    const projectDetail = await findProjectDetail('Project A');
 
-    expect(within(projectCard).getByText('Folder A')).toBeInTheDocument();
-    expect(within(projectCard).queryByRole('button', { name: 'Org B' })).toBeNull();
-    expect(within(projectCard).queryByRole('button', { name: 'common.save' })).toBeNull();
+    expect(within(projectDetail).getByText('Folder A')).toBeInTheDocument();
+    expect(within(projectDetail).queryByRole('button', { name: 'Org B' })).toBeNull();
+    expect(within(projectDetail).queryByRole('button', { name: 'common.save' })).toBeNull();
   });
 
   it('deletes created workspace settings entries', async () => {
@@ -716,33 +771,19 @@ describe('WorkspaceSettingsSection', () => {
       expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-a');
     });
 
-    const projectTitle = screen
-      .getAllByText('Project A')
-      .find((element) => element.closest('.workspace-project-card'));
-    const projectCard = projectTitle?.closest('.workspace-project-card');
-    if (!(projectCard instanceof HTMLElement)) {
-      throw new Error('Project card was not rendered.');
-    }
-
-    const deleteProjectButton = within(projectCard).getByRole('button', {
+    const projectDetail = await findProjectDetail('Project A');
+    const deleteProjectButton = within(projectDetail).getByRole('button', {
       name: 'common.delete Project A',
     });
     expect(deleteProjectButton).toHaveClass('workspace-project-delete');
-    expect(within(projectCard).queryByRole('menu')).toBeNull();
+    expect(within(projectDetail).queryByRole('menu')).toBeNull();
 
-    fireEvent.click(within(projectCard).getByRole('button', { name: 'Project A' }));
-    fireEvent.click(within(projectCard).getByRole('button', { name: 'common.delete Folder A' }));
+    fireEvent.click(within(projectDetail).getByRole('button', { name: 'common.delete Folder A' }));
     await waitFor(() => {
       expect(workspaceSettings.deleteFolder).toHaveBeenCalledWith('folder-a');
     });
-
-    fireEvent.click(within(projectCard).getByRole('button', { name: 'Project A' }));
-    expect(within(projectCard).getByRole('button', { name: 'Project A' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    );
     expect(
-      within(projectCard).getByRole('button', { name: 'settings.workspace.drag.handle' })
+      screen.getByRole('button', { name: 'settings.workspace.drag.handle' })
     ).not.toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(deleteProjectButton);
@@ -825,7 +866,7 @@ describe('WorkspaceSettingsSection', () => {
     });
   });
 
-  it('focuses the next project delete button after deletion', async () => {
+  it('selects the next project and focuses its heading after deletion', async () => {
     const user = userEvent.setup();
     const workspaceSettings = installDeletionFocusSettings([
       { project_id: 'project-a', display_name: 'Project A', sort_order: 0, organization_ids: [] },
@@ -834,16 +875,20 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'common.delete Project A' }));
 
     await waitFor(() => {
       expect(workspaceSettings.deleteProject).toHaveBeenCalledWith('project-a');
-      expect(screen.getByRole('button', { name: 'common.delete Project B' })).toHaveFocus();
+      expect(screen.getByRole('heading', { name: 'Project B' })).toHaveFocus();
     });
+    expect(screen.getByRole('button', { name: 'Project B' })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
   });
 
-  it('focuses the next project delete button when an earlier project has expanded folders', async () => {
+  it('hands a deleted selected project to the one that took its place', async () => {
     const user = userEvent.setup();
     const workspaceSettings = installDeletionFocusSettings(
       [
@@ -873,17 +918,59 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
-    await user.click(screen.getByRole('button', { name: 'Project A' }));
-    const folderDeleteButton = screen.getByRole('button', { name: 'common.delete Folder A' });
+    await screen.findByRole('heading', { name: 'Project A' });
     expect(screen.getByRole('button', { name: 'common.delete Folder B' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Project B' }));
     await user.click(screen.getByRole('button', { name: 'common.delete Project B' }));
 
     await waitFor(() => {
       expect(workspaceSettings.deleteProject).toHaveBeenCalledWith('project-b');
-      expect(screen.getByRole('button', { name: 'common.delete Project C' })).toHaveFocus();
-      expect(folderDeleteButton).not.toBe(document.activeElement);
+      expect(screen.getByRole('heading', { name: 'Project C' })).toHaveFocus();
     });
+  });
+
+  it('deletes the project shown after the unassigned fallback and selects the next one', async () => {
+    const user = userEvent.setup();
+    const folder = (folderId: string, projectIds: string[]) => ({
+      folder_id: folderId,
+      display_name: folderId,
+      real_path: `/workspace/${folderId}`,
+      canonical_real_path: `/workspace/${folderId}`,
+      organization_ids: [],
+      project_ids: projectIds,
+    });
+    const workspaceSettings = installDeletionFocusSettings(
+      [
+        { project_id: 'project-a', display_name: 'Project A', sort_order: 0, organization_ids: [] },
+        { project_id: 'project-b', display_name: 'Project B', sort_order: 1, organization_ids: [] },
+      ],
+      [folder('loose', []), folder('held', ['project-a'])]
+    );
+    workspaceSettings.updateFolderLinks.mockImplementation(async () =>
+      folder('loose', ['project-b'])
+    );
+
+    renderWorkspaceSettingsSection();
+    await user.click(
+      await screen.findByRole('button', { name: 'settings.workspace.unassigned.title' })
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'settings.workspace.unassigned.project loose' }),
+      'project-b'
+    );
+    await user.click(screen.getByRole('button', { name: 'settings.workspace.unassigned.assign' }));
+    // Nothing is left unassigned, so the first project is shown.
+    expect(await screen.findByRole('heading', { name: 'Project A' })).toBeInTheDocument();
+
+    // Deleting it leaves its folder unassigned; the next project still takes its place.
+    await user.click(screen.getByRole('button', { name: 'common.delete Project A' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Project B' })).toHaveFocus();
+    });
+    expect(screen.getByRole('button', { name: 'Project B' })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
   });
 
   it('focuses the add project button after deleting the final project', async () => {
@@ -894,11 +981,11 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'common.delete Project A' }));
 
     await waitFor(() => {
-      expect(screen.queryByText('Project A')).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Project A' })).toBeNull();
       expect(screen.getByRole('button', { name: 'settings.workspace.addProject' })).toHaveFocus();
     });
   });
@@ -929,8 +1016,7 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
-    await user.click(screen.getByRole('button', { name: 'Project A' }));
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'common.delete Folder A' }));
 
     await waitFor(() => {
@@ -957,8 +1043,7 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
-    await user.click(screen.getByRole('button', { name: 'Project A' }));
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'common.delete Folder A' }));
 
     await waitFor(() => {
@@ -990,31 +1075,22 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
-    await user.click(screen.getByRole('button', { name: 'Project A' }));
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'Project B' }));
-    const projectACard = document.querySelector('[data-project-id="project-a"]');
-    const projectBCard = document.querySelector('[data-project-id="project-b"]');
-    if (!(projectACard instanceof HTMLElement) || !(projectBCard instanceof HTMLElement)) {
-      throw new Error('Project cards were not rendered.');
-    }
-    const projectADelete = within(projectACard).getByRole('button', {
+    const projectBDetail = await findProjectDetail('Project B');
+    const projectBDelete = within(projectBDetail).getByRole('button', {
       name: 'common.delete Folder A',
     });
-    const projectBDelete = within(projectBCard).getByRole('button', {
-      name: 'common.delete Folder A',
-    });
-    expect(projectADelete.id).not.toBe(projectBDelete.id);
+    expect(projectBDelete.id).toContain('project-b');
 
     projectBDelete.focus();
     await user.keyboard('{Enter}');
     await waitFor(() => expect(workspaceSettings.deleteFolder).toHaveBeenCalledWith('folder-a'));
-    within(projectACard).getByRole('button', { name: 'Project A' }).focus();
+    screen.getByRole('button', { name: 'Project A' }).focus();
     deleteRequest.reject(new Error('delete failed'));
 
     await waitFor(() => {
       expect(projectBDelete).toHaveFocus();
-      expect(projectADelete).not.toHaveFocus();
       expect(screen.getByRole('alert')).toHaveTextContent('settings.workspace.saveFailed');
     });
   });
@@ -1053,10 +1129,7 @@ describe('WorkspaceSettingsSection', () => {
 
     renderWorkspaceSettingsSection();
 
-    await screen.findByText('Project A');
-    expect(screen.getAllByText('Project A')).toHaveLength(1);
-    const projectCard = screen.getByText('Project A').closest('.workspace-project-card');
-    if (!(projectCard instanceof HTMLElement)) throw new Error('Project card was not rendered.');
+    const projectCard = await findProjectDetail('Project A');
     expect(within(projectCard).getByText('Org A')).toBeInTheDocument();
     expect(within(projectCard).getByText('Org B')).toBeInTheDocument();
     expect(within(projectCard).getByText('Org C')).toBeInTheDocument();
@@ -1073,9 +1146,7 @@ describe('WorkspaceSettingsSection', () => {
     const workspaceSettings = installProjectOrganizationSettings(['org-a', 'missing-org', 'org-b']);
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    const projectName = await screen.findByText('Project A');
-    const projectCard = projectName.closest('.workspace-project-card');
-    if (!(projectCard instanceof HTMLElement)) throw new Error('Project card was not rendered.');
+    const projectCard = await findProjectDetail('Project A');
     const removeButton = within(projectCard).getByRole('button', { name: 'Org Aを外す' });
 
     removeButton.focus();
@@ -1088,13 +1159,14 @@ describe('WorkspaceSettingsSection', () => {
       expect(within(projectCard).queryByRole('button', { name: 'Org Aを外す' })).toBeNull();
       expect(within(projectCard).getByRole('button', { name: 'Org Bを外す' })).toHaveFocus();
     });
-    expect(within(projectCard).getByRole('button', { name: 'Project A' })).toHaveAttribute(
-      'aria-expanded',
+    expect(screen.getByRole('button', { name: 'Project A' })).toHaveAttribute(
+      'aria-current',
       'true'
     );
-    expect(
-      within(projectCard).getByRole('button', { name: 'Project Aを移動' })
-    ).not.toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Project Aを移動' })).not.toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   it('replaces unresolved links from the add chip and turns the removed chip back into add', async () => {
@@ -1102,7 +1174,7 @@ describe('WorkspaceSettingsSection', () => {
     const workspaceSettings = installProjectOrganizationSettings(['missing-org']);
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     const addTrigger = screen.getByRole('button', { name: 'Project Aの組織を選択' });
     expect(addTrigger).toHaveClass('workspace-organization-add-trigger');
 
@@ -1140,7 +1212,7 @@ describe('WorkspaceSettingsSection', () => {
     const workspaceSettings = installProjectOrganizationSettings([]);
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     await user.click(screen.getByRole('button', { name: 'Project Aの組織を選択' }));
     const picker = screen.getByRole('dialog', { name: 'Project Aの組織を選択' });
     within(picker).getByRole('button', { name: 'Org A' }).focus();
@@ -1167,7 +1239,7 @@ describe('WorkspaceSettingsSection', () => {
     });
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     const addTrigger = screen.getByRole('button', { name: 'Project Aの組織を選択' });
 
     addTrigger.focus();
@@ -1249,6 +1321,75 @@ describe('WorkspaceSettingsSection', () => {
     expect(within(picker).queryByRole('group')).toBeNull();
   });
 
+  it('deletes unused organizations from the project picker without asking or selecting them', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    const workspaceSettings = installOrganizationPickerSettings(
+      [
+        { organization_id: 'org-a', display_name: 'Acme' },
+        { organization_id: 'org-b', display_name: 'Northwind' },
+      ],
+      async () => {
+        throw new Error('not expected');
+      }
+    );
+
+    renderWorkspaceSettingsSection(japaneseTranslate);
+    const picker = await openProjectOrganizationPicker(user);
+    await user.click(within(picker).getByRole('button', { name: '削除 Acme' }));
+
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-a');
+      expect(within(picker).queryByRole('button', { name: 'Acme' })).toBeNull();
+      expect(within(picker).getByRole('button', { name: '削除 Northwind' })).toHaveFocus();
+    });
+    expect(screen.getByRole('dialog', { name: 'Project Aの組織を選択' })).toBe(picker);
+
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-b');
+      expect(within(picker).getByRole('button', { name: '組織を追加' })).toHaveFocus();
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(workspaceSettings.updateProjectLinks).not.toHaveBeenCalled();
+  });
+
+  it('asks before deleting an organization a project uses and removes it from that project', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    const workspaceSettings = installProjectOrganizationSettings(['org-a']);
+
+    renderWorkspaceSettingsSection(japaneseTranslate);
+    const projectDetail = await findProjectDetail('Project A');
+    expect(within(projectDetail).getByRole('button', { name: 'Org Aを外す' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'プロジェクトを追加' }));
+    const popover = screen.getByRole('dialog', { name: 'プロジェクトを作成' });
+
+    await user.click(within(popover).getByRole('button', { name: '削除 Org A' }));
+    expect(confirm).toHaveBeenCalledWith(
+      '『Org A』は 1 件のプロジェクトやフォルダで使われています。削除すると、そこからも外れます。削除しますか？'
+    );
+    expect(workspaceSettings.deleteOrganization).not.toHaveBeenCalled();
+    expect(within(popover).getByRole('button', { name: 'Org A' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+    expect(within(projectDetail).getByRole('button', { name: 'Org Aを外す' })).toBeInTheDocument();
+
+    confirm.mockReturnValue(true);
+    await user.click(within(popover).getByRole('button', { name: '削除 Org A' }));
+
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-a');
+      expect(within(popover).queryByRole('button', { name: 'Org A' })).toBeNull();
+      expect(within(projectDetail).queryByRole('button', { name: 'Org Aを外す' })).toBeNull();
+      expect(within(popover).getByRole('button', { name: '削除 Org B' })).toHaveFocus();
+    });
+    expect(workspaceSettings.deleteOrganization).toHaveBeenCalledOnce();
+  });
+
   it('keeps the draft open without linking when organization creation is refused', async () => {
     const user = userEvent.setup();
     const workspaceSettings = installOrganizationPickerSettings([], async () => {
@@ -1284,7 +1425,7 @@ describe('WorkspaceSettingsSection', () => {
     });
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     const removeButton = screen.getByRole('button', { name: 'Org Bを外す' });
 
     removeButton.focus();
@@ -1343,7 +1484,7 @@ describe('WorkspaceSettingsSection', () => {
     window.electron = { workspaceSettings } as unknown as Window['electron'];
 
     renderWorkspaceSettingsSection(japaneseTranslate);
-    await screen.findByText('Project A');
+    await screen.findByRole('heading', { name: 'Project A' });
     const projectAAdd = screen.getByRole('button', { name: 'Project Aの組織を選択' });
     await user.click(projectAAdd);
     await user.click(
@@ -1359,6 +1500,7 @@ describe('WorkspaceSettingsSection', () => {
       expect(projectAAdd).toHaveAttribute('aria-busy', 'true');
     });
 
+    await user.click(screen.getByRole('button', { name: 'Project B' }));
     const projectBAdd = screen.getByRole('button', { name: 'Project Bの組織を選択' });
     expect(projectBAdd).toBeEnabled();
     await user.click(projectBAdd);
@@ -1373,8 +1515,12 @@ describe('WorkspaceSettingsSection', () => {
         organizationIds: ['org-b'],
       });
       expect(screen.getByRole('button', { name: 'Org Bを外す' })).toHaveFocus();
-      expect(projectAAdd).toHaveAttribute('aria-busy', 'true');
     });
+    await user.click(screen.getByRole('button', { name: 'Project A' }));
+    expect(screen.getByRole('button', { name: 'Project Aの組織を選択' })).toHaveAttribute(
+      'aria-busy',
+      'true'
+    );
 
     pendingUpdate.resolve({
       project_id: 'project-a',
@@ -1422,7 +1568,7 @@ describe('WorkspaceSettingsSection', () => {
     } as unknown as Window['electron'];
 
     const { container } = renderWorkspaceSettingsSection();
-    await screen.findByText('Zulu');
+    await screen.findByRole('heading', { name: 'Zulu' });
 
     expect(
       Array.from(container.querySelectorAll<HTMLElement>('[data-project-id]')).map(
@@ -1741,11 +1887,10 @@ describe('WorkspaceSettingsSection', () => {
     renderWorkspaceSettingsSection();
     await user.click(await screen.findByRole('button', { name: 'common.delete Project A' }));
 
-    const disclosure = await screen.findByRole('button', {
-      name: /settings\.workspace\.unassigned\.title/u,
-    });
-    await user.click(disclosure);
-
+    // With no project left, the folders it held are what the detail column shows.
+    expect(
+      await screen.findByRole('button', { name: 'settings.workspace.unassigned.title' })
+    ).toHaveAttribute('aria-current', 'true');
     expect(screen.getByText('Folder A')).toBeInTheDocument();
     expect(workspaceSettings.deleteProject).toHaveBeenCalledOnce();
     expect(workspaceSettings.get).toHaveBeenCalledOnce();
@@ -1798,14 +1943,17 @@ describe('WorkspaceSettingsSection', () => {
     window.electron = { workspaceSettings } as unknown as Window['electron'];
 
     renderWorkspaceSettingsSection();
-    const disclosure = await screen.findByRole('button', {
-      name: /settings\.workspace\.unassigned\.title/u,
+    const unassignedItem = await screen.findByRole('button', {
+      name: 'settings.workspace.unassigned.title',
     });
-    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(unassignedItem).not.toHaveAttribute('aria-current');
     expect(screen.queryByText('Unassigned Folder')).toBeNull();
-    fireEvent.click(disclosure);
+    fireEvent.click(unassignedItem);
+    expect(unassignedItem).toHaveAttribute('aria-current', 'true');
 
-    const unassignedSection = disclosure.closest('.workspace-unassigned-folders');
+    const unassignedSection = screen
+      .getByRole('heading', { name: 'settings.workspace.unassigned.title' })
+      .closest('.workspace-unassigned-folders');
     if (!(unassignedSection instanceof HTMLElement)) {
       throw new Error('Unassigned section was not rendered.');
     }
@@ -1830,5 +1978,12 @@ describe('WorkspaceSettingsSection', () => {
         projectIds: ['project-a'],
       });
     });
+    // With nothing left unassigned, the item goes and the project takes the detail column.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: 'settings.workspace.unassigned.title' })
+      ).toBeNull();
+    });
+    expect(screen.getByRole('heading', { name: 'Project A' })).toBeInTheDocument();
   });
 });

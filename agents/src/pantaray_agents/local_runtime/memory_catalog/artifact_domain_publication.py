@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
 from .errors import MemoryCatalogIntegrityError
@@ -132,7 +132,7 @@ def write_fact_projection(
     revision: MemoryRevision,
     publication: FactArtifactPublication,
 ) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     _set_revision_profile_brief(
         connection=connection,
         revision=revision,
@@ -193,7 +193,7 @@ def write_long_term_projection(
     revision: MemoryRevision,
     publication: LongTermInsightArtifactPublication,
 ) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     _set_revision_profile_brief(
         connection=connection,
         revision=revision,

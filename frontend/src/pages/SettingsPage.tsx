@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
+import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
 import { LanguageSection } from './settings/components/LanguageSection';
@@ -57,8 +58,9 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="settings-page-shell">
-      <aside className="settings-page-nav" aria-label={t('nav.settings')}>
+    <div className="app-split">
+      <aside className="app-split-master settings-page-nav" aria-label={t('nav.settings')}>
+        <h2 className="app-split-title settings-page-nav-title">{t('nav.settings')}</h2>
         {SETTINGS_SECTIONS.map((sectionId) => {
           const isActive = activeSection === sectionId;
           return (
@@ -83,7 +85,8 @@ const SettingsPage: React.FC = () => {
         })}
       </aside>
 
-      <div className="dashboard-container settings-page-content">
+      <div className="app-split-detail settings-page-content">
+        <AiConnectionNotice />
         {activeSection === 'ai_connection' ? <AiConnectionSettingsSection /> : null}
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />

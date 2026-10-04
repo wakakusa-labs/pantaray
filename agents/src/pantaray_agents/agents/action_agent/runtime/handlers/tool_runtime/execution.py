@@ -19,6 +19,7 @@ from pantaray_agents.agents.action_agent.tools import (
     CAPTURE_SCREEN_TOOL_ID,
     DRAFT_FINAL_ANSWER_TOOL_ID,
     READ_ACTION_PLAN_TOOL_ID,
+    REMEMBER_TOOL_ID,
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL_ID,
     SUBMIT_FINAL_ANSWER_TOOL_ID,
@@ -32,6 +33,10 @@ from pantaray_agents.agents.core import TokenBudgetExceeded
 from pantaray_agents.application.action.ports import (
     ActionStepEventPersistenceError,
     ActionToolStepEmission,
+)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import (
+    format_utc_iso,
+    now_utc_iso,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     GLOB_TOOL_ID,
@@ -72,6 +77,7 @@ from .memory_links import (
 from .memory_search import run_memory_search_tool
 from .memory_sql import run_memory_sql_tool
 from .plan_document import run_action_plan_tool
+from .remember import run_remember_tool
 from .request_identity import resolve_tool_request_id
 from .shared import (
     ApprovalDeniedToolControl,
@@ -189,6 +195,7 @@ async def run_validated_tool_impl(
         )
     elif tool_def.tool_id == SPAWN_SUBAGENT_TOOL_ID:
         result = await run_spawn_subagent_tool(
+            agent,
             step_id=resolved_step_id,
             tool_def=tool_def,
             args=args,
@@ -261,6 +268,14 @@ async def run_validated_tool_impl(
             args=args,
             state=state,
         )
+    elif tool_def.tool_id == REMEMBER_TOOL_ID:
+        result = await run_remember_tool(
+            step_id=resolved_step_id,
+            tool_def=tool_def,
+            args=args,
+            state=state,
+            actor=actor,
+        )
     elif tool_def.tool_id == "memory_sql":
         result = await run_memory_sql_tool(
             agent, resolved_step_id, tool_def, args, state
@@ -304,12 +319,12 @@ async def run_validated_tool_impl(
     else:
         raise ValueError(f"Unsupported tool_id: {tool_def.tool_id}")
 
-    result.started_at = effective_started_at.isoformat()
+    result.started_at = format_utc_iso(effective_started_at)
     try:
         completion_dt = datetime.fromisoformat(result.completed_at)
     except ValueError:
         completion_dt = datetime.now(UTC)
-        result.completed_at = completion_dt.isoformat()
+        result.completed_at = format_utc_iso(completion_dt)
     elapsed_ms = int((completion_dt - effective_started_at).total_seconds() * 1000)
     result.execution_time_ms = max(elapsed_ms, 0)
 
@@ -352,7 +367,7 @@ async def run_tool(
             state=state,
             tool_def=tool_def,
             step_id=step_id,
-            started_at=started_at.isoformat(),
+            started_at=format_utc_iso(started_at),
             args=raw_args,
             tool_request_id=validation_request_id,
         )
@@ -363,8 +378,8 @@ async def run_tool(
                 step_id=step_id,
                 tool_id=tool_def.tool_id,
                 status="error",
-                started_at=started_at.isoformat(),
-                completed_at=datetime.now(UTC).isoformat(),
+                started_at=format_utc_iso(started_at),
+                completed_at=now_utc_iso(),
                 output=error_payload,
                 tool_request_id=validation_request_id,
                 tool_invocation_id=validation_invocation_id,
@@ -386,8 +401,10 @@ async def run_tool(
                 step_id=step_id,
                 tool_def=tool_def,
                 state=state,
+                # The input schema requires a non-blank string.
+                app_name=str(validated_args["app_name"]),
                 tool_request_id=tool_request_id,
-                requested_at=started_at.isoformat(),
+                requested_at=format_utc_iso(started_at),
             )
             if tool_def.tool_id == CAPTURE_SCREEN_TOOL_ID
             else await run_broker_tool_wrapper(
@@ -398,7 +415,7 @@ async def run_tool(
                 state,
                 invocation_id=None,
                 tool_request_id=tool_request_id,
-                requested_at=started_at.isoformat(),
+                requested_at=format_utc_iso(started_at),
                 preflight_only=True,
             )
         )
@@ -415,7 +432,7 @@ async def run_tool(
             state=state,
             tool_def=tool_def,
             step_id=step_id,
-            started_at=started_at.isoformat(),
+            started_at=format_utc_iso(started_at),
             args=validated_args,
             tool_request_id=tool_request_id,
         )
@@ -429,7 +446,7 @@ async def run_tool(
                     label=tool_def.name,
                     tool_args={"args": validated_args},
                     status="processing",
-                    started_at=started_at.isoformat(),
+                    started_at=format_utc_iso(started_at),
                     completed_at=None,
                 )
             )
@@ -442,7 +459,7 @@ async def run_tool(
                 state,
                 invocation_id=invocation_id,
                 tool_request_id=tool_request_id,
-                requested_at=started_at.isoformat(),
+                requested_at=format_utc_iso(started_at),
                 preflight_only=False,
             )
             broker_preparation.result.tool_request_id = tool_request_id
@@ -459,9 +476,10 @@ async def run_tool(
                 step_id=step_id,
                 tool_def=tool_def,
                 state=state,
+                app_name=str(validated_args["app_name"]),
                 tool_request_id=tool_request_id,
                 tool_invocation_id=invocation_id,
-                requested_at=started_at.isoformat(),
+                requested_at=format_utc_iso(started_at),
             )
         else:
             result = await run_validated_tool_impl(

@@ -24,12 +24,9 @@ function createCaptureApi({ ipcRenderer }) {
       getCaptureSettings: () => ipcRenderer.invoke('privacy:getCaptureSettings'),
       updateCaptureSettings: (settings) =>
         ipcRenderer.invoke('privacy:updateCaptureSettings', settings),
-      getActiveAppName: () => ipcRenderer.invoke('privacy:getActiveAppName'),
-      getActiveWindowInfo: () => ipcRenderer.invoke('privacy:getActiveWindowInfo'),
       listInstalledApps: () => ipcRenderer.invoke('privacy:listInstalledApps'),
       getIdeFileRules: () => ipcRenderer.invoke('privacy:getIdeFileRules'),
       updateIdeFileRules: (rules) => ipcRenderer.invoke('privacy:updateIdeFileRules', rules),
-      getActiveBrowserUrl: () => ipcRenderer.invoke('privacy:getActiveBrowserUrl'),
       setCaptureEditing: (request) =>
         ipcRenderer.invoke('privacy:setCaptureEditing', request),
       onCaptureSettingsUpdated: (callback) => {

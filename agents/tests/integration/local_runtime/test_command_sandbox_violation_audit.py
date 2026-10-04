@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    WRITE_FOLDER_REQUEST_HINT,
+)
+
 from .support import (
     SEATBELT_SKIP_REASON,
     bootstrap_runtime_testbed,
@@ -35,7 +39,7 @@ int main(void) {{
 
 
 @pytest.mark.asyncio
-async def test_denied_write_preserves_os_error_without_guessing_its_cause(
+async def test_denied_write_keeps_the_os_error_and_hints_at_write_folders(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -56,4 +60,5 @@ async def test_denied_write_preserves_os_error_without_guessing_its_cause(
     assert audit["sandbox_violation_summary"] is None
     assert outcome.output["exit_code"] == 111
     assert outcome.output["stderr"] == "open: Operation not permitted\n"
+    assert outcome.output["error"]["llm_feedback"] == WRITE_FOLDER_REQUEST_HINT
     assert not outside_path.exists()

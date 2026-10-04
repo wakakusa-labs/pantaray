@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import BinaryIO, Final
 
 from docx import Document
 from docx.document import Document as DocxDocument
 from docx.oxml.ns import qn
+from docx.oxml.table import CT_Tc
 from docx.oxml.xmlchemy import BaseOxmlElement
-from docx.table import Table
+from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
 
 from .document_model import (
+    MAX_TABLE_COLUMNS,
+    DocumentExtractionError,
     DocumentImage,
     DocumentTextBudget,
     ExtractedDocument,
     pipe_table,
     resolve_start_unit,
+    table_cut_notes,
 )
 
 _HEADING_STYLE: Final = re.compile(r"heading\s*([1-9])", re.IGNORECASE)
@@ -30,13 +35,15 @@ _DOCX_NOTES: Final = (
     "embedded pictures are not listed.",
     "List numbering is not resolved, so a numbered item carries the same "
     "marker as a bullet.",
-    "A page count is unavailable without rendering the document.",
+    "Pages are not counted here; render_pdf_page draws the laid-out pages "
+    "and reports the page count.",
 )
 
 
 def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     document = Document(source)
-    total_units = len(document.paragraphs)
+    blocks = list(_body_blocks(document.element.body))
+    total_units = sum(block.tag == qn("w:p") for block in blocks)
     start = resolve_start_unit(
         start_unit, total_units=total_units, unit_kind="paragraph"
     )
@@ -48,14 +55,12 @@ def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
     paragraphs = 0
     tables = 0
     table_cut = False
-    for block in document.element.body.iterchildren():
+    for block in blocks:
         is_paragraph = block.tag == qn("w:p")
         if is_paragraph:
             paragraphs += 1
-        elif block.tag == qn("w:tbl"):
-            tables += 1
         else:
-            continue
+            tables += 1
         # A table sits between paragraphs, so it is read as part of the
         # paragraph it follows: a read resuming at a later paragraph skips it
         # because the read that reached that paragraph already carried it.
@@ -70,9 +75,7 @@ def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
             lines = [line]
         else:
             location = f"table {tables}"
-            lines, cut = pipe_table(
-                [cell.text for cell in row.cells] for row in Table(block, document).rows
-            )
+            lines, cut = pipe_table(_table_rows(Table(block, document)))
             table_cut = table_cut or cut
         images.extend(_block_images(block, document, location))
         if not budget.add_unit(number, *lines):
@@ -86,12 +89,37 @@ def extract_docx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
         next_start_unit=budget.next_start_unit,
         outline=tuple(outline),
         images=tuple(images),
-        notes=(*_DOCX_NOTES, *budget.notes()),
+        notes=(*_DOCX_NOTES, *table_cut_notes(table_cut), *budget.notes()),
     )
 
 
+def _body_blocks(container: BaseOxmlElement) -> Iterator[BaseOxmlElement]:
+    """Paragraphs and tables in reading order, including those a block-level
+    content control (``w:sdt``) wraps."""
+
+    for child in container.iterchildren():
+        if child.tag in (qn("w:p"), qn("w:tbl")):
+            yield child
+        elif child.tag == qn("w:sdt"):
+            for content in child.iterchildren(qn("w:sdtContent")):
+                yield from _body_blocks(content)
+
+
+def _inline_text(container: BaseOxmlElement) -> str:
+    """A paragraph's text as python-docx reads it, plus inline content controls."""
+
+    parts: list[str] = []
+    for child in container.iterchildren():
+        if child.tag in (qn("w:r"), qn("w:hyperlink")):
+            parts.append(child.text or "")
+        elif child.tag == qn("w:sdt"):
+            for content in child.iterchildren(qn("w:sdtContent")):
+                parts.append(_inline_text(content))
+    return "".join(parts)
+
+
 def _paragraph_line(paragraph: Paragraph) -> str:
-    text = paragraph.text
+    text = _inline_text(paragraph._p)
     if not text.strip():
         return ""
     style = (paragraph.style.name or "") if paragraph.style is not None else ""
@@ -103,6 +131,45 @@ def _paragraph_line(paragraph: Paragraph) -> str:
     if _LIST_STYLE.search(style):
         return f"- {text}"
     return text
+
+
+def _table_rows(table: Table) -> Iterator[list[str]]:
+    """Each row's cell text, a cell repeated per grid column it spans, as ``row.cells``.
+
+    ``row.cells`` cannot be handed an untrusted table. It repeats a cell once
+    for every grid column the cell declares it spans, so one ``gridSpan`` of
+    2**31 - 1 builds a tuple of that length; and it finds the cell a vertical
+    merge continues by walking back up the table a row at a time, re-scanning
+    each row, which measured 31 s for a 200-row, 10-column merge. The same
+    layout is built here in one pass: each row remembers the merge root that
+    starts at each grid offset, so the row below finds it directly, and a row
+    stops repeating text one column past what a table keeps.
+    """
+
+    roots_above: dict[int, CT_Tc] = {}
+    for tr in table._tbl.tr_lst:
+        roots: dict[int, CT_Tc] = {}
+        texts: list[str] = []
+        offset = tr.grid_before
+        for tc in tr.tc_lst:
+            root = tc
+            if tc.vMerge == "continue":
+                above = roots_above.get(offset)
+                if above is None:
+                    raise DocumentExtractionError(
+                        f"a vertically merged table cell at grid column {offset} "
+                        "has no cell above it to continue"
+                    )
+                root = above
+            roots[offset] = root
+            # The root's span, not this cell's: a continuing cell repeats the
+            # cell it continues, as python-docx lays it out.
+            room = MAX_TABLE_COLUMNS + 1 - len(texts)
+            if room > 0:
+                texts.extend([_Cell(root, table).text] * min(root.grid_span, room))
+            offset += tc.grid_span
+        roots_above = roots
+        yield texts
 
 
 def _block_images(

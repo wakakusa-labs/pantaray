@@ -9,6 +9,7 @@ MemoryCatalogSource = Literal[
     "suggestion",
     "action",
     "action_file_read",
+    "memory_note",
     "agent_experience",
     "short_term_insight",
     "long_term_insight",

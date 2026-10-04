@@ -21,9 +21,7 @@ function clampOverlayBounds(screen, win, requestedHeight) {
 
 function resizeWindow(screen, win, requestedHeight) {
   const nextBounds = clampOverlayBounds(screen, win, requestedHeight);
-  if (!nextBounds) return false;
-  win.setBounds({ y: nextBounds.y, height: nextBounds.height });
-  return true;
+  if (nextBounds) win.setBounds({ y: nextBounds.y, height: nextBounds.height });
 }
 
 function findSenderWindow(BrowserWindow, event) {
@@ -44,7 +42,8 @@ function hideSenderWindow(BrowserWindow, windows, event) {
 }
 
 function hideLastWindow(windows) {
-  windows.hide(windows.getLastOverlayId() || 'default');
+  const lastOverlayId = windows.getLastOverlayId();
+  if (lastOverlayId) windows.hide(lastOverlayId);
 }
 
 function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, interactions }) {
@@ -55,17 +54,6 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
     );
 
     return {
-      onShowNotification: (_event, payload) => {
-        try {
-          if (payload && typeof payload === 'object' && 'id' in payload) {
-            windows.show(payload.content, String(payload.id || 'default'));
-          } else {
-            windows.show(payload);
-          }
-        } catch (error) {
-          console.error('show-notification failed:', error);
-        }
-      },
       onResizeNotificationWindow: (event, payload) => {
         const targetId = payload && typeof payload === 'object' ? payload.id : null;
         const requestedHeight = payload && typeof payload === 'object' ? payload.height : payload;
@@ -73,9 +61,7 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
           resizeWindow(screen, windows.getOverlay(String(targetId)), requestedHeight);
           return;
         }
-        const senderWindow = findSenderWindow(BrowserWindow, event);
-        if (resizeWindow(screen, senderWindow, requestedHeight)) return;
-        resizeWindow(screen, windows.getLegacyNotification(), requestedHeight);
+        resizeWindow(screen, findSenderWindow(BrowserWindow, event), requestedHeight);
       },
       onNotificationActionAccept: (_event, data) => {
         console.log('Notification Accepted:', data);

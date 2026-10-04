@@ -335,10 +335,9 @@ function createMainWindow(options = {}) {
     minHeight: 600,
     frame: true,
     transparent: false,
-    // History/Settings の背景（body: --app-background）の見た目に近い中間色へ合わせる
-    // - --app-background: #1a1e24 -> #161a20（かなり薄いグラデ）
-    // - 中間色: (26,30,36) と (22,26,32) の平均 = (24,28,34) => #181c22
-    backgroundColor: '#181c22',
+    // The middle stop of the renderer's fog ground (index.css --app-background), so the
+    // window shows the same color before the first paint.
+    backgroundColor: '#0f131a',
     hasShadow: true,
     resizable: true,
     fullscreenable: true,

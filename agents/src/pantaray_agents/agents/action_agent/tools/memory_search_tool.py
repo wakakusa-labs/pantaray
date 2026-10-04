@@ -35,9 +35,6 @@ from .base import (
 )
 
 ACTION_MEMORY_SEARCH_FOCUS_VALUES = MEMORY_SEARCH_FOCUS_VALUES
-MEMORY_SEARCH_FOCUS_PROMPT_TYPE = (
-    f"enum[{','.join(repr(value) for value in ACTION_MEMORY_SEARCH_FOCUS_VALUES)}]"
-)
 
 
 def validate_memory_search_args(args: Mapping[str, JSONValue]) -> None:
@@ -139,8 +136,10 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
         description=(
             "Search current active Memory Catalog fragments with exact, lexical, and "
             "semantic retrieval. "
-            "Use this first for broad recall across stock knowledge, flow "
-            "knowledge, and prior agent work."
+            "Use this for recall by words and meaning across stock knowledge, "
+            "flow knowledge, and prior agent work, including a topic tied to a "
+            "time, which goes in time_hint. Use memory_sql only to strictly "
+            "filter, order, or count rows of its tables."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -162,15 +161,29 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                 "for organized stock context, focus='activity' for recent flow "
                 "context, and focus='all' when the same topic may span both. If "
                 "a result contains a note-bearing ref, use get_memory_reference with "
-                "that result's context_handle to follow the exact immutable link."
+                "that result's context_handle to follow the exact immutable link. "
+                "When a question names both a topic and a time, such as the "
+                "estimate document seen yesterday, search here with time_hint to "
+                "find candidates. When it is bounded only by time, such as what "
+                "happened in a window, or rows of memory_sql's tables must be "
+                "ordered or counted, use memory_sql. For the exact time something "
+                "was observed, use the Observed: line of each quote in source_records "
+                "results, or memory_sql's source_records table; the result's "
+                "observed_at is the latest time in its run."
             ),
             pitfalls=(
                 "Do not treat one source as complete by itself. Stock knowledge can be "
                 "stale; flow knowledge is fresher but noisier and less organized. "
-                "When context matters, reconcile stock and flow evidence. Do not "
-                "specify tables or source-specific time ranges. time_hint is a ranking "
-                "hint, not a hard filter. Write the query with concrete names, IDs, "
-                "paths, errors, and both Japanese/English terms when useful."
+                "When context matters, reconcile stock and flow evidence. time_hint "
+                "only ranks results near a time and does not filter them; to "
+                "strictly restrict rows of memory_sql's tables to a time range or "
+                "type, use memory_sql. Write the query with concrete names, IDs, "
+                "paths, errors, and both Japanese/English terms when useful. Words "
+                "are matched from three characters; below that, single characters "
+                "are not matched, and two-letter ASCII words only whole and when "
+                "written in capitals (PR, UI) or with a digit (#7, v2). notes in "
+                "the result name any query term that was not matched and say when "
+                "the result list was full, so more may match."
             ),
         ),
         execution_policy=tool_execution_policy(
@@ -183,9 +196,7 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                     name="query",
                     schema={"type": "string", "minLength": 1},
                     required=True,
-                    prompt_type="string",
                     description="Natural-language or keyword query for memory recall.",
-                    llm_order=10,
                 ),
                 field_spec(
                     name="focus",
@@ -193,12 +204,10 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                         "type": "string",
                         "enum": list(ACTION_MEMORY_SEARCH_FOCUS_VALUES),
                     },
-                    prompt_type=MEMORY_SEARCH_FOCUS_PROMPT_TYPE,
                     description=(
                         "Optional broad search focus. Default all. This is a source "
                         "selection hint, not a table name."
                     ),
-                    llm_order=20,
                 ),
                 field_spec(
                     name="time_hint",
@@ -214,24 +223,20 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                             },
                         },
                     },
-                    prompt_type="object",
                     description=(
                         "Optional ranking hint. Results near center are boosted, but "
                         "other relevant results can still appear."
                     ),
-                    llm_order=30,
                     children=(
                         field_spec(
                             name="center",
                             schema={"type": "string", "format": "date-time"},
                             required=True,
-                            prompt_type="datetime",
                             description=(
                                 "ISO8601 timestamp to rank nearby memories higher. "
                                 "Times shown to you are local with an offset; pass "
                                 "the same offset, e.g. 2026-09-27T06:50+09:00."
                             ),
-                            llm_order=10,
                         ),
                         field_spec(
                             name="radius_hours",
@@ -241,9 +246,7 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                                 "maximum": MEMORY_SEARCH_MAX_TIME_HINT_RADIUS_HOURS,
                             },
                             required=True,
-                            prompt_type="integer",
                             description="Ranking radius around center, in hours.",
-                            llm_order=20,
                         ),
                     ),
                 ),
@@ -254,16 +257,14 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                         "minimum": 1,
                         "maximum": MEMORY_SEARCH_MAX_LIMIT,
                     },
-                    prompt_type="integer",
                     description=f"Optional result limit. Default: {MEMORY_SEARCH_DEFAULT_LIMIT}.",
-                    llm_order=40,
                 ),
             )
         ),
         output_schema={
             "type": "object",
             "properties": {
-                "grouped_results": {"type": "object", "additionalProperties": True},
+                "notes": {"type": "array", "items": {"type": "string"}},
                 "semantic_status": {
                     "type": "string",
                     "enum": list(MEMORY_SEARCH_SEMANTIC_STATUS_VALUES),
@@ -310,9 +311,9 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
             },
             "required": [
                 "results",
-                "grouped_results",
                 "semantic_status",
                 "semantic_error_code",
+                "notes",
             ],
             "additionalProperties": False,
         },

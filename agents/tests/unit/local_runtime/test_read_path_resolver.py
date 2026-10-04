@@ -187,6 +187,7 @@ def _context(
         path_access_kind="read",
         manifest_roots=roots,
         read_access_scope=read_access_scope,
+        db_path=cwd_path.resolve().parent / "app-data" / "runtime.db",
     )
 
 

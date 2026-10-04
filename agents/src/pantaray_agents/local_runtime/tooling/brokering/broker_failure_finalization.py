@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import traceback
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 
@@ -39,7 +39,7 @@ def finalize_broker_invocation_error(
         request=ToolResultFinalizationRequest(
             owner=InvocationToolResultOwner(
                 invocation_id=invocation_id,
-                completed_at=datetime.now(UTC).isoformat(),
+                completed_at=now_utc_iso(),
                 status="failed",
                 completion_scope="execution",
             ),
@@ -86,7 +86,7 @@ def finalize_canceled_broker_invocation(
         request=ToolResultFinalizationRequest(
             owner=InvocationToolResultOwner(
                 invocation_id=invocation_id,
-                completed_at=datetime.now(UTC).isoformat(),
+                completed_at=now_utc_iso(),
                 status="canceled",
                 completion_scope="execution",
             ),

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Final, NoReturn
 
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.job_control import (
     LocalJobDeferEvent,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso, utc_now
 from pantaray_agents.tasks.job_retry import defer_local_job_transition_with_retry
 
 MEMORY_UPDATE_LOCK_CONFLICT_EXCEPTION: Final[str] = "MemoryUpdateLockConflictError"
@@ -20,11 +21,9 @@ async def defer_memory_update_lock_conflict(
     job_type: str,
     process_pending_status: str,
 ) -> NoReturn:
-    now = datetime.now(UTC)
-    scheduled_at = (
-        (now + timedelta(seconds=MEMORY_LOCK_RETRY_DELAY_SECONDS))
-        .isoformat()
-        .replace("+00:00", "Z")
+    now = utc_now()
+    scheduled_at = format_utc_iso(
+        now + timedelta(seconds=MEMORY_LOCK_RETRY_DELAY_SECONDS)
     )
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     await defer_local_job_transition_with_retry(
@@ -43,6 +42,6 @@ async def defer_memory_update_lock_conflict(
                 "retry_delay_seconds": MEMORY_LOCK_RETRY_DELAY_SECONDS,
                 "exception_type": MEMORY_UPDATE_LOCK_CONFLICT_EXCEPTION,
             },
-            created_at=now.isoformat().replace("+00:00", "Z"),
+            created_at=format_utc_iso(now),
         ),
     )

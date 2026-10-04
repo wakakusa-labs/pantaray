@@ -30,7 +30,6 @@ import { createExternalUrlOpener } from '../security/openExternalUrl';
 import {
   createScreenshotSyncManager,
   type RecordingStartResult,
-  type ScreenshotLib,
 } from '../screenshot/screenshotSync';
 import {
   holdsCaptureOsPermissions,
@@ -45,7 +44,9 @@ import {
 } from '../settings/approvalPreferencesFetch';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
+import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
 import type { DesktopRuntime } from './desktopRuntime';
+import { postWelcomeSuggestion } from './welcomeSuggestion';
 import {
   createGlobalShortcutController,
   createGlobalShortcutStore,
@@ -76,8 +77,6 @@ type FeatureRuntimeParams = {
   resolveUiSettingsPath: (userId: string | null) => string;
   getUiLanguage: () => UiLanguage;
   setUiLanguage: (language: UiLanguage) => void;
-  screenshotLib: ScreenshotLib;
-  execPromise: (command: string) => Promise<{ stdout: string; stderr: string }>;
   logger: LoggerLike | null;
 };
 const ACTION_CONVERSATION_LATEST_PAGE_LIMIT = 25;
@@ -216,7 +215,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     isMac: process.platform === 'darwin',
     userDataDir: app.getPath('userData'),
     getMainWindow: params.getMainWindow,
-    getNotificationWindow: () => safely(orchestration.getNotificationWindowOrNull, null),
     isBackendRuntimeReady: () => params.supabaseWiring.getLocalOwnerId() !== null,
     getManifestPath: params.desktopRuntime.getAppRuntimeManifestPath,
     requestPermissions: requestCapturePermissions,
@@ -238,9 +236,16 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       if (!result.contained) throw new Error(result.reason);
     },
     capturePrivacy,
-    screenshotLib: params.screenshotLib,
-    execPromise: params.execPromise,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
+    // The runtime greets only an owner who has no data yet, so every start may ask.
+    onRecordingStarted: (userId) => {
+      const { accelerator, failure } = shortcutController.getState();
+      // A failure means the accelerator is configured but not registered: it would not work.
+      const answer = getWelcomeSuggestionText(params.getUiLanguage(), failure ? null : accelerator);
+      postWelcomeSuggestion({ requestJson, userId, answer }).catch((error: unknown) => {
+        params.logger?.error?.('WELCOME_SUGGESTION_ERR', { err: error });
+      });
+    },
   });
   const rebuildMenus = () =>
     safely(() => {
@@ -377,8 +382,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         openCapturePermissionSettings,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
-        screenshotLib: params.screenshotLib,
-        execPromise: params.execPromise,
         onCaptureSettingsChanged: () => void params.updateUi.refreshCaptureStatus(),
         openExternalUrl,
         wsSend: orchestration.sendFromRenderer,

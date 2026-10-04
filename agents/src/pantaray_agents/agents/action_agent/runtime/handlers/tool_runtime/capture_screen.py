@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Literal
 
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
@@ -47,6 +46,7 @@ from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     announce_screen_capture_request,
     screen_capture_broker,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.brokering.attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
@@ -91,20 +91,30 @@ _REFUSAL_MESSAGES: dict[ScreenCaptureRefusalCode, str] = {
         "image was taken. Ask the user to allow it in System Settings > Privacy "
         "& Security > Screen Recording, then try again."
     ),
+    "CAPTURE_TARGET_NOT_FOUND": (
+        "That app has no window on screen, so no image was taken. A minimized or "
+        "hidden window, or one on another desktop, cannot be captured. "
+        "details.available_apps names the apps that can be captured now."
+    ),
     "CAPTURE_REFUSED_BY_PRIVACY_FILTER": (
-        "The user's recording filter excludes what is on screen right now, so no "
-        "image was taken. Do not retry; ask the user for the information instead."
+        "The user's recording filter excludes this window, so no image was taken. "
+        "Do not retry; ask the user for the information instead."
     ),
     "CAPTURE_REFUSED_PASSWORD_MANAGER": (
-        "A password manager is frontmost. Captures there are always refused, so "
-        "no image was taken. Do not retry."
+        "The app is a password manager. Captures there are always refused, so no "
+        "image was taken. Do not retry."
     ),
     "CAPTURE_REFUSED_URL_UNAVAILABLE": (
-        "The frontmost browser did not report a URL, so the website filter could "
-        "not be applied and no image was taken."
+        "The page in this browser window could not be checked against the user's "
+        "website filter, so no image was taken. Only Google Chrome and Safari "
+        "windows can be checked."
+    ),
+    "CAPTURE_REFUSED_PRIVATE_WINDOW": (
+        "The window is a Chrome Incognito window. Captures there are always "
+        "refused, so no image was taken. Do not retry."
     ),
     "CAPTURE_REFUSED_SENSITIVE_PAGE": (
-        "The frontmost browser is on a sign-in or payment page. Captures there are "
+        "The browser window is on a sign-in or payment page. Captures there are "
         "always refused, so no image was taken. Do not retry; ask the user for the "
         "information instead."
     ),
@@ -133,15 +143,15 @@ class _CaptureIdentity:
     user_id: str
 
 
-def build_capture_screen_summary() -> dict[str, JSONValue]:
-    """What the approval panel shows for this request.
+def build_capture_screen_summary(app_name: str) -> dict[str, JSONValue]:
+    """What the approval panel shows for this request: the app to be captured.
 
-    The frontmost application and the page it is on are known only inside
-    Electron, and only at the moment of capture, so the summary names the act
-    rather than its target: naming a target here would mean guessing one.
+    The same name is what Electron is asked to capture, so the user approves the
+    target itself. Which of its windows is frontmost, and the page it shows, are
+    known only inside Electron at the moment of capture.
     """
 
-    return {"summary_kind": _CAPTURE_SUMMARY_KIND}
+    return {"summary_kind": _CAPTURE_SUMMARY_KIND, "app_name": app_name}
 
 
 async def run_capture_screen_preflight(
@@ -149,6 +159,7 @@ async def run_capture_screen_preflight(
     step_id: str,
     tool_def: ToolDefinition,
     state,
+    app_name: str,
     tool_request_id: str,
     requested_at: str,
 ) -> ToolExecutionPreparation:
@@ -166,6 +177,7 @@ async def run_capture_screen_preflight(
     try:
         _authorize_capture(
             identity=identity,
+            app_name=app_name,
             tool_request_id=tool_request_id,
             requested_at=requested_at,
         )
@@ -213,6 +225,7 @@ async def run_capture_screen_tool(
     step_id: str,
     tool_def: ToolDefinition,
     state,
+    app_name: str,
     tool_request_id: str,
     tool_invocation_id: str,
     requested_at: str,
@@ -229,6 +242,7 @@ async def run_capture_screen_tool(
     try:
         _claim_capture_authorization(
             identity=identity,
+            app_name=app_name,
             tool_request_id=tool_request_id,
             tool_invocation_id=tool_invocation_id,
             requested_at=requested_at,
@@ -264,6 +278,7 @@ async def run_capture_screen_tool(
             process_id=identity.process_id,
             tool_request_id=tool_request_id,
             capture_request_id=capture_request_id,
+            app_name=app_name,
         )
     except Exception:
         broker.close(capture_request_id=capture_request_id)
@@ -295,6 +310,7 @@ async def run_capture_screen_tool(
 def _claim_capture_authorization(
     *,
     identity: _CaptureIdentity,
+    app_name: str,
     tool_request_id: str,
     tool_invocation_id: str,
     requested_at: str,
@@ -309,6 +325,7 @@ def _claim_capture_authorization(
 
     approval_session_id, approval_source = _authorize_capture(
         identity=identity,
+        app_name=app_name,
         tool_request_id=tool_request_id,
         requested_at=requested_at,
     )
@@ -336,6 +353,7 @@ def _claim_capture_authorization(
 def _authorize_capture(
     *,
     identity: _CaptureIdentity,
+    app_name: str,
     tool_request_id: str,
     requested_at: str,
 ) -> tuple[str | None, Literal["settings", "prompt"] | None]:
@@ -359,7 +377,7 @@ def _authorize_capture(
         ),
         tool_invocation_id=None,
         tool_request_id=tool_request_id,
-        command_summary=build_capture_screen_summary(),
+        command_summary=build_capture_screen_summary(app_name),
         requested_at=requested_at,
     )
 
@@ -441,7 +459,7 @@ def _captured_result(
         "width_px": captured.width_px,
         "height_px": captured.height_px,
         "message": (
-            f"Captured the screen of {captured.app_name} at {captured_at}. {ref}"
+            f"Captured the window of {captured.app_name} at {captured_at}. {ref}"
         ),
         # The durable step row keeps only this output, so the conversation read model
         # can name the image only if the output names it. The logical storage_path is
@@ -463,7 +481,7 @@ def _captured_result(
         tool_id=step.tool_def.tool_id,
         status="success",
         started_at=step.requested_at,
-        completed_at=datetime.now(UTC).isoformat(),
+        completed_at=now_utc_iso(),
         output=output,
         attachments=[attachment],
     )
@@ -481,7 +499,7 @@ def _error_result(
         tool_id=step.tool_def.tool_id,
         status="error",
         started_at=step.requested_at,
-        completed_at=datetime.now(UTC).isoformat(),
+        completed_at=now_utc_iso(),
         output=build_runtime_tool_error_output(
             error_type=code,
             message=message,

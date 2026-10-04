@@ -16,16 +16,31 @@ from pantaray_agents.agents.artifact_react import (
     ToolCallEnvelope,
 )
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
+from pantaray_agents.local_runtime.action_conversation.history_deletion import (
+    delete_history_item,
+)
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AgentExperienceContent,
     AgentExperienceScope,
     experience_entry_path,
     render_agent_experience_markdown,
 )
+from pantaray_agents.local_runtime.memory_catalog.connection import (
+    open_memory_catalog_connection,
+)
+from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    search_memory_catalog,
+)
+from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
+    register_inline_domain_memory,
+)
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.local_runtime.memory_catalog.search_policy import (
+    parse_memory_search_focus,
+)
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
@@ -73,8 +88,14 @@ DISPATCH_AT = datetime(2026, 1, 5, 1, 0, tzinfo=UTC)
 class _ScriptedMemoryAgent:
     """Writes one file per category through the run's own editor tools."""
 
-    def __init__(self, edits: tuple[tuple[str, str], ...]) -> None:
+    def __init__(
+        self,
+        edits: tuple[tuple[str, str], ...],
+        applied_memory_request_ids: tuple[str, ...] = (),
+    ) -> None:
         self._edits = edits
+        self.applied_memory_request_ids = applied_memory_request_ids
+        self.contexts: list[MemoryUpdateContext] = []
         self.briefs: list[MemorySource] = []
 
     async def update(
@@ -85,6 +106,7 @@ class _ScriptedMemoryAgent:
         tool_result_directory_fd: int,
     ) -> MemoryUpdateAgentResult:
         del tool_result_directory_fd
+        self.contexts.append(context)
         write = next(item for item in tool_definitions if item.name == "write_file")
         draft_revision = context.draft_revision
         for step, (path, content) in enumerate(self._edits, start=1):
@@ -111,7 +133,8 @@ class _ScriptedMemoryAgent:
                 status="success",
                 final_text="done",
                 steps=(),
-            )
+            ),
+            applied_memory_request_ids=self.applied_memory_request_ids,
         )
 
     async def generate_profile_brief(
@@ -287,7 +310,8 @@ class _AgentThatReplacesTheRoute:
             session_version="2",
         )
         return MemoryUpdateAgentResult(
-            loop_result=ReactLoopResult(status="success", final_text="done", steps=())
+            loop_result=ReactLoopResult(status="success", final_text="done", steps=()),
+            applied_memory_request_ids=(),
         )
 
     async def generate_profile_brief(
@@ -393,3 +417,204 @@ async def test_a_run_whose_every_action_was_deleted_completes_as_a_no_op(
         nodes = connection.execute("SELECT COUNT(*) FROM memory_nodes").fetchone()
     assert [json.loads(str(row[0])) for row in completed] == [{"published_sources": []}]
     assert nodes == (0,)
+
+
+ACTION_ID = "action-1"
+
+
+def _seed_remember_steps(
+    runtime: LocalMemoryFileEditorRuntime,
+    steps: tuple[tuple[str, int, str, str, str], ...],
+) -> None:
+    """Remember calls as (step_id, step_number, status, completed_at, note).
+
+    A successful call left its note in memory, keyed by its step as the tool
+    keys it.
+    """
+
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """INSERT INTO agent_actions(action_id,user_id,initial_user_message_id,
+              execution_target_json,status,final_output,prompt_name,prompt_version,
+              created_at,updated_at) VALUES (?,?,'message-1','{"kind":"scratch"}',
+              'success','done','action','1',?,?)""",
+            (ACTION_ID, USER_ID, TRIGGER_AT, TRIGGER_AT),
+        )
+        for step_id, step_number, status, completed_at, note in steps:
+            connection.execute(
+                """
+                INSERT INTO agent_action_steps(
+                    step_id, action_id, user_id, step_number, local_step_number,
+                    short_step_id, step_type, step_name, status, tool_args,
+                    started_at, completed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'tool_execution', 'tool::remember',
+                          ?, ?, ?, ?, ?)
+                """,
+                (
+                    step_id,
+                    ACTION_ID,
+                    USER_ID,
+                    step_number,
+                    step_number,
+                    f"S-{step_number}-TOOL",
+                    status,
+                    json.dumps({"tool_id": "remember", "args": {"note": note}}),
+                    TRIGGER_AT,
+                    completed_at,
+                    TRIGGER_AT,
+                ),
+            )
+    with open_memory_catalog_connection(
+        db_path=runtime.db_path, busy_timeout_ms=BUSY_TIMEOUT_MS
+    ) as connection:
+        with immediate_transaction(connection):
+            for step_id, _, status, _, note in steps:
+                if status == "success":
+                    register_inline_domain_memory(
+                        connection=connection,
+                        user_id=USER_ID,
+                        source="memory_note",
+                        source_record_id=f"{ACTION_ID}:{step_id}",
+                        content=f"User request recorded in Action {ACTION_ID}: {note}\n",
+                    )
+
+
+def _with_turn(payload: MemoryUpdateJobPayload, start: int, end: int) -> None:
+    payload["action_terminals"] = [
+        {
+            "source_id": f"{ACTION_ID}:{end}",
+            "action_id": ACTION_ID,
+            "action_completed_at": TRIGGER_AT,
+            "turn_start_step_number": start,
+            "turn_end_step_number": end,
+            "action_prompt_name": "action",
+            "action_prompt_version": "1",
+        }
+    ]
+
+
+def _searchable_notes(runtime: LocalMemoryFileEditorRuntime) -> list[str]:
+    with open_memory_catalog_connection(
+        db_path=runtime.db_path, busy_timeout_ms=BUSY_TIMEOUT_MS
+    ) as connection:
+        results, _ = search_memory_catalog(
+            connection=connection,
+            user_id=USER_ID,
+            run_id="action-2",
+            query="passphrase",
+            query_embedding=None,
+            embedding_generation=None,
+            focus=parse_memory_search_focus("all"),
+            center_time=None,
+            radius_hours=None,
+            limit=8,
+        )
+    return sorted(row["content"].rsplit(": ", 1)[1].strip() for row in results)
+
+
+@pytest.mark.asyncio
+async def test_only_the_final_successful_remember_calls_of_the_turn_are_rendered(
+    tmp_path: Path,
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    first, second = "2026-01-05T00:00:01Z", "2026-01-05T00:00:02Z"
+    _seed_remember_steps(
+        runtime,
+        (
+            ("before", 3, "success", first, "passphrase before"),
+            ("retried-error", 5, "error", first, "passphrase first try"),
+            ("retried-success", 5, "success", second, 'passphrase "second"\ntry'),
+            ("superseded-success", 6, "success", first, "passphrase superseded"),
+            ("superseded-error", 6, "error", second, "passphrase superseded"),
+            ("after", 7, "success", first, "passphrase after"),
+        ),
+    )
+    _with_turn(payload, 4, 6)
+    agent = _ScriptedMemoryAgent(())
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    (context,) = agent.contexts
+    assert context.memory_request_ids == ("R1",)
+    assert context.memory_requests == (
+        f"- request_id: R1 (action_id: {ACTION_ID}, step S-5-TOOL) "
+        'note: "passphrase \\"second\\"\\ntry"'
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_hides_only_the_notes_it_rendered_and_reported_applied(
+    tmp_path: Path,
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    _seed_remember_steps(
+        runtime,
+        (
+            ("applied", 4, "success", TRIGGER_AT, "passphrase applied"),
+            ("unreported", 5, "success", TRIGGER_AT, "passphrase unreported"),
+            ("outside", 8, "success", TRIGGER_AT, "passphrase outside"),
+        ),
+    )
+    _with_turn(payload, 4, 6)
+    # R3 is not a request of this run; the note past the turn stays out of reach.
+    agent = _ScriptedMemoryAgent((), applied_memory_request_ids=("R1", "R3"))
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    assert agent.contexts[0].memory_request_ids == ("R1", "R2")
+    assert _searchable_notes(runtime) == [
+        "passphrase outside",
+        "passphrase unreported",
+    ]
+    # Deleting the conversation still takes every note, archived or not.
+    delete_history_item(
+        db_path=runtime.db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        artifact_root=runtime.artifact_root,
+        user_id=USER_ID,
+        kind="conversation",
+        item_id=ACTION_ID,
+    )
+    with sqlite3.connect(runtime.db_path) as connection:
+        notes = connection.execute(
+            "SELECT COUNT(*) FROM memory_nodes WHERE source_type = 'memory_note'"
+        ).fetchone()
+    assert notes == (0,)
+
+
+class _AgentThatFails(_ScriptedMemoryAgent):
+    async def update(
+        self,
+        context: MemoryUpdateContext,
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        tool_result_directory_fd: int,
+    ) -> MemoryUpdateAgentResult:
+        raise RuntimeError("Memory update ReAct loop failed")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_hides_no_note(tmp_path: Path) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    _seed_remember_steps(
+        runtime, (("applied", 4, "success", TRIGGER_AT, "passphrase kept"),)
+    )
+    _with_turn(payload, 4, 6)
+
+    with pytest.raises(RuntimeError, match="ReAct loop failed"):
+        await execute_memory_update_job(
+            payload=payload,
+            runtime=runtime,
+            build_agent=_builder(
+                _AgentThatFails((), applied_memory_request_ids=("R1",))
+            ),
+        )
+
+    assert _searchable_notes(runtime) == ["passphrase kept"]

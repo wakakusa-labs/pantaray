@@ -19,7 +19,6 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={false}
           approvalUiState="hidden"
-          copyStatusAnswer={false}
           showBusyIndicator={true}
           showFooterActions={true}
         />
@@ -27,33 +26,6 @@ describe('AgentOverlayShell', () => {
     );
 
     expect(screen.queryByText('承認')).toBeNull();
-  });
-
-  it('enables the copy answer action when action text is visible', () => {
-    const onCopyAnswer = vi.fn();
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlayShell
-          isVisible={true}
-          isContentVisible={true}
-          isExpanded={true}
-          content={null}
-          suggestionText="Generated suggestion"
-          isSuggestionStreamFinished={true}
-          actionText="completed result"
-          isActionStreamFinished={true}
-          approvalUiState="hidden"
-          copyStatusAnswer={false}
-          showBusyIndicator={false}
-          showFooterActions={false}
-          onCopyAnswer={onCopyAnswer}
-        />
-      </UiLanguageProvider>
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Copy answer to clipboard' }));
-
-    expect(onCopyAnswer).toHaveBeenCalledTimes(1);
   });
 
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
@@ -93,7 +65,6 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={false}
           approvalUiState="hidden"
-          copyStatusAnswer={false}
           showBusyIndicator={false}
           showFooterActions={false}
           conversationContent={
@@ -138,9 +109,7 @@ describe('AgentOverlayShell', () => {
     expect(screen.getByRole('button', { name: 'Expand' })).toHaveFocus();
     toolOutput.focus();
     expect(toolOutput).toHaveFocus();
-    expect(conversationAction.closest('[data-sharecard-scroll="true"]')).not.toHaveAttribute(
-      'inert'
-    );
+    expect(conversationAction.closest('[data-overlay-scroll="true"]')).not.toHaveAttribute('inert');
     await act(async () => enableStatefulControl());
     expect(screen.getByRole('button', { name: 'Stateful conversation action' })).toBeDisabled();
     await act(async () => revealLateControl());
@@ -180,7 +149,6 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={false}
           approvalUiState="hidden"
-          copyStatusAnswer={false}
           showBusyIndicator={true}
           showFooterActions={false}
         />
@@ -208,7 +176,6 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={false}
           approvalUiState="hidden"
-          copyStatusAnswer={false}
           showBusyIndicator={true}
           showFooterActions={false}
           conversationContent={<p>long conversation</p>}
@@ -219,9 +186,9 @@ describe('AgentOverlayShell', () => {
 
     const shell = within(container);
     expect(
-      shell.getByText('long conversation').closest('[data-sharecard-scroll="true"]')
+      shell.getByText('long conversation').closest('[data-overlay-scroll="true"]')
     ).not.toBeNull();
-    expect(shell.getByLabelText('Message').closest('[data-sharecard-scroll="true"]')).toBeNull();
+    expect(shell.getByLabelText('Message').closest('[data-overlay-scroll="true"]')).toBeNull();
 
     // 停止は入力欄の主ボタンが担う。ヘッダは実行中であることだけを示す。
     expect(shell.queryByRole('button', { name: 'Stop' })).toBeNull();
@@ -253,7 +220,6 @@ describe('AgentOverlayShell', () => {
               commandSummary: { summary_kind: 'bash', command: 'rm -- a.png', cwd: '/tmp' },
             },
           ]}
-          copyStatusAnswer={false}
           showBusyIndicator={false}
           showFooterActions={false}
           conversationContent={<p>long conversation</p>}
@@ -264,7 +230,7 @@ describe('AgentOverlayShell', () => {
 
     const shell = within(container);
     const approval = shell.getByText('Approval required');
-    expect(approval.closest('[data-sharecard-scroll="true"]')).toBeNull();
+    expect(approval.closest('[data-overlay-scroll="true"]')).toBeNull();
     expect(
       shell.getByText('long conversation').compareDocumentPosition(approval) &
         Node.DOCUMENT_POSITION_FOLLOWING
@@ -303,7 +269,6 @@ describe('AgentOverlayShell', () => {
             actionText=""
             isActionStreamFinished={false}
             approvalUiState="hidden"
-            copyStatusAnswer={false}
             showBusyIndicator={false}
             showFooterActions={false}
             conversationContent={<p>conversation</p>}
@@ -312,9 +277,7 @@ describe('AgentOverlayShell', () => {
         </UiLanguageProvider>
       );
       const shell = within(container);
-      const conversation = shell
-        .getByText('conversation')
-        .closest('[data-sharecard-scroll="true"]');
+      const conversation = shell.getByText('conversation').closest('[data-overlay-scroll="true"]');
       const dock = shell.getByLabelText('Message').parentElement;
 
       // 取り違えを防ぐため、styled-components の宣言が実際に解決できていることを先に確かめる。
@@ -339,7 +302,6 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={true}
           approvalUiState="hidden"
-          copyStatusAnswer={false}
           showBusyIndicator={false}
           showFooterActions={false}
           onClose={onClose}

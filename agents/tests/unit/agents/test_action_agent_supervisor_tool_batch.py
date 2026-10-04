@@ -147,7 +147,6 @@ async def _build_supervisor_fixture(
     )
     state = project_request_user_step(state, request)
     state["phase"] = "executing"
-    state["context"]["user_request"] = "dummy"
     install_local_runtime_tool_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
@@ -293,6 +292,75 @@ async def test_wait_subagents_is_detached_and_announced(
     assert "wait_subagents" in notice
     assert "must be the only call of its turn" in notice
     # 次ターンのプロンプトに載る履歴本体へ届いていること。
+    assert notice in runtime.services.rendering.format_history(state)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("position", ("first", "last"))
+async def test_a_final_answer_mixed_with_other_calls_waits_for_its_own_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, position: str
+) -> None:
+    """最終回答を他の呼び出しと同じターンで出すと、回答は実行せず他だけを実行する。"""
+
+    tool_ids = (
+        ("submit_final_answer", "read", "memory_sql")
+        if position == "first"
+        else ("read", "memory_sql", "submit_final_answer")
+    )
+    _agent, runtime, state = await _think(
+        monkeypatch,
+        tmp_path,
+        action_id=f"act-batch-final-{position}",
+        turns=_batch_turn(*tool_ids),
+    )
+
+    # The Action cannot end on this turn, and the other calls are what runs.
+    batch = _require_batch(state)
+    assert [pending.tool_id for pending in batch.calls] == ["read", "memory_sql"]
+    notice = _think_history_entry(state)["result_line"]
+    assert isinstance(notice, str)
+    assert "submit_final_answer (must be the only call of its turn" in notice
+    assert notice in runtime.services.rendering.format_history(state)
+
+    # Asked again on a turn of its own, it is the call that runs.
+    _agent, _runtime, alone = await _think(
+        monkeypatch,
+        tmp_path / "alone",
+        action_id=f"act-batch-final-alone-{position}",
+        turns=_batch_turn("submit_final_answer"),
+    )
+    assert [pending.tool_id for pending in _require_batch(alone).calls] == [
+        "submit_final_answer"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_two_final_answers_in_one_turn_run_neither(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """最終回答を 2 件出したターンは、どちらも確定させず 1 件だけを出し直させる。"""
+
+    _agent, runtime, state = await _think(
+        monkeypatch,
+        tmp_path,
+        action_id="act-batch-two-final",
+        turns=_turn(
+            _call(
+                "submit_final_answer", note=_note_for("submit_final_answer"), index=0
+            ),
+            _call(
+                "submit_final_answer", note="訂正したので、こちらで確定する。", index=1
+            ),
+        ),
+    )
+
+    # Nothing runs, so neither answer ends the Action, and the run goes on.
+    assert state["next_action"] is None
+    assert state["status"] == "processing"
+    notice = _think_history_entry(state)["result_line"]
+    assert isinstance(notice, str)
+    assert notice.count("submit_final_answer (must be the only call of its turn") == 2
+    assert "send exactly one, alone" in notice
     assert notice in runtime.services.rendering.format_history(state)
 
 

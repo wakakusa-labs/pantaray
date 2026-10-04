@@ -11,6 +11,11 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionFetchedContext,
     SuggestionStableMemoryContext,
 )
+from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
+from pantaray_agents.agents.suggestion_agent.writer import (
+    SUGGESTION_WRITER_PROMPT_NAME,
+    build_writer_messages,
+)
 from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.suggestion_research import (
@@ -61,8 +66,25 @@ def test_real_prompt_renders_context_and_answer_language(
 
     for value in (*context.values(), "pending-work-evidence"):
         assert value in rendered
-    assert f"natural {label}" in instruction
+    assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction
+
+
+@pytest.mark.parametrize("label", ["Japanese", "English"])
+def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None:
+    system, prompt = build_writer_messages(
+        PromptLoader().load_config(SUGGESTION_WRITER_PROMPT_NAME),
+        {
+            "interaction_contract": "action_offer",
+            "key_point": "decided-point",
+        },
+        answer_language=label,
+    )
+
+    assert f"natural {label}" in system
+    assert "{" not in prompt
+    for value in ("offer", "decided-point"):
+        assert value in prompt
 
 
 def test_prompt_examples_are_accepted_by_the_suggestion_parser(
@@ -75,8 +97,6 @@ def test_prompt_examples_are_accepted_by_the_suggestion_parser(
     assert examples
     for example in examples:
         payload = json.loads(example)
-        parsed = suggestion_agent._parse_suggestion_output(  # noqa: SLF001
-            raw_text=example, parsed_output=None
-        )
+        parsed = parse_suggestion_output(raw_text=example, parsed_output=None)
         assert parsed["has_suggestion"] == payload["has_suggestion"]
         assert parsed["interaction_contract"] == payload["interaction_contract"]

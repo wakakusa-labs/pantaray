@@ -38,9 +38,6 @@ from ..tooling.resources.resource_recovery import (
     reconcile_tool_runtime_resources_for_startup,
 )
 from ..tooling.tool_result_recovery import reconcile_tool_results_for_startup
-from .action_legacy_shared_temp_purge import (
-    purge_legacy_action_shared_temp_for_startup,
-)
 from .activity_summary_recovery import (
     recover_interrupted_activity_summary_scheduler_runs,
 )
@@ -143,10 +140,6 @@ def run_local_runtime_bootstrap(
             db_path=bootstrap_config.db_path,
             busy_timeout_ms=bootstrap_config.busy_timeout_ms,
         )
-    )
-    purge_legacy_action_shared_temp_for_startup(
-        db_path=bootstrap_config.db_path,
-        busy_timeout_ms=bootstrap_config.busy_timeout_ms,
     )
     from .action_startup_recovery import recover_interrupted_action_runs_for_startup
     from .action_subagent_startup_recovery import (

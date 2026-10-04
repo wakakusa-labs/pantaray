@@ -1,37 +1,3 @@
-function createRetainedStringChannel({ ipcRenderer, channel, logError }) {
-  let retainedValue = null;
-  const subscribers = new Set();
-
-  try {
-    ipcRenderer.on(channel, (_event, value) => {
-      retainedValue = typeof value === 'string' ? value : String(value ?? '');
-      for (const subscriber of subscribers) {
-        try {
-          subscriber(retainedValue);
-        } catch (error) {
-          logError(`${channel} subscriber threw`, error);
-        }
-      }
-    });
-  } catch (error) {
-    logError(`ipcRenderer.on(${channel}) failed`, error);
-  }
-
-  return {
-    subscribe(callback) {
-      subscribers.add(callback);
-      if (retainedValue) {
-        try {
-          callback(retainedValue);
-        } catch (error) {
-          logError(`${channel} immediate delivery threw`, error);
-        }
-      }
-      return () => subscribers.delete(callback);
-    },
-  };
-}
-
 function getSnapshotSuggestionId(payload, logError) {
   try {
     const snapshot = payload && typeof payload === 'object' ? payload.snapshot : null;
@@ -84,20 +50,10 @@ function createSnapshotChannel({ ipcRenderer, logError }) {
 
 function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
   const { assertValidInvokeChannel, isValidSendChannel } = ipcPolicy;
-  const contentChannel = createRetainedStringChannel({
-    ipcRenderer,
-    channel: 'set-content',
-    logError,
-  });
   const snapshotChannel = createSnapshotChannel({ ipcRenderer, logError });
 
   return {
     agentOverlay: {
-      show: (content, options) => {
-        if (!isValidSendChannel('show-notification')) return;
-        const payload = options?.id ? { content, id: String(options.id) } : content;
-        ipcRenderer.send('show-notification', payload);
-      },
       showHistory: (payload) => {
         if (isValidSendChannel('history:openOverlay')) {
           ipcRenderer.send('history:openOverlay', payload);
@@ -109,7 +65,6 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
         const payload = options?.id ? { id: String(options.id), height } : height;
         ipcRenderer.send('resize-notification-window', payload);
       },
-      onSetContent: contentChannel.subscribe,
       acceptAction: (data) => ipcRenderer.send('notification-action-accept', data),
       submitApprovalDecision: (payload) => {
         assertValidInvokeChannel('overlay:submitApprovalDecision');

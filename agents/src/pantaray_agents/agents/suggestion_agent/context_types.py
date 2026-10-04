@@ -19,6 +19,7 @@ class SuggestionStableMemoryContext:
     prompt: str
     has_facts: bool
     has_insights: bool
+    # The whole `insights/todos.md`, carried in the prompt as is.
     pending_work: str = ""
 
 

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    field_validator,
+    model_validator,
+)
 
 from pantaray_agents.local_runtime.tooling.documents.page_render import (
     MAX_RENDERED_PAGES,
@@ -32,11 +39,12 @@ BrokerExecutableSourceKind = Literal[
 ]
 DiscoveryTruncationReason = Literal[
     "limit",
-    "scan_budget",
     "timeout",
     "output_bytes",
     "line_length",
 ]
+DISCOVERY_RESULT_LIMIT_MAX = 500
+LIST_MAX_DEPTH = 6
 
 
 class ReadToolArgs(BaseModel):
@@ -71,8 +79,8 @@ class ListToolArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     path: str = Field(min_length=1, pattern=r"\S")
-    max_depth: int = Field(default=2, ge=0, le=6)
-    limit: int = Field(default=100, ge=1, le=500)
+    max_depth: int = Field(default=2, ge=1, le=LIST_MAX_DEPTH)
+    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class GlobToolArgs(BaseModel):
@@ -80,7 +88,7 @@ class GlobToolArgs(BaseModel):
 
     base_path: str = Field(min_length=1, pattern=r"\S")
     pattern: str = Field(min_length=1, pattern=r"\S")
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class GrepToolArgs(BaseModel):
@@ -89,7 +97,7 @@ class GrepToolArgs(BaseModel):
     base_path: str = Field(min_length=1, pattern=r"\S")
     pattern: str = Field(min_length=1, pattern=r"\S")
     include_glob: str | None = Field(default=None, min_length=1, pattern=r"\S")
-    max_matches: int = Field(default=100, ge=1, le=500)
+    max_matches: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class ApplyPatchEdit(BaseModel):
@@ -146,7 +154,35 @@ class ApplyPatchToolArgs(BaseModel):
     changes: list[ApplyPatchChange] = Field(min_length=1, max_length=1)
 
 
-class BashToolArgs(BaseModel):
+WriteFolder = Annotated[str, Field(min_length=1, pattern=r"\S")]
+
+
+class _JustifiedCommandArgs(BaseModel):
+    """Command access beyond the workspace defaults, and the reason for it.
+
+    The justification is shown to the user as the approval question, so it is
+    required exactly when the call asks for such access.
+    """
+
+    additional_write_folders: list[WriteFolder] = Field(default_factory=list)
+    justification: str | None = Field(default=None, min_length=1, pattern=r"\S")
+
+    def _asks_for_access(self) -> bool:
+        return bool(self.additional_write_folders)
+
+    @model_validator(mode="after")
+    def _justified_exactly_when_asking(self) -> _JustifiedCommandArgs:
+        if self._asks_for_access() != (self.justification is not None):
+            raise ValueError(
+                "justification is required with additional_write_folders, "
+                "use_login_environment or run_outside_sandbox, and only then"
+            )
+        return self
+
+
+class SandboxedBashToolArgs(_JustifiedCommandArgs):
+    """The bash input an Action subagent is offered: no run outside the sandbox."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
     command: str = Field(min_length=1, pattern=r"\S")
@@ -154,7 +190,28 @@ class BashToolArgs(BaseModel):
     use_login_environment: bool = False
 
 
-class RunPythonToolArgs(BaseModel):
+class BashToolArgs(SandboxedBashToolArgs):
+    run_outside_sandbox: bool = False
+
+    def _asks_for_access(self) -> bool:
+        return (
+            self.use_login_environment
+            or self.run_outside_sandbox
+            or super()._asks_for_access()
+        )
+
+    @model_validator(mode="after")
+    def _no_write_folders_outside_sandbox(self) -> BashToolArgs:
+        # Outside the sandbox every folder is writable; asking for one would show
+        # the user a folder approval that limits nothing.
+        if self.run_outside_sandbox and self.additional_write_folders:
+            raise ValueError(
+                "additional_write_folders cannot be combined with run_outside_sandbox"
+            )
+        return self
+
+
+class RunPythonToolArgs(_JustifiedCommandArgs):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     code: str = Field(min_length=1, pattern=r"\S")
@@ -177,13 +234,35 @@ class RenderedPdfPageAttachment(BaseModel):
     byte_size: int
 
 
-class RenderPdfPageOutput(BaseModel):
+class RenderedPdfPagesOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["pdf_pages"]
     path: str
     message: str
+    page_count: int
     attachments: list[RenderedPdfPageAttachment]
+
+
+class RendererPreparingOutput(BaseModel):
+    """No pages yet: the Office renderer is still being installed."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["renderer_preparing"]
+    path: str
+    message: str
+
+
+class RenderPdfPageOutput(
+    RootModel[
+        Annotated[
+            RenderedPdfPagesOutput | RendererPreparingOutput,
+            Field(discriminator="kind"),
+        ]
+    ]
+):
+    model_config = ConfigDict(strict=True)
 
 
 class DiscoveryEntry(BaseModel):
@@ -214,6 +293,7 @@ class GlobToolOutput(BaseModel):
     truncation_reason: DiscoveryTruncationReason | None = None
     retry_hint: str | None = None
     warning: str | None = None
+    skipped_files: int = Field(ge=0)
 
 
 class GrepMatch(BaseModel):
@@ -439,6 +519,8 @@ class ValidatedCommandRequest(BaseModel):
     open_file_lease_limit: int
     network_policy: BrokerNetworkPolicy
     use_login_environment: bool
+    # Only an approved Action bash call sets it; see build_validated_command_request.
+    run_outside_sandbox: bool
     generated_python_code: str | None = None
     real_read_roots: list[str]
     real_write_roots: list[str]

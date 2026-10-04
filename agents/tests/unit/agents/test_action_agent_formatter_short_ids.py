@@ -23,7 +23,7 @@ LEGACY_TOOL_REF_PATTERN = re.compile(
 
 def test_format_history_contains_no_uuid() -> None:
     """format_history 出力にUUID形式が含まれないこと。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -61,7 +61,7 @@ def test_format_history_contains_no_uuid() -> None:
 
 def test_format_history_displays_short_ids() -> None:
     """format_history 出力にスコープ別の短縮IDが表示されること。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -107,7 +107,7 @@ def test_format_history_displays_short_ids() -> None:
 
 def test_format_history_reference_uses_short_id_not_uuid() -> None:
     """履歴中の参照表記（Tool Result Ref / Thinking Ref）が短縮IDに統一され、tool_id#uuid 形式が出ないこと。"""
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -152,7 +152,7 @@ def test_format_history_reference_uses_short_id_not_uuid() -> None:
 
 
 def test_format_history_uses_one_history_ref_contract_for_all_step_types() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [
@@ -213,7 +213,7 @@ def test_format_history_uses_one_history_ref_contract_for_all_step_types() -> No
 
 
 def test_format_history_displays_user_request_as_numbered_history_entry() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "history_by_scope": {
             "S": [

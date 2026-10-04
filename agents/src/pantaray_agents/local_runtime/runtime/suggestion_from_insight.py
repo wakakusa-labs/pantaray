@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal
 
@@ -22,7 +22,7 @@ from .job_payload_models import parse_suggestion_job_payload_json
 from .job_types import LOCAL_SUGGESTION_JOB_TYPE
 from .process_events import append_process_event_in_connection
 from .suggestion_queue import build_local_suggestion_enqueue_request
-from .utc_timestamps import parse_utc_iso
+from .utc_timestamps import format_utc_iso, parse_utc_iso
 
 # uuidv5(uuid.NAMESPACE_URL, "pantaray:suggestion_from_insight:v1")
 NAMESPACE_SUGGESTION_FROM_INSIGHT: Final[uuid.UUID] = uuid.uuid5(
@@ -199,6 +199,6 @@ def reserve_suggestion_start(
                 process_id=process_id,
                 event_name="suggestion_generation_started",
                 payload={},
-                created_at=now.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+                created_at=format_utc_iso(now),
             )
     return "start"

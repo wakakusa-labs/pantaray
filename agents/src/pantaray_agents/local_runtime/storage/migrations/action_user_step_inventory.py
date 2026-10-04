@@ -4,7 +4,7 @@ import re
 import sqlite3
 from typing import NamedTuple
 
-from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z
+from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_microseconds
 
 from .specs import MigrationError
 
@@ -150,7 +150,7 @@ def _required_timestamp(value: object, *, field: str) -> str:
     if _TIMESTAMP_PATTERN.fullmatch(text) is None:
         raise MigrationError(f"Action USER step inventory has invalid {field}")
     try:
-        return normalize_iso8601_utc_z(text)
+        return normalize_iso8601_utc_z_microseconds(text)
     except ValueError as exc:
         raise MigrationError(f"Action USER step inventory has invalid {field}") from exc
 

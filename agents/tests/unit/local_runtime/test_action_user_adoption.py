@@ -287,6 +287,12 @@ def test_in_connection_adoption_projects_pending_users_to_a_distinct_process(
                       '2026-08-29T00:04:00Z')""",
             (SUCCESSOR_PROCESS_ID, USER_ID, ACTION_ID, SUGGESTION_ID),
         )
+        # The previous run's checkpoint is superseded by the adopted turn's.
+        connection.execute(
+            "UPDATE agent_action_steps SET runtime_state_checkpoint='{}', "
+            "runtime_state_checkpoint_version=1 WHERE step_id=?",
+            (ROOT_STEP_ID,),
+        )
         result = adoption.adopt_pending_action_user_steps_in_connection(
             connection=connection,
             user_id=USER_ID,
@@ -300,6 +306,10 @@ def test_in_connection_adoption_projects_pending_users_to_a_distinct_process(
             """SELECT expected_process_id,adopted_process_id,runtime_state_checkpoint
                FROM agent_action_steps WHERE step_number IN (2,3)
                ORDER BY step_number"""
+        ).fetchall()
+        checkpoint_steps = connection.execute(
+            """SELECT step_id FROM agent_action_steps
+               WHERE runtime_state_checkpoint IS NOT NULL"""
         ).fetchall()
         event_processes = connection.execute(
             """SELECT json_extract(payload,'$.data.process_id')
@@ -319,6 +329,7 @@ def test_in_connection_adoption_projects_pending_users_to_a_distinct_process(
     ]
     assert ownership[0][2] is None
     assert ownership[1][2] is not None
+    assert [row[0] for row in checkpoint_steps] == ["pending-2"]
     assert [row[0] for row in event_processes] == [
         SUCCESSOR_PROCESS_ID,
         SUCCESSOR_PROCESS_ID,

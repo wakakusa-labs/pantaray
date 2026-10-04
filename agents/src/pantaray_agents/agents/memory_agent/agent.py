@@ -63,20 +63,22 @@ type MemoryUpdateStepRecorder = Callable[[ReactLoopStep], Awaitable[None]]
 # target file first. The Agent Experience run needed 10 turns / 16 tool calls for
 # a single category, so this starts at roughly three times that budget. No
 # measurement exists yet; tighten it once real runs report their tool-call counts.
-MEMORY_UPDATE_MAX_LLM_TURNS = 30
-MEMORY_UPDATE_MAX_TOOL_CALLS = 48
+# Writing an endeavor's big picture searches its history first, which doubles it.
+MEMORY_UPDATE_MAX_LLM_TURNS = 60
+MEMORY_UPDATE_MAX_TOOL_CALLS = 96
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
     loop_result: ReactLoopResult
+    applied_memory_request_ids: tuple[str, ...]
 
 
 class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
     """ReAct editor for one user's Fact, Insight and Agent Experience memory."""
 
     PROMPT_NAME = "memory_update"
-    PROMPT_VERSION = "1.2"
+    PROMPT_VERSION = "1.5"
     TOOL_IDS = (
         READ_FILE_TOOL_NAME,
         SEARCH_FILES_TOOL_NAME,
@@ -124,6 +126,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             short_term_insights=context.short_term_insights or "- none",
             activity_summaries=context.activity_summaries or "- none",
             action_turns=context.action_turns or "- none",
+            memory_requests=context.memory_requests or "- none",
             local_time_note=context.local_time_note,
             memory_file_manifest=context.memory_file_manifest,
             workspace_context_prompt=context.workspace_context_prompt or "- none",
@@ -175,13 +178,17 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
                     max_tool_calls=MEMORY_UPDATE_MAX_TOOL_CALLS,
                 ),
                 consume_llm_thoughts=self._consume_llm_thoughts,
+                memory_request_ids=context.memory_request_ids,
             )
         )
         if result.loop_result.status != "success":
             raise RuntimeError(
                 result.loop_result.last_error or "Memory update ReAct loop failed"
             )
-        return MemoryUpdateAgentResult(loop_result=result.loop_result)
+        return MemoryUpdateAgentResult(
+            loop_result=result.loop_result,
+            applied_memory_request_ids=result.applied_memory_request_ids,
+        )
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str

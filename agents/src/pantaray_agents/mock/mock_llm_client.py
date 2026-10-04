@@ -138,7 +138,9 @@ class AIOModelInterface:
         return GeminiResponse(
             text,
             tool_calls=calls,
-            tool_continuation=OpenAiToolContinuation(
+            tool_continuation=None
+            if tool_use.continuation_mode == "disabled"
+            else OpenAiToolContinuation(
                 provider="openai",
                 history_items=[
                     {
@@ -236,8 +238,8 @@ class MockLLMClient:
             "suggestion": json.dumps(
                 {
                     "has_suggestion": False,
-                    "answer": "",
                     "interaction_contract": None,
+                    "key_point": "",
                     "suggestion_summary": None,
                     "target_context": None,
                 }
@@ -255,6 +257,8 @@ class MockLLMClient:
             "default": "Default mock response",
         }
         self.next_response: Any | None = None
+        # Served in order after next_response, one per call.
+        self.queued_responses: list[Any] = []
         self.next_error: Exception | None = None
         self.last_prompt: str | None = None
 
@@ -270,6 +274,8 @@ class MockLLMClient:
     def get_response_text(self, prompt: str) -> str:
         """プロンプトに基づいて適切な応答テキストを返す"""
         self.last_prompt = prompt
+        if not self.next_response and self.queued_responses:
+            self.next_response = self.queued_responses.pop(0)
         if self.next_response:
             response_data = self.next_response
             self.next_response = None  # 一度使ったらクリア

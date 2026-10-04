@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
@@ -16,6 +15,7 @@ from pantaray_agents.agents.action_agent.support.severity import (
 from pantaray_agents.agents.action_agent.support.status import (
     ACTION_TERMINAL_STATUSES,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent
@@ -81,9 +81,7 @@ async def finalize_step(
             append_state_error(state, error=error)
             status = "error"
 
-    set_status_with_updated_at(
-        state, status=status, updated_at=datetime.now(UTC).isoformat()
-    )
+    set_status_with_updated_at(state, status=status, updated_at=now_utc_iso())
     return state
 
 

@@ -171,6 +171,7 @@ class ScreenCaptureRequestedMessage(BaseModel):
     action_id: str = Field(description="依頼元 Action ID")
     tool_request_id: str = Field(description="承認済みツール要求の論理 ID")
     capture_request_id: str = Field(description="1 回だけ消費できる撮影要求 ID")
+    app_name: str = Field(description="承認された撮影対象のアプリ名")
 
 
 class ProcessCompletedMessage(BaseModel):

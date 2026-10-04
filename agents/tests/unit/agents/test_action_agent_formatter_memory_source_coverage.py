@@ -19,7 +19,7 @@ def _build_slots() -> list[dict[str, str | None]]:
 
 @pytest.mark.usefixtures("tokyo_local_zone")
 def test_format_memory_source_coverage_formats_valid_snapshot() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "context": {
             "memory_source_coverage": {
@@ -45,7 +45,7 @@ def test_format_memory_source_coverage_formats_valid_snapshot() -> None:
 
 
 def test_format_memory_source_coverage_rejects_empty_evaluated_at() -> None:
-    formatter = ActionAgentFormatter(tool_registry={})
+    formatter = ActionAgentFormatter()
     state = {
         "context": {
             "memory_source_coverage": {

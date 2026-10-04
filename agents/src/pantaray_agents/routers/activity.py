@@ -2,7 +2,6 @@
 """ActivitySummaryAgent のAPIルーター"""
 
 import logging
-from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -15,6 +14,7 @@ from fastapi import (
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.config_local_runtime import settings
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.orchestration.runtime.activity_job_queue import (
     enqueue_activity_summary_job,
 )
@@ -132,7 +132,7 @@ async def generate_activity_summary(
                 period_start=str(extra_fields.get("period_start") or ""),
                 period_end=str(extra_fields.get("period_end") or ""),
                 source_ids=[],
-                created_at=datetime.now(UTC).isoformat(),
+                created_at=now_utc_iso(),
                 status="processing",
                 error=None,
             )

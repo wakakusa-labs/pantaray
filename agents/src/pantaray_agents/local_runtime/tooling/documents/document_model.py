@@ -28,11 +28,11 @@ MAX_DOCUMENT_BYTES: Final = 20 * 1024 * 1024
 # enters an archive close to its own size, so a genuine document only passes
 # this cap when it carries more than 20 MB of XML.
 #
-# Design limit: openpyxl builds an object per cell outside read-only mode, which
-# measured 6.3 s and 527 MiB at 39.8 MiB expanded and 52 s and 1.2 GiB at
-# 97.8 MiB; this keeps a read to a few seconds and under 1 GiB, and nothing
-# outside it bounds a read that is called on its own. Revisit
-# with a per-format cap or a read-only path if real documents are reported as
+# Design limit: python-docx and python-pptx parse each part they open into a
+# whole lxml tree, which measured 4 s and 675 MiB for a 39 MiB document body and
+# 1 s and 909 MiB for a 38 MiB chart part; this keeps a read to a few seconds
+# and under 1 GiB, and nothing outside it bounds a read that is called on its
+# own. Revisit with a per-format cap if real documents are reported as
 # unreadable at this size.
 MAX_DOCUMENT_EXPANDED_BYTES: Final = 40 * 1024 * 1024
 MAX_DOCUMENT_TEXT_CHARS: Final = 400_000
@@ -180,6 +180,18 @@ def pipe_table(
     if cut:
         lines.append(f"[table cut to {width} columns and {len(kept)} rows]")
     return lines, cut
+
+
+def table_cut_notes(cut: bool) -> tuple[str, ...]:
+    """The note a cut table needs: no start_unit reaches the cells it dropped."""
+
+    if not cut:
+        return ()
+    return (
+        f"Tables longer than {MAX_TABLE_ROWS} rows or wider than "
+        f"{MAX_TABLE_COLUMNS} columns are cut where the text says [table cut ...]; "
+        "read cannot reach the rest, so read such a table with run_python.",
+    )
 
 
 def stored_value_text(value: object) -> str:
@@ -341,5 +353,6 @@ __all__ = [
     "continuation_note",
     "pipe_table",
     "resolve_start_unit",
+    "table_cut_notes",
     "stored_value_text",
 ]

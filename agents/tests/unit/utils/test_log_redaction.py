@@ -79,7 +79,9 @@ def test_unquoted_credentials_are_fully_masked_in_text_and_json(
 
 
 def test_formatter_masks_json_and_exception_without_changing_other_handlers() -> None:
-    credential = r"abc\def"
+    # The tail after the backslash must not survive redaction; it is distinctive
+    # so a traceback path or source line cannot contain it by chance.
+    credential = r"abc\Qz7vKx"
     try:
         raise ValueError(f"failed token={credential}")
     except ValueError:
@@ -97,7 +99,7 @@ def test_formatter_masks_json_and_exception_without_changing_other_handlers() ->
     formatter = RedactingFormatter("%(levelname)s %(message)s")
     rendered = formatter.format(record)
     assert credential not in rendered
-    assert "def" not in rendered
+    assert "Qz7vKx" not in rendered
     assert json.loads(rendered.splitlines()[0].removeprefix("ERROR ")) == {
         "message": "failed token=<redacted>"
     }

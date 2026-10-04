@@ -29,7 +29,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from pantaray_agents.tasks.job_retry import (
@@ -42,6 +42,7 @@ from .route_identity import (
     effective_route_identity,
     read_route_inputs,
 )
+from .utc_timestamps import format_utc_iso, utc_now
 
 
 class LocalJobRouteIdentityChangedError(RuntimeError):
@@ -137,6 +138,21 @@ async def require_current_route_identity() -> None:
     )
 
 
+def job_owner_changed() -> bool:
+    """Whether the local data now belongs to someone other than this run's owner.
+
+    A requeued job is claimed only for its own owner, so a background job whose
+    owner is gone never runs again; its caller has to end what it started
+    instead of relying on the requeue. Outside a claimed job this is False.
+    """
+    route = _RUNNING_JOB_ROUTE.get()
+    if route is None:
+        return False
+    return effective_route_identity(read_route_inputs()).owner_id != (
+        route.identity.owner_id
+    )
+
+
 def _restart_after_the_barrier() -> str:
     """When a requeued job may be claimed again.
 
@@ -144,14 +160,14 @@ def _restart_after_the_barrier() -> str:
     the barrier still applying the new identity to have finished, and keeps a
     run that keeps losing the race from spinning.
     """
-    restart_at = datetime.now(UTC) + timedelta(
-        seconds=LOCAL_JOB_OPERATIONAL_RETRY_DELAY_SECONDS
+    return format_utc_iso(
+        utc_now() + timedelta(seconds=LOCAL_JOB_OPERATIONAL_RETRY_DELAY_SECONDS)
     )
-    return restart_at.isoformat().replace("+00:00", "Z")
 
 
 __all__ = [
     "LocalJobRouteIdentityChangedError",
     "bind_job_route_identity",
+    "job_owner_changed",
     "require_current_route_identity",
 ]

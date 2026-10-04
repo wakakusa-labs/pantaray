@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent.runtime.checkpoint import (
@@ -51,6 +50,7 @@ from .action_startup_recovery_envelope import (
     list_action_startup_recovery_envelopes_in_connection,
 )
 from .action_subagent_startup_recovery import ActionRootIdentity
+from .utc_timestamps import now_utc_iso
 
 _RECOVERY_ERROR_MESSAGE = "Worker restart re-queued the in-flight job"
 _TOOL_FAILURE_MESSAGE = "tool invocation was interrupted during startup recovery"
@@ -83,7 +83,7 @@ def recover_interrupted_action_runs_for_startup(
                 busy_timeout_ms=busy_timeout_ms,
                 execution_session_id=authority.context.execution_session_id,
                 status="expired",
-                completed_at=_utc_now_iso(),
+                completed_at=now_utc_iso(),
             )
             authority = _reload_exact_authority(
                 db_path=db_path,
@@ -196,7 +196,7 @@ def _settle_session_children(
     )
     if result.failure_count:
         raise MigrationError("interrupted Action child resource cleanup failed")
-    completed_at = _utc_now_iso()
+    completed_at = now_utc_iso()
     database_uri = f"{db_path.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(database_uri, uri=True) as connection:
         configure_connection(connection, busy_timeout_ms)
@@ -258,7 +258,7 @@ def _persist_requeue(
     authority: ActionStartupRecoveryAuthority,
     resource: StoredToolRuntimeResource,
 ) -> None:
-    timestamp = _utc_now_iso()
+    timestamp = now_utc_iso()
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
@@ -300,7 +300,7 @@ def _persist_root_cleanup_failure(
     resource: StoredToolRuntimeResource,
     cleanup_error: str,
 ) -> None:
-    timestamp = _utc_now_iso()
+    timestamp = now_utc_iso()
     abandoned = resource_cleanup_attempts_exhausted(resource)
     status: ToolRuntimeResourceTransitionStatus = (
         "abandoned" if abandoned else "cleanup_failed"
@@ -436,10 +436,6 @@ def _requeue_job_in_connection(
     )
     if (attempt.rowcount, process.rowcount, job.rowcount) != (1, 1, 1):
         raise MigrationError("interrupted Action job requeue CAS failed")
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 __all__ = ["recover_interrupted_action_runs_for_startup"]

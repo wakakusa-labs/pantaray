@@ -67,6 +67,10 @@ def parse_search_request(value: JSONValue) -> tuple[str, int, int]:
     return query, offset, limit
 
 
+def parse_from_step(value: JSONValue, default: int) -> int:
+    return _bounded_int(_arguments(value), "from_step", default, minimum=1)
+
+
 def parse_history_refs(value: JSONValue) -> tuple[str, ...]:
     args = _arguments(value)
     raw_refs = args.get("refs")
@@ -455,6 +459,7 @@ __all__ = [
     "StoredActionHistoryError",
     "history_fetch_step",
     "history_fetch_success_schema",
+    "parse_from_step",
     "parse_history_refs",
     "parse_page",
     "parse_search_request",

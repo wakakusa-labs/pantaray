@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
 from ..models import (
@@ -42,10 +42,6 @@ RecoveryTrigger = Literal["startup", "periodic"]
 RecoveryScope = Literal["inflight", "lingering"]
 STARTUP_RECOVERY_ERROR_TYPE = "StartupRecoveryInterruptedToolInvocation"
 PERIODIC_REAPER_ERROR_TYPE = "PeriodicReaperInterruptedToolInvocation"
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _build_startup_recovery_warning(
@@ -171,7 +167,7 @@ def _recover_resources(
                 invocation_warnings.append((resource.tool_invocation_id, warning))
             continue
         recovered_count += 1
-        timestamp = _utc_now_iso()
+        timestamp = now_utc_iso()
         cleanup_error: str | None
         try:
             cleanup_runtime_resource(resource)
@@ -340,7 +336,7 @@ def _reconcile_tool_runtime_resources(
         resource_count += recovered_count
         for invocation_id, warning in invocation_warnings:
             warnings_by_invocation[invocation_id].append(warning)
-    completed_at = _utc_now_iso()
+    completed_at = now_utc_iso()
     for invocation in inflight_invocations:
         if invocation.invocation_id in resource_invocation_ids:
             warnings = tuple(warnings_by_invocation[invocation.invocation_id])

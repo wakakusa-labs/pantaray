@@ -112,11 +112,13 @@ async def test_read_keeps_action_plan_private_but_allows_ordinary_plans(
         context=context,
         args={"path": "."},
     )
-    action_root_directory = await execute_read_tool(
-        db_path=db_path,
-        context=context,
-        args={"path": str(context.workspace_path.parent)},
-    )
+    # The Action root around the workspace is private app storage.
+    with pytest.raises(BrokerPolicyError) as action_root:
+        await execute_read_tool(
+            db_path=db_path,
+            context=context,
+            args={"path": str(context.workspace_path.parent)},
+        )
     neighbor_read = await execute_read_tool(
         db_path=db_path,
         context=context,
@@ -132,9 +134,7 @@ async def test_read_keeps_action_plan_private_but_allows_ordinary_plans(
     assert {"plan.md", "plan-alias.md", "plan-hardlink.md"}.isdisjoint(
         entry["name"] for entry in directory.output["entries"]
     )
-    assert abandoned_write.name not in {
-        entry["name"] for entry in action_root_directory.output["entries"]
-    }
+    assert action_root.value.code == "READ_PATH_DENIED"
     assert neighbor_read.output["content"] == "neighbor\n"
     assert other_read.output["content"] == "ordinary plan\n"
 
@@ -194,71 +194,63 @@ async def test_read_directory_reports_incomplete_page(tmp_path: Path) -> None:
 
     assert outcome.status == "success"
     assert len(outcome.output["entries"]) == 2
-    assert outcome.output["next_offset"] == 3
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "page_limit"
     assert outcome.output["retry_hint"] == "Continue with offset=next_offset."
+    rest = await execute_read_tool(
+        db_path=db_path,
+        context=context,
+        args={"path": ".", "offset": outcome.output["next_offset"], "limit": 2},
+    )
+    assert {
+        entry["name"] for entry in outcome.output["entries"] + rest.output["entries"]
+    } == {f"file-{index}.txt" for index in range(3)}
+    assert rest.output["next_offset"] is None
 
 
 @pytest.mark.asyncio
-async def test_read_directory_scan_budget_applies_before_full_materialization(
+async def test_read_directory_pages_reach_entries_past_twenty_thousand(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     large_dir = context.workspace_path / "large-dir"
     large_dir.mkdir()
-    for index in range(10):
-        (large_dir / f"file-{index}.txt").write_text("content\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker_direct_read.READ_DIRECTORY_SCAN_LIMIT",
-        2,
-    )
+    # One past the entries a directory read once scanned before stopping.
+    for index in range(20_001):
+        (large_dir / f"{index:05}").touch()
 
     outcome = await execute_read_tool(
         db_path=db_path,
         context=context,
-        args={"path": "large-dir", "limit": 10},
+        args={"path": "large-dir", "offset": 20_000, "limit": 10},
     )
 
-    assert outcome.status == "success"
-    assert outcome.output["kind"] == "directory"
     assert len(outcome.output["entries"]) == 2
-    assert outcome.output["next_offset"] == 3
-    assert outcome.output["truncated"] is True
-    assert outcome.output["truncation_reason"] == "scan_budget"
-    assert outcome.output["retry_hint"] is None
+    assert outcome.output["next_offset"] is None
+    assert outcome.output["truncated"] is False
 
 
 @pytest.mark.asyncio
-async def test_read_directory_scan_budget_hit_before_page_is_not_reported_as_eof(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_read_directory_says_what_it_skipped(tmp_path: Path) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
-    large_dir = context.workspace_path / "large-dir"
-    large_dir.mkdir()
-    for index in range(10):
-        (large_dir / f"file-{index}.txt").write_text("content\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker_direct_read.READ_DIRECTORY_SCAN_LIMIT",
-        2,
-    )
+    folder = context.workspace_path / "project"
+    (folder / ".venv").mkdir(parents=True)
+    (folder / ".runtime-temp").mkdir()
+    (folder / "link.txt").symlink_to(folder / ".venv")
 
     outcome = await execute_read_tool(
-        db_path=db_path,
-        context=context,
-        args={"path": "large-dir", "offset": 5, "limit": 10},
+        db_path=db_path, context=context, args={"path": "project"}
+    )
+    scratch = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "."}
     )
 
-    assert outcome.status == "success"
-    assert outcome.output["kind"] == "directory"
-    assert outcome.output["entries"] == []
-    assert outcome.output["next_offset"] is None
-    assert outcome.output["truncated"] is True
-    assert outcome.output["truncation_reason"] == "scan_budget"
-    assert outcome.output["retry_hint"] is not None
-    assert "narrower directory path" in outcome.output["retry_hint"]
+    names = {entry["name"] for entry in outcome.output["entries"]}
+    assert names == {".venv", ".runtime-temp"}
+    assert "skipped 1 symlink(s)" in str(outcome.output["warning"])
+    # Pantaray's own session temp folder in the scratch workspace stays out.
+    assert ".runtime-temp" not in {entry["name"] for entry in scratch.output["entries"]}
+    assert scratch.output["warning"] is None
 
 
 @pytest.mark.asyncio
@@ -322,7 +314,8 @@ async def test_read_registered_folder_local_path(
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "notes.txt").write_text("alpha\nbeta\n", encoding="utf-8")
-    db_path = tmp_path / "runtime.db"
+    db_path = tmp_path / "app-data" / "runtime.db"
+    db_path.parent.mkdir()
     prepare_test_database(
         db_path=db_path,
         busy_timeout_ms=1_000,

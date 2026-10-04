@@ -37,6 +37,7 @@ def _running_child(
             "action_id": "action-1",
             "parent_process_id": "parent-process",
             "inference_profile_id": SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            "action_context": "# Workspace Paths\nparent context",
             "task": "Inspect the assigned boundary",
             "context_refs": [],
             "resource_claim_ids": ["claim-1"],

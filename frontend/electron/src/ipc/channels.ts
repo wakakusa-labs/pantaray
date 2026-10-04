@@ -8,7 +8,6 @@
 
 export const validSendChannels = [
   'resize-notification-window',
-  'show-notification',
   'notification-action-accept',
   'notification-action-reject',
   'notification-hide',
@@ -20,15 +19,12 @@ export const validSendChannels = [
   'overlay:openWorkspaceSettings',
   'history:openOverlay',
   'open-external-url',
-  // Share card capture (main-rendered)
-  'sharecard:ready',
   // WebSocket bridge (connect/disconnect は main に統一のため未公開)
   'ws:send',
 ] as const;
 
 export const validReceiveChannels = [
   'aiConnection:changed',
-  'set-content',
   // Auth state (main SSOT)
   'auth:stateChanged',
   // History realtime hint (main SSOT)
@@ -89,6 +85,9 @@ export const validInvokeChannels = [
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',
   'actionImage:reveal',
+  // Composer document attachments: stage a file, or discard one the user removed
+  'action:attachFile',
+  'action:discardAttachment',
   'action:readConversationPage',
   'action:readToolOutputPage',
   // Suggestion history (main SSOT)
@@ -105,9 +104,6 @@ export const validInvokeChannels = [
   'recording:getGateState',
   'recording:dismissIntro',
   'recording:openPermissionSettings',
-  // Share card (AgentOverlay share screenshot)
-  'share:savePng',
-  'share:captureShareCard',
   'ws:getStatus',
   // UI language (SSOT)
   'ui:getLanguage',
@@ -119,12 +115,9 @@ export const validInvokeChannels = [
   'privacy:getCaptureSettings',
   'privacy:updateCaptureSettings',
   'privacy:listInstalledApps',
-  'privacy:getActiveAppName',
-  'privacy:getActiveWindowInfo',
   // IDE file rules
   'privacy:getIdeFileRules',
   'privacy:updateIdeFileRules',
-  'privacy:getActiveBrowserUrl',
   // 編集モード（全アプリのキャプチャを一時停止）
   'privacy:setCaptureEditing',
   'ws:acceptAction',

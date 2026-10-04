@@ -90,7 +90,9 @@ async def execute_memory_update_job(
     async def run() -> None:
         if _every_category_is_published(runtime=runtime, payload=payload):
             # A crash after the last activation but before the run was closed.
-            complete_memory_update_run(runtime=runtime, payload=payload)
+            complete_memory_update_run(
+                runtime=runtime, payload=payload, applied_note_record_ids=()
+            )
             return
         with MemoryRunWorkspaceScope() as workspace_scope:
             prepared = prepare_memory_update_run(
@@ -99,13 +101,15 @@ async def execute_memory_update_job(
                 workspace_scope=workspace_scope,
             )
             agent = await build_agent()
+            applied_memory_request_ids: tuple[str, ...] = ()
             # With every input deleted from history, the run publishes nothing.
             if prepared.has_evidence:
-                await agent.update(
+                result = await agent.update(
                     prepared.context,
                     tool_definitions=prepared.tool_definitions,
                     tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
                 )
+                applied_memory_request_ids = result.applied_memory_request_ids
             # Everything above stayed in the run-only workspace; this is where
             # the edits become the owner's memory, so the route they were made
             # on has to still be current.
@@ -117,6 +121,7 @@ async def execute_memory_update_job(
                 prompt_name=MemoryUpdateAgent.PROMPT_NAME,
                 prompt_version=MemoryUpdateAgent.PROMPT_VERSION,
                 build_profile_brief=agent.generate_profile_brief,
+                applied_memory_request_ids=applied_memory_request_ids,
             )
 
     await run_memory_update_job(

@@ -45,6 +45,7 @@ from pantaray_agents.local_runtime.runtime.process_events import (
     append_local_process_event,
     mark_local_action_job_paused,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     load_action_job_root_execution_session_id,
@@ -68,7 +69,6 @@ from pantaray_agents.tasks.action_job_support import (
     ACTION_JOB_EXCEPTION_ERROR_MESSAGE,
     ACTION_JOB_EXCEPTION_ERROR_TYPE,
     ACTION_PROCESSING_ERROR_CODE,
-    now_iso,
     persist_terminal_action_status_strict,
 )
 from pantaray_agents.tasks.action_job_terminal import (
@@ -91,7 +91,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
     job_id = job_payload["job_id"]
     action_id = job_payload["action_id"]
     user_id = job_payload["user_id"]
-    started_at = now_iso()
+    started_at = now_utc_iso()
 
     terminal_state = ActionJobTerminalState()
     terminal_status: ActionRuntimeStatus | None = None
@@ -273,7 +273,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
                     suggestion_id=suggestion_id,
                     command_id=command_id,
                     accepted_at=accepted_at,
-                    completed_at=now_iso(),
+                    completed_at=now_utc_iso(),
                     failure_stage=ACTION_FAILURE_STAGE_START_FAILED,
                     outcome=preparation.skip_outcome,
                 )
@@ -334,7 +334,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
         execution_session_id = execution_result.execution_session_id
         runtime_state_checkpoint = execution_result.runtime_state_checkpoint
 
-        completed_at = str(run_result.completed_at or now_iso())
+        completed_at = str(run_result.completed_at or now_utc_iso())
         status_value = coerce_task_status(run_result.status)
         status_field = status_value.value
         if status_field == ACTION_STATUS_PROCESSING:
@@ -405,7 +405,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
                 defer_event = LocalJobDeferEvent(
                     event_name="action_step",
                     payload=exc.event.model_dump(mode="json"),
-                    created_at=now_iso(),
+                    created_at=now_utc_iso(),
                 )
             await defer_local_job_if_retryable(
                 exc=exc,
@@ -445,7 +445,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
             )
         if terminal_writer is None:
             raise
-        completed_at = now_iso()
+        completed_at = now_utc_iso()
         terminal_write_started = True
         terminal_status = await terminal_writer.persist_terminal_until_success(
             requested_status="error",

@@ -31,6 +31,7 @@ from .native_tool_use import (
     split_step_note,
 )
 from .read_tool import READ_TOOL
+from .remember_tool import REMEMBER_TOOL, REMEMBER_TOOL_ID
 from .render_pdf_page_tool import (
     RENDER_PDF_PAGE_TOOL,
     RENDER_PDF_PAGE_TOOL_ID,
@@ -43,6 +44,7 @@ from .subagent_tool import (
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL,
     SPAWN_SUBAGENT_TOOL_ID,
+    SUBMIT_SUBAGENT_REPORT_TOOL_ID,
     WAIT_SUBAGENTS_TOOL,
     WAIT_SUBAGENTS_TOOL_ID,
 )
@@ -81,6 +83,7 @@ __all__ = [
     "CANCEL_SUBAGENT_TOOL_ID",
     "SPAWN_SUBAGENT_TOOL",
     "SPAWN_SUBAGENT_TOOL_ID",
+    "SUBMIT_SUBAGENT_REPORT_TOOL_ID",
     "SEND_MESSAGE_TO_SUBAGENT_TOOL",
     "SEND_MESSAGE_TO_SUBAGENT_TOOL_ID",
     "WAIT_SUBAGENTS_TOOL",
@@ -100,6 +103,8 @@ __all__ = [
     "GET_MEMORY_REFERENCE_TOOL",
     "LINK_MEMORY_TOOL",
     "UNLINK_MEMORY_TOOL",
+    "REMEMBER_TOOL",
+    "REMEMBER_TOOL_ID",
     "WEB_SEARCH_TOOL",
     "WEB_EXTRACT_TOOL",
     "WEB_CRAWL_TOOL",
@@ -126,6 +131,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         GET_MEMORY_REFERENCE_TOOL,
         LINK_MEMORY_TOOL,
         UNLINK_MEMORY_TOOL,
+        REMEMBER_TOOL,
         WEB_SEARCH_TOOL,
         WEB_EXTRACT_TOOL,
         WEB_CRAWL_TOOL,
@@ -159,6 +165,7 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     GET_MEMORY_REFERENCE_TOOL.tool_id,
     LINK_MEMORY_TOOL.tool_id,
     UNLINK_MEMORY_TOOL.tool_id,
+    REMEMBER_TOOL.tool_id,
     WEB_SEARCH_TOOL.tool_id,
     WEB_EXTRACT_TOOL.tool_id,
     WEB_CRAWL_TOOL.tool_id,

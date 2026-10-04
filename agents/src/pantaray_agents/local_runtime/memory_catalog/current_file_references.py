@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
-from datetime import UTC, datetime
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
     remove_reference_ids,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .current_files_index import refresh_current_memory_index
@@ -124,7 +124,7 @@ def link_current_memory_file(
                 str(source["fragment_id"]),
                 target.fragment_id,
                 note,
-                datetime.now(UTC).isoformat(),
+                now_utc_iso(),
             ),
         )
     with immediate_transaction(connection):

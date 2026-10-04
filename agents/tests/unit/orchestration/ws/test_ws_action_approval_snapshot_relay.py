@@ -9,6 +9,9 @@ import pytest
 from pantaray_agents.local_runtime.runtime.action_approval_projection import (
     ACTION_APPROVAL_SNAPSHOT_EVENT,
 )
+from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
+    SCREEN_CAPTURE_REQUESTED_EVENT,
+)
 from pantaray_agents.local_runtime.suggestion_state.event_names import (
     EVENT_ACTION_RESUME_REQUESTED,
 )
@@ -357,3 +360,40 @@ async def test_snapshot_for_a_terminal_action_is_skipped_without_ending_the_forw
     assert handler.sent == []
     assert append.await_count == 2
     assert ROOT_PROCESS_ID in handler._action_processes
+
+
+@pytest.mark.asyncio
+async def test_a_capture_request_reaches_the_desktop_client_with_its_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Electron captures only the app the user approved, so the name must arrive."""
+
+    handler = _FakeHandler()
+    request = _FakeEvent(
+        cursor=1,
+        event_id="event-capture",
+        event_type=SCREEN_CAPTURE_REQUESTED_EVENT,
+        payload={
+            "action_id": "act-1",
+            "process_id": ROOT_PROCESS_ID,
+            "tool_request_id": "request-1",
+            "capture_request_id": "capture-1",
+            "app_name": "Google Chrome",
+        },
+    )
+
+    await _forward(monkeypatch, handler, [[request]])
+
+    assert [(event, data) for event, data, _kwargs in handler.sent] == [
+        (
+            OutboundEvent.SCREEN_CAPTURE_REQUESTED.value,
+            {
+                "kind": "action",
+                "process_id": ROOT_PROCESS_ID,
+                "action_id": "act-1",
+                "tool_request_id": "request-1",
+                "capture_request_id": "capture-1",
+                "app_name": "Google Chrome",
+            },
+        )
+    ]

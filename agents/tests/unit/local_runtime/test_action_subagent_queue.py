@@ -41,6 +41,7 @@ def _payload(*, task: str = "Inspect the queue boundary") -> ActionSubagentJobPa
             "action_id": "action-1",
             "parent_process_id": "parent-process-1",
             "inference_profile_id": "action.subagent.luna.high.v1",
+            "action_context": "# Workspace Paths\nparent context",
             "task": task,
             "context_refs": ["conversation:step-1"],
             "resource_claim_ids": ["claim-1"],

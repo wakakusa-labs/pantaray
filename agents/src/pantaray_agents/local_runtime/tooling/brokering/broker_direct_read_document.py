@@ -8,7 +8,6 @@ because it competes with the text for one inline output budget.
 from __future__ import annotations
 
 import os
-import stat
 from pathlib import Path
 from typing import cast
 
@@ -45,8 +44,8 @@ READ_DOCUMENT_UNIT_OUT_OF_RANGE = "READ_DOCUMENT_UNIT_OUT_OF_RANGE"
 READ_LEGACY_DOCUMENT_UNSUPPORTED = "READ_LEGACY_DOCUMENT_UNSUPPORTED"
 DOCUMENT_BUDGET_TRUNCATION_REASON = "document_budget"
 READ_DOCUMENT_BUDGET_RETRY_HINT = (
-    "Extraction stopped before the end of this document; notes say what was "
-    "left out. No offset or start_unit continues the missing content."
+    "Part of this document was left out; notes say what and how to reach it. "
+    "No offset or start_unit continues the missing content."
 )
 READ_DOCUMENT_UNIT_OUT_OF_RANGE_FIX_HINT = (
     "Read this document again with a start_unit inside it, or without "
@@ -102,9 +101,11 @@ def read_document(
     target: ReadTarget,
     request: ValidatedReadRequest,
     document_format: DocumentFormat,
+    descriptor: int,
 ) -> UnprojectedBrokerToolOutcome:
     document = _extract(
         target=target,
+        descriptor=descriptor,
         document_format=document_format,
         start_unit=request.start_unit,
     )
@@ -163,30 +164,14 @@ def _budget_retry_hint(document: ExtractedDocument) -> str:
 def _extract(
     *,
     target: ReadTarget,
+    descriptor: int,
     document_format: DocumentFormat,
     start_unit: int | None,
 ) -> ExtractedDocument:
-    """Extract from a descriptor opened the way the text branch opens a file."""
+    """Extract from the regular file the read opened and sampled."""
 
     try:
-        descriptor = os.open(
-            target.real_path,
-            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
-        )
-    except OSError as exc:
-        raise BrokerPolicyError(
-            f"Cannot read document: {target.display_path}: {exc}",
-            code=READ_DOCUMENT_UNREADABLE,
-            fix_hint=READ_DOCUMENT_UNREADABLE_FIX_HINT,
-        ) from exc
-    try:
         file_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise BrokerPolicyError(
-                f"Cannot read document: {target.display_path} is not a regular file",
-                code=READ_DOCUMENT_UNREADABLE,
-                fix_hint=READ_DOCUMENT_UNREADABLE_FIX_HINT,
-            )
         if file_stat.st_size > MAX_DOCUMENT_BYTES:
             raise BrokerPolicyError(
                 (
@@ -229,8 +214,6 @@ def _extract(
             code=READ_DOCUMENT_UNREADABLE,
             fix_hint=READ_DOCUMENT_UNREADABLE_FIX_HINT,
         ) from exc
-    finally:
-        os.close(descriptor)
 
 
 def _document_summary(

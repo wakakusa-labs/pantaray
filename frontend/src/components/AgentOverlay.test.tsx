@@ -241,13 +241,6 @@ describe('AgentOverlay broader E2E', () => {
     decision: 'approved_once',
     accepted: true,
   }));
-  const captureShareCard = vi.fn<NonNullable<ElectronBridge['share']>['captureShareCard']>(
-    async () => ({
-      ok: true,
-      clipboardOk: true,
-      downloadOk: true,
-    })
-  );
   const sendOrchestration = vi.fn();
   const acceptAction = vi.fn();
   const resizeOverlay = vi.fn();
@@ -271,11 +264,12 @@ describe('AgentOverlay broader E2E', () => {
     vi.fn(),
   ];
   const attachImage = vi.fn();
+  const attachFile = vi.fn();
+  const discardAttachment = vi.fn();
   const olderPage = createConversationUpdate().snapshot.page;
   Object.assign(olderPage.runs[0], { run_id: 'run-0', final_output: 'older final output' });
 
   beforeEach(() => {
-    captureShareCard.mockClear();
     submitApprovalDecision.mockClear();
     submitMessage.mockReset();
     resumeAction.mockReset();
@@ -303,6 +297,15 @@ describe('AgentOverlay broader E2E', () => {
       widthPx: 10,
       heightPx: 10,
     }));
+    attachFile.mockReset();
+    attachFile.mockImplementation(
+      async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => ({
+        attachmentId: `${attachFile.mock.calls.length}2222222-2222-4222-8222-222222222222`,
+        name,
+        byteSize: bytes.byteLength,
+      })
+    );
+    discardAttachment.mockReset().mockResolvedValue(undefined);
     stopAction.mockReset();
     sendOrchestration.mockReset();
     acceptAction.mockReset().mockResolvedValue(null);
@@ -370,6 +373,8 @@ describe('AgentOverlay broader E2E', () => {
           submitMessage,
           resumeAction,
           attachImage,
+          attachFile,
+          discardAttachment,
           readConversationPage,
           onConversationUpdated: (cb: typeof conversationListener) => {
             conversationListener = cb;
@@ -378,9 +383,6 @@ describe('AgentOverlay broader E2E', () => {
               if (conversationListener === cb) conversationListener = null;
             };
           },
-        },
-        share: {
-          captureShareCard,
         },
       },
     });
@@ -397,9 +399,9 @@ describe('AgentOverlay broader E2E', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
     ) {
-      const height = this.parentElement?.hasAttribute('data-sharecard-scroll')
+      const height = this.parentElement?.hasAttribute('data-overlay-scroll')
         ? 800
-        : this.hasAttribute('data-sharecard-scroll')
+        : this.hasAttribute('data-overlay-scroll')
           ? 64
           : 40;
       return {
@@ -437,6 +439,102 @@ describe('AgentOverlay broader E2E', () => {
     await waitFor(() => expect(resizeOverlay.mock.lastCall?.[0]).toBeGreaterThan(500));
   });
 
+  describe('conversation copy', () => {
+    /** One turn of a page chain: the newest page is `cursor: null`, each points to the next older. */
+    const turn = (index: number, sequence: number, nextCursor: string | null) => {
+      const page = createConversationUpdate(nextCursor).snapshot.page;
+      page.action.approved_suggestion = { suggestion_id: 'sug-1', content: 'Tidy the notes' };
+      Object.assign(page.runs[0], {
+        run_id: `run-${index}`,
+        final_output: index === 0 ? 'canonical final output' : `answer ${index}`,
+        entries: [
+          {
+            step_kind: 'user',
+            step_id: `ask-${index}`,
+            step_number: sequence,
+            message_id: `message-${index}`,
+            accepted_sequence: sequence,
+            content: sequence === 1 ? 'Keep it short' : `question ${index}`,
+            images:
+              sequence === 1
+                ? [{ kind: 'image', storage_path: 'user-1/2026-09-29/approval.png' }]
+                : [],
+            project_refs: [],
+            status: 'adopted',
+            approved_suggestion:
+              sequence === 1 ? { suggestion_id: 'sug-1', content: 'Tidy the notes' } : null,
+          },
+        ],
+      });
+      return page;
+    };
+    const chain = [turn(0, 4, 'c1'), turn(1, 3, 'c2'), turn(2, 2, 'c3'), turn(3, 1, null)];
+    const TRANSCRIPT = [
+      'Pantaray\nTidy the notes',
+      'You\nKeep it short\n(1 image)',
+      'Pantaray\nanswer 3',
+      'You\nquestion 2',
+      'Pantaray\nanswer 2',
+      'You\nquestion 1',
+      'Pantaray\nanswer 1',
+      'You\nquestion 0',
+      'Pantaray\ncanonical final output',
+    ].join('\n\n');
+
+    async function showConversation() {
+      readConversationPage.mockImplementation(async ({ cursor }: { cursor: string | null }) =>
+        cursor === null ? chain[0] : chain[Number(cursor.slice(1))]
+      );
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay />
+        </UiLanguageProvider>
+      );
+      await act(async () => snapshotListener?.(createResumedSnapshot()));
+      expect(screen.queryByRole('button', { name: 'Copy conversation' })).toBeNull();
+      const update = createConversationUpdate();
+      update.snapshot.page = chain[0];
+      await act(async () => conversationListener?.(update));
+      // The Overlay has loaded only its first older pages; the oldest turn is not shown.
+      await screen.findByText('answer 2');
+      expect(screen.queryByText('answer 3')).toBeNull();
+      readConversationPage.mockClear();
+      writeText.mockReset();
+    }
+
+    it('reads every page first and copies the whole exchange in order', async () => {
+      await showConversation();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy conversation' }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(TRANSCRIPT));
+      expect(readConversationPage.mock.calls.map(([request]) => request.cursor)).toEqual([
+        null,
+        'c1',
+        'c2',
+        'c3',
+      ]);
+    });
+
+    it('copies nothing when an older page cannot be read', async () => {
+      await showConversation();
+      readConversationPage.mockImplementation(async ({ cursor }: { cursor: string | null }) =>
+        cursor === 'c3'
+          ? { kind: 'stale_cursor' }
+          : cursor === null
+            ? chain[0]
+            : chain[Number(cursor.slice(1))]
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy conversation' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Couldn’t copy the conversation. Try again.'
+      );
+      expect(writeText).not.toHaveBeenCalled();
+    });
+  });
+
   it('submits against the canonical run and clears a stopped not-executed message', async () => {
     const messageId = '00000000-0000-4000-8000-000000000001';
     vi.spyOn(crypto, 'randomUUID')
@@ -469,6 +567,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        files: [],
       },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
@@ -557,9 +656,7 @@ describe('AgentOverlay broader E2E', () => {
     const controls = Array.from((box as HTMLElement).querySelectorAll('textarea, button'));
     expect(controls).toHaveLength(4);
     expect(controls[0]).toBe(message);
-    expect(controls[1]).toBe(
-      within(box as HTMLElement).getByRole('button', { name: 'Add images' })
-    );
+    expect(controls[1]).toBe(within(box as HTMLElement).getByRole('button', { name: 'Add files' }));
     expect(controls[2]).toBe(permission);
     expect(controls[3]).toBe(within(box as HTMLElement).getByRole('button', { name: 'Stop' }));
 
@@ -734,6 +831,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        files: [],
       },
     });
   });
@@ -976,7 +1074,7 @@ describe('AgentOverlay broader E2E', () => {
       </UiLanguageProvider>
     );
     await act(async () => snapshotListener?.(createResumedSnapshot()));
-    const scroll = container.querySelector<HTMLDivElement>('[data-sharecard-scroll]')!;
+    const scroll = container.querySelector<HTMLDivElement>('[data-overlay-scroll]')!;
     Object.defineProperties(scroll, {
       scrollHeight: { value: 1000 },
       clientHeight: { value: 200 },
@@ -1071,12 +1169,6 @@ describe('AgentOverlay broader E2E', () => {
     };
     await waitFor(() => expect(scrolledItem()).toHaveTextContent('canonical final output'));
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Copy answer to clipboard' }));
-    expect(writeText).toHaveBeenCalledWith('older final output\n\ncanonical final output');
-    fireEvent.click(screen.getByRole('button', { name: 'Share Screenshot' }));
-    expect(captureShareCard.mock.calls[0][0].actionText).toBe(
-      'older final output\n\ncanonical final output'
-    );
     expect(screen.getByText('older final output')).toBeInTheDocument();
 
     await act(async () => conversationListener?.({ kind: 'reset' }));
@@ -1159,7 +1251,7 @@ describe('AgentOverlay broader E2E', () => {
       screen.getByText('Generated Python code will run in the workspace.')
     ).toBeInTheDocument();
     expect(screen.getByText('Size')).toBeInTheDocument();
-    expect(screen.getByText('128 bytes')).toBeInTheDocument();
+    expect(screen.getByText('128 B')).toBeInTheDocument();
     expect(screen.queryByText('Timeout')).toBeNull();
     expect(screen.queryByText('600s')).toBeNull();
     expect(screen.queryByText('process_exec_local')).toBeNull();
@@ -1236,6 +1328,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        files: [],
       },
     });
 
@@ -1322,7 +1415,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(restored).toHaveValue('  Use this image  ');
     expect(screen.getByRole('img', { name: 'Attached image 1 of 1' })).toBeInTheDocument();
     expect(restored).toHaveAttribute('readonly');
-    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add files' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(acceptAction).toHaveBeenLastCalledWith({
       suggestionId: 'sug-comment',
@@ -1331,6 +1424,7 @@ describe('AgentOverlay broader E2E', () => {
       supplementProjectRefs: [],
       approvalMode: 'always_allow',
       images: [{ kind: 'image', storage_path: storagePath }],
+      files: [],
     });
     const accepted = createPendingSnapshot();
     accepted.snapshot.suggestionId = 'sug-comment';
@@ -1410,20 +1504,6 @@ describe('AgentOverlay broader E2E', () => {
       const bubble = screen.queryByRole('article', { name: language === 'ja' ? 'あなた' : 'You' });
       if (comment === null) expect(bubble).toBeNull();
       else expect(bubble).toHaveTextContent(comment);
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole('button', {
-            name: language === 'ja' ? 'スクリーンショットを共有' : 'Share Screenshot',
-          })
-        );
-      });
-      expect(captureShareCard).toHaveBeenCalledWith(
-        expect.objectContaining({
-          suggestionText: '[Review the changes](https://example.com)',
-          isSuggestionStreamFinished: true,
-          isSuggestionAccepted: true,
-        })
-      );
     }
   );
 
@@ -1734,7 +1814,7 @@ describe('AgentOverlay broader E2E', () => {
       </UiLanguageProvider>
     );
     await act(async () => snapshotListener?.(createResumedSnapshot()));
-    const scroll = container.querySelector<HTMLDivElement>('[data-sharecard-scroll]')!;
+    const scroll = container.querySelector<HTMLDivElement>('[data-overlay-scroll]')!;
     const scrollHeight = { value: 1000, configurable: true };
     Object.defineProperties(scroll, { scrollHeight, clientHeight: { value: 200 } });
     const userScrollsTo = (top: number) => {
@@ -1854,7 +1934,7 @@ describe('AgentOverlay broader E2E', () => {
       });
     });
 
-    const attachments = await screen.findByRole('list', { name: 'Attached images, 2' });
+    const attachments = await screen.findByRole('list', { name: 'Attachments, 2' });
     const thumbnails = within(attachments).getAllByRole('img');
     expect(thumbnails.map((image) => image.getAttribute('alt'))).toEqual([
       'Attached image 1 of 2',
@@ -1878,7 +1958,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage.mock.calls[0][0].message.images).toEqual([
       { kind: 'image', storage_path: expect.stringMatching(/^user-1\/2026-09-08\/2/) },
     ]);
-    expect(screen.getByRole('list', { name: /^Attached images/ })).toBeVisible();
+    expect(screen.getByRole('list', { name: /^Attachments/ })).toBeVisible();
     expect(screen.getByLabelText('Message')).toHaveValue('Look at this');
     expect(screen.queryByRole('button', { name: /Remove attached image/ })).toBeNull();
   });
@@ -1888,13 +1968,14 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: { files: [new File(['x'], 'notes.pdf', { type: 'application/pdf' })] },
+        clipboardData: { files: [new File(['x'], 'notes.txt', { type: 'text/plain' })] },
       });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Only PNG, JPEG, GIF, and WebP images can be attached.'
+      'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, and notebook files.'
     );
     expect(attachImage).not.toHaveBeenCalled();
+    expect(attachFile).not.toHaveBeenCalled();
 
     await act(async () => {
       fireEvent.paste(composer, {
@@ -1911,7 +1992,7 @@ describe('AgentOverlay broader E2E', () => {
       fireEvent.paste(composer, { clipboardData: { files: [pngFile('broken.png')] } });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent('That image could not be read.');
-    expect(screen.queryByRole('list', { name: /^Attached images/ })).toBeNull();
+    expect(screen.queryByRole('list', { name: /^Attachments/ })).toBeNull();
   });
 
   it('stops at the per-message image limit', async () => {
@@ -1923,12 +2004,269 @@ describe('AgentOverlay broader E2E', () => {
       });
     });
 
-    expect(await screen.findByRole('list', { name: 'Attached images, 10' })).toBeVisible();
+    expect(await screen.findByRole('list', { name: 'Attachments, 10' })).toBeVisible();
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Up to 10 images can be sent in one message.'
     );
     expect(attachImage).toHaveBeenCalledTimes(10);
-    expect(screen.getByRole('button', { name: 'Add images' })).toBeDisabled();
+    // Documents have their own limit, so the picker stays open for them.
+    expect(screen.getByRole('button', { name: 'Add files' })).toBeEnabled();
+  });
+
+  const documentFile = (name: string, size = 4, type = 'application/pdf') =>
+    new File([new Uint8Array(size)], name, { type });
+
+  it('routes documents by extension, a notebook without a MIME type included, and sends them as files', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000014';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+    submitMessage.mockResolvedValue(createSubmittedResult('act-1', messageId));
+    const composer = await openComposer();
+
+    await act(async () => {
+      fireEvent.drop(composer.closest('form')!, {
+        dataTransfer: {
+          files: [
+            documentFile('Report.PDF', 1_258_291),
+            documentFile('analysis.ipynb', 2048, ''),
+            pngFile('chart.png'),
+          ],
+        },
+      });
+    });
+
+    const attachments = await screen.findByRole('list', { name: 'Attachments, 3' });
+    expect(attachFile.mock.calls.map(([request]) => request.name)).toEqual([
+      'Report.PDF',
+      'analysis.ipynb',
+    ]);
+    expect(attachImage).toHaveBeenCalledTimes(1);
+    expect(within(attachments).getByText('Report.PDF')).toBeVisible();
+    expect(within(attachments).getByText('1.2 MB')).toBeVisible();
+    expect(within(attachments).getByRole('img', { name: 'Attached image 1 of 1' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Remove analysis.ipynb' })).toBeVisible();
+
+    fireEvent.change(composer, { target: { value: 'Summarize these' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    const { message } = submitMessage.mock.calls[0][0];
+    expect(message.files).toEqual([
+      {
+        attachment_id: '12222222-2222-4222-8222-222222222222',
+        name: 'Report.PDF',
+        byte_size: 1_258_291,
+      },
+      {
+        attachment_id: '22222222-2222-4222-8222-222222222222',
+        name: 'analysis.ipynb',
+        byte_size: 2048,
+      },
+    ]);
+    expect(message.images).toHaveLength(1);
+  });
+
+  it('refuses an oversized document and an eleventh one without sending them to the main process', async () => {
+    const composer = await openComposer();
+    const oversized = documentFile('scan.pdf');
+    Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 });
+
+    await act(async () => {
+      fireEvent.paste(composer, { clipboardData: { files: [oversized] } });
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Each PDF, Word, Excel, PowerPoint, or notebook file must be 20 MB or smaller.'
+    );
+    expect(attachFile).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: Array.from({ length: 11 }, (_, index) => documentFile(`${index}.docx`)),
+        },
+      });
+    });
+    expect(await screen.findByRole('list', { name: 'Attachments, 10' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Up to 10 files can be sent in one message.'
+    );
+    expect(attachFile).toHaveBeenCalledTimes(10);
+
+    attachFile.mockRejectedValueOnce(new Error('ipc failed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 0.docx' }));
+    await act(async () => {
+      fireEvent.paste(composer, { clipboardData: { files: [documentFile('broken.xlsx')] } });
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The file could not be attached. Try again.'
+    );
+    expect(screen.getByRole('list', { name: 'Attachments, 9' })).toBeVisible();
+  });
+
+  it('carries an attached document with the approval', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const snapshot = createCommentOnlySnapshot();
+    snapshot.snapshot.interactionContract = 'action_offer';
+    await act(async () => snapshotListener?.(snapshot));
+    fireEvent.click(screen.getByRole('button', { name: 'Additional instructions (optional)' }));
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [documentFile('brief.docx', 10)] },
+      });
+    });
+    await screen.findByRole('button', { name: 'Remove brief.docx' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+
+    expect(acceptAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            attachment_id: '12222222-2222-4222-8222-222222222222',
+            name: 'brief.docx',
+            byte_size: 10,
+          },
+        ],
+      })
+    );
+    // The accepted snapshot replaces the composer; the document now belongs to the Action.
+    const accepted = createPendingSnapshot();
+    accepted.snapshot.suggestionId = 'sug-comment';
+    await act(async () => snapshotListener?.(accepted));
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it('discards staged documents when the next suggestion replaces the composer', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const snapshot = createCommentOnlySnapshot();
+    await act(async () => snapshotListener?.(snapshot));
+    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [documentFile('notes.pdf')] },
+      });
+    });
+    await screen.findByRole('button', { name: 'Remove notes.pdf' });
+
+    snapshot.snapshot.suggestionId = 'sug-next';
+    await act(async () => snapshotListener?.(snapshot));
+    expect(discardAttachment).toHaveBeenCalledWith({
+      attachmentId: '12222222-2222-4222-8222-222222222222',
+    });
+
+    // A document still being staged when the composer is replaced is discarded when it lands.
+    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
+    let finishAttach!: (result: unknown) => void;
+    attachFile.mockReturnValueOnce(new Promise((resolve) => (finishAttach = resolve)));
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [documentFile('late.pdf')] },
+    });
+    await waitFor(() => expect(attachFile).toHaveBeenCalledTimes(2));
+    snapshot.snapshot.suggestionId = 'sug-third';
+    await act(async () => snapshotListener?.(snapshot));
+    const lateId = '33333333-3333-4333-8333-333333333333';
+    await act(async () => finishAttach({ attachmentId: lateId, name: 'late.pdf', byteSize: 4 }));
+    expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: lateId });
+    expect(discardAttachment).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves a document that went out with a reply to the backend when the composer is replaced', async () => {
+    submitMessage.mockReturnValue(new Promise(() => {}));
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const snapshot = createCommentOnlySnapshot();
+    await act(async () => snapshotListener?.(snapshot));
+    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [documentFile('notes.pdf')] },
+      });
+    });
+    await screen.findByRole('button', { name: 'Remove notes.pdf' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Read this' },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submitMessage.mock.calls[0][0].message.files).toHaveLength(1);
+
+    snapshot.snapshot.suggestionId = 'sug-next';
+    await act(async () => snapshotListener?.(snapshot));
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it('discards the documents a concurrent batch pushes past the per-message limit', async () => {
+    const composer = await openComposer();
+    let finishFirst!: (result: unknown) => void;
+    attachFile.mockReturnValueOnce(new Promise((resolve) => (finishFirst = resolve)));
+    const batch = (prefix: string) =>
+      Array.from({ length: 6 }, (_, index) => documentFile(`${prefix}${index}.pdf`));
+
+    await act(async () => {
+      fireEvent.paste(composer, { clipboardData: { files: batch('first-') } });
+    });
+    await act(async () => {
+      fireEvent.paste(composer, { clipboardData: { files: batch('second-') } });
+    });
+    expect(await screen.findByRole('list', { name: 'Attachments, 6' })).toBeVisible();
+    await act(async () =>
+      finishFirst({
+        attachmentId: '44444444-4444-4444-8444-444444444444',
+        name: 'first-0.pdf',
+        byteSize: 4,
+      })
+    );
+
+    expect(await screen.findByRole('list', { name: 'Attachments, 10' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Up to 10 files can be sent in one message.'
+    );
+    expect(screen.queryByText('first-4.pdf')).toBeNull();
+    expect(screen.queryByText('first-5.pdf')).toBeNull();
+    const dropped = attachFile.mock.results.slice(-2).map(async (result) => {
+      const { attachmentId } = await (result.value as Promise<{ attachmentId: string }>);
+      return { attachmentId };
+    });
+    expect(discardAttachment.mock.calls.map(([request]) => request)).toEqual(
+      await Promise.all(dropped)
+    );
+  });
+
+  it('discards a removed document and keeps keyboard focus in the composer', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000015';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+    submitMessage.mockResolvedValue(createSubmittedResult('act-1', messageId));
+    const composer = await openComposer();
+    await act(async () => {
+      fireEvent.paste(composer, {
+        clipboardData: { files: [documentFile('a.pdf'), documentFile('b.pptx')] },
+      });
+    });
+
+    const removeFirst = await screen.findByRole('button', { name: 'Remove a.pdf' });
+    removeFirst.focus();
+    fireEvent.click(removeFirst);
+    expect(discardAttachment).toHaveBeenCalledWith({
+      attachmentId: '12222222-2222-4222-8222-222222222222',
+    });
+    const removeSecond = screen.getByRole('button', { name: 'Remove b.pptx' });
+    expect(removeSecond).toHaveFocus();
+    fireEvent.click(removeSecond);
+    expect(composer).toHaveFocus();
+    expect(screen.queryByRole('list', { name: /^Attachments/ })).toBeNull();
+
+    fireEvent.change(composer, { target: { value: 'Never mind' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submitMessage.mock.calls[0][0].message.files).toEqual([]);
   });
 
   it('cannot send while an image is still being written, so it lands on the message it was meant for', async () => {
@@ -2005,12 +2343,12 @@ describe('AgentOverlay broader E2E', () => {
       });
     });
 
-    expect(screen.queryByRole('list', { name: /^Attached images/ })).toBeNull();
+    expect(screen.queryByRole('list', { name: /^Attachments/ })).toBeNull();
 
     // The replacement composer must be usable, not stuck behind a leftover in-flight count.
     await act(async () => conversationListener?.(createConversationUpdate(null, true)));
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Fresh start' } });
-    expect(screen.queryByRole('list', { name: /^Attached images/ })).toBeNull();
+    expect(screen.queryByRole('list', { name: /^Attachments/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
@@ -2044,7 +2382,7 @@ describe('AgentOverlay broader E2E', () => {
       });
     });
 
-    expect(await screen.findByRole('list', { name: 'Attached images, 1' })).toBeVisible();
+    expect(await screen.findByRole('list', { name: 'Attachments, 1' })).toBeVisible();
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Look at this' } });
     const send = screen.getByRole('button', { name: 'Send' });
     await waitFor(() => expect(send).toBeEnabled());

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+import unicodedata
+from collections.abc import Callable, Mapping
+from types import MappingProxyType
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -12,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     NonNegativeInt,
+    PositiveInt,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -35,6 +38,25 @@ ACTION_PROJECT_REF_MAX_PATHS = 32
 # for a project name and a folder path; a reference copies those values.
 ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS = 200
 ACTION_PROJECT_REF_PATH_MAX_CODEPOINTS = 4096
+ACTION_MESSAGE_MAX_FILES = 10
+# The document formats the read tool extracts, with the name the model sees for
+# each. The Electron attach IPC admits the same extensions.
+ACTION_FILE_TYPE_LABEL_BY_EXTENSION: Mapping[str, str] = MappingProxyType(
+    {
+        ".docx": "Word document",
+        ".ipynb": "Jupyter notebook",
+        ".pdf": "PDF",
+        ".pptx": "PowerPoint presentation",
+        ".xlsx": "Excel workbook",
+    }
+)
+# The workspace directory submission links attached files into.
+ACTION_ATTACHMENTS_DIRNAME = "attachments"
+# A macOS file name limit, in UTF-8 bytes.
+ACTION_FILE_NAME_MAX_BYTES = 255
+_ATTACHMENT_ID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 def _bounded_text(value: str, *, limit: int) -> str:
@@ -116,6 +138,7 @@ _bounded_images = _bounded_items(
 _bounded_project_refs = _bounded_items(
     limit=ACTION_MESSAGE_MAX_PROJECT_REFS, unit="project_references"
 )
+_bounded_files = _bounded_items(limit=ACTION_MESSAGE_MAX_FILES, unit="files")
 
 
 def _bounded_project_name(value: str) -> str:
@@ -160,6 +183,51 @@ class ActionProjectRef(BaseModel):
     _validate_paths = field_validator("paths", mode="before")(
         _bounded_items(limit=ACTION_PROJECT_REF_MAX_PATHS, unit="project_paths")
     )
+
+
+def _attachment_file_name(value: str) -> str:
+    """Admit only a name that is safe as one path component and keeps its type."""
+
+    if (
+        not unicodedata.is_normalized("NFC", value)
+        or value.startswith(".")
+        or len(value.encode()) > ACTION_FILE_NAME_MAX_BYTES
+        or any(
+            character in "/\\:" or unicodedata.category(character) == "Cc"
+            for character in value
+        )
+        or os.path.splitext(value)[1].lower() not in ACTION_FILE_TYPE_LABEL_BY_EXTENSION
+    ):
+        raise PydanticCustomError(
+            "action_message_invalid", "attached file name is not allowed"
+        )
+    return value
+
+
+class FileAttachmentInput(BaseModel):
+    """A document the user attached, staged by Electron main before the send.
+
+    The staged copy is ``generated/attachments/{user}/{attachment_id}{ext}``
+    under the artifact root, where ``ext`` is the name's lowercased extension.
+    Submission moves it into the Action workspace as
+    ``attachments/{attachment_id}/{name}``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    attachment_id: Annotated[str, Field(pattern=_ATTACHMENT_ID_PATTERN)]
+    name: Annotated[str, AfterValidator(_attachment_file_name)]
+    byte_size: PositiveInt
+
+    @property
+    def extension(self) -> str:
+        return os.path.splitext(self.name)[1].lower()
+
+    @property
+    def workspace_path(self) -> str:
+        """The path relative to the Action workspace the model opens."""
+
+        return f"{ACTION_ATTACHMENTS_DIRNAME}/{self.attachment_id}/{self.name}"
 
 
 def _require_project_ref_spans(
@@ -220,12 +288,14 @@ class ActionUserMessageInput(BaseModel):
     # Each list points into the one text it names: ``content`` or ``supplement``.
     project_refs: tuple[ActionProjectRef, ...] = ()
     supplement_project_refs: tuple[ActionProjectRef, ...] = ()
+    files: tuple[FileAttachmentInput, ...] = ()
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
     _bound_project_refs = field_validator(
         "project_refs", "supplement_project_refs", mode="before"
     )(_bounded_project_refs)
+    _bound_files = field_validator("files", mode="before")(_bounded_files)
 
     @field_validator("project_refs")
     @classmethod
@@ -300,12 +370,17 @@ class ActionMessageHttpMessage(_ActionMessageHttpModel):
         tuple[ActionProjectRef, ...],
         Field(json_schema_extra={"maxItems": ACTION_MESSAGE_MAX_PROJECT_REFS}),
     ] = ()
+    files: Annotated[
+        tuple[FileAttachmentInput, ...],
+        Field(json_schema_extra={"maxItems": ACTION_MESSAGE_MAX_FILES}),
+    ] = ()
 
     _validate_content = field_validator("content")(_bounded_content)
     _validate_images = field_validator("images", mode="before")(_bounded_images)
     _bound_project_refs = field_validator("project_refs", mode="before")(
         _bounded_project_refs
     )
+    _bound_files = field_validator("files", mode="before")(_bounded_files)
 
     @field_validator("project_refs")
     @classmethod
@@ -417,8 +492,12 @@ def validate_action_user_message_for_submit(
 
 
 __all__ = [
+    "ACTION_ATTACHMENTS_DIRNAME",
+    "ACTION_FILE_NAME_MAX_BYTES",
+    "ACTION_FILE_TYPE_LABEL_BY_EXTENSION",
     "ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS",
     "ACTION_MESSAGE_ID_MAX_CODEPOINTS",
+    "ACTION_MESSAGE_MAX_FILES",
     "ACTION_MESSAGE_MAX_IMAGES",
     "ACTION_MESSAGE_MAX_PROJECT_REFS",
     "ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS",
@@ -446,6 +525,7 @@ __all__ = [
     "ActionProjectRef",
     "ActionResumeHttpRequest",
     "ActionUserMessageInput",
+    "FileAttachmentInput",
     "SuggestionApprovalInput",
     "validate_action_user_message_for_submit",
 ]

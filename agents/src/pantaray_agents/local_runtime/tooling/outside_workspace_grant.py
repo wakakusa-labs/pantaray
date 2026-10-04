@@ -1,6 +1,6 @@
 """Folders outside the workspace that the user allowed for one conversation.
 
-"Allow for this conversation" on an outside-workspace approval makes the
+"Allow for this conversation" on an outside-workspace approval makes each
 approved folder a writable root of that Action's workspace manifest. Later calls
 of the Action resolve inside it like a registered folder and follow the normal
 approval mode; other Actions never see it.
@@ -17,6 +17,8 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
+from .action_session_temp_paths import resolve_local_runtime_storage_base
+from .brokering.command_approval_summaries import outside_workspace_folder_paths
 from .repository.manifests import insert_approved_folder_root_in_connection
 from .workspace_manifest_roots import ManifestRoot
 from .workspace_root_authority import (
@@ -32,9 +34,11 @@ class OutsideWorkspaceGrantError(ValueError):
 
 
 def app_owned_roots(db_path: Path) -> tuple[Path, ...]:
+    """Pantaray's private app storage: the app data folder and the artifact root."""
+
     return (
+        resolve_local_runtime_storage_base(db_path=db_path),
         read_local_runtime_artifact_root().resolve(),
-        db_path.parent.resolve(),
     )
 
 
@@ -79,20 +83,27 @@ def approved_summary_covers_request(
     if approved == requested:
         return True
     # After "Allow for this conversation" the approved call resolves inside the
-    # newly granted root, so its summary no longer names an outside folder. A
-    # later registration of the same folder replaces that root with a folder root
-    # at the next reconcile, which still covers the approved call.
-    outside = approved.get("outside_workspace")
-    if not isinstance(outside, dict):
+    # newly granted roots, so its summary no longer names those folders. A later
+    # registration of the same folder replaces its root with a folder root at the
+    # next reconcile, which still covers the approved call.
+    approved_folders = set(outside_workspace_folder_paths(approved))
+    if not approved_folders:
         return False
-    remainder = {
-        key: value for key, value in approved.items() if key != "outside_workspace"
-    }
-    return remainder == requested and any(
-        root.source_type in {APPROVED_FOLDER_SOURCE_TYPE, "folder"}
-        and str(root.canonical_real_path) == outside.get("folder_path")
+    requested_folders = set(outside_workspace_folder_paths(requested))
+    if _without_outside_folders(approved) != _without_outside_folders(requested):
+        return False
+    if not requested_folders <= approved_folders:
+        return False
+    granted_paths = {
+        str(root.canonical_real_path)
         for root in manifest_roots
-    )
+        if root.source_type in {APPROVED_FOLDER_SOURCE_TYPE, "folder"}
+    }
+    return approved_folders - requested_folders <= granted_paths
+
+
+def _without_outside_folders(summary: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    return {key: value for key, value in summary.items() if key != "outside_workspace"}
 
 
 def grant_outside_workspace_folder_in_connection(
@@ -104,9 +115,9 @@ def grant_outside_workspace_folder_in_connection(
     db_path: Path,
     granted_at: str,
 ) -> None:
-    """Add the approval's folder as a writable root of the Action's manifest.
+    """Add each of the approval's folders as a writable root of the Action's manifest.
 
-    The folder comes from the stored approval summary, never from the client.
+    The folders come from the stored approval summary, never from the client.
     """
 
     row = connection.execute(
@@ -126,24 +137,28 @@ def grant_outside_workspace_folder_in_connection(
     ).fetchone()
     if row is None:
         raise OutsideWorkspaceGrantError("approval has no ready workspace manifest")
-    outside = json.loads(str(row[1])).get("outside_workspace")
-    folder_path = outside.get("folder_path") if isinstance(outside, dict) else None
-    if not isinstance(folder_path, str):
+    folders = tuple(
+        Path(path) for path in outside_workspace_folder_paths(json.loads(str(row[1])))
+    )
+    if not folders:
         raise OutsideWorkspaceGrantError(
             "approval does not open a folder outside the workspace"
         )
-    folder = Path(folder_path)
-    if not folder_can_be_granted(folder=folder, db_path=db_path):
+    if not all(
+        folder_can_be_granted(folder=folder, db_path=db_path) for folder in folders
+    ):
         raise OutsideWorkspaceGrantError(
             "folder cannot be allowed for the whole conversation"
         )
-    insert_approved_folder_root_in_connection(
-        connection,
-        manifest_id=str(row[0]),
-        approval_session_id=approval_session_id,
-        folder=folder,
-        created_at=granted_at,
-    )
+    for ordinal, folder in enumerate(folders):
+        insert_approved_folder_root_in_connection(
+            connection,
+            manifest_id=str(row[0]),
+            approval_session_id=approval_session_id,
+            ordinal=ordinal,
+            folder=folder,
+            created_at=granted_at,
+        )
 
 
 __all__ = [

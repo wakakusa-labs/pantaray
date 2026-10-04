@@ -12,9 +12,10 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
     StateTokenSink,
 )
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .shared import ThinkingPayload, UnprojectedToolExecutionResult, now_iso
+from .shared import ThinkingPayload, UnprojectedToolExecutionResult
 
 
 async def run_thinking_tool(
@@ -74,8 +75,8 @@ async def run_thinking_tool(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, result_payload),
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
+
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .agent_experience_content import (
     AGENT_EXPERIENCE_INDEX_PATH,
@@ -141,7 +142,7 @@ def rebuild_agent_experience_repair_draft(
                     ),
                     source_anchor_occurrence=1,
                     reference_note="source action",
-                    created_at=datetime.now(UTC).isoformat(),
+                    created_at=now_utc_iso(),
                     state="carried",
                 )
             )

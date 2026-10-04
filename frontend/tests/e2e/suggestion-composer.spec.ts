@@ -19,7 +19,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await vite?.close();
 });
-test.use({ viewport: { width: 460, height: 800 }, locale: 'ja-JP', deviceScaleFactor: 2 });
+test.use({ viewport: { width: 520, height: 800 }, locale: 'ja-JP', deviceScaleFactor: 2 });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -88,6 +88,15 @@ test.beforeEach(async ({ page }) => {
             document.documentElement.dataset.submitted = JSON.stringify(request);
             return { kind: 'action_conflict' };
           },
+          attachFile: async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => {
+            const staged = Number(document.documentElement.dataset.staged ?? 0) + 1;
+            document.documentElement.dataset.staged = String(staged);
+            const attachmentId = `${staged}0000000-0000-4000-8000-000000000000`;
+            return { attachmentId, name, byteSize: bytes.byteLength };
+          },
+          discardAttachment: async ({ attachmentId }: { attachmentId: string }) => {
+            document.documentElement.dataset.discarded = attachmentId;
+          },
         },
       },
     });
@@ -127,7 +136,7 @@ async function capture(page: Page, info: TestInfo, name: string) {
         .map((animation) => animation.finished)
     );
   });
-  const panel = page.locator('[data-sharecard-root]');
+  const panel = page.locator('[data-overlay-panel]');
   await expect
     .poll(async () => Number(await page.locator('html').getAttribute('data-overlay-height')))
     .toBeGreaterThanOrEqual(Math.ceil((await panel.boundingBox())!.height));
@@ -140,13 +149,13 @@ test('comment: quiet entry, keyboard reveal, resize and reply', async ({ page },
   await expect(page.getByRole('textbox')).toHaveCount(0);
   const reply = page.getByRole('button', { name: 'この提案に返信' });
   await capture(page, info, 'comment-collapsed');
-  const initialHeight = (await page.locator('[data-sharecard-root]').boundingBox())!.height;
+  const initialHeight = (await page.locator('[data-overlay-panel]').boundingBox())!.height;
   await reply.focus();
   await page.keyboard.press('Enter');
   const input = page.getByRole('textbox', { name: 'メッセージ', exact: true });
   await expect(input).toBeFocused();
   await capture(page, info, 'comment-expanded');
-  expect((await page.locator('[data-sharecard-root]').boundingBox())!.height).toBeGreaterThan(
+  expect((await page.locator('[data-overlay-panel]').boundingBox())!.height).toBeGreaterThan(
     initialHeight
   );
   await input.fill('決めたいことを3つに整理して');
@@ -175,7 +184,7 @@ test('offer: inline decisions, expanded instructions and fresh suggestion reset'
   const input = page.getByRole('textbox', { name: '追加の指示（任意）' });
   await expect(input).toBeFocused();
   await input.fill('未決事項だけを、箇条書きでまとめて');
-  await expect(page.getByRole('button', { name: '画像を追加' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
   await page.getByRole('button', { name: /ファイル編集・コマンド実行の権限/ }).click();
   await page.getByRole('menuitemradio', { name: /自動承認/ }).click();
   await capture(page, info, 'offer-expanded');
@@ -206,7 +215,7 @@ test('user-started Action opens the regular composer immediately', async ({ page
   await page.goto(`${baseUrl}notification.html?mode=standalone`);
   await expect(page.getByRole('textbox', { name: 'メッセージ', exact: true })).toBeFocused();
   await expect(page.getByRole('button', { name: 'この提案に返信' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '画像を追加' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
   await capture(page, info, 'standalone-unchanged');
 });
 
@@ -372,3 +381,71 @@ test('suggestion reply and approval supplement carry picked projects', async ({ 
     supplementProjectRefs: [{ project_id: 'project-2', start: 0, end: 6 }],
   });
 });
+
+for (const language of ['ja', 'en'] as const) {
+  test(`documents: chip, keyboard removal, send, and history (${language})`, async ({
+    page,
+  }, info) => {
+    const copy = {
+      ja: {
+        message: 'メッセージ',
+        attach: 'ファイルを追加',
+        you: 'あなた',
+        files: '添付ファイル 1 件',
+      },
+      en: { message: 'Message', attach: 'Add files', you: 'You', files: '1 attached file' },
+    }[language];
+    const remove = (name: string) => (language === 'ja' ? `${name} を削除` : `Remove ${name}`);
+    await page.addInitScript(
+      (value) => localStorage.setItem('pantaray_ui_language', value),
+      language
+    );
+    await page.goto(`${baseUrl}notification.html?mode=standalone&actionId=action-1`);
+    await expect(page.locator('html')).toHaveAttribute('data-conversation-ready', 'true');
+    // prettier-ignore
+    const sent = { step_kind: 'user', approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: 'message-1', accepted_sequence: 1, content: '先月の見積書を確認して', images: [], project_refs: [], files: [{ name: '2026年8月 見積書（改訂版・最終）.pdf', byte_size: 1_258_291 }], status: 'adopted' };
+    // prettier-ignore
+    const conversation = parseActionConversationPage({
+      action: { action_id: 'action-1', suggestion_id: null, status: 'success', latest_run_id: 'run-1', approved_suggestion: null, resumable: false },
+      runs: [{ run_id: 'run-1', status: 'success', started_at: '2026-09-29T00:00:00.000000Z', completed_at: '2026-09-29T00:01:00.000000Z', completion_event_id: 'completion-1', final_output: '合計金額と支払条件を確認しました。', error: null, entries: [sent] }],
+      unadopted_messages: [],
+      next_cursor: null,
+    });
+    // prettier-ignore
+    const update: ActionLiveUpdate = { kind: 'action_updated', snapshot: { actionId: 'action-1', page: conversation, pageVersion: 1, transientToolSteps: [], approvalBlockers: [], lifecycle: null } };
+    await page.evaluate((detail) => {
+      window.dispatchEvent(new CustomEvent('test:conversation', { detail }));
+    }, update);
+
+    const history = page.getByRole('article', { name: copy.you });
+    await expect(history.getByRole('list', { name: copy.files })).toContainText('1.2 MB');
+    await expect(history.getByRole('button')).toHaveCount(0);
+    await capture(page, info, `documents-history-${language}`);
+
+    await expect(page.getByRole('button', { name: copy.attach })).toBeVisible();
+    await page.locator('.overlay-composer input[type="file"]').setInputFiles([
+      { name: 'minutes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7 minutes') },
+      { name: 'analysis.ipynb', mimeType: '', buffer: Buffer.from('{"cells": []}') },
+    ]);
+    const composer = page.locator('.overlay-composer');
+    await expect(composer.getByText('minutes.pdf')).toBeVisible();
+    await expect(composer.getByText('16 B')).toBeVisible();
+    await capture(page, info, `documents-composer-${language}`);
+
+    await composer.getByRole('button', { name: remove('analysis.ipynb') }).focus();
+    await page.keyboard.press('Enter');
+    await expect(composer.getByText('analysis.ipynb')).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-discarded',
+      '20000000-0000-4000-8000-000000000000'
+    );
+    await expect(composer.getByRole('button', { name: remove('minutes.pdf') })).toBeFocused();
+
+    const input = page.getByRole('textbox', { name: copy.message, exact: true });
+    await input.fill('議事録を要約して');
+    await input.press('Enter');
+    expect((await recorded(page, 'submitted')).message.files).toEqual([
+      { attachment_id: '10000000-0000-4000-8000-000000000000', name: 'minutes.pdf', byte_size: 16 },
+    ]);
+  });
+}

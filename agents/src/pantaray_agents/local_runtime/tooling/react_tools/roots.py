@@ -14,6 +14,8 @@ class WorkspaceReadRoot:
     root_id: str
     display_name: str
     canonical_path: Path
+    # Pantaray's own storage, hidden when a registered folder contains it.
+    private_app_storage: tuple[Path, ...]
 
 
 @dataclass(frozen=True, slots=True)

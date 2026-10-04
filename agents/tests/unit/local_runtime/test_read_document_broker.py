@@ -3,13 +3,19 @@ from __future__ import annotations
 import base64
 import datetime
 import json
+import re
+import struct
+import tracemalloc
 import zipfile
+import zlib
 from io import BytesIO
 from pathlib import Path
 from typing import cast
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn as docx_qn
 from docx.shared import Inches
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
@@ -20,8 +26,16 @@ from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml.ns import qn
 from pptx.util import Inches as SlideInches
 from pypdf import PageObject, PdfWriter
-from pypdf.generic import ContentStream, DictionaryObject, NameObject
+from pypdf.generic import (
+    ArrayObject,
+    ContentStream,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+    StreamObject,
+)
 
+from pantaray_agents.local_runtime.tooling import documents as documents_package
 from pantaray_agents.local_runtime.tooling.action_file_read_memory import (
     build_action_file_read_memory_input,
 )
@@ -35,6 +49,12 @@ from pantaray_agents.local_runtime.tooling.documents import (
     MAX_DOCUMENT_TEXT_CHARS,
     MAX_NOTEBOOK_OUTPUT_CHARS,
     MAX_SHEET_ROWS,
+    extract_document,
+)
+from pantaray_agents.local_runtime.tooling.documents.document_model import (
+    MAX_TABLE_COLUMNS,
+    MAX_TABLE_ROWS,
+    DocumentImage,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
@@ -280,6 +300,96 @@ async def test_docx_that_expands_past_the_memory_limit_is_refused(
 
 
 @pytest.mark.asyncio
+async def test_docx_cell_spanning_past_the_table_cap_is_cut_not_expanded(
+    tmp_path: Path,
+) -> None:
+    """A cell's declared span is a count to stop at, not a row to build."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    document = Document()
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "wide"
+    table.cell(0, 1).text = "after"
+    span = OxmlElement("w:gridSpan")
+    span.set(docx_qn("w:val"), str(2**31 - 1))
+    table.cell(0, 0)._tc.get_or_add_tcPr().append(span)
+    document.save(context.workspace_path / "span.docx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "span.docx"}
+    )
+
+    assert outcome.output["content"] == "".join(
+        line + "\n"
+        for line in (
+            "| " + " | ".join(["wide"] * MAX_TABLE_COLUMNS) + " |",
+            "| " + " | ".join(["---"] * MAX_TABLE_COLUMNS) + " |",
+            f"[table cut to {MAX_TABLE_COLUMNS} columns and 1 rows]",
+        )
+    )
+    assert outcome.output["truncated"] is True
+    assert any("read cannot reach the rest" in note for note in outcome.output["notes"])
+    assert "Part of this document was left out" in outcome.output["retry_hint"]
+
+
+@pytest.mark.asyncio
+async def test_docx_reads_text_inside_content_controls(tmp_path: Path) -> None:
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    document = Document()
+    document.add_paragraph("before")
+    block = document.add_paragraph("in a block control")._p
+    sdt, content = OxmlElement("w:sdt"), OxmlElement("w:sdtContent")
+    block.addprevious(sdt)
+    sdt.append(content)
+    content.append(block)
+    inline_sdt, inline_content = OxmlElement("w:sdt"), OxmlElement("w:sdtContent")
+    paragraph = document.add_paragraph("Name: ")
+    paragraph._p.append(inline_sdt)
+    inline_sdt.append(inline_content)
+    inline_content.append(paragraph.add_run("Ada")._r)
+    document.save(context.workspace_path / "form.docx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "form.docx"}
+    )
+
+    assert outcome.output["content"] == "before\nin a block control\nName: Ada\n"
+    assert outcome.output["total_units"] == 3
+
+
+@pytest.mark.asyncio
+async def test_docx_vertical_merge_down_a_long_table_repeats_its_text(
+    tmp_path: Path,
+) -> None:
+    """Every row of a merge reads the cell it continues, without walking back up."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    rows, columns = 500, 20
+    document = Document()
+    table = document.add_table(rows=rows, cols=columns)
+    # Marked on the elements directly: python-docx's merge() is itself slow at
+    # this size.
+    for row_number, tr in enumerate(table._tbl.tr_lst):
+        for tc in tr.tc_lst:
+            tc.vMerge = "restart" if row_number == 0 else "continue"
+    for column, cell in enumerate(table.rows[0].cells):
+        cell.text = f"c{column}"
+    document.save(context.workspace_path / "merged.docx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "merged.docx"}
+    )
+
+    merged_row = "| " + " | ".join(f"c{column}" for column in range(columns)) + " |"
+    divider = "| " + " | ".join(["---"] * columns) + " |"
+    # The table is longer than one read returns, so the window is checked: every
+    # whole row after the divider is the merged row.
+    lines = cast(str, outcome.output["content"]).split("\n")
+    assert lines[:3] == [merged_row, divider, merged_row]
+    assert set(lines[2:-1]) == {merged_row}
+
+
+@pytest.mark.asyncio
 async def test_protected_docx_is_refused_with_its_own_code(tmp_path: Path) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     (context.workspace_path / "sealed.docx").write_bytes(OLE2_MAGIC + b"\x00" * 64)
@@ -447,6 +557,93 @@ async def test_xlsx_that_expands_entities_is_refused(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.code == "READ_DOCUMENT_UNREADABLE"
+
+
+@pytest.mark.asyncio
+async def test_xlsx_ranges_covering_the_whole_sheet_are_not_expanded(
+    tmp_path: Path,
+) -> None:
+    """A merged range or a hyperlink names a range, not cells to build one by one."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    source_path = context.workspace_path / "ranges.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "kept"
+    workbook.save(source_path)
+    with zipfile.ZipFile(source_path) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml")
+    whole_sheet = (
+        b'<mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells>'
+        b'<hyperlinks><hyperlink ref="A1:XFD1048576" location="Sheet!A1"/>'
+        b"</hyperlinks>"
+    )
+    replace_package_part(
+        source_path,
+        "xl/worksheets/sheet1.xml",
+        sheet_xml.replace(b"</sheetData>", b"</sheetData>" + whole_sheet),
+    )
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "ranges.xlsx"}
+    )
+
+    assert outcome.output["content"] == "## Sheet: Sheet\n| kept |\n| --- |\n"
+    assert outcome.output["truncated"] is False
+
+
+def test_xlsx_picture_drawn_many_times_is_not_read_once_per_anchor(
+    tmp_path: Path,
+) -> None:
+    """Anchors are counted from the drawing; the image part is never copied per anchor."""
+
+    # 1,000 x 1,000 pixels stored uncompressed: a 3 MB part that the package
+    # deflates to a few kilobytes and counts once against the expansion cap.
+    rows = b"".join(b"\x00" + b"\x00" * 3_000 for _ in range(1_000))
+    header = struct.pack(">IIBBBBB", 1_000, 1_000, 8, 2, 0, 0, 0)
+    picture = (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", header)
+        + png_chunk(b"IDAT", zlib.compress(rows, 0))
+        + png_chunk(b"IEND", b"")
+    )
+    source_path = tmp_path / "pictures.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "kept"
+    workbook.active.add_image(SheetImage(BytesIO(picture)), "C3")
+    workbook.save(source_path)
+    with zipfile.ZipFile(source_path) as archive:
+        drawing_xml = archive.read("xl/drawings/drawing1.xml")
+    anchor = re.search(rb"<oneCellAnchor>.*</oneCellAnchor>", drawing_xml, re.S)
+    assert anchor is not None
+    anchors = 200
+    replace_package_part(
+        source_path,
+        "xl/drawings/drawing1.xml",
+        drawing_xml.replace(anchor.group(0), anchor.group(0) * anchors),
+    )
+
+    tracemalloc.start()
+    try:
+        with source_path.open("rb") as source:
+            document = extract_document(source=source, document_format="xlsx")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert document.images == (
+        DocumentImage(location="Sheet", ref="C3", count=anchors),
+    )
+    # One copy of the part per anchor would be 600 MB.
+    assert peak < 32 * 1024 * 1024
+
+
+def png_chunk(kind: bytes, data: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(data))
+        + kind
+        + data
+        + struct.pack(">I", zlib.crc32(kind + data))
+    )
 
 
 @pytest.mark.asyncio
@@ -686,6 +883,119 @@ async def test_a_chart_python_pptx_cannot_read_is_counted_not_fatal(
         for note in cast(list[str], output["notes"])
     )
     ReadToolOutput.model_validate(output)
+
+
+@pytest.mark.asyncio
+async def test_chart_point_counts_the_file_declares_bound_nothing_read(
+    tmp_path: Path,
+) -> None:
+    """A cache that claims 2**31 - 1 points is read only as far as a table keeps."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    source_path = context.workspace_path / "counts.pptx"
+    chart_data = CategoryChartData()
+    chart_data.categories = ["East", "West"]
+    chart_data.add_series("Revenue", (120.0, 80.0))
+    presentation = Presentation()
+    presentation.slides.add_slide(presentation.slide_layouts[6]).shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED,
+        SlideInches(1),
+        SlideInches(1),
+        SlideInches(4),
+        SlideInches(3),
+        chart_data,
+    )
+    presentation.save(source_path)
+    with zipfile.ZipFile(source_path) as archive:
+        chart_xml = archive.read("ppt/charts/chart1.xml")
+    replace_package_part(
+        source_path,
+        "ppt/charts/chart1.xml",
+        re.sub(rb'<c:ptCount val="\d+"/>', b'<c:ptCount val="2147483647"/>', chart_xml),
+    )
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "counts.pptx"}
+    )
+
+    empty_rows = MAX_TABLE_ROWS - 3
+    assert outcome.output["content"] == "".join(
+        line + "\n"
+        for line in (
+            "## Slide 1",
+            "Chart (COLUMN_CLUSTERED)",
+            "| Category | Revenue |",
+            "| --- | --- |",
+            "| East | 120.0 |",
+            "| West | 80.0 |",
+            *["|  |  |"] * empty_rows,
+            f"[table cut to 2 columns and {MAX_TABLE_ROWS} rows]",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_long_hierarchical_chart_axis_is_cut_with_its_parents(
+    tmp_path: Path,
+) -> None:
+    """Each leaf finds its parent label directly, however many the axis holds."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    leaves = 3_000
+    chart_data = CategoryChartData()
+    for index in range(leaves):
+        chart_data.categories.add_category(f"P{index}").add_sub_category(f"L{index}")
+    chart_data.add_series("Sales", [float(index) for index in range(leaves)])
+    presentation = Presentation()
+    presentation.slides.add_slide(presentation.slide_layouts[6]).shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED,
+        SlideInches(1),
+        SlideInches(1),
+        SlideInches(4),
+        SlideInches(3),
+        chart_data,
+    )
+    presentation.save(context.workspace_path / "axis.pptx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "axis.pptx"}
+    )
+
+    kept = MAX_TABLE_ROWS - 1
+    assert outcome.output["content"] == "".join(
+        line + "\n"
+        for line in (
+            "## Slide 1",
+            "Chart (COLUMN_CLUSTERED)",
+            "| Category | Sales |",
+            "| --- | --- |",
+            *[f"| P{index} / L{index} | {float(index)} |" for index in range(kept)],
+            f"[table cut to 2 columns and {MAX_TABLE_ROWS} rows]",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_paragraph_level_past_the_schema_indents_as_the_deepest_level(
+    tmp_path: Path,
+) -> None:
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    paragraph = slide.shapes.add_textbox(
+        SlideInches(1), SlideInches(1), SlideInches(3), SlideInches(1)
+    ).text_frame.paragraphs[0]
+    paragraph.text = "deep"
+    # python-pptx refuses to write a level past 8, so the attribute is set raw,
+    # the way another producer could have saved it.
+    paragraph._p.get_or_add_pPr().set("lvl", str(2**31 - 1))
+    presentation.save(context.workspace_path / "deep.pptx")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "deep.pptx"}
+    )
+
+    assert outcome.output["content"] == "## Slide 1\n" + "  " * 8 + "deep\n"
 
 
 @pytest.mark.asyncio
@@ -1213,6 +1523,125 @@ async def test_pdf_extraction_gives_up_once_it_runs_past_its_time_limit(
     # Nothing was read, so there is no page to continue from: pointing back at
     # page 1 would ask for the same slow read again, forever.
     assert output["next_start_unit"] is None
+
+
+@pytest.mark.asyncio
+async def test_pdf_page_redrawing_one_form_stops_at_the_time_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The limit holds inside a page, where pypdf parses a form again per draw."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    form = StreamObject()
+    form.set_data(b"0 0 m\n" * 200_000)
+    form.update(
+        {
+            NameObject("/Type"): NameObject("/XObject"),
+            NameObject("/Subtype"): NameObject("/Form"),
+            NameObject("/BBox"): ArrayObject([NumberObject(0)] * 4),
+            # pypdf skips a form with no resources rather than parsing it.
+            NameObject("/Resources"): DictionaryObject(
+                {NameObject("/ProcSet"): ArrayObject([NameObject("/PDF")])}
+            ),
+        }
+    )
+    form = form.flate_encode()
+    resources = DictionaryObject()
+    resources[NameObject("/XObject")] = DictionaryObject(
+        {NameObject("/Fm0"): writer._add_object(form)}
+    )
+    page[NameObject("/Resources")] = resources
+    drawing = ContentStream(None, None)
+    drawing.set_data(b"/Fm0 Do\n" * 5_000)
+    page.replace_contents(drawing)
+    writer.write(context.workspace_path / "redraw.pdf")
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.tooling.documents.pdf."
+        "MAX_PDF_EXTRACTION_SECONDS",
+        1.0,
+    )
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "redraw.pdf"}
+    )
+
+    output = outcome.output
+    assert output["content"] == ""
+    assert output["truncated"] is True
+    assert any("page 1 of 1" in note for note in cast(list[str], output["notes"]))
+    assert output["next_start_unit"] is None
+
+
+@pytest.mark.asyncio
+async def test_pdf_past_one_of_pypdfs_own_limits_is_refused_as_unreadable(
+    tmp_path: Path,
+) -> None:
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    # A CID width range that ends before it starts, which pypdf refuses with
+    # LimitReachedError when it measures the font's glyphs.
+    descendant = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/CIDFontType2"),
+            NameObject("/BaseFont"): NameObject("/Broken"),
+            NameObject("/W"): ArrayObject(
+                [NumberObject(10), NumberObject(5), NumberObject(300)]
+            ),
+        }
+    )
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type0"),
+            NameObject("/BaseFont"): NameObject("/Broken"),
+            NameObject("/Encoding"): NameObject("/Identity-H"),
+            NameObject("/DescendantFonts"): ArrayObject(
+                [writer._add_object(descendant)]
+            ),
+        }
+    )
+    resources = DictionaryObject()
+    resources[NameObject("/Font")] = DictionaryObject({NameObject("/F1"): font})
+    page[NameObject("/Resources")] = resources
+    drawing = ContentStream(None, None)
+    drawing.set_data(b"BT /F1 12 Tf 72 720 Td <0001> Tj ET")
+    page.replace_contents(drawing)
+    writer.write(context.workspace_path / "limit.pdf")
+
+    with pytest.raises(BrokerPolicyError) as exc_info:
+        await execute_read_tool(
+            db_path=db_path, context=context, args={"path": "limit.pdf"}
+        )
+
+    assert exc_info.value.code == "READ_DOCUMENT_UNREADABLE"
+
+
+@pytest.mark.asyncio
+async def test_extraction_out_of_memory_is_refused_as_too_large(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An allocation a document sized past what memory holds refuses that read only."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    write_sample_pdf(context.workspace_path / "report.pdf")
+
+    def exhaust_memory(source: object, start_unit: object) -> None:
+        raise MemoryError
+
+    monkeypatch.setitem(documents_package._EXTRACTORS, "pdf", exhaust_memory)
+
+    with pytest.raises(BrokerPolicyError) as exc_info:
+        await execute_read_tool(
+            db_path=db_path, context=context, args={"path": "report.pdf"}
+        )
+
+    assert exc_info.value.code == "READ_DOCUMENT_TOO_LARGE"
 
 
 @pytest.mark.asyncio

@@ -12,21 +12,6 @@ from pantaray_llm.contracts.tool_use import (
 # 各エージェントタイプに応じた応答形式（プレーン/JSON/一部タグ）のテスト
 
 
-def test_get_response_text_suggestion_prompt():
-    """'suggestion' を含むプロンプトに対する応答をテストする"""
-    client = MockLLMClient()
-    prompt = "Create a suggestion task for the user."
-    response_text = client.get_response_text(prompt)
-    payload = json.loads(response_text)
-    assert payload == {
-        "has_suggestion": False,
-        "answer": "",
-        "interaction_contract": None,
-        "suggestion_summary": None,
-        "target_context": None,
-    }
-
-
 def test_get_response_text_action_prompt():
     """'action' を含むプロンプトに対する応答をテストする"""
     client = MockLLMClient()

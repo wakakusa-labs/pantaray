@@ -2,11 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
+from pantaray_agents.agents.action_agent import ActionAgent
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+    SUBAGENT_ROLE,
+    role_system_instruction,
+)
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    EXCLUSION_NOTICES,
+    PROVIDER_DROPPED_NOTICE,
+    plan_tool_batch,
+)
+from pantaray_agents.agents.action_agent.tools import SUBMIT_SUBAGENT_REPORT_TOOL_ID
 from pantaray_agents.agents.artifact_react import (
     NativeReactCompletion,
     NativeReactRunInput,
+    NativeReactSkippedCall,
+    NativeReactTurnInterrupt,
+    NativeReactTurnPlan,
     ReactLoopPolicy,
     ReactLoopStep,
     ReactToolResult,
@@ -18,6 +33,7 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     LlmToolUseMixin,
 )
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
+from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.local_runtime.llm_proxy import build_local_llm_proxy_client
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     load_pending_action_subagent_approval,
@@ -57,8 +73,10 @@ from pantaray_agents.local_runtime.runtime.job_executor import (
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
+from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.contracts.conversation import LlmConversation
 from pantaray_llm.contracts.tool_use import (
+    LlmToolCall,
     LlmToolContinuation,
     LlmToolDefinition,
     LlmToolResult,
@@ -71,7 +89,6 @@ from .action_subagent_broker import (
     execute_action_subagent_broker_tool,
 )
 
-SUBMIT_SUBAGENT_REPORT_TOOL_NAME = "submit_subagent_report"
 ACTION_SUBAGENT_PROFILE_UNAVAILABLE = "ACTION_SUBAGENT_PROFILE_UNAVAILABLE"
 ACTION_SUBAGENT_EXECUTION_FAILED = "ACTION_SUBAGENT_EXECUTION_FAILED"
 
@@ -79,10 +96,17 @@ _CONFIGURED_PROFILE_IDS = frozenset(
     settings.profile_id for settings in SUBAGENT_MODEL_SETTINGS
 )
 _ACTION_SUBAGENT_MAX_REPORT_REPAIRS = 2
-_ACTION_SUBAGENT_SYSTEM_INSTRUCTION = (
-    "Complete only the assigned task. Do not expose private reasoning. "
-    "Return the concise final result with submit_subagent_report."
-)
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedCall:
+    """One requested call, in the shape the parent's batch policy reads."""
+
+    call: LlmToolCall
+
+    @property
+    def tool_id(self) -> str:
+        return self.call.name
 
 
 class ActionSubagentJobFailed(RuntimeError):
@@ -109,6 +133,7 @@ async def execute_action_subagent_job(
 ) -> ActionSubagentTerminalSuccess:
     sink = CountingSink()
     terminal_tool = _report_tool_definition()
+    max_parallel = load_local_runtime_tunables().action_agent.max_parallel_tool_calls
     rejected_reports = 0
     turn_conversation: LlmConversation | None = None
 
@@ -128,6 +153,7 @@ async def execute_action_subagent_job(
             tools=tools,
             continuation_mode="disabled",
             conversation=turn_conversation,
+            max_parallel_tool_calls=max_parallel,
             before_attempt=lambda: _raise_if_cancellation_requested(
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
@@ -157,7 +183,7 @@ async def execute_action_subagent_job(
             status="completed" if step.status == "success" else "error",
             arguments=(
                 {}
-                if step.tool_name == SUBMIT_SUBAGENT_REPORT_TOOL_NAME
+                if step.tool_name == SUBMIT_SUBAGENT_REPORT_TOOL_ID
                 and step.status == "error"
                 else step.tool_args
             ),
@@ -178,11 +204,14 @@ async def execute_action_subagent_job(
             process_id=payload["process_id"],
         )
         turn_conversation = build_action_subagent_conversation(
-            entries, repair_notice=last_error
+            entries,
+            assigned_task=_assigned_task_message(payload),
+            repair_notice=last_error,
         )
-        # The assigned task alone, byte for byte on every turn: it is the cache
-        # prefix the conversation items grow behind.
-        return _build_initial_prompt(payload)
+        # The parent's frozen head, byte for byte on every turn and for every
+        # child of that parent: the cache prefix the task and the transcript
+        # grow behind.
+        return payload["action_context"]
 
     async def project_result(result: ReactToolResult) -> ReactToolResult:
         _raise_if_cancellation_requested(
@@ -260,6 +289,17 @@ async def execute_action_subagent_job(
             record_step=record_tool_step,
             project_tool_result=project_result,
             policy=ReactLoopPolicy(),
+            plan_turn=lambda turn, remaining: _plan_turn(
+                turn, max_parallel=max_parallel, remaining_tool_calls=remaining
+            ),
+            # The pause anchor holds only the call that asked; the resumed run
+            # settles it, so the calls after it are answered as not run now.
+            turn_interrupt=NativeReactTurnInterrupt(
+                exception=ActionSubagentApprovalPause,
+                not_run_reason=_not_run_reason(
+                    "came after a call that waited for the user's approval"
+                ),
+            ),
         )
     )
     if result.loop_result.status != "success" or result.value is None:
@@ -289,7 +329,7 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
         runner = _ActionSubagentToolLlmRunner(
             client=build_local_llm_proxy_client(),
             llm_config={},
-            default_system_instruction=_ACTION_SUBAGENT_SYSTEM_INSTRUCTION,
+            default_system_instruction=_subagent_system_instruction(),
             error_code_prefix="ACTION_SUBAGENT",
             llm_inference_profile_id=payload["inference_profile_id"],
         )
@@ -400,7 +440,7 @@ def _persist_terminal_until_success(
 
 def _report_tool_definition() -> LlmToolDefinition:
     return LlmToolDefinition(
-        name=SUBMIT_SUBAGENT_REPORT_TOOL_NAME,
+        name=SUBMIT_SUBAGENT_REPORT_TOOL_ID,
         description="Submit the final private report to the parent agent.",
         parameters={
             "type": "object",
@@ -417,12 +457,66 @@ def _report_tool_definition() -> LlmToolDefinition:
     )
 
 
-def _build_initial_prompt(payload: ActionSubagentJobPayload) -> str:
-    context_refs = json.dumps(payload["context_refs"], ensure_ascii=False)
-    return (
-        "# Assigned Task\n"
-        f"{payload['task']}\n\n"
-        "# Context References\n"
-        f"{context_refs}\n\n"
-        f"Call {SUBMIT_SUBAGENT_REPORT_TOOL_NAME} when the report is ready."
+def _plan_turn(
+    turn: LlmToolCallTurn, *, max_parallel: int, remaining_tool_calls: int
+) -> NativeReactTurnPlan:
+    """Split one turn's calls by the parent's batch policy.
+
+    Read-only calls run at once, a changing call runs alone in order, and a call
+    the policy leaves out is answered with the parent's reason for it. A report
+    that is not its turn's single call is one of them, so no requested work and
+    no later correction is lost to a report ending the run early.
+    """
+
+    plan = plan_tool_batch(
+        tuple(_PlannedCall(call) for call in turn.calls),
+        max_parallel=max_parallel,
+        remaining_tool_steps=remaining_tool_calls,
     )
+    skipped = [
+        (
+            entry.call.call.name,
+            entry.call.call.arguments,
+            EXCLUSION_NOTICES[entry.reason],
+        )
+        for entry in (*plan.deferred, *plan.dropped)
+    ]
+    skipped.extend(
+        (name, {}, PROVIDER_DROPPED_NOTICE) for name in turn.dropped_call_names
+    )
+    return NativeReactTurnPlan(
+        calls=tuple(planned.call for planned in plan.calls),
+        parallel=plan.mode == "parallel",
+        skipped=tuple(
+            NativeReactSkippedCall(
+                name=name,
+                arguments=arguments,
+                reason=_not_run_reason(notice),
+            )
+            for name, arguments, notice in skipped
+        ),
+    )
+
+
+def _not_run_reason(notice: str) -> str:
+    return (
+        f"Not run: this call {notice}. "
+        "Request it again in a later turn if it is still needed."
+    )
+
+
+def _subagent_system_instruction() -> str:
+    """The Supervisor's system instruction with the subagent's role section."""
+
+    config = load_config(ActionAgent.EXECUTING_PROMPT_NAME)
+    if config.system_instruction is None:
+        raise RuntimeError("The Action prompt has no system instruction")
+    return role_system_instruction(
+        config.system_instruction,
+        role_rule=config.require_role_rule(SUBAGENT_ROLE),
+    )
+
+
+def _assigned_task_message(payload: ActionSubagentJobPayload) -> str:
+    context_refs = json.dumps(payload["context_refs"], ensure_ascii=False)
+    return f"# Assigned Task\n{payload['task']}\n\n# Context References\n{context_refs}"

@@ -2,22 +2,28 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useLayoutEffect, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
-import { HistoryCaptureControls } from '@/components/history/HistoryCaptureControls';
+import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
 import HistorySearchField from '@/components/history/HistorySearchField';
 import { getConversationHistoryStatusMeta } from '@/components/history/statusTokens';
-import { ShortcutHint, ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
+import { ariaKeyShortcuts, acceleratorKeycaps } from '@/components/shortcut/acceleratorKeycaps';
+import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
 import {
   useGlobalShortcutHint,
   type ShortcutHintState,
 } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
+import { groupHistoryByDay } from '@/history/historyDayGroups';
+import type { HistoryLiveStage } from '@/history/historyLiveStage';
+import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, useSuggestionHistory } from '@/hooks/useSuggestionHistory';
+import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
 
 import './suggestionHistoryPage.css';
 
 const NEW_CONVERSATION_BUTTON_ID = 'history-new-conversation';
+const SHORTCUT_UNAVAILABLE_ID = 'history-new-conversation-shortcut-unavailable';
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
 
@@ -58,6 +64,25 @@ async function openConversation(actionId: string): Promise<void> {
   await open({ actionId });
 }
 
+function liveStageText(
+  stage: HistoryLiveStage,
+  language: 'en' | 'ja',
+  t: (key: MessageKey) => string
+): string {
+  switch (stage.kind) {
+    case 'tool':
+      return resolveToolLine(stage.label, language, {
+        subject: stage.subject,
+        running: true,
+        outcome: stage.outcome,
+      }).text;
+    case 'message':
+      return stage.text;
+    case 'thinking':
+      return t('overlay.thinking');
+  }
+}
+
 async function openNewConversation(): Promise<void> {
   const open = window.electron?.history?.openNewConversation;
   if (!open) throw new Error('New conversation bridge is unavailable.');
@@ -87,6 +112,55 @@ function EmptyStateHint({
   );
 }
 
+/**
+ * The global shortcut opens the same Overlay, so it sits inside the button the way menus show
+ * shortcuts. The keycaps are drawn only; assistive technology gets `aria-keyshortcuts`.
+ */
+function NewConversationButton({
+  shortcutHint,
+  t,
+  onClick,
+}: {
+  shortcutHint: ShortcutHintState;
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+  onClick: () => void;
+}) {
+  const isUnavailable = shortcutHint.status === 'unavailable';
+  const accelerator = shortcutHint.status === 'ready' ? shortcutHint.accelerator : null;
+  return (
+    <>
+      <button
+        type="button"
+        id={NEW_CONVERSATION_BUTTON_ID}
+        className="history-new-conversation-button"
+        aria-keyshortcuts={
+          accelerator === null
+            ? undefined
+            : ariaKeyShortcuts(
+                acceleratorKeycaps(accelerator, window.electron?.process.platform === 'darwin')
+              )
+        }
+        title={isUnavailable ? t('shortcut.hint.unavailable') : undefined}
+        aria-describedby={isUnavailable ? SHORTCUT_UNAVAILABLE_ID : undefined}
+        onClick={onClick}
+      >
+        <Plus size={16} aria-hidden="true" />
+        {t('history.newConversation')}
+        {accelerator === null ? null : (
+          <span className="history-new-conversation-keys" aria-hidden="true">
+            <ShortcutKeycaps accelerator={accelerator} t={t} />
+          </span>
+        )}
+      </button>
+      {isUnavailable ? (
+        <span id={SHORTCUT_UNAVAILABLE_ID} hidden>
+          {t('shortcut.hint.unavailable')}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 const SuggestionHistoryPage = () => {
   const {
     items,
@@ -102,7 +176,8 @@ const SuggestionHistoryPage = () => {
     isUnread,
     removeItem,
   } = useSuggestionHistory();
-  const { t, formatDateTime } = useI18n();
+  const { t, language, formatDateTime } = useI18n();
+  const liveStages = useHistoryLiveStages();
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<ConversationHistoryListItem | null>(
     null
@@ -179,68 +254,97 @@ const SuggestionHistoryPage = () => {
       );
     }
 
+    const locale = getLocaleForUiLanguage(language);
+    const formatTime = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+    // Headings and rows are siblings in one flat list keyed by identity, so a live update that
+    // adds or moves a day never remounts the rows that stay, nor takes focus from them.
+    const headingsPerDay = new Map<string, number>();
     return (
       <div className="history-list">
-        {items.map((item) => {
-          const identity =
-            item.kind === 'conversation'
-              ? `conversation:${item.action_id}`
-              : `suggestion:${item.suggestion_id}`;
-          const statusMeta = getConversationHistoryStatusMeta(item.status);
-          const content = (
-            <div className="history-item-body">
-              <div className="history-item-text">
-                <p className="history-item-title">{item.title}</p>
-                <div className="history-item-meta">
-                  <span>{formatDateTime(new Date(item.updated_at))}</span>
+        {groupHistoryByDay(
+          items,
+          new Date(),
+          { today: t('history.day.today'), yesterday: t('history.day.yesterday') },
+          locale
+        ).flatMap((day) => {
+          // Rows out of date order can bring a day back; its repeat count keeps the key unique.
+          const repeat = headingsPerDay.get(day.key) ?? 0;
+          headingsPerDay.set(day.key, repeat + 1);
+          return [
+            <h2 key={`day:${day.key}:${repeat}`} className="history-day">
+              {day.label}
+            </h2>,
+            ...day.items.map((item) => {
+              const identity = itemIdentity(item);
+              const statusMeta = getConversationHistoryStatusMeta(item.status);
+              const liveStage =
+                item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
+              const content = (
+                <div className="history-item-body">
+                  <div className="history-item-text">
+                    <p className="history-item-title">{item.title}</p>
+                    <div className="history-item-meta">
+                      <span>
+                        {day.isRecent
+                          ? formatTime.format(new Date(item.updated_at))
+                          : formatDateTime(new Date(item.updated_at))}
+                      </span>
+                    </div>
+                    {liveStage ? (
+                      // Visual only: it changes on every step, and the badge carries the status.
+                      <p className="history-item-live" aria-hidden="true">
+                        {liveStageText(liveStage, language, t)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="history-item-status">
+                    {isUnread(item) ? <span aria-label={t('history.unread')}>●</span> : null}
+                    {statusMeta ? (
+                      <span className={`badge badge--${statusMeta.tone}`}>
+                        {t(statusMeta.labelKey)}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <div className="history-item-status">
-                {isUnread(item) ? <span aria-label={t('history.unread')}>●</span> : null}
-                {statusMeta ? (
-                  <span className={`badge badge--${statusMeta.tone}`}>
-                    {t(statusMeta.labelKey)}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          );
+              );
 
-          return (
-            <div key={identity} className="history-item">
-              <button
-                type="button"
-                id={openButtonId(identity)}
-                className="history-item-button"
-                onClick={() => {
-                  if (item.kind === 'conversation') {
-                    void handleConversation(item.action_id);
-                    return;
-                  }
-                  setNotice(null);
-                  try {
-                    openSuggestionHistory(item.suggestion_id);
-                  } catch {
-                    setNotice(t('history.openOverlayFailed'));
-                  }
-                }}
-              >
-                {content}
-              </button>
-              <button
-                type="button"
-                id={deleteButtonId(identity)}
-                className="history-item-delete"
-                aria-label={`${t('common.delete')} ${item.title}`}
-                title={t('common.delete')}
-                aria-busy={deletingIdentity === identity}
-                disabled={isDeleteBlocked(item) || deletingIdentity !== null}
-                onClick={() => setConfirmingDelete(item)}
-              >
-                <Trash2 size={16} aria-hidden="true" />
-              </button>
-            </div>
-          );
+              return (
+                <div key={identity} className="history-item">
+                  <button
+                    type="button"
+                    id={openButtonId(identity)}
+                    className="history-item-button"
+                    onClick={() => {
+                      if (item.kind === 'conversation') {
+                        void handleConversation(item.action_id);
+                        return;
+                      }
+                      setNotice(null);
+                      try {
+                        openSuggestionHistory(item.suggestion_id);
+                      } catch {
+                        setNotice(t('history.openOverlayFailed'));
+                      }
+                    }}
+                  >
+                    {content}
+                  </button>
+                  <button
+                    type="button"
+                    id={deleteButtonId(identity)}
+                    className="history-item-delete"
+                    aria-label={`${t('common.delete')} ${item.title}`}
+                    title={t('common.delete')}
+                    aria-busy={deletingIdentity === identity}
+                    disabled={isDeleteBlocked(item) || deletingIdentity !== null}
+                    onClick={() => setConfirmingDelete(item)}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            }),
+          ];
         })}
         {error ? (
           <div className="history-error" role="alert">
@@ -275,16 +379,11 @@ const SuggestionHistoryPage = () => {
           >
             <RefreshCw size={16} aria-hidden="true" />
           </button>
-          <ShortcutHint state={shortcutHint} t={t} />
-          <button
-            type="button"
-            id={NEW_CONVERSATION_BUTTON_ID}
-            className="history-new-conversation-button"
+          <NewConversationButton
+            shortcutHint={shortcutHint}
+            t={t}
             onClick={() => void handleNewConversation()}
-          >
-            <Plus size={16} aria-hidden="true" />
-            {t('history.newConversation')}
-          </button>
+          />
         </div>
         {isRealtimeSyncing ? <div className="history-sync">{t('history.syncing')}</div> : null}
         {notice ? (
@@ -297,7 +396,6 @@ const SuggestionHistoryPage = () => {
       {confirmingDelete ? (
         <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
       ) : null}
-      <HistoryCaptureControls />
     </div>
   );
 };

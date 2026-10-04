@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { acceleratorKeycaps, keycapsLabel } from './acceleratorKeycaps';
+import { acceleratorKeycaps, ariaKeyShortcuts, keycapsLabel } from './acceleratorKeycaps';
 
 const symbols = (accelerator: string, isMac: boolean) =>
   acceleratorKeycaps(accelerator, isMac).map((keycap) => keycap.symbol);
@@ -28,6 +28,16 @@ describe('acceleratorKeycaps', () => {
     expect(keycapsLabel(acceleratorKeycaps('Option+Space', true))).toBe('Option Space');
     expect(keycapsLabel(acceleratorKeycaps('Control+Shift+Command+L', true))).toBe(
       'Control Shift Command L'
+    );
+  });
+
+  it('names the shortcut for aria-keyshortcuts with key values on every platform', () => {
+    expect(ariaKeyShortcuts(acceleratorKeycaps('Option+Space', true))).toBe('Alt+Space');
+    expect(ariaKeyShortcuts(acceleratorKeycaps('CommandOrControl+Shift+K', true))).toBe(
+      'Shift+Meta+K'
+    );
+    expect(ariaKeyShortcuts(acceleratorKeycaps('CommandOrControl+Shift+K', false))).toBe(
+      'Shift+Control+K'
     );
   });
 });

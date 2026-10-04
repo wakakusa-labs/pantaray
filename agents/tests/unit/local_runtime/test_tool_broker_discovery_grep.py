@@ -81,7 +81,8 @@ async def test_grep_does_not_expose_action_plan_matches(
     nested_plan = context.workspace_path / "nested" / "plan.md"
     nested_plan.parent.mkdir()
     nested_plan.write_text("needle ordinary nested plan\n", encoding="utf-8")
-    parent = context.workspace_path.parent
+    # Searched from above app storage, only the Action's own workspace shows.
+    parent = db_path.parent.resolve().parent
     case_alias = parent.with_name(parent.name.swapcase())
     grep_base = case_alias if case_alias.exists() else parent
 
@@ -96,7 +97,9 @@ async def test_grep_does_not_expose_action_plan_matches(
         args={
             "base_path": str(grep_base),
             "pattern": "needle",
-            "include_glob": f"{context.workspace_path.name}/**/*.md",
+            "include_glob": (
+                f"{context.workspace_path.relative_to(parent).as_posix()}/**/*.md"
+            ),
             "max_matches": 2,
         },
     )
@@ -226,8 +229,10 @@ async def test_grep_reports_skipped_files_as_warning(
 
     from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
     from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-        RipgrepGrepMatch,
         RipgrepGrepResult,
+    )
+    from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+        RipgrepGrepMatch,
     )
 
     def fake_grep(**_: object) -> RipgrepGrepResult:
@@ -237,12 +242,15 @@ async def test_grep_reports_skipped_files_as_warning(
                     relative_path="notes.txt",
                     line_number=1,
                     line="needle",
+                    line_truncated=False,
                 ),
             ),
             truncated=False,
             truncation_reason=None,
             timed_out=False,
             skipped_files=2,
+            first_skip_error="./locked: Permission denied (os error 13)",
+            binary_match_paths=tuple(f"blob-{index}.bin" for index in range(12)),
         )
 
     monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", fake_grep)
@@ -267,8 +275,14 @@ async def test_grep_reports_skipped_files_as_warning(
     assert outcome.output["truncated"] is False
     assert outcome.output["truncation_reason"] is None
     assert outcome.output["skipped_files"] == 2
-    assert "skipped" in str(outcome.output["warning"])
-    assert "include_glob" in str(outcome.output["retry_hint"])
+    warning = str(outcome.output["warning"])
+    assert "2 path(s) could not be read" in warning
+    assert "./locked: Permission denied (os error 13)" in warning
+    assert "12 binary file(s) also match" in warning
+    assert str(context.workspace_path / "blob-9.bin") in warning
+    assert str(context.workspace_path / "blob-10.bin") not in warning
+    assert "and 2 more." in warning
+    assert "read" in str(outcome.output["retry_hint"])
 
 
 @pytest.mark.asyncio
@@ -279,7 +293,7 @@ async def test_grep_truncates_long_matching_lines(
     install_fake_ripgrep_backend(monkeypatch)
     db_path, context = _bootstrap_runtime_db(tmp_path)
     (context.workspace_path / "minified.js").write_text(
-        "needle " + ("x" * 3_000) + "\n",
+        ("x" * 3_000) + " needle " + ("y" * 3_000) + "\n",
         encoding="utf-8",
     )
 
@@ -302,12 +316,49 @@ async def test_grep_truncates_long_matching_lines(
     assert outcome.status == "success"
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "line_length"
-    assert "include_glob" in str(outcome.output["retry_hint"])
-    assert "shortened" in str(outcome.output["warning"])
+    assert "offset=line_number" in str(outcome.output["retry_hint"])
+    assert "excerpt around their first match" in str(outcome.output["warning"])
     matches = outcome.output["matches"]
     assert isinstance(matches, list)
     assert len(matches) == 1
-    assert "(line truncated to" in matches[0]["line"]
+    line = matches[0]["line"]
+    assert line.startswith("…x") and line.endswith("y…")
+    assert " needle " in line
+
+
+@pytest.mark.asyncio
+async def test_grep_match_limit_names_the_limit_and_keeps_line_note(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_ripgrep_backend(monkeypatch)
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    (context.workspace_path / "log.txt").write_text(
+        "".join(f"needle {index} {'x' * 600}\n" for index in range(3)),
+        encoding="utf-8",
+    )
+
+    outcome = await execute_broker_tool(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_id="grep",
+        user_id="user-1",
+        actor_process_id=BROKER_ACTOR_PROCESS_ID,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session_id,
+        args={"base_path": ".", "pattern": "needle", "max_matches": 2},
+    )
+
+    assert outcome.status == "success"
+    assert len(outcome.output["matches"]) == 2
+    assert outcome.output["truncated"] is True
+    assert outcome.output["truncation_reason"] == "limit"
+    warning = str(outcome.output["warning"])
+    assert "max_matches=2" in warning
+    assert "excerpt around their first match" in warning
+    retry_hint = str(outcome.output["retry_hint"])
+    assert "Raise max_matches" in retry_hint
+    assert "offset=line_number" in retry_hint
 
 
 @pytest.mark.asyncio
@@ -347,8 +398,8 @@ async def test_grep_caps_total_output_bytes(
     )
     assert stored_output["truncated"] is True
     assert stored_output["truncation_reason"] == "output_bytes"
-    assert "narrow" in str(stored_output["retry_hint"])
-    assert "output byte limit" in str(stored_output["warning"])
+    assert "Narrow base_path" in str(stored_output["retry_hint"])
+    assert "50 KB output limit" in str(stored_output["warning"])
     matches = stored_output["matches"]
     assert isinstance(matches, list)
     assert len(str(stored_output).encode("utf-8")) <= 70_000
@@ -416,69 +467,37 @@ async def test_discovery_tools_do_not_materialize_full_tree_before_limit(
 
 
 @pytest.mark.asyncio
-async def test_discovery_scan_budget_applies_before_pattern_filtering(
+async def test_list_reports_the_depth_cut_symlinks_and_unreadable_paths(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    (context.workspace_path / "a.txt").write_text("alpha\n", encoding="utf-8")
-    (context.workspace_path / "b.txt").write_text("beta\n", encoding="utf-8")
+    tree = context.workspace_path / "tree"
+    (tree / "src" / "pkg").mkdir(parents=True)
+    (tree / "src" / "pkg" / "deep.py").write_text("x\n", encoding="utf-8")
+    (tree / "a.txt").write_text("a\n", encoding="utf-8")
+    (tree / "link.txt").symlink_to("a.txt")
+    (tree / "locked").mkdir(mode=0)
+    try:
+        outcome = await execute_broker_tool(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            tool_id="list",
+            user_id="user-1",
+            actor_process_id=BROKER_ACTOR_PROCESS_ID,
+            manifest_id=context.manifest_id,
+            execution_session_id=context.execution_session_id,
+            args={"path": "tree", "max_depth": 2, "limit": 10},
+        )
+    finally:
+        (tree / "locked").chmod(0o700)
 
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-
-    monkeypatch.setattr(broker_discovery, "DISCOVERY_MAX_SCANNED_PATHS", 1)
-
-    list_outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="list",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={"path": ".", "max_depth": 1, "limit": 10},
-    )
-
-    assert list_outcome.status == "success"
-    assert list_outcome.output["truncated"] is True
-    assert list_outcome.output["truncation_reason"] == "scan_budget"
-    assert "narrower path" in str(list_outcome.output["retry_hint"])
-    assert "scan budget" in str(list_outcome.output["warning"])
-    assert len(list_outcome.output["entries"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_list_scan_budget_counts_skipped_symlinks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    db_path, context = _bootstrap_runtime_db(tmp_path)
-    links_dir = context.workspace_path / "links"
-    links_dir.mkdir()
-    for index in range(3):
-        (links_dir / f"skip-{index}").symlink_to("missing.txt")
-
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-
-    monkeypatch.setattr(broker_discovery, "DISCOVERY_MAX_SCANNED_PATHS", 1)
-
-    outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="list",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={"path": "links", "max_depth": 1, "limit": 10},
-    )
-
-    assert outcome.status == "success"
-    assert outcome.output["truncated"] is True
-    assert outcome.output["truncation_reason"] == "scan_budget"
-    assert "narrower path" in str(outcome.output["retry_hint"])
-    assert "scan budget" in str(outcome.output["warning"])
-    assert outcome.output["entries"] == []
+    names = [entry["name"] for entry in outcome.output["entries"]]
+    assert names == ["a.txt", "src", "pkg"]
+    warning = str(outcome.output["warning"])
+    assert "1 listed director(y/ies) at max_depth=2 were not opened" in warning
+    assert "1 symlink(s) were skipped" in warning
+    assert "1 path(s) could not be read" in warning
+    assert "Raise max_depth (up to 6)" in str(outcome.output["retry_hint"])
 
 
 @pytest.mark.asyncio
@@ -561,6 +580,6 @@ async def test_discovery_tools_report_truncation(tmp_path: Path) -> None:
     assert outcome.status == "success"
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "limit"
-    assert "narrower path" in str(outcome.output["retry_hint"])
-    assert "result limit" in str(outcome.output["warning"])
+    assert "Raise limit (up to 500)" in str(outcome.output["retry_hint"])
+    assert "Stopped at limit=1 entries; more exist." in str(outcome.output["warning"])
     assert len(outcome.output["entries"]) == 1

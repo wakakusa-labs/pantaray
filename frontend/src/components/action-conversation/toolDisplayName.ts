@@ -108,6 +108,17 @@ const TOOL_DISPLAY_NAMES = {
     enDone: 'Unlinked {subject}',
     enRunning: 'Unlinking {subject}',
   },
+  remember: {
+    agentName: 'Remember',
+    icon: Brain,
+    // 忘れて・直しての依頼もメモとして残るので、「覚えました」とは言わない。
+    ja: '記憶にメモ',
+    en: 'Note in memory',
+    jaDone: '記憶にメモしました {subject}',
+    jaRunning: '記憶にメモしています {subject}',
+    enDone: 'Noted in memory: {subject}',
+    enRunning: 'Noting in memory: {subject}',
+  },
   web_search: {
     agentName: 'Web Search',
     icon: Search,
@@ -149,10 +160,10 @@ const TOOL_DISPLAY_NAMES = {
     enRunning: 'Reading {subject}',
   },
   render_pdf_page: {
-    agentName: 'Look At PDF Pages',
+    agentName: 'Look At Document Pages',
     icon: FileText,
-    ja: 'PDF のページを見る',
-    en: 'Look at a PDF page',
+    ja: 'ページを見る',
+    en: 'Look at pages',
     jaDone: '{subject} のページを見ました',
     jaRunning: '{subject} のページを見ています',
     enDone: 'Looked at pages of {subject}',
@@ -224,12 +235,12 @@ const TOOL_DISPLAY_NAMES = {
   capture_screen: {
     agentName: 'Capture Screen',
     icon: Camera,
-    ja: '画面を撮影',
-    en: 'Capture the screen',
-    jaDone: '画面を撮影しました',
-    jaRunning: '画面を撮影しています',
-    enDone: 'Captured the screen',
-    enRunning: 'Capturing the screen',
+    ja: 'ウィンドウを撮影',
+    en: 'Capture a window',
+    jaDone: '{subject} を撮影しました',
+    jaRunning: '{subject} を撮影しています',
+    enDone: 'Captured {subject}',
+    enRunning: 'Capturing {subject}',
   },
   read_action_plan: {
     agentName: 'Read Action Plan',
@@ -398,6 +409,12 @@ const NOT_EXECUTED_LINES = {
   },
 } as const;
 
+/** ページを描く準備がまだ済んでいない。失敗ではなく、準備が済めば見られる。 */
+const PREPARING_LINES = {
+  ja: '{subject} を表示する準備をしています',
+  en: 'Preparing to show {subject}',
+} as const;
+
 /** 未登録のツールでも生の snake_case は出さず、読める語に均す。 */
 function humanizeToolLabel(label: string): string {
   const spaced = label.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -432,6 +449,9 @@ export function resolveToolLine(
     if (subject === null) return { text: lines.bare, mono: false };
     // subject は記録されたままの文字列。置換文字列として解釈させない。
     return { text: lines.subject.replace(SUBJECT_SLOT, () => subject), mono: false };
+  }
+  if (outcome === 'preparing' && subject !== null) {
+    return { text: PREPARING_LINES[language].replace(SUBJECT_SLOT, () => subject), mono: false };
   }
   const entry = lookup(label);
   if (entry === undefined) return { text: humanizeToolLabel(label), mono: false };

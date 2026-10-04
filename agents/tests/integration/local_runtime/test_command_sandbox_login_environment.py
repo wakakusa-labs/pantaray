@@ -19,20 +19,25 @@ pytestmark = pytest.mark.skipif(not seatbelt_available(), reason=SEATBELT_SKIP_R
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("read_access_scope", "use_login_environment", "home_readable"),
+    ("read_access_scope", "use_login_environment"),
     [
-        ("full_access", False, False),
-        ("full_access", True, True),
-        ("workspace", True, False),
+        ("full_access", False),
+        ("full_access", True),
+        ("workspace", False),
+        ("workspace", True),
     ],
 )
-async def test_login_environment_reads_home_by_setting_and_keeps_boundaries(
+async def test_command_reads_follow_setting_and_keep_boundaries(
     tmp_path: Path,
+    outside_temp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     read_access_scope: ReadAccessScope,
     use_login_environment: bool,
-    home_readable: bool,
 ) -> None:
+    home_readable = read_access_scope == "full_access"
+    # Only the login environment points HOME at the real one, so only then does
+    # Git pick up the user's ~/.gitconfig.
+    git_user_visible = home_readable and use_login_environment
     app_data = tmp_path / "app-data"
     app_data.mkdir()
     testbed = bootstrap_runtime_testbed(
@@ -40,7 +45,7 @@ async def test_login_environment_reads_home_by_setting_and_keeps_boundaries(
         monkeypatch=monkeypatch,
         read_access_scope=read_access_scope,
     )
-    home = tmp_path / "home"
+    home = outside_temp_path / "home"
     (home / ".config").mkdir(parents=True)
     (home / ".config" / "cli-token").write_text("signed-in", encoding="utf-8")
     (home / ".gitconfig").write_text("[user]\n\tname = Login User\n", encoding="utf-8")
@@ -76,7 +81,7 @@ async def test_login_environment_reads_home_by_setting_and_keeps_boundaries(
     assert "workspace-write=yes" in lines
     # An existing but unreadable ~/.gitconfig must not make Git abort.
     assert "git=yes" in lines
-    assert ("Login User" in lines) == home_readable
+    assert ("Login User" in lines) == git_user_visible
     assert not (home / "written").exists()
     assert secret.read_text(encoding="utf-8") == "private"
 

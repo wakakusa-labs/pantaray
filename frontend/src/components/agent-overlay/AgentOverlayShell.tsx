@@ -17,10 +17,11 @@ import {
 } from './ContentLayout';
 import { MarkdownBlock } from './MarkdownRenderer';
 import { HeaderIconButton } from './IconButton';
-import { Check, ChevronDown, ChevronUp, Clipboard, Minus, Share2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, CircleAlert, Clipboard, Minus } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
+import type { ClipboardCopyStatus } from './useClipboardCopy';
 import { SuggestionDecisionControls, type SuggestionDecision } from './SuggestionDecisionControls';
 
 const SuggestionAcceptedStatus = styled.span`
@@ -69,7 +70,7 @@ const BusyDot = styled.span`
   }
 `;
 
-const BusyLabel = styled.span`
+const VisuallyHidden = styled.span`
   position: absolute;
   width: 1px;
   height: 1px;
@@ -117,46 +118,6 @@ const ThinkingLine = styled.p`
   }
 `;
 
-type ShareToastKind = 'success' | 'warning' | 'error';
-
-type ShareToastState = {
-  kind: ShareToastKind;
-  message: string;
-};
-
-const ShareToast = styled.div<{ $kind: ShareToastKind }>`
-  pointer-events: none;
-  display: inline-flex;
-  align-items: center;
-  height: 32px; /* HeaderIconButton(8px padding + 16px icon)と同じ行高感 */
-  padding: 0 12px;
-  border-radius: 10px;
-  font-family: var(--font-sans);
-  font-size: var(--text-ui-size-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--text-meta-tracking);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 180px;
-
-  /* 既存トーンに寄せて派手さを抑える（強ブラー/黄緑枠をやめる） */
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.88);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-
-  ${({ $kind }) => {
-    if ($kind === 'error') {
-      return `
-        color: rgba(254, 202, 202, 0.95);
-      `;
-    }
-    return '';
-  }}
-`;
-
 type AgentOverlayShellProps = {
   isVisible: boolean;
   isContentVisible: boolean;
@@ -175,11 +136,8 @@ type AgentOverlayShellProps = {
   approvalBlockers?: readonly ActionApprovalBlocker[];
   isSubmittingApproval?: boolean;
   approvalErrorMessage?: string | null;
-  copyStatusAnswer: boolean;
   showBusyIndicator: boolean;
   showThinking?: boolean;
-  isSharing?: boolean;
-  shareToast?: ShareToastState | null;
   showFooterActions?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
@@ -188,8 +146,8 @@ type AgentOverlayShellProps = {
   onReject?: () => void;
   onDecideApproval?: (decision: ApprovalDecision, blocker: ActionApprovalBlocker) => void;
   onOpenWorkspaceSettings?: () => void;
-  onCopyAnswer?: () => void;
-  onShareScreenshot?: () => void;
+  /** Present while a conversation is shown; copies the whole conversation. */
+  conversationCopy?: Readonly<{ status: ClipboardCopyStatus; copy: () => void }>;
   onHeaderPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
   onHeaderPointerMove?: (event: PointerEvent<HTMLDivElement>) => void;
   onHeaderPointerUp?: (event: PointerEvent<HTMLDivElement>) => void;
@@ -221,11 +179,8 @@ const AgentOverlayShell = ({
   approvalBlockers = [],
   isSubmittingApproval = false,
   approvalErrorMessage = null,
-  copyStatusAnswer,
   showBusyIndicator,
   showThinking = false,
-  isSharing = false,
-  shareToast = null,
   showFooterActions = true,
   fadeDurationMs = 600,
   onToggleExpand,
@@ -234,8 +189,7 @@ const AgentOverlayShell = ({
   onReject,
   onDecideApproval,
   onOpenWorkspaceSettings,
-  onCopyAnswer,
-  onShareScreenshot,
+  conversationCopy,
   onHeaderPointerDown,
   onHeaderPointerMove,
   onHeaderPointerUp,
@@ -254,6 +208,8 @@ const AgentOverlayShell = ({
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
   const { t } = useI18n();
   const showApprovalPanel = approvalUiState === 'approval_pending' && approvalBlockers.length > 0;
+  const copyConversationFailed =
+    conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
   const suppressNextCloseClickRef = useRef(false);
   const scrollIndicatorHideTimeoutRef = useRef<number | null>(null);
   const handleCloseMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -305,11 +261,10 @@ const AgentOverlayShell = ({
       $bg={overlayBackground}
       $isVisible={isVisible}
       $fadeMs={fadeDurationMs}
-      data-sharecard-root="true"
+      data-overlay-panel="true"
     >
       <HeaderRow
         ref={headerRef}
-        data-sharecard-hide="true"
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
@@ -317,53 +272,33 @@ const AgentOverlayShell = ({
       >
         {showBusyIndicator && (
           <BusyIndicator role="status">
-            <BusyLabel>{t('overlay.actioning')}</BusyLabel>
+            <VisuallyHidden>{t('overlay.actioning')}</VisuallyHidden>
             {BUSY_DOT_DELAYS_S.map((delay) => (
               <BusyDot key={delay} style={{ animationDelay: `${delay}s` }} aria-hidden />
             ))}
           </BusyIndicator>
         )}
-        {shareToast && (
-          <ShareToast
-            $kind={shareToast.kind}
-            role="status"
-            aria-live="polite"
-            data-sharecard-hide="true"
-          >
-            {shareToast.message}
-          </ShareToast>
-        )}
         <HeaderButtonGroup>
-          {onCopyAnswer && (
-            <HeaderIconButton
-              $visible={isVisible}
-              onClick={onCopyAnswer}
-              aria-label={t('overlay.copyAnswerToClipboard')}
-              title={t('overlay.copyAnswer')}
-            >
-              {copyStatusAnswer ? <Check strokeWidth={1.75} /> : <Clipboard strokeWidth={1.75} />}
-            </HeaderIconButton>
-          )}
-          {onShareScreenshot && (
-            <HeaderIconButton
-              $visible={isVisible}
-              // NOTE:
-              // - `disabled` を付けると macOS 側で「禁止（×）」カーソルが出て煩わしいため、
-              //   見た目はそのままでクリックだけ無効化する。
-              onClick={(e) => {
-                if (isSharing) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  return;
-                }
-                onShareScreenshot();
-              }}
-              aria-disabled={isSharing}
-              aria-label={t('overlay.shareScreenshot')}
-              title={t('overlay.shareScreenshot')}
-            >
-              <Share2 strokeWidth={1.75} />
-            </HeaderIconButton>
+          {conversationCopy && (
+            <>
+              <HeaderIconButton
+                $visible={isVisible}
+                onClick={conversationCopy.copy}
+                aria-label={t('overlay.copyConversation')}
+                title={copyConversationFailed ?? t('overlay.copyConversation')}
+              >
+                {conversationCopy.status === 'copied' ? (
+                  <Check strokeWidth={1.75} />
+                ) : conversationCopy.status === 'failed' ? (
+                  <CircleAlert strokeWidth={1.75} />
+                ) : (
+                  <Clipboard strokeWidth={1.75} />
+                )}
+              </HeaderIconButton>
+              {copyConversationFailed ? (
+                <VisuallyHidden role="alert">{copyConversationFailed}</VisuallyHidden>
+              ) : null}
+            </>
           )}
           {onToggleExpand && (
             <HeaderIconButton
@@ -390,13 +325,13 @@ const AgentOverlayShell = ({
         </HeaderButtonGroup>
       </HeaderRow>
 
-      <ContentFade $visible={isContentVisible} data-sharecard-force-visible="true">
+      <ContentFade $visible={isContentVisible}>
         <ScrollableContent
           ref={resolvedScrollableRef}
           $collapsed={!isExpanded}
           $hasFooter={Boolean(showFooterActions)}
           onScroll={handleScrollableContentScroll}
-          data-sharecard-scroll="true"
+          data-overlay-scroll="true"
         >
           <ContentInner ref={contentInnerRef}>
             {typeof content === 'string' && content.trim().length > 0 ? (
@@ -441,7 +376,7 @@ const AgentOverlayShell = ({
         </ScrollableContent>
       </ContentFade>
 
-      <ComposerDock ref={composerRef} data-sharecard-hide="true">
+      <ComposerDock ref={composerRef}>
         {showApprovalPanel ? (
           <ApprovalDock>
             {approvalBlockers.map((blocker) => (

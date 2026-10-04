@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from docx import Document
 
 from pantaray_agents.agents.action_agent.tools import (
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
@@ -40,6 +39,7 @@ from pantaray_agents.local_runtime.tooling.documents import (
     PageOutOfRangeError,
     PageRenderTimeoutError,
     RenderedPage,
+    RenderedPages,
 )
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     _CHILD_BROKER_TOOLS,
@@ -72,6 +72,7 @@ def stub_renderer(
     monkeypatch: pytest.MonkeyPatch,
     *,
     pages: tuple[RenderedPage, ...] = (),
+    page_count: int = 3,
     error: Exception | None = None,
 ) -> dict[str, object]:
     asked: dict[str, object] = {}
@@ -83,13 +84,13 @@ def stub_renderer(
         python_executable: Path,
         _drawn: tuple[RenderedPage, ...] = pages,
         _error: Exception | None = error,
-    ) -> tuple[RenderedPage, ...]:
+    ) -> RenderedPages:
         asked.update(
             pdf_path=pdf_path, pages=list(pages), python_executable=python_executable
         )
         if _error is not None:
             raise _error
-        return _drawn
+        return RenderedPages(page_count=page_count, pages=_drawn)
 
     monkeypatch.setattr(
         broker_direct_render_pdf, "render_pdf_pages", fake_render_pdf_pages
@@ -127,9 +128,10 @@ async def test_render_returns_each_page_as_an_image_stored_for_the_model(
     assert asked["python_executable"] == Path(sys.executable)
 
     assert outcome.status == "success"
-    parsed = RenderPdfPageOutput.model_validate(outcome.output)
+    parsed = RenderPdfPageOutput.model_validate(outcome.output).root
     assert parsed.kind == "pdf_pages"
     assert parsed.path == str(pdf_path)
+    assert parsed.page_count == 3
     # The pages asked for, in that order, each named in the message the string
     # prompt path reads.
     assert [page.page_number for page in parsed.attachments] == [3, 1]
@@ -188,19 +190,22 @@ async def test_render_reports_each_way_the_renderer_can_refuse(
         assert "1 and 2" in (caught.value.fix_hint or "")
 
 
-@pytest.mark.parametrize("subject", ["not-a-pdf", "outside-the-readable-roots"])
+@pytest.mark.parametrize(
+    "subject", ["notebook", "legacy-word", "outside-the-readable-roots"]
+)
 async def test_render_refuses_before_it_starts_a_renderer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subject: str
 ) -> None:
-    """Only a PDF, and only one the read policy already allows."""
+    """Only a format it can draw, and only a file the read policy already allows."""
 
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     db_path, context = bootstrap_read_runtime_db(tmp_path)
-    if subject == "not-a-pdf":
-        document = Document()
-        document.add_paragraph("Revenue held steady.")
-        document.save(context.workspace_path / "review.docx")
-        requested, expected = "review.docx", {"RENDER_FORMAT_UNSUPPORTED"}
+    if subject == "notebook":
+        (context.workspace_path / "run.ipynb").write_text('{"cells": []}')
+        requested, expected = "run.ipynb", {"RENDER_FORMAT_UNSUPPORTED"}
+    elif subject == "legacy-word":
+        (context.workspace_path / "old.doc").write_bytes(b"\xd0\xcf\x11\xe0" * 8)
+        requested, expected = "old.doc", {"RENDER_FORMAT_UNSUPPORTED"}
     else:
         outside = tmp_path / "outside.pdf"
         write_pdf(outside, marks=[(0, 0, 0)])

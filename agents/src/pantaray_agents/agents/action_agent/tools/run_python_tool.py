@@ -12,6 +12,7 @@ from .base import (
     ToolSpec,
     tool_execution_policy,
 )
+from .bash_tool import WRITE_FOLDER_REQUEST_FIELD_PRESENTATION
 from .broker_tool_input_schema import (
     BrokerToolFieldPresentation,
     broker_tool_input_spec_from_model,
@@ -20,7 +21,6 @@ from .broker_tool_input_schema import (
 RUN_PYTHON_TOOL_FIELD_PRESENTATION = (
     BrokerToolFieldPresentation(
         name="code",
-        prompt_type="string",
         description=(
             "Generated Python source code to run for temporary computation "
             "or structured processing.\n"
@@ -30,21 +30,17 @@ RUN_PYTHON_TOOL_FIELD_PRESENTATION = (
             "- Do not use it for direct known-content edits that should be "
             "represented as apply_patch."
         ),
-        llm_order=10,
     ),
     BrokerToolFieldPresentation(
         name="args",
-        prompt_type="json",
         description=(
             "Optional argv values passed to the generated script.\n"
             "- Each value must be a string.\n"
             "- Keep data small enough to fit in the tool request."
         ),
-        llm_order=20,
     ),
     BrokerToolFieldPresentation(
         name="cwd",
-        prompt_type="string",
         description=(
             "Optional workspace cwd.\n"
             "- Use the current workspace marker, an absolute local workspace "
@@ -54,10 +50,10 @@ RUN_PYTHON_TOOL_FIELD_PRESENTATION = (
             "approve that one call; use one only when the user asked for "
             "that location.\n"
             "- File paths used by the script should be inside registered "
-            "workspaces or the approved cwd."
+            "workspaces or approved folders."
         ),
-        llm_order=30,
     ),
+    *WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
 )
 
 RUN_PYTHON_TOOL = ToolDefinition.from_spec(
@@ -83,7 +79,9 @@ RUN_PYTHON_TOOL = ToolDefinition.from_spec(
             when=(
                 "Use for temporary calculations or workspace-scoped file transforms. "
                 "Use read/apply_patch for normal source inspection and direct file "
-                "creation or edits."
+                "creation or edits. To write a folder outside the workspace, rerun "
+                "with additional_write_folders and justification exactly as the "
+                "bash tool describes."
             ),
             pitfalls=(
                 "The code is approval-gated and sandboxed. Keep code minimal and "

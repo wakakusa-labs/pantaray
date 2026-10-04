@@ -8,6 +8,7 @@ import {
   EMPTY_CONVERSATION_PAGING,
 } from './agent-overlay/conversationPaging';
 import { useConversationScroll } from './agent-overlay/useConversationScroll';
+import { useConversationCopy } from './agent-overlay/conversationCopy';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AgentOverlayShell from './agent-overlay/AgentOverlayShell';
 import { useAgentOverlayController } from './agent-overlay/useAgentOverlayController';
@@ -15,7 +16,6 @@ import { useI18n } from '@/context/useI18n';
 import { useOverlayHeaderDrag } from './agent-overlay/useOverlayHeaderDrag';
 import { ActionConversationView } from './action-conversation/ActionConversationView';
 import { projectActionConversationView } from '../../electron/src/actions/actionConversationModel';
-import { ACTION_IMAGE_MAX_PER_MESSAGE } from '../../electron/src/ipc/schemas/actionImages';
 import type {
   ActionLiveSnapshot,
   ActionTransientToolStep,
@@ -64,6 +64,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const {
     composer,
     images,
+    files,
+    canAttach,
     projectRefs: supplementProjectRefs,
     supplement,
     supplementInvalid,
@@ -253,7 +255,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const { endRef: completionEndRef, failed: completionReadFailed } = useCompletionViewed(
     conversationActionId,
     completionEventId,
-    (entryMode === 'standalone' || (state.isOverlayVisible && ctrl.isContentVisible)) &&
+    (entryMode === 'standalone' || state.isOverlayVisible) &&
       (state.historyExpandOverride ?? state.isExpanded)
   );
   const failureFallbackText =
@@ -288,7 +290,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     if (visiblePages !== null)
       setComposer((current) => visiblePages.reduce(reconcileCanonicalSubmission, current));
   }, [visiblePages, setComposer]);
-  const canonicalPlaintext = currentView ? currentView.output.plaintext : '';
+  const conversationCopy = useConversationCopy(actions, currentView?.action?.action_id ?? null);
   const canDecide =
     state.interactionContract === 'action_offer' &&
     state.reactionState === null &&
@@ -444,7 +446,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     permissionsReady && composer.attachmentsInFlight === 0 && !supplementInvalid;
   const acceptSuggestion = () => {
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
-    ctrl.onAccept({ supplement, supplementProjectRefs, approvalMode: approvalMode.mode, images });
+    ctrl.onAccept({
+      supplement,
+      supplementProjectRefs,
+      approvalMode: approvalMode.mode,
+      images,
+      files,
+    });
   };
   const composerContent =
     toolOutputLoader &&
@@ -457,15 +465,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         submissionControls={submissionControls}
         retryAcceptance={canDecide && ctrl.acceptFailed}
         attachments={composer.attachments}
-        attachmentErrorMessage={
-          composer.attachmentFailure
-            ? t(`overlay.composer.attachFailed.${composer.attachmentFailure}`, {
-                limit: ACTION_IMAGE_MAX_PER_MESSAGE,
-              })
-            : null
-        }
+        attachmentFailure={composer.attachmentFailure}
         validationFailed={canDecide ? supplementInvalid : composer.validationFailed}
-        canAttach={composer.attachments.length < ACTION_IMAGE_MAX_PER_MESSAGE}
+        canAttach={canAttach}
         action={canDecide ? 'accept' : composerAction}
         canSend={
           canDecide
@@ -522,7 +524,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   return (
     <AgentOverlayShell
       isVisible={entryMode === 'standalone' || state.isOverlayVisible}
-      isContentVisible={entryMode === 'standalone' || ctrl.isContentVisible}
+      isContentVisible={entryMode === 'standalone' || state.isOverlayVisible}
       isExpanded={
         state.historyExpandOverride !== null ? state.historyExpandOverride : state.isExpanded
       }
@@ -549,11 +551,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       approvalBlockers={approvalBlockers}
       isSubmittingApproval={approval.isSubmittingApproval}
       approvalErrorMessage={approval.approvalErrorMessage}
-      copyStatusAnswer={ctrl.copyStatusAnswer}
       showBusyIndicator={showBusyIndicator}
       showThinking={showThinking}
-      isSharing={ctrl.isSharing}
-      shareToast={ctrl.shareToast}
       showFooterActions={approvalUiState === 'hidden' && canDecide}
       fadeDurationMs={600}
       onToggleExpand={ctrl.onToggleExpand}
@@ -580,8 +579,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           : undefined
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
-      onCopyAnswer={canonicalPlaintext ? () => ctrl.onCopyAnswer(canonicalPlaintext) : undefined}
-      onShareScreenshot={() => ctrl.onShareScreenshot(canonicalPlaintext, suggestionDisplay)}
+      conversationCopy={conversationCopy}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}
       onHeaderPointerMove={headerDrag.onHeaderPointerMove}
       onHeaderPointerUp={headerDrag.onHeaderPointerUp}

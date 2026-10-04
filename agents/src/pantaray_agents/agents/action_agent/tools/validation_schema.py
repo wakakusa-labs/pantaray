@@ -80,15 +80,6 @@ def _validate_members(members: Sequence[InputMember]) -> None:
                 alias_to_canonical[alias.name] = member.canonical_name
             continue
 
-        prompt_children = member.prompt_children or ()
-        if prompt_children and member.children:
-            raise ValueError(
-                f"Field '{member.name}' cannot define both children and prompt_children."
-            )
-        if member.runtime_injected and member.llm_visible:
-            raise ValueError(
-                f"Field '{member.name}' is runtime_injected and must be hidden from LLM."
-            )
         if member.children:
             _validate_members(member.children)
 
@@ -219,7 +210,7 @@ def _build_generic_field_schema(member: FieldSpec) -> JSONValue:
     raw_schema = schema_to_plain_json(freeze_schema_node(member.schema))
     if not isinstance(raw_schema, dict):
         raise TypeError(f"Field '{member.name}' schema must be a JSON object.")
-    generic = dict(raw_schema)
+    generic = _with_description(member.name, raw_schema, member.description)
     if member.children:
         generic["type"] = "object"
         generic["properties"] = {
@@ -284,10 +275,14 @@ def _build_member_schema(
     member: InputMember,
 ) -> tuple[dict[str, JSONValue], list[str], list[dict[str, JSONValue]]]:
     if isinstance(member, ReferenceGroupSpec):
-        properties = {
-            alias.name: schema_to_plain_json(freeze_schema_node(alias.schema))
-            for alias in member.aliases
-        }
+        properties: dict[str, JSONValue] = {}
+        for alias in member.aliases:
+            alias_schema = schema_to_plain_json(freeze_schema_node(alias.schema))
+            if not isinstance(alias_schema, dict):
+                raise TypeError(f"Alias '{alias.name}' schema must be a JSON object.")
+            properties[alias.name] = _with_description(
+                alias.name, alias_schema, member.description
+            )
         any_of: list[dict[str, JSONValue]] = []
         if member.required:
             any_of = [
@@ -301,18 +296,18 @@ def _build_member_schema(
 
 
 def _build_field_schema(member: FieldSpec) -> JSONValue:
-    if not member.children:
-        return schema_to_plain_json(freeze_schema_node(member.schema))
-
     base_schema = schema_to_plain_json(freeze_schema_node(member.schema))
     if not isinstance(base_schema, dict):
         raise TypeError(f"Field '{member.name}' schema must be a JSON object.")
+    if not member.children:
+        return _with_description(member.name, base_schema, member.description)
+
     child_schema = _build_object_schema(
         member.children,
         description=str(base_schema.get("description", "")),
         additional_properties=bool(base_schema.get("additionalProperties", False)),
     )
-    merged = dict(base_schema)
+    merged = _with_description(member.name, base_schema, member.description)
     merged["properties"] = child_schema["properties"]
     merged["required"] = child_schema["required"]
     if child_schema.get("anyOf"):
@@ -320,6 +315,24 @@ def _build_field_schema(member: FieldSpec) -> JSONValue:
     if "additionalProperties" not in merged:
         merged["additionalProperties"] = False
     return merged
+
+
+def _with_description(
+    name: str, schema: dict[str, JSONValue], description: str
+) -> dict[str, JSONValue]:
+    """Carry the field description to the model through the schema it receives.
+
+    The same schema validates arguments; ``description`` is only an annotation.
+    """
+
+    if not description:
+        return dict(schema)
+    if "description" in schema:
+        raise ValueError(
+            f"Field '{name}' defines its description twice; keep only the field "
+            "description."
+        )
+    return {**schema, "description": description}
 
 
 def _json_list(values: Sequence[JSONValue]) -> list[JSONValue]:

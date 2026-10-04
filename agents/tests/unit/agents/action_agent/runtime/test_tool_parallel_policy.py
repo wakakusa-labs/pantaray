@@ -37,7 +37,10 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.plan_docu
     run_action_plan_tool,
 )
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import ToolCallModel
-from pantaray_agents.agents.action_agent.tools import SUPERVISOR_SINGLE_REACT_TOOL_IDS
+from pantaray_agents.agents.action_agent.tools import (
+    SUBMIT_SUBAGENT_REPORT_TOOL_ID,
+    SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+)
 
 # run_validated_tool_impl / run_tool の dispatch を写した、allowlist ツールの実装関数。
 # 新しい allowlist ツールを増やすときはここにも実装関数を登録する。
@@ -101,10 +104,11 @@ def _state_write_keys(handler: Callable[..., object]) -> set[str]:
 
 
 def test_every_supervisor_tool_id_has_exactly_one_classification() -> None:
-    supervisor_tool_ids = set(SUPERVISOR_SINGLE_REACT_TOOL_IDS)
+    # A subagent's tools are the Supervisor's, plus its own terminal report.
+    tool_ids = {*SUPERVISOR_SINGLE_REACT_TOOL_IDS, SUBMIT_SUBAGENT_REPORT_TOOL_ID}
     classified = PARALLEL_SAFE_TOOL_IDS | SOLO_TURN_TOOL_IDS | SERIAL_ONLY_TOOL_IDS
 
-    assert classified == supervisor_tool_ids
+    assert classified == tool_ids
     assert not PARALLEL_SAFE_TOOL_IDS & SOLO_TURN_TOOL_IDS
     assert not PARALLEL_SAFE_TOOL_IDS & SERIAL_ONLY_TOOL_IDS
     assert not SOLO_TURN_TOOL_IDS & SERIAL_ONLY_TOOL_IDS
@@ -225,15 +229,47 @@ def test_trailing_solo_turn_tool_is_deferred_after_its_predecessors_run() -> Non
     ]
 
 
-def test_submit_final_answer_is_a_solo_turn_tool() -> None:
+@pytest.mark.parametrize("tool_id", ("submit_final_answer", "submit_subagent_report"))
+@pytest.mark.parametrize("position", ("first", "last"))
+def test_a_run_ending_tool_shares_no_turn_and_the_others_still_run(
+    tool_id: str, position: str
+) -> None:
+    # Run alone first, it would end the run before the deferred calls came back.
+    others = [_call("read"), _call("grep")]
+    calls = (
+        [_call(tool_id), *others] if position == "first" else [*others, _call(tool_id)]
+    )
+
+    plan = plan_tool_batch(calls, max_parallel=3, remaining_tool_steps=10)
+
+    assert _tool_ids(plan.calls) == ["read", "grep"]
+    assert plan.mode == "parallel"
+    assert _excluded(plan.deferred) == [(tool_id, "run_ending_tool")]
+
+
+@pytest.mark.parametrize("tool_id", ("submit_final_answer", "submit_subagent_report"))
+def test_two_run_ending_calls_in_one_turn_both_wait_and_nothing_runs(
+    tool_id: str,
+) -> None:
+    # Letting the first through would end the run on it and lose the second.
     plan = plan_tool_batch(
-        [_call("submit_final_answer"), _call("read")],
-        max_parallel=3,
-        remaining_tool_steps=10,
+        [_call(tool_id), _call(tool_id)], max_parallel=3, remaining_tool_steps=10
+    )
+
+    assert plan.calls == ()
+    assert _excluded(plan.deferred) == [
+        (tool_id, "run_ending_tool"),
+        (tool_id, "run_ending_tool"),
+    ]
+
+
+def test_a_run_ending_tool_alone_runs() -> None:
+    plan = plan_tool_batch(
+        [_call("submit_final_answer")], max_parallel=3, remaining_tool_steps=10
     )
 
     assert _tool_ids(plan.calls) == ["submit_final_answer"]
-    assert _excluded(plan.deferred) == [("read", "after_solo_turn_tool")]
+    assert plan.deferred == ()
 
 
 def test_spawn_subagents_run_sequentially_after_a_regular_tool() -> None:

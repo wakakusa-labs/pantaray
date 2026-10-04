@@ -14,7 +14,6 @@ from pantaray_agents.repositories.action_support.initial_memory_context_contract
     InitialMemoryArtifactFile,
     InitialMemoryContext,
     InitialMemorySourceType,
-    InitialShortTermInsight,
 )
 from pantaray_agents.schema.repositories.repository import (
     DBRow,
@@ -284,8 +283,6 @@ class MockActionAgentQueryMixin:
         *,
         action_id: str,
         suggestion_id: str | None,
-        short_term_since_iso: str,
-        short_term_limit: int,
     ) -> RepositoryResult[InitialMemoryContext]:
         _ = (action_id, suggestion_id)
         insights = [
@@ -348,13 +345,6 @@ class MockActionAgentQueryMixin:
                     ),
                 )
             )
-        short_rows = [
-            row
-            for row in insights
-            if row.get("short_term_insight_data")
-            and str(row.get("created_at") or "") >= short_term_since_iso
-        ]
-        short_rows.sort(key=lambda row: row.get("created_at"), reverse=True)
         return RepositoryResult(
             data=InitialMemoryContext(
                 insight=(
@@ -368,17 +358,6 @@ class MockActionAgentQueryMixin:
                     )
                     if insight_row is not None
                     else None
-                ),
-                short_term_insights=tuple(
-                    InitialShortTermInsight(
-                        insight_id=str(row.get("insight_id") or ""),
-                        short_term_insight_data=str(
-                            row.get("short_term_insight_data") or ""
-                        ),
-                        created_at=str(row.get("created_at") or ""),
-                        updated_at=str(row.get("updated_at") or ""),
-                    )
-                    for row in short_rows[:short_term_limit]
                 ),
                 facts=(
                     InitialFactsBrief(

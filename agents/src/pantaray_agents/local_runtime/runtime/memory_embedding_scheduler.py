@@ -4,7 +4,6 @@ import logging
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.local_runtime.embedding_local import (
@@ -36,6 +35,7 @@ from pantaray_agents.local_runtime.memory_catalog.semantic_index import (
     encode_embedding_vectors,
     validate_pending_embedding,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def _project_one_batch(
     generation: EmbeddingGeneration,
     model: LocalEmbeddingModel,
 ) -> MemoryEmbeddingProjectionResult:
-    now = _utc_now()
+    now = now_utc_iso()
     documents = claim_due_embeddings(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -156,7 +156,7 @@ def _project_one_batch(
             busy_timeout_ms=busy_timeout_ms,
             documents=valid_documents,
             error_code=exc.error_code,
-            updated_at=_utc_now(),
+            updated_at=now_utc_iso(),
         )
         return MemoryEmbeddingProjectionResult(
             selected_count=len(documents),
@@ -184,7 +184,7 @@ def _project_one_batch(
                 busy_timeout_ms=busy_timeout_ms,
                 documents=exhausted,
                 error_code=MEMORY_EMBEDDING_INFERENCE_FAILED,
-                updated_at=_utc_now(),
+                updated_at=now_utc_iso(),
             )
         return MemoryEmbeddingProjectionResult(
             selected_count=0,
@@ -197,7 +197,7 @@ def _project_one_batch(
         busy_timeout_ms=busy_timeout_ms,
         documents=valid_documents,
         encoded_vectors=encoded_vectors,
-        created_at=_utc_now(),
+        created_at=now_utc_iso(),
     )
     return MemoryEmbeddingProjectionResult(
         selected_count=len(documents),
@@ -270,13 +270,9 @@ def _reject_invalid_documents(
             busy_timeout_ms=busy_timeout_ms,
             documents=failed_documents,
             error_code=error_code,
-            updated_at=_utc_now(),
+            updated_at=now_utc_iso(),
         )
     return tuple(valid_documents), failed_count
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 __all__ = [

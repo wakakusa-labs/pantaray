@@ -26,14 +26,10 @@ function isVisibleWindowAtPoint(win, point) {
 function createOverlayActivationTracker(options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const overlayWindows = new Set();
-  let notificationWindow = null;
   let lastInteractionAtMs = 0;
   let activeInteractionCount = 0;
 
   return {
-    setNotificationWindow(win) {
-      notificationWindow = win || null;
-    },
     registerOverlayWindow(win) {
       if (win) overlayWindows.add(win);
     },
@@ -41,10 +37,9 @@ function createOverlayActivationTracker(options = {}) {
       if (win) overlayWindows.delete(win);
     },
     isOverlayWindow(win) {
-      return Boolean(win && (win === notificationWindow || overlayWindows.has(win)));
+      return Boolean(win && overlayWindows.has(win));
     },
     isVisibleOverlayAtPoint(point) {
-      if (isVisibleWindowAtPoint(notificationWindow, point)) return true;
       for (const win of overlayWindows) {
         if (isVisibleWindowAtPoint(win, point)) return true;
       }

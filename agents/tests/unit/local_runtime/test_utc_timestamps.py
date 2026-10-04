@@ -4,8 +4,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from pantaray_agents.local_runtime.runtime.utc_timestamps import parse_utc_iso
+from pantaray_agents.local_runtime.runtime.utc_timestamps import (
+    now_utc_iso,
+    parse_utc_iso,
+)
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
+from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_milliseconds
+
+
+def test_now_utc_iso_is_the_canonical_millisecond_form() -> None:
+    timestamp = now_utc_iso()
+
+    assert normalize_iso8601_utc_z_milliseconds(timestamp) == timestamp
 
 
 def test_parse_utc_iso_accepts_utc_z_suffix() -> None:

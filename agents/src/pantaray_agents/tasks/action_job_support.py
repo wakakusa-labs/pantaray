@@ -19,7 +19,6 @@ from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_d
 from pantaray_agents.local_runtime.runtime.db_execution_context import (
     resolve_local_runtime_db_config,
 )
-from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.action import RuntimeStateCheckpointPayload
 from pantaray_agents.schema.repository_errors import (
     is_retryable_repository_exception,
@@ -111,10 +110,6 @@ def terminal_persistence_failure_code(exc: BaseException) -> str:
     return ACTION_FAILURE_CODE_PERSIST_TERMINAL_STATE_INCONSISTENT
 
 
-def now_iso() -> str:
-    return now_utc_iso()
-
-
 def terminal_retry_delay_seconds(*, consecutive_failures: int) -> float:
     attempts = max(1, int(consecutive_failures))
     # The exponent is clamped before it is expanded: a long child settlement
@@ -189,7 +184,6 @@ __all__ = [
     "PersistedActionTerminalResult",
     "is_non_retryable_terminal_persistence_error",
     "is_retryable_terminal_persistence_error",
-    "now_iso",
     "persist_terminal_action_status_strict",
     "terminal_retry_delay_seconds",
     "terminal_persistence_failure_code",

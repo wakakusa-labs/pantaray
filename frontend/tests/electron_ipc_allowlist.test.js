@@ -72,7 +72,6 @@ test('IPC preload exposes workspace and shortcut settings', () => {
 // 「allowlist にない = main が拒否する」死んだ API が残るか、逆に allowlist だけが残る。
 const PRELOAD_SOURCES = [
   'electron/preload.js',
-  'electron/preload_sharecard.js',
   'electron/preload_overlay_interaction.js',
   ...fs
     .readdirSync(path.join(__dirname, '..', 'electron', 'preload'))

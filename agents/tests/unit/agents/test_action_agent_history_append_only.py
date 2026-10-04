@@ -8,7 +8,7 @@ from typing import Any, cast
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
 from pantaray_agents.schema.agent.action import StepType
 
-_FORMATTER = ActionAgentFormatter(tool_registry={})
+_FORMATTER = ActionAgentFormatter()
 
 
 def _entry(index: int, suffix: str, **overrides: Any) -> dict[str, Any]:

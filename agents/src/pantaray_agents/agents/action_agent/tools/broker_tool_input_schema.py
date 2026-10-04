@@ -17,12 +17,10 @@ NULL_SCHEMA_TYPE = "null"
 
 @dataclass(frozen=True, slots=True)
 class BrokerToolFieldPresentation:
-    """Prompt-only metadata for one brokered tool field."""
+    """Model-facing description for one brokered tool field."""
 
     name: str
-    prompt_type: str
     description: str
-    llm_order: int
 
 
 def broker_tool_input_spec_from_model(
@@ -34,8 +32,8 @@ def broker_tool_input_spec_from_model(
     """Build an InputSpec from the broker runtime args model.
 
     The Pydantic model owns data shape and validation constraints. Presentation
-    metadata owns prompt wording and field ordering. This adapter only projects the
-    runtime JSON Schema into the existing LLM-facing schema shape.
+    metadata owns the field descriptions the model reads. This adapter only projects
+    the runtime JSON Schema into the existing LLM-facing schema shape.
     """
 
     schema = cast(dict[str, JSONValue], model.model_json_schema())
@@ -52,9 +50,7 @@ def broker_tool_input_spec_from_model(
                     _normalize_prompt_schema(properties[presentation.name], schema),
                 ),
                 required=presentation.name in required_names,
-                prompt_type=presentation.prompt_type,
                 description=presentation.description,
-                llm_order=presentation.llm_order,
             )
             for presentation in fields
         ),

@@ -18,13 +18,18 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from pantaray_agents.schema.agent.image import ImageInput
-from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z
+from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_microseconds
 
 type ActionStatus = Literal["queued", "processing", "success", "error", "canceled"]
 type RunStatus = Literal["running", "approval_pending", "success", "error", "canceled"]
 type UserEntryStatus = Literal["adopted", "pending", "not_executed"]
 type ActionStepStatus = Literal["processing", "success", "error", "timeout"]
-type ToolEntryOutcome = Literal["completed", "denied", "unavailable", "not_executed"]
+type ToolEntryOutcome = Literal[
+    "completed", "denied", "unavailable", "not_executed", "preparing"
+]
+# The body kind a successful page render returns while the renderer it needs is still
+# being set up; the row says the pages will be shown once it is ready, not that it failed.
+RENDERER_PREPARING_OUTPUT_KIND = "renderer_preparing"
 type ActionToolOutputUnavailableReason = Literal["no_output", "binary"]
 
 _ACTION_TOOL_STEP_NAME_PREFIX = "tool::"
@@ -84,7 +89,7 @@ type ActionConversationIdentity = Annotated[
     str, AfterValidator(_require_canonical_identity)
 ]
 type ActionConversationTimestamp = Annotated[
-    str, AfterValidator(normalize_iso8601_utc_z)
+    str, AfterValidator(normalize_iso8601_utc_z_microseconds)
 ]
 type NonBlankText = Annotated[str, AfterValidator(_require_non_blank)]
 
@@ -193,6 +198,13 @@ class UserEntryProjectRef(_ActionConversationModel):
     end: NonNegativeInt
 
 
+class UserEntryFile(_ActionConversationModel):
+    """A document attached to the message, as it was named when sent."""
+
+    name: NonBlankText
+    byte_size: PositiveInt
+
+
 class UserEntry(_ActionConversationModel):
     step_kind: Literal["user"]
     step_id: ActionConversationIdentity
@@ -203,6 +215,7 @@ class UserEntry(_ActionConversationModel):
     approved_suggestion: ApprovedSuggestion | None
     images: tuple[ImageInput, ...]
     project_refs: tuple[UserEntryProjectRef, ...]
+    files: tuple[UserEntryFile, ...]
     status: UserEntryStatus
 
     @model_validator(mode="after")
@@ -482,6 +495,7 @@ __all__ = [
     "ActionToolOutputDetail",
     "ActionToolOutputUnavailableReason",
     "PublicActionError",
+    "RENDERER_PREPARING_OUTPUT_KIND",
     "RunStatus",
     "ToolEntry",
     "ToolEntryOutcome",

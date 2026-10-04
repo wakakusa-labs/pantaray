@@ -23,7 +23,7 @@ _MULTIMODAL_CAPABILITIES: Mapping[LlmCapability, bool] = {
     "structured_output": True,
 }
 
-# Verified 2026-09-25 against the model/effort documentation, not API aliases
+# Verified 2026-09-30 against the model/effort documentation, not API aliases
 # guessed from names. ChatGPT capabilities come from Codex's models-manager
 # catalog and Responses request builder, independently of the public API.
 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
@@ -48,6 +48,7 @@ MODEL_CATALOG = {
             for model in (
                 "gpt-6-luna",
                 "gpt-6-astra",
+                "gpt-6.1-sol",
                 "gpt-6-sol",
                 "gpt-5.6-sol",
                 "gpt-5.6-terra",

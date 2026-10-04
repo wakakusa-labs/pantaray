@@ -11,8 +11,10 @@ from .external_tools import (
 from .memory_search import run_memory_search_tool
 from .memory_sql import run_memory_sql_tool
 from .parallel_policy import (
+    EXCLUSION_NOTICES,
     MEMORY_EPOCH_WRITER_TOOL_IDS,
     PARALLEL_SAFE_TOOL_IDS,
+    PROVIDER_DROPPED_NOTICE,
     SERIAL_ONLY_TOOL_IDS,
     SOLO_TURN_TOOL_IDS,
     BatchMode,
@@ -47,7 +49,9 @@ __all__ = [
     "run_zanei_query_tool",
     "run_zanei_timeline_tool",
     "MEMORY_EPOCH_WRITER_TOOL_IDS",
+    "EXCLUSION_NOTICES",
     "PARALLEL_SAFE_TOOL_IDS",
+    "PROVIDER_DROPPED_NOTICE",
     "SERIAL_ONLY_TOOL_IDS",
     "SOLO_TURN_TOOL_IDS",
     "BatchMode",

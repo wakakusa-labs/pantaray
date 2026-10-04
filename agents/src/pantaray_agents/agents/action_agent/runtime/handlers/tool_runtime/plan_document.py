@@ -12,6 +12,7 @@ from pantaray_agents.agents.action_agent.tools.action_plan_tools import (
     WRITE_ACTION_PLAN_TOOL_ID,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.action_plan_document import (
     ActionPlanTooLargeError,
     read_action_plan,
@@ -23,7 +24,6 @@ from .shared import (
     ToolExecutionActor,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 
 
@@ -77,7 +77,7 @@ async def run_action_plan_tool(
             },
         ) from exc
 
-    completed_at = now_iso()
+    completed_at = now_utc_iso()
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,

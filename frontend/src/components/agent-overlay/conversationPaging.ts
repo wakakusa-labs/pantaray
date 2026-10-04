@@ -22,6 +22,29 @@ export const EMPTY_CONVERSATION_PAGING: ConversationPagingState = {
   boundPageState: 'idle',
 };
 
+/**
+ * Reads one conversation from its newest page to its first, apart from the visible
+ * history. Null when any page cannot be read, so a caller never sees a partial past.
+ */
+export async function readWholeConversation(
+  actions: Pick<ActionsApi, 'readConversationPage'>,
+  actionId: string
+): Promise<ActionConversationPageChain | null> {
+  let chain: ActionConversationPageChain | null = null;
+  let cursor: string | null = null;
+  do {
+    const result = await actions.readConversationPage({
+      actionId,
+      cursor,
+      limit: ACTION_CONVERSATION_PAGE_LIMIT,
+    });
+    if ('kind' in result) return null;
+    chain = applyActionConversationPage(chain, cursor, result);
+    cursor = result.next_cursor;
+  } while (cursor !== null);
+  return chain;
+}
+
 /** Owns the visible history and the lifetime of reads which can replace it. */
 export function createConversationPaging(
   actions: Pick<ActionsApi, 'readConversationPage'>,

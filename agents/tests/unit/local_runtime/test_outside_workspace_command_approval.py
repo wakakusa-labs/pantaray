@@ -32,7 +32,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     apply_approval_decision,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import BrokerContext
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    BrokerContext,
+    load_broker_context,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerPreflightOutcome,
     BrokerToolOutcome,
@@ -40,6 +43,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
+)
+from pantaray_agents.local_runtime.tooling.brokering.command_approval_summaries import (
+    build_bash_summary,
 )
 from pantaray_agents.local_runtime.tooling.brokering.outside_workspace import (
     OutsideWorkspaceCwd,
@@ -49,7 +55,7 @@ from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
-    resolve_runtime_budget,
+    PROFILE_TIMEOUT_MS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -87,8 +93,7 @@ def _args(tool_id: str, cwd: Path | str) -> dict[str, JSONValue]:
 
 def _expected_summary(tool_id: str, folder: Path) -> dict[str, JSONValue]:
     outside_workspace: dict[str, JSONValue] = {
-        "folder_path": str(folder),
-        "folder_display_name": folder.name,
+        "folders": [{"path": str(folder), "display_name": folder.name}],
         "can_allow_for_conversation": True,
     }
     if tool_id == "bash":
@@ -96,10 +101,9 @@ def _expected_summary(tool_id: str, folder: Path) -> dict[str, JSONValue]:
             "summary_kind": "bash",
             "command": "touch made.txt",
             "cwd": str(folder),
-            "timeout_ms": resolve_runtime_budget(
-                sandbox_profile="workspace_process_exec"
-            ).sandbox_launch.timeout_ms,
+            "timeout_ms": PROFILE_TIMEOUT_MS["workspace_process_exec"],
             "use_login_environment": False,
+            "reason": None,
             "outside_workspace": outside_workspace,
         }
     code = PYTHON_CODE.encode("utf-8")
@@ -109,9 +113,8 @@ def _expected_summary(tool_id: str, folder: Path) -> dict[str, JSONValue]:
         "code_sha256": sha256(code).hexdigest(),
         "code_size_bytes": len(code),
         "args_count": 0,
-        "timeout_ms": resolve_runtime_budget(
-            sandbox_profile="agent_generated_python"
-        ).sandbox_launch.timeout_ms,
+        "timeout_ms": PROFILE_TIMEOUT_MS["agent_generated_python"],
+        "reason": None,
         "outside_workspace": outside_workspace,
     }
 
@@ -384,6 +387,48 @@ async def test_approved_cwd_is_rechecked_before_launch(
     assert caught.value.code == broker_command_validation.EXEC_CWD_RETARGETED
     assert len(calls) == 2
     assert launched == []
+
+
+def test_every_approved_folder_is_rechecked_before_launch(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    db_path, context = _setup(tmp_path, "prompt_each_time")
+    broker_context = load_broker_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_id="bash",
+        path_access_kind="exec",
+        user_id="user-1",
+        actor_process_id=BROKER_ACTOR_PROCESS_ID,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session_id,
+    )
+    first = tmp_path_factory.mktemp("first").resolve()
+    second = tmp_path_factory.mktemp("second").resolve()
+    elsewhere = tmp_path_factory.mktemp("elsewhere").resolve()
+    request = ValidatedCommandRequest.model_construct(
+        command_summary_json=build_bash_summary(
+            command="touch made.txt",
+            cwd_relative_path=str(first),
+            timeout_ms=1_000,
+            use_login_environment=False,
+            run_outside_sandbox=False,
+            reason=None,
+            outside_workspace_folders=(first, second),
+        )
+    )
+    broker_command_validation.verify_outside_workspace_folders_unchanged(
+        context=broker_context, request=request
+    )
+
+    # The second folder, not the cwd, is swapped for a link after approval.
+    second.rmdir()
+    second.symlink_to(elsewhere)
+    with pytest.raises(BrokerPolicyError) as caught:
+        broker_command_validation.verify_outside_workspace_folders_unchanged(
+            context=broker_context, request=request
+        )
+    assert caught.value.code == broker_command_validation.EXEC_CWD_RETARGETED
 
 
 @pytest.mark.asyncio

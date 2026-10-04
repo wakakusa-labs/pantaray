@@ -65,7 +65,6 @@ export function WorkspaceListToolbar(props: WorkspaceListToolbarProps) {
     },
     [onCreateOrganization]
   );
-  const hasProjects = projects.length > 0;
   // The manager can delete a drafted organization, so the selection is resolved against the
   // organizations the popover actually offers.
   const draftOrganizationId = organizations.some(
@@ -75,7 +74,7 @@ export function WorkspaceListToolbar(props: WorkspaceListToolbarProps) {
     : null;
 
   return (
-    <div className={`workspace-list-toolbar${hasProjects ? '' : ' is-empty'}`}>
+    <div className="workspace-list-toolbar">
       {/* A closing modal returns focus to whatever was focused before it opened, so the dialog
           commits its close before the popover it reopens focuses its first field. */}
       <OrganizationManagerDialog
@@ -91,22 +90,20 @@ export function WorkspaceListToolbar(props: WorkspaceListToolbarProps) {
         isDeleteBusy={props.isOrganizationDeleteBusy}
       />
 
-      {hasProjects ? null : (
-        <p className="workspace-list-toolbar-hint">{t('settings.workspace.gettingStarted')}</p>
-      )}
       <div className="workspace-project-create-anchor">
         <button
           ref={projectTriggerRef}
           id={workspaceFocusId.projectAdd}
           type="button"
-          className="workspace-button workspace-button-primary"
+          className="workspace-icon-button workspace-project-add"
+          aria-label={t('settings.workspace.addProject')}
+          title={t('settings.workspace.addProject')}
           aria-expanded={isProjectPopoverOpen}
           onClick={() =>
             isProjectPopoverOpen ? closeProjectPopover() : setIsProjectPopoverOpen(true)
           }
         >
-          <Plus size={14} aria-hidden="true" />
-          {t('settings.workspace.addProject')}
+          <Plus size={16} aria-hidden="true" />
         </button>
         <ProjectCreatePopover
           busy={projectCreateBusy}
@@ -119,6 +116,8 @@ export function WorkspaceListToolbar(props: WorkspaceListToolbarProps) {
           onCreate={onCreateProject}
           onDraftChange={setProjectDraft}
           onManageOrganizations={openOrganizationDialog}
+          onDeleteOrganization={onDeleteOrganization}
+          isOrganizationDeleteBusy={props.isOrganizationDeleteBusy}
         />
       </div>
     </div>

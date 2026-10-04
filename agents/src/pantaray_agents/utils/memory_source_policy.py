@@ -78,6 +78,7 @@ def parse_utc_datetime(value: str) -> datetime:
 def format_utc_datetime(value: datetime) -> str:
     """UTC datetime を ISO8601（Z）文字列へ変換する。"""
 
+    # Whole seconds: bounds are string-compared with second-form activity windows.
     return (
         value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )

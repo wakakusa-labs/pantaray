@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.memory_update_lock import (
     MemoryUpdateLockConflictError,
     MemoryUpdateLockLease,
@@ -41,7 +41,7 @@ def reconcile_memory_catalog(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         limit=scan_limit,
-        now=datetime.now(UTC).isoformat(),
+        now=now_utc_iso(),
     )
     completed = 0
     for job in jobs:
@@ -137,7 +137,7 @@ def _scan_current_heads(
                     (
                         str(last["user_id"]),
                         str(last["node_id"]),
-                        datetime.now(UTC).isoformat(),
+                        now_utc_iso(),
                     ),
                 )
                 if cursor.rowcount != 1:

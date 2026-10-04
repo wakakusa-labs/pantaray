@@ -43,8 +43,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.completed.sign_in_chatgpt': 'Connected to ChatGPT.',
     'settings.aiConnection.completed.cancel_chatgpt_sign_in': 'ChatGPT sign-in cancelled.',
     'settings.aiConnection.completed.disconnect_chatgpt': 'ChatGPT disconnected.',
-    'settings.commandNetwork.title':
-      'Allow network access for file conversion, analysis, and code execution',
+    'settings.commandNetwork.title': 'Allow network access for commands',
     'settings.commandNetwork.description':
       'Turning this off stops code and file transfers with services such as GitHub, as well as software downloads. Chat and web search are not affected.',
     'settings.commandNetwork.unavailable': 'Unavailable',
@@ -141,7 +140,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.shortcut.recordingButton': 'Press shortcut',
     'settings.shortcut.cancel': 'Cancel',
     'settings.shortcut.loading': 'Loading shortcut…',
-    'settings.shortcut.recording': 'Use Command, Control, {alt}, or F1–F11/F13–F24 alone.',
+    'settings.shortcut.recording':
+      'Press a key with Command, Control, or {alt} (for example, {alt}+Space), or press F1–F11 or F13–F24.',
     'settings.shortcut.saved': 'Shortcut updated.',
     'settings.shortcut.loadFailed': 'Failed to load the shortcut setting.',
     'settings.shortcut.settingsUnreadable': 'Saved shortcut unreadable. Record a new one.',
@@ -158,18 +158,15 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.readAccessScope.toggle.workspace': 'Limited',
     'settings.readAccessScope.toggle.fullAccess': 'Full',
     'settings.readAccessScope.unavailable': 'Unavailable',
-    'settings.readAccessScope.workspaceDescription':
-      'Only workspace folders and the default work area can be read.',
+    'settings.readAccessScope.workspaceDescription': 'Only files in workspace folders can be read.',
     'settings.readAccessScope.fullAccessDescription':
-      'Files anywhere on this computer can be read.\nEdits and commands stay limited to workspace folders and the default work area.',
+      'Files anywhere on this computer can be read.',
     'settings.readAccessScope.workspaceBoundary':
       'File edits and command working directories are managed in Workspace.',
     'settings.readAccessScope.openWorkspace': 'Manage workspaces',
     'settings.readAccessScope.loadFailed': 'Failed to load read access settings.',
     'settings.readAccessScope.saveFailed': 'Failed to save read access settings.',
     'settings.workspace.title': 'Workspace',
-    'settings.workspace.description':
-      'Register work folders in a project so Pantaray works inside that scope.',
     'settings.workspace.gettingStarted': 'Create a project first, then add its work folders.',
     'settings.workspace.organizations': 'Organizations',
     'settings.workspace.addOrganization': 'Add organization',
@@ -192,6 +189,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.organizationManager.open': 'Create or manage organizations',
     'settings.workspace.organizationManager.title': 'Organizations',
     'settings.workspace.organizationManager.usage': '{count} uses',
+    'settings.workspace.organizationDelete.confirm':
+      '“{name}” is used by {count} projects or folders. Deleting it also removes it from them. Delete it?',
     'settings.workspace.unassigned.title': 'Unassigned folders',
     'settings.workspace.unassigned.project': 'Project for',
     'settings.workspace.unassigned.chooseProject': 'Choose a project',
@@ -322,7 +321,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.completed.cancel_chatgpt_sign_in':
       'ChatGPTのログインをキャンセルしました。',
     'settings.aiConnection.completed.disconnect_chatgpt': 'ChatGPTの接続を解除しました。',
-    'settings.commandNetwork.title': 'ファイル変換・集計・コード実行でネット接続を許可',
+    'settings.commandNetwork.title': 'コマンド実行時のネット接続を許可',
     'settings.commandNetwork.description':
       'OFFにすると、GitHubなどとのコード・ファイルの送受信や、ソフトのダウンロードを止めます。会話やWeb検索には影響しません。',
     'settings.commandNetwork.unavailable': '未取得',
@@ -420,7 +419,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.shortcut.cancel': 'キャンセル',
     'settings.shortcut.loading': 'ショートカットを読み込み中…',
     'settings.shortcut.recording':
-      'Command、Control、{alt}、またはF1〜F11・F13〜F24を押してください。',
+      'Command・Control・{alt}のどれかと一緒にキーを押すか（例：{alt}＋Space）、F1〜F11・F13〜F24を押してください。',
     'settings.shortcut.saved': 'ショートカットを更新しました。',
     'settings.shortcut.loadFailed': 'ショートカット設定の読み込みに失敗しました。',
     'settings.shortcut.settingsUnreadable':
@@ -438,18 +437,15 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.readAccessScope.toggle.workspace': '限定',
     'settings.readAccessScope.toggle.fullAccess': '全体',
     'settings.readAccessScope.unavailable': '未取得',
-    'settings.readAccessScope.workspaceDescription':
-      'ワークスペースとデフォルト作業空間だけを読み取れます。',
+    'settings.readAccessScope.workspaceDescription': '作業フォルダのファイルだけを読み取れます。',
     'settings.readAccessScope.fullAccessDescription':
-      'このコンピューター内のファイルを読み取れます。\n編集とコマンド実行はワークスペースとデフォルト作業空間に限定されます。',
+      'このコンピューター内のファイルを読み取れます。',
     'settings.readAccessScope.workspaceBoundary':
       'ファイル編集とコマンド実行の作業場所は、ワークスペースで管理します。',
     'settings.readAccessScope.openWorkspace': 'ワークスペースを管理',
     'settings.readAccessScope.loadFailed': '読み取り範囲の読み込みに失敗しました。',
     'settings.readAccessScope.saveFailed': '読み取り範囲の保存に失敗しました。',
     'settings.workspace.title': 'ワークスペース',
-    'settings.workspace.description':
-      'プロジェクトに作業フォルダを登録すると、Pantarayはその範囲で作業します。',
     'settings.workspace.gettingStarted':
       'まずプロジェクトを作成し、そこに作業フォルダを追加します。',
     'settings.workspace.organizations': '組織',
@@ -473,6 +469,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.organizationManager.open': '組織を作成・管理',
     'settings.workspace.organizationManager.title': '組織',
     'settings.workspace.organizationManager.usage': '{count} 件で使用',
+    'settings.workspace.organizationDelete.confirm':
+      '『{name}』は {count} 件のプロジェクトやフォルダで使われています。削除すると、そこからも外れます。削除しますか？',
     'settings.workspace.unassigned.title': '未割り当てフォルダ',
     'settings.workspace.unassigned.project': '割り当て先',
     'settings.workspace.unassigned.chooseProject': 'プロジェクトを選択',

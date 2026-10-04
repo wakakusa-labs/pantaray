@@ -29,6 +29,7 @@ def _build_tool_history_entry(
     attachments: list[ToolAttachment] | None = None,
     short_step_id: str | None = None,
     origin: ActionToolCallOrigin | None = None,
+    agents_md: str | None = None,
 ) -> HistoryEntry:
     """ツール実行に関する履歴エントリを組み立てる。"""
     entry: HistoryEntry = {
@@ -53,6 +54,8 @@ def _build_tool_history_entry(
     if origin is not None:
         entry["call_id"] = origin.call_id
         entry["llm_step_id"] = origin.llm_step_id
+    if agents_md is not None:
+        entry["agents_md"] = agents_md
     return entry
 
 

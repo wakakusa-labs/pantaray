@@ -7,21 +7,30 @@ shapes sit stays behind in the picture, and the notes say which is which.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import Counter
 from collections.abc import Iterator, Sequence
-from itertools import zip_longest
+from itertools import accumulate, zip_longest
 from typing import BinaryIO, Final
 
 from pptx import Presentation
 from pptx.chart.chart import Chart
+from pptx.chart.plot import PlotFactory
+from pptx.oxml.chart.plot import BaseChartElement
+from pptx.oxml.chart.series import CT_SeriesComposite
+from pptx.oxml.ns import qn
+from pptx.oxml.xmlchemy import BaseOxmlElement
 from pptx.shapes.autoshape import Shape
 from pptx.shapes.base import BaseShape
 from pptx.shapes.graphfrm import GraphicFrame
 from pptx.shapes.group import GroupShape
 from pptx.shapes.picture import Picture
 from pptx.slide import Slide
+from pptx.table import Table, _Row
 
 from .document_model import (
+    MAX_TABLE_COLUMNS,
+    MAX_TABLE_ROWS,
     DocumentChart,
     DocumentImage,
     DocumentTextBudget,
@@ -29,10 +38,14 @@ from .document_model import (
     pipe_table,
     resolve_start_unit,
     stored_value_text,
+    table_cut_notes,
 )
 
 # python-pptx renders a soft line break inside a paragraph as a vertical tab.
 _LINE_BREAK: Final = "\v"
+# ECMA-376 types a paragraph's lvl as 0 through 8, and python-pptx returns the
+# attribute unchecked when it reads a file.
+_MAX_OUTLINE_LEVEL: Final = 8
 # PowerPoint writes show="0" for a slide it skips in a show; ECMA-376 types the
 # attribute as xsd:boolean, so another producer may write the word instead.
 _HIDDEN_SLIDE_VALUES: Final = frozenset({"0", "false"})
@@ -105,10 +118,7 @@ def extract_pptx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
                     lines.append(_chart_heading(shape.chart, entry.title))
                     lines.extend(tables)
                 elif shape.has_table:
-                    rows, cut = pipe_table(
-                        [_one_line(cell.text) for cell in row.cells]
-                        for row in shape.table.rows
-                    )
+                    rows, cut = pipe_table(_table_rows(shape.table))
                     table_cut = table_cut or cut
                     lines.extend(rows)
             elif isinstance(shape, Shape):
@@ -132,8 +142,26 @@ def extract_pptx(source: BinaryIO, start_unit: int | None) -> ExtractedDocument:
         outline=tuple(outline),
         images=tuple(images),
         charts=tuple(charts),
-        notes=(*_PPTX_NOTES, *_unread_chart_note(unread_charts), *budget.notes()),
+        notes=(
+            *_PPTX_NOTES,
+            *_unread_chart_note(unread_charts),
+            *table_cut_notes(table_cut),
+            *budget.notes(),
+        ),
     )
+
+
+def _table_rows(table: Table) -> Iterator[list[str]]:
+    """Each row's cell text, walking the table's rows once.
+
+    ``Table.rows`` re-reads every row element on each index, so iterating it
+    costs the square of the row count; the row elements are listed once here
+    and handed to python-pptx's own row type.
+    """
+
+    rows = table.rows
+    for tr in table._tbl.tr_lst:
+        yield [_one_line(cell.text) for cell in _Row(tr, rows).cells]
 
 
 def _unread_chart_note(unread_charts: int) -> tuple[str, ...]:
@@ -180,7 +208,7 @@ def _shape_lines(shape: Shape) -> Iterator[str]:
     """A shape's paragraphs, indented by the outline level each one carries."""
 
     for paragraph in shape.text_frame.paragraphs:
-        indent = "  " * paragraph.level
+        indent = "  " * min(paragraph.level, _MAX_OUTLINE_LEVEL)
         for line in paragraph.text.split(_LINE_BREAK):
             if line.strip():
                 yield f"{indent}{line.strip()}"
@@ -238,19 +266,26 @@ def _chart_tables(chart: Chart) -> tuple[list[str], bool]:
     chart whose points python-pptx does not expose -- an XY or bubble plot
     reports no categories at all -- or one it cannot open; the caller counts
     those so the notes can say how many were listed without their data.
+
+    The chart part is walked here rather than through python-pptx's plot,
+    series and category sequences, because those size themselves by the point
+    counts the file declares and re-read their elements on every index: a few
+    kilobytes of chart XML could keep that busy for hours. Each element is read
+    once, and only as many points and series as a table keeps.
     """
 
     lines: list[str] = []
     cut = False
     try:
-        for plot in chart.plots:
-            labels: tuple[tuple[str, ...], ...] = plot.categories.flattened_labels
-            series: list[tuple[str, list[str]]] = [
-                (
-                    _one_line(one.name),
-                    [stored_value_text(value) for value in one.values],
-                )
-                for one in plot.series
+        for x_chart in chart._chartSpace.chart.plotArea.xCharts:
+            # Building the plot is what refuses a chart type python-pptx does
+            # not model, which the caller reports as a chart without data.
+            PlotFactory(x_chart, chart)
+            labels = _category_labels(x_chart)
+            series = [
+                (_series_name(ser), _series_values(ser))
+                # One past what a table shows, so a wider plot reads as cut.
+                for ser in x_chart.sers[:MAX_TABLE_COLUMNS]
             ]
             if not labels or not series:
                 continue
@@ -268,6 +303,97 @@ def _chart_tables(chart: Chart) -> tuple[list[str], bool]:
         # stand.
         return lines, cut
     return lines, cut
+
+
+def _category_labels(x_chart: BaseChartElement) -> list[tuple[str, ...]]:
+    """Each category's labels from the outermost level in, as python-pptx joins them.
+
+    Labels come from the first series, which is where python-pptx reads them.
+    A flat axis has a slot for every category the cache counts, empty where no
+    label was saved; a hierarchical one has a row per saved leaf label, under
+    the last parent label whose index does not pass the leaf's. At most
+    ``MAX_TABLE_ROWS`` are read: with the header that is one row past what a
+    table keeps, so a longer axis still reads as cut.
+    """
+
+    category_source = x_chart.cat
+    if category_source is None:
+        return []
+    if category_source.multiLvlStrRef is None:
+        count = min(_category_count(x_chart), MAX_TABLE_ROWS)
+        points = x_chart.xpath("./c:ser[1]/c:cat//c:lvl[1]/c:pt") or x_chart.xpath(
+            "./c:ser[1]/c:cat//c:pt"
+        )
+        # A repeated index keeps the last label saved for it, as python-pptx does.
+        by_index = {point.idx: point for point in points if point.idx < count}
+        return [(_point_label(by_index.get(index)),) for index in range(count)]
+    levels = [level.pt_lst for level in category_source.lvls]
+    if not levels:
+        return []
+    parent_levels: list[tuple[list[BaseOxmlElement], list[int]]] = []
+    for level in levels[1:]:
+        # An empty level ends the hierarchy, as it does in python-pptx.
+        if not level:
+            break
+        # The highest index seen so far, so a bisection finds the first parent
+        # past a leaf even when the file saves them out of order.
+        parent_levels.append((level, list(accumulate((p.idx for p in level), max))))
+    labels: list[tuple[str, ...]] = []
+    for leaf in levels[0][:MAX_TABLE_ROWS]:
+        path = [_point_label(leaf)]
+        for level, highest_index in parent_levels:
+            position = bisect_right(highest_index, leaf.idx)
+            path.append(_point_label(level[max(position - 1, 0)]))
+        labels.append(tuple(reversed(path)))
+    return labels
+
+
+def _category_count(x_chart: BaseChartElement) -> int:
+    """How many categories the plot's axis counts, as the first series to say so.
+
+    python-pptx asks one XPath for this across every series at once, which
+    measured 16 s for 60,000 series; asking each series in document order
+    returns the same count and usually stops at the first.
+    """
+
+    for ser in x_chart.iterchildren(qn("c:ser")):
+        counts = ser.xpath(".//c:cat//c:ptCount")
+        if counts:
+            return int(counts[0].val)
+    return 0
+
+
+def _series_name(ser: CT_SeriesComposite) -> str:
+    """The series' saved name, read where python-pptx reads it."""
+
+    names = ser.xpath("./c:tx//c:pt/c:v/text()")
+    return _one_line(str(names[0])) if names else ""
+
+
+def _series_values(ser: CT_SeriesComposite) -> list[str]:
+    """The first ``MAX_TABLE_ROWS`` values a series' cache counts, read in one pass.
+
+    A slot without a saved point is empty. Where a cache saves one index twice
+    the first point counts, as python-pptx reads it; a value that is not a
+    number raises, which ends the chart's data.
+    """
+
+    caches = ser.xpath("./c:val")
+    if not caches:
+        return []
+    cache = caches[0]
+    count = min(cache.ptCount_val, MAX_TABLE_ROWS)
+    by_index: dict[int, float] = {}
+    for point in cache.xpath(".//c:pt"):
+        if point.idx < count and point.idx not in by_index:
+            by_index[point.idx] = point.value
+    return [stored_value_text(by_index.get(index)) for index in range(count)]
+
+
+def _point_label(point: BaseOxmlElement | None) -> str:
+    # python-pptx turns a label element with no text into the string "None";
+    # an empty label is what the chart shows there.
+    return "" if point is None else (point.findtext(qn("c:v")) or "")
 
 
 def _plot_rows(

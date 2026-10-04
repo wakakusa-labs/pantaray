@@ -585,6 +585,13 @@ async def test_bash_approval_is_bound_to_login_environment_choice(
             args={
                 "command": "gh auth status",
                 "use_login_environment": use_login_environment,
+                **(
+                    {
+                        "justification": "Check the pull request with your GitHub account."
+                    }
+                    if use_login_environment
+                    else {}
+                ),
             },
         )
 

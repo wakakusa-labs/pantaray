@@ -17,14 +17,19 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     TOOL_RESULT_BINARY_MEDIA_TYPE,
 )
 from pantaray_agents.schema.action_conversation import (
+    RENDERER_PREPARING_OUTPUT_KIND,
     ApprovedSuggestion,
     ToolEntry,
     ToolEntryOutcome,
     UserEntry,
+    UserEntryFile,
     UserEntryProjectRef,
     UserEntryStatus,
 )
-from pantaray_agents.schema.agent.action_message import ActionProjectRef
+from pantaray_agents.schema.agent.action_message import (
+    ActionProjectRef,
+    FileAttachmentInput,
+)
 from pantaray_agents.schema.agent.action_message_codec import (
     parse_stored_action_user_message,
 )
@@ -71,6 +76,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
     images: tuple[ImageInput, ...]
     approved_suggestion: ApprovedSuggestion | None = None
     project_refs: tuple[ActionProjectRef, ...] = ()
+    files: tuple[FileAttachmentInput, ...] = ()
     if message is None:
         content = row.user_request_text
         images = ()
@@ -86,6 +92,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
             content = message.content
             project_refs = message.project_refs
         images = message.images
+        files = message.files
 
     status: UserEntryStatus = (
         "adopted"
@@ -109,6 +116,10 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
                     display_name=ref.display_name, start=ref.start, end=ref.end
                 )
                 for ref in project_refs
+            ),
+            files=tuple(
+                UserEntryFile(name=file.name, byte_size=file.byte_size)
+                for file in files
             ),
             status=status,
         )
@@ -148,17 +159,19 @@ def _tool_entry_images(output: object) -> tuple[ImageInput, ...]:
     return tuple(images)
 
 
-def _tool_entry_outcome(output: object) -> ToolEntryOutcome:
+def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
     """Say whether the tool did what it was called for, refused to, or could not.
 
     A denied approval and a read taken while recording is off are both persisted as
     successful steps whose body says the call never happened, so the terminal status
     cannot carry that distinction. A call a user Stop reached before it was issued is
-    persisted as an error step, yet it never ran either. Each producer marks its own
-    body, and this is the one place that turns those markers into the closed outcome
-    the row reads.
+    persisted as an error step, yet it never ran either. A page render whose renderer
+    is still being set up succeeds without drawing anything. Each producer marks its
+    own body, and this is the one place that turns those markers into the closed
+    outcome the row reads.
     """
 
+    output = step.output
     if not isinstance(output, dict):
         return "completed"
     if (
@@ -170,6 +183,11 @@ def _tool_entry_outcome(output: object) -> ToolEntryOutcome:
         return "not_executed"
     if output.get("status") == RECORDING_UNAVAILABLE_STATUS:
         return "unavailable"
+    if (
+        step.status == "success"
+        and output.get("kind") == RENDERER_PREPARING_OUTPUT_KIND
+    ):
+        return "preparing"
     return "completed"
 
 
@@ -207,7 +225,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
             )
         )
         images = _tool_entry_images(output.output)
-        outcome = _tool_entry_outcome(output.output)
+        outcome = _tool_entry_outcome(output)
         if output_available:
             output_preview = project_tool_output_preview(
                 row.tool_id, output.output, output.output_storage_kind

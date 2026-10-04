@@ -3,7 +3,7 @@ const path = require('path');
 const { buildFrontendDevPageUrl } = require('./dev_frontend_env');
 const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap');
 
-const DEFAULT_OVERLAY_WIDTH_PX = 460;
+const DEFAULT_OVERLAY_WIDTH_PX = 520;
 const DEFAULT_OVERLAY_HEIGHT_PX = 120;
 const DEFAULT_SCREEN_MARGIN_PX = 20;
 const DEFAULT_OVERLAY_GAP_PX = 12;
@@ -130,7 +130,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     return buildUiLanguageAdditionalArguments(getUiLanguage());
   }
 
-  function loadOverlayPage(win, entryMode = null, actionId = null) {
+  function loadOverlayPage(win, entryMode, actionId) {
     const notificationUrl = isDevRuntime()
       ? buildFrontendDevPageUrl('/notification.html')
       : `file://${path.join(__dirname, '../dist/notification.html')}`;
@@ -139,57 +139,6 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     if (actionId) url.searchParams.set('actionId', actionId);
     hardDisableDevTools(win);
     win.loadURL(url.toString());
-  }
-
-  function createLegacyNotificationWindow({ content, onClosed }) {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const bounds = primaryDisplay.bounds;
-    const bx = Number(bounds?.x || 0);
-    const by = Number(bounds?.y || 0);
-    const win = new BrowserWindow({
-      width: DEFAULT_OVERLAY_WIDTH_PX,
-      height: DEFAULT_OVERLAY_HEIGHT_PX,
-      x: bx + bounds.width - DEFAULT_OVERLAY_WIDTH_PX - DEFAULT_SCREEN_MARGIN_PX,
-      y: by + DEFAULT_SCREEN_MARGIN_PX,
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-      alwaysOnTop: true,
-      level: OVERLAY_ALWAYS_ON_TOP_LEVEL,
-      skipTaskbar: true,
-      resizable: false,
-      movable: true,
-      hasShadow: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'dist', 'preload.js'),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        additionalArguments: additionalArguments(),
-        devTools: isDevRuntime(),
-      },
-      show: false,
-      ...(process.platform === 'darwin' && {
-        type: 'panel',
-        fullscreenable: false,
-        focusable: false,
-        acceptFirstMouse: true,
-      }),
-    });
-    registerWindow(win);
-    loadOverlayPage(win);
-
-    win.once('ready-to-show', () => {
-      if (win.isDestroyed()) return;
-      safeShowInactive(win);
-      win.setAlwaysOnTop(true, OVERLAY_ALWAYS_ON_TOP_LEVEL);
-      win.moveTop();
-      if (content) {
-        win.webContents.send('set-content', content);
-      }
-    });
-    win.on('closed', () => onClosed(win));
-    return win;
   }
 
   function createConversationOverlayWindow({
@@ -241,15 +190,12 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
   }
 
   return {
-    createLegacyNotificationWindow,
     createConversationOverlayWindow,
   };
 }
 
 module.exports = {
-  OVERLAY_ALWAYS_ON_TOP_LEVEL,
   createOverlayWindowFactory,
   applyOverlayShellMode,
-  safeShowInactive,
   showInteractiveOverlayWindow,
 };

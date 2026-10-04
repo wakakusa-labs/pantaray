@@ -20,6 +20,7 @@ from .embedding_generations import (
     current_embedding_specification,
     load_active_embedding_generation,
 )
+from .lexical_search import lexical_query_notes
 from .models import MemoryContextEpoch, MemorySearchResult, MemorySource
 from .search_policy import MemorySearchFocus
 
@@ -52,6 +53,25 @@ class MemorySearchResponse:
     epoch: MemoryContextEpoch
     semantic_status: MemorySearchSemanticStatus
     semantic_error_code: str | None = None
+    # What the search left out of the query, in sentences the model reads.
+    notes: tuple[str, ...] = ()
+
+
+def memory_search_notes(
+    response: MemorySearchResponse, *, limit: int, max_limit: int
+) -> list[str]:
+    """The response's notes, plus one when the result list is full."""
+
+    notes = list(response.notes)
+    if len(response.results) >= limit:
+        larger = (
+            f"pass a larger limit (up to {max_limit}) or " if limit < max_limit else ""
+        )
+        notes.append(
+            f"The results stop at limit={limit}; more may match. To reach "
+            f"others, {larger}search with more specific terms."
+        )
+    return notes
 
 
 async def execute_memory_search(
@@ -138,6 +158,7 @@ async def execute_memory_search(
         epoch=epoch,
         semantic_status=semantic_status,
         semantic_error_code=semantic_error_code,
+        notes=lexical_query_notes(request.query),
     )
 
 
@@ -184,4 +205,5 @@ __all__ = [
     "MemorySearchRequest",
     "MemorySearchResponse",
     "execute_memory_search",
+    "memory_search_notes",
 ]

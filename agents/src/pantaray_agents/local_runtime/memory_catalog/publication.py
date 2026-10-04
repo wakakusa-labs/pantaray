@@ -7,9 +7,9 @@ import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .artifact_intent_payload import encode_artifact_intent_payload
@@ -150,7 +150,7 @@ def create_artifact_revision_intent(
         domain_payload_json=request.domain_payload_json,
         draft=request.draft,
     )
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     node = require_node(
         connection=connection,
         user_id=request.draft.user_id,
@@ -341,7 +341,7 @@ def _publish_in_transaction(
                 request.draft.base_revision_id,
             ),
         )
-    now = datetime.now(UTC).isoformat()
+    now = now_utc_iso()
     if request.draft.base_revision_id is None:
         cursor = connection.execute(
             """
@@ -434,7 +434,7 @@ def _build_revision(
         fragment_schema_version=MEMORY_FRAGMENT_SCHEMA_VERSION,
         content_sha256=artifact_content_sha256(request.draft.documents),
         profile_brief=None,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=now_utc_iso(),
     )
 
 

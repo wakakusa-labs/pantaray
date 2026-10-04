@@ -26,6 +26,7 @@ def _build_llm_history_entry(
     args: ToolArgsPayload | None = None,
     short_step_id: str | None = None,
     turn_context: str | None = None,
+    world_state: dict[str, str] | None = None,
 ) -> HistoryEntry:
     """LLM ステップの履歴エントリを組み立てる。"""
     entry: HistoryEntry = {
@@ -48,6 +49,8 @@ def _build_llm_history_entry(
         entry["short_step_id"] = short_step_id
     if turn_context is not None:
         entry["turn_context"] = turn_context
+    if world_state is not None:
+        entry["world_state"] = world_state
     return entry
 
 

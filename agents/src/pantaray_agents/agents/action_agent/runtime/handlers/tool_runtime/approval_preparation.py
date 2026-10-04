@@ -8,10 +8,10 @@ shape in one place is what makes a new gated tool behave like the existing ones.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
@@ -78,7 +78,7 @@ def build_approval_required_preparation(
     )
     if not isinstance(projected_summary.output, dict):
         raise RuntimeError("approval command summary projection must be an object")
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = now_utc_iso()
     output: dict[str, JSONValue] = {
         "kind": APPROVAL_REQUIRED_OUTPUT_KIND,
         "approval_status": "pending",
@@ -122,7 +122,7 @@ def build_approval_denied_preparation(
             tool_id=tool_def.tool_id,
             status="success",
             started_at=requested_at,
-            completed_at=datetime.now(UTC).isoformat(),
+            completed_at=now_utc_iso(),
             output={
                 "kind": APPROVAL_DENIED_OUTPUT_KIND,
                 "approval_status": "denied",

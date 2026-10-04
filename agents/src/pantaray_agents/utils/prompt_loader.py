@@ -23,18 +23,32 @@ class PromptConfig:
 
     prompt: str
     system_instruction: str | None = None
-    tool_use_rules: dict[str, str] = field(default_factory=dict)
+    # One section per role that shares the system instruction (Action only).
+    role_rules: dict[str, str] = field(default_factory=dict)
+    # Templates for a changed part of the Action prompt's head (Action only).
+    world_state_updates: dict[str, str] = field(default_factory=dict)
 
-    def require_tool_use_rule(self, key: str) -> str:
-        """指定キーの tool use rule を取得する。"""
+    def require_role_rule(self, key: str) -> str:
+        """指定キーの role rule を取得する。"""
 
-        rule = self.tool_use_rules.get(key)
-        if rule is None:
-            raise ValueError(f"Prompt tool use rule not found: {key}")
-        normalized = rule.strip()
-        if not normalized:
-            raise ValueError(f"Prompt tool use rule is empty: {key}")
-        return normalized
+        return _require_entry(self.role_rules, kind="role rule", key=key)
+
+    def require_world_state_update(self, key: str) -> str:
+        """指定キーの world state 更新テンプレートを取得する。"""
+
+        return _require_entry(
+            self.world_state_updates, kind="world state update", key=key
+        )
+
+
+def _require_entry(entries: dict[str, str], *, kind: str, key: str) -> str:
+    entry = entries.get(key)
+    if entry is None:
+        raise ValueError(f"Prompt {kind} not found: {key}")
+    normalized = entry.strip()
+    if not normalized:
+        raise ValueError(f"Prompt {kind} is empty: {key}")
+    return normalized
 
 
 class PromptLoader:
@@ -99,16 +113,19 @@ class PromptLoader:
                 f"Invalid prompt file format in {prompt_file}. Missing 'prompt' key."
             )
 
-        tool_use_rules = _parse_prompt_string_map(
-            prompt_data.get("tool_use_rules", {}),
-            prompt_file=prompt_file,
-            section_name="tool_use_rules",
-        )
-
         config = PromptConfig(
             prompt=prompt_data["prompt"],
             system_instruction=prompt_data.get("system_instruction"),
-            tool_use_rules=tool_use_rules,
+            role_rules=_parse_prompt_string_map(
+                prompt_data.get("role_rules", {}),
+                prompt_file=prompt_file,
+                section_name="role_rules",
+            ),
+            world_state_updates=_parse_prompt_string_map(
+                prompt_data.get("world_state_updates", {}),
+                prompt_file=prompt_file,
+                section_name="world_state_updates",
+            ),
         )
 
         # キャッシュに保存

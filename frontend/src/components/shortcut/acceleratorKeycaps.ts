@@ -69,3 +69,25 @@ export function acceleratorKeycaps(accelerator: string, isMac: boolean): Shortcu
 export function keycapsLabel(keycaps: readonly ShortcutKeycap[]): string {
   return keycaps.map((keycap) => keycap.label).join(' ');
 }
+
+/** ARIA names the modifiers by their KeyboardEvent key values. */
+const ARIA_MODIFIER_NAMES: Readonly<Record<string, string>> = {
+  Control: 'Control',
+  Ctrl: 'Control',
+  Option: 'Alt',
+  Alt: 'Alt',
+  Shift: 'Shift',
+  Command: 'Meta',
+  Super: 'Meta',
+};
+
+/** `aria-keyshortcuts` form of a shortcut, e.g. `Alt+Space`. */
+export function ariaKeyShortcuts(keycaps: readonly ShortcutKeycap[]): string {
+  return keycaps
+    .map((keycap, index) =>
+      index < keycaps.length - 1
+        ? (ARIA_MODIFIER_NAMES[keycap.label] ?? keycap.label)
+        : keycap.label
+    )
+    .join('+');
+}

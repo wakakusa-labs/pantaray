@@ -8,9 +8,9 @@ NOTE:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Literal
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.orchestration.ws.error_meta import (
     build_session_error_meta,
 )
@@ -188,7 +188,7 @@ class SuggestionInsightMixin:
             self.follow_resumed_suggestion_process(process_id, proc.suggestion_id)
 
     async def handle_dismiss(self, suggestion_id: str) -> None:
-        rejected_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        rejected_at = now_utc_iso()
         try:
             row = await self._persist_suggestion_status(
                 suggestion_id,

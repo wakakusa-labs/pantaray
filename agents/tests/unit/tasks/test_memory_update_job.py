@@ -25,6 +25,10 @@ from pantaray_agents.local_runtime.runtime.job_types import (
 from pantaray_agents.local_runtime.runtime.memory_update_queue import (
     build_local_memory_update_enqueue_request,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import (
+    now_utc_iso,
+    parse_utc_iso,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -233,7 +237,8 @@ async def test_lock_conflict_defers_for_fifteen_seconds(
     async def unexpected_run() -> None:
         raise AssertionError("lock conflict must defer before RUN")
 
-    before = datetime.now(UTC)
+    # Stored times are whole milliseconds, so compare against a floored start.
+    before = parse_utc_iso(now_utc_iso())
     with runtime.acquire_user_update_lock(user_id="user-1", owner_id="other-job"):
         with pytest.raises(DeferredLocalJob):
             await run_memory_update_job(

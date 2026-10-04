@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -100,6 +101,8 @@ async def test_every_write_is_denied(
 
     assert result.output["exit_code"] != 0
     assert "Operation not permitted" in result.output["stderr"]
+    # A suggestion command cannot ask for write folders, so it is not told to.
+    assert "additional_write_folders" not in json.dumps(result.output)
     assert not (workspace / "created.txt").exists()
 
 

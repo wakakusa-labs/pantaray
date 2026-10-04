@@ -59,9 +59,11 @@ class ScreenCaptureCaptured:
 
 ScreenCaptureRefusalCode = Literal[
     "SCREEN_RECORDING_PERMISSION_REQUIRED",
+    "CAPTURE_TARGET_NOT_FOUND",
     "CAPTURE_REFUSED_BY_PRIVACY_FILTER",
     "CAPTURE_REFUSED_PASSWORD_MANAGER",
     "CAPTURE_REFUSED_URL_UNAVAILABLE",
+    "CAPTURE_REFUSED_PRIVATE_WINDOW",
     "CAPTURE_REFUSED_SENSITIVE_PAGE",
 ]
 """Every reason a capture can be refused. Closed so the model is never handed an
@@ -159,13 +161,14 @@ def announce_screen_capture_request(
     process_id: str,
     tool_request_id: str,
     capture_request_id: str,
+    app_name: str,
 ) -> None:
     """Publish the request on the stream Electron actually reads.
 
     Only the root Action process is forwarded to the desktop client, so a
-    subagent's request is announced on its parent's stream. The payload carries
-    no capture policy: what may be captured is decided in Electron main, against
-    settings the runtime never sees.
+    subagent's request is announced on its parent's stream. The payload names the
+    approved app and carries no capture policy: what may be captured is decided
+    in Electron main, against settings the runtime never sees.
     """
 
     append_local_process_event(
@@ -183,6 +186,7 @@ def announce_screen_capture_request(
             "process_id": process_id,
             "tool_request_id": tool_request_id,
             "capture_request_id": capture_request_id,
+            "app_name": app_name,
         },
     )
 

@@ -10,6 +10,9 @@ from typing import Literal, cast
 from pydantic import ValidationError
 
 from pantaray_agents.action_status import is_action_terminal_status
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    ActionFileAttachmentUnavailableError,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     ActionMessageConflictError,
     NewActionTarget,
@@ -18,6 +21,7 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import is_local_runtime_enabled
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.orchestration.ws.action_relay import (
@@ -30,13 +34,15 @@ from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
 )
-from pantaray_agents.schema.agent.action_message import ActionProjectRef
+from pantaray_agents.schema.agent.action_message import (
+    ActionProjectRef,
+    FileAttachmentInput,
+)
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.websocket import ExecuteActionMessage
 from pantaray_agents.security.storage_paths import validate_image_storage_path
 from pantaray_agents.utils.public_error import public_ws_error
-from pantaray_agents.utils.timestamps import utc_now_iso8601_utc_z
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +78,7 @@ def _build_suggestion_action_command(
     supplement_project_refs: tuple[ActionProjectRef, ...],
     approval_mode: ApprovalMode,
     images: tuple[ImageInput, ...],
+    files: tuple[FileAttachmentInput, ...],
     suggestion_row: Mapping[str, object],
 ) -> SubmitActionMessageCommand:
     content = _optional_text(suggestion_row.get("answer"))
@@ -100,6 +107,7 @@ def _build_suggestion_action_command(
                 supplement=supplement,
                 supplement_project_refs=supplement_project_refs,
                 images=images,
+                files=files,
                 suggestion_approval=SuggestionApprovalInput(
                     suggestion_id=suggestion_id,
                     approved_at=approved_at,
@@ -166,9 +174,7 @@ class ActionFlowMixin(ActionRelayMixin):
             )
             return
 
-        approved_at = (
-            _optional_text(suggestion_row.get("accepted_at")) or utc_now_iso8601_utc_z()
-        )
+        approved_at = _optional_text(suggestion_row.get("accepted_at")) or now_utc_iso()
         language = self._resolve_action_language(payload.language)
         try:
             result = submit_action_message(
@@ -182,9 +188,19 @@ class ActionFlowMixin(ActionRelayMixin):
                     supplement_project_refs=payload.supplement_project_refs,
                     approval_mode=payload.approval_mode,
                     images=payload.images,
+                    files=payload.files,
                     suggestion_row=suggestion_row,
                 )
             )
+        except ActionFileAttachmentUnavailableError:
+            await self._send_preflight_error(
+                suggestion_id=suggestion_id,
+                command_id=command_id,
+                error_code="WS_ACTION_ATTACHMENT_UNAVAILABLE",
+                error_message="An attached file is no longer available.",
+                failure_kind="attachment_unavailable",
+            )
+            return
         except ActionMessageConflictError:
             await self._send_preflight_error(
                 suggestion_id=suggestion_id,

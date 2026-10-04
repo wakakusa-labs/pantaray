@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
+from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 
 OutcomeStatus = Literal[
@@ -86,6 +87,8 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
         case "read":
             return _read_detail(body)
         case "render_pdf_page":
+            if body.get("kind") == RENDERER_PREPARING_OUTPUT_KIND:
+                return ["no pages yet, viewer preparing"]
             return [_count(body, "attachments", "page", "pages")]
         case "list":
             return [_count(body, "entries", "entry", "entries")]

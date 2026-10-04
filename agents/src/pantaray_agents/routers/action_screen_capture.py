@@ -51,9 +51,11 @@ class RefusedScreenCaptureResult(BaseModel):
     code: ScreenCaptureRefusalCode
     # Refusal details may name the application or the browser host, never the
     # window title: a title is often the private thing the filter is protecting.
-    axis: Literal["app", "website", "editing"] | None = None
+    axis: Literal["app", "website", "file", "editing"] | None = None
     app_name: str | None = None
     host: str | None = None
+    # Only apps the filter admits; never an excluded app or a window title.
+    available_apps: list[str] | None = None
 
 
 class ActionScreenCaptureRequest(BaseModel):
@@ -108,6 +110,8 @@ def _build_outcome(
             details["app_name"] = result.app_name
         if result.host is not None:
             details["host"] = result.host
+        if result.available_apps is not None:
+            details["available_apps"] = list(result.available_apps)
         return ScreenCaptureRefused(code=result.code, details=details)
     return ScreenCaptureCaptured(
         storage_path=result.storage_path,

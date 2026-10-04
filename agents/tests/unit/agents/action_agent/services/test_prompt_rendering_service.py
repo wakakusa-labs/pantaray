@@ -118,27 +118,6 @@ def test_memory_context_model_describes_stock_flow_and_anchor_search() -> None:
     assert "Reconcile stock and flow evidence" in rendered
 
 
-def test_supervisor_pending_final_answer_renders_empty_state() -> None:
-    service = _build_service()
-    state = _state_with_workspace_contract()
-
-    rendered = service.render_supervisor_pending_final_answer(state)
-
-    assert rendered == "No pending final-answer draft."
-
-
-def test_supervisor_pending_final_answer_uses_safe_markdown_fence() -> None:
-    service = _build_service()
-    state = _state_with_workspace_contract()
-    state["supervisor_pending_final_answer"] = "Use:\n```python\nprint('ok')\n```"
-
-    rendered = service.render_supervisor_pending_final_answer(state)
-
-    assert "A pending final-answer draft exists:" in rendered
-    assert "````markdown" in rendered
-    assert "```python" in rendered
-
-
 def _build_service() -> PromptRenderingService:
     return PromptRenderingService(
         PromptRenderingDeps(formatter=cast(object, SimpleNamespace()))

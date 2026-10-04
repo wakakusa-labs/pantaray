@@ -203,8 +203,8 @@ def local_runtime_ws_harness(
         SuggestionStructuredOutput.model_validate(
             {
                 "has_suggestion": True,
-                "answer": "Continue the focused local runtime verification.",
                 "interaction_contract": "action_offer",
+                "key_point": "The local runtime verification is half done.",
                 "suggestion_summary": "Focused local runtime verification.",
                 "target_context": {
                     "organization_name": None,
@@ -214,6 +214,25 @@ def local_runtime_ws_harness(
         ).model_dump()
     )
 
+    # The other two lens runs find nothing; the selector picks the candidate.
+    nothing = SuggestionStructuredOutput.model_validate(
+        {
+            "has_suggestion": False,
+            "interaction_contract": None,
+            "key_point": "",
+            "suggestion_summary": None,
+            "target_context": None,
+        }
+    ).model_dump()
+    suggestion_llm.queued_responses = [
+        nothing,
+        nothing,
+        {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
+    ]
+    # The writer's call is the next plain-text call on this client.
+    suggestion_llm.responses["default"] = (
+        "Continue the focused local runtime verification."
+    )
     monkeypatch.setattr(deps, "get_llm_client", lambda: activity_llm, raising=False)
     monkeypatch.setattr(
         deps,

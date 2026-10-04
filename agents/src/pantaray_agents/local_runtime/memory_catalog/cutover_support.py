@@ -14,6 +14,7 @@ from pantaray_agents.local_runtime.memory_references.reference_parser import (
     MarkdownReferenceOccurrence,
     extract_markdown_references,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
 from .connection import open_memory_catalog_connection
 from .cutover_records import LegacyMemoryRecord
@@ -112,6 +113,7 @@ def write_artifact_tree(path: Path, documents: tuple[MemoryDocument, ...]) -> No
 
 
 def create_preflight_backup(*, db_path: Path, artifact_root: Path) -> tuple[Path, Path]:
+    # A backup file name, not a stored timestamp: compact and free of colons.
     suffix = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     db_backup = db_path.with_name(f"{db_path.name}.pre-memory-catalog-{suffix}.bak")
     artifact_backup = artifact_root.with_name(
@@ -174,7 +176,7 @@ def record_empty_cutover(
         ) as connection,
         connection,
     ):
-        now = datetime.now(UTC).isoformat()
+        now = now_utc_iso()
         connection.execute(
             """
             INSERT INTO memory_catalog_cutovers(
@@ -198,7 +200,7 @@ def record_failed_cutover(
         ) as connection,
         connection,
     ):
-        now = datetime.now(UTC).isoformat()
+        now = now_utc_iso()
         connection.execute(
             """
             INSERT INTO memory_catalog_cutovers(

@@ -18,6 +18,8 @@ from .migrated_db import prepare_test_database
 USER_ID = "user-1"
 FIRST_TRIGGER_AT = "2026-09-07T00:00:00Z"
 NOW = datetime(2026, 9, 7, 0, 10, tzinfo=UTC)
+# One 15-minute Insight window after the first trigger.
+ACTION_DEFERRAL_ELAPSED = datetime(2026, 9, 7, 0, 15, tzinfo=UTC)
 
 
 def _prepare_db(tmp_path: Path) -> Path:
@@ -127,13 +129,51 @@ def test_one_fresh_short_insight_starts_memory_immediately(tmp_path: Path) -> No
     assert len(_memory_update_jobs(db_path)) == 1
 
 
-def test_an_action_terminal_starts_a_run_alone_and_keeps_its_turn_binding(
+def test_a_fresh_action_terminal_alone_starts_no_run(tmp_path: Path) -> None:
+    db_path = _prepare_db(tmp_path)
+    _insert_action_terminal_trigger(db_path)
+
+    result = _dispatch(db_path, NOW)
+
+    assert result.outcomes == ()
+    assert _memory_update_jobs(db_path) == []
+
+
+def test_a_fresh_action_terminal_rides_along_with_a_short_insight_run(
+    tmp_path: Path,
+) -> None:
+    db_path = _prepare_db(tmp_path)
+    _insert_action_terminal_trigger(db_path)
+    _insert_short_insight_triggers(db_path, 1)
+
+    result = _dispatch(db_path, NOW)
+
+    jobs = _memory_update_jobs(db_path)
+    assert len(jobs) == 1
+    assert {
+        (outcome.trigger.trigger_kind, outcome.job_id) for outcome in result.outcomes
+    } == {
+        ("memory_from_action_terminal", jobs[0][0]),
+        ("memory_from_short_insight", jobs[0][0]),
+    }
+    with sqlite3.connect(db_path) as connection:
+        payload = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM job_payloads WHERE job_id = ?",
+                (jobs[0][0],),
+            ).fetchone()[0]
+        )
+    assert payload["short_insight_ids"] == ["insight-0"]
+    assert [item["source_id"] for item in payload["action_terminals"]] == ["turn-1"]
+
+
+def test_an_action_terminal_runs_alone_after_one_insight_window_with_its_binding(
     tmp_path: Path,
 ) -> None:
     db_path = _prepare_db(tmp_path)
     _insert_action_terminal_trigger(db_path)
 
-    result = _dispatch(db_path, NOW)
+    result = _dispatch(db_path, ACTION_DEFERRAL_ELAPSED)
 
     jobs = _memory_update_jobs(db_path)
     assert len(jobs) == 1
@@ -163,7 +203,7 @@ def test_an_action_terminal_starts_a_run_alone_and_keeps_its_turn_binding(
 def test_an_active_memory_update_job_blocks_a_second_run(tmp_path: Path) -> None:
     db_path = _prepare_db(tmp_path)
     _insert_action_terminal_trigger(db_path)
-    _dispatch(db_path, NOW)
+    _dispatch(db_path, ACTION_DEFERRAL_ELAPSED)
     _insert_short_insight_triggers(db_path, 3)
 
     result = _dispatch(db_path, NOW)

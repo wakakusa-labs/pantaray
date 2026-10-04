@@ -49,6 +49,17 @@ from pantaray_agents.schema.agent.base import JSONValue
             "wait_subagents: ok, 1 done, 1 running",
         ),
         ("zanei_timeline", {"events": [{}]}, "zanei_timeline: ok, 1 event"),
+        (
+            "render_pdf_page",
+            {"kind": "pdf_pages", "attachments": [{}, {}]},
+            "render_pdf_page: ok, 2 pages",
+        ),
+        # Not an empty render: the model is told the pages can come later.
+        (
+            "render_pdf_page",
+            {"kind": "renderer_preparing", "path": "a.pptx", "message": "..."},
+            "render_pdf_page: ok, no pages yet, viewer preparing",
+        ),
         ("thinking", {"thought": "..."}, "thinking: ok"),
         ("some_new_tool", {"anything": 1}, "some_new_tool: ok"),
         (

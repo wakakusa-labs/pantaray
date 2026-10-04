@@ -65,7 +65,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     getMainWindow: ctx.windows.getMainWindow,
   });
 
-  registrar.on('show-notification', handlers.onShowNotification);
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);
   registrar.on('notification-action-accept', handlers.onNotificationActionAccept);
   registrar.on('notification-action-reject', handlers.onNotificationActionReject);

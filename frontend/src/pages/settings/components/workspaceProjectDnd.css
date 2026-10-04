@@ -1,7 +1,3 @@
-.workspace-project-card-header {
-  grid-template-columns: max-content minmax(120px, 1fr) minmax(0, auto) max-content max-content;
-}
-
 .workspace-project-drag-handle {
   align-items: center;
   background: transparent;
@@ -23,22 +19,10 @@
   opacity: 0.45;
 }
 
-.workspace-project-card.is-dragging {
+.workspace-master-item.is-dragging {
+  background: var(--fog-popover);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-  opacity: 0.82;
+  opacity: 0.9;
+  position: relative;
   z-index: 3;
-}
-
-@media (max-width: 760px) {
-  .workspace-project-card-header {
-    grid-template-columns: max-content minmax(0, 1fr) max-content;
-  }
-
-  .workspace-project-delete {
-    grid-column: 3;
-  }
-
-  .workspace-project-folder-count {
-    grid-column: 2;
-  }
 }

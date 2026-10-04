@@ -26,18 +26,21 @@ function blocker(
 describe('buildApprovalDisplay', () => {
   // What is being consented to must be readable: a screen capture that falls through
   // to the generic line says only "run this operation" and hides the disclosure.
-  it('names the screen capture, from the tool id and from a recovered summary alike', () => {
+  it('names the window capture and its app, from the tool id and from a recovered summary alike', () => {
+    const summary = { summary_kind: 'screen_capture', app_name: 'Google Chrome' };
     for (const panel of [
-      blocker('capture_screen', 'screen_capture', { summary_kind: 'screen_capture' }),
-      blocker('unknown_tool', 'screen_capture', { summary_kind: 'screen_capture' }),
-      blocker('capture_screen', 'screen_capture', {}),
+      blocker('capture_screen', 'screen_capture', summary),
+      blocker('unknown_tool', 'screen_capture', summary),
     ]) {
       const display = buildApprovalDisplay(panel, t);
       expect(display.operationKey).toBe('overlay.approvalRequired.operation.captureScreen');
-      // The capture has no target until Electron takes it, so there is nothing to list.
-      expect(display.primaryValue).toBe('');
+      expect(display.primaryLabelKey).toBe('overlay.approvalRequired.app');
+      expect(display.primaryValue).toBe('Google Chrome');
       expect(display.details).toEqual([]);
     }
+    expect(
+      buildApprovalDisplay(blocker('capture_screen', 'screen_capture', {}), t).primaryValue
+    ).toBe('overlay.approvalRequired.unavailable');
   });
 
   // A command that runs with the user's sign-ins must say so before it is approved.

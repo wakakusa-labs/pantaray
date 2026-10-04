@@ -38,7 +38,6 @@ from pantaray_llm.providers.anthropic.response_error import (
     anthropic_stop_reason_error,
     build_anthropic_status_error,
     invalid_anthropic_response,
-    map_anthropic_transport_error,
 )
 from pantaray_llm.providers.anthropic.settings import (
     AnthropicAdaptiveThinking,
@@ -56,7 +55,10 @@ from pantaray_llm.providers.anthropic.wire import (
     anthropic_usage_payload,
 )
 from pantaray_llm.providers.model_output import model_output_error_from_proxy_error
-from pantaray_llm.providers.response_error import enrich_provider_error
+from pantaray_llm.providers.response_error import (
+    enrich_provider_error,
+    transport_failure_error,
+)
 from pantaray_llm.providers.schema_compiler import (
     CompiledProviderSchema,
     ProviderSchemaCompilationError,
@@ -126,7 +128,9 @@ async def execute_anthropic_request(
             "The request contains text that cannot be encoded as UTF-8."
         ) from exc
     except httpx.TransportError as exc:
-        raise map_anthropic_transport_error(request=request, exc=exc) from exc
+        raise transport_failure_error(
+            exc, details=anthropic_request_details(request=request)
+        ) from exc
     status_error = build_anthropic_status_error(response=http_response, request=request)
     if status_error is not None:
         raise status_error

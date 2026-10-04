@@ -72,6 +72,9 @@ class PreparedWindow:
     # The context message this turn appended, which the step record keeps so a
     # later turn replays the bytes that were sent rather than rebuilding them.
     turn_context: str | None
+    # The head sections that message brings up to date, by field, recorded with
+    # it so a later turn can tell what the conversation already shows.
+    world_state: dict[str, str] | None
     # The media the sent shape references, uploaded with the request.
     file_inputs: tuple[LlmFileInput, ...]
     # The history's share of the rendering, in the unit the omission boundary

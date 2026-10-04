@@ -72,12 +72,10 @@ DRAFT_FINAL_ANSWER_TOOL = ToolDefinition.from_spec(
                     name="answer",
                     schema=_NON_EMPTY_STRING_SCHEMA,
                     required=True,
-                    prompt_type="string",
                     description=(
                         "Final-answer draft to store for the current execution "
                         "scope. Calling this again replaces the previous draft."
                     ),
-                    llm_order=10,
                 ),
             ),
             description=(
@@ -89,8 +87,9 @@ DRAFT_FINAL_ANSWER_TOOL = ToolDefinition.from_spec(
             "properties": {
                 "status": {"type": "string", "enum": ["draft_updated"]},
                 "next_step": {"type": "string"},
+                "draft_revision": {"type": "string", "pattern": "^sha256:"},
             },
-            "required": ["status", "next_step"],
+            "required": ["status", "next_step", "draft_revision"],
             "additionalProperties": False,
         },
         pre_validate_args=_validate_draft_final_answer_args,

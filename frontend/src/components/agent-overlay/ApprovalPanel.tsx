@@ -39,6 +39,12 @@ const ApprovalFolderPath = styled.p`
   word-break: break-all;
 `;
 
+const ApprovalFolderList = styled.ul`
+  margin: 0;
+  padding: 0;
+  list-style: none;
+`;
+
 const ApprovalHint = styled.p`
   margin: 12px 0 0;
   font-family: var(--font-sans);
@@ -96,6 +102,24 @@ const ApprovalCodeBlock = styled.pre`
   color: rgba(255, 255, 255, 0.86);
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+const ApprovalDisclosure = styled.details`
+  margin-top: 12px;
+`;
+
+const ApprovalDisclosureSummary = styled.summary`
+  font-family: var(--font-sans);
+  font-size: var(--text-ui-size-sm);
+  color: rgba(255, 255, 255, 0.66);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+
+  &:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 `;
 
 const ApprovalDetailList = styled.dl`
@@ -163,36 +187,118 @@ export function ApprovalPanel({
   t,
 }: ApprovalPanelProps) {
   const display = buildApprovalDisplay(approvalPanel, t);
+  const folderPaths =
+    display.outsideWorkspace === null ? null : display.outsideWorkspace.folders.length === 1 ? (
+      <ApprovalFolderPath>{display.outsideWorkspace.folders[0].path}</ApprovalFolderPath>
+    ) : (
+      <ApprovalFolderList>
+        {display.outsideWorkspace.folders.map((folder) => (
+          <ApprovalFolderPath as="li" key={folder.path}>
+            {folder.path}
+          </ApprovalFolderPath>
+        ))}
+      </ApprovalFolderList>
+    );
+
+  const toolDetails = (
+    <ApprovalDetailGroup>
+      {display.primaryValue ? (
+        <>
+          <ApprovalDetailLabel>{t(display.primaryLabelKey)}</ApprovalDetailLabel>
+          <ApprovalCodeBlock>{display.primaryValue}</ApprovalCodeBlock>
+        </>
+      ) : null}
+      {display.details.length > 0 ? (
+        <ApprovalDetailList>
+          {display.details.map((detail, index) => (
+            <Fragment key={`${detail.labelKey}-${index}`}>
+              <ApprovalDetailTerm>{t(detail.labelKey)}</ApprovalDetailTerm>
+              <ApprovalDetailValue>{detail.value}</ApprovalDetailValue>
+            </Fragment>
+          ))}
+        </ApprovalDetailList>
+      ) : null}
+    </ApprovalDetailGroup>
+  );
+
+  const question = display.reason ?? t(display.operationKey, display.operationVars);
+  let body;
+  if (display.runsOutsideSandbox) {
+    // The model says what the run is for; Pantaray, not the model, says what
+    // allowing it means. The command stays one click away.
+    body = (
+      <>
+        <ApprovalDetailGroup>
+          <ApprovalDetailLabel>
+            {t('overlay.approvalRequired.outsideSandbox.purpose')}
+          </ApprovalDetailLabel>
+          <ApprovalOperationText>{question}</ApprovalOperationText>
+        </ApprovalDetailGroup>
+        <ApprovalDetailGroup>
+          <ApprovalDetailLabel>
+            {t('overlay.approvalRequired.outsideSandbox.effect')}
+          </ApprovalDetailLabel>
+          <ApprovalOperationText>
+            {t('overlay.approvalRequired.outsideSandbox.effectDescription')}
+          </ApprovalOperationText>
+        </ApprovalDetailGroup>
+        <ApprovalDisclosure>
+          <ApprovalDisclosureSummary>
+            {t('overlay.approvalRequired.details')}
+          </ApprovalDisclosureSummary>
+          {toolDetails}
+        </ApprovalDisclosure>
+      </>
+    );
+  } else if (display.reason) {
+    // A reason is for readers who cannot read commands: it leads, the folders
+    // follow, and the command stays one click away.
+    body = (
+      <>
+        <ApprovalOperationText>{question}</ApprovalOperationText>
+        {display.usesLoginEnvironment ? (
+          <ApprovalOperationText>
+            {t('overlay.approvalRequired.loginEnvironmentNotice')}
+          </ApprovalOperationText>
+        ) : null}
+        {folderPaths ? (
+          <ApprovalDetailGroup>
+            <ApprovalDetailLabel>
+              {t('overlay.approvalRequired.outsideWorkspace.folders')}
+            </ApprovalDetailLabel>
+            {folderPaths}
+          </ApprovalDetailGroup>
+        ) : null}
+        <ApprovalDisclosure>
+          <ApprovalDisclosureSummary>
+            {t('overlay.approvalRequired.details')}
+          </ApprovalDisclosureSummary>
+          {toolDetails}
+        </ApprovalDisclosure>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <ApprovalOperationText>{question}</ApprovalOperationText>
+        {folderPaths}
+        {toolDetails}
+      </>
+    );
+  }
 
   return (
     <ApprovalPanelCard>
-      <ApprovalPanelTitle>{t('overlay.approvalRequired.title')}</ApprovalPanelTitle>
-      <ApprovalOperationText>
-        {t(display.operationKey, display.operationVars)}
-      </ApprovalOperationText>
-      {display.outsideWorkspace ? (
-        <ApprovalFolderPath>{display.outsideWorkspace.folderPath}</ApprovalFolderPath>
-      ) : null}
-      <ApprovalDetailGroup>
-        {display.primaryValue ? (
-          <>
-            <ApprovalDetailLabel>{t(display.primaryLabelKey)}</ApprovalDetailLabel>
-            <ApprovalCodeBlock>{display.primaryValue}</ApprovalCodeBlock>
-          </>
-        ) : null}
-        {display.details.length > 0 ? (
-          <ApprovalDetailList>
-            {display.details.map((detail, index) => (
-              <Fragment key={`${detail.labelKey}-${index}`}>
-                <ApprovalDetailTerm>{t(detail.labelKey)}</ApprovalDetailTerm>
-                <ApprovalDetailValue>{detail.value}</ApprovalDetailValue>
-              </Fragment>
-            ))}
-          </ApprovalDetailList>
-        ) : null}
-      </ApprovalDetailGroup>
+      <ApprovalPanelTitle>
+        {t(
+          display.runsOutsideSandbox
+            ? 'overlay.approvalRequired.outsideSandbox.title'
+            : 'overlay.approvalRequired.title'
+        )}
+      </ApprovalPanelTitle>
+      {body}
       {approvalErrorMessage ? <ApprovalErrorText>{approvalErrorMessage}</ApprovalErrorText> : null}
-      <ApprovalActionRow data-sharecard-hide="true">
+      <ApprovalActionRow>
         {onDecide
           ? DECISION_OPTIONS.map(({ decision, variant }) => {
               const labelKey = display.decisionLabelKeys[decision];
@@ -211,8 +317,8 @@ export function ApprovalPanel({
           : null}
       </ApprovalActionRow>
       {display.outsideWorkspace && onOpenWorkspaceSettings ? (
-        <ApprovalHint data-sharecard-hide="true">
-          {t('overlay.approvalRequired.outsideWorkspace.hint')}{' '}
+        <ApprovalHint>
+          {t(display.outsideWorkspace.hintKey)}{' '}
           <ApprovalHintLink type="button" onClick={onOpenWorkspaceSettings}>
             {t('overlay.approvalRequired.outsideWorkspace.openSettings')}
           </ApprovalHintLink>

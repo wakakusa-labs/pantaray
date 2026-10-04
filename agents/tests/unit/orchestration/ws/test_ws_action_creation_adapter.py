@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.websockets import WebSocketState
 
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    ActionFileAttachmentUnavailableError,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     ActionMessageConflictError,
     DeferredActionMessageResult,
@@ -31,6 +34,7 @@ from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_agents.schema.websocket import AckEventMessage
 from pantaray_agents.schema.websocket.client_messages import ExecuteActionMessage
 from pantaray_agents.schema.websocket.server_messages import ErrorMessage
+from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_milliseconds
 
 COMMAND_ID = "11111111-1111-4111-8111-111111111111"
 APPROVED_AT = "2026-08-16T01:02:03Z"
@@ -144,7 +148,7 @@ def _configure_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: True,
     )
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.utc_now_iso8601_utc_z",
+        "pantaray_agents.orchestration.ws.action.now_utc_iso",
         lambda: APPROVED_AT,
     )
 
@@ -200,6 +204,13 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
             # Spans point into the trimmed supplement.
             supplement="  Run only the focused regression in Demo App.",
             supplement_project_refs=(DEMO_REF,),
+            files=(
+                {
+                    "attachment_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                    "name": "spec.docx",
+                    "byte_size": 4_096,
+                },
+            ),
         )
     )
 
@@ -215,7 +226,16 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
     assert message.supplement == "Run only the focused regression in Demo App."
     assert message.supplement_project_refs[0].display_name == "Demo App"
     assert render_action_user_request_text(message).endswith(
-        "Referenced workspace projects:\n- Demo App: /workspace/demo-app"
+        "Referenced workspace projects:\n- Demo App: /workspace/demo-app\n\n"
+        "Attached files:\n"
+        "The user attached these files to this message. Each is saved at the path "
+        "shown, relative to your workspace cwd. Open one with the `read` tool at "
+        "that path; the pages of a PDF, Word, PowerPoint or Excel file can also "
+        "be viewed with `render_pdf_page`. These "
+        "formats are readable: do not tell the user they are unsupported, and do "
+        "not ask them to paste the contents.\n"
+        "- spec.docx (Word document, 4.0 KB): "
+        "attachments/0f8fad5b-d9cb-469f-a165-70867728950e/spec.docx"
     )
     assert message.language == "ja"
     assert (
@@ -237,6 +257,39 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
     assert handler.attached[0]["logical_run_id"] == "process-1"
     assert handler.errors == []
     assert handler.session_errors == []
+
+
+@pytest.mark.asyncio
+async def test_execute_action_stamps_a_pending_approval_in_canonical_milliseconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The approval time is stored with the Suggestion, so it must use the
+    # canonical storage form rather than whatever the clock formats.
+    monkeypatch.setattr(
+        "pantaray_agents.orchestration.ws.action.is_local_runtime_enabled",
+        lambda: True,
+    )
+    calls: list[SubmitActionMessageCommand] = []
+    monkeypatch.setattr(
+        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        lambda command: calls.append(command) or _result(),
+    )
+
+    await _Handler().execute_action(
+        ExecuteActionMessage(
+            approval_mode="prompt_each_time",
+            images=(),
+            suggestion_id="suggestion-1",
+            command_id=COMMAND_ID,
+        )
+    )
+
+    approval = calls[0].message.suggestion_approval
+    assert approval is not None
+    assert (
+        normalize_iso8601_utc_z_milliseconds(approval.approved_at)
+        == approval.approved_at
+    )
 
 
 @pytest.mark.asyncio
@@ -414,6 +467,11 @@ async def test_execute_action_does_not_replay_or_attach_deferred_submission(
     [
         (False, None, "LOCAL_RUNTIME_REQUIRED"),
         (True, ActionMessageConflictError("conflict"), "WS_ACTION_NOT_ALLOWED"),
+        (
+            True,
+            ActionFileAttachmentUnavailableError("staged file is gone"),
+            "WS_ACTION_ATTACHMENT_UNAVAILABLE",
+        ),
         (True, RuntimeError("database unavailable"), "WS_DEPENDENCY_UNAVAILABLE"),
     ],
 )

@@ -1,7 +1,7 @@
 """suggestion agent"""
 
-import json
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
@@ -43,8 +43,18 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     normalize_activity_description_rows,
     normalize_activity_summary_rows,
 )
-from pantaray_agents.agents.suggestion_agent.react import run_suggestion_react
+from pantaray_agents.agents.suggestion_agent.lenses import (
+    SUGGESTION_LENS_PROMPT_NAME,
+    SUGGESTION_SELECTOR_PROMPT_NAME,
+    decide_with_lenses,
+    sample_lenses,
+)
 from pantaray_agents.agents.suggestion_agent.research import SuggestionResearchTools
+from pantaray_agents.agents.suggestion_agent.writer import (
+    SUGGESTION_WRITER_PROMPT_NAME,
+    write_suggestion_answer,
+)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.runtime_ports import (
     SuggestionRepositoryPort,
 )
@@ -59,10 +69,9 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentResponse,
     SuggestionExtraction,
     SuggestionHistoryEntry,
-    SuggestionStructuredOutput,
-    SuggestionTargetContext,
 )
 from pantaray_agents.schema.repository_errors import repository_data_or_raise
+from pantaray_agents.utils.local_time import describe_local_time, local_zone_name
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import (
     LlmToolContinuation,
@@ -76,26 +85,12 @@ logger = logging.getLogger(__name__)
 type SuggestionAgentConfig = dict[str, JSONValue]
 type SuggestionLlmPayload = dict[str, JSONValue]
 
-# Design limit: a 64k-character application cap bounds initial input cost.
-# Revisit on normal-input overflow using measured token cost and latency.
-SUGGESTION_INITIAL_PROMPT_MAX_CHARS = 64_000
-
-
-def _normalize_target_context(
-    target_context: SuggestionTargetContext | None,
-) -> SuggestionTargetContext | None:
-    if target_context is None:
-        return None
-    organization_name = target_context.organization_name
-    project_name = target_context.project_name
-    return SuggestionTargetContext(
-        organization_name=organization_name.strip() or None
-        if isinstance(organization_name, str)
-        else None,
-        project_name=project_name.strip() or None
-        if isinstance(project_name, str)
-        else None,
-    )
+# Design limit: the earlier 64k budget for the rest of the prompt plus insights/todos.md
+# up to the snapshot's 60k-character bound. Memory keeps that file to the user's own
+# open work, but files written before that rule reached 40k characters. If production
+# todos.md exceeds about 20 KB after Memory has run on it, revisit the Memory rules
+# rather than raising these limits.
+SUGGESTION_INITIAL_PROMPT_MAX_CHARS = 124_000
 
 
 class SuggestionPersistencePayload(TypedDict):
@@ -142,11 +137,21 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._prompt_config: PromptConfig = self._load_prompt_config(
             "suggestion/suggestion"
         )
+        self._writer_prompt_config = self._load_prompt_config(
+            SUGGESTION_WRITER_PROMPT_NAME
+        )
+        self._lens_prompt_config = self._load_prompt_config(SUGGESTION_LENS_PROMPT_NAME)
+        self._selector_prompt_config = self._load_prompt_config(
+            SUGGESTION_SELECTOR_PROMPT_NAME
+        )
+        self._lens_rng = random.Random()
+        self._last_step_number = 0  # the run's latest recorded step
         self._action_agent_capabilities_prompt_text = ACTION_AGENT_CAPABILITY_ENVELOPE
         self._current_user_id = ""
         self._current_suggestion_id = ""
         self._last_prompt_text = ""
         self._last_response_text = ""
+        self._recent_suggestions_text = ""
 
     @property
     def task_suggestion_prompt(self) -> str:
@@ -224,11 +229,11 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             raise TypeError("Request must be of type SuggestionAgentRequest")
         suggestion_request = request
 
-        # 直近のanswer（最新5件）を取得（thinkingは含めない）
-        # 期間は広め（30日）に設定し、limitで5件に絞る
+        # 直近のanswer（最新12件）を取得（thinkingは含めない）
+        # 期間は広め（30日）に設定し、limitで12件に絞る
         recent_suggestion_rows = repository_data_or_raise(
             await self.repository.get_recent_suggestions(
-                suggestion_request.user_id, days=30, limit=5
+                suggestion_request.user_id, days=30, limit=12
             ),
             safe_message="failed to fetch recent suggestions",
         )
@@ -304,11 +309,13 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
 
     def _build_prompt(self, context_data: SuggestionFetchedContext) -> str:
         """プロンプトを構築する"""
+        reference_time = self._get_reference_time()
         values: dict[str, str] = {
+            "current_time": describe_local_time(reference_time, local_zone_name()),
             "short_term_insight": context_data["short_term_insight"],
             "reconsideration_reason": context_data["reconsideration_reason"],
             "stable_memory_context": context_data["stable_memory_context"],
-            "pending_work_context": self.stable_memory.pending_work
+            "pending_work_context": self.stable_memory.pending_work.strip()
             or "(No pending work recorded.)",
             "action_agent_capabilities": context_data["action_agent_capabilities"],
             "recent_suggestions": context_data["recent_suggestions"],
@@ -323,6 +330,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "workspace_context_prompt": context_data["workspace_context_prompt"],
             "answer_language": self._answer_language_label(),
         }
+        self._recent_suggestions_text = context_data["recent_suggestions"]
         rendered = self.task_suggestion_prompt.format(**values)
         if len(rendered) > SUGGESTION_INITIAL_PROMPT_MAX_CHARS:
             raise ValueError(
@@ -331,87 +339,12 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             )
         return rendered
 
-    def _parse_suggestion_output(
-        self,
-        *,
-        raw_text: str,
-        parsed_output: SuggestionStructuredOutput | None,
-    ) -> SuggestionExtraction:
-        """SuggestionAgent 用の JSON-only LLM 出力を検証・正規化する。"""
-        parsed = parsed_output
-        if parsed is None:
-            raw = (raw_text or "").strip()
-            if not raw:
-                raise ValueError("Empty structured suggestion response")
-            loaded = json.loads(raw)
-            parsed = SuggestionStructuredOutput.model_validate(loaded)
-
-        answer = parsed.answer.strip()
-        suggestion_summary = (
-            parsed.suggestion_summary.strip()
-            if isinstance(parsed.suggestion_summary, str)
-            else None
-        )
-        target_context = _normalize_target_context(parsed.target_context)
-
-        if parsed.has_suggestion:
-            if not answer:
-                raise ValueError(
-                    "Suggestion answer must be non-empty when has_suggestion=true"
-                )
-            if parsed.interaction_contract is None:
-                raise ValueError(
-                    "interaction_contract is required when has_suggestion=true"
-                )
-            if not suggestion_summary:
-                raise ValueError(
-                    "suggestion_summary must be non-empty when has_suggestion=true"
-                )
-            if target_context is None:
-                raise ValueError(
-                    "target_context must be an object when has_suggestion=true"
-                )
-            return {
-                "thinking": None,
-                "answer": answer,
-                "suggestion_summary": suggestion_summary,
-                "target_context": target_context,
-                "prompt_text": "",
-                "response_text": raw_text,
-                "has_suggestion": True,
-                "interaction_contract": parsed.interaction_contract,
-            }
-
-        if answer:
-            raise ValueError(
-                "Suggestion answer must be empty when has_suggestion=false"
-            )
-        if parsed.interaction_contract is not None:
-            raise ValueError(
-                "interaction_contract must be null when has_suggestion=false"
-            )
-        if suggestion_summary:
-            raise ValueError(
-                "suggestion_summary must be empty when has_suggestion=false"
-            )
-        if target_context is not None:
-            raise ValueError("target_context must be null when has_suggestion=false")
-        return {
-            "thinking": None,
-            "answer": "",
-            "suggestion_summary": None,
-            "target_context": None,
-            "prompt_text": "",
-            "response_text": raw_text,
-            "has_suggestion": False,
-            "interaction_contract": None,
-        }
-
     async def _process_llm_response(self, prompt: str) -> SuggestionExtraction:
         """根拠探索を含むbounded ReActで提案を生成する。"""
         if not self._current_user_id or not self._current_suggestion_id:
             raise RuntimeError("Suggestion request scope is not initialized")
         sink = CountingSink()
+        self._last_step_number = 0
 
         async def generate_tool_call(
             *,
@@ -434,22 +367,55 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 stage=stage,
             )
 
-        extracted = await run_suggestion_react(
+        decision = await decide_with_lenses(
             user_id=self._current_user_id,
             suggestion_id=self._current_suggestion_id,
             initial_prompt=prompt,
             system_instruction=self._system_instruction_for_request(),
+            current_time=describe_local_time(
+                self._get_reference_time(), local_zone_name()
+            ),
+            recent_suggestions=self._recent_suggestions_text,
+            lenses=sample_lenses(self._lens_rng),
+            lens_config=self._lens_prompt_config,
+            selector_config=self._selector_prompt_config,
             research_tools=self.research_tools,
             generate_tool_call=generate_tool_call,
-            parse_output=self._parse_suggestion_output,
             record_step=self._record_react_step,
             discard_llm_thoughts=self._consume_llm_thoughts,
         )
+        extracted = decision.extraction
+        decided = extracted["decided"]
+        if decided is not None:
+
+            async def generate_text(
+                *, prompt: str, system_instruction: str, stage: str
+            ) -> str:
+                text = await self._generate_llm_response(
+                    prompt,
+                    sink=sink,
+                    system_instruction=system_instruction,
+                    stage=stage,
+                )
+                if not isinstance(text, str):
+                    raise RuntimeError("Suggestion writer returned a non-text response")
+                return text
+
+            extracted["answer"] = await write_suggestion_answer(
+                run_id=self._current_suggestion_id,
+                step_number=self._last_step_number + 1,
+                decided=decided,
+                answer_language=self._answer_language_label(),
+                config=self._writer_prompt_config,
+                generate_text=generate_text,
+                record_step=self._record_react_step,
+            )
         self._last_prompt_text = prompt
         self._last_response_text = extracted["response_text"]
         return extracted
 
     async def _record_react_step(self, step: ReactLoopStep) -> None:
+        self._last_step_number = max(self._last_step_number, step.step_number)
         result = await self.repository.save_suggestion_run_step(
             suggestion_id=self._current_suggestion_id,
             step_number=step.step_number,
@@ -482,7 +448,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             thinking=extracted_data["thinking"],
             suggestion_summary=extracted_data["suggestion_summary"],
             target_context=extracted_data["target_context"],
-            created_at=datetime.now(UTC).isoformat(),
+            created_at=now_utc_iso(),
             has_suggestion=extracted_data["has_suggestion"],
             interaction_contract=extracted_data["interaction_contract"],
             user_id=suggestion_request.user_id,
@@ -530,7 +496,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 "thinking": None,
                 "suggestion_summary": None,
                 "target_context": None,
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": now_utc_iso(),
                 "has_suggestion": False,
                 "interaction_contract": None,
                 "user_id": user_id,

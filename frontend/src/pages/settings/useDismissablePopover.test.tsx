@@ -29,6 +29,39 @@ function PopoverHarness() {
   );
 }
 
+/** Passes a new inline callback on every render, as most callers do. */
+function InlineCallbackHarness() {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [renders, setRenders] = useState(0);
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const { popoverRef } = useDismissablePopover({
+    isOpen,
+    triggerRef,
+    onDismiss: () => {
+      setDismissedAt(renders);
+      setIsOpen(false);
+    },
+  });
+
+  return (
+    <>
+      <button ref={triggerRef} type="button" onClick={() => setIsOpen(true)}>
+        Open
+      </button>
+      {isOpen ? (
+        <div ref={popoverRef} role="dialog">
+          <input aria-label="First field" />
+          <button type="button" onClick={() => setRenders((count) => count + 1)}>
+            Rerender
+          </button>
+        </div>
+      ) : null}
+      <output aria-label="Dismissed at">{dismissedAt ?? 'open'}</output>
+    </>
+  );
+}
+
 describe('useDismissablePopover', () => {
   afterEach(cleanup);
 
@@ -76,5 +109,19 @@ describe('useDismissablePopover', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(outside).toHaveFocus();
+  });
+
+  it('keeps focus in place across re-renders and dismisses with the latest callback', async () => {
+    const user = userEvent.setup();
+    render(<InlineCallbackHarness />);
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    const rerender = screen.getByRole('button', { name: 'Rerender' });
+    await user.click(rerender);
+    await user.click(rerender);
+
+    expect(rerender).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('status', { name: 'Dismissed at' })).toHaveTextContent('2');
   });
 });

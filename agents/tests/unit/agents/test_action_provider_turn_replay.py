@@ -75,6 +75,7 @@ def _window(store: ActionProviderTurnStore) -> PreparedWindow:
             )
         ],
         turn_context=None,
+        world_state=None,
         file_inputs=(),
         history_bytes=0,
         rendered_bytes=0,

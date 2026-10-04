@@ -99,7 +99,6 @@ export type HistoryChangedPayload =
   | { source: 'read_state' };
 
 export type NotificationIpcHandlers = {
-  onShowNotification: (event: unknown, payload: unknown) => void;
   onResizeNotificationWindow: (event: unknown, payload: unknown) => void;
   onNotificationActionAccept: (event: unknown, payload: unknown) => void;
   onNotificationActionReject: (event: unknown, payload: unknown) => void;
@@ -123,8 +122,7 @@ export type NotificationWindowApi = {
   setLocalOwnerIdGetter: (getter: () => string | null) => void;
   // Synchronously destroy owner windows and invalidate pending delivery before rebinding.
   clearForOwnerChange: () => void;
-  showNotification: (payload: unknown, id?: string) => void;
-  getNotificationWindow: () => BrowserWindow | null;
+  showNotification: (id: string) => void;
   isVisibleOverlayAtPoint?: (point: { x: number; y: number }) => boolean;
   hasRecentOverlayInteraction?: (referenceMs?: number) => boolean;
   sendToAllOverlays: (channel: string, payload: unknown) => void;
@@ -134,6 +132,8 @@ export type NotificationWindowApi = {
   setOverlaySnapshot: (suggestionId: string, payload: OverlaySnapshotPayload) => void;
   registerProcessAssociation: (processId: string, suggestionId: string) => void;
   registerActionAssociation: (actionId: string, overlayId: string) => void;
+  // Binds unless an open window already shows the Action; for server-event-derived binds.
+  adoptActionAssociation: (actionId: string, overlayId: string) => void;
   cleanupMappingsForProcess: (processId: string) => void;
   cleanupMappingsForAction: (actionId: string) => void;
   clearActionAssociations: () => void;

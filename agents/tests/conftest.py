@@ -118,6 +118,9 @@ from pantaray_agents.local_runtime.runtime.connection_store import (  # noqa: E4
 from pantaray_agents.local_runtime.runtime.session_store import (  # noqa: E402
     reset_desktop_session_store,
 )
+from pantaray_agents.local_runtime.tooling.brokering import (  # noqa: E402
+    command_runtime,
+)
 from pantaray_agents.settings_loader import (  # noqa: E402
     clear_active_settings_module,
 )
@@ -169,3 +172,9 @@ def reset_local_desktop_session() -> None:
     yield
     reset_connection_store()
     reset_desktop_session_store()
+
+
+@pytest.fixture(autouse=True)
+def use_process_path_for_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commands see this process's PATH, not whatever the developer's dotfiles set."""
+    monkeypatch.setattr(command_runtime, "login_shell_path", lambda: os.environ["PATH"])

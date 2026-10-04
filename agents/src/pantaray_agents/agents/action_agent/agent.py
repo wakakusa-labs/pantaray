@@ -7,10 +7,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent.agent_runtime_facade import (
-    clone_runtime_tool_registry,
     coerce_action_token_budget,
     load_runtime_approval_session_by_request,
-    now_iso,
 )
 from pantaray_agents.agents.action_agent.runtime.graph import (
     ActionGraphRuntime,
@@ -27,10 +25,6 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.action_agent.support.formatter import (
     ActionAgentFormatter,
-)
-from pantaray_agents.agents.action_agent.tools import (
-    TOOL_REGISTRY,
-    ToolDefinition,
 )
 from pantaray_agents.agents.core import BaseAgent
 from pantaray_agents.application.action.cancellation_service import (
@@ -59,6 +53,7 @@ from pantaray_agents.application.action.runtime_entrypoint import (
 from pantaray_agents.local_runtime.runtime.bootstrap import (
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.models import StoredApprovalSession
 from pantaray_agents.repositories.runtime_ports import ActionRepositoryPort
 from pantaray_agents.schema.agent.action import (
@@ -102,10 +97,7 @@ class ActionAgent(
         self.repository = repository
         # プロンプト設定のロード（system_instruction と prompt を分離）
         self._executing_config = self._load_prompt_config(self.EXECUTING_PROMPT_NAME)
-        runtime_tool_registry: dict[str, ToolDefinition] = clone_runtime_tool_registry(
-            TOOL_REGISTRY
-        )
-        formatter = ActionAgentFormatter(runtime_tool_registry)
+        formatter = ActionAgentFormatter()
         self._prompt_rendering_service = PromptRenderingService(
             PromptRenderingDeps(formatter=formatter)
         )
@@ -113,7 +105,7 @@ class ActionAgent(
         self._initialize_runtime_support()
 
     def _now_iso(self) -> str:
-        return now_iso()
+        return now_utc_iso()
 
     @property
     def executing_prompt_name(self) -> str:
@@ -180,7 +172,7 @@ class ActionAgent(
             default_prompt_name=self.executing_prompt_name,
             default_prompt_version="1.0",
             logger=self._logger,
-            now_provider=now_iso,
+            now_provider=now_utc_iso,
         )
         self._response_service = ActionResponseService(
             ResponseDeps(persistence=self._persistence)
@@ -195,14 +187,14 @@ class ActionAgent(
                 logger=self._logger,
                 load_approval_session_by_request=self.load_approval_session_by_request,
                 build_agent_error=self._response_service.build_agent_error,
-                now_provider=now_iso,
+                now_provider=now_utc_iso,
             )
         )
         self._cancellation_service = ActionCancellationService(
             CancellationDeps(
                 repository=self.repository,
                 logger=self._logger,
-                now_provider=now_iso,
+                now_provider=now_utc_iso,
                 build_agent_error=self._response_service.build_agent_error,
             )
         )
@@ -232,9 +224,13 @@ class ActionAgent(
         """Executing の system_instruction を返す。"""
         return self._executing_config.system_instruction
 
-    def executing_tool_use_rule(self, key: str) -> str:
-        """Executing prompt の tool use rule を返す。"""
-        return self._executing_config.require_tool_use_rule(key)
+    def executing_role_rule(self, key: str) -> str:
+        """Executing prompt の role rule を返す。"""
+        return self._executing_config.require_role_rule(key)
+
+    def executing_world_state_update(self, key: str) -> str:
+        """Executing prompt の world state 更新テンプレートを返す。"""
+        return self._executing_config.require_world_state_update(key)
 
     def get_response_class(self) -> type[ActionAgentResponse]:
         return ActionAgentResponse

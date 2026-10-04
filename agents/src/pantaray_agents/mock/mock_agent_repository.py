@@ -4,6 +4,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+
 from ..schema.agent.base import StatusType
 from ..schema.repositories.repository import RepositoryResult
 from .mock_action_agent_repository import MockActionAgentRepository
@@ -64,7 +66,7 @@ class MockInsightAgentRepository(MockRepository):
             "prompt_name": prompt_name,
             "prompt_version": prompt_version,
             "created_at": created_at.isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": now_utc_iso(),
             "status": getattr(response, "status", StatusType.SUCCESS),
             "error": None,
             "insight_update_id": None,

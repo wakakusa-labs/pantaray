@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
@@ -32,6 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.support.severity import (
     FATAL_SEVERITIES,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.action import (
     ActionAgentResponse,
     ActionApprovalBlocker,
@@ -93,7 +93,7 @@ class ActionAgentPersistence:
         now_provider: Callable[[], str] | None = None,
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
-        self._now_provider = now_provider or (lambda: datetime.now(UTC).isoformat())
+        self._now_provider = now_provider or now_utc_iso
         self._default_prompt_name = default_prompt_name
         self._default_prompt_version = default_prompt_version
 

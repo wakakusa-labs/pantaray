@@ -211,6 +211,11 @@ async def execute_bash(
             "command": command,
             **({"cwd": cwd} if cwd is not None else {}),
             "use_login_environment": use_login_environment,
+            **(
+                {"justification": "Use your signed-in accounts for this check."}
+                if use_login_environment
+                else {}
+            ),
         },
     )
 

@@ -8,7 +8,7 @@
  * for logging and test assertions.
  */
 
-import type { ZodIssue, ZodSchema } from 'zod';
+import type { ZodIssue, ZodType, ZodTypeDef } from 'zod';
 
 export class IpcValidationError extends Error {
   readonly channel: string;
@@ -22,7 +22,12 @@ export class IpcValidationError extends Error {
   }
 }
 
-export function parseInput<T>(schema: ZodSchema<T>, channel: string, payload: unknown): T {
+// The parsed shape may differ from the payload shape when a schema transforms a field.
+export function parseInput<T>(
+  schema: ZodType<T, ZodTypeDef, unknown>,
+  channel: string,
+  payload: unknown
+): T {
   const result = schema.safeParse(payload);
   if (result.success) {
     return result.data;

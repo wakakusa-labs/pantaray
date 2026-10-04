@@ -12,7 +12,6 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Final, cast
 
 from pantaray_agents.local_runtime.runtime.job_payload_models import (
@@ -25,6 +24,7 @@ from pantaray_agents.local_runtime.runtime.job_types import (
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     append_memory_category_published_in_connection,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import (
@@ -70,26 +70,41 @@ class MemoryRunBinding:
         return None
 
 
-def distinct_action_terminals(
+def merged_action_terminals(
     terminals: tuple[MemoryUpdateActionTerminal, ...],
 ) -> tuple[MemoryUpdateActionTerminal, ...]:
-    """Keep the last completed turn per Action; short step refs are per Action.
+    """One terminal per Action whose step window spans all its turns in this run.
 
-    An Action that completed several turns before this run therefore reaches the
-    agent as its newest turn only: earlier turns of the same Action are dropped
-    rather than merged, because one Action carries exactly one evidence ref and
-    one revision, and the newest turn is the state the memory should record.
+    Turns are independent step ranges, not cumulative states, so a run that
+    coalesced several turns of one Action must record every one of them. They
+    become one window because an Action carries exactly one evidence ref and
+    one revision. The window keeps the newest turn's identity but the
+    revision of the newest turn that published one: an error or cancel turn
+    publishes nothing, so the Action's current revision is still the one an
+    earlier successful turn published. Dispatch takes pending triggers oldest
+    first and never re-queues one, so the turns of an Action inside one run are
+    consecutive, and the span reaches no turn another run records.
     """
 
-    latest: dict[str, MemoryUpdateActionTerminal] = {}
+    turns_by_action: dict[str, list[MemoryUpdateActionTerminal]] = {}
     for terminal in terminals:
-        current = latest.get(terminal["action_id"])
-        if (
-            current is None
-            or current["turn_end_step_number"] < terminal["turn_end_step_number"]
-        ):
-            latest[terminal["action_id"]] = terminal
-    return tuple(latest[action_id] for action_id in sorted(latest))
+        turns_by_action.setdefault(terminal["action_id"], []).append(terminal)
+    merged: list[MemoryUpdateActionTerminal] = []
+    for action_id in sorted(turns_by_action):
+        turns = sorted(
+            turns_by_action[action_id], key=lambda turn: turn["turn_end_step_number"]
+        )
+        window = turns[-1].copy()
+        window["turn_start_step_number"] = min(
+            turn["turn_start_step_number"] for turn in turns
+        )
+        window.pop("source_action_revision_id", None)
+        for turn in reversed(turns):
+            if "source_action_revision_id" in turn:
+                window["source_action_revision_id"] = turn["source_action_revision_id"]
+                break
+        merged.append(window)
+    return tuple(merged)
 
 
 def memory_run_binding_from_payload(
@@ -104,9 +119,7 @@ def memory_run_binding_from_payload(
                 action_id=terminal["action_id"],
                 source_action_revision_id=terminal.get("source_action_revision_id"),
             )
-            for terminal in distinct_action_terminals(
-                tuple(payload["action_terminals"])
-            )
+            for terminal in merged_action_terminals(tuple(payload["action_terminals"]))
         ),
     )
 
@@ -210,7 +223,7 @@ def record_memory_run_category(
         process_id=binding.process_id,
         source=source,
         revision_id=revision.revision_id,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=now_utc_iso(),
     )
 
 
@@ -294,10 +307,10 @@ __all__ = [
     "MemoryRunActionEvidence",
     "MemoryRunBinding",
     "derived_experience_ids",
-    "distinct_action_terminals",
     "memory_run_binding_from_intent",
     "memory_run_binding_from_payload",
     "memory_run_binding_payload",
+    "merged_action_terminals",
     "record_memory_run_category",
     "validate_memory_run_intent_owner",
     "validate_memory_run_runtime",

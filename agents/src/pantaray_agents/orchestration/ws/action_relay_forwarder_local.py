@@ -239,6 +239,7 @@ async def _forward_action_events_from_local_runtime(
                         action_id=str(event.payload["action_id"]),
                         tool_request_id=str(event.payload["tool_request_id"]),
                         capture_request_id=str(event.payload["capture_request_id"]),
+                        app_name=str(event.payload["app_name"]),
                     ),
                     process_id=process_id,
                     meta=dict(meta),

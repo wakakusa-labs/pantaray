@@ -6,10 +6,12 @@ from pydantic import BaseModel, Field
 from pydantic.types import UUID4
 
 from ..agent.action_message import (
+    ACTION_MESSAGE_MAX_FILES,
     ACTION_MESSAGE_MAX_IMAGES,
     ACTION_MESSAGE_MAX_PROJECT_REFS,
     ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS,
     ActionProjectRef,
+    FileAttachmentInput,
 )
 from ..agent.image import ImageInput
 
@@ -42,6 +44,11 @@ class ExecuteActionMessage(BaseModel):
         default=(),
         max_length=ACTION_MESSAGE_MAX_PROJECT_REFS,
         description="Workspace projects named in the trimmed supplement",
+    )
+    files: tuple[FileAttachmentInput, ...] = Field(
+        default=(),
+        max_length=ACTION_MESSAGE_MAX_FILES,
+        description="Documents attached beside the supplement",
     )
 
 

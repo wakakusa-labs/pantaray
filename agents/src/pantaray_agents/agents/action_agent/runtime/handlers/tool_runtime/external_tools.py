@@ -21,6 +21,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime imp
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
@@ -34,7 +35,6 @@ from .shared import (
     HistoryFetchPayload,
     ToolValidationError,
     UnprojectedToolExecutionResult,
-    now_iso,
 )
 
 if TYPE_CHECKING:
@@ -59,8 +59,8 @@ async def run_web_search_wrapper(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status=outcome.status,
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, outcome.payload),
         prompt_tokens=outcome.prompt_tokens,
         completion_tokens=outcome.completion_tokens,
@@ -85,8 +85,8 @@ async def run_web_extract_wrapper(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status=outcome.status,
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, outcome.payload),
         prompt_tokens=outcome.prompt_tokens,
         completion_tokens=outcome.completion_tokens,
@@ -111,8 +111,8 @@ async def run_web_crawl_wrapper(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status=outcome.status,
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, outcome.payload),
         prompt_tokens=outcome.prompt_tokens,
         completion_tokens=outcome.completion_tokens,
@@ -173,8 +173,8 @@ async def run_history_fetch_wrapper(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
-        started_at=now_iso(),
-        completed_at=now_iso(),
+        started_at=now_utc_iso(),
+        completed_at=now_utc_iso(),
         output=cast(JSONValue, payload),
     )
 

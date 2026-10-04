@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 
 from ..locks.workspace_lock_coordinator import (
@@ -247,7 +247,7 @@ def run_apply_patch_executor(
                 db_path=context.db_path,
                 busy_timeout_ms=context.busy_timeout_ms,
                 lease=workspace_lock_lease,
-                released_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                released_at=now_utc_iso(),
             )
 
 

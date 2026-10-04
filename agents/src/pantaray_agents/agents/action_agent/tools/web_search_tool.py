@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pantaray_llm.profiles import WEB_SEARCH_COUNTRIES, WEB_SEARCH_TOPICS
+from pantaray_llm.profiles import (
+    WEB_SEARCH_COUNTRIES,
+    WEB_SEARCH_RESULT_LIMIT,
+    WEB_SEARCH_TOPICS,
+)
 
 from .base import (
     InputSpec,
@@ -19,8 +23,9 @@ WEB_SEARCH_TOOL = ToolDefinition.from_spec(
         tool_id="web_search",
         name="Web Search",
         description=(
-            "Search the web via the cloud search wrapper and return normalized "
-            "search results for one focused query."
+            "Search the web via the cloud search wrapper and return up to "
+            f"{WEB_SEARCH_RESULT_LIMIT} results for one focused query. Each result's "
+            "content is a short excerpt; use web_extract to read the full page."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -49,43 +54,34 @@ WEB_SEARCH_TOOL = ToolDefinition.from_spec(
                         "type": "string",
                         "minLength": 1,
                         "pattern": r"\S",
-                        "description": "Focused Tavily search query to execute.",
                     },
                     required=True,
-                    prompt_type="string",
                     description="Focused Tavily search query to execute.",
-                    llm_order=10,
                 ),
                 field_spec(
                     name="topic",
                     schema={
                         "type": "string",
                         "enum": list(WEB_SEARCH_TOPICS),
-                        "description": (
-                            "Optional Tavily search topic. Use general for broad web "
-                            "search, news for recent reporting, or finance for market "
-                            "and company information."
-                        ),
                     },
                     required=False,
-                    prompt_type="string",
-                    description="Optional Tavily search topic.",
-                    llm_order=20,
+                    description=(
+                        "Optional Tavily search topic. Use general for broad web "
+                        "search, news for recent reporting, or finance for market "
+                        "and company information."
+                    ),
                 ),
                 field_spec(
                     name="country",
                     schema={
                         "type": "string",
                         "enum": list(WEB_SEARCH_COUNTRIES),
-                        "description": (
-                            "Optional Tavily country hint. Only use this with the "
-                            "general topic when regional results matter."
-                        ),
                     },
                     required=False,
-                    prompt_type="string",
-                    description="Optional Tavily country hint for general searches.",
-                    llm_order=30,
+                    description=(
+                        "Optional Tavily country hint. Only use this with the "
+                        "general topic when regional results matter."
+                    ),
                 ),
             )
         ),

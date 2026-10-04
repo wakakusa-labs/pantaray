@@ -10,7 +10,10 @@ from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
 )
-from pantaray_agents.schema.agent.action_message import ActionProjectRef
+from pantaray_agents.schema.agent.action_message import (
+    ActionProjectRef,
+    FileAttachmentInput,
+)
 from pantaray_agents.schema.agent.action_message_codec import (
     parse_action_user_message as parse_action_user_message_codec,
 )
@@ -115,6 +118,77 @@ def test_project_refs_render_one_line_per_project_and_round_trip() -> None:
         )
         == message
     )
+
+
+ATTACHMENT_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+
+def test_attached_files_add_a_note_the_visible_text_does_not_carry() -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Summarize these",
+        files=(
+            FileAttachmentInput(
+                attachment_id=ATTACHMENT_ID, name="Report.PDF", byte_size=1_258_291
+            ),
+            FileAttachmentInput(
+                attachment_id=ATTACHMENT_ID, name="予算 v2.xlsx", byte_size=2_048
+            ),
+            FileAttachmentInput(
+                attachment_id=ATTACHMENT_ID, name="run.ipynb", byte_size=900
+            ),
+        ),
+    )
+
+    assert render_action_user_request_text(message) == (
+        "Summarize these\n\n"
+        "Attached files:\n"
+        "The user attached these files to this message. Each is saved at the path "
+        "shown, relative to your workspace cwd. Open one with the `read` tool at "
+        "that path; the pages of a PDF, Word, PowerPoint or Excel file can also "
+        "be viewed with `render_pdf_page`. These "
+        "formats are readable: do not tell the user they are unsupported, and do "
+        "not ask them to paste the contents.\n"
+        f"- Report.PDF (PDF, 1.2 MB): attachments/{ATTACHMENT_ID}/Report.PDF\n"
+        f"- 予算 v2.xlsx (Excel workbook, 2.0 KB): attachments/{ATTACHMENT_ID}/予算 v2.xlsx\n"
+        f"- run.ipynb (Jupyter notebook, 900 B): attachments/{ATTACHMENT_ID}/run.ipynb"
+    )
+    assert render_action_user_visible_text(
+        content=message.content, supplement=None
+    ) == ("Summarize these")
+    assert parse_action_user_message(serialize_action_user_message(message)) == message
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "notes.txt",
+        "legacy.doc",
+        ".pdf",
+        ".hidden.pdf",
+        "a/b.pdf",
+        "a\\b.pdf",
+        "a:b.pdf",
+        "tab\there.pdf",
+        "nul\x00.pdf",
+        "cafe\u0301.pdf",
+        "x" * 252 + ".pdf",
+    ],
+)
+def test_attached_file_name_must_be_one_safe_component_of_a_readable_type(
+    name: str,
+) -> None:
+    with pytest.raises(ValidationError, match="attached file name is not allowed"):
+        FileAttachmentInput(attachment_id=ATTACHMENT_ID, name=name, byte_size=1)
+
+
+@pytest.mark.parametrize(
+    "attachment_id",
+    ["../escape", "0F8FAD5B-D9CB-469F-A165-70867728950E", "not-a-uuid"],
+)
+def test_attachment_id_must_be_a_canonical_uuid(attachment_id: str) -> None:
+    with pytest.raises(ValidationError):
+        FileAttachmentInput(attachment_id=attachment_id, name="a.pdf", byte_size=1)
 
 
 def test_supplement_project_refs_require_a_supplement() -> None:

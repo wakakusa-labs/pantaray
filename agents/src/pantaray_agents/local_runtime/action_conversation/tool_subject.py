@@ -92,8 +92,8 @@ def _pattern_in_path(args: dict[str, JSONValue]) -> str | None:
 
 
 # Only a tool whose call names what it acted on has a subject. A tool that always acts on
-# the whole screen, the current plan, or the answer being written has none, and its row
-# falls back to the head of its result.
+# the current plan or the answer being written has none, and its row falls back to the
+# head of its result.
 _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "read": _text("path"),
     "render_pdf_page": _text("path"),
@@ -103,6 +103,7 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "bash": _text("command"),
     "run_python": _text("code"),
     "apply_patch": _changed_paths,
+    "capture_screen": _text("app_name"),
     "web_search": _text("query"),
     "web_extract": _joined("urls"),
     "web_crawl": _text("url"),
@@ -111,6 +112,7 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "get_memory_reference": _text("source_handle", "local_ref_id"),
     "link_memory": _text("target_handle"),
     "unlink_memory": _text("local_ref_id"),
+    "remember": _text("note"),
     "history_fetch": _joined("refs"),
     "zanei_query": _text("event_id"),
     "spawn_subagent": _text("task"),

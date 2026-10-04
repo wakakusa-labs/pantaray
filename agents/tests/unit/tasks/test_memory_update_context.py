@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     MEMORY_RUN_MAX_NEW_EXPERIENCES,
+    MemoryRunActionEvidence,
     derived_experience_ids,
+    memory_run_binding_from_payload,
 )
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
@@ -26,11 +30,20 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     LocalMemoryFileEditorRuntime,
 )
+from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.agent.action_message_codec import (
+    render_action_user_request_text,
+)
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tasks.action_user_message import serialize_action_user_message
 from pantaray_agents.tasks.memory_update_context import (
     derived_first_fact_id,
     prepare_memory_update_run,
 )
-from pantaray_agents.tasks.types import MemoryUpdateJobPayload
+from pantaray_agents.tasks.types import (
+    MemoryUpdateActionTerminal,
+    MemoryUpdateJobPayload,
+)
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
@@ -234,6 +247,7 @@ def test_action_terminals_expose_scoped_history_tools(tmp_path: Path) -> None:
         )
 
     assert "action-1" in prepared.context.action_turns
+    assert "steps 1-4," in prepared.context.action_turns
     fetch = next(
         definition
         for definition in prepared.tool_definitions
@@ -242,6 +256,212 @@ def test_action_terminals_expose_scoped_history_tools(tmp_path: Path) -> None:
     properties = fetch.request_schema["properties"]
     assert isinstance(properties, dict)
     assert properties["action_id"] == {"type": "string", "enum": ["action-1"]}
+
+
+def _insert_user_step(db_path: Path, *, step_number: int, text: str) -> None:
+    message = ActionUserMessageInput(message_id=f"message-{step_number}", content=text)
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO agent_action_steps(
+                step_id, action_id, user_id, step_number, local_step_number,
+                short_step_id, step_type, step_name, status, goal_handle,
+                retry_count, prompt_tokens, completion_tokens, user_message_id,
+                user_message_json, user_request_text, accepted_sequence,
+                adopted_process_id, started_at, completed_at, created_at
+            ) VALUES (?, 'action-1', ?, ?, ?, ?, 'user_request', 'user_request',
+                      'success', 'S', 0, 0, 0, ?, ?, ?, ?, 'action-process', ?, ?, ?)
+            """,
+            (
+                f"step-{step_number}",
+                USER_ID,
+                step_number,
+                step_number,
+                f"S-{step_number}-USER",
+                message.message_id,
+                serialize_action_user_message(message),
+                render_action_user_request_text(message),
+                step_number,
+                NOW,
+                NOW,
+                NOW,
+            ),
+        )
+
+
+def _turn(start: int, end: int, revision_id: str | None) -> MemoryUpdateActionTerminal:
+    terminal: MemoryUpdateActionTerminal = {
+        "source_id": f"action-1:{end}",
+        "action_id": "action-1",
+        "action_completed_at": f"2026-09-07T00:00:0{end // 3}Z",
+        "turn_start_step_number": start,
+        "turn_end_step_number": end,
+        "action_prompt_name": "action",
+        "action_prompt_version": f"{end // 3}.0",
+    }
+    if revision_id is not None:
+        terminal["source_action_revision_id"] = revision_id
+    return terminal
+
+
+def _tool_call(name: str, **args: JSONValue) -> ReactToolCall:
+    return ReactToolCall(
+        tool_name=name,
+        tool_args=dict(args),
+        tool_call_envelope=ToolCallEnvelope(tool_id=name, reason=None, args=dict(args)),
+    )
+
+
+async def test_every_turn_one_run_coalesced_for_an_action_stays_readable(
+    tmp_path: Path,
+) -> None:
+    # A run that queued while another was running carries several turns of one
+    # Action; the user's request in an earlier turn must stay in reach.
+    runtime = _runtime(tmp_path)
+    _bootstrap(runtime.db_path)
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO processes(
+                process_id, user_id, kind, status, action_id, next_event_seq,
+                started_at, updated_at, heartbeat_at
+            ) VALUES ('action-process', ?, 'action', 'running', 'action-1', 1,
+                      ?, ?, ?)
+            """,
+            (USER_ID, NOW, NOW, NOW),
+        )
+    for step_number, text in (
+        (1, "Remember the first request"),
+        (4, "second"),
+        (7, "third"),
+    ):
+        _insert_user_step(runtime.db_path, step_number=step_number, text=text)
+    payload = _payload()
+    payload["action_terminals"] = [
+        _turn(1, 3, "rev-1"),
+        _turn(4, 6, "rev-2"),
+        _turn(7, 9, "rev-3"),
+    ]
+
+    with MemoryRunWorkspaceScope() as scope:
+        prepared = prepare_memory_update_run(
+            runtime=runtime, payload=payload, workspace_scope=scope
+        )
+
+    (listed,) = prepared.context.action_turns.splitlines()
+    assert listed.startswith("- action_id: action-1 ")
+    assert listed.endswith(", steps 1-9, prompt action@3.0)")
+    tools = {definition.name: definition for definition in prepared.tool_definitions}
+    fetched = await tools["history_fetch"].execute(
+        _tool_call("history_fetch", action_id="action-1", refs=["S-1-USER"]), 1
+    )
+    assert fetched.status == "success"
+    assert "Remember the first request" in json.dumps(fetched.output)
+    found = await tools["search_action_steps"].execute(
+        _tool_call("search_action_steps", action_id="action-1", query="Remember"), 1
+    )
+    assert found.status == "success"
+    assert isinstance(found.output, dict)
+    matches = found.output["matches"]
+    assert isinstance(matches, list)
+    assert [match["short_step_id"] for match in matches] == ["S-1-USER"]
+    # The Action still cites one revision: the newest turn's.
+    assert memory_run_binding_from_payload(payload).action_evidence == (
+        MemoryRunActionEvidence(
+            action_id="action-1", source_action_revision_id="rev-3"
+        ),
+    )
+
+
+async def test_a_later_turn_starts_at_its_new_steps_and_reaches_back_to_step_1(
+    tmp_path: Path,
+) -> None:
+    # "Remember this" in a later turn only makes sense against the request
+    # that started the Action, which an earlier memory run already recorded.
+    runtime = _runtime(tmp_path)
+    _bootstrap(runtime.db_path)
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO processes(
+                process_id, user_id, kind, status, action_id, next_event_seq,
+                started_at, updated_at, heartbeat_at
+            ) VALUES ('action-process', ?, 'action', 'running', 'action-1', 1,
+                      ?, ?, ?)
+            """,
+            (USER_ID, NOW, NOW, NOW),
+        )
+    for step_number, text in (
+        (1, "Draft the launch plan"),
+        (4, "Remember to keep the launch plan short"),
+        (7, "Launch plan follow-up still in progress"),
+    ):
+        _insert_user_step(runtime.db_path, step_number=step_number, text=text)
+    payload = _payload()
+    payload["action_terminals"] = [_turn(4, 6, "rev-2")]
+
+    with MemoryRunWorkspaceScope() as scope:
+        prepared = prepare_memory_update_run(
+            runtime=runtime, payload=payload, workspace_scope=scope
+        )
+
+    assert ", steps 4-6, " in prepared.context.action_turns
+    tools = {definition.name: definition for definition in prepared.tool_definitions}
+
+    async def refs(name: str, key: str, **args: JSONValue) -> list[JSONValue]:
+        result = await tools[name].execute(
+            _tool_call(name, action_id="action-1", **args), 1
+        )
+        assert isinstance(result.output, dict)
+        items = result.output[key]
+        assert isinstance(items, list)
+        return [item["short_step_id"] for item in items if isinstance(item, dict)]
+
+    # The run starts at the steps it records; step 7 is past the bound.
+    assert await refs("list_action_steps", "steps") == ["S-4-USER"]
+    assert await refs("search_action_steps", "matches", query="launch") == ["S-4-USER"]
+    assert await refs("list_action_steps", "steps", from_step=1) == [
+        "S-1-USER",
+        "S-4-USER",
+    ]
+    assert await refs(
+        "search_action_steps", "matches", query="launch", from_step=1
+    ) == ["S-1-USER", "S-4-USER"]
+    fetched = await tools["history_fetch"].execute(
+        _tool_call("history_fetch", action_id="action-1", refs=["S-1-USER"]), 1
+    )
+    assert fetched.status == "success"
+    assert "Draft the launch plan" in json.dumps(fetched.output)
+    beyond = await tools["history_fetch"].execute(
+        _tool_call("history_fetch", action_id="action-1", refs=["S-7-USER"]), 1
+    )
+    assert beyond.status == "error"
+
+
+@pytest.mark.parametrize(
+    ("revisions", "expected"),
+    [
+        # An error or cancel turn publishes no revision, so the Action's current
+        # revision is still the one the earlier successful turn published.
+        (("rev-1", "rev-2", None), "rev-2"),
+        ((None, None, None), None),
+    ],
+)
+def test_the_action_cites_the_newest_revision_its_turns_published(
+    revisions: tuple[str | None, str | None, str | None], expected: str | None
+) -> None:
+    payload = _payload()
+    payload["action_terminals"] = [
+        _turn(1, 3, revisions[0]),
+        _turn(4, 6, revisions[1]),
+        _turn(7, 9, revisions[2]),
+    ]
+
+    assert memory_run_binding_from_payload(payload).action_evidence == (
+        MemoryRunActionEvidence(
+            action_id="action-1", source_action_revision_id=expected
+        ),
+    )
 
 
 def test_the_first_fact_node_id_is_derived_from_the_job(tmp_path: Path) -> None:

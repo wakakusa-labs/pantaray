@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Final, Literal, TypedDict, TypeGuard
 
 from pantaray_agents.suggestion_reactions import (
@@ -15,6 +14,7 @@ from pantaray_agents.suggestion_reactions import (
     require_stored_suggestion_user_reaction,
 )
 from pantaray_agents.utils.strict_numbers import is_strict_int
+from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_microseconds
 
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
@@ -413,25 +413,14 @@ def _normalize_required_non_empty_str(
 def _normalize_timestamp_str(
     command: FinalizeActionTerminalCommand, field_name: str
 ) -> None:
-    value = getattr(command, field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(
-            f"FinalizeActionTerminalCommand: {field_name} must be a non-empty string"
-        )
-    normalized = value.strip()
+    # Stored terminal payloads are re-derived and compared in microseconds.
     try:
-        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        canonical = normalize_iso8601_utc_z_microseconds(getattr(command, field_name))
     except ValueError as exc:
         raise ValueError(
-            f"FinalizeActionTerminalCommand: {field_name} must be an ISO 8601 timestamp"
+            f"FinalizeActionTerminalCommand: {field_name} must be a "
+            f"timezone-aware ISO 8601 timestamp: {exc}"
         ) from exc
-    if parsed.tzinfo is None:
-        raise ValueError(
-            f"FinalizeActionTerminalCommand: {field_name} must include timezone offset"
-        )
-    canonical = (
-        parsed.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-    )
     object.__setattr__(command, field_name, canonical)
 
 

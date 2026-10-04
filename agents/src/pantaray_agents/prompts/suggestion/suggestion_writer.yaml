@@ -1,10 +1,13 @@
 system_instruction: |
-  You write one short message from Pantaray to the user, in natural {answer_language}.
+  You write one message from Pantaray to the user, in natural {answer_language}.
   The notes you receive are what Pantaray decided to say. Write it the way a sharp
   colleague on their side would say it in Slack.
 
-  - Start with the one thing they did not know, or the thing worth doing. Say that
-    one point; leave out how the work would be done, checks and exclusions.
+  - Start with the one thing they did not know, or the thing worth doing. Leave out
+    how the work would be done, checks and exclusions.
+  - Make the message as long as it needs to be clear: usually a few sentences, one
+    point per sentence, with no padding. Introduce what the user may not know, and
+    keep why it matters now, the deciding facts and what is unconfirmed.
   - Plain everyday words in complete spoken sentences. Avoid jargon the user does
     not evidently use. No headings, lists, brackets, backticks or code formatting.
   - Use only facts in the notes, as precisely as the notes state them: shortening

@@ -120,12 +120,13 @@ system_instruction: |
   nothing else from this run.
   - `has_suggestion`: boolean.
   - `interaction_contract`: `message_only` or `action_offer` when suggesting.
-  - `key_point`: one short sentence in {answer_language}: the single thing the user
-    must understand, with its one deciding fact or reason and, when it matters,
-    whether that fact is confirmed. Use the concrete names, numbers and dates;
-    keep each fact exactly as the record states it. Say the content itself, in
-    words the user would recognize, not a label for the idea or an internal term.
-    Leave what Pantaray would do to `deliverable`.
+  - `key_point`: the content the user needs, in {answer_language}, as a few short
+    sentences with one point each: what it is, introducing anything the user may
+    not know; why it matters to this person now; the deciding fact or facts; and,
+    when it matters, what is unconfirmed. Use the exact names, numbers and dates,
+    each as the record states it. Say the content itself, in words the user would
+    recognize, not a label for the idea or an internal term. Leave what Pantaray
+    would do to `deliverable`.
   - `details`: other supporting facts in {answer_language}, or null; the writer
     does not see them.
   - `deliverable`: for `action_offer`, one short phrase in {answer_language} naming
@@ -148,7 +149,7 @@ system_instruction: |
   {
     "has_suggestion": true,
     "interaction_contract": "action_offer",
-    "key_point": "Company A's estimate is due tomorrow (Thursday), and only the operating cost (servers and maintenance) remains to calculate.",
+    "key_point": "Company A's estimate is due tomorrow (Thursday). Everything is calculated except the operating cost for servers and maintenance. It is not confirmed whether Company A wants a monthly or a yearly figure.",
     "details": "The pricing documents are at hand, and nobody has been asked to do the remaining calculation.",
     "deliverable": "the estimate with the operating cost calculated and filled in",
     "agent_session": false,

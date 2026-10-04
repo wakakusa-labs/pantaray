@@ -132,7 +132,8 @@ async def decide_with_lenses(
 ) -> LensDecision:
     """Run one decision run per lens in parallel and select among their candidates.
 
-    Any run's failure fails the Suggestion, as a single run's failure does.
+    Any run's failure fails the Suggestion, as a single run's failure does, and
+    stops the other runs.
     """
 
     async def run_lens(index: int, lens: str) -> SuggestionExtraction:
@@ -153,9 +154,18 @@ async def decide_with_lenses(
             discard_llm_thoughts=discard_llm_thoughts,
         )
 
-    results = await asyncio.gather(
-        *(run_lens(index, lens) for index, lens in enumerate(lenses))
-    )
+    tasks = [
+        asyncio.create_task(run_lens(index, lens)) for index, lens in enumerate(lenses)
+    ]
+    try:
+        results = await asyncio.gather(*tasks)
+    except BaseException:
+        # No lens run may keep calling the model or recording steps once the
+        # Suggestion has failed or been cancelled.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     candidates = tuple(
         LensCandidate(lens=lens, extraction=result)
         for lens, result in zip(lenses, results, strict=True)

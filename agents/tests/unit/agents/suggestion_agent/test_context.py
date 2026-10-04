@@ -778,6 +778,31 @@ def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejec
     assert "y" * (RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS + 1) not in rendered
 
 
+def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None:
+    from pantaray_agents.agents.suggestion_agent.context_formatters import (
+        RECENT_SUGGESTIONS_MAX_CHARS,
+    )
+
+    entries = [
+        normalize_recent_suggestion_entry(
+            {
+                "answer": f"Suggestion {number:02d} " + "a" * 500,
+                "created_at": "2026-09-10T00:00:00Z",
+                "user_reply": "x" * 3_000,
+                "action_status": "success",
+                "action_result": "y" * 3_000,
+                "action_followups": ["z" * 900] * 8,
+            }
+        )
+        for number in range(12)  # newest first, as the repository returns them
+    ]
+    rendered = format_recent_suggestions([e for e in entries if e is not None])
+    assert len(rendered) <= RECENT_SUGGESTIONS_MAX_CHARS
+    assert "Suggestion 00" in rendered
+    assert "Suggestion 04" in rendered
+    assert "Suggestion 11" not in rendered
+
+
 @pytest.mark.usefixtures("tokyo_local_zone")
 def test_suggestion_context_shows_the_local_date_of_each_stored_instant() -> None:
     # 21:50Z is already the next morning in Tokyo; the model must see the 27th.

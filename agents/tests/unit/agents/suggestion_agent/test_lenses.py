@@ -1,5 +1,6 @@
 """Lens runs look for one pattern each; the selector picks one candidate or none."""
 
+import asyncio
 import random
 
 import pytest
@@ -139,3 +140,23 @@ async def test_no_candidate_skips_the_selector() -> None:
 
     assert selector_prompts == []
     assert decision.extraction["has_suggestion"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lens_run_stops_the_other_runs() -> None:
+    stopped: list[str] = []
+
+    async def generate(*, prompt, **_kwargs):
+        if "### Take_Over" in prompt:
+            raise RuntimeError("model unavailable")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.append(prompt)
+            raise
+        raise AssertionError("unreachable")
+
+    with pytest.raises(RuntimeError, match="model unavailable"):
+        await _decide(generate, [])
+
+    assert len(stopped) == 2

@@ -3,6 +3,45 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.3.0
+
+- Attach PDF, Word, Excel, PowerPoint and notebook files to a message, and Pantaray reads them.
+- Copy one answer, or the whole conversation, from the conversation window.
+- The main window now has a navigation rail on the left, and History, Workspace and Settings have a
+  new layout.
+- History shows what a running conversation is doing right now, under its entry.
+- Ask Pantaray to remember or forget something, and it does.
+- Suggestions now bring ideas that move your work forward, not only next steps.
+- Commands can ask to change files in a folder outside your workspace, after you allow it.
+- When a command cannot work inside Pantaray's protected environment, Pantaray can ask to run that
+  one command outside it.
+- Commands can now use the tools you use in Terminal, and read as far as the read-access setting
+  allows.
+- Pantaray follows instructions you write in an AGENTS.md file.
+- ChatGPT connections can now use gpt-6.1-sol.
+- Screen capture now takes only the window of the app it names.
+- Pantaray retries when the AI connection stalls or drops.
+- Fixed approvals and progress sometimes not appearing in a conversation reopened from History.
+- Fixed Option+Space not being accepted as a shortcut.
+
+---
+
+- PDF、Word、Excel、PowerPoint、ノートブックのファイルをメッセージに添付でき、Pantaray が読めるようになりました。
+- 会話の画面から、回答 1 つ、または会話全体をコピーできるようになりました。
+- メインのウィンドウの左にアイコンの列ができ、履歴・ワークスペース・設定の見た目が新しくなりました。
+- 実行中の会話がいま何をしているかが、履歴の項目の下に出るようになりました。
+- 覚えておいてほしいこと、忘れてほしいことを頼めるようになりました。
+- 次の一歩だけでなく、作業を前に進めるアイデアも提案するようになりました。
+- コマンドが、ワークスペースの外のフォルダの変更を、許可を得てから行えるようになりました。
+- Pantaray の安全な実行環境の中では動かないコマンドは、その 1 回だけ外で動かしてよいか確認するようになりました。
+- コマンドが、ターミナルで使っているツールを使い、読み取り範囲の設定どおりに読めるようになりました。
+- AGENTS.md に書いた指示に従うようになりました。
+- ChatGPT の接続で gpt-6.1-sol を使えるようになりました。
+- 画面の取り込みは、名前を指定したアプリのウィンドウだけを撮るようになりました。
+- AI との接続が止まったり切れたりしたとき、やり直すようになりました。
+- 履歴から開き直した会話に、許可や進み具合が出ないことがある問題を直しました。
+- Option＋Space をショートカットとして登録できなかった問題を直しました。
+
 ## 0.2.4
 
 - Type @ in a message to pick a workspace project.

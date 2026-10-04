@@ -834,6 +834,7 @@ def test_lexical_lane_matches_short_acronyms_and_numbers_as_whole_words(
                 ("fact-training", "training データの取り扱いを見直した"),
                 ("fact-pr", "PRを #7 で出した"),
                 ("fact-other-issue", "#77 を閉じた"),
+                ("fact-longer-issue", "#777 と abc#77suffix を見た"),
                 ("fact-api", "API v2 へ移行した"),
             ),
         )

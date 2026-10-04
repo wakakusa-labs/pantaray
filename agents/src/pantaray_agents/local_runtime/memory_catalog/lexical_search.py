@@ -14,7 +14,8 @@ from .fragment_visibility import (
 from .models import MemorySource
 
 # A word, or a "#" issue number. The "#" is kept only on numbers of one or two
-# digits, which are otherwise too short to tell from any other number.
+# digits, which are otherwise too short to tell from any other number; those are
+# matched as whole words so #7 finds neither #77 nor #7a.
 _QUERY_TOKEN_RE = re.compile(r"#?[^\W_]+", re.UNICODE)
 _SHORT_ISSUE_NUMBER_RE = re.compile(r"#[0-9]{1,2}")
 # memory_fragments_fts is tokenized with trigram, so a MATCH term is a substring
@@ -117,7 +118,10 @@ def _lexical_terms(query: str) -> _LexicalTerms:
     whole_words: list[str] = []
     skipped: list[str] = []
     for token in dict.fromkeys(_QUERY_TOKEN_RE.findall(query)):
-        if token.startswith("#") and not _SHORT_ISSUE_NUMBER_RE.fullmatch(token):
+        if _SHORT_ISSUE_NUMBER_RE.fullmatch(token):
+            whole_words.append(token)
+            continue
+        if token.startswith("#"):
             token = token[1:]
         word = token.casefold()
         if len(word) >= TRIGRAM_LENGTH:
@@ -168,8 +172,8 @@ def _indexed_lexical_rows(
 ) -> tuple[sqlite3.Row, ...]:
     if not terms:
         return ()
-    # _QUERY_TOKEN_RE keeps word characters and a leading "#" only, so a term
-    # holds no FTS5 operator and quoting it is enough to keep it a literal phrase.
+    # _QUERY_TOKEN_RE keeps word characters only here, so a term holds no FTS5
+    # operator and quoting it is enough to keep it a literal phrase.
     return tuple(
         connection.execute(
             f"""

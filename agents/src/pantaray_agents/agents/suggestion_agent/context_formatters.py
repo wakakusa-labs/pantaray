@@ -17,7 +17,7 @@ NO_ACTIVITY_SUMMARY_1H_TEXT = "(no 1h summary available)"
 NO_RECENT_ANSWERS_TEXT = "(no recent answers)"
 RECENT_SUGGESTION_REPLY_MAX_CHARS = 2_000
 # Stored Action outputs were 947 chars or fewer in 34 of 36 runs, and the head
-# carries the conclusion; five entries then add at most 5,000 chars.
+# carries the conclusion; twelve entries then add at most 12,000 chars.
 RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS = 1_000
 # The latest instructions carry the current scope; older ones are superseded
 # or already reflected in the result.

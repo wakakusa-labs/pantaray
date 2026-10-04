@@ -4,6 +4,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    prompt_configs,
+    serve_lens_runs,
+)
 
 from pantaray_agents.agents.activity_summary_agent.agent import NO_ACTIVITY_TEMPLATE
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -40,7 +44,6 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentRequest,
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
-from pantaray_agents.utils.prompt_loader import PromptConfig
 
 _STABLE_MEMORY = SuggestionStableMemoryContext(
     prompt="Stable memory summary",
@@ -82,7 +85,7 @@ async def test_fetch_context_data_propagates_summary_fetch_connection_error(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -140,7 +143,7 @@ async def test_fetch_context_data_raises_unexpected_summary_fetch_exception(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -457,7 +460,7 @@ async def test_suggestion_agent_process_includes_context_density_in_prompt(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -529,7 +532,7 @@ async def test_suggestion_agent_process_includes_context_density_in_prompt(
             short_term_insight="# Insight\nThe user is fixing a parser bug.",
             reconsideration_reason="The user switched goals.",
         )
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await agent.process(req)
         prompt_used = mock_llm_client.last_prompt or ""
         assert f"context_density: {expected_density}" in prompt_used
@@ -566,7 +569,7 @@ async def test_fetch_context_data_counts_facts_in_context_density(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -670,7 +673,7 @@ async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_conte
             wraps=suggestion_agent._build_prompt,
         ) as mock_build_prompt,
     ):
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await suggestion_agent.process(request)
 
         ctx = mock_build_prompt.call_args[0][0]

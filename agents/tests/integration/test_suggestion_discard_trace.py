@@ -161,6 +161,22 @@ def _prepare_job(
                 }
             ).model_dump()
         )
+        # The other two lens runs find nothing; the selector picks the candidate.
+        nothing = SuggestionStructuredOutput.model_validate(
+            {
+                "has_suggestion": False,
+                "interaction_contract": None,
+                "key_point": "",
+                "agent_session": None,
+                "suggestion_summary": None,
+                "target_context": None,
+            }
+        ).model_dump()
+        llm.queued_responses = [
+            nothing,
+            nothing,
+            {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
+        ]
         llm.responses["default"] = answer  # what the writer call returns
         await repository.create_processing_suggestion_row(
             user_id=USER_ID, suggestion_id=suggestion_id

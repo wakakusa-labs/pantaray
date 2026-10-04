@@ -1,6 +1,7 @@
 """The writer call turns the decided content into the user-facing Suggestion text."""
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -68,7 +69,7 @@ async def test_the_writer_receives_only_the_decided_content(
 ) -> None:
     _SpyConfig.calls = []
     monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
 
     response = await suggestion_agent.process(_request())
@@ -91,7 +92,7 @@ async def test_the_published_answer_comes_from_the_writer(
     mock_repository: MockSuggestionAgentRepository,
     mock_llm_client: MockLLMClient,
 ) -> None:
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
 
     response = await suggestion_agent.process(_request())
@@ -116,7 +117,7 @@ async def test_a_writer_failure_publishes_nothing(
     async def failing_writer(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("writer model unavailable")
 
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     monkeypatch.setattr(suggestion_agent, "_generate_llm_response", failing_writer)
 
     response = await suggestion_agent.process(_request())
@@ -147,7 +148,7 @@ async def test_only_a_language_with_a_voice_supplement_gets_it(
     _SpyConfig.calls = []
     monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
     monkeypatch.setattr(suggestion_agent, "_load_prompt_config", load)
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
     request = _request()
     request.language = language

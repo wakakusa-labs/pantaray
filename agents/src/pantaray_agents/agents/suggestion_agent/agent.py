@@ -1,6 +1,7 @@
 """suggestion agent"""
 
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
@@ -42,8 +43,12 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     normalize_activity_description_rows,
     normalize_activity_summary_rows,
 )
-from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
-from pantaray_agents.agents.suggestion_agent.react import run_suggestion_react
+from pantaray_agents.agents.suggestion_agent.lenses import (
+    SUGGESTION_LENS_PROMPT_NAME,
+    SUGGESTION_SELECTOR_PROMPT_NAME,
+    decide_with_lenses,
+    sample_lenses,
+)
 from pantaray_agents.agents.suggestion_agent.research import SuggestionResearchTools
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
@@ -136,12 +141,18 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._writer_prompt_config = self._load_prompt_config(
             SUGGESTION_WRITER_PROMPT_NAME
         )
+        self._lens_prompt_config = self._load_prompt_config(SUGGESTION_LENS_PROMPT_NAME)
+        self._selector_prompt_config = self._load_prompt_config(
+            SUGGESTION_SELECTOR_PROMPT_NAME
+        )
+        self._lens_rng = random.Random()
         self._last_step_number = 0  # the run's latest recorded step
         self._action_agent_capabilities_prompt_text = ACTION_AGENT_CAPABILITY_ENVELOPE
         self._current_user_id = ""
         self._current_suggestion_id = ""
         self._last_prompt_text = ""
         self._last_response_text = ""
+        self._recent_suggestions_text = ""
 
     @property
     def task_suggestion_prompt(self) -> str:
@@ -219,11 +230,11 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             raise TypeError("Request must be of type SuggestionAgentRequest")
         suggestion_request = request
 
-        # 直近のanswer（最新5件）を取得（thinkingは含めない）
-        # 期間は広め（30日）に設定し、limitで5件に絞る
+        # 直近のanswer（最新12件）を取得（thinkingは含めない）
+        # 期間は広め（30日）に設定し、limitで12件に絞る
         recent_suggestion_rows = repository_data_or_raise(
             await self.repository.get_recent_suggestions(
-                suggestion_request.user_id, days=30, limit=5
+                suggestion_request.user_id, days=30, limit=12
             ),
             safe_message="failed to fetch recent suggestions",
         )
@@ -320,6 +331,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "workspace_context_prompt": context_data["workspace_context_prompt"],
             "answer_language": self._answer_language_label(),
         }
+        self._recent_suggestions_text = context_data["recent_suggestions"]
         rendered = self.task_suggestion_prompt.format(**values)
         if len(rendered) > SUGGESTION_INITIAL_PROMPT_MAX_CHARS:
             raise ValueError(
@@ -356,17 +368,24 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 stage=stage,
             )
 
-        extracted = await run_suggestion_react(
+        decision = await decide_with_lenses(
             user_id=self._current_user_id,
             suggestion_id=self._current_suggestion_id,
             initial_prompt=prompt,
             system_instruction=self._system_instruction_for_request(),
+            current_time=describe_local_time(
+                self._get_reference_time(), local_zone_name()
+            ),
+            recent_suggestions=self._recent_suggestions_text,
+            lenses=sample_lenses(self._lens_rng),
+            lens_config=self._lens_prompt_config,
+            selector_config=self._selector_prompt_config,
             research_tools=self.research_tools,
             generate_tool_call=generate_tool_call,
-            parse_output=parse_suggestion_output,
             record_step=self._record_react_step,
             discard_llm_thoughts=self._consume_llm_thoughts,
         )
+        extracted = decision.extraction
         decided = extracted["decided"]
         if decided is not None:
 

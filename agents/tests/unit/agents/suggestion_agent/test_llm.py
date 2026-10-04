@@ -4,6 +4,7 @@ import json
 
 import pytest
 from pydantic import ValidationError
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -329,7 +330,7 @@ async def test_suggestion_agent_reasoning_mode_omits_temperature_and_sets_thinki
     monkeypatch.setattr(
         mixin_mod.types, "GenerateContentConfig", _SpyGenerateContentConfig
     )
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     suggestion_agent._current_user_id = "user-test"  # noqa: SLF001
     suggestion_agent._current_suggestion_id = "suggestion-test"  # noqa: SLF001

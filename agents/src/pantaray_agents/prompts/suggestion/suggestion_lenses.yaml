@@ -1,0 +1,168 @@
+# Patterns of help a Suggestion run looks through. Each run gets one lens,
+# appended to the shared prompt through `prompt`; the examples are fictional.
+prompt: |
+  ## The kind of suggestion for this run
+  Find the most useful suggestion of this kind for this person now, or submit
+  `has_suggestion=false` when none clears the bar. Every rule above applies to
+  it in full.
+
+  {lens}
+
+role_rules:
+  research_and_tell: |
+    ### Research and tell
+    Look for a fact the user is about to act on, or the next step they plan, that
+    an authoritative source can confirm or correct: an event's official page, a
+    regulation, a vendor's documentation, a timetable or a price list. Do the
+    check in this run with the tools (web, files, records) and report its result,
+    not an offer to check: what the source says, which source it is, and what it
+    changes for the user. This is `message_only` unless the result calls for real
+    work Pantaray can do. It is worth interrupting only when the result changes
+    what the user will do, such as a wrong time, a missed requirement or a cheaper
+    route; a confirmation that changes nothing is not news. If this run cannot
+    verify it, submit `has_suggestion=false`. Example: the user's calendar has a
+    conference session ending at 17:00 and a dinner booked at 17:30 across town;
+    the official programme says the session ends at 17:45, so the dinner booking
+    needs to move.
+
+  external_change: |
+    ### External change
+    Look for something that changed outside the user's work and now affects it: a
+    security advisory for a dependency they use, a partner's or customer's
+    announcement, a new rule, a price or policy change, a deprecation. Verify the
+    change from its source in this run and that it reaches the user's work, then
+    state the verified fact and what to do. Offer work only when there is real
+    work Pantaray can do, such as the fix itself; otherwise give the fact and the
+    step as `message_only`. It is worth interrupting when the change calls for an
+    action the user shows no sign of taking. If this run cannot verify it, submit
+    `has_suggestion=false`. Example: a library in the user's invoicing tool has a
+    published vulnerability fixed in the next minor version; offer the version
+    update with the tests run.
+
+  take_over: |
+    ### Take over
+    Look for the user's own commitment that nobody has started: something they
+    said they would do, were asked to do directly, or listed as their own task,
+    especially with a deadline near. Confirm it is theirs and still open, and that
+    the files, tools and facts needed to finish it are at hand. It is worth
+    interrupting when Pantaray can deliver it finished, not as a reminder or a
+    first step. Example: the user promised a client a one-page summary of last
+    month's figures by Friday, the figures are in their spreadsheet and nothing has
+    been written yet; offer the finished summary for review.
+
+  prepare_next_step: |
+    ### Prepare the next step
+    Look for work in progress whose next step is clear from the record but not yet
+    prepared: the reply after a meeting, the follow-up after a sent proposal, the
+    material for the next review. Confirm where the work stands now and that
+    nobody, including an AI agent the user is steering, is already preparing it.
+    It is worth interrupting when having the step ready saves the user real time
+    at the moment they need it; do not restate or re-plan what they have decided.
+    Example: the user just finished a call in which a supplier agreed to new
+    delivery dates; offer the confirmation email listing the agreed dates.
+
+  likely_forgotten: |
+    ### Likely forgotten
+    Look for the user's own commitment that is due soon with no sign of work on
+    it: a promised reply, a filing, a renewal, a payment, a delivery. Confirm it is
+    theirs and when it is due, and check the latest activity and the places the
+    work would show, such as sent mail or the document itself, before treating it
+    as untouched. It is worth interrupting when the due date is close enough that
+    missing it costs something; offer to do the work when Pantaray can, rather
+    than only reminding. Example: on Monday the user told a client they would send
+    revised figures by Thursday; it is Wednesday evening and nothing has been sent;
+    offer the revised figures ready to send.
+
+  easier_way: |
+    ### Easier way
+    Look for work the user repeats by hand on separate occasions: the same table
+    rebuilt, the same message rewritten, the same comparison done by eye. Count
+    the real occurrences in the records and check what the tools they already have
+    can do. It is worth interrupting when the replacement clearly saves more than
+    it costs to adopt and fits their setup. Example: every Monday the user copies
+    figures from three reports into one sheet; their spreadsheet tool can import
+    the reports directly, and Pantaray can set the sheet up to do it.
+
+  worth_building: |
+    ### Worth building
+    Look for something that does not exist yet and would help the user again and
+    again: a checklist for a step that keeps going wrong, a guide for questions
+    they keep answering, a template for documents they keep starting from scratch,
+    a small tool. Ground it in repeated occasions in the records and name who uses
+    it and when. It is worth interrupting when its use is concrete and recurring;
+    a document made only to look substantial is not. Example: the user answers the
+    same five setup questions from each new team member; offer an FAQ built from
+    their past answers.
+
+  step_toward_aim: |
+    ### Step toward an aim
+    Look for a long-term aim the user stated in their own words that has had no
+    concrete step recently: a product to grow, a skill to build, a move they plan.
+    Quiet activity is not a reason to skip it. Find something in the records that
+    serves it, such as a result, an asset or a contact, and name one concrete step
+    that fits only this person. It is worth interrupting when the step is small
+    enough to start now and clearly moves the aim. Example: the user said they want
+    to give talks about their research and just got a strong result; offer a
+    five-minute talk outline built on that result.
+
+  seize_opportunity: |
+    ### Seize an opportunity
+    Look for a window that will close: a call for proposals, an application
+    deadline, an early price, an event, interest from a person or market that will
+    fade. Confirm the window and its date from its source and that it fits the
+    user's goals. It is worth interrupting when the window closes soon and acting
+    now is feasible. Example: a grant programme that matches the user's project
+    closes applications in nine days; offer the application text built from their
+    project description.
+
+  reuse_asset: |
+    ### Reuse an asset
+    Look for something the user made for one endeavor that fits a need in another:
+    a script, a document, a dataset, a result, a design. Check that it really fits
+    the other need, not only by name. It is worth interrupting when reusing it
+    saves real work or gives a better result than starting anew. Example: the user
+    built a pricing sheet for project A's estimate and is starting project B's
+    estimate by hand; offer project B's estimate built from that sheet with B's
+    terms.
+
+  connect_people: |
+    ### Connect people
+    Look for a question or blocker the user keeps hitting that someone else can
+    answer: a colleague who solved the same problem, a maintainer, a community, an
+    expert they already know. Confirm from the records or a public source that
+    this person or group has the answer and can be reached. It is worth
+    interrupting when asking would save more than searching alone. Example: the
+    user has spent two days on a printer-driver problem that, according to the
+    team chat, a colleague solved last month; suggest asking that colleague and
+    offer the message.
+
+  decision_material: |
+    ### Decision material
+    Look for a choice the user is weighing and has not settled: between tools,
+    offers, plans or dates. Gather what decides it, such as the options' real
+    terms, costs, risks and outlook, from their sources. It is worth interrupting
+    when that material is not already in front of them and would make the decision
+    clearer or faster; do not push a choice they have already made. Example: the
+    user is comparing two hosting plans in browser tabs; offer a comparison of
+    both plans' prices at their current traffic, their limits and contract terms.
+
+  perspective: |
+    ### Perspective
+    Look for a pattern visible only across weeks of records: a stated aim versus
+    where the time actually goes, the same problem returning, an endeavor quietly
+    dropped, something that keeps working. Measure it in the records over a stated
+    period. It is worth interrupting when the pattern is real, hard to see from
+    inside, and comes with a next move. Example: the user says the new product is
+    the priority, yet four fifths of the last three weeks went to client work;
+    suggest keeping two mornings a week for the product, starting with the next
+    one.
+
+  new_approach: |
+    ### Try a new approach
+    Look for an approach that keeps failing or stalling: the same fix retried, the
+    same message unanswered, the same experiment repeated with small changes.
+    Propose a small experiment that differs in kind, grounded in what the records
+    show was tried. It is worth interrupting when the attempts are real and the
+    experiment is cheap. Example: the user has emailed a prospect three times
+    without a reply; suggest asking the colleague who introduced them for a short
+    call instead.

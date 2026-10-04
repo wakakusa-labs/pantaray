@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    prompt_configs,
+    serve_lens_runs,
+)
 
 from pantaray_agents.agents.capability_envelopes import (
     ACTION_AGENT_CAPABILITY_ENVELOPE,
@@ -31,7 +35,6 @@ from pantaray_agents.schema.agent.suggestion import (
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_agents.schema.repository_errors import FetchContextError
-from pantaray_agents.utils.prompt_loader import PromptConfig
 
 _STABLE_MEMORY = SuggestionStableMemoryContext(
     prompt="Stable memory summary",
@@ -101,7 +104,7 @@ def test_suggestion_agent_build_prompt_rejects_unknown_placeholders(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -120,7 +123,7 @@ def test_suggestion_agent_build_prompt_requires_context_density_signal(
     test_prompt = "Density:\n{context_density_signal}\n"
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -201,7 +204,7 @@ async def test_suggestion_agent_sends_large_activity_context_without_truncation(
         research_tools=build_mock_suggestion_research_tools(),
         stable_memory=_STABLE_MEMORY,
     )
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     response = await agent.process(
         SuggestionAgentRequest(
@@ -254,7 +257,7 @@ async def test_suggestion_agent_process_includes_action_capabilities_in_prompt(
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        return_value=PromptConfig(prompt=test_prompt, system_instruction=None),
+        side_effect=prompt_configs(test_prompt),
     ):
         agent = SuggestionAgent(
             config={"llm_client": mock_llm_client},
@@ -270,7 +273,7 @@ async def test_suggestion_agent_process_includes_action_capabilities_in_prompt(
             short_term_insight="# Insight\nThe user is fixing a parser bug.",
             reconsideration_reason="The user switched goals.",
         )
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await agent.process(req)
         prompt_used = mock_llm_client.last_prompt or ""
         assert "Capabilities:" in prompt_used
@@ -307,7 +310,7 @@ async def test_suggestion_agent_process_no_suggestion(
         reconsideration_reason="The user switched goals.",
     )
 
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     response = await suggestion_agent.process(request)
 
@@ -345,7 +348,7 @@ async def test_suggestion_agent_process_with_suggestion(
         reconsideration_reason="The user switched goals.",
     )
 
-    mock_llm_client.set_next_response(_suggestion_output("Task 1 is ready."))
+    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
     mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
 
     response = await suggestion_agent.process(request)
@@ -388,7 +391,7 @@ async def test_suggestion_agent_uses_preloaded_stable_memory(
             wraps=suggestion_agent._build_prompt,
         ) as mock_build_prompt,
     ):
-        mock_llm_client.set_next_response(_no_suggestion_output())
+        serve_lens_runs(mock_llm_client, _no_suggestion_output())
         _ = await suggestion_agent.process(request)
 
         assert mock_build_prompt.call_count >= 1
@@ -590,7 +593,7 @@ async def test_suggestion_agent_repository_error_on_save(
         short_term_insight="# Insight\nThe user is fixing a parser bug.",
         reconsideration_reason="The user switched goals.",
     )
-    mock_llm_client.set_next_response(_suggestion_output("Task 1 is ready."))
+    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
     mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
 
     response = await suggestion_agent.process(request)

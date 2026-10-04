@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from pantaray_llm.profiles import (
+    WEB_CRAWL_MAX_BREADTH,
+    WEB_CRAWL_MAX_DEPTH,
+    WEB_CRAWL_PAGE_LIMIT,
+    WEB_EXCERPTS_PER_PAGE,
+)
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -18,7 +25,13 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
         name="Web Crawl",
         description=(
             "Crawl outward from one starting URL to collect content across nearby "
-            "pages in the same site area. Use this when one exact page is not enough."
+            "pages in the same site area. Use this when one exact page is not enough. "
+            f"It follows at most {WEB_CRAWL_MAX_BREADTH} links per page, goes at most "
+            f"{WEB_CRAWL_MAX_DEPTH} levels deep, and stops after {WEB_CRAWL_PAGE_LIMIT} "
+            "links; pages beyond these limits are not returned, and the result "
+            "cannot tell which were skipped. With instructions, "
+            f"each page returns only its top {WEB_EXCERPTS_PER_PAGE} relevant "
+            "excerpts instead of its full content."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -66,9 +79,11 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                     },
                     required=False,
                     description=(
-                        "Optional natural-language crawl instructions. Use this "
-                        "to tell the crawler what pages or topics to prioritize "
-                        "within the site area."
+                        "Optional natural-language crawl instructions telling "
+                        "the crawler what pages or topics to prioritize. When "
+                        f"set, each page returns only its top {WEB_EXCERPTS_PER_PAGE} "
+                        "excerpts relevant to them (up to 500 characters each) "
+                        "instead of its full content."
                     ),
                 ),
             )
@@ -89,6 +104,7 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                         "additionalProperties": False,
                     },
                 },
+                "retry_hint": {"type": "string"},
                 "response_time": {"type": "number"},
                 "meta": {
                     "type": "object",

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pantaray_llm.profiles import WEB_SEARCH_COUNTRIES, WEB_SEARCH_TOPICS
+from pantaray_llm.profiles import (
+    WEB_SEARCH_COUNTRIES,
+    WEB_SEARCH_RESULT_LIMIT,
+    WEB_SEARCH_TOPICS,
+)
 
 from .base import (
     InputSpec,
@@ -19,8 +23,9 @@ WEB_SEARCH_TOOL = ToolDefinition.from_spec(
         tool_id="web_search",
         name="Web Search",
         description=(
-            "Search the web via the cloud search wrapper and return normalized "
-            "search results for one focused query."
+            "Search the web via the cloud search wrapper and return up to "
+            f"{WEB_SEARCH_RESULT_LIMIT} results for one focused query. Each result's "
+            "content is a short excerpt; use web_extract to read the full page."
         ),
         guide=ToolGuideSpec(
             what=(

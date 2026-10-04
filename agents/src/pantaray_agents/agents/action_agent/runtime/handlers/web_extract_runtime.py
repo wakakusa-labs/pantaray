@@ -26,11 +26,17 @@ from pantaray_llm.errors import (
     ProxyToolResultMeta,
     build_proxy_tool_result_meta,
 )
-from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID
+from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE, WEB_EXTRACT_PROFILE_ID
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent
     from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
+
+QUERY_EXCERPTS_RETRY_HINT = (
+    f"query was set, so each raw_content holds only up to {WEB_EXCERPTS_PER_PAGE} "
+    "excerpts relevant to it, joined by [...], not the full page. Call "
+    "web_extract again without query to read the full page."
+)
 
 
 class _TavilyExtractRow(TypedDict, total=False):
@@ -63,6 +69,8 @@ class WebExtractFailedResult(TypedDict, total=False):
 class WebExtractPayload(TypedDict, total=False):
     results: Required[list[WebExtractResult]]
     failed_results: Required[list[WebExtractFailedResult]]
+    truncated: NotRequired[bool]
+    retry_hint: NotRequired[str | None]
     response_time: NotRequired[float]
     meta: NotRequired[ProxyToolResultMeta]
     error: NotRequired[ProxyAgentErrorPayload]
@@ -262,6 +270,10 @@ async def run_web_extract_tool(
         if parsed is None:
             raise WebContentInvalidResponseError("response")
         payload = _normalize_extract_payload(parsed)
+        payload["truncated"] = query is not None and bool(payload["results"])
+        payload["retry_hint"] = (
+            QUERY_EXCERPTS_RETRY_HINT if payload["truncated"] else None
+        )
         payload["meta"] = _build_extract_meta(
             payload=payload,
             request_id=request_context["request_id"],

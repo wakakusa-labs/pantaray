@@ -6,6 +6,7 @@ from pantaray_agents.agents.artifact_react import (
     react_tool_response_schema,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE, WEB_SEARCH_RESULT_LIMIT
 
 WEB_EXTRACT_MAX_URLS = 3
 WEB_URL_MAX_CHARS = 2_048
@@ -65,8 +66,10 @@ def build_web_research_definitions(
         _definition(
             name="web_search",
             description=(
-                "Search the web for current evidence. Continue result pages with "
-                "next_offset; use web_extract for full page content."
+                "Search the web for current evidence. Returns up to "
+                f"{WEB_SEARCH_RESULT_LIMIT} results per query, each with a short "
+                "excerpt. Continue result pages with next_offset; use web_extract "
+                "for full page content."
             ),
             properties={
                 "query": {"type": "string", "minLength": 1, "pattern": r"\S"},
@@ -85,7 +88,9 @@ def build_web_research_definitions(
             name="web_extract",
             description=(
                 "Extract bounded content from specific web pages. Continue each "
-                "truncated URL with its next_offset."
+                "URL with its next_offset. With a query, each page holds only its "
+                f"top {WEB_EXCERPTS_PER_PAGE} excerpts relevant to the query; set "
+                "query to null to read the full page."
             ),
             properties={
                 "urls": {

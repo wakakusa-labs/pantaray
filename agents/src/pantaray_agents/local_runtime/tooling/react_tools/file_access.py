@@ -4,7 +4,7 @@ import json
 import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 import regex  # type: ignore[import-untyped]
@@ -16,28 +16,36 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text imp
     read_text_descriptor_lines,
     read_text_value_lines,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
+    RipgrepGrepResult,
+    RipgrepTruncationReason,
+    run_ripgrep_grep,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
     GREP_MAX_LINE_CHARS,
     GREP_OMITTED_TEXT_MARKER,
+    RIPGREP_MAX_COLUMNS,
     RipgrepGrepMatch,
     binary_match_warning,
     grep_match,
 )
 from pantaray_agents.local_runtime.tooling.brokering.private_app_storage import (
     PRIVATE_APP_STORAGE_MESSAGE,
+    PrivateAppStorage,
     is_within_any,
 )
 from pantaray_agents.local_runtime.tooling.brokering.workspace_descriptor_access import (
     SEARCH_TIMEOUT_SECONDS,
-    DescriptorTruncationReason,
-    WorkspaceGrepScan,
     WorkspaceScanSkips,
     glob_workspace_files,
-    grep_workspace_files,
     matches_workspace_glob,
+    open_workspace_directory_descriptor,
     open_workspace_file_descriptor,
     scan_skip_notes,
     scan_workspace_entries,
+)
+from pantaray_agents.local_runtime.tooling.sandbox.seatbelt_profiles import (
+    render_ripgrep_seatbelt_profile,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -64,7 +72,7 @@ class _Page:
 @dataclass(frozen=True, slots=True)
 class _Found:
     items: list[JSONValue]
-    reason: DescriptorTruncationReason | None = None
+    reason: RipgrepTruncationReason | None = None
     skips: WorkspaceScanSkips = field(default_factory=WorkspaceScanSkips)
 
 
@@ -218,19 +226,20 @@ class ReadOnlyFileAccess:
                 include_glob=include_glob,
             )
         else:
-            _reject_private_app_storage(root, relative_base)
-            result = grep_workspace_files(
-                root_path=root.canonical_path,
+            result = _workspace_grep_matches(
+                root=root,
                 base_path=relative_base,
                 pattern=pattern,
                 include_glob=include_glob,
                 max_matches=offset - 1 + max_matches,
-                exclude_subtree=_in_private_app_storage(root),
             )
         found = _Found(
             [_grep_match_json(match) for match in result.matches],
             result.truncation_reason,
-            result.skips,
+            WorkspaceScanSkips(
+                unreadable=result.skipped_files,
+                first_unreadable_error=result.first_skip_error,
+            ),
         )
         page = _bounded_page(found, offset=offset, limit=max_matches)
         warnings, hints = _page_notes(found, page)
@@ -238,8 +247,9 @@ class ReadOnlyFileAccess:
         if any(match.line_truncated for match in shown):
             warnings.append(
                 f"Matching lines longer than {GREP_MAX_LINE_CHARS} characters are "
-                f"shown as an excerpt around their first match; "
-                f"{GREP_OMITTED_TEXT_MARKER} marks omitted text."
+                "shown as an excerpt around their first match, or from the line's "
+                f"start when that match is over {RIPGREP_MAX_COLUMNS // 1024} KB "
+                f"into the line; {GREP_OMITTED_TEXT_MARKER} marks omitted text."
             )
             hints.append("To see more of such a line, read it at offset=line_number.")
         if result.binary_match_paths:
@@ -328,6 +338,59 @@ def _in_private_app_storage(root: WorkspaceReadRoot) -> Callable[[Path], bool]:
     return lambda path: is_within_any(path, root.private_app_storage)
 
 
+def _workspace_grep_matches(
+    *,
+    root: WorkspaceReadRoot,
+    base_path: str,
+    pattern: str,
+    include_glob: str | None,
+    max_matches: int,
+) -> RipgrepGrepResult:
+    _reject_private_app_storage(root, base_path)
+    if include_glob is not None:
+        _validate_glob_pattern(include_glob)
+    # Refuses a base reached through a symlink, as list and glob do. ripgrep
+    # then reopens paths by name, so the seatbelt profile binds what it reads
+    # to this root, outside private app storage, whatever the tree does.
+    os.close(
+        open_workspace_directory_descriptor(
+            root_path=root.canonical_path, relative_path=base_path
+        )
+    )
+    cwd = root.canonical_path / base_path
+    storage_roots = root.private_app_storage
+    result = run_ripgrep_grep(
+        cwd=cwd,
+        sandbox_profile=render_ripgrep_seatbelt_profile(
+            read_roots=(str(root.canonical_path),),
+            private_storage_roots=tuple(str(path) for path in storage_roots),
+            readable_private_roots=(),
+            action_plan_path=None,
+        ),
+        pattern=pattern,
+        include_glob=include_glob,
+        max_matches=max_matches,
+        pruned_relative_paths=PrivateAppStorage(
+            storage_roots=storage_roots, readable_roots=()
+        )
+        .search_scope(cwd)
+        .pruned,
+        sorted_by_path=True,
+    )
+
+    def root_relative(path: str) -> str:
+        return (PurePosixPath(base_path) / path).as_posix()
+
+    return replace(
+        result,
+        matches=tuple(
+            replace(match, relative_path=root_relative(match.relative_path))
+            for match in result.matches
+        ),
+        binary_match_paths=tuple(map(root_relative, result.binary_match_paths)),
+    )
+
+
 def _workspace_list_entries(
     *,
     root: WorkspaceReadRoot,
@@ -391,7 +454,7 @@ def _memory_grep_matches(
     base_path: str,
     pattern: str,
     include_glob: str | None,
-) -> WorkspaceGrepScan:
+) -> RipgrepGrepResult:
     deadline = time.monotonic() + SEARCH_TIMEOUT_SECONDS
     try:
         expression = regex.compile(pattern)
@@ -427,9 +490,18 @@ def _memory_grep_matches(
                         cut=False,
                     )
                 )
+        timed_out = False
     except TimeoutError:
-        return WorkspaceGrepScan(tuple(matches), "timeout", WorkspaceScanSkips(), ())
-    return WorkspaceGrepScan(tuple(matches), None, WorkspaceScanSkips(), ())
+        timed_out = True
+    return RipgrepGrepResult(
+        matches=tuple(matches),
+        truncated=timed_out,
+        truncation_reason="timeout" if timed_out else None,
+        timed_out=timed_out,
+        skipped_files=0,
+        first_skip_error=None,
+        binary_match_paths=(),
+    )
 
 
 def _grep_match_json(match: RipgrepGrepMatch) -> JSONValue:
@@ -458,13 +530,14 @@ def _bounded_page(found: _Found, *, offset: int, limit: int) -> _Page:
     consumed = len(selected)
     has_more = found.reason == "limit" or start + consumed < len(found.items)
     next_offset = offset + consumed if has_more and consumed else None
-    timed_out = found.reason == "timeout"
+    # The search ended early, so what it had not reached is missing too.
+    stopped = found.reason in ("timeout", "output_bytes")
     return _Page(
         items=selected,
         next_offset=next_offset,
-        truncated=has_more or timed_out,
+        truncated=has_more or stopped,
         truncation_reason=(
-            "timeout" if timed_out else "page_limit" if has_more else None
+            found.reason if stopped else "page_limit" if has_more else None
         ),
     )
 
@@ -481,6 +554,12 @@ def _page_notes(
         warnings.append(
             f"The search stopped after {SEARCH_TIMEOUT_SECONDS:g} seconds; paths "
             "it had not reached were not searched."
+        )
+        hints.append("Narrow base_path, pattern or include_glob to search the rest.")
+    elif found.reason == "output_bytes":
+        warnings.append(
+            "The search stopped at its output limit; files it had not reached "
+            "were not searched."
         )
         hints.append("Narrow base_path, pattern or include_glob to search the rest.")
     if page.next_offset is not None:

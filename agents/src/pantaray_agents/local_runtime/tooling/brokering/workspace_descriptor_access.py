@@ -10,8 +10,6 @@ from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Literal, NamedTuple
 
-import regex  # type: ignore[import-untyped]
-
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     DescriptorPathMissingError,
@@ -21,7 +19,6 @@ from pantaray_agents.local_runtime.descriptor_access import (
 )
 
 from .broker_common import BrokerPolicyError
-from .broker_grep_lines import RipgrepGrepMatch, grep_match
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
 _FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
@@ -29,10 +26,6 @@ _WORKSPACE_FILE_POLICY_ERROR = (
     "workspace path is missing, not a regular file, or uses a symlink"
 )
 SEARCH_TIMEOUT_SECONDS = 5.0
-# Design limit: a longer line is not searched, so a file without newlines
-# cannot exhaust memory; such lines are counted and reported.
-GREP_MAX_SEARCHED_LINE_CHARS = 8 * 1024 * 1024
-_GREP_READ_CHARS = 1024 * 1024
 
 type DescriptorTruncationReason = Literal["limit", "timeout"]
 
@@ -49,21 +42,12 @@ class WorkspaceScanSkips:
     first_unreadable_error: str | None = None
     # Listed directories at max_depth, whose contents were not walked.
     unexpanded_directories: int = 0
-    unsearched_lines: int = 0
 
 
 class WorkspaceDescriptorScan(NamedTuple):
     entries: tuple[WorkspaceDescriptorEntry, ...]
     truncation_reason: DescriptorTruncationReason | None
     skips: WorkspaceScanSkips
-
-
-class WorkspaceGrepScan(NamedTuple):
-    matches: tuple[RipgrepGrepMatch, ...]
-    truncation_reason: DescriptorTruncationReason | None
-    skips: WorkspaceScanSkips
-    # Files holding a NUL byte that match; their lines are not returned.
-    binary_match_paths: tuple[str, ...]
 
 
 class WorkspacePathMissingError(BrokerPolicyError):
@@ -91,8 +75,12 @@ def open_workspace_entry_descriptor(*, root_path: Path, relative_path: str) -> i
 
     components = _relative_components(relative_path, allow_dot=True)
     if not components:
-        return _open_directory(root_path, ".")
-    parent = _open_directory(root_path, "/".join(components[:-1]) or ".")
+        return open_workspace_directory_descriptor(
+            root_path=root_path, relative_path="."
+        )
+    parent = open_workspace_directory_descriptor(
+        root_path=root_path, relative_path="/".join(components[:-1]) or "."
+    )
     try:
         return _open(components[-1], _FILE_FLAGS, parent=parent)
     finally:
@@ -131,7 +119,7 @@ def scan_workspace_entries(
     reason: DescriptorTruncationReason | None = None
     prefix = "" if base_path == "." else f"{base_path}/"
     try:
-        for entry, _descriptor in iterator:
+        for entry in iterator:
             relative = entry.root_relative_path.removeprefix(prefix)
             path = root_path.joinpath(*entry.root_relative_path.split("/"))
             if include_path is not None and not include_path(path):
@@ -173,123 +161,6 @@ def glob_workspace_files(
     )
 
 
-def grep_workspace_files(
-    *,
-    root_path: Path,
-    base_path: str,
-    pattern: str,
-    include_glob: str | None,
-    max_matches: int,
-    exclude_subtree: Callable[[Path], bool] | None = None,
-) -> WorkspaceGrepScan:
-    """Search readable files of any size; lines are decoded lossily, split as
-    read splits them, and bounded to an excerpt around their first match."""
-
-    deadline = time.monotonic() + SEARCH_TIMEOUT_SECONDS
-    try:
-        expression = regex.compile(pattern)
-    except (regex.error, RecursionError) as exc:
-        raise BrokerPolicyError(
-            "grep pattern is invalid",
-            code="GREP_PATTERN_INVALID",
-            fix_hint="grep.pattern must be a valid regular expression.",
-        ) from exc
-    matches: list[RipgrepGrepMatch] = []
-    binary_match_paths: list[str] = []
-    skips = WorkspaceScanSkips()
-    reason: DescriptorTruncationReason | None = None
-    prefix = "" if base_path == "." else f"{base_path}/"
-    iterator = _entries(
-        root_path=root_path,
-        base_path=base_path,
-        max_depth=None,
-        deadline=deadline,
-        exclude_subtree=exclude_subtree,
-        skips=skips,
-    )
-    try:
-        for entry, descriptor in iterator:
-            relative = entry.root_relative_path.removeprefix(prefix)
-            if entry.kind != "file" or (
-                include_glob is not None
-                and not matches_workspace_glob(relative, include_glob)
-            ):
-                continue
-            try:
-                for line_number, body, match_start, binary in _matching_lines(
-                    descriptor, expression, deadline, skips
-                ):
-                    if binary:
-                        binary_match_paths.append(entry.root_relative_path)
-                        break
-                    if len(matches) >= max_matches:
-                        reason = "limit"
-                        break
-                    matches.append(
-                        grep_match(
-                            relative_path=entry.root_relative_path,
-                            line_number=line_number,
-                            text=body,
-                            match_start=match_start,
-                            cut=False,
-                        )
-                    )
-            except TimeoutError:
-                raise
-            except OSError as exc:
-                _skip_unreadable(skips, entry.root_relative_path, exc)
-            if reason == "limit":
-                break
-    except TimeoutError:
-        reason = "timeout"
-    finally:
-        iterator.close()
-    return WorkspaceGrepScan(tuple(matches), reason, skips, tuple(binary_match_paths))
-
-
-def _matching_lines(
-    descriptor: int,
-    expression: regex.Pattern[str],
-    deadline: float,
-    skips: WorkspaceScanSkips,
-) -> Generator[tuple[int, str, int, bool], None, None]:
-    # Each matching line, and whether the file has shown a NUL byte by then.
-    with open(
-        descriptor, encoding="utf-8", errors="replace", newline="", closefd=False
-    ) as handle:
-        binary = False
-        line_number = 0
-        while True:
-            parts: list[str] | None = []
-            while part := handle.readline(_GREP_READ_CHARS):
-                _within(deadline)
-                if parts is not None:
-                    parts.append(part)
-                    if sum(map(len, parts)) > GREP_MAX_SEARCHED_LINE_CHARS:
-                        parts = None
-                if part.endswith("\r") and len(part) == _GREP_READ_CHARS:
-                    # The read stopped between the \r and \n of one line end.
-                    position = handle.tell()
-                    if handle.read(1) != "\n":
-                        handle.seek(position)
-                if part.endswith(("\n", "\r")):
-                    break
-            if parts == []:
-                return
-            line_number += 1
-            if parts is None:
-                skips.unsearched_lines += 1
-                continue
-            body = "".join(parts).rstrip("\r\n")
-            binary = binary or "\0" in body
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError
-            found = expression.search(body, timeout=remaining)
-            if found is not None:
-                yield line_number, body, found.start(), binary
-
-
 def matches_workspace_glob(path: str, pattern: str) -> bool:
     return fnmatch(path, pattern) or (
         pattern.startswith("**/") and fnmatch(path, pattern.removeprefix("**/"))
@@ -304,8 +175,10 @@ def _entries(
     deadline: float | None,
     exclude_subtree: Callable[[Path], bool] | None,
     skips: WorkspaceScanSkips,
-) -> Generator[tuple[WorkspaceDescriptorEntry, int], None, None]:
-    base = _open_directory(root_path, base_path)
+) -> Generator[WorkspaceDescriptorEntry, None, None]:
+    base = open_workspace_directory_descriptor(
+        root_path=root_path, relative_path=base_path
+    )
     relative = "/".join(_relative_components(base_path, allow_dot=True)) or "."
     excluded = (
         None
@@ -326,7 +199,7 @@ def _walk(
     deadline: float | None,
     excluded: Callable[[str], bool] | None,
     skips: WorkspaceScanSkips,
-) -> Generator[tuple[WorkspaceDescriptorEntry, int], None, None]:
+) -> Generator[WorkspaceDescriptorEntry, None, None]:
     try:
         context = os.scandir(descriptor)
     except OSError as exc:
@@ -362,7 +235,7 @@ def _walk(
                         raise BrokerPolicyError(
                             "workspace path must reference a directory"
                         )
-                    yield WorkspaceDescriptorEntry(child_relative, "directory"), child
+                    yield WorkspaceDescriptorEntry(child_relative, "directory")
                     if max_depth is None or child_depth < max_depth:
                         yield from _walk(
                             child,
@@ -374,7 +247,7 @@ def _walk(
                             skips,
                         )
                 elif stat.S_ISREG(mode):
-                    yield WorkspaceDescriptorEntry(child_relative, "file"), child
+                    yield WorkspaceDescriptorEntry(child_relative, "file")
             finally:
                 os.close(child)
 
@@ -392,12 +265,6 @@ def scan_skip_notes(
         )
         hints.append(
             f"Raise max_depth (up to {depth_limit}) or list one of them to see inside."
-        )
-    if skips.unsearched_lines:
-        warnings.append(
-            f"{skips.unsearched_lines} line(s) longer than "
-            f"{GREP_MAX_SEARCHED_LINE_CHARS:,} characters were not searched; read "
-            "such a line with offset and column."
         )
     if skips.symlinks:
         warnings.append(
@@ -426,7 +293,7 @@ def _skip_unreadable(skips: WorkspaceScanSkips, relative: str, exc: OSError) -> 
         skips.first_unreadable_error = f"{relative}: {exc.strerror or exc}"
 
 
-def _open_directory(root_path: Path, relative_path: str) -> int:
+def open_workspace_directory_descriptor(*, root_path: Path, relative_path: str) -> int:
     try:
         return open_directory_descriptor(
             root_path=root_path,

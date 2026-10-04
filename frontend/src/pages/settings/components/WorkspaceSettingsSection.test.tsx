@@ -547,6 +547,61 @@ describe('WorkspaceSettingsSection', () => {
     });
   });
 
+  it('leaves the Enter that commits an IME conversion to the IME in workspace name fields', async () => {
+    const workspaceSettings = {
+      get: vi.fn(async () => emptySettings),
+      createOrganization: vi.fn(async () => ({
+        organization_id: 'org-new',
+        display_name: '新しい組織',
+      })),
+      createProject: vi.fn(async () => ({
+        project_id: 'project-new',
+        display_name: '新しい案件',
+        organization_ids: [],
+      })),
+      createFolder: vi.fn(),
+      deleteOrganization: vi.fn(),
+      deleteProject: vi.fn(),
+      deleteFolder: vi.fn(),
+      updateProjectLinks: vi.fn(),
+      updateFolderLinks: vi.fn(),
+      updateReadAccessScope: vi.fn(),
+      selectFolder: vi.fn(),
+    };
+    window.electron = { workspaceSettings } as unknown as Window['electron'];
+
+    renderWorkspaceSettingsSection();
+
+    await screen.findByRole('button', { name: 'settings.workspace.addProject' });
+    const organizationDialog = openOrganizationDialog();
+    const organizationInput = within(organizationDialog).getByLabelText(
+      'settings.workspace.organizationPlaceholder'
+    );
+    fireEvent.change(organizationInput, { target: { value: '新しい組織' } });
+    fireEvent.keyDown(organizationInput, { key: 'Enter', isComposing: true });
+    expect(workspaceSettings.createOrganization).not.toHaveBeenCalled();
+    fireEvent.keyDown(organizationInput, { key: 'Enter' });
+    await waitFor(() => {
+      expect(workspaceSettings.createOrganization).toHaveBeenCalledWith({
+        displayName: '新しい組織',
+      });
+    });
+    // Closing the manager returns to the project popover it was opened from.
+    fireEvent.click(within(organizationDialog).getByRole('button', { name: 'common.close' }));
+
+    const popover = screen.getByRole('dialog', { name: 'settings.workspace.projectCreate.title' });
+    const projectInput = within(popover).getByRole('textbox', {
+      name: 'settings.workspace.projectPlaceholder',
+    });
+    fireEvent.change(projectInput, { target: { value: '新しい案件' } });
+    fireEvent.keyDown(projectInput, { key: 'Enter', isComposing: true });
+    expect(workspaceSettings.createProject).not.toHaveBeenCalled();
+    fireEvent.keyDown(projectInput, { key: 'Enter' });
+    await waitFor(() => {
+      expect(workspaceSettings.createProject).toHaveBeenCalledOnce();
+    });
+  });
+
   it('delegates organization dialog focus and closing to the native dialog API', async () => {
     const user = userEvent.setup();
     window.electron = {

@@ -70,7 +70,8 @@ function OpenProjectCreatePopover(props: ProjectCreatePopoverProps) {
           value={draft.displayName}
           onChange={(event) => onDraftChange({ ...draft, displayName: event.target.value })}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') void submit();
+            // The Enter that commits a kana-kanji conversion belongs to the IME.
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void submit();
           }}
         />
       </label>

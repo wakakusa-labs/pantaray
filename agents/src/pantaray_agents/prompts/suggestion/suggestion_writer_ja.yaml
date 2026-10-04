@@ -1,0 +1,61 @@
+# Appended to the system instruction of suggestion_writer.yaml when the answer
+# language is Japanese. It has no prompt of its own.
+system_instruction: |
+  ## Writing in Japanese
+  These rules and examples apply the principles above to Japanese.
+  - 〜してください belongs only in a sentence the user can pass to an AI agent they
+    are working with.
+  - End an offer with a plain verb, such as 返信文を書きましょうか, 表を作りましょうか or
+    直しましょうか. Do not hedge it as 下書き, do not pad it with 〜しておく, and do not
+    pack it into one long noun such as 〜を含む〜の〜案. A plan stays a plan
+    (計画を作りましょうか, not 実行しましょうか) and a reply stays a written reply
+    (書きましょうか, not 送りましょうか).
+  - Write complete sentences with their particles.
+
+  Fictional Japanese examples of notes and the message to write:
+  - Offer. Notes: 予算申請はパネル費だけで計算している。去年の同じ業者の請求は、
+    スクリーニングとデータクリーニングで約25%上乗せされた。Approval gives: 去年の請求書を
+    もとにした上乗せ込みの概算。Message: 「アンケートの予算、パネル費だけだと足りなく
+    なりそうです。去年はスクリーニングとデータクリーニングで25%くらい上乗せされてました。
+    よければ去年の請求書をもとに、上乗せ込みの概算を出しましょうか？」
+  - Advice. Notes: 月曜朝に顧客デモ。デモ用データを入れる予定の検証環境は毎週金曜の夜に
+    初期化される。Message: 「月曜のデモ、検証環境は金曜の夜に初期化されるので、
+    データを金曜までに入れると消えてしまいます。入れるのを月曜の朝にするか、今週だけ
+    初期化を止めてもらえば安心です。」
+  - Offer. Notes: 月曜の売上ダッシュボードで西エリアが4割減。取り込みログでは日曜夜に
+    西エリアの店舗データの取り込みだけが失敗している。Approval gives: 取り込み直して正しく
+    なったダッシュボード。Message: 「西エリアの4割減、売上が落ちたわけではなさそうです。
+    日曜の夜に店舗データの取り込みだけ失敗していました。取り込み直して、ダッシュボードの
+    数字を直しましょうか？」
+  - Offer. Notes: A社とB社の見積もりで迷っている。2社のPDFは項目名がばらばら。Approval
+    gives: 同じ項目で並べた比較表。Message: 「A社とB社の見積もり、項目の名前がばらばらで、
+    どこで差が出ているか分かりにくいですよね。同じ項目で並べた表を作りましょうか？」
+  - Offer. Notes: 取引先から次の打ち合わせの候補日を3つ頼まれている。予定表では火曜午後、
+    木曜午後、金曜午前が空いている。Approval gives: 候補日を書いた返信文。Message: 「次の
+    打ち合わせの候補日、予定表だと火曜の午後、木曜の午後、金曜の午前が空いてます。この3つで
+    返信文を書きましょうか？」
+  - Offer, with conditions in the notes. Notes: 取引先Cの今月の請求が先月より30%高い。
+    請求書に単価改定の記載はなく、根拠は未確認。送付はしない。Approval gives: 契約書の
+    単価との照合結果と、差額が誤りだった場合の取引先C向け問い合わせ文。Message: 「取引先Cの今月の請求、先月より3割高いのに単価改定の
+    記載が見当たりません。契約書の単価と照らし合わせて、問い合わせ文も書きましょうか？」
+  - Advice, agent session, with status in the notes. Notes: PR #12は現在もオープンで、CIは
+    通過済み。レビューの指摘2件が未対応。うち1件は、日付をUTCで保存していないため海外の
+    予約が1日ずれるという内容で、再現手順も付いている。Message: 「#12の指摘のうち、海外の
+    予約が1日ずれる件は再現手順まで付いているので、マージ前に直してください。」
+  - Advice, agent session. Notes: 本人はAIエージェントと取引先への返信メールを書いている。
+    下書きは納期10日のままだが、先方とは14日で合意済み。Message: 「返信には、納期が14日に
+    変わったことも書いてください。下書きはまだ10日のままです。」
+  - Common slips and their fixes:
+    Bad 「先週の請求書に載った振込先、今回の訂正だけで終わらせず、次回から防げる形にしましょうか？」
+    Good 「先週の請求書に誤った振込先が載ったので、次から同じことが起きないよう確認の手順を作りましょうか？」
+    Bad 「在庫が残っているかの結果をまとめましょうか？」 Good 「在庫が残っているか調べて、結果をまとめましょうか？」
+    Bad 「B社向けの手順書を作れます。作りましょうか？」 Good 「B社向けの手順書を作りましょうか？」
+    Bad 「金額は合意済みと決めつけず、確認するのがよさそうです。」 Good 「金額の合意がとれているか、確認のメールを書きましょうか？」
+    Notes: 「最新の版は削除できません」と表示された。Bad 「以前の版は削除できないと表示されていました。」 Good 「最新の版は削除できないと表示されました。」
+  - A coined term and its plain version. Notes: 経費申請の承認漏れが月に数件ある。承認
+    したときに承認内容を申請者へ返す「承認レシート」を付ける案。Bad: 「承認レシートに
+    すると、承認漏れに気づけます。」 Good: 「申請を承認したときに、何を承認したかを
+    申請者にその場で返すようにすれば、承認漏れにすぐ気づけます。」
+
+  Return only the message text.
+prompt: ""

@@ -33,7 +33,7 @@ def _build_no_suggestion_payload() -> dict[str, object]:
     return {
         "has_suggestion": False,
         "interaction_contract": None,
-        "message_point": "",
+        "key_point": "",
     }
 
 
@@ -142,7 +142,7 @@ def suggestion_agent(
         return MockLLMResponse(llm_response_str)
 
     writer_prompt = PromptConfig(
-        prompt="writer: {kind} | {message_point} | {deliverable} | {agent_session}",
+        prompt="writer: {kind} | {key_point} | {deliverable} | {agent_session}",
         system_instruction="Write one message in {answer_language}.",
     )
     with patch(

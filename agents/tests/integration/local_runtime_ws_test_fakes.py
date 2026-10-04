@@ -37,9 +37,11 @@ def load_test_prompt_config(prompt_name: str) -> PromptConfig:
         )
     if prompt_name == "suggestion/suggestion_writer":
         return PromptConfig(
-            prompt="suggestion writer\n{kind}\n{message_point}\n{deliverable}\n",
+            prompt="suggestion writer\n{kind}\n{key_point}\n{deliverable}\n",
             system_instruction="Write one message in {answer_language}.",
         )
+    if prompt_name == "suggestion/suggestion_writer_ja":
+        return PromptConfig(prompt="", system_instruction="Japanese voice.")
     raise AssertionError(f"Unexpected prompt requested in E2E test: {prompt_name}")
 
 

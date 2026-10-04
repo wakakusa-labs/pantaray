@@ -108,7 +108,7 @@ class SuggestionDecidedContent(TypedDict):
     """What the decision run decided to say: the writer's only input."""
 
     interaction_contract: SuggestionInteractionContract
-    message_point: str
+    key_point: str
     deliverable: str | None
     agent_session: bool
 
@@ -155,9 +155,13 @@ class SuggestionStructuredOutput(BaseModel):
     interaction_contract: SuggestionInteractionContract | None = Field(
         default=None, description="提案の操作契約"
     )
-    message_point: str = Field(
+    key_point: str = Field(
         max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-        description="伝える一点（気づきか大事な事実）。提案なしの場合は空文字列",
+        description="利用者が理解すべき一点と、その決め手の事実か理由。提案なしの場合は空文字列",
+    )
+    details: str | None = Field(
+        default=None,
+        description="一点を支える事実。書き手には渡さない。提案なしの場合は null",
     )
     deliverable: str | None = Field(
         default=None,

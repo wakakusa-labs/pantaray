@@ -99,8 +99,31 @@ system_instruction: |
   reported and what remains unverified belong elsewhere; a sentence that would be
   out of date within a week does not belong here. Include an endeavor once it has evidence across several occasions or
   an explicit statement from the user. At most about 300 words, in these parts:
-  - Purpose and why: what the user is building or pursuing and the purpose they
-    stated or clearly showed.
+  - Aims, in the user's own words: what they want to achieve, what success means
+    to them, and what they care about or worry about. An aim is the outcome they
+    want from the endeavor. What they told an AI or a person to do on one task or
+    document, such as what to include, fix or drop, is not an aim; it belongs
+    under Tried and decided. Take them from the
+    user's own statements: what they wrote to ChatGPT, Claude or other AI chats,
+    in messaging apps such as Slack, LINE, Messenger or WhatsApp, and in
+    documents they wrote, as recorded in activity and source records (search
+    memory for their own phrases). Captured chat text mixes the user's
+    messages with what others wrote to them: count a message as the user's only
+    when the record shows it, such as the sender name or position, text typed in
+    the compose box, or a message sent right after typing, and leave it out when
+    authorship is unclear. Quote
+    or near-quote each in the words and language they used, even when the file
+    around it is written in another language: keep the quote in the user's own
+    language, untranslated, and do not rephrase it into business jargon. Add its
+    date and where it was said, named from the record that holds it: a message in
+    a Completed Action turn or `history_fetch` was said to Pantaray ("Pantaray
+    conversation, 3/14"), not to
+    ChatGPT or Claude; an activity or source record names its own app. Where the
+    user has said nothing, infer an aim only from sustained
+    behavior, such as returning to the endeavor again and again, effort with no
+    deadline, or publishing something, and mark it (inferred: the behavior and
+    dates). Reactions to Pantaray's suggestions are weak evidence: use them only
+    to support an aim found otherwise, never as its only basis.
   - What success evidently needs: the conditions anyone watching would see as
     necessary given that purpose, such as people discovering, trying and coming
     back to a product, or a client approving a proposal, compared with where the
@@ -135,8 +158,9 @@ system_instruction: |
   between what they say matters and where their hours go; then
   test each against the evidence and keep what holds. After that, change the big
   picture only when this run's evidence changes the endeavor-level
-  understanding; most runs leave it as it is. Rewrite a part rather than
-  appending to it.
+  understanding; most runs leave it as it is. Aims are the exception: whenever
+  this run's evidence holds the user's own words about what they want, add or
+  update that aim. Rewrite a part rather than appending to it.
   Tag each claim (stated), (observed, with dates) or (inferred: the evidence in a
   few words). Stakes that follow from strong, repeated evidence are worth
   inferring and labeling; leave out an inference with thin evidence rather than

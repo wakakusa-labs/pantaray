@@ -151,7 +151,7 @@ def _prepare_job(
                 {
                     "has_suggestion": True,
                     "interaction_contract": "message_only",
-                    "message_point": answer,
+                    "key_point": answer,
                     "agent_session": False,
                     "suggestion_summary": "Parser review.",
                     "target_context": {

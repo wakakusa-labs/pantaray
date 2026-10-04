@@ -137,7 +137,8 @@ def _terminal_tool() -> LlmToolDefinition:
             "required": [
                 "has_suggestion",
                 "interaction_contract",
-                "message_point",
+                "key_point",
+                "details",
                 "deliverable",
                 "agent_session",
                 "suggestion_summary",
@@ -150,12 +151,19 @@ def _terminal_tool() -> LlmToolDefinition:
                     "type": ["string", "null"],
                     "enum": ["action_offer", "message_only", None],
                 },
-                "message_point": {
+                "key_point": {
                     "type": "string",
                     "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
                     "description": (
-                        "Notes for the writer: the single point to tell the user, "
-                        "in one or two short sentences. Not the finished message."
+                        "One short sentence for the writer: the single thing the "
+                        "user must understand, with its one deciding fact or reason. "
+                        "Not the finished message."
+                    ),
+                },
+                "details": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional supporting facts. The writer does not see them."
                     ),
                 },
                 "deliverable": {
@@ -190,8 +198,9 @@ def _terminal_tool() -> LlmToolDefinition:
                 "candidates": {
                     "type": "array",
                     "description": (
-                        "Up to five candidates you considered, including the one "
-                        "you suggest, each with why it was suggested or skipped. "
+                        "Up to eight candidates you considered, including the one "
+                        "you suggest and the best one for each endeavor, each with "
+                        "why it was suggested or skipped and the shift it came from. "
                         "Diagnostic only; never shown to the user."
                     ),
                     "items": {

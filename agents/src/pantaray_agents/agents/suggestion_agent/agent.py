@@ -1,6 +1,5 @@
 """suggestion agent"""
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
@@ -43,11 +42,13 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     normalize_activity_description_rows,
     normalize_activity_summary_rows,
 )
+from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.agents.suggestion_agent.react import run_suggestion_react
 from pantaray_agents.agents.suggestion_agent.research import SuggestionResearchTools
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
     write_suggestion_answer,
+    writer_voice_instruction,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.runtime_ports import (
@@ -62,11 +63,8 @@ from pantaray_agents.schema.agent.base import (
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentRequest,
     SuggestionAgentResponse,
-    SuggestionDecidedContent,
     SuggestionExtraction,
     SuggestionHistoryEntry,
-    SuggestionStructuredOutput,
-    SuggestionTargetContext,
 )
 from pantaray_agents.schema.repository_errors import repository_data_or_raise
 from pantaray_agents.utils.local_time import describe_local_time, local_zone_name
@@ -89,23 +87,6 @@ type SuggestionLlmPayload = dict[str, JSONValue]
 # todos.md exceeds about 20 KB after Memory has run on it, revisit the Memory rules
 # rather than raising these limits.
 SUGGESTION_INITIAL_PROMPT_MAX_CHARS = 124_000
-
-
-def _normalize_target_context(
-    target_context: SuggestionTargetContext | None,
-) -> SuggestionTargetContext | None:
-    if target_context is None:
-        return None
-    organization_name = target_context.organization_name
-    project_name = target_context.project_name
-    return SuggestionTargetContext(
-        organization_name=organization_name.strip() or None
-        if isinstance(organization_name, str)
-        else None,
-        project_name=project_name.strip() or None
-        if isinstance(project_name, str)
-        else None,
-    )
 
 
 class SuggestionPersistencePayload(TypedDict):
@@ -347,98 +328,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             )
         return rendered
 
-    def _parse_suggestion_output(
-        self,
-        *,
-        raw_text: str,
-        parsed_output: SuggestionStructuredOutput | None,
-    ) -> SuggestionExtraction:
-        """SuggestionAgent 用の JSON-only LLM 出力を検証・正規化する。"""
-        parsed = parsed_output
-        if parsed is None:
-            raw = (raw_text or "").strip()
-            if not raw:
-                raise ValueError("Empty structured suggestion response")
-            loaded = json.loads(raw)
-            parsed = SuggestionStructuredOutput.model_validate(loaded)
-
-        message_point = parsed.message_point.strip()
-        deliverable = parsed.deliverable.strip() if parsed.deliverable else None
-        suggestion_summary = (
-            parsed.suggestion_summary.strip()
-            if isinstance(parsed.suggestion_summary, str)
-            else None
-        )
-        target_context = _normalize_target_context(parsed.target_context)
-
-        if parsed.has_suggestion:
-            if not message_point:
-                raise ValueError(
-                    "message_point must be non-empty when has_suggestion=true"
-                )
-            if parsed.interaction_contract is None:
-                raise ValueError(
-                    "interaction_contract is required when has_suggestion=true"
-                )
-            if (parsed.interaction_contract == "action_offer") != bool(deliverable):
-                raise ValueError(
-                    "deliverable must be given exactly when interaction_contract "
-                    "is action_offer"
-                )
-            if parsed.agent_session is None:
-                raise ValueError("agent_session is required when has_suggestion=true")
-            if not suggestion_summary:
-                raise ValueError(
-                    "suggestion_summary must be non-empty when has_suggestion=true"
-                )
-            if target_context is None:
-                raise ValueError(
-                    "target_context must be an object when has_suggestion=true"
-                )
-            decided: SuggestionDecidedContent = {
-                "interaction_contract": parsed.interaction_contract,
-                "message_point": message_point,
-                "deliverable": deliverable,
-                "agent_session": parsed.agent_session,
-            }
-            return {
-                "thinking": None,
-                "answer": "",
-                "decided": decided,
-                "suggestion_summary": suggestion_summary,
-                "target_context": target_context,
-                "prompt_text": "",
-                "response_text": raw_text,
-                "has_suggestion": True,
-                "interaction_contract": parsed.interaction_contract,
-            }
-
-        if message_point or deliverable:
-            raise ValueError(
-                "message_point and deliverable must be empty when has_suggestion=false"
-            )
-        if parsed.interaction_contract is not None:
-            raise ValueError(
-                "interaction_contract must be null when has_suggestion=false"
-            )
-        if suggestion_summary:
-            raise ValueError(
-                "suggestion_summary must be empty when has_suggestion=false"
-            )
-        if target_context is not None:
-            raise ValueError("target_context must be null when has_suggestion=false")
-        return {
-            "thinking": None,
-            "answer": "",
-            "decided": None,
-            "suggestion_summary": None,
-            "target_context": None,
-            "prompt_text": "",
-            "response_text": raw_text,
-            "has_suggestion": False,
-            "interaction_contract": None,
-        }
-
     async def _process_llm_response(self, prompt: str) -> SuggestionExtraction:
         """根拠探索を含むbounded ReActで提案を生成する。"""
         if not self._current_user_id or not self._current_suggestion_id:
@@ -474,7 +363,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             system_instruction=self._system_instruction_for_request(),
             research_tools=self.research_tools,
             generate_tool_call=generate_tool_call,
-            parse_output=self._parse_suggestion_output,
+            parse_output=parse_suggestion_output,
             record_step=self._record_react_step,
             discard_llm_thoughts=self._consume_llm_thoughts,
         )
@@ -494,12 +383,16 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                     raise RuntimeError("Suggestion writer returned a non-text response")
                 return text
 
+            answer_language = self._answer_language_label()
             extracted["answer"] = await write_suggestion_answer(
                 run_id=self._current_suggestion_id,
                 step_number=self._last_step_number + 1,
                 decided=decided,
-                answer_language=self._answer_language_label(),
+                answer_language=answer_language,
                 config=self._writer_prompt_config,
+                voice_instruction=writer_voice_instruction(
+                    answer_language, self._load_prompt_config
+                ),
                 generate_text=generate_text,
                 record_step=self._record_react_step,
             )

@@ -204,7 +204,7 @@ def local_runtime_ws_harness(
             {
                 "has_suggestion": True,
                 "interaction_contract": "action_offer",
-                "message_point": "The local runtime verification is half done.",
+                "key_point": "The local runtime verification is half done.",
                 "deliverable": "The rest of the local runtime verification.",
                 "agent_session": False,
                 "suggestion_summary": "Focused local runtime verification.",

@@ -59,7 +59,7 @@ def _no_suggestion_output() -> dict[str, object]:
     return {
         "has_suggestion": False,
         "interaction_contract": None,
-        "message_point": "",
+        "key_point": "",
         "suggestion_summary": None,
         "target_context": None,
     }
@@ -69,7 +69,7 @@ def _suggestion_output(point: str) -> dict[str, object]:
     return {
         "has_suggestion": True,
         "interaction_contract": "action_offer",
-        "message_point": point,
+        "key_point": point,
         "deliverable": "Task 1 done.",
         "agent_session": False,
         "suggestion_summary": "Action handoff summary",

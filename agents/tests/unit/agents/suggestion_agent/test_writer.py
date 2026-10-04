@@ -5,14 +5,10 @@ from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
-from pantaray_agents.agents.suggestion_agent.writer import (
-    SUGGESTION_WRITER_VOICE_PROMPT_NAMES,
-)
 from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
-from pantaray_agents.utils.prompt_loader import PromptConfig
 
 POINT = (
     "The client asked twice for the March invoice; it is still unsent. "
@@ -125,34 +121,3 @@ async def test_a_writer_failure_publishes_nothing(
     writer_step = _steps(mock_repository)[-1]
     assert writer_step["status"] == "error"
     assert "writer model unavailable" in str(writer_step["error_message"])
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("language", "gets_voice"), [("ja", True), ("en", False)])
-async def test_only_a_language_with_a_voice_supplement_gets_it(
-    suggestion_agent: SuggestionAgent,
-    mock_llm_client: MockLLMClient,
-    monkeypatch: pytest.MonkeyPatch,
-    language: str,
-    gets_voice: bool,
-) -> None:
-    voice = PromptConfig(prompt="", system_instruction="JAPANESE-VOICE-RULES")
-
-    def load(name: str) -> PromptConfig:
-        assert name == SUGGESTION_WRITER_VOICE_PROMPT_NAMES["Japanese"]
-        return voice
-
-    _SpyConfig.calls = []
-    monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
-    monkeypatch.setattr(suggestion_agent, "_load_prompt_config", load)
-    serve_lens_runs(mock_llm_client, _decision())
-    mock_llm_client.responses["default"] = WRITTEN
-    request = _request()
-    request.language = language
-
-    response = await suggestion_agent.process(request)
-
-    assert response.status == StatusType.SUCCESS
-    system = str(_SpyConfig.calls[-1]["system_instruction"])
-    assert system.startswith("Write one message in ")
-    assert ("JAPANESE-VOICE-RULES" in system) is gets_voice

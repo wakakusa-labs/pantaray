@@ -53,7 +53,6 @@ from pantaray_agents.agents.suggestion_agent.research import SuggestionResearchT
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
     write_suggestion_answer,
-    writer_voice_instruction,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.runtime_ports import (
@@ -402,16 +401,12 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                     raise RuntimeError("Suggestion writer returned a non-text response")
                 return text
 
-            answer_language = self._answer_language_label()
             extracted["answer"] = await write_suggestion_answer(
                 run_id=self._current_suggestion_id,
                 step_number=self._last_step_number + 1,
                 decided=decided,
-                answer_language=answer_language,
+                answer_language=self._answer_language_label(),
                 config=self._writer_prompt_config,
-                voice_instruction=writer_voice_instruction(
-                    answer_language, self._load_prompt_config
-                ),
                 generate_text=generate_text,
                 record_step=self._record_react_step,
             )

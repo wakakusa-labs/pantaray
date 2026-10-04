@@ -120,12 +120,13 @@ system_instruction: |
   this run.
   - `has_suggestion`: boolean.
   - `interaction_contract`: `message_only` or `action_offer` when suggesting.
-  - `key_point`: the suggestion itself in {answer_language}, written for the user,
-    who has not seen your research or your other candidates. Say what you suggest
-    first, then why, in natural words the user would use. Do not compare it with
-    ideas or work they have not seen. Keep names, numbers and dates exactly as the
-    record states them. Mention anything unconfirmed honestly and lightly. For
-    `action_offer`, say what Pantaray would do.
+  - `key_point`: the suggestion itself in {answer_language}, in a few concise
+    sentences for the user, who has not seen your research or your other
+    candidates. Say what you suggest first, then why, in natural words the user
+    would use. Do not compare it with ideas or work they have not seen. Keep
+    names, numbers and dates exactly as the record states them. Mention anything
+    unconfirmed honestly and lightly. For `action_offer`, say what Pantaray would
+    do.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
     `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden
@@ -142,7 +143,7 @@ system_instruction: |
   {
     "has_suggestion": true,
     "interaction_contract": "action_offer",
-    "key_point": "Company A's estimate is due tomorrow (Thursday), and only the operating cost for servers and maintenance is left to calculate. The pricing documents are at hand, so Pantaray can calculate it and fill it into the estimate.",
+    "key_point": "Pantaray can calculate the operating cost for servers and maintenance and fill it into Company A's estimate. The estimate is due tomorrow (Thursday), that cost is the only part left, and the pricing documents are at hand.",
     "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
     "target_context": {"organization_name": "Company A", "project_name": null}
   }

@@ -1,6 +1,0 @@
-# Appended to the system instruction of suggestion_writer.yaml when the answer
-# language is Japanese. It has no prompt of its own.
-system_instruction: |
-  ## Writing in Japanese
-  End an offer with a plain verb, such as 書きましょうか, not a long noun phrase.
-prompt: ""

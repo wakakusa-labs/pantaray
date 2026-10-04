@@ -209,15 +209,6 @@ def test_read_only_file_access_reads_only_registered_roots(
         column=1,
         limit=1,
     )
-    grep_result = reader.grep(
-        root_id=root_id,
-        base_path=".",
-        pattern="shared contract",
-        include_glob="**/*.md",
-        offset=1,
-        max_matches=10,
-    )
-
     assert read_result["content"] == "shared contract\n"
     assert read_result["next_offset"] == 3
     assert read_result["truncated"] is True
@@ -225,13 +216,6 @@ def test_read_only_file_access_reads_only_registered_roots(
     assert read_result["retry_hint"] == (
         "Continue with offset=next_offset and column=next_column."
     )
-    assert grep_result["matches"] == [
-        {
-            "path": "design.md",
-            "line_number": 2,
-            "line": "shared contract",
-        }
-    ]
     with pytest.raises(BrokerPolicyError, match="root-relative"):
         reader.read(
             root_id=root_id,
@@ -268,18 +252,9 @@ def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
     globbed = reader.glob(
         root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
     )
-    grepped = reader.grep(
-        root_id=root_id,
-        base_path=".",
-        pattern="needle",
-        include_glob=None,
-        offset=1,
-        max_matches=50,
-    )
 
     assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
     assert globbed["matches"] == ["sibling.txt"]
-    assert [match["path"] for match in grepped["matches"]] == ["sibling.txt"]  # type: ignore[index]
     alias = storage.with_name(storage.name.upper())
     private_paths = [f"{storage.name}/notes.txt", f"{storage.name}/{db_path.name}"]
     if alias.exists() and alias.samefile(storage):
@@ -296,14 +271,6 @@ def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
         ),
         lambda: reader.glob(
             root_id=root_id, base_path=storage.name, pattern="*", offset=1, limit=10
-        ),
-        lambda: reader.grep(
-            root_id=root_id,
-            base_path=storage.name,
-            pattern="needle",
-            include_glob=None,
-            offset=1,
-            max_matches=10,
         ),
     ):
         with pytest.raises(BrokerPolicyError, match="private app storage"):
@@ -335,22 +302,13 @@ def test_read_only_file_access_never_walks_into_private_app_storage(
             reader.glob(
                 root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
             ),
-            reader.grep(
-                root_id=root_id,
-                base_path=".",
-                pattern="needle",
-                include_glob=None,
-                offset=1,
-                max_matches=50,
-            ),
         )
     finally:
         unreadable.chmod(0o600)
 
-    listed, globbed, grepped = results
+    listed, globbed = results
     assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
     assert globbed["matches"] == ["sibling.txt"]
-    assert [match["path"] for match in grepped["matches"]] == ["sibling.txt"]  # type: ignore[index]
     for result in results:
         assert result["truncated"] is False
         assert result["warning"] is None
@@ -484,150 +442,6 @@ def test_workspace_glob_remains_pinned_after_base_replacement(
 
     assert result["matches"] == ["base/inside.py"]
     assert "outside.py" not in str(result)
-
-
-def test_workspace_grep_reads_scanned_file_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "shared.txt").write_text("inside marker\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "shared.txt").write_text("outside marker\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path="base",
-        pattern="marker",
-        include_glob="*.txt",
-        offset=1,
-        max_matches=100,
-    )
-
-    assert result["matches"] == [
-        {
-            "path": "base/shared.txt",
-            "line_number": 1,
-            "line": "inside marker",
-        }
-    ]
-    assert "outside marker" not in str(result)
-
-
-def test_workspace_grep_preserves_one_based_pagination(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    (root / "matches.txt").write_text(
-        "needle one\nneedle two\nneedle three\n",
-        encoding="utf-8",
-    )
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path=".",
-        pattern="needle",
-        include_glob="*.txt",
-        offset=2,
-        max_matches=1,
-    )
-
-    assert result["matches"] == [
-        {"path": "matches.txt", "line_number": 2, "line": "needle two"}
-    ]
-    assert result["next_offset"] == 3
-    assert result["truncated"] is True
-    assert result["truncation_reason"] == "page_limit"
-    assert result["retry_hint"] == "Continue with offset=next_offset."
-
-
-def test_workspace_grep_preserves_bounded_multibyte_line_output(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    line = "needle" + "あ" * 600
-    (root / "matches.txt").write_text(line + "\n", encoding="utf-8")
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.grep(
-        root_id="workspace",
-        base_path=".",
-        pattern="needle",
-        include_glob="*.txt",
-        offset=1,
-        max_matches=1,
-    )
-
-    assert result["matches"] == [
-        {
-            "path": "matches.txt",
-            "line_number": 1,
-            "line": line[:500] + "…",
-        }
-    ]
-    assert "excerpt around their first match" in str(result["warning"])
-    assert "offset=line_number" in str(result["retry_hint"])
-
-
-def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    (root / "docs" / "deep").mkdir(parents=True)
-    (root / "docs" / "deep" / "note.txt").write_text("needle deep\n")
-    (root / "big.log").write_bytes(b"x\n" * (1024 * 1024) + b"needle late\n")
-    (root / "blob.bin").write_bytes(b"needle\0")
-    (root / "latin1.txt").write_bytes(b"needle caf\xe9\n")
-    (root / "wide.txt").write_text("x" * 8 * 1024 * 1024 + " needle\nneedle 2\n")
-    (root / "link.txt").symlink_to(root / "big.log")
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    listed = reader.list(root_id="workspace", path=".", max_depth=1, offset=1, limit=10)
-    grepped = reader.grep(
-        root_id="workspace",
-        base_path=".",
-        pattern="needle",
-        include_glob=None,
-        offset=1,
-        max_matches=10,
-    )
-
-    names = [entry["name"] for entry in listed["entries"]]  # type: ignore[index]
-    assert names == ["big.log", "blob.bin", "docs", "latin1.txt", "wide.txt"]
-    assert "at max_depth=1 were not opened" in str(listed["warning"])
-    assert "1 symlink(s) were skipped" in str(listed["warning"])
-    assert grepped["matches"] == [
-        {"path": "big.log", "line_number": 1024 * 1024 + 1, "line": "needle late"},
-        {"path": "docs/deep/note.txt", "line_number": 1, "line": "needle deep"},
-        {"path": "latin1.txt", "line_number": 1, "line": "needle caf\ufffd"},
-        {"path": "wide.txt", "line_number": 2, "line": "needle 2"},
-    ]
-    assert "1 line(s) longer than 8,388,608 characters" in str(grepped["warning"])
-    assert "1 binary file(s) also match" in str(grepped["warning"])
-    assert "blob.bin" in str(grepped["warning"])
 
 
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(

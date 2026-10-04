@@ -137,7 +137,7 @@ def render_ripgrep_seatbelt_profile(
     read_roots: Sequence[str],
     private_storage_roots: Sequence[str],
     readable_private_roots: Sequence[str],
-    action_plan_path: str,
+    action_plan_path: str | None,
 ) -> str:
     """Let the discovery search read ``read_roots`` and run, and do nothing else.
 

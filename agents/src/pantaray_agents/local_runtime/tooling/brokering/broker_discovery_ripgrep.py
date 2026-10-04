@@ -199,6 +199,7 @@ def run_ripgrep_grep(
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
+    sorted_by_path: bool = False,
 ) -> RipgrepGrepResult:
     matches: list[RipgrepGrepMatch] = []
     binary_match_paths: list[str] = []
@@ -260,6 +261,10 @@ def run_ripgrep_grep(
     ]
     if follow_symlinks:
         argv.append("--follow")
+    if sorted_by_path:
+        # One thread in path order, so a repeated search returns the same
+        # matches in the same order and a caller can page through them.
+        argv.extend(("--sort", "path"))
     if include_glob is not None:
         argv.extend(("--glob", include_glob))
     if excluded_relative_path is not None:

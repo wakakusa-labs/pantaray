@@ -205,7 +205,8 @@ def build_read_only_file_definitions(
                 "Search text files of any size in an explicit readable root. A "
                 f"line over {GREP_MAX_LINE_CHARS} characters comes back as an "
                 "excerpt around its first match; a matching binary file is named "
-                "in warning; skipped_files counts unreadable files. " + _SEARCH_LIMITS
+                "in warning; skipped_files counts unreadable files. Skipped "
+                "symlinks are not counted or named. " + _SEARCH_LIMITS
             ),
             properties={
                 "root": root,

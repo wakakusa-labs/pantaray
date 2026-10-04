@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
+    MAX_BYTES,
+    MAX_LINE_LENGTH,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import ReadToolArgs
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+)
 
 from .base import (
     ToolDefinition,
@@ -96,9 +103,17 @@ READ_TOOL = ToolDefinition.from_spec(
                 "If truncated=true, treat the result as incomplete and follow "
                 "truncation_reason and retry_hint instead of treating "
                 "next_offset=null as EOF. "
-                "Text results are automatically paged to fit the inline output "
-                "limit, including metadata. Follow the returned cursor to read "
-                "the remaining text."
+                "Each call returns at most limit lines, "
+                f"{MAX_BYTES // 1024} KB of text, and what fits the "
+                f"{ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT:,}-character inline "
+                "result with its metadata; follow the returned cursor for the "
+                "rest. Every line of a text file of any size is reachable by "
+                f"offset, and a line longer than {MAX_LINE_LENGTH} characters "
+                "continues with next_column. A directory read pages through "
+                "every entry in the directory's own order, and offset counts the "
+                "entries it skips too: symlinks without full read access, "
+                "Pantaray's private app storage, and its .runtime-temp folder in "
+                "the scratch workspace. warning says what a page skipped."
             ),
         ),
         execution_policy=tool_execution_policy(
@@ -187,15 +202,12 @@ READ_TOOL = ToolDefinition.from_spec(
                     "type": ["string", "null"],
                     "enum": [
                         "page_limit",
-                        "scan_budget",
                         "line_count_budget",
                         "document_budget",
                         None,
                     ],
                     "description": (
                         "page_limit means more entries or lines are available. "
-                        "scan_budget means the safe text scan or directory traversal "
-                        "limit was reached; follow retry_hint. "
                         "line_count_budget means a text file was "
                         "too large to count total_lines safely. "
                         "document_budget means document extraction stopped before "
@@ -208,6 +220,10 @@ READ_TOOL = ToolDefinition.from_spec(
                     "description": (
                         "Guidance for continuing or retrying when truncated=true."
                     ),
+                },
+                "warning": {
+                    "type": ["string", "null"],
+                    "description": "Directory entries this read skipped, and why.",
                 },
                 "document_format": {
                     "type": "string",

@@ -44,8 +44,8 @@ READ_DOCUMENT_UNIT_OUT_OF_RANGE = "READ_DOCUMENT_UNIT_OUT_OF_RANGE"
 READ_LEGACY_DOCUMENT_UNSUPPORTED = "READ_LEGACY_DOCUMENT_UNSUPPORTED"
 DOCUMENT_BUDGET_TRUNCATION_REASON = "document_budget"
 READ_DOCUMENT_BUDGET_RETRY_HINT = (
-    "Extraction stopped before the end of this document; notes say what was "
-    "left out. No offset or start_unit continues the missing content."
+    "Part of this document was left out; notes say what and how to reach it. "
+    "No offset or start_unit continues the missing content."
 )
 READ_DOCUMENT_UNIT_OUT_OF_RANGE_FIX_HINT = (
     "Read this document again with a start_unit inside it, or without "

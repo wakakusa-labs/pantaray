@@ -3,7 +3,6 @@ from __future__ import annotations
 import mimetypes
 import os
 import stat
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -11,6 +10,7 @@ from typing import cast
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 
+from ..action_session_temp_paths import SCRATCH_SESSION_TEMP_DIRNAME
 from .attachment_reference import build_workspace_file_attachment
 from .broker_common import (
     BrokerContext,
@@ -44,11 +44,6 @@ READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
 READ_ATTACHMENT_TOO_LARGE = "READ_ATTACHMENT_TOO_LARGE"
 READ_START_UNIT_UNSUPPORTED = "READ_START_UNIT_UNSUPPORTED"
-READ_DIRECTORY_SCAN_LIMIT = 20_000
-READ_DIRECTORY_SCAN_BUDGET_RETRY_HINT = (
-    "Use a narrower directory path, or use list/glob with a more specific base path "
-    "before reading this directory again."
-)
 READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT = "Continue with offset=next_offset."
 
 _BINARY_EXTENSIONS = frozenset(
@@ -74,7 +69,6 @@ _BINARY_EXTENSIONS = frozenset(
         ".zip",
     }
 )
-_INTERNAL_DIRECTORY_NAMES = frozenset({".runtime-temp", ".venv"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +78,7 @@ class DirectoryReadResult:
     truncated: bool
     truncation_reason: str | None
     retry_hint: str | None
+    warning: str | None
 
 
 def run_read_executor(
@@ -267,6 +262,7 @@ def _read_directory(
             "truncated": result.truncated,
             "truncation_reason": result.truncation_reason,
             "retry_hint": result.retry_hint,
+            "warning": result.warning,
         },
         search_text=search_text,
         file_paths=(target.display_path,),
@@ -282,66 +278,58 @@ def _read_bounded_directory_entries(
     offset: int,
     limit: int,
 ) -> DirectoryReadResult:
+    """One page of entries, from the offset-th entry in the directory's order.
+
+    offset counts every entry, shown or skipped, so a page only checks its own
+    entries and offset reaches any entry of a directory left unchanged.
+    """
+
     entries: list[dict[str, JSONValue]] = []
-    visible_index = 0
-    scanned = 0
+    skipped_symlinks = 0
+    unreadable = 0
+    first_error: str | None = None
     is_hidden = hidden_read_path_filter(context)
+    session_temp = context.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
+    next_offset: int | None = None
     with os.scandir(descriptor) as iterator:
-        for child in iterator:
-            scanned += 1
-            if scanned > READ_DIRECTORY_SCAN_LIMIT:
-                return DirectoryReadResult(
-                    entries=entries,
-                    next_offset=(offset + len(entries) if entries else None),
-                    truncated=True,
-                    truncation_reason="scan_budget",
-                    retry_hint=(
-                        READ_DIRECTORY_SCAN_BUDGET_RETRY_HINT if not entries else None
-                    ),
-                )
-            entry = _directory_entry(child, is_hidden=is_hidden, target=target)
-            if entry is None:
-                continue
-            visible_index += 1
-            if visible_index < offset:
+        for index, child in enumerate(iterator, start=1):
+            if index < offset:
                 continue
             if len(entries) >= limit:
-                return DirectoryReadResult(
-                    entries=entries,
-                    next_offset=offset + len(entries),
-                    truncated=True,
-                    truncation_reason="page_limit",
-                    retry_hint=READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT,
-                )
-            entries.append(entry)
+                next_offset = index
+                break
+            child_path = target.real_path / child.name
+            try:
+                if child_path == session_temp or is_hidden(child_path):
+                    continue
+                if child.is_symlink() and not target.allow_symlink_directory_entries:
+                    skipped_symlinks += 1
+                    continue
+                kind = "directory" if child.is_dir() else "file"
+            except OSError as exc:
+                unreadable += 1
+                first_error = first_error or f"{child.name}: {exc.strerror or exc}"
+                continue
+            entries.append({"name": child.name, "kind": kind})
+    warnings: list[str] = []
+    if skipped_symlinks:
+        warnings.append(
+            f"This page skipped {skipped_symlinks} symlink(s): symlinks are listed "
+            "only with full read access."
+        )
+    if unreadable:
+        warnings.append(
+            f"This page skipped {unreadable} entr(y/ies) that could not be read. "
+            f"First error: {first_error}."
+        )
     return DirectoryReadResult(
         entries=entries,
-        next_offset=None,
-        truncated=False,
-        truncation_reason=None,
-        retry_hint=None,
+        next_offset=next_offset,
+        truncated=next_offset is not None,
+        truncation_reason="page_limit" if next_offset is not None else None,
+        retry_hint=READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT if next_offset else None,
+        warning=" ".join(warnings) or None,
     )
-
-
-def _directory_entry(
-    child: os.DirEntry[str],
-    *,
-    is_hidden: Callable[[Path], bool],
-    target: ReadTarget,
-) -> dict[str, JSONValue] | None:
-    if child.name in _INTERNAL_DIRECTORY_NAMES:
-        return None
-    child_path = target.real_path / child.name
-    try:
-        if child.is_symlink():
-            if not target.allow_symlink_directory_entries:
-                return None
-        if is_hidden(child_path):
-            return None
-        kind = "directory" if child.is_dir() else "file"
-    except OSError:
-        return None
-    return {"name": child.name, "kind": kind}
 
 
 def _reject_start_unit(request: ValidatedReadRequest) -> None:

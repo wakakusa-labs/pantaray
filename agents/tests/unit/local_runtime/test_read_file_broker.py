@@ -10,9 +10,6 @@ import pytest
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerPolicyError,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    MAX_TEXT_SCAN_BYTES,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker_read_protocol import (
     ReadToolOutput,
 )
@@ -128,30 +125,22 @@ async def test_read_reaches_large_offset_without_splitting(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_read_rejects_unreachable_offset_and_accepts_smaller_retry(
-    tmp_path: Path,
-) -> None:
+async def test_read_reaches_lines_past_eight_mebibytes(tmp_path: Path) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     line = "x" * 1_023 + "\n"
-    last_start = MAX_TEXT_SCAN_BYTES // len(line)
-    (context.workspace_path / "large.txt").write_text(line * (last_start + 2))
-    with pytest.raises(BrokerPolicyError) as raised:
-        await execute_read_tool(
-            db_path=db_path,
-            context=context,
-            args={"path": "large.txt", "offset": last_start + 1, "limit": 1},
-        )
-    assert raised.value.code == "READ_OFFSET_SCAN_LIMIT"
-    assert "smaller offset or column" in str(raised.value)
-    retry = await execute_read_tool(
+    # Past the 8 MiB that read once scanned before refusing an offset.
+    last = 8 * 1024 * 1024 // len(line) + 2
+    (context.workspace_path / "large.txt").write_text(line * (last - 1) + "end\n")
+
+    outcome = await execute_read_tool(
         db_path=db_path,
         context=context,
-        args={"path": "large.txt", "offset": last_start, "limit": 1},
+        args={"path": "large.txt", "offset": last, "limit": 2},
     )
-    assert retry.status == "success"
-    assert retry.output["content"] == line
-    assert retry.output["truncation_reason"] == "scan_budget"
-    assert retry.output["next_offset"] is None
+
+    assert outcome.output["content"] == "end\n"
+    assert outcome.output["total_lines"] == last
+    assert outcome.output["truncated"] is False
 
 
 @pytest.mark.asyncio

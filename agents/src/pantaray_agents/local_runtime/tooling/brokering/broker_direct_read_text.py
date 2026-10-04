@@ -12,15 +12,6 @@ from .broker_common import BrokerPolicyError
 MAX_BYTES = 50 * 1024
 MAX_LINE_LENGTH = 2_000
 MAX_TOTAL_LINE_COUNT_BYTES = 512 * 1024
-MAX_TEXT_SCAN_BYTES = 8 * 1024 * 1024
-READ_SCAN_LIMIT_MESSAGE = (
-    "Text scan limit reached before the requested position. "
-    "Retry with a smaller offset or column."
-)
-READ_FILE_SCAN_LIMIT_RETRY_HINT = (
-    "Text scan limit reached; this is partial content with no continuation. "
-    "Use a smaller offset or column to read an earlier range."
-)
 READ_OFFSET_OUT_OF_RANGE = "READ_OFFSET_OUT_OF_RANGE"
 READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT = (
     "Use next_offset to continue reading. total_lines is unavailable because the "
@@ -53,7 +44,6 @@ class TextLineRead:
     fits_byte_budget: bool
     line_complete: bool
     stream_has_line_remainder: bool
-    scanned_bytes: int
     consumed_chars: int
 
 
@@ -119,46 +109,34 @@ def _read_text_lines(
     next_offset: int | None = None
     next_column: int | None = None
     pending_current_line_remainder = False
-    scanned_bytes = 0
     saw_eof = False
-    scan_limit_reached = False
+    # Lines before offset are streamed past one bounded chunk at a time, so any
+    # line of a file of any size is reachable without holding the file.
     while current_line < offset - 1:
         skipped_line = _read_bounded_text_line(
             handle,
             byte_budget=None,
             consume_remainder=True,
-            scan_byte_budget=MAX_TEXT_SCAN_BYTES - scanned_bytes,
         )
         if skipped_line is None:
             saw_eof = True
             break
         current_line += 1
-        scanned_bytes += skipped_line.scanned_bytes
 
     while len(content_lines) < limit:
-        remaining_scan_bytes = MAX_TEXT_SCAN_BYTES - scanned_bytes
         remaining_bytes = max_bytes - content_bytes
         line = _read_bounded_text_line(
             handle,
             byte_budget=remaining_bytes,
             consume_remainder=False,
             start_column=column if current_line + 1 == offset else 1,
-            scan_byte_budget=remaining_scan_bytes,
         )
         if line is None:
             saw_eof = True
             break
         current_line += 1
-        scanned_bytes += line.scanned_bytes
         current_column = column if current_line == offset else 1
-        scan_limit_reached = scanned_bytes >= MAX_TEXT_SCAN_BYTES
         if not line.fits_byte_budget:
-            if scan_limit_reached:
-                if not content_lines:
-                    raise BrokerPolicyError(
-                        READ_SCAN_LIMIT_MESSAGE, code="READ_OFFSET_SCAN_LIMIT"
-                    )
-                break
             next_offset = current_line
             next_column = current_column
             pending_current_line_remainder = line.stream_has_line_remainder
@@ -168,8 +146,6 @@ def _read_text_lines(
         content_bytes += line_bytes
         end_line = current_line
         end_column = current_column + line.consumed_chars - 1
-        if scan_limit_reached:
-            break
         if not line.line_complete:
             next_offset = current_line
             next_column = current_column + line.consumed_chars
@@ -184,7 +160,7 @@ def _read_text_lines(
             next_column = 1
             break
 
-    if not scan_limit_reached and (should_count_exact_total or saw_eof):
+    if should_count_exact_total or saw_eof:
         remaining_lines = _count_remaining_text_lines(
             handle=handle,
             discard_current_line_remainder=pending_current_line_remainder,
@@ -208,20 +184,16 @@ def _read_text_lines(
         )
     page_incomplete = next_offset is not None
     line_count_incomplete = total_lines is None
-    truncated = scan_limit_reached or page_incomplete or line_count_incomplete
+    truncated = page_incomplete or line_count_incomplete
     truncation_reason = (
-        "scan_budget"
-        if scan_limit_reached
-        else "line_count_budget"
+        "line_count_budget"
         if line_count_incomplete
         else "page_limit"
         if page_incomplete
         else None
     )
     retry_hint = (
-        READ_FILE_SCAN_LIMIT_RETRY_HINT
-        if scan_limit_reached
-        else READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT
+        READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT
         if line_count_incomplete
         else READ_FILE_PAGE_LIMIT_RETRY_HINT
         if page_incomplete
@@ -267,18 +239,9 @@ def _read_bounded_text_line(
     byte_budget: int | None,
     consume_remainder: bool,
     start_column: int = 1,
-    scan_byte_budget: int | None = None,
 ) -> TextLineRead | None:
-    skipped_bytes = _skip_line_columns(
-        handle, start_column=start_column, scan_byte_budget=scan_byte_budget
-    )
-    remaining_scan_bytes = (
-        None if scan_byte_budget is None else scan_byte_budget - skipped_bytes
-    )
-    read_size = _scan_read_size(remaining_scan_bytes)
-    if remaining_scan_bytes is not None and byte_budget is not None:
-        byte_budget = min(byte_budget, remaining_scan_bytes)
-    chunk, chunk_bytes = _read_text_chunk(handle, read_size)
+    _skip_line_columns(handle, start_column=start_column)
+    chunk = _read_text_chunk(handle, _LINE_READ_AHEAD_CHARS)
     if chunk == "":
         if start_column > 1:
             raise BrokerPolicyError(
@@ -289,17 +252,9 @@ def _read_bounded_text_line(
 
     body, newline = _split_line_newline(chunk)
     if newline and len(body) <= MAX_LINE_LENGTH:
-        return _line_read_if_fits_byte_budget(
-            text=chunk,
-            byte_budget=byte_budget,
-            scanned_bytes=skipped_bytes + chunk_bytes,
-        )
-    if not newline and len(chunk) < read_size:
-        return _line_read_if_fits_byte_budget(
-            text=chunk,
-            byte_budget=byte_budget,
-            scanned_bytes=skipped_bytes + chunk_bytes,
-        )
+        return _line_read_if_fits_byte_budget(text=chunk, byte_budget=byte_budget)
+    if not newline and len(chunk) < _LINE_READ_AHEAD_CHARS:
+        return _line_read_if_fits_byte_budget(text=chunk, byte_budget=byte_budget)
 
     line = body[:MAX_LINE_LENGTH]
     pending_remainder = not newline
@@ -318,7 +273,6 @@ def _read_bounded_text_line(
                 fits_byte_budget=True,
                 line_complete=False,
                 stream_has_line_remainder=pending_remainder,
-                scanned_bytes=skipped_bytes + chunk_bytes,
                 consumed_chars=len(bounded_line),
             )
         return TextLineRead(
@@ -326,7 +280,6 @@ def _read_bounded_text_line(
             fits_byte_budget=False,
             line_complete=False,
             stream_has_line_remainder=pending_remainder,
-            scanned_bytes=skipped_bytes + chunk_bytes,
             consumed_chars=0,
         )
 
@@ -336,26 +289,13 @@ def _read_bounded_text_line(
             fits_byte_budget=True,
             line_complete=False,
             stream_has_line_remainder=True,
-            scanned_bytes=skipped_bytes + chunk_bytes,
             consumed_chars=len(line),
         )
 
-    suffix_newline = newline
-    remainder_bytes = 0
-    if not suffix_newline:
-        suffix_newline, remainder_bytes = _discard_line_remainder(
-            handle,
-            scan_byte_budget=(
-                None
-                if remaining_scan_bytes is None
-                else remaining_scan_bytes - chunk_bytes
-            ),
-        )
+    suffix_newline = newline or _discard_line_remainder(handle)
     return _line_read_if_fits_byte_budget(
         text=line + suffix_newline,
         byte_budget=byte_budget,
-        line_complete=True,
-        scanned_bytes=skipped_bytes + chunk_bytes + remainder_bytes,
     )
 
 
@@ -363,8 +303,6 @@ def _line_read_if_fits_byte_budget(
     *,
     text: str,
     byte_budget: int | None,
-    line_complete: bool = True,
-    scanned_bytes: int | None = None,
 ) -> TextLineRead:
     fits_byte_budget = _fits_byte_budget(text=text, byte_budget=byte_budget)
     if not fits_byte_budget and byte_budget is not None:
@@ -376,17 +314,13 @@ def _line_read_if_fits_byte_budget(
                 fits_byte_budget=True,
                 line_complete=False,
                 stream_has_line_remainder=False,
-                scanned_bytes=(
-                    _encoded_len(text) if scanned_bytes is None else scanned_bytes
-                ),
                 consumed_chars=len(bounded_body),
             )
     return TextLineRead(
         text=text if fits_byte_budget else "",
         fits_byte_budget=fits_byte_budget,
-        line_complete=line_complete,
+        line_complete=True,
         stream_has_line_remainder=False,
-        scanned_bytes=(_encoded_len(text) if scanned_bytes is None else scanned_bytes),
         consumed_chars=len(text.removesuffix("\n")),
     )
 
@@ -405,33 +339,16 @@ def _prefix_within_byte_budget(text: str, *, byte_budget: int) -> str:
     return text[:low]
 
 
-def _scan_read_size(remaining_bytes: int | None) -> int:
-    if remaining_bytes is None:
-        return _LINE_READ_AHEAD_CHARS
-    if remaining_bytes <= 0:
-        raise BrokerPolicyError(READ_SCAN_LIMIT_MESSAGE, code="READ_OFFSET_SCAN_LIMIT")
-    # TextIO sizes reads in characters; UTF-8 read-ahead is bounded to one chunk.
-    return min(_LINE_READ_AHEAD_CHARS, remaining_bytes)
-
-
-def _skip_line_columns(
-    handle: TextIO, *, start_column: int, scan_byte_budget: int | None
-) -> int:
+def _skip_line_columns(handle: TextIO, *, start_column: int) -> None:
     remaining = start_column - 1
-    scanned_bytes = 0
     while remaining > 0:
-        read_size = _scan_read_size(
-            None if scan_byte_budget is None else scan_byte_budget - scanned_bytes
-        )
-        chunk, chunk_bytes = _read_text_chunk(handle, min(remaining, read_size))
+        chunk = _read_text_chunk(handle, min(remaining, _LINE_READ_AHEAD_CHARS))
         if chunk == "" or "\n" in chunk:
             raise BrokerPolicyError(
                 f"Column {start_column} is out of range for this line",
                 code=READ_OFFSET_OUT_OF_RANGE,
             )
         remaining -= len(chunk)
-        scanned_bytes += chunk_bytes
-    return scanned_bytes
 
 
 def _fits_byte_budget(*, text: str, byte_budget: int | None) -> bool:
@@ -440,26 +357,19 @@ def _fits_byte_budget(*, text: str, byte_budget: int | None) -> bool:
     return _encoded_len(text) <= byte_budget
 
 
-def _discard_line_remainder(
-    handle: TextIO, *, scan_byte_budget: int | None = None
-) -> tuple[str, int]:
-    scanned_bytes = 0
+def _discard_line_remainder(handle: TextIO) -> str:
+    """Skip the rest of the current line and return its newline, if any."""
+
     while True:
-        chunk, chunk_bytes = _read_text_chunk(
-            handle,
-            _scan_read_size(
-                None if scan_byte_budget is None else scan_byte_budget - scanned_bytes
-            ),
-        )
+        chunk = _read_text_chunk(handle, _LINE_READ_AHEAD_CHARS)
         if chunk == "":
-            return "", scanned_bytes
-        scanned_bytes += chunk_bytes
+            return ""
         _body, newline = _split_line_newline(chunk)
         if newline:
-            return newline, scanned_bytes
+            return newline
 
 
-def _read_text_chunk(handle: TextIO, size: int) -> tuple[str, int]:
+def _read_text_chunk(handle: TextIO, size: int) -> str:
     chunk = handle.readline(size)
     # Keep CRLF together when the character limit lands between its two bytes.
     if chunk.endswith("\r"):
@@ -469,8 +379,7 @@ def _read_text_chunk(handle: TextIO, size: int) -> tuple[str, int]:
             chunk += suffix
         elif suffix:
             handle.seek(position)
-    scanned_bytes = _encoded_len(chunk)
-    return chunk.replace("\r\n", "\n").replace("\r", "\n"), scanned_bytes
+    return chunk.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _encoded_len(text: str) -> int:

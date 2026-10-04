@@ -19,6 +19,7 @@ from pantaray_agents.schema.tool_result import FormalToolStepOutput
 
 from ..storage.migrations import MigrationError
 from .repository.common import BUSY_TIMEOUT_PRAGMA_TEMPLATE
+from .tool_result_spill import is_json_spill_shape
 from .tool_result_storage import (
     ACTION_TOOL_RESULTS_DIRNAME,
     TOOL_RESULT_BINARY_MEDIA_TYPE,
@@ -26,16 +27,6 @@ from .tool_result_storage import (
 )
 
 _FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json)$")
-_JSON_METADATA_KEYS = frozenset(
-    {
-        "storage",
-        "path",
-        "media_type",
-        "byte_size",
-        "character_count",
-        "line_count",
-    }
-)
 _BINARY_METADATA_KEYS = frozenset({"storage", "path", "media_type", "byte_size"})
 
 
@@ -325,7 +316,7 @@ def _validate_action_file_metadata(
         )
     media_type = value.get("media_type")
     if media_type == TOOL_RESULT_JSON_MEDIA_TYPE:
-        expected_keys = _JSON_METADATA_KEYS
+        shape_is_valid = is_json_spill_shape(set(value))
         expected_suffix = ".json"
         size_fields: tuple[str, ...] = (
             "byte_size",
@@ -333,14 +324,14 @@ def _validate_action_file_metadata(
             "line_count",
         )
     elif media_type == TOOL_RESULT_BINARY_MEDIA_TYPE:
-        expected_keys = _BINARY_METADATA_KEYS
+        shape_is_valid = set(value) == _BINARY_METADATA_KEYS
         expected_suffix = ".bin"
         size_fields = ("byte_size",)
     else:
         raise ToolResultRecoveryError(
             f"unsupported action-file media_type in {column_name}"
         )
-    if set(value) != expected_keys:
+    if not shape_is_valid:
         raise ToolResultRecoveryError(
             f"invalid action-file metadata shape in {column_name}"
         )

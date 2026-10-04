@@ -37,9 +37,7 @@ class ReadTextPageOutput(BaseModel):
 
 class ReadFileOutput(ReadTextPageOutput):
     kind: Literal["file"]
-    truncation_reason: (
-        Literal["line_count_budget", "page_limit", "scan_budget"] | None
-    ) = None
+    truncation_reason: Literal["line_count_budget", "page_limit"] | None = None
 
 
 class ReadDocumentImage(BaseModel):
@@ -69,8 +67,7 @@ class ReadDocumentOutput(ReadTextPageOutput):
 
     kind: Literal["document"]
     truncation_reason: (
-        Literal["document_budget", "line_count_budget", "page_limit", "scan_budget"]
-        | None
+        Literal["document_budget", "line_count_budget", "page_limit"] | None
     ) = None
     document_format: Literal["docx", "ipynb", "pdf", "pptx", "xlsx"]
     unit_kind: Literal["cell", "page", "paragraph", "sheet", "slide"]
@@ -100,8 +97,10 @@ class ReadDirectoryOutput(BaseModel):
     offset: int
     next_offset: int | None = None
     truncated: bool = False
-    truncation_reason: Literal["page_limit", "scan_budget"] | None = None
+    truncation_reason: Literal["page_limit"] | None = None
     retry_hint: str | None = None
+    # Entries skipped without being listed: symlinks, unreadable entries.
+    warning: str | None = None
 
 
 class ReadAttachment(BaseModel):

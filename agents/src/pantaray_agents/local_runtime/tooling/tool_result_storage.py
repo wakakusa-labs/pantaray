@@ -9,7 +9,7 @@ import stat
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 from urllib.parse import quote
 
 from pantaray_agents.schema.agent.base import JSONValue
@@ -19,6 +19,7 @@ from pantaray_agents.schema.tool_result import (
 )
 
 from .models import ToolOutputStorageKind
+from .tool_result_spill import is_json_spill_shape, spill_preview
 
 TOOL_RESULT_JSON_MEDIA_TYPE: Literal["application/json"] = "application/json"
 TOOL_RESULT_BINARY_MEDIA_TYPE: Literal["application/octet-stream"] = (
@@ -31,16 +32,6 @@ TOOL_RESULT_JSON_SUFFIX = ".json"
 TOOL_RESULT_BINARY_SUFFIX = ".bin"
 _JSON_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.json$")
 _BINARY_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.bin$")
-_JSON_METADATA_KEYS = frozenset(
-    {
-        "storage",
-        "path",
-        "media_type",
-        "byte_size",
-        "character_count",
-        "line_count",
-    }
-)
 _BINARY_METADATA_KEYS = frozenset({"storage", "path", "media_type", "byte_size"})
 
 
@@ -51,6 +42,8 @@ class ActionFileToolResultMetadata(TypedDict):
     byte_size: int
     character_count: int
     line_count: int
+    preview: NotRequired[str]
+    retry_hint: NotRequired[str]
 
 
 class ActionBinaryToolResultMetadata(TypedDict):
@@ -147,6 +140,7 @@ def store_tool_result(
         file_suffix=TOOL_RESULT_JSON_SUFFIX,
     )
 
+    preview, retry_hint = spill_preview(text=history_text, path=str(stored_path))
     metadata: ActionFileToolResultMetadata = {
         "storage": "action_file",
         "path": str(stored_path),
@@ -154,6 +148,8 @@ def store_tool_result(
         "byte_size": len(payload),
         "character_count": len(history_text),
         "line_count": history_text.count("\n") + 1,
+        "preview": preview,
+        "retry_hint": retry_hint,
     }
     return ToolResultStorageResult(
         output_json=cast(dict[str, JSONValue], metadata),
@@ -323,12 +319,14 @@ def read_tool_result_text_prefix(
 
 
 def _validate_json_metadata(metadata: JSONValue) -> ActionFileToolResultMetadata:
-    if not isinstance(metadata, dict) or set(metadata) != _JSON_METADATA_KEYS:
+    if not isinstance(metadata, dict) or not is_json_spill_shape(set(metadata)):
         raise ToolResultLoadError("invalid action-file JSON metadata shape")
     if (
         metadata.get("storage") != "action_file"
         or metadata.get("media_type") != TOOL_RESULT_JSON_MEDIA_TYPE
         or not isinstance(metadata.get("path"), str)
+        or not isinstance(metadata.get("preview", ""), str)
+        or not isinstance(metadata.get("retry_hint", ""), str)
         or any(
             not isinstance(metadata.get(field), int)
             or isinstance(metadata.get(field), bool)

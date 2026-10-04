@@ -11,9 +11,6 @@ import pytest
 from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.models import MemoryDocument
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    MAX_TEXT_SCAN_BYTES,
-)
 from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     EditablePathPolicy,
     TextFileError,
@@ -298,55 +295,6 @@ def _tool_call(tool_name: str, args: dict[str, object]) -> ReactToolCall:
             args=args,  # type: ignore[arg-type]
         ),
     )
-
-
-@pytest.mark.asyncio
-async def test_workspace_read_returns_offset_limit_error_and_accepts_retry(
-    tmp_path: Path,
-) -> None:
-    line = "x" * 1_023 + "\n"
-    last_start = MAX_TEXT_SCAN_BYTES // len(line)
-    (tmp_path / "large.txt").write_text(line * (last_start + 2))
-    policy = EditablePathPolicy(("draft.md",))
-    tools = build_local_memory_file_tools(
-        editable_policy=policy,
-        memory_session=_memory_session(path="draft.md", text="draft", policy=policy),
-        readable_roots=(
-            ReadableFileRoot("workspace", "workspace", tmp_path, tmp_path.resolve()),
-        ),
-    )
-    read = next(tool for tool in tools if tool.name == "read_file")
-    result = await read.execute(
-        _tool_call(
-            "read_file",
-            {
-                "root": "workspace",
-                "path": "large.txt",
-                "offset": last_start + 1,
-                "limit": 1,
-            },
-        ),
-        1,
-    )
-    assert result.status == "error"
-    assert result.output["error_code"] == "READ_OFFSET_SCAN_LIMIT"
-    assert "smaller offset or column" in result.output["message"]
-    retry = await read.execute(
-        _tool_call(
-            "read_file",
-            {
-                "root": "workspace",
-                "path": "large.txt",
-                "offset": last_start,
-                "limit": 1,
-            },
-        ),
-        2,
-    )
-    assert retry.status == "success"
-    assert retry.output["text"] == line
-    assert retry.output["truncation_reason"] == "scan_budget"
-    assert retry.output["next_offset"] is None
 
 
 @pytest.mark.asyncio

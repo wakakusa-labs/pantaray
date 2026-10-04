@@ -21,6 +21,7 @@ interface WorkspaceProjectDetailProps {
   t: Translate;
   onCreateFolder: (input: WorkspaceFolderCreateInput) => Promise<boolean>;
   onCreateOrganization: (displayName: string) => Promise<string | null>;
+  onDeleteOrganization: (organizationId: string, focus: FocusRequest) => Promise<void>;
   onDeleteFolder: (folderId: string, focus: FocusRequest) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
   onSelectFolder: () => Promise<string | null>;
@@ -32,6 +33,7 @@ interface WorkspaceProjectDetailProps {
   createFolderBusy: boolean;
   deleteProjectBusy: boolean;
   isDeleteFolderBusy: (folderId: string) => boolean;
+  isOrganizationDeleteBusy: (organizationId: string) => boolean;
   organizationCreateBusy: boolean;
   projectLinksBusy: boolean;
 }
@@ -67,7 +69,9 @@ export function WorkspaceProjectDetail(props: WorkspaceProjectDetailProps) {
           project={props.project}
           t={props.t}
           onCreateOrganization={props.onCreateOrganization}
+          onDeleteOrganization={props.onDeleteOrganization}
           onUpdate={props.onUpdateOrganizations}
+          isOrganizationDeleteBusy={props.isOrganizationDeleteBusy}
         />
 
         <button

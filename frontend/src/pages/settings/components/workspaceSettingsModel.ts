@@ -36,6 +36,10 @@ export const workspaceFocusId = {
   organizationDelete: (organizationId: string): FocusKey =>
     `ws-organization-delete-${organizationId}`,
   organizationInput: 'ws-organization-input' as FocusKey,
+  organizationManagerOpen: 'ws-organization-manager-open' as FocusKey,
+  organizationCreateOption: 'ws-organization-create-option' as FocusKey,
+  organizationOptionDelete: (organizationId: string): FocusKey =>
+    `ws-organization-option-delete-${organizationId}`,
   projectAdd: 'ws-project-add' as FocusKey,
   projectDelete: (projectId: string): FocusKey => `ws-project-delete-${projectId}`,
   projectHeading: (projectId: string): FocusKey => `ws-project-heading-${projectId}`,

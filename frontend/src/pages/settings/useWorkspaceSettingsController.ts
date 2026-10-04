@@ -8,7 +8,11 @@ import {
   getCachedWorkspaceSettings,
   setCachedWorkspaceSettings,
 } from './components/workspaceSettingsCache';
-import { applyWorkspaceMutation, workspaceFocusId } from './components/workspaceSettingsModel';
+import {
+  applyWorkspaceMutation,
+  countOrganizationUsage,
+  workspaceFocusId,
+} from './components/workspaceSettingsModel';
 import type {
   WorkspaceFolderCreateInput,
   FocusKey,
@@ -189,7 +193,25 @@ export function useWorkspaceSettingsController(t: Translate) {
     return folder !== null;
   };
 
+  // Every surface deletes through here, so an organization still in use is never deleted
+  // without the user agreeing to drop it from those projects and folders.
   const deleteOrganization = async (organizationId: string, focus: FocusRequest) => {
+    const organization = settings?.organizations.find(
+      (candidate) => candidate.organization_id === organizationId
+    );
+    if (!settings || !organization) return;
+    const usage = countOrganizationUsage(organizationId, settings.projects, settings.folders);
+    if (
+      usage > 0 &&
+      !window.confirm(
+        t('settings.workspace.organizationDelete.confirm', {
+          name: organization.display_name,
+          count: usage,
+        })
+      )
+    ) {
+      return;
+    }
     await commitMutation(
       workspacePendingKey.organizationDelete(organizationId),
       async () => await requireWorkspaceSettingsApi().deleteOrganization(organizationId),

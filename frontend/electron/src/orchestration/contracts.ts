@@ -132,6 +132,8 @@ export type NotificationWindowApi = {
   setOverlaySnapshot: (suggestionId: string, payload: OverlaySnapshotPayload) => void;
   registerProcessAssociation: (processId: string, suggestionId: string) => void;
   registerActionAssociation: (actionId: string, overlayId: string) => void;
+  // Binds unless an open window already shows the Action; for server-event-derived binds.
+  adoptActionAssociation: (actionId: string, overlayId: string) => void;
   cleanupMappingsForProcess: (processId: string) => void;
   cleanupMappingsForAction: (actionId: string) => void;
   clearActionAssociations: () => void;

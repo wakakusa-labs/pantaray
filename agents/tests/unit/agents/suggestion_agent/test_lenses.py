@@ -29,7 +29,6 @@ def _suggestion(point: str) -> dict[str, object]:
         "has_suggestion": True,
         "interaction_contract": "message_only",
         "key_point": point,
-        "details": None,
         "suggestion_summary": f"### Target\n{point}",
         "target_context": {"organization_name": None, "project_name": None},
         "candidates": [],

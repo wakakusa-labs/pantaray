@@ -132,8 +132,6 @@ system_instruction: |
     Use the exact names, numbers and dates, each as the record states it. Say the
     content itself, in words the user would recognize, not a label for the idea
     or an internal term.
-  - `details`: other supporting facts in {answer_language}, or null; the writer
-    does not see them.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
     `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden
@@ -151,7 +149,6 @@ system_instruction: |
     "has_suggestion": true,
     "interaction_contract": "action_offer",
     "key_point": "Company A's estimate is due tomorrow (Thursday). Everything is calculated except the operating cost for servers and maintenance. It is not confirmed whether Company A wants a monthly or a yearly figure. Pantaray can calculate the operating cost and fill it into the estimate.",
-    "details": "The pricing documents are at hand, and nobody has been asked to do the remaining calculation.",
     "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
     "target_context": {"organization_name": "Company A", "project_name": null}
   }

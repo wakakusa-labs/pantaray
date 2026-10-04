@@ -138,7 +138,6 @@ def _terminal_tool() -> LlmToolDefinition:
                 "has_suggestion",
                 "interaction_contract",
                 "key_point",
-                "details",
                 "suggestion_summary",
                 "target_context",
                 "candidates",
@@ -157,12 +156,6 @@ def _terminal_tool() -> LlmToolDefinition:
                         "sentences: what it is, why it matters now, the deciding "
                         "facts, what is unconfirmed and, for an offer, what "
                         "Pantaray would make or do. Not the finished message."
-                    ),
-                },
-                "details": {
-                    "type": ["string", "null"],
-                    "description": (
-                        "Optional supporting facts. The writer does not see them."
                     ),
                 },
                 "suggestion_summary": {"type": ["string", "null"]},

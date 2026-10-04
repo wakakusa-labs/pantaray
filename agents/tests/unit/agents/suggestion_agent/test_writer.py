@@ -19,7 +19,6 @@ POINT = (
     "Pantaray can write a reply with the invoice attached."
 )
 SUMMARY = "ACTION-ONLY summary: procedure, conditions and ambiguity."
-DETAILS = "DECISION-ONLY details: supporting facts for the run."
 INSIGHT = "RUN-ONLY insight: the user reviewed the billing sheet."
 WRITTEN = "3月の請求書、先方から2回催促が来ています。添付して返信文を書きましょうか？"
 
@@ -38,7 +37,6 @@ def _decision() -> dict[str, object]:
         "has_suggestion": True,
         "interaction_contract": "action_offer",
         "key_point": POINT,
-        "details": DETAILS,
         "suggestion_summary": SUMMARY,
         "target_context": {"organization_name": None, "project_name": None},
     }
@@ -78,7 +76,7 @@ async def test_the_writer_receives_only_the_decided_content(
     writer_prompt = mock_llm_client.last_prompt
     assert writer_prompt is not None
     assert POINT in writer_prompt
-    for leaked in (SUMMARY, DETAILS, INSIGHT, "suggestion task"):
+    for leaked in (SUMMARY, INSIGHT, "suggestion task"):
         assert leaked not in writer_prompt
     writer_config = _SpyConfig.calls[-1]
     assert writer_config["system_instruction"] == "Write one message in English."

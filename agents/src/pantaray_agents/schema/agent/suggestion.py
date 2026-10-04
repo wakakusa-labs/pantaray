@@ -157,10 +157,6 @@ class SuggestionStructuredOutput(BaseModel):
         max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
         description="利用者に伝える提案の中身すべて（何か・なぜ今か・決め手の事実・未確認の点・承認で行うこと）。提案なしの場合は空文字列",
     )
-    details: str | None = Field(
-        default=None,
-        description="中身を支える事実。書き手には渡さない。提案なしの場合は null",
-    )
     suggestion_summary: str | None = Field(
         description=(
             "ActionAgent に引き継ぐ提案背景・前提・補足。提案なしの場合は null"

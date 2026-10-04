@@ -42,7 +42,6 @@ def parse_suggestion_output(
         parsed = SuggestionStructuredOutput.model_validate(loaded)
 
     key_point = parsed.key_point.strip()
-    details = parsed.details.strip() if parsed.details else None
     suggestion_summary = (
         parsed.suggestion_summary.strip()
         if isinstance(parsed.suggestion_summary, str)
@@ -81,10 +80,8 @@ def parse_suggestion_output(
             "interaction_contract": parsed.interaction_contract,
         }
 
-    if key_point or details:
-        raise ValueError(
-            "key_point and details must be empty when has_suggestion=false"
-        )
+    if key_point:
+        raise ValueError("key_point must be empty when has_suggestion=false")
     if parsed.interaction_contract is not None:
         raise ValueError("interaction_contract must be null when has_suggestion=false")
     if suggestion_summary:

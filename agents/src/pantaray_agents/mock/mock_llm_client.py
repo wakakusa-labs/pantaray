@@ -240,7 +240,6 @@ class MockLLMClient:
                     "has_suggestion": False,
                     "interaction_contract": None,
                     "key_point": "",
-                    "details": None,
                     "suggestion_summary": None,
                     "target_context": None,
                 }

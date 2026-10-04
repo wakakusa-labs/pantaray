@@ -340,6 +340,7 @@ async def _run_web_search(
         "query": request.args.query,
         "search_depth": profile.search_depth,
         "topic": resolved_topic,
+        "max_results": profile.max_results,
     }
     if request.args.country is not None:
         search_kwargs["country"] = request.args.country
@@ -402,7 +403,9 @@ async def _run_web_extract(
         "extract_depth": profile.extract_depth,
     }
     if request.args.query is not None:
+        # Tavily then returns only the top excerpts per page, not the full page.
         extract_kwargs["query"] = request.args.query
+        extract_kwargs["chunks_per_source"] = profile.query_chunks_per_source
     try:
         result = await asyncio.to_thread(client.extract, **extract_kwargs)
     except Exception as exc:  # noqa: BLE001
@@ -460,10 +463,14 @@ async def _run_web_crawl(
     crawl_kwargs: dict[str, object] = {
         "url": request.args.url,
         "max_depth": profile.max_depth,
+        "max_breadth": profile.max_breadth,
+        "limit": profile.limit,
         "extract_depth": profile.extract_depth,
     }
     if request.args.instructions is not None:
+        # Tavily then returns only the top excerpts per page, not the full page.
         crawl_kwargs["instructions"] = request.args.instructions
+        crawl_kwargs["chunks_per_source"] = profile.instructions_chunks_per_source
     try:
         result = await asyncio.to_thread(client.crawl, **crawl_kwargs)
     except Exception as exc:  # noqa: BLE001

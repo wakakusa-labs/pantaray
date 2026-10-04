@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -18,7 +20,9 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
         name="Web Extract",
         description=(
             "Extract the main body content from specific web pages that you already "
-            "know. Accepts up to 5 exact URLs and returns normalized page text."
+            "know. Accepts up to 5 exact URLs and returns each page's full text. "
+            f"With query, each page returns only its top {WEB_EXCERPTS_PER_PAGE} "
+            "excerpts (up to 500 characters each) relevant to the query."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -31,8 +35,9 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
             ),
             pitfalls=(
                 "Pass direct page URLs, not homepages unless the homepage itself is "
-                "the target. Use query only to express what content matters for "
-                "reranking. This tool returns extracted content, not a final answer."
+                "the target. Set query only when relevant excerpts are enough; omit "
+                "it to read the whole page. This tool returns extracted content, "
+                "not a final answer."
             ),
         ),
         execution_policy=tool_execution_policy(
@@ -70,9 +75,10 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
                     },
                     required=False,
                     description=(
-                        "Optional intent string used only to rerank extracted "
-                        "content chunks. Describe what information matters in "
-                        "the extracted pages."
+                        "Optional. When set, each page returns only its top "
+                        f"{WEB_EXCERPTS_PER_PAGE} excerpts relevant to this text "
+                        "(up to 500 characters each), joined by [...], instead "
+                        "of the full page. Omit it to read the full page."
                     ),
                 ),
             )
@@ -104,6 +110,8 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
                         "additionalProperties": False,
                     },
                 },
+                "truncated": {"type": "boolean"},
+                "retry_hint": {"type": ["string", "null"]},
                 "response_time": {"type": "number"},
                 "meta": {
                     "type": "object",

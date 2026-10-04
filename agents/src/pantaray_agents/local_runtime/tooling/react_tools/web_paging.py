@@ -9,6 +9,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from .web_definitions import WEB_SEARCH_RESULT_CONTENT_MAX_CHARS
 
 WEB_EXTRACT_FAILED_RESULT_MAX_CHARS = 300
+WEB_EXTRACT_QUERY_EXCERPTS_HINT = (
+    "Only excerpts relevant to query were returned, not the full page; call "
+    "web_extract with query=null to read the full page."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +174,11 @@ def web_extract_pages(
         page = content[start : start + limit]
         end_offset = start + len(page)
         next_offset = end_offset + 1 if end_offset < len(content) else None
+        hints: list[str] = []
+        if next_offset is not None:
+            hints.append("Continue this URL with offset=next_offset.")
+        if query is not None:
+            hints.append(WEB_EXTRACT_QUERY_EXCERPTS_HINT)
         results.append(
             {
                 "url": url,
@@ -178,15 +187,16 @@ def web_extract_pages(
                 "end_offset": end_offset,
                 "total_chars": len(content),
                 "next_offset": next_offset,
-                "truncated": next_offset is not None,
+                "truncated": bool(hints),
+                # next_offset already shows paging, so name the larger cut.
                 "truncation_reason": (
-                    "page_limit" if next_offset is not None else None
-                ),
-                "retry_hint": (
-                    "Continue this URL with offset=next_offset."
+                    "query_excerpts"
+                    if query is not None
+                    else "page_limit"
                     if next_offset is not None
                     else None
                 ),
+                "retry_hint": " ".join(hints) or None,
             }
         )
     return {

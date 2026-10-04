@@ -1618,6 +1618,59 @@ async def test_suggestion_web_extract_pages_content_from_one_snapshot(
     )
 
 
+@pytest.mark.asyncio
+async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    excerpts = "pricing table [...] plan limits"
+
+    async def invoke_web_tools_wrapper(**_kwargs):
+        return {
+            "status": "success",
+            "result": {
+                "results": [
+                    {"url": "https://example.com/page", "raw_content": excerpts}
+                ],
+                "failed_results": [],
+            },
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        invoke_web_tools_wrapper,
+    )
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=_snapshot(db_path=db_path),
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    result = await registry.execute(
+        _tool_call(
+            "web_extract",
+            {
+                "urls": ["https://example.com/page"],
+                "query": "pricing",
+                "offset": 1,
+                "limit": 1_000,
+            },
+        ),
+        1,
+    )
+
+    row = result.output["results"][0]
+    assert row["raw_content"] == excerpts
+    assert row["next_offset"] is None
+    assert row["truncated"] is True
+    assert row["truncation_reason"] == "query_excerpts"
+    assert "query=null" in row["retry_hint"]
+
+
 def _publish_insight_tree(
     *,
     db_path: Path,

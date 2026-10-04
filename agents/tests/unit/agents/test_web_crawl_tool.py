@@ -17,6 +17,7 @@ from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentExecutionError,
 )
+from pantaray_llm.profiles import WEB_CRAWL_PAGE_LIMIT
 
 
 def _base_state() -> dict[str, Any]:
@@ -118,6 +119,12 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
                 "raw_content": "uvwxyz",
             },
         ],
+        "truncated": True,
+        "retry_hint": (
+            "instructions was set, so each raw_content holds only up to 3 "
+            "excerpts relevant to it, joined by [...], not the full page. Use "
+            "web_extract without query on a URL to read the full page."
+        ),
         "response_time": 15.0,
         "meta": {
             "request_id": result.output["meta"]["request_id"],
@@ -127,6 +134,47 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
             "upstream_request_id": "provider-1",
         },
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_count", "truncated"),
+    [(WEB_CRAWL_PAGE_LIMIT - 1, False), (WEB_CRAWL_PAGE_LIMIT, True)],
+)
+async def test_web_crawl_reports_when_it_stopped_at_the_page_limit(
+    monkeypatch, page_count: int, truncated: bool
+) -> None:
+    async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
+        return {
+            "tool_id": "web_crawl",
+            "status": "ok",
+            "request_id": "req-1",
+            "result": {
+                "base_url": "https://example.com/docs",
+                "results": [
+                    {"url": f"https://example.com/{index}", "raw_content": "page"}
+                    for index in range(page_count)
+                ],
+            },
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        _fake_invoke,
+    )
+
+    result = await _run_tool(
+        args={"url": "https://example.com/docs"},
+        state=_base_state(),
+    )
+
+    assert result.status == "success"
+    assert result.output["truncated"] is truncated
+    if truncated:
+        assert f"returned {page_count} pages" in result.output["retry_hint"]
+        assert "narrower section URL" in result.output["retry_hint"]
+    else:
+        assert result.output["retry_hint"] is None
 
 
 @pytest.mark.asyncio

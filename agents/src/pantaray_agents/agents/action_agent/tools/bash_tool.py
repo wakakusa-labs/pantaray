@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import BashToolArgs
+from dataclasses import replace
+
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    BashToolArgs,
+    SandboxedBashToolArgs,
+)
 
 from .base import (
     ToolDefinition,
     ToolGuideSpec,
     ToolSpec,
+    build_validation_input_schema,
     tool_execution_policy,
 )
 from .broker_tool_input_schema import (
@@ -117,6 +123,8 @@ BASH_TOOL_FIELD_PRESENTATION = (
     *WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
 )
 
+_BASH_INPUT_DESCRIPTION = "Run a non-interactive workspace shell command or script."
+
 BASH_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id="bash",
@@ -161,7 +169,7 @@ BASH_TOOL = ToolDefinition.from_spec(
         input_spec=broker_tool_input_spec_from_model(
             model=BashToolArgs,
             fields=BASH_TOOL_FIELD_PRESENTATION,
-            description="Run a non-interactive workspace shell command or script.",
+            description=_BASH_INPUT_DESCRIPTION,
         ),
         output_schema={
             "type": "object",
@@ -175,4 +183,21 @@ BASH_TOOL = ToolDefinition.from_spec(
             "additionalProperties": False,
         },
     )
+)
+
+# A subagent writes only what it claimed, which an unsandboxed command cannot be
+# held to, so its bash does not offer run_outside_sandbox (the broker refuses it).
+ACTION_SUBAGENT_BASH_TOOL = replace(
+    BASH_TOOL,
+    input_schema=build_validation_input_schema(
+        broker_tool_input_spec_from_model(
+            model=SandboxedBashToolArgs,
+            fields=tuple(
+                field
+                for field in BASH_TOOL_FIELD_PRESENTATION
+                if field.name != "run_outside_sandbox"
+            ),
+            description=_BASH_INPUT_DESCRIPTION,
+        )
+    ),
 )

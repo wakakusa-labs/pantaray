@@ -180,12 +180,17 @@ class _JustifiedCommandArgs(BaseModel):
         return self
 
 
-class BashToolArgs(_JustifiedCommandArgs):
+class SandboxedBashToolArgs(_JustifiedCommandArgs):
+    """The bash input an Action subagent is offered: no run outside the sandbox."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
     command: str = Field(min_length=1, pattern=r"\S")
     cwd: str | None = Field(default=None, min_length=1, pattern=r"\S")
     use_login_environment: bool = False
+
+
+class BashToolArgs(SandboxedBashToolArgs):
     run_outside_sandbox: bool = False
 
     def _asks_for_access(self) -> bool:

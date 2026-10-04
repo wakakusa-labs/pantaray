@@ -226,7 +226,13 @@
   margin-bottom: 5px;
 }
 
-.workspace-organization-select button,
+.workspace-organization-option {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.workspace-organization-option-select,
 .workspace-organization-create-option {
   align-items: center;
   background: transparent;
@@ -244,22 +250,29 @@
   width: 100%;
 }
 
-.workspace-organization-select button:hover,
-.workspace-organization-select button[aria-pressed='true'],
+.workspace-organization-option-select:hover,
+.workspace-organization-option-select[aria-pressed='true'],
 .workspace-organization-create-option:hover {
   background: rgba(125, 171, 220, 0.12);
   border-color: rgba(125, 171, 220, 0.28);
 }
 
-.workspace-organization-select button:focus-visible,
+.workspace-organization-option-select:focus-visible,
 .workspace-organization-create-option:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 
-.workspace-organization-select button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.workspace-organization-option-select {
+  min-width: 0;
+}
+
+/* Sized to the option row so the trash button does not make the list taller. */
+.workspace-organization-option-delete {
+  flex: none;
+  height: 26px;
+  min-height: 26px;
+  width: 26px;
 }
 
 .workspace-organization-create-option {

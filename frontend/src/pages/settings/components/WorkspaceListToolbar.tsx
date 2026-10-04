@@ -116,6 +116,8 @@ export function WorkspaceListToolbar(props: WorkspaceListToolbarProps) {
           onCreate={onCreateProject}
           onDraftChange={setProjectDraft}
           onManageOrganizations={openOrganizationDialog}
+          onDeleteOrganization={onDeleteOrganization}
+          isOrganizationDeleteBusy={props.isOrganizationDeleteBusy}
         />
       </div>
     </div>

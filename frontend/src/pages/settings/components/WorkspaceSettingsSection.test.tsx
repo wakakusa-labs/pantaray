@@ -244,6 +244,7 @@ describe('WorkspaceSettingsSection', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     clearWorkspaceSettingsCache();
     delete window.electron;
     if (originalShowModal) {
@@ -1263,6 +1264,75 @@ describe('WorkspaceSettingsSection', () => {
     expect(options[0]).toHaveAccessibleName('組織を追加');
     expect(options[0]).toHaveFocus();
     expect(within(picker).queryByRole('group')).toBeNull();
+  });
+
+  it('deletes unused organizations from the project picker without asking or selecting them', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    const workspaceSettings = installOrganizationPickerSettings(
+      [
+        { organization_id: 'org-a', display_name: 'Acme' },
+        { organization_id: 'org-b', display_name: 'Northwind' },
+      ],
+      async () => {
+        throw new Error('not expected');
+      }
+    );
+
+    renderWorkspaceSettingsSection(japaneseTranslate);
+    const picker = await openProjectOrganizationPicker(user);
+    await user.click(within(picker).getByRole('button', { name: '削除 Acme' }));
+
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-a');
+      expect(within(picker).queryByRole('button', { name: 'Acme' })).toBeNull();
+      expect(within(picker).getByRole('button', { name: '削除 Northwind' })).toHaveFocus();
+    });
+    expect(screen.getByRole('dialog', { name: 'Project Aの組織を選択' })).toBe(picker);
+
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-b');
+      expect(within(picker).getByRole('button', { name: '組織を追加' })).toHaveFocus();
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(workspaceSettings.updateProjectLinks).not.toHaveBeenCalled();
+  });
+
+  it('asks before deleting an organization a project uses and removes it from that project', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    const workspaceSettings = installProjectOrganizationSettings(['org-a']);
+
+    renderWorkspaceSettingsSection(japaneseTranslate);
+    const projectDetail = await findProjectDetail('Project A');
+    expect(within(projectDetail).getByRole('button', { name: 'Org Aを外す' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'プロジェクトを追加' }));
+    const popover = screen.getByRole('dialog', { name: 'プロジェクトを作成' });
+
+    await user.click(within(popover).getByRole('button', { name: '削除 Org A' }));
+    expect(confirm).toHaveBeenCalledWith(
+      '『Org A』は 1 件のプロジェクトやフォルダで使われています。削除すると、そこからも外れます。削除しますか？'
+    );
+    expect(workspaceSettings.deleteOrganization).not.toHaveBeenCalled();
+    expect(within(popover).getByRole('button', { name: 'Org A' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+    expect(within(projectDetail).getByRole('button', { name: 'Org Aを外す' })).toBeInTheDocument();
+
+    confirm.mockReturnValue(true);
+    await user.click(within(popover).getByRole('button', { name: '削除 Org A' }));
+
+    await waitFor(() => {
+      expect(workspaceSettings.deleteOrganization).toHaveBeenCalledWith('org-a');
+      expect(within(popover).queryByRole('button', { name: 'Org A' })).toBeNull();
+      expect(within(projectDetail).queryByRole('button', { name: 'Org Aを外す' })).toBeNull();
+      expect(within(popover).getByRole('button', { name: '削除 Org B' })).toHaveFocus();
+    });
+    expect(workspaceSettings.deleteOrganization).toHaveBeenCalledOnce();
   });
 
   it('keeps the draft open without linking when organization creation is refused', async () => {

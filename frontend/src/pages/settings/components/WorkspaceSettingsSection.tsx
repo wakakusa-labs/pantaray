@@ -33,6 +33,8 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
   const controller = useWorkspaceSettingsController(t);
   const { clearFocusRequest, focusRequest, settings } = controller;
   const isPending = (key: WorkspacePendingKey) => controller.pending.has(key);
+  const isOrganizationDeleteBusy = (organizationId: string) =>
+    isPending(workspacePendingKey.organizationDelete(organizationId));
   const projectIds = settings?.projects.map((project) => project.project_id) ?? null;
   const unassignedCount = settings
     ? getUnassignedFolders(settings.folders, settings.projects).length
@@ -66,9 +68,7 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
               onCreateOrganization={controller.addOrganization}
               onCreateProject={controller.createProject}
               onDeleteOrganization={controller.deleteOrganization}
-              isOrganizationDeleteBusy={(organizationId) =>
-                isPending(workspacePendingKey.organizationDelete(organizationId))
-              }
+              isOrganizationDeleteBusy={isOrganizationDeleteBusy}
             />
           ) : null}
         </div>
@@ -136,6 +136,7 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
                 onCreateFolder={controller.createFolder}
                 onCreateOrganization={controller.addOrganization}
                 onDeleteFolder={controller.deleteFolder}
+                onDeleteOrganization={controller.deleteOrganization}
                 onDeleteProject={(projectId) =>
                   controller.deleteProject(projectId, {
                     // The project that takes its place is selected (useWorkspaceSelection).
@@ -159,6 +160,7 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
                 isDeleteFolderBusy={(folderId) =>
                   isPending(workspacePendingKey.folderDelete(folderId))
                 }
+                isOrganizationDeleteBusy={isOrganizationDeleteBusy}
                 organizationCreateBusy={isPending(workspacePendingKey.organizationCreate)}
                 projectLinksBusy={isPending(
                   workspacePendingKey.projectLinks(selectedProject.project_id)

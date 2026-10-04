@@ -193,6 +193,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.organizationManager.open': 'Create or manage organizations',
     'settings.workspace.organizationManager.title': 'Organizations',
     'settings.workspace.organizationManager.usage': '{count} uses',
+    'settings.workspace.organizationDelete.confirm':
+      '“{name}” is used by {count} projects or folders. Deleting it also removes it from them. Delete it?',
     'settings.workspace.unassigned.title': 'Unassigned folders',
     'settings.workspace.unassigned.project': 'Project for',
     'settings.workspace.unassigned.chooseProject': 'Choose a project',
@@ -474,6 +476,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.organizationManager.open': '組織を作成・管理',
     'settings.workspace.organizationManager.title': '組織',
     'settings.workspace.organizationManager.usage': '{count} 件で使用',
+    'settings.workspace.organizationDelete.confirm':
+      '『{name}』は {count} 件のプロジェクトやフォルダで使われています。削除すると、そこからも外れます。削除しますか？',
     'settings.workspace.unassigned.title': '未割り当てフォルダ',
     'settings.workspace.unassigned.project': '割り当て先',
     'settings.workspace.unassigned.chooseProject': 'プロジェクトを選択',

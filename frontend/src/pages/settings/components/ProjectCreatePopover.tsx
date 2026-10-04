@@ -3,7 +3,11 @@ import type { RefObject } from 'react';
 import type { Translate } from '../types';
 import { useDismissablePopover } from '../useDismissablePopover';
 import { OrganizationSelect } from './OrganizationSelect';
-import type { WorkspaceOrganization } from './workspaceSettingsModel';
+import {
+  workspaceFocusId,
+  type FocusRequest,
+  type WorkspaceOrganization,
+} from './workspaceSettingsModel';
 
 export interface ProjectDraft {
   displayName: string;
@@ -21,6 +25,8 @@ interface ProjectCreatePopoverProps {
   onCreate: (displayName: string, organizationIds: string[]) => Promise<boolean>;
   onDraftChange: (draft: ProjectDraft) => void;
   onManageOrganizations: () => void;
+  onDeleteOrganization: (organizationId: string, focus: FocusRequest) => Promise<void>;
+  isOrganizationDeleteBusy: (organizationId: string) => boolean;
 }
 
 export function ProjectCreatePopover(props: ProjectCreatePopoverProps) {
@@ -37,6 +43,8 @@ function OpenProjectCreatePopover(props: ProjectCreatePopoverProps) {
     onDismiss,
     onDraftChange,
     onManageOrganizations,
+    onDeleteOrganization,
+    isOrganizationDeleteBusy,
     t,
     triggerRef,
   } = props;
@@ -77,10 +85,18 @@ function OpenProjectCreatePopover(props: ProjectCreatePopoverProps) {
       <OrganizationSelect
         organizations={organizations}
         selectedOrganizationId={draft.organizationId}
+        emptyFocusKey={workspaceFocusId.organizationManagerOpen}
         t={t}
         onSelect={selectOrganization}
+        onDelete={onDeleteOrganization}
+        isDeleteBusy={isOrganizationDeleteBusy}
       />
-      <button type="button" className="workspace-popover-link" onClick={onManageOrganizations}>
+      <button
+        type="button"
+        id={workspaceFocusId.organizationManagerOpen}
+        className="workspace-popover-link"
+        onClick={onManageOrganizations}
+      >
         {t('settings.workspace.organizationManager.open')}
       </button>
       <button

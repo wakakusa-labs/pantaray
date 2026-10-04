@@ -67,7 +67,7 @@ def test_real_prompt_renders_context_and_answer_language(
 
     for value in (*context.values(), "pending-work-evidence"):
         assert value in rendered
-    assert f"notes in {label}" in instruction
+    assert f"one short sentence in {label} for the writer" in instruction
     assert "{answer_language}" not in instruction
 
 
@@ -79,7 +79,7 @@ def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None
         loader.load_config(SUGGESTION_WRITER_PROMPT_NAME),
         {
             "interaction_contract": "action_offer",
-            "message_point": "decided-point",
+            "key_point": "decided-point",
             "deliverable": "decided-deliverable",
             "agent_session": True,
         },

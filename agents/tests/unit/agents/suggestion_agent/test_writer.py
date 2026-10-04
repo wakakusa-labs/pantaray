@@ -16,6 +16,7 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 POINT = "The client asked twice for the March invoice; it is still unsent."
 DELIVERABLE = "A reply to the client with the March invoice attached."
 SUMMARY = "ACTION-ONLY summary: procedure, conditions and ambiguity."
+DETAILS = "DECISION-ONLY details: supporting facts for the run."
 INSIGHT = "RUN-ONLY insight: the user reviewed the billing sheet."
 WRITTEN = "3月の請求書、先方から2回催促が来ています。添付して返信文を書きましょうか？"
 
@@ -33,7 +34,8 @@ def _decision() -> dict[str, object]:
     return {
         "has_suggestion": True,
         "interaction_contract": "action_offer",
-        "message_point": POINT,
+        "key_point": POINT,
+        "details": DETAILS,
         "deliverable": DELIVERABLE,
         "agent_session": False,
         "suggestion_summary": SUMMARY,
@@ -76,7 +78,7 @@ async def test_the_writer_receives_only_the_decided_content(
     assert writer_prompt is not None
     assert POINT in writer_prompt
     assert DELIVERABLE in writer_prompt
-    for leaked in (SUMMARY, INSIGHT, "suggestion task"):
+    for leaked in (SUMMARY, DETAILS, INSIGHT, "suggestion task"):
         assert leaked not in writer_prompt
     writer_config = _SpyConfig.calls[-1]
     assert writer_config["system_instruction"] == "Write one message in English."

@@ -19,7 +19,7 @@ def _no_suggestion_output() -> dict[str, object]:
     return {
         "has_suggestion": False,
         "interaction_contract": None,
-        "message_point": "",
+        "key_point": "",
         "deliverable": None,
         "agent_session": None,
         "suggestion_summary": None,
@@ -31,7 +31,7 @@ def _suggestion_output(point: str) -> dict[str, object]:
     return {
         "has_suggestion": True,
         "interaction_contract": "action_offer",
-        "message_point": point,
+        "key_point": point,
         "deliverable": "A schedule with the mornings kept free.",
         "agent_session": False,
         "suggestion_summary": "Action handoff summary",
@@ -181,7 +181,7 @@ def test_parse_suggestion_output_with_plain_suggestion(
     assert result["answer"] == ""
     assert result["decided"] == {
         "interaction_contract": "action_offer",
-        "message_point": (
+        "key_point": (
             "I want my schedule to be structured so that I can focus in the morning."
         ),
         "deliverable": "A schedule with the mornings kept free.",
@@ -296,14 +296,14 @@ def test_system_instruction_renders_answer_language(
     suggestion_agent._prompt_config = PromptConfig(  # noqa: SLF001
         prompt="prompt",
         system_instruction=(
-            "`message_point` must be written in {answer_language}.\n"
+            "`key_point` must be written in {answer_language}.\n"
             'JSON example: {"has_suggestion": true}'
         ),
     )
     suggestion_agent._current_language = "ja"  # noqa: SLF001
 
     system_instruction = suggestion_agent._system_instruction_for_request()  # noqa: SLF001
-    assert "`message_point` must be written in Japanese." in system_instruction
+    assert "`key_point` must be written in Japanese." in system_instruction
     assert '{"has_suggestion": true}' in system_instruction
     assert "You must respond in Japanese" not in system_instruction
 

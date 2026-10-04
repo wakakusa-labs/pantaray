@@ -54,7 +54,7 @@ def build_writer_messages(
         answer_language=answer_language,
         kind=_KIND_LABELS[decided["interaction_contract"]],
         agent_session="yes" if decided["agent_session"] else "no",
-        message_point=decided["message_point"],
+        key_point=decided["key_point"],
         deliverable=decided["deliverable"] or "(none)",
     )
     system = config.system_instruction.replace("{answer_language}", answer_language)

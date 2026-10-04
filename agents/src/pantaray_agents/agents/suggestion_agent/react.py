@@ -137,7 +137,8 @@ def _terminal_tool() -> LlmToolDefinition:
             "required": [
                 "has_suggestion",
                 "interaction_contract",
-                "message_point",
+                "key_point",
+                "details",
                 "deliverable",
                 "agent_session",
                 "suggestion_summary",
@@ -150,12 +151,19 @@ def _terminal_tool() -> LlmToolDefinition:
                     "type": ["string", "null"],
                     "enum": ["action_offer", "message_only", None],
                 },
-                "message_point": {
+                "key_point": {
                     "type": "string",
                     "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
                     "description": (
-                        "Notes for the writer: the single point to tell the user, "
-                        "in one or two short sentences. Not the finished message."
+                        "One short sentence for the writer: the single thing the "
+                        "user must understand, with its one deciding fact or reason. "
+                        "Not the finished message."
+                    ),
+                },
+                "details": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional supporting facts. The writer does not see them."
                     ),
                 },
                 "deliverable": {

@@ -237,7 +237,8 @@ class MockLLMClient:
                 {
                     "has_suggestion": False,
                     "interaction_contract": None,
-                    "message_point": "",
+                    "key_point": "",
+                    "details": None,
                     "deliverable": None,
                     "agent_session": None,
                     "suggestion_summary": None,

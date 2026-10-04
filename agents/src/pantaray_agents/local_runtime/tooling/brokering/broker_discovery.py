@@ -49,7 +49,7 @@ from .tool_path_policy import (
     hidden_read_path_filter,
     resolve_read_tool_path,
 )
-from .workspace_descriptor_access import WorkspaceScanSkips, scan_skip_notes
+from .workspace_descriptor_access import scan_skip_notes
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
 TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {
@@ -113,12 +113,16 @@ def run_list_executor(
     entries = [entry_for_discovery_path(path) for path in bounded.selected]
     entry_values: list[JSONValue] = [_discovery_entry_json(entry) for entry in entries]
     search_text = "\n".join(str(entry["path"]) for entry in entries)
-    warnings, hints = _list_notes(
-        limit_reached=bounded.truncation_reason == "limit",
-        limit=request.limit,
-        max_depth=request.max_depth,
-        skips=bounded.skips,
+    warnings, hints = scan_skip_notes(
+        bounded.skips, max_depth=request.max_depth, depth_limit=LIST_MAX_DEPTH
     )
+    if bounded.truncation_reason == "limit":
+        warnings.insert(0, f"Stopped at limit={request.limit} entries; more exist.")
+        hints.insert(
+            0,
+            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}) or list a narrower "
+            "path; to page through one directory, read it with offset.",
+        )
     return UnprojectedBrokerToolOutcome(
         status="success",
         output={
@@ -425,28 +429,6 @@ def _dominant_truncation_reason(
         if TRUNCATION_REASON_PRIORITY[candidate] > TRUNCATION_REASON_PRIORITY[current]
         else current
     )
-
-
-def _list_notes(
-    *,
-    limit_reached: bool,
-    limit: int,
-    max_depth: int,
-    skips: WorkspaceScanSkips,
-) -> tuple[list[str], list[str]]:
-    """Warnings and retry hints naming everything list left out."""
-
-    warnings, hints = scan_skip_notes(
-        skips, max_depth=max_depth, depth_limit=LIST_MAX_DEPTH
-    )
-    if limit_reached:
-        warnings.insert(0, f"Stopped at limit={limit} entries; more entries exist.")
-        hints.insert(
-            0,
-            f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}) or list a narrower "
-            "path; to page through one directory, read it with offset.",
-        )
-    return warnings, hints
 
 
 def _glob_notes(

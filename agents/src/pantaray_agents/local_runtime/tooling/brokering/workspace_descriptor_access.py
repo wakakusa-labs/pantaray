@@ -29,6 +29,9 @@ _WORKSPACE_FILE_POLICY_ERROR = (
     "workspace path is missing, not a regular file, or uses a symlink"
 )
 SEARCH_TIMEOUT_SECONDS = 5.0
+# Design limit: a longer line is searched in parts of this many characters, so a
+# file without newlines cannot exhaust memory; a match across parts is missed.
+GREP_LINE_PART_CHARS = 1024 * 1024
 
 type DescriptorTruncationReason = Literal["limit", "timeout"]
 
@@ -47,6 +50,7 @@ class WorkspaceScanSkips:
     first_unreadable_error: str | None = None
     # Listed directories at max_depth, whose contents were not walked.
     unexpanded_directories: int = 0
+    split_lines: int = 0
 
 
 class WorkspaceDescriptorScan(NamedTuple):
@@ -214,7 +218,7 @@ def grep_workspace_files(
                 continue
             try:
                 for line_number, body, match_start, binary in _matching_lines(
-                    descriptor, expression, deadline
+                    descriptor, expression, deadline, skips
                 ):
                     if binary:
                         binary_match_paths.append(entry.root_relative_path)
@@ -245,24 +249,37 @@ def grep_workspace_files(
 
 
 def _matching_lines(
-    descriptor: int, expression: regex.Pattern[str], deadline: float
+    descriptor: int,
+    expression: regex.Pattern[str],
+    deadline: float,
+    skips: WorkspaceScanSkips,
 ) -> Generator[tuple[int, str, int, bool], None, None]:
     # Yields each matching line with whether the file has shown a NUL byte yet.
-    # Design limit: one line is held whole while it is searched, as ripgrep
-    # does; the search timeout bounds the time, not the memory.
     with open(
         descriptor, encoding="utf-8", errors="replace", newline="", closefd=False
     ) as handle:
         binary = False
-        for line_number, line in enumerate(handle, start=1):
+        line_number, matched, split = 1, 0, 0
+        while part := handle.readline(GREP_LINE_PART_CHARS):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
-            binary = binary or "\0" in line
-            body = line.rstrip("\r\n")
-            found = expression.search(body, timeout=remaining)
+            line_ends = part.endswith(("\n", "\r"))
+            cut = not line_ends and len(part) == GREP_LINE_PART_CHARS
+            if cut and split != line_number:
+                skips.split_lines += 1
+                split = line_number
+            binary = binary or "\0" in part
+            body = part.rstrip("\r\n")
+            found = (
+                None
+                if matched == line_number
+                else expression.search(body, timeout=remaining)
+            )
             if found is not None:
+                matched = line_number
                 yield line_number, body, found.start(), binary
+            line_number += line_ends
 
 
 def matches_workspace_glob(path: str, pattern: str) -> bool:
@@ -368,6 +385,12 @@ def scan_skip_notes(
         )
         hints.append(
             f"Raise max_depth (up to {depth_limit}) or list one of them to see inside."
+        )
+    if skips.split_lines:
+        warnings.append(
+            f"{skips.split_lines} line(s) longer than {GREP_LINE_PART_CHARS:,} "
+            "characters were searched in parts of that size; a match across two "
+            "parts is not found."
         )
     if skips.symlinks:
         warnings.append(

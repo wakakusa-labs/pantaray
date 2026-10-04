@@ -583,5 +583,5 @@ async def test_discovery_tools_report_truncation(tmp_path: Path) -> None:
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "limit"
     assert "Raise limit (up to 500)" in str(outcome.output["retry_hint"])
-    assert "Stopped at limit=1 entries" in str(outcome.output["warning"])
+    assert "Stopped at limit=1 entries; more exist." in str(outcome.output["warning"])
     assert len(outcome.output["entries"]) == 1

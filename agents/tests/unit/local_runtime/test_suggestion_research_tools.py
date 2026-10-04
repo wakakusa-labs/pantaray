@@ -599,6 +599,7 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
     (root / "big.log").write_bytes(b"x\n" * (1024 * 1024) + b"needle late\n")
     (root / "blob.bin").write_bytes(b"needle\0")
     (root / "latin1.txt").write_bytes(b"needle caf\xe9\n")
+    (root / "wide.txt").write_text("x" * (1024 * 1024 + 9) + " needle\n")
     (root / "link.txt").symlink_to(root / "big.log")
     reader = ReadOnlyFileAccess(
         roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
@@ -619,6 +620,7 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
         "blob.bin",
         "docs",
         "latin1.txt",
+        "wide.txt",
     ]
     assert "1 listed director(y/ies) at max_depth=1 were not opened" in str(
         listed["warning"]
@@ -628,7 +630,9 @@ def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
         {"path": "big.log", "line_number": 1024 * 1024 + 1, "line": "needle late"},
         {"path": "docs/deep/note.txt", "line_number": 1, "line": "needle deep"},
         {"path": "latin1.txt", "line_number": 1, "line": "needle caf\ufffd"},
+        {"path": "wide.txt", "line_number": 1, "line": "x" * 9 + " needle"},
     ]
+    assert "1 line(s) longer than 1,048,576 characters" in str(grepped["warning"])
     assert "1 binary file(s) also match" in str(grepped["warning"])
     assert "blob.bin" in str(grepped["warning"])
 

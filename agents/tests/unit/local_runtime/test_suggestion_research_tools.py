@@ -312,15 +312,12 @@ def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
 
 def test_read_only_file_access_never_walks_into_private_app_storage(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    scan_limit = 20
-    monkeypatch.setattr(file_access_module, "DISCOVERY_SCAN_LIMIT", scan_limit)
     db_path = _bootstrap_db(tmp_path)
     storage = db_path.parent
     records = storage / "records"
     records.mkdir()
-    for index in range(scan_limit * 3):
+    for index in range(60):
         (records / f"{index}.txt").write_text("needle secret\n", encoding="utf-8")
     # Opening this would fail the whole scan, so the scan must not reach it.
     unreadable = storage / "unreadable.txt"
@@ -356,6 +353,7 @@ def test_read_only_file_access_never_walks_into_private_app_storage(
     assert [match["path"] for match in grepped["matches"]] == ["sibling.txt"]  # type: ignore[index]
     for result in results:
         assert result["truncated"] is False
+        assert result["warning"] is None
 
 
 def test_workspace_read_remains_pinned_after_parent_replacement(
@@ -562,6 +560,7 @@ def test_workspace_grep_preserves_one_based_pagination(tmp_path: Path) -> None:
     assert result["next_offset"] == 3
     assert result["truncated"] is True
     assert result["truncation_reason"] == "page_limit"
+    assert result["retry_hint"] == "Continue with offset=next_offset."
 
 
 def test_workspace_grep_preserves_bounded_multibyte_line_output(tmp_path: Path) -> None:
@@ -586,9 +585,49 @@ def test_workspace_grep_preserves_bounded_multibyte_line_output(tmp_path: Path) 
         {
             "path": "matches.txt",
             "line_number": 1,
-            "line": line[:500] + "... [truncated]",
+            "line": line[:500] + "…",
         }
     ]
+    assert "excerpt around their first match" in str(result["warning"])
+    assert "offset=line_number" in str(result["retry_hint"])
+
+
+def test_workspace_search_reports_what_it_passed_over(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    (root / "docs" / "deep").mkdir(parents=True)
+    (root / "docs" / "deep" / "note.txt").write_text("needle deep\n")
+    (root / "big.log").write_bytes(b"x\n" * (1024 * 1024) + b"needle late\n")
+    (root / "blob.bin").write_bytes(b"needle\0")
+    (root / "latin1.txt").write_bytes(b"needle caf\xe9\n")
+    (root / "wide.txt").write_text("x" * 8 * 1024 * 1024 + " needle\nneedle 2\n")
+    (root / "link.txt").symlink_to(root / "big.log")
+    reader = ReadOnlyFileAccess(
+        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
+    )
+
+    listed = reader.list(root_id="workspace", path=".", max_depth=1, offset=1, limit=10)
+    grepped = reader.grep(
+        root_id="workspace",
+        base_path=".",
+        pattern="needle",
+        include_glob=None,
+        offset=1,
+        max_matches=10,
+    )
+
+    names = [entry["name"] for entry in listed["entries"]]  # type: ignore[index]
+    assert names == ["big.log", "blob.bin", "docs", "latin1.txt", "wide.txt"]
+    assert "at max_depth=1 were not opened" in str(listed["warning"])
+    assert "1 symlink(s) were skipped" in str(listed["warning"])
+    assert grepped["matches"] == [
+        {"path": "big.log", "line_number": 1024 * 1024 + 1, "line": "needle late"},
+        {"path": "docs/deep/note.txt", "line_number": 1, "line": "needle deep"},
+        {"path": "latin1.txt", "line_number": 1, "line": "needle caf\ufffd"},
+        {"path": "wide.txt", "line_number": 2, "line": "needle 2"},
+    ]
+    assert "1 line(s) longer than 8,388,608 characters" in str(grepped["warning"])
+    assert "1 binary file(s) also match" in str(grepped["warning"])
+    assert "blob.bin" in str(grepped["warning"])
 
 
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(

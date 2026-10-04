@@ -5,6 +5,7 @@ import os
 import stat
 import time
 from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Literal, NamedTuple
@@ -20,6 +21,7 @@ from pantaray_agents.local_runtime.descriptor_access import (
 )
 
 from .broker_common import BrokerPolicyError
+from .broker_grep_lines import RipgrepGrepMatch, grep_match
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
 _FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
@@ -27,10 +29,12 @@ _WORKSPACE_FILE_POLICY_ERROR = (
     "workspace path is missing, not a regular file, or uses a symlink"
 )
 SEARCH_TIMEOUT_SECONDS = 5.0
-GREP_MAX_FILE_BYTES = 1024 * 1024
-GREP_MAX_MATCH_CHARS = 500
+# Design limit: a longer line is not searched, so a file without newlines
+# cannot exhaust memory; such lines are counted and reported.
+GREP_MAX_SEARCHED_LINE_CHARS = 8 * 1024 * 1024
+_GREP_READ_CHARS = 1024 * 1024
 
-type DescriptorTruncationReason = Literal["limit", "scan_budget", "timeout"]
+type DescriptorTruncationReason = Literal["limit", "timeout"]
 
 
 class WorkspaceDescriptorEntry(NamedTuple):
@@ -38,24 +42,28 @@ class WorkspaceDescriptorEntry(NamedTuple):
     kind: Literal["file", "directory"]
 
 
+@dataclass(slots=True)
+class WorkspaceScanSkips:
+    symlinks: int = 0
+    unreadable: int = 0
+    first_unreadable_error: str | None = None
+    # Listed directories at max_depth, whose contents were not walked.
+    unexpanded_directories: int = 0
+    unsearched_lines: int = 0
+
+
 class WorkspaceDescriptorScan(NamedTuple):
     entries: tuple[WorkspaceDescriptorEntry, ...]
     truncation_reason: DescriptorTruncationReason | None
-
-
-class WorkspaceGrepMatch(NamedTuple):
-    path: str
-    line_number: int
-    line: str
+    skips: WorkspaceScanSkips
 
 
 class WorkspaceGrepScan(NamedTuple):
-    matches: tuple[WorkspaceGrepMatch, ...]
+    matches: tuple[RipgrepGrepMatch, ...]
     truncation_reason: DescriptorTruncationReason | None
-    skipped_files: int
-
-
-class _ScanLimitReached(RuntimeError): ...
+    skips: WorkspaceScanSkips
+    # Files holding a NUL byte that match; their lines are not returned.
+    binary_match_paths: tuple[str, ...]
 
 
 class WorkspacePathMissingError(BrokerPolicyError):
@@ -97,27 +105,28 @@ def scan_workspace_entries(
     base_path: str,
     max_depth: int | None,
     limit: int,
-    scan_limit: int,
     include_path: Callable[[Path], bool] | None = None,
     exclude_subtree: Callable[[Path], bool] | None = None,
     file_pattern: str | None = None,
     deadline: float | None = None,
 ) -> WorkspaceDescriptorScan:
-    """Scan entries under base_path.
+    """Scan entries under base_path in path order, up to limit selected entries.
 
+    The order is the same on every call, so a caller pages by asking for more.
     include_path filters entries after they are opened and still walks into a
     directory it drops. exclude_subtree drops an entry before it is opened, and
-    neither it nor anything under it is walked or charged to the scan budget.
+    neither it nor anything under it is walked.
     """
 
     selected: list[WorkspaceDescriptorEntry] = []
+    skips = WorkspaceScanSkips()
     iterator = _entries(
         root_path=root_path,
         base_path=base_path,
         max_depth=max_depth,
-        scan_limit=scan_limit,
         deadline=deadline,
         exclude_subtree=exclude_subtree,
+        skips=skips,
     )
     reason: DescriptorTruncationReason | None = None
     prefix = "" if base_path == "." else f"{base_path}/"
@@ -136,14 +145,13 @@ def scan_workspace_entries(
                 reason = "limit"
                 break
             selected.append(entry)
-    except _ScanLimitReached:
-        reason = "scan_budget"
+            if entry.kind == "directory" and relative.count("/") + 1 == max_depth:
+                skips.unexpanded_directories += 1
     except TimeoutError:
         reason = "timeout"
     finally:
         iterator.close()
-    entries = tuple(sorted(selected, key=lambda item: item.root_relative_path))
-    return WorkspaceDescriptorScan(entries, reason)
+    return WorkspaceDescriptorScan(tuple(selected), reason, skips)
 
 
 def glob_workspace_files(
@@ -152,7 +160,6 @@ def glob_workspace_files(
     base_path: str,
     pattern: str,
     limit: int,
-    scan_limit: int,
     exclude_subtree: Callable[[Path], bool] | None = None,
 ) -> WorkspaceDescriptorScan:
     return scan_workspace_entries(
@@ -160,7 +167,6 @@ def glob_workspace_files(
         base_path=base_path,
         max_depth=None,
         limit=limit,
-        scan_limit=scan_limit,
         exclude_subtree=exclude_subtree,
         file_pattern=pattern,
         deadline=time.monotonic() + SEARCH_TIMEOUT_SECONDS,
@@ -174,9 +180,11 @@ def grep_workspace_files(
     pattern: str,
     include_glob: str | None,
     max_matches: int,
-    scan_limit: int,
     exclude_subtree: Callable[[Path], bool] | None = None,
 ) -> WorkspaceGrepScan:
+    """Search readable files of any size; lines are decoded lossily, split as
+    read splits them, and bounded to an excerpt around their first match."""
+
     deadline = time.monotonic() + SEARCH_TIMEOUT_SECONDS
     try:
         expression = regex.compile(pattern)
@@ -186,17 +194,18 @@ def grep_workspace_files(
             code="GREP_PATTERN_INVALID",
             fix_hint="grep.pattern must be a valid regular expression.",
         ) from exc
-    matches: list[WorkspaceGrepMatch] = []
-    skipped_files = 0
+    matches: list[RipgrepGrepMatch] = []
+    binary_match_paths: list[str] = []
+    skips = WorkspaceScanSkips()
     reason: DescriptorTruncationReason | None = None
     prefix = "" if base_path == "." else f"{base_path}/"
     iterator = _entries(
         root_path=root_path,
         base_path=base_path,
         max_depth=None,
-        scan_limit=scan_limit,
         deadline=deadline,
         exclude_subtree=exclude_subtree,
+        skips=skips,
     )
     try:
         for entry, descriptor in iterator:
@@ -206,33 +215,79 @@ def grep_workspace_files(
                 and not matches_workspace_glob(relative, include_glob)
             ):
                 continue
-            payload = _read_grep_descriptor(descriptor)
-            if payload is None:
-                skipped_files += 1
-                continue
-            for line_number, line in enumerate(payload.splitlines(), start=1):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError
-                if expression.search(line, timeout=remaining) is None:
-                    continue
-                if len(matches) >= max_matches:
-                    reason = "limit"
-                    break
-                line = bound_grep_line(line)
-                matches.append(
-                    WorkspaceGrepMatch(entry.root_relative_path, line_number, line)
-                )
+            try:
+                for line_number, body, match_start, binary in _matching_lines(
+                    descriptor, expression, deadline, skips
+                ):
+                    if binary:
+                        binary_match_paths.append(entry.root_relative_path)
+                        break
+                    if len(matches) >= max_matches:
+                        reason = "limit"
+                        break
+                    matches.append(
+                        grep_match(
+                            relative_path=entry.root_relative_path,
+                            line_number=line_number,
+                            text=body,
+                            match_start=match_start,
+                            cut=False,
+                        )
+                    )
+            except TimeoutError:
+                raise
+            except OSError as exc:
+                _skip_unreadable(skips, entry.root_relative_path, exc)
             if reason == "limit":
                 break
     except TimeoutError:
         reason = "timeout"
-    except _ScanLimitReached:
-        reason = "scan_budget"
     finally:
         iterator.close()
-    ordered = tuple(sorted(matches, key=lambda item: (item.path, item.line_number)))
-    return WorkspaceGrepScan(ordered, reason, skipped_files)
+    return WorkspaceGrepScan(tuple(matches), reason, skips, tuple(binary_match_paths))
+
+
+def _matching_lines(
+    descriptor: int,
+    expression: regex.Pattern[str],
+    deadline: float,
+    skips: WorkspaceScanSkips,
+) -> Generator[tuple[int, str, int, bool], None, None]:
+    # Each matching line, and whether the file has shown a NUL byte by then.
+    with open(
+        descriptor, encoding="utf-8", errors="replace", newline="", closefd=False
+    ) as handle:
+        binary = False
+        line_number = 0
+        while True:
+            parts: list[str] | None = []
+            while part := handle.readline(_GREP_READ_CHARS):
+                _within(deadline)
+                if parts is not None:
+                    parts.append(part)
+                    if sum(map(len, parts)) > GREP_MAX_SEARCHED_LINE_CHARS:
+                        parts = None
+                if part.endswith("\r") and len(part) == _GREP_READ_CHARS:
+                    # The read stopped between the \r and \n of one line end.
+                    position = handle.tell()
+                    if handle.read(1) != "\n":
+                        handle.seek(position)
+                if part.endswith(("\n", "\r")):
+                    break
+            if parts == []:
+                return
+            line_number += 1
+            if parts is None:
+                skips.unsearched_lines += 1
+                continue
+            body = "".join(parts).rstrip("\r\n")
+            binary = binary or "\0" in body
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            found = expression.search(body, timeout=remaining)
+            if found is not None:
+                yield line_number, body, found.start(), binary
 
 
 def matches_workspace_glob(path: str, pattern: str) -> bool:
@@ -241,20 +296,14 @@ def matches_workspace_glob(path: str, pattern: str) -> bool:
     )
 
 
-def bound_grep_line(text: str) -> str:
-    if len(text) <= GREP_MAX_MATCH_CHARS:
-        return text
-    return text[:GREP_MAX_MATCH_CHARS].rstrip() + "... [truncated]"
-
-
 def _entries(
     *,
     root_path: Path,
     base_path: str,
     max_depth: int | None,
-    scan_limit: int,
     deadline: float | None,
     exclude_subtree: Callable[[Path], bool] | None,
+    skips: WorkspaceScanSkips,
 ) -> Generator[tuple[WorkspaceDescriptorEntry, int], None, None]:
     base = _open_directory(root_path, base_path)
     relative = "/".join(_relative_components(base_path, allow_dot=True)) or "."
@@ -264,9 +313,7 @@ def _entries(
         else lambda child: exclude_subtree(root_path.joinpath(*child.split("/")))
     )
     try:
-        yield from _walk(
-            base, relative, 0, max_depth, [0], scan_limit, deadline, excluded
-        )
+        yield from _walk(base, relative, 0, max_depth, deadline, excluded, skips)
     finally:
         os.close(base)
 
@@ -276,38 +323,38 @@ def _walk(
     relative: str,
     depth: int,
     max_depth: int | None,
-    scanned: list[int],
-    scan_limit: int,
     deadline: float | None,
     excluded: Callable[[str], bool] | None,
+    skips: WorkspaceScanSkips,
 ) -> Generator[tuple[WorkspaceDescriptorEntry, int], None, None]:
     try:
         context = os.scandir(descriptor)
     except OSError as exc:
+        if depth > 0:
+            _skip_unreadable(skips, relative, exc)
+            return
         _raise_policy(exc)
         raise
     with context as iterator:
-        for item in iterator:
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError
+        # Design limit: a directory's names are held while it is walked, so the
+        # order is the same on every call; fine below 10^6 entries a directory.
+        listed = (entry for entry in iterator if _within(deadline))
+        for item in sorted(listed, key=lambda entry: entry.name):
+            _within(deadline)
             child_relative = item.name if relative == "." else f"{relative}/{item.name}"
             if excluded is not None and excluded(child_relative):
                 continue
-            scanned[0] += 1
-            if scanned[0] > scan_limit:
-                raise _ScanLimitReached
             try:
                 if item.is_symlink():
+                    skips.symlinks += 1
                     continue
                 is_directory = item.is_dir(follow_symlinks=False)
+                flags = _DIRECTORY_FLAGS if is_directory else _FILE_FLAGS
+                child = _open(item.name, flags, parent=descriptor)
             except OSError as exc:
-                _raise_policy(exc)
-                raise
-            child_depth = depth + 1
-            if max_depth is not None and child_depth > max_depth:
+                _skip_unreadable(skips, child_relative, exc)
                 continue
-            flags = _DIRECTORY_FLAGS if is_directory else _FILE_FLAGS
-            child = _open(item.name, flags, parent=descriptor)
+            child_depth = depth + 1
             try:
                 mode = os.fstat(child).st_mode
                 if is_directory:
@@ -322,15 +369,61 @@ def _walk(
                             child_relative,
                             child_depth,
                             max_depth,
-                            scanned,
-                            scan_limit,
                             deadline,
                             excluded,
+                            skips,
                         )
                 elif stat.S_ISREG(mode):
                     yield WorkspaceDescriptorEntry(child_relative, "file"), child
             finally:
                 os.close(child)
+
+
+def scan_skip_notes(
+    skips: WorkspaceScanSkips, *, max_depth: int | None = None, depth_limit: int = 0
+) -> tuple[list[str], list[str]]:
+    """Warnings and retry hints for what a scan passed over."""
+
+    warnings, hints = [], []
+    if skips.unexpanded_directories:
+        warnings.append(
+            f"{skips.unexpanded_directories} listed director(y/ies) at "
+            f"max_depth={max_depth} were not opened; their contents are not listed."
+        )
+        hints.append(
+            f"Raise max_depth (up to {depth_limit}) or list one of them to see inside."
+        )
+    if skips.unsearched_lines:
+        warnings.append(
+            f"{skips.unsearched_lines} line(s) longer than "
+            f"{GREP_MAX_SEARCHED_LINE_CHARS:,} characters were not searched; read "
+            "such a line with offset and column."
+        )
+    if skips.symlinks:
+        warnings.append(
+            f"{skips.symlinks} symlink(s) were skipped: symlinks are not followed, "
+            "and neither they nor their targets are listed or searched."
+        )
+    if skips.unreadable:
+        warnings.append(
+            f"{skips.unreadable} path(s) could not be read and were skipped, with "
+            f"anything under them. First error: {skips.first_unreadable_error}."
+        )
+    return warnings, hints
+
+
+def _within(deadline: float | None) -> bool:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError
+    return True
+
+
+def _skip_unreadable(skips: WorkspaceScanSkips, relative: str, exc: OSError) -> None:
+    # A path swapped for a symlink or removed mid-scan stays a policy error.
+    _raise_policy(exc)
+    skips.unreadable += 1
+    if skips.first_unreadable_error is None:
+        skips.first_unreadable_error = f"{relative}: {exc.strerror or exc}"
 
 
 def _open_directory(root_path: Path, relative_path: str) -> int:
@@ -375,16 +468,3 @@ def _relative_components(value: str, *, allow_dot: bool) -> tuple[str, ...]:
     ):
         raise BrokerPolicyError("workspace path contains an unsafe component")
     return path.parts
-
-
-def _read_grep_descriptor(descriptor: int) -> str | None:
-    if os.fstat(descriptor).st_size > GREP_MAX_FILE_BYTES:
-        return None
-    with open(descriptor, "rb", closefd=False) as handle:
-        payload = handle.read(GREP_MAX_FILE_BYTES + 1)
-    if len(payload) > GREP_MAX_FILE_BYTES or b"\0" in payload:
-        return None
-    try:
-        return payload.decode("utf-8")
-    except UnicodeDecodeError:
-        return None

@@ -340,20 +340,12 @@ def _paths(outcome: object, key: str) -> list[Path]:
 @pytest.mark.asyncio
 async def test_list_from_a_parent_does_not_walk_private_app_storage(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-
     db_path, context, public, _own = _seed_registered_parent(tmp_path)
     # Other Actions' folders sit beside this Action's, on the way to its roots.
-    actions = context.workspace_path.parent.parent  # type: ignore[attr-defined]
-    for index in range(100):
-        other = actions / f"other-{index}"
-        other.mkdir()
-        (other / "notes.txt").write_text("needle secret\n", encoding="utf-8")
-    # Enough for the user's files and the path down to the Action's own roots,
-    # not for anything in app storage.
-    monkeypatch.setattr(broker_discovery, "DISCOVERY_MAX_SCANNED_PATHS", 30)
+    # Walking that level would count this as a skipped symlink.
+    other = context.workspace_path.parent.parent / "other"  # type: ignore[attr-defined]
+    other.symlink_to(tmp_path)
 
     outcome = await _run(
         db_path=db_path,
@@ -363,6 +355,7 @@ async def test_list_from_a_parent_does_not_walk_private_app_storage(
     )
 
     assert outcome.output["truncation_reason"] is None
+    assert "symlink" not in str(outcome.output["warning"])
     paths = _paths(outcome, "entries")
     assert public in paths
     # max_depth 6 reaches the Action's workspace folder inside app storage.

@@ -35,7 +35,7 @@ async def test_execute_broker_tool_lists_workspace_directory(tmp_path: Path) -> 
         actor_process_id=BROKER_ACTOR_PROCESS_ID,
         manifest_id=context.manifest_id,
         execution_session_id=context.execution_session_id,
-        args={"path": ".", "max_depth": 2, "limit": 10},
+        args={"path": ".", "max_depth": 6, "limit": 10},
     )
 
     assert outcome.status == "success"

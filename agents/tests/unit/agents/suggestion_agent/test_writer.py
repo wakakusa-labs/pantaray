@@ -1,6 +1,7 @@
 """The writer call turns the decided content into the user-facing Suggestion text."""
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -13,10 +14,11 @@ from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
-POINT = "The client asked twice for the March invoice; it is still unsent."
-DELIVERABLE = "A reply to the client with the March invoice attached."
+POINT = (
+    "The client asked twice for the March invoice; it is still unsent. "
+    "Pantaray can write a reply with the invoice attached."
+)
 SUMMARY = "ACTION-ONLY summary: procedure, conditions and ambiguity."
-DETAILS = "DECISION-ONLY details: supporting facts for the run."
 INSIGHT = "RUN-ONLY insight: the user reviewed the billing sheet."
 WRITTEN = "3月の請求書、先方から2回催促が来ています。添付して返信文を書きましょうか？"
 
@@ -35,9 +37,6 @@ def _decision() -> dict[str, object]:
         "has_suggestion": True,
         "interaction_contract": "action_offer",
         "key_point": POINT,
-        "details": DETAILS,
-        "deliverable": DELIVERABLE,
-        "agent_session": False,
         "suggestion_summary": SUMMARY,
         "target_context": {"organization_name": None, "project_name": None},
     }
@@ -68,7 +67,7 @@ async def test_the_writer_receives_only_the_decided_content(
 ) -> None:
     _SpyConfig.calls = []
     monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
 
     response = await suggestion_agent.process(_request())
@@ -77,8 +76,7 @@ async def test_the_writer_receives_only_the_decided_content(
     writer_prompt = mock_llm_client.last_prompt
     assert writer_prompt is not None
     assert POINT in writer_prompt
-    assert DELIVERABLE in writer_prompt
-    for leaked in (SUMMARY, DETAILS, INSIGHT, "suggestion task"):
+    for leaked in (SUMMARY, INSIGHT, "suggestion task"):
         assert leaked not in writer_prompt
     writer_config = _SpyConfig.calls[-1]
     assert writer_config["system_instruction"] == "Write one message in English."
@@ -91,7 +89,7 @@ async def test_the_published_answer_comes_from_the_writer(
     mock_repository: MockSuggestionAgentRepository,
     mock_llm_client: MockLLMClient,
 ) -> None:
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
 
     response = await suggestion_agent.process(_request())
@@ -116,7 +114,7 @@ async def test_a_writer_failure_publishes_nothing(
     async def failing_writer(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("writer model unavailable")
 
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     monkeypatch.setattr(suggestion_agent, "_generate_llm_response", failing_writer)
 
     response = await suggestion_agent.process(_request())
@@ -147,7 +145,7 @@ async def test_only_a_language_with_a_voice_supplement_gets_it(
     _SpyConfig.calls = []
     monkeypatch.setattr(mixin_mod.types, "GenerateContentConfig", _SpyConfig)
     monkeypatch.setattr(suggestion_agent, "_load_prompt_config", load)
-    mock_llm_client.set_next_response(_decision())
+    serve_lens_runs(mock_llm_client, _decision())
     mock_llm_client.responses["default"] = WRITTEN
     request = _request()
     request.language = language

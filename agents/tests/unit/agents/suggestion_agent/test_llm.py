@@ -4,6 +4,7 @@ import json
 
 import pytest
 from pydantic import ValidationError
+from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -20,8 +21,6 @@ def _no_suggestion_output() -> dict[str, object]:
         "has_suggestion": False,
         "interaction_contract": None,
         "key_point": "",
-        "deliverable": None,
-        "agent_session": None,
         "suggestion_summary": None,
         "target_context": None,
     }
@@ -32,8 +31,6 @@ def _suggestion_output(point: str) -> dict[str, object]:
         "has_suggestion": True,
         "interaction_contract": "action_offer",
         "key_point": point,
-        "deliverable": "A schedule with the mornings kept free.",
-        "agent_session": False,
         "suggestion_summary": "Action handoff summary",
         "target_context": {
             "organization_name": "Wakakusa",
@@ -184,29 +181,9 @@ def test_parse_suggestion_output_with_plain_suggestion(
         "key_point": (
             "I want my schedule to be structured so that I can focus in the morning."
         ),
-        "deliverable": "A schedule with the mornings kept free.",
-        "agent_session": False,
     }
     assert result["has_suggestion"] is True
     assert result["suggestion_summary"] == "Action handoff summary"
-
-
-@pytest.mark.parametrize(
-    ("contract", "deliverable"),
-    [("action_offer", None), ("message_only", "A reply to the client.")],
-)
-def test_parse_suggestion_output_requires_a_deliverable_exactly_for_an_offer(
-    suggestion_agent: SuggestionAgent, contract: str, deliverable: str | None
-) -> None:
-    payload = _suggestion_output("The client asked for the invoice again.")
-    payload["interaction_contract"] = contract
-    payload["deliverable"] = deliverable
-
-    with pytest.raises(ValueError, match="deliverable must be given exactly"):
-        parse_suggestion_output(
-            raw_text=json.dumps(payload, ensure_ascii=False),
-            parsed_output=SuggestionStructuredOutput.model_validate(payload),
-        )
 
 
 def test_parse_suggestion_output_rejects_missing_suggestion_summary(
@@ -329,7 +306,7 @@ async def test_suggestion_agent_reasoning_mode_omits_temperature_and_sets_thinki
     monkeypatch.setattr(
         mixin_mod.types, "GenerateContentConfig", _SpyGenerateContentConfig
     )
-    mock_llm_client.set_next_response(_no_suggestion_output())
+    serve_lens_runs(mock_llm_client, _no_suggestion_output())
 
     suggestion_agent._current_user_id = "user-test"  # noqa: SLF001
     suggestion_agent._current_suggestion_id = "suggestion-test"  # noqa: SLF001

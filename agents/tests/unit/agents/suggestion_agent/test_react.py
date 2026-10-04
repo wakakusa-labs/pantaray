@@ -58,8 +58,6 @@ def _terminal_payload() -> dict[str, JSONValue]:
         "has_suggestion": True,
         "interaction_contract": "action_offer",
         "key_point": "共通契約に反例があり、呼び出し側の対処では直らない。",
-        "deliverable": "共通契約の修正と検証",
-        "agent_session": False,
         "suggestion_summary": "### Target\nPantaray\n\n### Work Surface\nUnknown\n\n### Why This Suggestion\nEvidence\n\n### Expected Action\nFix and verify\n\n### Source Context\nObserved\n\n### Ambiguity\nNone",
         "target_context": {
             "organization_name": "Wakakusa",
@@ -115,8 +113,7 @@ def test_terminal_tool_declares_action_message_content_limit() -> None:
     properties = _terminal_tool().parameters["properties"]
 
     assert "answer" not in properties
-    for field in ("key_point", "deliverable"):
-        assert properties[field]["maxLength"] == ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS
+    assert properties["key_point"]["maxLength"] == ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS
 
 
 @pytest.mark.asyncio

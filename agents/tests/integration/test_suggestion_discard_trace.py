@@ -152,7 +152,6 @@ def _prepare_job(
                     "has_suggestion": True,
                     "interaction_contract": "message_only",
                     "key_point": answer,
-                    "agent_session": False,
                     "suggestion_summary": "Parser review.",
                     "target_context": {
                         "organization_name": None,
@@ -161,6 +160,21 @@ def _prepare_job(
                 }
             ).model_dump()
         )
+        # The other two lens runs find nothing; the selector picks the candidate.
+        nothing = SuggestionStructuredOutput.model_validate(
+            {
+                "has_suggestion": False,
+                "interaction_contract": None,
+                "key_point": "",
+                "suggestion_summary": None,
+                "target_context": None,
+            }
+        ).model_dump()
+        llm.queued_responses = [
+            nothing,
+            nothing,
+            {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
+        ]
         llm.responses["default"] = answer  # what the writer call returns
         await repository.create_processing_suggestion_row(
             user_id=USER_ID, suggestion_id=suggestion_id

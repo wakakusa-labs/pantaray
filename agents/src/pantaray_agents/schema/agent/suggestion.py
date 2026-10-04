@@ -109,8 +109,6 @@ class SuggestionDecidedContent(TypedDict):
 
     interaction_contract: SuggestionInteractionContract
     key_point: str
-    deliverable: str | None
-    agent_session: bool
 
 
 class SuggestionExtraction(TypedDict):
@@ -157,20 +155,7 @@ class SuggestionStructuredOutput(BaseModel):
     )
     key_point: str = Field(
         max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-        description="利用者が理解すべき一点と、その決め手の事実か理由。提案なしの場合は空文字列",
-    )
-    details: str | None = Field(
-        default=None,
-        description="一点を支える事実。書き手には渡さない。提案なしの場合は null",
-    )
-    deliverable: str | None = Field(
-        default=None,
-        max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-        description="action_offer で承認すると手に入るもの。それ以外は null",
-    )
-    agent_session: bool | None = Field(
-        default=None,
-        description="本人がこの作業を AI エージェントのセッションで進めているか",
+        description="利用者に伝える提案の中身すべて（何か・なぜ今か・決め手の事実・未確認の点・承認で行うこと）。提案なしの場合は空文字列",
     )
     suggestion_summary: str | None = Field(
         description=(

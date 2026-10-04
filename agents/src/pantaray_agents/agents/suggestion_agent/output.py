@@ -42,8 +42,6 @@ def parse_suggestion_output(
         parsed = SuggestionStructuredOutput.model_validate(loaded)
 
     key_point = parsed.key_point.strip()
-    details = parsed.details.strip() if parsed.details else None
-    deliverable = parsed.deliverable.strip() if parsed.deliverable else None
     suggestion_summary = (
         parsed.suggestion_summary.strip()
         if isinstance(parsed.suggestion_summary, str)
@@ -58,13 +56,6 @@ def parse_suggestion_output(
             raise ValueError(
                 "interaction_contract is required when has_suggestion=true"
             )
-        if (parsed.interaction_contract == "action_offer") != bool(deliverable):
-            raise ValueError(
-                "deliverable must be given exactly when interaction_contract "
-                "is action_offer"
-            )
-        if parsed.agent_session is None:
-            raise ValueError("agent_session is required when has_suggestion=true")
         if not suggestion_summary:
             raise ValueError(
                 "suggestion_summary must be non-empty when has_suggestion=true"
@@ -76,8 +67,6 @@ def parse_suggestion_output(
         decided: SuggestionDecidedContent = {
             "interaction_contract": parsed.interaction_contract,
             "key_point": key_point,
-            "deliverable": deliverable,
-            "agent_session": parsed.agent_session,
         }
         return {
             "thinking": None,
@@ -91,10 +80,8 @@ def parse_suggestion_output(
             "interaction_contract": parsed.interaction_contract,
         }
 
-    if key_point or details or deliverable:
-        raise ValueError(
-            "key_point, details and deliverable must be empty when has_suggestion=false"
-        )
+    if key_point:
+        raise ValueError("key_point must be empty when has_suggestion=false")
     if parsed.interaction_contract is not None:
         raise ValueError("interaction_contract must be null when has_suggestion=false")
     if suggestion_summary:

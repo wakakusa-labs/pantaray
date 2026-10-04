@@ -67,7 +67,7 @@ def test_real_prompt_renders_context_and_answer_language(
 
     for value in (*context.values(), "pending-work-evidence"):
         assert value in rendered
-    assert f"one short sentence in {label} for the writer" in instruction
+    assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction
 
 
@@ -80,8 +80,6 @@ def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None
         {
             "interaction_contract": "action_offer",
             "key_point": "decided-point",
-            "deliverable": "decided-deliverable",
-            "agent_session": True,
         },
         answer_language=label,
         voice_instruction=(
@@ -92,7 +90,7 @@ def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None
     assert f"natural {label}" in system
     assert ("## Writing in Japanese" in system) is (label == "Japanese")
     assert "{" not in prompt
-    for value in ("offer", "decided-point", "decided-deliverable", "yes"):
+    for value in ("offer", "decided-point"):
         assert value in prompt
 
 

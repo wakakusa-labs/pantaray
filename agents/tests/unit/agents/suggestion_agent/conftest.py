@@ -5,6 +5,10 @@ import os
 from unittest.mock import patch
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    NO_SUGGESTION,
+    prompt_configs,
+)
 
 from pantaray_agents.agents.artifact_react import (
     ReactToolCall,
@@ -27,14 +31,6 @@ from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentReposi
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.mock_repository import MockRepository
 from pantaray_agents.utils.prompt_loader import PromptConfig
-
-
-def _build_no_suggestion_payload() -> dict[str, object]:
-    return {
-        "has_suggestion": False,
-        "interaction_contract": None,
-        "key_point": "",
-    }
 
 
 async def _execute_research_tool(
@@ -94,9 +90,7 @@ def mock_repository() -> MockSuggestionAgentRepository:
 def mock_llm_client() -> MockLLMClient:
     """MockLLMClientのフィクスチャ"""
     client = MockLLMClient()
-    client.responses["suggestion"] = json.dumps(
-        _build_no_suggestion_payload(), ensure_ascii=False
-    )
+    client.responses["suggestion"] = json.dumps(NO_SUGGESTION, ensure_ascii=False)
     return client
 
 
@@ -142,15 +136,13 @@ def suggestion_agent(
         return MockLLMResponse(llm_response_str)
 
     writer_prompt = PromptConfig(
-        prompt="writer: {kind} | {key_point} | {deliverable} | {agent_session}",
+        prompt="writer: {kind} | {key_point}",
         system_instruction="Write one message in {answer_language}.",
     )
     with patch(
         "pantaray_agents.agents.core.base.prompt_loader.load_config",
-        side_effect=lambda name: (
-            writer_prompt
-            if name == SUGGESTION_WRITER_PROMPT_NAME
-            else PromptConfig(prompt=test_prompt, system_instruction=None)
+        side_effect=prompt_configs(
+            test_prompt, {SUGGESTION_WRITER_PROMPT_NAME: writer_prompt}
         ),
     ):
         agent = SuggestionAgent(

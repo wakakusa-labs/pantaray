@@ -13,8 +13,9 @@ import hashlib
 import io
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -22,6 +23,10 @@ import pytest
 from PIL import Image
 from pydantic import BaseModel
 
+from pantaray_agents.agents.core import CountingSink
+from pantaray_agents.agents.core.mixins.llm_generation_mixin import (
+    LLMGenerationMixin,
+)
 from pantaray_agents.local_runtime.llm_proxy import direct
 from pantaray_agents.local_runtime.llm_proxy.response_parsing import (
     extract_meta,
@@ -44,6 +49,9 @@ from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import LlmProxyExecutionError, ProviderError
 from pantaray_llm.profiles import ACTIVITY_SUMMARY_PROFILE_ID, MEMORY_UPDATE_PROFILE_ID
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.providers.openai_responses.retry_policy import (
+    LLM_TRANSPORT_MAX_ATTEMPTS,
+)
 
 OPENAI_KEY = "sk-test-openai-000000000000000000"
 CHATGPT_TOKEN = "chatgpt-access-token-000000000000"
@@ -222,6 +230,7 @@ class SendBoundary:
         self.requests: list[httpx.Request] = []
         self.subjects: list[str] = []
         self.budgets: list[int] = []
+        self.timeouts: list[httpx.Timeout] = []
         self.emitted: list[LlmProxyResponse] = []
         self._handler = handler
 
@@ -240,12 +249,13 @@ class SendBoundary:
 
     @asynccontextmanager
     async def http_client(
-        self, user_id: str, *, timeout_seconds: float, max_requests: int = 1
+        self, user_id: str, *, timeout: httpx.Timeout, max_requests: int = 1
     ) -> Any:
         self.subjects.append(user_id)
         self.budgets.append(max_requests)
+        self.timeouts.append(timeout)
         async with httpx.AsyncClient(
-            timeout=timeout_seconds, transport=httpx.MockTransport(self._respond)
+            timeout=timeout, transport=httpx.MockTransport(self._respond)
         ) as client:
             yield client
 
@@ -822,3 +832,113 @@ async def test_a_provider_failure_crosses_the_source_lifetime_boundary(
 
     assert exc_info.value.error_code == "PROXY_UPSTREAM_RATE_LIMITED"
     assert exc_info.value.upstream_provider == "anthropic"
+
+
+def stalled_stream(
+    failure: type[httpx.TransportError],
+) -> Callable[[httpx.Request], httpx.Response]:
+    """The backend answers 200, sends its first event, then the stream breaks."""
+
+    first_event = sse_body(responses_payload([text_output("hello")])).split(b"\n\n")[0]
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        async def body() -> AsyncIterator[bytes]:
+            yield first_event + b"\n\n"
+            # httpx gives a read timeout no message, as the reported stall did.
+            raise failure("")
+
+        return httpx.Response(
+            200, content=body(), headers={"content-type": "text/event-stream"}
+        )
+
+    return respond
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (httpx.ReadTimeout, "The model provider request timed out."),
+        (httpx.RemoteProtocolError, "The model provider is temporarily unavailable."),
+        (httpx.ReadError, "The model provider is temporarily unavailable."),
+    ],
+    ids=["stall", "cut-off", "reset"],
+)
+async def test_a_broken_stream_is_a_retryable_provider_failure(
+    boundary: Callable[..., SendBoundary],
+    failure: type[httpx.TransportError],
+    message: str,
+) -> None:
+    boundary(stalled_stream(failure))
+
+    with pytest.raises(LlmProxyExecutionError) as exc_info:
+        await dispatch(CHATGPT_CONNECTION)
+
+    assert exc_info.value.error_code == "PROXY_UPSTREAM_UNAVAILABLE"
+    assert exc_info.value.retryable is True
+    assert str(exc_info.value) == message
+    assert exc_info.value.upstream_provider == "openai_codex"
+    assert exc_info.value.local_job_id == LOCAL_JOB_ID
+
+
+async def test_the_provider_client_bounds_silence_not_length(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """httpx applies `read` to every socket read, so a stream that keeps sending
+    is never cut, while a provider that never accepts the connection fails fast.
+    """
+
+    recorder = boundary()
+
+    await dispatch(CHATGPT_CONNECTION)
+
+    assert recorder.timeouts == [httpx.Timeout(250.0, connect=10.0)]
+
+
+class _Agent(LLMGenerationMixin):
+    """The retry loop every agent's LLM call goes through, on the direct route."""
+
+    LLM_INFERENCE_PROFILE_ID = ACTIVITY_SUMMARY_PROFILE_ID
+    DEFAULT_SYSTEM_INSTRUCTION = "sys"
+
+    def __init__(self) -> None:
+        self.llm_config = {}
+        self.client = SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=self._send))
+        )
+
+    async def _send(self, **_kwargs: object) -> ProxyResponse:
+        return await dispatch(CHATGPT_CONNECTION)
+
+    @classmethod
+    async def _sleep_llm_retry_backoff(cls, attempt_index: int) -> None:
+        return None
+
+
+async def test_a_stalled_stream_is_sent_again_and_its_answer_adopted(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    stall = stalled_stream(httpx.ReadTimeout)
+    answer = responder()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        first = len(recorder.requests) == 1
+        return stall(request) if first else answer(request)
+
+    recorder = boundary(respond)
+
+    text = await _Agent()._generate_llm_response("hi", sink=CountingSink())
+
+    assert text == "hello"
+    assert len(recorder.requests) == 2
+
+
+async def test_a_stream_that_keeps_stalling_fails_with_a_named_cause(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    recorder = boundary(stalled_stream(httpx.ReadTimeout))
+
+    with pytest.raises(LlmProxyExecutionError) as exc_info:
+        await _Agent()._generate_llm_response("hi", sink=CountingSink())
+
+    assert len(recorder.requests) == LLM_TRANSPORT_MAX_ATTEMPTS
+    assert str(exc_info.value) == "The model provider request timed out."

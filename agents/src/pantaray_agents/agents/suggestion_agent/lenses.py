@@ -108,7 +108,6 @@ def _format_candidates(candidates: Sequence[LensCandidate]) -> str:
             f"### Candidate {number}\n"
             f"Kind: {_KIND_LABELS[decided['interaction_contract']]}\n"
             f"Point: {decided['key_point']}\n"
-            f"Deliverable: {decided['deliverable'] or '(none)'}\n"
             f"Context:\n{candidate.extraction['suggestion_summary']}"
         )
     return "\n\n".join(blocks)

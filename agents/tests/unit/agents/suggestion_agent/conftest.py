@@ -136,7 +136,7 @@ def suggestion_agent(
         return MockLLMResponse(llm_response_str)
 
     writer_prompt = PromptConfig(
-        prompt="writer: {kind} | {key_point} | {deliverable} | {agent_session}",
+        prompt="writer: {kind} | {key_point}",
         system_instruction="Write one message in {answer_language}.",
     )
     with patch(

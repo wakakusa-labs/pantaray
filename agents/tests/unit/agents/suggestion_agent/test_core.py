@@ -73,8 +73,6 @@ def _suggestion_output(point: str) -> dict[str, object]:
         "has_suggestion": True,
         "interaction_contract": "action_offer",
         "key_point": point,
-        "deliverable": "Task 1 done.",
-        "agent_session": False,
         "suggestion_summary": "Action handoff summary",
         "target_context": {
             "organization_name": "Wakakusa",

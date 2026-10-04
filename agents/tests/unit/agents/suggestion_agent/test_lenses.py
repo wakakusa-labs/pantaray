@@ -30,8 +30,6 @@ def _suggestion(point: str) -> dict[str, object]:
         "interaction_contract": "message_only",
         "key_point": point,
         "details": None,
-        "deliverable": None,
-        "agent_session": False,
         "suggestion_summary": f"### Target\n{point}",
         "target_context": {"organization_name": None, "project_name": None},
         "candidates": [],

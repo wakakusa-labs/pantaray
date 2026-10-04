@@ -139,8 +139,6 @@ def _terminal_tool() -> LlmToolDefinition:
                 "interaction_contract",
                 "key_point",
                 "details",
-                "deliverable",
-                "agent_session",
                 "suggestion_summary",
                 "target_context",
                 "candidates",
@@ -155,29 +153,16 @@ def _terminal_tool() -> LlmToolDefinition:
                     "type": "string",
                     "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
                     "description": (
-                        "One short sentence for the writer: the single thing the "
-                        "user must understand, with its one deciding fact or reason. "
-                        "Not the finished message."
+                        "The whole suggestion for the writer, in a few short "
+                        "sentences: what it is, why it matters now, the deciding "
+                        "facts, what is unconfirmed and, for an offer, what "
+                        "Pantaray would make or do. Not the finished message."
                     ),
                 },
                 "details": {
                     "type": ["string", "null"],
                     "description": (
                         "Optional supporting facts. The writer does not see them."
-                    ),
-                },
-                "deliverable": {
-                    "type": ["string", "null"],
-                    "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-                    "description": (
-                        "For action_offer, one short phrase naming what approval "
-                        "gives the user."
-                    ),
-                },
-                "agent_session": {
-                    "type": ["boolean", "null"],
-                    "description": (
-                        "Whether the user is doing this work in an AI agent session."
                     ),
                 },
                 "suggestion_summary": {"type": ["string", "null"]},

@@ -14,8 +14,10 @@ from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
-POINT = "The client asked twice for the March invoice; it is still unsent."
-DELIVERABLE = "A reply to the client with the March invoice attached."
+POINT = (
+    "The client asked twice for the March invoice; it is still unsent. "
+    "Pantaray can write a reply with the invoice attached."
+)
 SUMMARY = "ACTION-ONLY summary: procedure, conditions and ambiguity."
 DETAILS = "DECISION-ONLY details: supporting facts for the run."
 INSIGHT = "RUN-ONLY insight: the user reviewed the billing sheet."
@@ -37,8 +39,6 @@ def _decision() -> dict[str, object]:
         "interaction_contract": "action_offer",
         "key_point": POINT,
         "details": DETAILS,
-        "deliverable": DELIVERABLE,
-        "agent_session": False,
         "suggestion_summary": SUMMARY,
         "target_context": {"organization_name": None, "project_name": None},
     }
@@ -78,7 +78,6 @@ async def test_the_writer_receives_only_the_decided_content(
     writer_prompt = mock_llm_client.last_prompt
     assert writer_prompt is not None
     assert POINT in writer_prompt
-    assert DELIVERABLE in writer_prompt
     for leaked in (SUMMARY, DETAILS, INSIGHT, "suggestion task"):
         assert leaked not in writer_prompt
     writer_config = _SpyConfig.calls[-1]

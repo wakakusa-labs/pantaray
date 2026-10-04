@@ -53,9 +53,7 @@ def build_writer_messages(
     prompt = config.prompt.format(
         answer_language=answer_language,
         kind=_KIND_LABELS[decided["interaction_contract"]],
-        agent_session="yes" if decided["agent_session"] else "no",
         key_point=decided["key_point"],
-        deliverable=decided["deliverable"] or "(none)",
     )
     system = config.system_instruction.replace("{answer_language}", answer_language)
     if voice_instruction:

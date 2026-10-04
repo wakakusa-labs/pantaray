@@ -241,8 +241,6 @@ class MockLLMClient:
                     "interaction_contract": None,
                     "key_point": "",
                     "details": None,
-                    "deliverable": None,
-                    "agent_session": None,
                     "suggestion_summary": None,
                     "target_context": None,
                 }

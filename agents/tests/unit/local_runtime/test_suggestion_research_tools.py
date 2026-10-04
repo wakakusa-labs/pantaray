@@ -1223,6 +1223,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
             step_number,
         )
         assert result.status == "success"
+        assert result.output["notes"][-1].startswith("The results stop at limit=1;")
 
     reference = await registry.execute(
         _tool_call(

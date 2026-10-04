@@ -23,6 +23,10 @@ from pantaray_agents.local_runtime.memory_catalog.embedding_generations import (
 from pantaray_agents.local_runtime.memory_catalog.epoch import (
     append_memory_context_item,
 )
+from pantaray_agents.local_runtime.memory_catalog.lexical_search import (
+    MAX_QUERY_TRIGRAM_WINDOWS,
+    lexical_query_notes,
+)
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryContextEpoch,
     MemoryReferenceDepth,
@@ -816,7 +820,9 @@ def test_lexical_lane_keeps_short_terms_when_indexed_terms_fill_the_pool(
     assert "fact-short-term" in [str(row["record_id"]) for row in results]
 
 
-def test_lexical_lane_drops_two_letter_ascii_words(tmp_path: Path) -> None:
+def test_lexical_lane_matches_short_acronyms_and_numbers_as_whole_words(
+    tmp_path: Path,
+) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):
         _register_facts(
@@ -826,14 +832,34 @@ def test_lexical_lane_drops_two_letter_ascii_words(tmp_path: Path) -> None:
                 ("fact-gmail", "Gmail の下書きを確認した"),
                 ("fact-domain", "domain の一覧を整理した"),
                 ("fact-training", "training データの取り扱いを見直した"),
+                ("fact-pr", "PRを #7 で出した"),
+                ("fact-other-issue", "#77 を閉じた"),
+                ("fact-longer-issue", "#777 と abc#77suffix を見た"),
+                ("fact-api", "API v2 へ移行した"),
             ),
         )
         matched = {
             query: _lexical_record_ids(connection, query=query)
-            for query in ("AI 設計方針", "AI")
+            for query in ("AI 設計方針", "AI", "ai", "PR", "#7", "V2", "#77")
         }
 
-    assert matched == {"AI 設計方針": ["fact-roadmap"], "AI": []}
+    assert matched == {
+        "AI 設計方針": ["fact-roadmap"],
+        "AI": ["fact-roadmap"],
+        "ai": [],
+        "PR": ["fact-pr"],
+        "#7": ["fact-pr"],
+        "V2": ["fact-api"],
+        "#77": ["fact-other-issue"],
+    }
+
+
+def test_lexical_query_notes_name_what_the_word_lanes_skipped() -> None:
+    assert lexical_query_notes("PR #7 の設計方針") == ()
+    (skipped,) = lexical_query_notes("is a PR open")
+    assert skipped.startswith("Not matched by words: is, a.")
+    (windows,) = lexical_query_notes("あ" * (MAX_QUERY_TRIGRAM_WINDOWS + 3))
+    assert f"first {MAX_QUERY_TRIGRAM_WINDOWS} three-character pieces" in windows
 
 
 def test_lexical_lane_keeps_ascii_words_whole(tmp_path: Path) -> None:

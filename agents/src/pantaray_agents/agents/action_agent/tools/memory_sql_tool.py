@@ -6,7 +6,10 @@ from typing import get_args
 
 from pantaray_agents.agents.action_agent.services.memory_sql import (
     DEFAULT_MEMORY_SQL_LIMIT,
+    MAX_MEMORY_SQL_CELL_CHARS,
     MAX_MEMORY_SQL_LIMIT,
+    MAX_MEMORY_SQL_OUTPUT_CHARS,
+    MEMORY_SQL_CELL_CUT_MARKER,
 )
 from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
 
@@ -62,7 +65,14 @@ MEMORY_SQL_TOOL = ToolDefinition.from_spec(
                 "- Write values directly in the SQL as literals, for example "
                 "period_start >= '2026-09-27T00:00:00Z'.\n"
                 "- The executor applies the current action's memory scope automatically.\n\n"
-                + _TABLE_GUIDE
+                "Result limits: at most limit rows (default "
+                f"{DEFAULT_MEMORY_SQL_LIMIT}, maximum {MAX_MEMORY_SQL_LIMIT}) and "
+                f"about {MAX_MEMORY_SQL_OUTPUT_CHARS:,} characters in total; a text "
+                f"cell longer than {MAX_MEMORY_SQL_CELL_CHARS:,} characters is cut "
+                f"and ends with a {MEMORY_SQL_CELL_CUT_MARKER} ...] marker. row_count "
+                "counts the rows returned, not every row that matched. When "
+                "anything was cut, truncated is true and notes say which limit "
+                "applied and how to read the rest.\n\n" + _TABLE_GUIDE
             ),
             when=(
                 "Use when rows of the readable memory tables must be strictly "

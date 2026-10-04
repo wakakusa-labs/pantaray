@@ -48,7 +48,7 @@ from ..tool_result_storage import ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
 
 BASH_EXECUTABLE = Path("/bin/bash")
 # An Action keeps a result this long inline in its transcript. A Suggestion has
-# no spill file to page through, so it keeps that much and marks the rest cut.
+# no spill file to page through, so it keeps that much and says what it cut.
 STDERR_MAX_CHARS = ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT // 4
 # The same bound submit_suggestion puts on rejection feedback.
 ERROR_MESSAGE_MAX_CHARS = 1_200
@@ -82,14 +82,27 @@ def commands_run_without_asking(
 
 
 def _bounded_streams(output: BashToolOutput) -> dict[str, JSONValue]:
-    stderr = output.stderr[:STDERR_MAX_CHARS]
+    # A command prints its error last, so stderr keeps its end.
+    stderr = output.stderr[max(0, len(output.stderr) - STDERR_MAX_CHARS) :]
     stdout = output.stdout[: ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT - len(stderr)]
+    notes: list[JSONValue] = []
+    if len(stdout) < len(output.stdout):
+        notes.append(
+            f"stdout was cut: showing the first {len(stdout):,} of "
+            f"{len(output.stdout):,} characters. Narrow it with grep, head, tail "
+            "or sed -n to read the rest."
+        )
+    if len(stderr) < len(output.stderr):
+        notes.append(
+            f"stderr was cut: showing the last {len(stderr):,} of "
+            f"{len(output.stderr):,} characters."
+        )
     return {
         "exit_code": output.exit_code,
         "stdout": stdout,
         "stderr": stderr,
-        "truncated": len(stdout) < len(output.stdout)
-        or len(stderr) < len(output.stderr),
+        "truncated": bool(notes),
+        "notes": notes,
     }
 
 
@@ -131,7 +144,12 @@ class SuggestionCommandSession:
                     "for example `git log` or `gh pr view`. No file can be written; "
                     "the network follows the user's command network setting. Never "
                     "run a command that changes something elsewhere, such as "
-                    "merging, pushing, sending or deleting."
+                    "merging, pushing, sending or deleting. Output is limited to "
+                    f"{ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT:,} characters: "
+                    "stdout keeps its beginning and stderr its last "
+                    f"{STDERR_MAX_CHARS:,} characters. When either is cut, "
+                    "truncated is true and notes say how much; narrow the output "
+                    "with grep, head, tail or sed -n."
                 ),
                 request_schema={
                     "type": "object",
@@ -166,6 +184,7 @@ class SuggestionCommandSession:
                             "stdout",
                             "stderr",
                             "truncated",
+                            "notes",
                         ],
                         "properties": {
                             "status": {"const": "success"},
@@ -173,6 +192,7 @@ class SuggestionCommandSession:
                             "stdout": {"type": "string"},
                             "stderr": {"type": "string"},
                             "truncated": {"type": "boolean"},
+                            "notes": {"type": "array", "items": {"type": "string"}},
                         },
                     }
                 ),

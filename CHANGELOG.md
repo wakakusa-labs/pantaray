@@ -6,12 +6,12 @@ in English and Japanese: one short sentence per change, saying what changed for 
 ## 0.3.2
 
 - Fixed Pantaray being unable to start, with History stuck loading, when a saved tool result file was missing.
-- The update button now appears once the update is ready to install, so restarting from it installs the update.
+- Fixed the update button sometimes closing Pantaray without installing the update.
 
 ---
 
 - ツールの結果を保存したファイルが無くなっていると、Pantaray が起動できず、履歴が読み込み中のままになる問題を直しました。
-- 更新のボタンは、インストールの準備ができてから出るようになり、押すと確実に更新されるようになりました。
+- 更新のボタンを押すと、更新されないままアプリが終了することがある問題を直しました。
 
 ## 0.3.1
 

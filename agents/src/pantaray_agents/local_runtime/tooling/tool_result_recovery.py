@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import stat
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+
+from pantaray_agents.utils.structured_logging import log_structured_event
 
 from .action_session_temp_paths import (
     MANAGED_DIRECTORY_MODE,
@@ -21,6 +25,8 @@ from .tool_result_storage import (
 _FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json)$")
 _TEMP_RESULT_FILE_PATTERN = re.compile(r"^\.output-[0-9a-f]{32}\.tmp$")
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class ToolResultRecoveryResult:
@@ -28,6 +34,7 @@ class ToolResultRecoveryResult:
     removed_directory_count: int
     preserved_file_count: int
     unknown_entry_count: int
+    missing_reference_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +51,11 @@ class _InvocationDirectory:
 def reconcile_tool_results_for_startup(
     *, db_path: Path, busy_timeout_ms: int
 ) -> ToolResultRecoveryResult:
-    """Reject missing references, then remove unreferenced managed results."""
+    """Remove unreferenced managed results; never delete a referenced one.
+
+    A durable reference whose file is gone is counted and logged, not fatal:
+    reading that one result fails later, while the rest of the app starts.
+    """
     workspace_root = _workspace_root(db_path=db_path)
     references = load_stored_tool_result_references(
         db_path=db_path,
@@ -60,26 +71,23 @@ def reconcile_tool_results_for_startup(
         for invocation in invocation_directories
         for file_name in invocation.managed_file_names
     }
-    missing_references = sorted(
-        (
-            reference
-            for reference in references
-            if reference.path not in scanned_file_paths
-        ),
-        key=lambda reference: (
-            reference.source_kind,
-            reference.source_id,
-            str(reference.path),
-        ),
+    missing_by_source_kind = Counter(
+        reference.source_kind
+        for reference in references
+        if reference.path not in scanned_file_paths
     )
-    if missing_references:
-        missing_sources = ", ".join(
-            f"{reference.source_kind}:{reference.source_id}"
-            for reference in missing_references
-        )
-        raise ToolResultRecoveryError(
-            "managed tool-result file is missing for durable sources: "
-            f"{missing_sources}"
+    missing_reference_count = missing_by_source_kind.total()
+    if missing_reference_count:
+        log_structured_event(
+            logger,
+            level="warning",
+            evt="TOOL_RESULT_FILES_MISSING_AT_STARTUP",
+            component="local_runtime.tooling.tool_result_recovery",
+            missing_reference_count=missing_reference_count,
+            missing_tool_invocation_reference_count=(
+                missing_by_source_kind["tool_invocation"]
+            ),
+            missing_action_step_reference_count=missing_by_source_kind["action_step"],
         )
 
     removed_file_count = 0
@@ -100,6 +108,7 @@ def reconcile_tool_results_for_startup(
         removed_directory_count=removed_directory_count,
         preserved_file_count=preserved_file_count,
         unknown_entry_count=unknown_entry_count,
+        missing_reference_count=missing_reference_count,
     )
 
 

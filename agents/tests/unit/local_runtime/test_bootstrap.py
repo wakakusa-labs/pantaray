@@ -575,6 +575,67 @@ def test_bootstrap_removes_orphaned_action_tool_results(
     assert "removed_empty_tool_result_directories=1" in row[0]
 
 
+def test_bootstrap_starts_when_a_referenced_tool_result_file_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    _set_minimum_local_runtime_env(monkeypatch=monkeypatch, db_path=db_path)
+    _initialize_once()
+    insert_agent_action(db_path=db_path)
+    tool_results_root = (
+        tmp_path
+        / "local_runtime_workspaces"
+        / "scratch"
+        / "user-1"
+        / "action-1"
+        / "tool-results"
+    )
+    missing_result = tool_results_root / "step-1" / f"output-{'1' * 32}.json"
+    orphaned_result = tool_results_root / "orphan" / f"output-{'2' * 32}.json"
+    orphaned_result.parent.mkdir(parents=True)
+    orphaned_result.write_bytes(b"orphaned")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO agent_action_steps(
+                step_id, action_id, user_id, step_number, step_type, step_name,
+                status, tool_output, created_at
+            ) VALUES ('step-1', 'action-1', 'user-1', 1, 'tool_execution',
+                      'tool::read', 'success', ?, '2026-03-23T00:00:00Z')
+            """,
+            (
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "success",
+                        "output": {
+                            "storage": "action_file",
+                            "path": str(missing_result),
+                            "media_type": "application/json",
+                            "byte_size": 1,
+                            "character_count": 1,
+                            "line_count": 1,
+                        },
+                        "output_storage_kind": "action_file",
+                        "output_owner_kind": "action_step",
+                    }
+                ),
+            ),
+        )
+
+    _initialize_once()
+
+    assert not orphaned_result.exists()
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT note FROM runtime_recovery_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    assert "missing_tool_result_references=1" in row[0]
+    assert "removed_orphaned_tool_result_files=1" in row[0]
+
+
 def test_bootstrap_creates_only_the_logged_out_owner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

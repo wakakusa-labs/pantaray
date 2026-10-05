@@ -752,56 +752,21 @@ def test_recovery_fails_closed_if_referenced_file_becomes_a_symlink_after_scan(
     assert outside.read_text(encoding="utf-8") == "keep"
 
 
-def test_recovery_fails_closed_on_missing_action_step_reference_before_cleanup(
+def test_recovery_continues_cleanup_when_referenced_files_are_missing(
+    caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "runtime.db"
     _create_reference_db(db_path)
     root = _tool_results_root(db_path)
     orphan = _write_result(root, owner="orphan", file_name=_ORPHAN_FILE_NAME)
-    missing_path = root / "missing-owner" / _JSON_FILE_NAME
-    missing_path.parent.mkdir(parents=True)
-    with sqlite3.connect(db_path) as connection:
-        connection.execute(
-            "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
-            (
-                "step-1",
-                "user-1",
-                "action-1",
-                json.dumps(
-                    _preflight_tool_output(
-                        {
-                            "storage": "action_file",
-                            "path": str(missing_path.absolute()),
-                            "media_type": "application/json",
-                            "byte_size": 1,
-                            "character_count": 1,
-                            "line_count": 1,
-                        },
-                        tool_request_id="missing-owner",
-                    )
-                ),
-            ),
-        )
-
-    with pytest.raises(ToolResultRecoveryError) as error:
-        reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
-
-    assert "action_step:step-1" in str(error.value)
-    assert orphan.is_file()
-
-
-def test_recovery_reports_invocation_and_step_identities_for_shared_missing_path(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "runtime.db"
-    _create_reference_db(db_path)
-    root = _tool_results_root(db_path)
-    orphan = _write_result(root, owner="orphan", file_name=_ORPHAN_FILE_NAME)
-    missing_path = root / "invocation-shared" / _JSON_FILE_NAME
-    metadata = {
+    kept = _write_result(root, owner="request-kept", file_name=_JSON_FILE_NAME)
+    missing_shared = root / "invocation-shared" / _JSON_FILE_NAME
+    missing_preflight = root / "request-missing" / _BINARY_FILE_NAME
+    missing_preflight.parent.mkdir(parents=True)
+    shared_metadata = {
         "storage": "action_file",
-        "path": str(missing_path.absolute()),
+        "path": str(missing_shared.absolute()),
         "media_type": "application/json",
         "byte_size": 1,
         "character_count": 1,
@@ -814,33 +779,66 @@ def test_recovery_reports_invocation_and_step_identities_for_shared_missing_path
         )
         connection.execute(
             "INSERT INTO tool_outputs VALUES (?, ?, ?, 'action_file')",
-            ("output-shared", "invocation-shared", json.dumps(metadata)),
+            ("output-shared", "invocation-shared", json.dumps(shared_metadata)),
         )
-        connection.execute(
-            "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
+        connection.executemany(
+            "INSERT INTO agent_action_steps VALUES (?, 'user-1', 'action-1', ?, NULL)",
             (
-                "step-shared",
-                "user-1",
-                "action-1",
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "status": "success",
-                        "output": metadata,
-                        "output_storage_kind": "action_file",
-                        "output_owner_kind": "tool_invocation",
-                    }
+                (
+                    "step-shared",
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "success",
+                            "output": shared_metadata,
+                            "output_storage_kind": "action_file",
+                            "output_owner_kind": "tool_invocation",
+                        }
+                    ),
+                ),
+                (
+                    "step-missing",
+                    json.dumps(
+                        _preflight_tool_output(
+                            {
+                                "storage": "action_file",
+                                "path": str(missing_preflight.absolute()),
+                                "media_type": "application/octet-stream",
+                                "byte_size": 1,
+                            },
+                            tool_request_id="request-missing",
+                        )
+                    ),
+                ),
+                (
+                    "step-kept",
+                    json.dumps(
+                        _preflight_tool_output(
+                            _json_metadata(kept), tool_request_id="request-kept"
+                        )
+                    ),
                 ),
             ),
         )
 
-    with pytest.raises(ToolResultRecoveryError) as error:
-        reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+    with caplog.at_level("WARNING", logger=tool_result_recovery.__name__):
+        result = reconcile_tool_results_for_startup(
+            db_path=db_path, busy_timeout_ms=1_000
+        )
 
-    message = str(error.value)
-    assert "tool_invocation:invocation-shared" in message
-    assert "action_step:step-shared" in message
-    assert orphan.is_file()
+    assert result.missing_reference_count == 3
+    assert not orphan.exists()
+    assert kept.is_file()
+    assert result.removed_file_count == 1
+    assert result.preserved_file_count == 1
+    [record] = caplog.records
+    assert json.loads(record.getMessage()) == {
+        "evt": "TOOL_RESULT_FILES_MISSING_AT_STARTUP",
+        "component": "local_runtime.tooling.tool_result_recovery",
+        "missing_reference_count": 3,
+        "missing_tool_invocation_reference_count": 1,
+        "missing_action_step_reference_count": 2,
+    }
 
 
 def test_recovery_uses_canonical_db_parent_for_referenced_results(

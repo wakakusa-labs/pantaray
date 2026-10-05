@@ -84,6 +84,12 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      # Electron 42+ no longer downloads its binary in postinstall; fetch it here so the
+      # download is not charged to the first Playwright launch.
+      - name: Download the Electron binary
+        working-directory: frontend
+        run: pnpm exec install-electron
+
       - name: Install Chromium for renderer tests
         working-directory: frontend
         run: pnpm exec playwright install chromium --only-shell

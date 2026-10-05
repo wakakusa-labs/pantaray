@@ -1,4 +1,5 @@
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeImage, shell } from 'electron';
+import path from 'node:path';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
 import type { createLocalBackendAuthContextController } from '../auth/localBackendAuthContextController';
 import type { LocalOwner } from '../auth/localRuntimeState';
@@ -189,17 +190,23 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   const actions = createActionFetcher({ requestJson, getUserId });
   const approvalPreferenceFetch = createApprovalPreferenceFetcher({ requestJson, getUserId });
   const workspaceSettingsFetch = createWorkspaceSettingsFetcher({ requestJson, getUserId });
+  // Since Electron 43 a dialog without defaultPath always opens in Downloads and the OS no
+  // longer restores the last-visited folder, so the picker reopens where the last pick was.
+  let lastWorkspaceFolderParent: string | undefined;
   const selectWorkspaceFolder = async (): Promise<{ canceled: boolean; path: string | null }> => {
     // getAllWindows() lists the newest window first, which can be a hidden overlay;
     // a dialog parented to it would show that overlay.
     const mainWindow = params.getMainWindow();
-    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] };
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openDirectory'],
+      defaultPath: lastWorkspaceFolderParent,
+    };
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options);
-    return result.canceled || result.filePaths.length === 0
-      ? { canceled: true, path: null }
-      : { canceled: false, path: result.filePaths[0] };
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true, path: null };
+    lastWorkspaceFolderParent = path.dirname(result.filePaths[0]);
+    return { canceled: false, path: result.filePaths[0] };
   };
   const openExternalUrl = createExternalUrlOpener({
     isDevRuntime: params.isDevRuntime,

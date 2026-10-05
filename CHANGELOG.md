@@ -3,6 +3,16 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.3.2
+
+- Fixed Pantaray being unable to start, with History stuck loading, when a saved tool result file was missing.
+- Fixed the update button sometimes closing Pantaray without installing the update.
+
+---
+
+- ツールの結果を保存したファイルが無くなっていると、Pantaray が起動できず、履歴が読み込み中のままになる問題を直しました。
+- 更新のボタンを押すと、更新されないままアプリが終了することがある問題を直しました。
+
 ## 0.3.1
 
 - Fixed Pantaray sometimes being unable to start after it was closed unexpectedly or updated.

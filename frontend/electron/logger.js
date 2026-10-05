@@ -137,7 +137,7 @@ function redactText(text) {
   s = s.replace(/https?:\/\/[^\s'"<>]+/gi, (url) => redactUrlInText(url));
   s = s.replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`);
   s = s.replace(
-    /((?:token|access_token|refresh_token|id_token|signature)\s*=\s*)[^\s,&"']+/gi,
+    /((?:token|access_token|refresh_token|id_token|signature|api_?key|secret|password)\s*=\s*)[^\s,&"']+/gi,
     `$1${REDACTED}`
   );
   return s;
@@ -258,7 +258,8 @@ function safeStringValue(key, value) {
     return { fp: fingerprint(v), len: v.length };
   }
 
-  return v;
+  // Free text such as a helper's stderr can carry a secret anywhere in the body.
+  return redactText(v);
 }
 
 function redact(value, { depth = 0, maxDepth = 4 } = {}) {

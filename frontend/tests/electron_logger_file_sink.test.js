@@ -75,6 +75,29 @@ test('redacts secrets inside Error messages persisted to file', () => {
   assert.match(raw, /<redacted>/);
 });
 
+test('redacts secrets anywhere in a multi-line free-text value', () => {
+  resetFileSinkForTests();
+  const dir = freshDir();
+  configureFileSink({ dir, level: 'error' });
+  const logger = createLogger();
+
+  logger.error('LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY', {
+    stderrTail: [
+      'Traceback (most recent call last):',
+      '  File "main.py", line 1, in <module>',
+      'ValueError: invalid URL https://proxy.example.com/v1?api_key=sk-query-secret',
+      'proxy rejected header Bearer bearer-secret-value',
+      'api_key=plain-secret-value',
+    ].join('\n'),
+  });
+
+  const raw = fs.readFileSync(path.join(dir, ELECTRON_LOG_FILENAME), 'utf8');
+  for (const secret of ['sk-query-secret', 'bearer-secret-value', 'plain-secret-value']) {
+    assert.equal(raw.includes(secret), false, secret);
+  }
+  assert.match(raw, /Traceback/);
+});
+
 test('rotates when exceeding the size cap and caps file count', () => {
   resetFileSinkForTests();
   const dir = freshDir();

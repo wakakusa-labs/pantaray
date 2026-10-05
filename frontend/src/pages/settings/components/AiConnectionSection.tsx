@@ -7,7 +7,6 @@ import {
   type AiConnectionMethod,
   type AiConnectionState,
   type ApiKeyProvider,
-  type LlmRoute,
 } from '../aiConnectionModel';
 import type { ConnectionCommand } from '../../../../electron/src/ipc/schemas/aiConnection';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../../../electron/src/auth/accountLoginFeature';
@@ -40,28 +39,6 @@ type AiConnectionSectionProps = {
 const METHODS: readonly AiConnectionMethod[] = PANTARAY_ACCOUNT_LOGIN_ENABLED
   ? ['cloud', 'chatgpt', 'api_key']
   : ['chatgpt', 'api_key'];
-
-function RouteLine({
-  label,
-  route,
-  name,
-  detail,
-}: {
-  label: string;
-  route: LlmRoute | null;
-  name: string;
-  detail: string;
-}): React.JSX.Element {
-  return (
-    <Row label={label}>
-      <p className="ai-route" role="status">
-        <span className={`ai-dot ai-dot--${route}`} aria-hidden="true" />
-        <span className="ai-route-name">{name}</span>
-        <span className="ai-route-detail">{detail}</span>
-      </p>
-    </Row>
-  );
-}
 
 function SecretRow({
   label,
@@ -273,7 +250,6 @@ export function AiConnectionSection({
   }, [pendingOperation]);
 
   const status = state.runtime.ok ? state.runtime.status : null;
-  const llmRoute = status?.llmRoute ?? null;
   const webSearchRoute = status?.webSearchRoute ?? null;
   const cloudSession = status?.cloudSessionState ?? null;
 
@@ -281,60 +257,13 @@ export function AiConnectionSection({
   const methodNoteId =
     state.method === 'cloud' && cloudSession === 'expired' ? 'ai-method-note' : undefined;
 
-  const routeName = (route: LlmRoute | null, directName: string): string =>
-    route === 'direct' ? directName : t(`settings.aiConnection.route.${route ?? 'unavailable'}`);
-  const model = state.model || t('settings.aiConnection.model.unset');
-  const inferenceDetail =
-    llmRoute === null
-      ? t('settings.aiConnection.status.unavailable')
-      : llmRoute === 'direct'
-        ? state.method === 'chatgpt'
-          ? state.chatgpt?.status === 'reauthentication_required'
-            ? t('settings.aiConnection.chatgpt.reauthenticationRequired')
-            : model
-          : [t(`settings.aiConnection.provider.${state.apiKey.provider}`), model].join(' · ')
-        : llmRoute === 'cloud'
-          ? cloudSession === 'expired'
-            ? t('settings.aiConnection.status.expiredDetail')
-            : t('settings.aiConnection.status.cloudDetail')
-          : t('settings.aiConnection.status.unconfiguredDetail');
-
   return (
     <section className="dashboard-section ai-connection">
       <h3 className="dashboard-section-title">{t('settings.aiConnection.title')}</h3>
 
-      <h4 className="ai-group">{t('settings.aiConnection.status.title')}</h4>
-      <RouteLine
-        label={t('settings.aiConnection.status.inference')}
-        route={llmRoute}
-        name={routeName(
-          llmRoute,
-          t(
-            `settings.aiConnection.method.${state.method === 'chatgpt' ? 'chatgpt' : 'api_key'}.title`
-          )
-        )}
-        detail={inferenceDetail}
-      />
-      <RouteLine
-        label={t('settings.aiConnection.status.webSearch')}
-        route={webSearchRoute}
-        name={routeName(webSearchRoute, 'Tavily')}
-        detail={
-          webSearchRoute === null
-            ? t('settings.aiConnection.status.unavailable')
-            : webSearchRoute === 'cloud'
-              ? cloudSession === 'expired'
-                ? t('settings.aiConnection.status.expiredDetail')
-                : t('settings.aiConnection.status.cloudDetail')
-              : ''
-        }
-      />
-
       {!state.canStoreSecrets ? (
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       ) : null}
-
-      <div className="ai-rule" />
 
       <p role="status" className={feedback?.isError ? 'settings-section-error' : 'ai-note'}>
         {pendingOperation === 'sign_in_chatgpt'

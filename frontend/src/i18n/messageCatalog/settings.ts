@@ -54,19 +54,8 @@ export const SETTINGS_MESSAGES = defineMessages({
       'The save and current setting could not be confirmed. Reload to check.',
     'settings.commandNetwork.reload': 'Reload setting',
     'settings.aiConnection.title': 'AI connection',
-    'settings.aiConnection.status.title': 'Current route',
-    'settings.aiConnection.status.inference': 'Inference',
-    'settings.aiConnection.status.webSearch': 'Web search',
-    'settings.aiConnection.status.cloudDetail': 'Requests go through your Pantaray account.',
     'settings.aiConnection.status.expiredDetail':
       'The session expired. Sign in again before sending an Action; your ChatGPT account or API key is not used instead.',
-    'settings.aiConnection.status.unconfiguredDetail':
-      'Choose how to connect before sending an Action.',
-    'settings.aiConnection.route.cloud': 'Pantaray Cloud',
-    'settings.aiConnection.route.unconfigured': 'Not set up',
-    'settings.aiConnection.route.unavailable': 'Unavailable',
-    'settings.aiConnection.status.unavailable':
-      'Could not read the current route. Saved settings can still be edited.',
     'settings.aiConnection.operation.running': 'Applying changes…',
     'settings.aiConnection.chatgpt.waiting': 'Waiting for authorization in your browser…',
     'settings.aiConnection.chatgpt.cancel': 'Cancel sign-in',
@@ -98,7 +87,6 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.modelSelectPlaceholder': 'Select a Codex model',
     'settings.aiConnection.chatgptModelHint': 'Choose a model available in Codex.',
     'settings.aiConnection.modelHint': 'Pick a suggestion or type any model the provider accepts.',
-    'settings.aiConnection.model.unset': 'No model set',
     'settings.aiConnection.key.label': 'API key',
     'settings.aiConnection.key.placeholder': 'Paste your key',
     'settings.aiConnection.key.save': 'Save',
@@ -332,19 +320,8 @@ export const SETTINGS_MESSAGES = defineMessages({
       '保存結果と現在の設定を確認できません。再取得してください。',
     'settings.commandNetwork.reload': '設定を再取得',
     'settings.aiConnection.title': 'AI 接続',
-    'settings.aiConnection.status.title': '現在の経路',
-    'settings.aiConnection.status.inference': '推論',
-    'settings.aiConnection.status.webSearch': 'Web 検索',
-    'settings.aiConnection.status.cloudDetail': 'Pantaray アカウント経由で実行します。',
     'settings.aiConnection.status.expiredDetail':
       'セッションが失効しています。再ログインするまで実行できません（ChatGPT アカウントや API キーには切り替わりません）。',
-    'settings.aiConnection.status.unconfiguredDetail':
-      'Action を送る前に接続方法を選んでください。',
-    'settings.aiConnection.route.cloud': 'Pantaray Cloud',
-    'settings.aiConnection.route.unconfigured': '未設定',
-    'settings.aiConnection.route.unavailable': '取得できません',
-    'settings.aiConnection.status.unavailable':
-      '現在の経路を取得できませんでした。保存済みの設定は編集できます。',
     'settings.aiConnection.operation.running': '変更を反映中…',
     'settings.aiConnection.chatgpt.waiting': 'ブラウザでの認証を待っています…',
     'settings.aiConnection.chatgpt.cancel': 'ログインをキャンセル',
@@ -377,7 +354,6 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.chatgptModelHint': 'Codex で利用できるモデルから選択してください。',
     'settings.aiConnection.modelHint':
       '候補から選ぶか、プロバイダーが受け付ける名前を直接入力できます。',
-    'settings.aiConnection.model.unset': 'モデル未設定',
     'settings.aiConnection.key.label': 'API キー',
     'settings.aiConnection.key.placeholder': 'キーを貼り付け',
     'settings.aiConnection.key.save': '保存',

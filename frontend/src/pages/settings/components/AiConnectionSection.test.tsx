@@ -249,13 +249,6 @@ it('locks the key field while a save is in flight', async () => {
   await waitFor(() => expect(input).not.toBeDisabled());
 });
 
-it('says web search is unusable while the session is expired', () => {
-  renderSection({
-    runtime: runtime({ webSearchRoute: 'cloud', cloudSessionState: 'expired', llmRoute: 'cloud' }),
-  });
-  expect(screen.getAllByText('settings.aiConnection.status.expiredDetail')).toHaveLength(2);
-});
-
 it('states why Pantaray Cloud is unavailable instead of hiding it in a tooltip', () => {
   renderSection({ runtime: runtime({ cloudSessionState: 'absent' }) });
   const reason = screen.getByText('settings.aiConnection.method.cloud.requiresLogin');
@@ -424,7 +417,6 @@ it('edits a model as a draft and preserves it when applying fails', async () => 
   const input = screen.getByLabelText('settings.aiConnection.modelLabel');
   fireEvent.change(input, { target: { value: ' new-model ' } });
   expect(save).not.toHaveBeenCalled();
-  expect(screen.getByText(/saved-model/)).toBeInTheDocument();
   fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
   expect(save).toHaveBeenCalledWith('new-model');
   expect(await screen.findByText('settings.aiConnection.model.saveFailed')).toBeInTheDocument();
@@ -432,10 +424,8 @@ it('edits a model as a draft and preserves it when applying fails', async () => 
   expect(input).toHaveFocus();
 });
 
-it('shows unavailable runtime status without hiding credential editing', () => {
+it('keeps credential editing available when the runtime status is unavailable', () => {
   renderSection({ runtime: { ok: false, error: 'runtime_unavailable' } });
-  expect(screen.getAllByText('settings.aiConnection.route.unavailable')).toHaveLength(2);
-  expect(screen.queryByText('settings.aiConnection.route.unconfigured')).toBeNull();
   expect(screen.getByLabelText('settings.aiConnection.key.label')).toBeEnabled();
   expect(screen.getByRole('radio', { name: /method.cloud/ })).toBeDisabled();
 });

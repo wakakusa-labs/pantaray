@@ -1,30 +1,20 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from .process_lock import (
-    RuntimeLockRecord,
     RuntimeProcessLock,
     acquire_runtime_process_lock,
-    read_runtime_lock_record,
     release_runtime_process_lock,
-    runtime_process_exists,
 )
 from .runtime_lock_repository import (
-    RuntimeLockResource,
     create_runtime_lock_resource,
-    list_recoverable_runtime_lock_resources,
-    mark_runtime_lock_resource_abandoned,
+    list_open_runtime_lock_resource_ids,
     mark_runtime_lock_resource_cleaned,
-    mark_runtime_lock_resource_cleanup_failed,
     record_runtime_lock_event,
 )
 from .utc_timestamps import now_utc_iso
-
-MAX_RUNTIME_LOCK_CLEANUP_ATTEMPTS = 3
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +77,7 @@ def attach_runtime_lock_lease(
         created_at=timestamp,
     )
     lease = RuntimeProcessLockLease(runtime_lock=runtime_lock, resource_id=resource_id)
-    recovered_resource_count = reconcile_runtime_lock_resources_for_startup(
+    recovered_resource_count = _close_previous_runtime_lock_leases(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         active_lease=lease,
@@ -134,128 +124,38 @@ def release_runtime_lock_lease(
     )
 
 
-def reconcile_runtime_lock_resources_for_startup(
+def _close_previous_runtime_lock_leases(
     *,
     db_path: Path,
     busy_timeout_ms: int,
-    active_lease: RuntimeProcessLockLease | None = None,
+    active_lease: RuntimeProcessLockLease,
 ) -> int:
-    return _reconcile_runtime_lock_resources(
-        trigger="startup",
+    # The caller holds the flock, so every other lease still recorded as open
+    # belongs to an owner that exited without releasing it.
+    closed_count = 0
+    for resource_id in list_open_runtime_lock_resource_ids(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
-        active_lease=active_lease,
-    )
-
-
-def reconcile_runtime_lock_resources_for_periodic_reaper(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    active_lease: RuntimeProcessLockLease | None = None,
-) -> int:
-    return _reconcile_runtime_lock_resources(
-        trigger="periodic",
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        active_lease=active_lease,
-    )
-
-
-def _reconcile_runtime_lock_resources(
-    *,
-    trigger: str,
-    db_path: Path,
-    busy_timeout_ms: int,
-    active_lease: RuntimeProcessLockLease | None,
-) -> int:
-    resources = list_recoverable_runtime_lock_resources(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-    )
-    recovered_count = 0
-    for resource in resources:
-        if (
-            active_lease is not None
-            and resource.resource_id == active_lease.resource_id
-        ):
-            continue
-        if _resource_is_live(resource):
+    ):
+        if resource_id == active_lease.resource_id:
             continue
         timestamp = now_utc_iso()
-        try:
-            _cleanup_runtime_lock_resource(resource)
-        except Exception as exc:
-            if resource.cleanup_attempts + 1 >= MAX_RUNTIME_LOCK_CLEANUP_ATTEMPTS:
-                mark_runtime_lock_resource_abandoned(
-                    db_path=db_path,
-                    busy_timeout_ms=busy_timeout_ms,
-                    resource_id=resource.resource_id,
-                    abandoned_at=timestamp,
-                    cleanup_error=str(exc),
-                )
-                event_type = f"{trigger}_runtime_lock_abandoned"
-                message = f"{trigger} runtime global lock cleanup abandoned after retry budget: {exc}"
-            else:
-                mark_runtime_lock_resource_cleanup_failed(
-                    db_path=db_path,
-                    busy_timeout_ms=busy_timeout_ms,
-                    resource_id=resource.resource_id,
-                    failed_at=timestamp,
-                    cleanup_error=str(exc),
-                )
-                event_type = f"{trigger}_runtime_lock_warning"
-                message = f"{trigger} runtime global lock cleanup failed: {exc}"
-        else:
-            mark_runtime_lock_resource_cleaned(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                resource_id=resource.resource_id,
-                cleaned_at=timestamp,
-            )
-            event_type = f"{trigger}_runtime_lock_completed"
-            message = f"{trigger} runtime global lock cleanup completed"
+        mark_runtime_lock_resource_cleaned(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            resource_id=resource_id,
+            cleaned_at=timestamp,
+        )
         record_runtime_lock_event(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            resource_id=resource.resource_id,
-            event_type=event_type,
-            message=message,
+            resource_id=resource_id,
+            event_type="startup_runtime_lock_completed",
+            message="startup runtime global lock cleanup completed",
             created_at=timestamp,
         )
-        recovered_count += 1
-    return recovered_count
-
-
-def _resource_is_live(resource: RuntimeLockResource) -> bool:
-    record = read_runtime_lock_record(lock_path=Path(resource.lock_path))
-    if record is None:
-        return False
-    if not _record_matches_resource(record=record, resource=resource):
-        return False
-    return runtime_process_exists(record.owner_pid)
-
-
-def _cleanup_runtime_lock_resource(resource: RuntimeLockResource) -> None:
-    lock_path = Path(resource.lock_path)
-    record = read_runtime_lock_record(lock_path=lock_path)
-    if record is None:
-        if not lock_path.exists():
-            return
-        raise RuntimeError("runtime global lock owner is unreadable")
-    if not _record_matches_resource(record=record, resource=resource):
-        return
-    if runtime_process_exists(record.owner_pid):
-        raise RuntimeError("runtime global lock is still held by a live owner")
-    lock_path.unlink()
-
-
-def _record_matches_resource(
-    *,
-    record: RuntimeLockRecord,
-    resource: RuntimeLockResource,
-) -> bool:
-    return record.owner_pid == resource.owner_pid and record.lock_id == resource.lock_id
+        closed_count += 1
+    return closed_count
 
 
 __all__ = [
@@ -265,7 +165,5 @@ __all__ = [
     "RuntimeProcessLockLease",
     "acquire_runtime_lock_for_startup",
     "attach_runtime_lock_lease",
-    "reconcile_runtime_lock_resources_for_periodic_reaper",
-    "reconcile_runtime_lock_resources_for_startup",
     "release_runtime_lock_lease",
 ]

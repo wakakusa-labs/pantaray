@@ -44,10 +44,7 @@ def _build_runtime_services() -> SimpleNamespace:
         rendering=SimpleNamespace(
             format_history=MagicMock(return_value=""),
             history_entries=MagicMock(return_value=()),
-            format_memory_source_coverage=MagicMock(return_value=""),
             render_memory_context_model=MagicMock(return_value=""),
-            render_memory_artifact_references=MagicMock(return_value=""),
-            render_linkable_memory_context=MagicMock(return_value=""),
             render_request_summary=MagicMock(return_value=""),
             render_target_context=MagicMock(return_value=""),
             render_workspace_path_contract=MagicMock(return_value=""),

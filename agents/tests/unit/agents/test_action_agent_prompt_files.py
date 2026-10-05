@@ -188,13 +188,6 @@ def test_executing_prompt_states_the_tool_batch_rules() -> None:
     assert "Every call needs its own internal `step_note`" in text
 
 
-def test_action_prompts_include_memory_source_coverage_placeholder() -> None:
-    base = Path(__file__).parents[3] / "src" / "pantaray_agents" / "prompts" / "action"
-    text = _read_text(base / "executing.yaml")
-
-    assert "{memory_source_coverage}" in text
-
-
 def test_action_prompts_treat_request_summary_as_handoff_note() -> None:
     base = Path(__file__).parents[3] / "src" / "pantaray_agents" / "prompts" / "action"
     text = _read_text(base / "executing.yaml")
@@ -206,14 +199,13 @@ def test_action_prompts_treat_request_summary_as_handoff_note() -> None:
 
 # The head is rendered once per Action. These change while it lasts, so they
 # reach the model through world_state_updates instead of a rewritten head:
-# - linkable_persisted_memory: memory_context_epoch, extended mid-run.
 # - current_time: wall clock.
 # - the workspace and ~/.pantaray AGENTS.md: re-read by every run.
 _CHANGING_PROMPT_FIELDS = frozenset(
     field for _, fields in WORLD_STATE_SECTIONS for field in fields
 )
-# Fixed for the whole Action. Memory and its source coverage are read once,
-# when the Action starts; Pantaray's default AGENTS.md ships with the app.
+# Fixed for the whole Action. The profile briefs are read once, when the Action
+# starts; Pantaray's default AGENTS.md ships with the app.
 _FIXED_PROMPT_FIELDS = frozenset(
     {
         "pantaray_default_agents_md",
@@ -223,8 +215,6 @@ _FIXED_PROMPT_FIELDS = frozenset(
         "memory_context_model",
         "insight_data",
         "structured_fact_data",
-        "memory_artifact_references",
-        "memory_source_coverage",
     }
 )
 

@@ -115,18 +115,6 @@ it('refreshes on auth readiness and ignores the older initial response', async (
   expect(api.authChanges.size).toBe(0);
 });
 
-it('keeps unknown runtime distinct from unconfigured and recovers through notification', async () => {
-  const initial = saved();
-  initial.runtime = { ok: false, error: 'runtime_unavailable' };
-  const api = bridge(initial);
-  render(<AiConnectionSettingsSection />);
-  await screen.findAllByText('settings.aiConnection.route.unavailable');
-  expect(screen.queryByText('settings.aiConnection.route.unconfigured')).toBeNull();
-  api.getState.mockResolvedValue(saved());
-  act(() => api.changes.forEach((notify) => notify()));
-  await screen.findAllByText('settings.aiConnection.route.unconfigured');
-});
-
 it('releases a cancelled login before its old response and preserves a newer login', async () => {
   const api = bridge();
   const old = deferred<ConnectionUpdateResult>();
@@ -430,7 +418,6 @@ it('keeps cloud routing authoritative when editing saved direct settings', async
   );
   await screen.findByLabelText('settings.aiConnection.providerLabel');
   await waitFor(() => expect(cloud).toBeEnabled());
-  expect(screen.getAllByText('settings.aiConnection.route.cloud')).toHaveLength(2);
   api.update.mockClear();
   fireEvent.click(cloud);
   expect(cloud).toBeChecked();

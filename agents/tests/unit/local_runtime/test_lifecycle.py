@@ -30,7 +30,10 @@ from pantaray_agents.local_runtime.runtime.local_api_auth import (
     LocalApiTokenUnavailableError,
     read_local_api_token,
 )
-from pantaray_agents.local_runtime.runtime.process_lock import runtime_process_lock_path
+from pantaray_agents.local_runtime.runtime.process_lock import (
+    acquire_runtime_process_lock,
+    release_runtime_process_lock,
+)
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     HELPER_INSTANCE_ID_ENV,
     MAIN_PROCESS_PID_ENV,
@@ -42,6 +45,7 @@ from pantaray_agents.local_runtime.runtime.worker_daemon import (
     start_local_action_worker_daemon,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
+    MigrationError,
     load_default_migrations,
 )
 
@@ -82,7 +86,6 @@ def test_start_local_runtime_holds_single_process_lock_across_bootstrap_and_daem
     runtime_dir = Path(tempfile.mkdtemp(prefix="prlf-", dir="/tmp"))
     db_path = runtime_dir / "runtime.db"
     _set_minimum_local_runtime_env(monkeypatch=monkeypatch, db_path=db_path)
-    lock_path = runtime_process_lock_path(db_path=db_path)
 
     monkeypatch.setattr(
         "pantaray_agents.local_runtime.runtime.worker_daemon._run_action_job_runner",
@@ -91,7 +94,8 @@ def test_start_local_runtime_holds_single_process_lock_across_bootstrap_and_daem
 
     start_local_runtime_if_enabled()
     try:
-        assert lock_path.exists()
+        with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
+            acquire_runtime_process_lock(db_path=db_path)
         with sqlite3.connect(db_path) as connection:
             active_row = connection.execute(
                 """
@@ -105,7 +109,9 @@ def test_start_local_runtime_holds_single_process_lock_across_bootstrap_and_daem
     finally:
         stop_local_runtime_if_enabled()
 
-    assert not lock_path.exists()
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )
     with sqlite3.connect(db_path) as connection:
         cleaned_row = connection.execute(
             """
@@ -225,7 +231,9 @@ def test_production_startup_does_not_start_services_when_cutover_fails(
 
     assert worker_started is False
     assert socket_started is False
-    assert not runtime_process_lock_path(db_path=db_path).exists()
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )
 
 
 def test_local_api_token_is_minted_per_start_and_destroyed_on_stop(

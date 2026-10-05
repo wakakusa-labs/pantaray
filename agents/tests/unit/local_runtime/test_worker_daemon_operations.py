@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
@@ -46,8 +49,6 @@ from .worker_daemon_test_support import (
     set_minimum_local_runtime_env,
     start_worker,
 )
-
-_STALE_LOCK_OWNER_PID = 999999
 
 
 @pytest.fixture(autouse=True)
@@ -146,17 +147,13 @@ def test_start_worker_fails_closed_when_runtime_lock_exists(
         with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
             start_worker()
     finally:
-        runtime_lock.lock_path.unlink(missing_ok=True)
+        release_runtime_process_lock(runtime_lock=runtime_lock)
 
 
-def test_start_worker_recovers_stale_runtime_lock(
+def test_start_worker_ignores_lock_file_left_by_a_killed_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from pantaray_agents.local_runtime.runtime import (
-        process_lock as process_lock_module,
-    )
-
     db_path = tmp_path / "runtime.db"
     prepare_test_database(
         db_path=db_path,
@@ -168,26 +165,27 @@ def test_start_worker_recovers_stale_runtime_lock(
         db_path=db_path,
         tmp_path=tmp_path,
     )
+    # The killed runtime's pid has since been reused by an unrelated live process.
+    reused_pid = os.getppid()
     lock_path = runtime_process_lock_path(db_path=db_path)
     lock_path.write_text(
-        json.dumps(
-            {
-                "owner_pid": _STALE_LOCK_OWNER_PID,
-                "lock_id": "stale-lock-id",
-                "acquired_at": "2026-03-23T00:00:00Z",
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
+        json.dumps({"owner_pid": reused_pid, "lock_id": "killed-runtime-lock"}),
         encoding="utf-8",
     )
-    # Only the stale owner is dead. Reporting every pid as dead would also make
-    # the daemon's periodic reaper recover the lock this test just acquired.
-    monkeypatch.setattr(
-        process_lock_module,
-        "_process_exists",
-        lambda pid: pid != _STALE_LOCK_OWNER_PID,
-    )
+    with sqlite3.connect(db_path) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO runtime_lock_resources(
+                    resource_id, lock_path, lock_id, owner_pid, status,
+                    created_at, updated_at, cleaned_at, cleanup_error, cleanup_attempts
+                ) VALUES (
+                    'killed-runtime-resource', ?, 'killed-runtime-lock', ?, 'active',
+                    '2026-03-23T00:00:00Z', '2026-03-23T00:00:00Z', NULL, NULL, 0
+                )
+                """,
+                (str(lock_path), reused_pid),
+            )
     monkeypatch.setattr(
         "pantaray_agents.local_runtime.runtime.worker_daemon._run_action_job_runner",
         lambda _job_payload: None,
@@ -195,43 +193,56 @@ def test_start_worker_recovers_stale_runtime_lock(
 
     start_worker()
     try:
-        assert lock_path.exists()
+        with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
+            acquire_runtime_process_lock(db_path=db_path)
     finally:
         stop_local_action_worker_daemon()
-    assert not lock_path.exists()
-
-
-def test_release_runtime_process_lock_tolerates_missing_lock_file(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "runtime.db"
-    runtime_lock = acquire_runtime_process_lock(db_path=db_path)
-
-    runtime_lock.lock_path.unlink()
-
-    release_runtime_process_lock(runtime_lock=runtime_lock)
-
-
-def test_release_runtime_process_lock_does_not_remove_replaced_lock_file(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "runtime.db"
-    runtime_lock = acquire_runtime_process_lock(db_path=db_path)
-
-    runtime_lock.lock_path.unlink()
-    replacement_payload = {
-        "owner_pid": runtime_lock.owner_pid,
-        "lock_id": "replacement-lock-id",
-        "acquired_at": "2026-03-23T00:00:00Z",
-    }
-    runtime_lock.lock_path.write_text(
-        json.dumps(replacement_payload, ensure_ascii=False, sort_keys=True),
-        encoding="utf-8",
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
     )
+    with sqlite3.connect(db_path) as connection:
+        killed_row = connection.execute(
+            """
+            SELECT status
+            FROM runtime_lock_resources
+            WHERE resource_id = 'killed-runtime-resource'
+            """
+        ).fetchone()
+    assert killed_row == ("cleaned",)
 
-    release_runtime_process_lock(runtime_lock=runtime_lock)
 
-    assert runtime_lock.lock_path.exists()
+def test_runtime_process_lock_is_held_until_the_holding_process_dies(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, os, sys, time\n"
+            "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "print('locked', flush=True)\n"
+            "time.sleep(60)\n",
+            str(runtime_process_lock_path(db_path=db_path)),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+        with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
+            acquire_runtime_process_lock(db_path=db_path)
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)
+        if holder.stdout is not None:
+            holder.stdout.close()
+
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )
 
 
 def test_release_runtime_lock_lease_returns_warning_when_persistence_fails(
@@ -269,4 +280,6 @@ def test_release_runtime_lock_lease_returns_warning_when_persistence_fails(
     assert release_result.process_lock_released is True
     assert release_result.persistence_failed is True
     assert release_result.warning_message is not None
-    assert not lease.runtime_lock.lock_path.exists()
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )

@@ -60,6 +60,8 @@ const PYTHONPATH_ENV = 'PYTHONPATH';
 const HELPER_PYCACHE_DIRNAME = 'local-backend-python-cache';
 const AGENTS_SOURCE_DIRNAME = 'src';
 const DEV_HELPER_STDIO = 'inherit';
+// Helper output is never kept: arbitrary stderr cannot be redacted reliably.
+// Startup failures reach the backend log through Python's structured logger.
 const PACKAGED_HELPER_STDIO = 'ignore';
 const LOCAL_BACKEND_DYNAMIC_PORT = 0;
 const CANONICAL_LOOPBACK_HOST = '127.0.0.1';
@@ -229,6 +231,10 @@ export function createLocalBackendHelperManager(params: {
   let currentHandle: HelperProcessHandle | null = null;
   let currentHelperInstanceId: string | null = null;
   let currentLocalApiToken: string | null = null;
+  const readyHandles = new WeakSet<HelperProcessHandle>();
+  // A start that keeps failing respawns until the ready deadline; one record
+  // per start keeps the log readable.
+  let notReadyExitRecorded = false;
   let startupQueue: Promise<{ helperInstanceId: string }> = Promise.resolve({
     helperInstanceId: '',
   });
@@ -311,6 +317,15 @@ export function createLocalBackendHelperManager(params: {
       });
     });
     child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      // A signal tells a native crash or a kill apart from a normal failed start.
+      if (!readyHandles.has(child) && !notReadyExitRecorded) {
+        notReadyExitRecorded = true;
+        params.logger?.error?.('LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY', {
+          pid: child.pid ?? null,
+          code,
+          signal,
+        });
+      }
       if (currentHandle !== child) {
         return;
       }
@@ -340,6 +355,7 @@ export function createLocalBackendHelperManager(params: {
     const socketPath = normalizeRequiredString(params.getControlSocketPath(), 'controlSocketPath');
     const startedAtMs = Date.now();
     const deadline = Date.now() + HELPER_READY_TIMEOUT_MS;
+    notReadyExitRecorded = false;
     let spawnConfig = resolveSpawnCommand();
     let child = spawnHelper(spawnConfig);
     let lastError: Error | null = null;
@@ -347,6 +363,7 @@ export function createLocalBackendHelperManager(params: {
     while (Date.now() < deadline) {
       const readiness = await probeReadiness(socketPath, spawnConfig.helperInstanceId);
       if (readiness.kind === 'owned') {
+        readyHandles.add(child);
         currentLocalApiToken = readiness.status.localApiToken;
         const readyRuntimeBackendUrl = buildRuntimeBackendUrl(
           readiness.status.backendHost,

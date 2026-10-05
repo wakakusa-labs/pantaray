@@ -25,10 +25,6 @@ from pantaray_agents.agents.action_agent.runtime.models.checkpoint import (
 from pantaray_agents.agents.action_agent.runtime.models.conversation import (
     GoalConversationStateModel,
 )
-from pantaray_agents.agents.action_agent.runtime.models.memory_reference import (
-    MemoryArtifactFileReferenceModel,
-    MemoryArtifactReferenceModel,
-)
 from pantaray_agents.agents.action_agent.runtime.state import (
     ActionAgentState,
     ActionPhase,
@@ -98,6 +94,32 @@ def test_runtime_checkpoint_restores_retired_screen_capture_context_keys() -> No
     assert restored["context"]["screen_captures"] == []  # type: ignore[typeddict-item]
 
 
+def test_runtime_checkpoint_restores_stored_memory_artifact_references() -> None:
+    """Checkpoints stored with the retired path list still resume, unchanged."""
+
+    state = create_initial_state(
+        user_id="user-1",
+        suggestion_id="suggestion-1",
+        action_id="action-1",
+        started_at="2026-03-20T10:00:00Z",
+        max_steps=20,
+        max_tool_steps=20,
+        token_budget=None,
+    )
+    checkpoint = build_runtime_state_checkpoint(state)
+    checkpoint["memory_artifact_references"] = []
+
+    restored = restore_runtime_state_checkpoint(
+        checkpoint,
+        expected_action_id="action-1",
+        expected_suggestion_id="suggestion-1",
+        expected_user_id="user-1",
+    )
+
+    assert restored["action_id"] == "action-1"
+    assert checkpoint["memory_artifact_references"] == []
+
+
 def test_runtime_checkpoint_v4_roundtrip_preserves_strict_context_extensions() -> None:
     state = create_initial_state(
         user_id="user-1",
@@ -109,23 +131,6 @@ def test_runtime_checkpoint_v4_roundtrip_preserves_strict_context_extensions() -
         token_budget=None,
     )
     state["goal_conversations"] = {"G1": GoalConversationStateModel(goal_id="G1")}
-    state["memory_artifact_references"] = (
-        MemoryArtifactReferenceModel(
-            source_type="facts",
-            source_record_id="fact-1",
-            artifact_id="artifact-1",
-            memory_key="memory_artifact:artifact-1",
-            logical_updated_at="2026-03-20T10:00:00Z",
-            files=(
-                MemoryArtifactFileReferenceModel(
-                    storage_path="users/u1/facts/structured_facts.md",
-                    sha256="a" * 64,
-                    byte_size=12,
-                    mime_type="text/markdown",
-                ),
-            ),
-        ),
-    )
     checkpoint = build_runtime_state_checkpoint(state)
     restored = restore_runtime_state_checkpoint(
         checkpoint,
@@ -136,7 +141,6 @@ def test_runtime_checkpoint_v4_roundtrip_preserves_strict_context_extensions() -
 
     assert RUNTIME_STATE_CHECKPOINT_VERSION == 4
     assert restored["goal_conversations"]["G1"].goal_id == "G1"
-    assert restored["memory_artifact_references"][0].source_record_id == "fact-1"
 
 
 def test_runtime_checkpoint_roundtrip_preserves_state() -> None:

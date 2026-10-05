@@ -8,14 +8,6 @@ from dataclasses import dataclass
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.utils.memory_source_policy import (
-    MemorySourceId,
-    MemorySourceStatus,
-)
-
-type MemorySourceCoverageSlotMap = dict[
-    MemorySourceId, tuple[MemorySourceStatus, str | None]
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +46,6 @@ def format_tool_summary_list(tool_registry: Mapping[str, ToolDefinition]) -> str
 
 __all__ = [
     "HistoryDisplayEntry",
-    "MemorySourceCoverageSlotMap",
     "format_tool_summary_list",
     "normalize_prompt_text",
 ]

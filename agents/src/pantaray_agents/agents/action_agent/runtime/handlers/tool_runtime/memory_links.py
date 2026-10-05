@@ -57,7 +57,8 @@ async def run_link_memory_tool(
     epoch_model = state.get("memory_context_epoch")
     if draft_model is None or epoch_model is None:
         raise ToolValidationError(
-            "link_memory requires a Supervisor draft and visible memory context."
+            "link_memory requires a Supervisor draft and a context_handle "
+            "from memory_search."
         )
     draft = deserialize_memory_draft(draft_model)
     epoch = deserialize_memory_epoch(epoch_model)
@@ -128,7 +129,7 @@ async def run_get_memory_reference_tool(
     epoch_model = state.get("memory_context_epoch")
     if epoch_model is None:
         raise ToolValidationError(
-            "get_memory_reference requires visible memory context."
+            "get_memory_reference requires a context_handle from memory_search."
         )
     epoch = deserialize_memory_epoch(epoch_model)
     source_item = require_reference_source(

@@ -17,7 +17,6 @@ from pantaray_agents.schema.repositories.repository import (
 
 from ..suggestion_state.repository import LocalSuggestionStateRepository
 from .action_repository_context import LocalActionRepositoryContextMixin
-from .action_repository_memory import LocalActionRepositoryMemoryMixin
 from .action_repository_steps import LocalActionRepositoryStepsMixin
 from .shared import (
     build_audit_timestamps,
@@ -37,7 +36,6 @@ class _RepositoryFailureResult(Protocol):
 class LocalActionRepository(
     LocalActionRepositoryStepsMixin,
     LocalActionRepositoryContextMixin,
-    LocalActionRepositoryMemoryMixin,
     LocalSuggestionStateRepository,
     ActionRepositoryPort,
 ):

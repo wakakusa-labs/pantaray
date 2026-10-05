@@ -204,11 +204,6 @@ def build_executing_turn(
         "memory_context_model": rendering.render_memory_context_model(),
         "insight_data": state["context"].get("insight_data", ""),
         "structured_fact_data": state["context"].get("structured_fact_data", ""),
-        "memory_source_coverage": rendering.format_memory_source_coverage(state),
-        "memory_artifact_references": rendering.render_memory_artifact_references(
-            state
-        ),
-        "linkable_persisted_memory": rendering.render_linkable_memory_context(state),
         "current_time": local_now_for_model(),
         "workspace_path_contract": rendering.render_workspace_path_contract(state),
         "workspace_context_rules": rendering.render_workspace_context_rules(),

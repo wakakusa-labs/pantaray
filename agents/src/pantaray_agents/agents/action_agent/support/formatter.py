@@ -6,14 +6,12 @@ from .formatter_parts import (
     GoalFormattingMixin,
     HistoryDisplayEntry,
     HistoryFormattingMixin,
-    PromptFormattingMixin,
     format_tool_summary_list,
     normalize_prompt_text,
 )
 
 
 class ActionAgentFormatter(
-    PromptFormattingMixin,
     HistoryFormattingMixin,
     GoalFormattingMixin,
 ):

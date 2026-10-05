@@ -34,7 +34,18 @@ from pantaray_agents.agents.action_agent.support.conversation_projection import 
 )
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
 from pantaray_agents.agents.action_agent.support.world_state import WorldState
-from pantaray_agents.schema.agent.action import StepType
+from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
+    serialize_memory_epoch,
+)
+from pantaray_agents.local_runtime.memory_catalog.models import (
+    MemoryContextEpoch,
+    MemoryContextItem,
+    ResolvedContextItem,
+)
+from pantaray_agents.schema.agent.action import (
+    MemoryContextEpochCheckpoint,
+    StepType,
+)
 from pantaray_agents.tasks.internal_jobs import action_subagent as subagent_job
 from pantaray_agents.utils.prompt_loader import PromptLoader
 from pantaray_llm.contracts.conversation import (
@@ -685,7 +696,6 @@ _UPDATE_HEADINGS = (
     "## Workspace Update",
     "## AGENTS.md Update",
     "## Memory Update",
-    "## Linkable Persisted Memory Update",
     "Current time: ",
 )
 
@@ -811,22 +821,61 @@ def test_each_changed_turn_section_is_appended_once() -> None:
     state["context"].update(_RUN_1)
     _, first = _think_once(state, think=2, call_id="c2", now="T0")
     _, later = _think_once(state, think=3, call_id="c3", now="T1")
-    coverage = state["context"]["memory_source_coverage"]
-    state["context"]["memory_source_coverage"] = {
-        **coverage,
-        "evaluated_at": "2026-09-19T01:00:00Z",
-    }
     state["context"]["workspace_context_prompt"] = "W-2"
     _, both = _think_once(state, think=4, call_id="c4", now="T2")
     _, again = _think_once(state, think=5, call_id="c5", now="T2")
 
     assert first.turn_context is None
     assert later.turn_context == TURN_CONTEXT_HEADING + "Current time: T1"
-    # Memory source coverage is fixed for the Action, like the memory it covers.
     assert _updates(both) == ["## Workspace Update", "Current time: "]
     assert again.turn_context is None
     for earlier, next_ in ((first, later), (later, both), (both, again)):
         assert next_.conversation[: len(earlier.conversation)] == earlier.conversation
+
+
+def _memory_epoch(*contents: str) -> MemoryContextEpochCheckpoint:
+    return serialize_memory_epoch(
+        MemoryContextEpoch(
+            epoch_id="epoch-1",
+            run_id="action-1",
+            user_id="user-1",
+            items=tuple(
+                ResolvedContextItem(
+                    item=MemoryContextItem(
+                        context_handle=f"ctx_{index}",
+                        source="fact",
+                        label="facts",
+                        source_path="facts/index.md",
+                        heading_path=None,
+                        content=content,
+                        observed_at="2026-09-19T00:00:00Z",
+                    ),
+                    user_id="user-1",
+                    fragment_id=f"fragment-{index}",
+                    revision_id="revision-1",
+                    node_id="node-1",
+                    reference_depth=0,
+                )
+                for index, content in enumerate(contents)
+            ),
+        )
+    )
+
+
+def test_linkable_memory_reaches_the_model_only_through_tool_results() -> None:
+    """記憶の本文を head にも turn context にも載せない（subagent の payload 上限）。"""
+
+    state = _state([_user(1)])
+    state["context"].update(_RUN_1)
+    state["memory_context_epoch"] = _memory_epoch("FRAGMENT-A")
+    head, first = _think_once(state, think=2, call_id="c2")
+    # memory_search extends the epoch mid-run.
+    state["memory_context_epoch"] = _memory_epoch("FRAGMENT-A", "FRAGMENT-B")
+    _, second = _think_once(state, think=3, call_id="c3")
+
+    sent = head + (first.turn_context or "") + (second.turn_context or "")
+    for leaked in ("FRAGMENT-A", "FRAGMENT-B", "ctx_0", "ctx_1"):
+        assert leaked not in sent
 
 
 def test_an_assistant_ending_with_nothing_new_gets_a_minimal_turn_context() -> None:

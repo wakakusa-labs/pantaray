@@ -24,7 +24,6 @@ from .approval import PendingApprovalRequestModel
 from .conversation import GoalConversationStateModel
 from .execution_context import ExecutionContextModel
 from .failure import ResumeFailureException
-from .memory_reference import MemoryArtifactReferenceModel
 from .tool_call import ActionLifecyclePhaseModel, NextActionModel
 
 ActionStatusModel = Literal["processing", "success", "error", "canceled"]
@@ -233,7 +232,6 @@ class RuntimeCheckpointModel(BaseModel):
     context: dict[str, JSONValue]
     history_by_scope: dict[str, list[HistoryEntryModel]]
     goal_conversations: dict[str, GoalConversationStateModel]
-    memory_artifact_references: tuple[MemoryArtifactReferenceModel, ...]
     next_action: NextActionModel | None = None
     final_output: str | None = None
     supervisor_pending_final_answer: str | None = None
@@ -254,11 +252,6 @@ class RuntimeCheckpointModel(BaseModel):
     action_temp_dir: str | None = None
     app_runtime_python: str | None = None
     read_access_scope: str | None = None
-
-    @field_validator("memory_artifact_references", mode="before")
-    @classmethod
-    def _normalize_json_memory_references(cls, value: object) -> object:
-        return tuple(value) if isinstance(value, list) else value
 
     @field_validator("step")
     @classmethod

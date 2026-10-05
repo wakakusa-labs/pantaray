@@ -3,6 +3,20 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.3.1
+
+- Fixed Pantaray sometimes being unable to start after it was closed unexpectedly or updated.
+- Fixed subagents failing to start once memory had grown large.
+- Removed the current route summary from AI connection settings; the settings below already show it.
+- Updated urllib3 to 2.8.0 to fix security issues.
+
+---
+
+- 予期せず終了したあとや更新のあとに、Pantaray が起動できなくなることがある問題を直しました。
+- 記憶が大きくなると、サブエージェントを起動できなくなる問題を直しました。
+- AI 接続の設定から、現在の経路の表示をなくしました。下の設定で同じ内容を確認できます。
+- urllib3 を 2.8.0 に更新し、セキュリティの問題を直しました。
+
 ## 0.3.0
 
 - Attach PDF, Word, Excel, PowerPoint and notebook files to a message, and Pantaray reads them.

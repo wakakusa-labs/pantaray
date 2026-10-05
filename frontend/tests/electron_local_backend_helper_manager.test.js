@@ -251,6 +251,55 @@ test('packaged runtime keeps helper stdio detached', async () => {
   assert.deepStrictEqual(spawnCalls[0].args.slice(-2), ['--port', '0']);
 });
 
+test('a failing start records one exit, with code and signal, for helpers that died before ready', async () => {
+  const errors = [];
+  const firstDead = new FakeChildProcess();
+  const secondDead = new FakeChildProcess();
+  const ready = new FakeChildProcess();
+  const children = [firstDead, secondDead, ready];
+  const die = (child, code, signal) => {
+    child.exitCode = code;
+    child.signalCode = signal;
+    child.emit('exit', code, signal);
+  };
+  let probeCount = 0;
+  const manager = createLocalBackendHelperManager({
+    isDevRuntime: false,
+    agentsRoot: '/tmp/agents',
+    resourcesPath: '/tmp/resources',
+    getControlSocketPath: () => '/tmp/user/local-backend/control.sock',
+    getHelperExecutablePath: () => '/tmp/resources/local_backend_helper',
+    getLoopbackBinding: () => ({ bindHost: '127.0.0.1', bindPort: 8005 }),
+    spawnFn: () => {
+      const child = children.shift();
+      assert.ok(child);
+      return child;
+    },
+    probeReadiness: async (_socketPath, helperInstanceId) => {
+      probeCount += 1;
+      if (probeCount === 1) {
+        die(firstDead, null, 'SIGSEGV');
+        return { kind: 'unavailable', error: new Error('connect ENOENT') };
+      }
+      if (probeCount === 2) {
+        die(secondDead, 1, null);
+        return { kind: 'unavailable', error: new Error('connect ENOENT') };
+      }
+      return { kind: 'owned', status: buildOwnedStatus(helperInstanceId) };
+    },
+    logger: { error: (message, payload) => errors.push({ message, payload }) },
+  });
+
+  await manager.ensureStarted();
+  await manager.terminateCurrentHelper();
+
+  assert.deepStrictEqual(
+    errors.map(({ message }) => message),
+    ['LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY']
+  );
+  assert.deepStrictEqual(errors[0].payload, { pid: 1234, code: null, signal: 'SIGSEGV' });
+});
+
 test('terminateCurrentHelper resolves only after the helper process actually exits', async () => {
   const fakeChild = new FakeChildProcess({ exitDelayMs: 120 });
   const manager = createLocalBackendHelperManager({

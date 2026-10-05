@@ -39,7 +39,6 @@ from pantaray_agents.local_runtime.runtime.local_runtime_generation_cutover impo
 from pantaray_agents.local_runtime.runtime.process_lock import (
     acquire_runtime_process_lock,
     release_runtime_process_lock,
-    runtime_process_lock_path,
 )
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     HELPER_INSTANCE_ID_ENV,
@@ -360,7 +359,9 @@ def test_process_group_cleanup_failure_preserves_pre_reset_store_and_aborts_star
         ).fetchone()
     assert version == (PRE_RESET_SCHEMA_VERSION,)
     assert sentinel.read_text(encoding="utf-8") == "legacy"
-    assert not runtime_process_lock_path(db_path=db_path).exists()
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )
 
 
 def test_invalid_busy_timeout_preserves_pre_reset_store(tmp_path: Path) -> None:
@@ -799,7 +800,7 @@ def test_bootstrap_fails_closed_when_runtime_lock_exists(
         with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
             _initialize_once()
     finally:
-        runtime_lock.lock_path.unlink(missing_ok=True)
+        release_runtime_process_lock(runtime_lock=runtime_lock)
 
 
 def test_bootstrap_records_subagent_child_recovery_counters(

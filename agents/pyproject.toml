@@ -15,6 +15,7 @@ license = "Apache-2.0"
 license-files = ["THIRD_PARTY_NOTICES.md"]
 dependencies = [
     "fastapi[all]>=0.115.6",
+    "urllib3==2.8.0",
     "pydantic>=2.10.5",
     "python-dotenv>=1.0.1",
     "regex==2026.4.4",

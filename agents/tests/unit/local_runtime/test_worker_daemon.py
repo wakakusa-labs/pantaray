@@ -39,7 +39,8 @@ from pantaray_agents.local_runtime.runtime.memory_update_queue import (
     build_local_memory_update_enqueue_request,
 )
 from pantaray_agents.local_runtime.runtime.process_lock import (
-    runtime_process_lock_path,
+    acquire_runtime_process_lock,
+    release_runtime_process_lock,
 )
 from pantaray_agents.local_runtime.runtime.session_store import (
     import_desktop_session,
@@ -50,6 +51,7 @@ from pantaray_agents.local_runtime.runtime.worker_daemon import (
     stop_local_action_worker_daemon,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
+    MigrationError,
     load_default_migrations,
 )
 from pantaray_agents.schema.agent.action import ActionUserMessageInput
@@ -379,12 +381,15 @@ def test_worker_daemon_keeps_runtime_lock_until_projection_finishes(
     assert projection_started.wait(timeout=2.0) is True
     reset_desktop_session_store()
     stop_local_action_worker_daemon()
-    assert runtime_process_lock_path(db_path=db_path).exists()
+    with pytest.raises(MigrationError, match="LOCAL_RUNTIME_ALREADY_ACTIVE"):
+        acquire_runtime_process_lock(db_path=db_path)
 
     release_projection.set()
     assert projection_consumed.wait(timeout=2.0) is True
     stop_local_action_worker_daemon()
-    assert not runtime_process_lock_path(db_path=db_path).exists()
+    release_runtime_process_lock(
+        runtime_lock=acquire_runtime_process_lock(db_path=db_path)
+    )
 
 
 def test_worker_drain_does_not_run_periodic_tasks_after_stop(

@@ -190,6 +190,8 @@ def run_local_runtime_bootstrap(
         f"{tool_result_recovery.removed_directory_count}; "
         f"unknown_tool_result_entries="
         f"{tool_result_recovery.unknown_entry_count}; "
+        f"missing_tool_result_references="
+        f"{tool_result_recovery.missing_reference_count}; "
         f"recovered_memory_intents={recovered_memory_intent_count}; "
         f"recovered_memory_deletions={recovered_memory_deletion_count}; "
         f"removed_orphaned_memory_workspaces={workspace_cleanup.removed_count}; "
@@ -235,6 +237,9 @@ def run_local_runtime_bootstrap(
             ),
             "unknown_tool_result_entry_count": (
                 tool_result_recovery.unknown_entry_count
+            ),
+            "missing_tool_result_reference_count": (
+                tool_result_recovery.missing_reference_count
             ),
         },
     )

@@ -177,6 +177,12 @@ export function createDesktopUpdater(params: {
 
   async function checkForUpdates(reason: 'auto' | 'manual'): Promise<void> {
     if (disposed || !updatesEnabled) return;
+    // A later check would replace pendingVersion while Squirrel.Mac still prepares or holds
+    // the earlier update, and the notice would then name a version the restart does not install.
+    if (reason === 'auto' && (updateDownloading || updateDownloaded)) {
+      log('info', 'AUTO_UPDATE_CHECK_SKIPPED', { pendingVersion });
+      return;
+    }
     if (checking) {
       // 起動直後の auto check 中に手動で「更新を確認」を押しても無反応に見えないよう、
       // 実行中のチェックの結果を手動チェック扱いに昇格させる。

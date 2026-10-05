@@ -169,6 +169,35 @@ test('a Squirrel.Mac error before the update is ready is logged and lets the nex
   assert.deepEqual(checks, ['checkForUpdates', 'checkForUpdates']);
 });
 
+test('automatic checks wait while an update is being prepared or is ready', async () => {
+  const checks = [];
+  const app = { isPackaged: true, getVersion: () => '0.3.0', exit: () => {} };
+  const autoUpdater = createAutoUpdater();
+  const squirrelUpdater = createEmitter();
+  autoUpdater.checkForUpdates = async () => {
+    checks.push('checkForUpdates');
+  };
+
+  await withDesktopUpdaterMocks(
+    { app, autoUpdater, squirrelUpdater, timers: { setTimeout } },
+    async ({ createDesktopUpdater }) => {
+      const updater = createDesktopUpdater({ logger: { info: () => {}, error: () => {} } });
+      await updater.checkForUpdates('auto');
+      autoUpdater.emit('update-available', { version: '0.3.1' });
+      autoUpdater.emit('update-downloaded', { version: '0.3.1' });
+
+      await updater.checkForUpdates('auto');
+      squirrelUpdater.emit('update-downloaded');
+      await updater.checkForUpdates('auto');
+
+      assert.equal(updater.getPendingVersion(), '0.3.1');
+      assert.equal(updater.getUpdateState(), 'downloaded');
+    },
+  );
+
+  assert.deepEqual(checks, ['checkForUpdates']);
+});
+
 test('start checks immediately on a packaged build without any auth token and schedules rechecks', () => {
   const calls = [];
   const app = { isPackaged: true, getVersion: () => '0.1.1', exit: () => {} };

@@ -16,7 +16,6 @@ class FakeChildProcess extends EventEmitter {
     this.pid = 1234;
     this.signals = [];
     this.exitDelayMs = exitDelayMs;
-    this.stderr = new EventEmitter();
   }
 
   kill(signal = 'SIGTERM') {
@@ -220,7 +219,7 @@ test('ensureStarted respawns after orphan helper disappears within the same call
   assert.equal(unexpectedExits, 0);
 });
 
-test('packaged runtime detaches helper stdin and stdout and keeps stderr', async () => {
+test('packaged runtime keeps helper stdio detached', async () => {
   const spawnCalls = [];
   const fakeChild = new FakeChildProcess();
   const manager = createLocalBackendHelperManager({
@@ -244,7 +243,7 @@ test('packaged runtime detaches helper stdin and stdout and keeps stderr', async
 
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0].command, '/tmp/resources/local_backend_helper');
-  assert.deepStrictEqual(spawnCalls[0].options.stdio, ['ignore', 'ignore', 'pipe']);
+  assert.equal(spawnCalls[0].options.stdio, 'ignore');
   assert.equal(spawnCalls[0].options.env.PYTHONDONTWRITEBYTECODE, '1');
   assert.equal(spawnCalls[0].options.env.PYTHONPATH, process.env.PYTHONPATH);
   // A cache prefix would make Python ignore the bytecode shipped in the bundle.
@@ -252,17 +251,16 @@ test('packaged runtime detaches helper stdin and stdout and keeps stderr', async
   assert.deepStrictEqual(spawnCalls[0].args.slice(-2), ['--port', '0']);
 });
 
-test('a failing start records one stderr tail, bounded, for helpers that died before ready', async () => {
+test('a failing start records one exit, with code and signal, for helpers that died before ready', async () => {
   const errors = [];
   const firstDead = new FakeChildProcess();
   const secondDead = new FakeChildProcess();
   const ready = new FakeChildProcess();
   const children = [firstDead, secondDead, ready];
-  const die = (child, text) => {
-    child.stderr.emit('data', Buffer.from(text, 'utf8'));
-    child.exitCode = 1;
-    child.emit('exit', 1, null);
-    child.emit('close', 1, null);
+  const die = (child, code, signal) => {
+    child.exitCode = code;
+    child.signalCode = signal;
+    child.emit('exit', code, signal);
   };
   let probeCount = 0;
   const manager = createLocalBackendHelperManager({
@@ -280,11 +278,11 @@ test('a failing start records one stderr tail, bounded, for helpers that died be
     probeReadiness: async (_socketPath, helperInstanceId) => {
       probeCount += 1;
       if (probeCount === 1) {
-        die(firstDead, `${'x'.repeat(20_000)}\nMigrationError: LOCAL_RUNTIME_ALREADY_ACTIVE\n`);
+        die(firstDead, null, 'SIGSEGV');
         return { kind: 'unavailable', error: new Error('connect ENOENT') };
       }
       if (probeCount === 2) {
-        die(secondDead, 'second failure\n');
+        die(secondDead, 1, null);
         return { kind: 'unavailable', error: new Error('connect ENOENT') };
       }
       return { kind: 'owned', status: buildOwnedStatus(helperInstanceId) };
@@ -293,16 +291,13 @@ test('a failing start records one stderr tail, bounded, for helpers that died be
   });
 
   await manager.ensureStarted();
-  ready.emit('close', 0, 'SIGTERM');
+  await manager.terminateCurrentHelper();
 
   assert.deepStrictEqual(
     errors.map(({ message }) => message),
     ['LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY']
   );
-  const { payload } = errors[0];
-  assert.equal(payload.code, 1);
-  assert.ok(payload.stderrTail.endsWith('MigrationError: LOCAL_RUNTIME_ALREADY_ACTIVE\n'));
-  assert.ok(Buffer.byteLength(payload.stderrTail) <= 8 * 1024);
+  assert.deepStrictEqual(errors[0].payload, { pid: 1234, code: null, signal: 'SIGSEGV' });
 });
 
 test('terminateCurrentHelper resolves only after the helper process actually exits', async () => {

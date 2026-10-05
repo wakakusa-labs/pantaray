@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createConnection } from 'node:net';
 import path from 'node:path';
@@ -60,11 +60,9 @@ const PYTHONPATH_ENV = 'PYTHONPATH';
 const HELPER_PYCACHE_DIRNAME = 'local-backend-python-cache';
 const AGENTS_SOURCE_DIRNAME = 'src';
 const DEV_HELPER_STDIO = 'inherit';
-// stderr is piped so a helper that dies before Python logging is configured
-// still leaves its traceback; stdin and stdout stay detached.
-const PACKAGED_HELPER_STDIO: StdioOptions = ['ignore', 'ignore', 'pipe'];
-// Enough for the last traceback of a failed start, small enough for one log line.
-const HELPER_STDERR_TAIL_BYTES = 8 * 1024;
+// Helper output is never kept: arbitrary stderr cannot be redacted reliably.
+// Startup failures reach the backend log through Python's structured logger.
+const PACKAGED_HELPER_STDIO = 'ignore';
 const LOCAL_BACKEND_DYNAMIC_PORT = 0;
 const CANONICAL_LOOPBACK_HOST = '127.0.0.1';
 const ALLOWED_LOOPBACK_HOSTS = new Set([CANONICAL_LOOPBACK_HOST, 'localhost']);
@@ -318,27 +316,16 @@ export function createLocalBackendHelperManager(params: {
         message: error.message,
       });
     });
-    let stderrTail = Buffer.alloc(0);
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderrTail = Buffer.concat([stderrTail, chunk]);
-      if (stderrTail.length > HELPER_STDERR_TAIL_BYTES) {
-        stderrTail = stderrTail.subarray(stderrTail.length - HELPER_STDERR_TAIL_BYTES);
-      }
-    });
-    // 'close' follows the end of stderr, so the tail is complete here.
-    child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
-      if (readyHandles.has(child) || notReadyExitRecorded) {
-        return;
-      }
-      notReadyExitRecorded = true;
-      params.logger?.error?.('LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY', {
-        pid: child.pid ?? null,
-        code,
-        signal,
-        stderrTail: stderrTail.toString('utf8'),
-      });
-    });
     child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      // A signal tells a native crash or a kill apart from a normal failed start.
+      if (!readyHandles.has(child) && !notReadyExitRecorded) {
+        notReadyExitRecorded = true;
+        params.logger?.error?.('LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY', {
+          pid: child.pid ?? null,
+          code,
+          signal,
+        });
+      }
       if (currentHandle !== child) {
         return;
       }

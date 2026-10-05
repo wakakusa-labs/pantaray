@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Iterator
 from types import ModuleType
 
@@ -18,6 +20,7 @@ from pantaray_agents.local_runtime.runtime.local_api_auth import (
     issue_local_api_token,
     read_local_api_token,
 )
+from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.routers import action_messages
 
 LOCAL_OWNER_ID = "local-owner-1"
@@ -176,3 +179,33 @@ def test_local_lifespan_stops_the_runtime_even_when_startup_fails(
         with TestClient(app) as client:
             assert client.get("/health").status_code == 200
     assert events == ["start", "stop"]
+
+
+def test_local_lifespan_logs_startup_failure_without_its_message(
+    monkeypatch: pytest.MonkeyPatch,
+    local_app_module: ModuleType,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_text = "api_key=sk-private-value"
+
+    def start() -> None:
+        raise MigrationError(f"LOCAL_RUNTIME_ALREADY_ACTIVE: {private_text}")
+
+    monkeypatch.setattr(local_app_module, "start_local_runtime_if_enabled", start)
+    app = local_app_module.create_local_app()
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(MigrationError),
+        TestClient(app),
+    ):
+        pass
+
+    startup_failures = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if "LOCAL_RUNTIME_STARTUP_FAILED" in record.getMessage()
+    ]
+    assert [
+        failure["exception_chain"][0]["error_class"] for failure in startup_failures
+    ] == ["MigrationError"]
+    assert private_text not in caplog.text

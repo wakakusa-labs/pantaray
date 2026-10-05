@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,6 +29,7 @@ from pantaray_agents.settings_loader import (
     clear_active_settings_module,
     register_active_settings_module,
 )
+from pantaray_agents.utils.structured_logging import log_structured_event
 
 from .shared import (
     configure_logging,
@@ -35,6 +37,8 @@ from .shared import (
     finalize_app,
     install_common_middleware,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -44,7 +48,19 @@ async def _local_app_lifespan(app: FastAPI):
         require_valid_startup_config_or_exit()
         app.state.authenticate_request = authenticate_local_api_request
         try:
-            start_local_runtime_if_enabled()
+            try:
+                start_local_runtime_if_enabled()
+            except Exception as exc:
+                # uvicorn reports a lifespan failure only on its own stderr
+                # logger, so record it in the backend log before it propagates.
+                log_structured_event(
+                    logger,
+                    level="error",
+                    evt="LOCAL_RUNTIME_STARTUP_FAILED",
+                    component="app.local_app",
+                    exception=exc,
+                )
+                raise
             async with monitor_main_process_lifecycle():
                 yield
         finally:

@@ -8,8 +8,6 @@ export { CHATGPT_MODEL_CANDIDATES };
 
 /** 設定画面「AI 接続」が扱う状態。値は Electron main が持つ接続設定の投影。 */
 
-export type LlmRoute = Extract<ConnectionRuntimeResult, { ok: true }>['status']['llmRoute'];
-
 /** 推論の接続方法。`cloud` は Pantaray アカウントでのログインが前提。 */
 export type AiConnectionMethod = 'cloud' | 'chatgpt' | 'api_key';
 

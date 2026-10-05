@@ -44,49 +44,6 @@
   min-width: 0;
 }
 
-.ai-route {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  line-height: 2.1;
-  margin: 0;
-  min-width: 0;
-}
-
-.ai-dot {
-  align-self: center;
-  border-radius: 50%;
-  flex: none;
-  height: 7px;
-  width: 7px;
-}
-
-.ai-dot--cloud {
-  background: #7dabdc;
-}
-
-.ai-dot--direct {
-  background: #7fc9a2;
-}
-
-.ai-dot--unconfigured {
-  background: var(--text-muted);
-}
-
-.ai-route-name {
-  color: var(--text-primary);
-  font-size: var(--text-body-size);
-  font-weight: var(--weight-semibold);
-}
-
-.ai-route-detail {
-  color: var(--text-secondary);
-  font-size: var(--text-meta-size);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .ai-segmented {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 9px;

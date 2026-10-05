@@ -16,6 +16,7 @@ class FakeChildProcess extends EventEmitter {
     this.pid = 1234;
     this.signals = [];
     this.exitDelayMs = exitDelayMs;
+    this.stderr = new EventEmitter();
   }
 
   kill(signal = 'SIGTERM') {
@@ -219,7 +220,7 @@ test('ensureStarted respawns after orphan helper disappears within the same call
   assert.equal(unexpectedExits, 0);
 });
 
-test('packaged runtime keeps helper stdio detached', async () => {
+test('packaged runtime detaches helper stdin and stdout and keeps stderr', async () => {
   const spawnCalls = [];
   const fakeChild = new FakeChildProcess();
   const manager = createLocalBackendHelperManager({
@@ -243,12 +244,65 @@ test('packaged runtime keeps helper stdio detached', async () => {
 
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0].command, '/tmp/resources/local_backend_helper');
-  assert.equal(spawnCalls[0].options.stdio, 'ignore');
+  assert.deepStrictEqual(spawnCalls[0].options.stdio, ['ignore', 'ignore', 'pipe']);
   assert.equal(spawnCalls[0].options.env.PYTHONDONTWRITEBYTECODE, '1');
   assert.equal(spawnCalls[0].options.env.PYTHONPATH, process.env.PYTHONPATH);
   // A cache prefix would make Python ignore the bytecode shipped in the bundle.
   assert.equal(spawnCalls[0].options.env.PYTHONPYCACHEPREFIX, undefined);
   assert.deepStrictEqual(spawnCalls[0].args.slice(-2), ['--port', '0']);
+});
+
+test('a failing start records one stderr tail, bounded, for helpers that died before ready', async () => {
+  const errors = [];
+  const firstDead = new FakeChildProcess();
+  const secondDead = new FakeChildProcess();
+  const ready = new FakeChildProcess();
+  const children = [firstDead, secondDead, ready];
+  const die = (child, text) => {
+    child.stderr.emit('data', Buffer.from(text, 'utf8'));
+    child.exitCode = 1;
+    child.emit('exit', 1, null);
+    child.emit('close', 1, null);
+  };
+  let probeCount = 0;
+  const manager = createLocalBackendHelperManager({
+    isDevRuntime: false,
+    agentsRoot: '/tmp/agents',
+    resourcesPath: '/tmp/resources',
+    getControlSocketPath: () => '/tmp/user/local-backend/control.sock',
+    getHelperExecutablePath: () => '/tmp/resources/local_backend_helper',
+    getLoopbackBinding: () => ({ bindHost: '127.0.0.1', bindPort: 8005 }),
+    spawnFn: () => {
+      const child = children.shift();
+      assert.ok(child);
+      return child;
+    },
+    probeReadiness: async (_socketPath, helperInstanceId) => {
+      probeCount += 1;
+      if (probeCount === 1) {
+        die(firstDead, `${'x'.repeat(20_000)}\nMigrationError: LOCAL_RUNTIME_ALREADY_ACTIVE\n`);
+        return { kind: 'unavailable', error: new Error('connect ENOENT') };
+      }
+      if (probeCount === 2) {
+        die(secondDead, 'second failure\n');
+        return { kind: 'unavailable', error: new Error('connect ENOENT') };
+      }
+      return { kind: 'owned', status: buildOwnedStatus(helperInstanceId) };
+    },
+    logger: { error: (message, payload) => errors.push({ message, payload }) },
+  });
+
+  await manager.ensureStarted();
+  ready.emit('close', 0, 'SIGTERM');
+
+  assert.deepStrictEqual(
+    errors.map(({ message }) => message),
+    ['LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY']
+  );
+  const { payload } = errors[0];
+  assert.equal(payload.code, 1);
+  assert.ok(payload.stderrTail.endsWith('MigrationError: LOCAL_RUNTIME_ALREADY_ACTIVE\n'));
+  assert.ok(Buffer.byteLength(payload.stderrTail) <= 8 * 1024);
 });
 
 test('terminateCurrentHelper resolves only after the helper process actually exits', async () => {

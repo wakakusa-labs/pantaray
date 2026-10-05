@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createConnection } from 'node:net';
 import path from 'node:path';
@@ -60,7 +60,11 @@ const PYTHONPATH_ENV = 'PYTHONPATH';
 const HELPER_PYCACHE_DIRNAME = 'local-backend-python-cache';
 const AGENTS_SOURCE_DIRNAME = 'src';
 const DEV_HELPER_STDIO = 'inherit';
-const PACKAGED_HELPER_STDIO = 'ignore';
+// stderr is piped so a helper that dies before Python logging is configured
+// still leaves its traceback; stdin and stdout stay detached.
+const PACKAGED_HELPER_STDIO: StdioOptions = ['ignore', 'ignore', 'pipe'];
+// Enough for the last traceback of a failed start, small enough for one log line.
+const HELPER_STDERR_TAIL_BYTES = 8 * 1024;
 const LOCAL_BACKEND_DYNAMIC_PORT = 0;
 const CANONICAL_LOOPBACK_HOST = '127.0.0.1';
 const ALLOWED_LOOPBACK_HOSTS = new Set([CANONICAL_LOOPBACK_HOST, 'localhost']);
@@ -229,6 +233,10 @@ export function createLocalBackendHelperManager(params: {
   let currentHandle: HelperProcessHandle | null = null;
   let currentHelperInstanceId: string | null = null;
   let currentLocalApiToken: string | null = null;
+  const readyHandles = new WeakSet<HelperProcessHandle>();
+  // A start that keeps failing respawns until the ready deadline; one record
+  // per start keeps the log readable.
+  let notReadyExitRecorded = false;
   let startupQueue: Promise<{ helperInstanceId: string }> = Promise.resolve({
     helperInstanceId: '',
   });
@@ -310,6 +318,26 @@ export function createLocalBackendHelperManager(params: {
         message: error.message,
       });
     });
+    let stderrTail = Buffer.alloc(0);
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrTail = Buffer.concat([stderrTail, chunk]);
+      if (stderrTail.length > HELPER_STDERR_TAIL_BYTES) {
+        stderrTail = stderrTail.subarray(stderrTail.length - HELPER_STDERR_TAIL_BYTES);
+      }
+    });
+    // 'close' follows the end of stderr, so the tail is complete here.
+    child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (readyHandles.has(child) || notReadyExitRecorded) {
+        return;
+      }
+      notReadyExitRecorded = true;
+      params.logger?.error?.('LOCAL_BACKEND_HELPER_EXITED_BEFORE_READY', {
+        pid: child.pid ?? null,
+        code,
+        signal,
+        stderrTail: stderrTail.toString('utf8'),
+      });
+    });
     child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       if (currentHandle !== child) {
         return;
@@ -340,6 +368,7 @@ export function createLocalBackendHelperManager(params: {
     const socketPath = normalizeRequiredString(params.getControlSocketPath(), 'controlSocketPath');
     const startedAtMs = Date.now();
     const deadline = Date.now() + HELPER_READY_TIMEOUT_MS;
+    notReadyExitRecorded = false;
     let spawnConfig = resolveSpawnCommand();
     let child = spawnHelper(spawnConfig);
     let lastError: Error | null = null;
@@ -347,6 +376,7 @@ export function createLocalBackendHelperManager(params: {
     while (Date.now() < deadline) {
       const readiness = await probeReadiness(socketPath, spawnConfig.helperInstanceId);
       if (readiness.kind === 'owned') {
+        readyHandles.add(child);
         currentLocalApiToken = readiness.status.localApiToken;
         const readyRuntimeBackendUrl = buildRuntimeBackendUrl(
           readiness.status.backendHost,

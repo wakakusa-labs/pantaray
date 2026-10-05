@@ -265,8 +265,6 @@ export function AiConnectionSection({
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       ) : null}
 
-      <div className="ai-rule" />
-
       <p role="status" className={feedback?.isError ? 'settings-section-error' : 'ai-note'}>
         {pendingOperation === 'sign_in_chatgpt'
           ? t('settings.aiConnection.chatgpt.waiting')

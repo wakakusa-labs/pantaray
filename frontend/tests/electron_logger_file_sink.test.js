@@ -90,6 +90,9 @@ test('redacts secrets anywhere in a multi-line free-text value', () => {
       'api_key=plain-secret-value',
       "ValueError: invalid URL https://proxy.example/v1?api_key='sk-single-quoted'",
       'secret = "double-quoted-secret"',
+      'failed https://proxy.example/v1?token=hidden&key=trailing-query-secret',
+      'password = "one\\"escaped-double-secret"',
+      "secret = 'a\\'escaped-single-secret'",
     ].join('\n'),
   });
 
@@ -100,10 +103,27 @@ test('redacts secrets anywhere in a multi-line free-text value', () => {
     'plain-secret-value',
     'sk-single-quoted',
     'double-quoted-secret',
+    'trailing-query-secret',
+    'escaped-double-secret',
+    'escaped-single-secret',
   ]) {
     assert.equal(raw.includes(secret), false, secret);
   }
   assert.match(raw, /Traceback/);
+});
+
+test('redacts a secret query value after an earlier one in an Error message', () => {
+  resetFileSinkForTests();
+  const dir = freshDir();
+  configureFileSink({ dir, level: 'error' });
+  const logger = createLogger();
+
+  logger.error('REQUEST_FAILED', {
+    err: new Error('failed https://proxy.example/v1?token=hidden&key=error-trailing-secret'),
+  });
+
+  const raw = fs.readFileSync(path.join(dir, ELECTRON_LOG_FILENAME), 'utf8');
+  assert.equal(raw.includes('error-trailing-secret'), false);
 });
 
 test('rotates when exceeding the size cap and caps file count', () => {

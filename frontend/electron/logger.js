@@ -134,14 +134,13 @@ function redactUrlInText(urlStr) {
 function redactText(text) {
   let s = String(text || '');
   if (!s) return s;
+  // Quotes stay inside the URL match so a quoted query value is parsed, not cut off.
+  s = s.replace(/https?:\/\/[^\s<>]+/gi, (url) => redactUrlInText(url));
   s = s.replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`);
   s = s.replace(
-    /((?:token|access_token|refresh_token|id_token|signature|api_?key|secret|password)\s*=\s*)(?:'[^']*'|"[^"]*"|[^\s,&"']+)/gi,
+    /((?:token|access_token|refresh_token|id_token|signature|api_?key|secret|password)\s*=\s*)(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[^\s,&"']+)/gi,
     `$1${REDACTED}`
   );
-  // After the assignments, so a quoted query value is already gone when the
-  // URL pattern stops at the quote.
-  s = s.replace(/https?:\/\/[^\s'"<>]+/gi, (url) => redactUrlInText(url));
   return s;
 }
 

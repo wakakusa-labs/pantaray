@@ -88,11 +88,19 @@ test('redacts secrets anywhere in a multi-line free-text value', () => {
       'ValueError: invalid URL https://proxy.example.com/v1?api_key=sk-query-secret',
       'proxy rejected header Bearer bearer-secret-value',
       'api_key=plain-secret-value',
+      "ValueError: invalid URL https://proxy.example/v1?api_key='sk-single-quoted'",
+      'secret = "double-quoted-secret"',
     ].join('\n'),
   });
 
   const raw = fs.readFileSync(path.join(dir, ELECTRON_LOG_FILENAME), 'utf8');
-  for (const secret of ['sk-query-secret', 'bearer-secret-value', 'plain-secret-value']) {
+  for (const secret of [
+    'sk-query-secret',
+    'bearer-secret-value',
+    'plain-secret-value',
+    'sk-single-quoted',
+    'double-quoted-secret',
+  ]) {
     assert.equal(raw.includes(secret), false, secret);
   }
   assert.match(raw, /Traceback/);

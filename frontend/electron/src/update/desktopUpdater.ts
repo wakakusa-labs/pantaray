@@ -12,9 +12,12 @@
  *   `X.Y.Z-test.N`（test チャネル。prerelease を受け入れる）。それ以外（ローカルで packaged した
  *   `-dev` ビルドなど）は feed を持たず、更新チェックをしない
  * - 適用はデフォルトで「次回終了時に自動」+ 任意で「今すぐ再起動して更新」
+ * - electron-updater の `update-downloaded` は zip を取り終えた時点で、Squirrel.Mac はその後に
+ *   zip を受け取り、展開と署名の検証をする。インストールできるのは Electron の autoUpdater
+ *   （Squirrel.Mac）が `update-downloaded` を出してからなので、それまでは `downloading` のまま
  */
 
-import { app } from 'electron';
+import { app, autoUpdater as squirrelUpdater } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 type LoggerLike = {
@@ -127,6 +130,8 @@ export function createDesktopUpdater(params: {
         }
       }
     });
+    // MacUpdater は Squirrel.Mac の error もこのイベントに流す。Squirrel の準備前に失敗したら
+    // idle に戻し、次の自動または手動のチェックでやり直せるようにする。
     autoUpdater.on('error', (err) => {
       updateDownloading = false;
       const reason = lastCheckReason;
@@ -142,10 +147,14 @@ export function createDesktopUpdater(params: {
     });
     autoUpdater.on('download-progress', (p) => log('info', 'AUTO_UPDATE_PROGRESS', { p }));
     autoUpdater.on('update-downloaded', (info) => {
-      updateDownloaded = true;
-      updateDownloading = false;
+      // zip を取り終えただけ。Squirrel.Mac の準備が終わるまで downloading のまま。
       lastCheckReason = null;
       log('info', 'AUTO_UPDATE_DOWNLOADED', { info });
+    });
+    squirrelUpdater.on('update-downloaded', () => {
+      updateDownloaded = true;
+      updateDownloading = false;
+      log('info', 'AUTO_UPDATE_READY', { pendingVersion });
       try {
         params.onUpdateDownloaded?.();
       } catch {
@@ -211,6 +220,11 @@ export function createDesktopUpdater(params: {
     },
     getPendingVersion: () => pendingVersion,
     quitAndInstall: () => {
+      // Squirrel.Mac の準備前に終了すると何もインストールされない（下の強制終了も含めて）。
+      if (!updateDownloaded) {
+        log('warn', 'AUTO_UPDATE_QUIT_INSTALL_NOT_READY', { pendingVersion });
+        return;
+      }
       log('info', 'AUTO_UPDATE_QUIT_INSTALL_REQUESTED', { pendingVersion });
       try {
         params.beforeQuitAndInstall?.();

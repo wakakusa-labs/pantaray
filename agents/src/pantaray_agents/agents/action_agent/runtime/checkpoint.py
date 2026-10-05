@@ -42,7 +42,6 @@ _REQUIRED_CHECKPOINT_STATE_FIELDS = (
     "chunks_sent",
     "history_by_scope",
     "goal_conversations",
-    "memory_artifact_references",
     "next_action",
     "final_output",
     "errors",
@@ -103,8 +102,16 @@ def restore_runtime_state_checkpoint(
 def validate_runtime_checkpoint_payload(
     checkpoint_payload: dict[str, JSONValue],
 ) -> RuntimeCheckpointModel:
+    # Checkpoints saved before the Action stopped carrying its memory artifact
+    # path list still hold that key. It is dropped from this read copy, never from
+    # the stored row, so those Actions can still take a follow-up message.
+    payload = {
+        key: value
+        for key, value in checkpoint_payload.items()
+        if key != "memory_artifact_references"
+    }
     try:
-        return RuntimeCheckpointModel.model_validate(checkpoint_payload)
+        return RuntimeCheckpointModel.model_validate(payload)
     except ResumeFailureException:
         raise
     except ValidationError as exc:
@@ -146,10 +153,6 @@ def _restore_runtime_state_from_model(
         goal_id: conversation.model_copy(deep=True)
         for goal_id, conversation in checkpoint_model.goal_conversations.items()
     }
-    restored_state["memory_artifact_references"] = tuple(
-        reference.model_copy(deep=True)
-        for reference in checkpoint_model.memory_artifact_references
-    )
     return restored_state
 
 
@@ -210,9 +213,6 @@ def _build_runtime_checkpoint_model(state: ActionAgentState) -> RuntimeCheckpoin
         "context": cast(dict[str, JSONValue], context),
         "history_by_scope": _require_state_field(state, "history_by_scope"),
         "goal_conversations": _require_state_field(state, "goal_conversations"),
-        "memory_artifact_references": _require_state_field(
-            state, "memory_artifact_references"
-        ),
         "next_action": _require_state_field(state, "next_action"),
         "final_output": _require_state_field(state, "final_output"),
         "supervisor_pending_final_answer": copy.deepcopy(

@@ -15,16 +15,6 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     HistoryEntry,
 )
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
-from pantaray_agents.local_runtime.artifacts.paths import resolve_artifact_path
-from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
-    deserialize_memory_epoch,
-)
-from pantaray_agents.local_runtime.memory_catalog.record_context import (
-    render_context_epoch,
-)
-from pantaray_agents.local_runtime.runtime.bootstrap import (
-    read_local_runtime_artifact_root,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
@@ -101,36 +91,6 @@ class PromptRenderingService:
 
     def render_workspace_context_rules(self) -> str:
         return WORKSPACE_CONTEXT_RULES_TEXT
-
-    def format_memory_source_coverage(self, state: ActionAgentState) -> str:
-        return self._deps.formatter.format_memory_source_coverage(state)
-
-    def render_memory_artifact_references(self, state: ActionAgentState) -> str:
-        references = state["memory_artifact_references"]
-        if not references:
-            return "No linked memory artifacts."
-        artifact_root = read_local_runtime_artifact_root()
-        lines: list[str] = []
-        for reference in references:
-            lines.append(
-                f"- {reference.source_type} record={reference.source_record_id} "
-                f"memory_key={reference.memory_key}"
-            )
-            for file in reference.files:
-                path = resolve_artifact_path(
-                    root_path=artifact_root,
-                    relative_path=file.storage_path,
-                )
-                lines.append(
-                    f"  - path={path} sha256={file.sha256} bytes={file.byte_size}"
-                )
-        return "\n".join(lines)
-
-    def render_linkable_memory_context(self, state: ActionAgentState) -> str:
-        epoch = state.get("memory_context_epoch")
-        if epoch is None:
-            return "N/A"
-        return render_context_epoch(deserialize_memory_epoch(epoch))
 
     def history_entries(
         self,

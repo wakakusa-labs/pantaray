@@ -31,8 +31,9 @@ def _tool(
                 what=description,
                 when="Use only when the relevant persisted memory is visible in this turn.",
                 pitfalls=(
-                    "Never write [[ref:...]] syntax yourself. Context handles are scoped "
-                    "to the rendered memory context and must not be invented."
+                    "Never write [[ref:...]] syntax yourself. Context handles come from "
+                    "memory_search and get_memory_reference results and must not be "
+                    "invented."
                 ),
             ),
             execution_policy=tool_execution_policy(

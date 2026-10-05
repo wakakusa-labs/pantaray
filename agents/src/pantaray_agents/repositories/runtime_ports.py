@@ -21,7 +21,6 @@ from pantaray_agents.schema.agent.action_subagent import (
 from pantaray_agents.schema.agent.base import JSONValue, StepStatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
 from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResult
-from pantaray_agents.utils.memory_source_policy import MemorySourceCoverageSnapshot
 from pantaray_llm.contracts.conversation import LlmProviderTurn
 
 type PatchRunStepKind = Literal["llm", "tool"]
@@ -187,20 +186,8 @@ class ActionRepositoryPort(Protocol):
     ) -> RepositoryResult[DBRow]: ...
 
     async def get_initial_memory_context(
-        self,
-        user_id: str,
-        *,
-        action_id: str,
-        suggestion_id: str | None,
+        self, user_id: str
     ) -> RepositoryResult[InitialMemoryContext]: ...
-
-    async def get_memory_source_coverage_snapshot(
-        self,
-        *,
-        user_id: str,
-        suggestion_created_at: str | None,
-        max_parallel_queries: int,
-    ) -> RepositoryResult[MemorySourceCoverageSnapshot]: ...
 
 
 class SuggestionRepositoryPort(Protocol):

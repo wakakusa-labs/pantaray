@@ -10,10 +10,7 @@ from pantaray_agents.repositories import action_runtime_resume_contract as resum
 from pantaray_agents.repositories.action_support.initial_memory_context_contract import (
     InitialFactsBrief,
     InitialInsightBrief,
-    InitialMemoryArtifact,
-    InitialMemoryArtifactFile,
     InitialMemoryContext,
-    InitialMemorySourceType,
 )
 from pantaray_agents.schema.repositories.repository import (
     DBRow,
@@ -32,15 +29,6 @@ from ..mock_action_agent_repository_types import (
 
 _PROVIDER_TURN_ADAPTER: TypeAdapter[LlmProviderTurn] = TypeAdapter(LlmProviderTurn)
 APPROVAL_SESSION_ID_KEY, TOOL_REQUEST_ID_KEY = "approval_session_id", "tool_request_id"
-_MEMORY_CATEGORIES: tuple[InitialMemorySourceType, ...] = (
-    "long_term_insight",
-    "facts",
-    "agent_experience",
-)
-
-
-def _memory_category(value: object) -> InitialMemorySourceType | None:
-    return next((item for item in _MEMORY_CATEGORIES if item == value), None)
 
 
 def _to_dt(value: object) -> datetime:
@@ -280,11 +268,7 @@ class MockActionAgentQueryMixin:
     async def get_initial_memory_context(
         self: MockActionAgentRepository,
         user_id: str,
-        *,
-        action_id: str,
-        suggestion_id: str | None,
     ) -> RepositoryResult[InitialMemoryContext]:
-        _ = (action_id, suggestion_id)
         insights = [
             row
             for row in self.data.get("insights", [])
@@ -306,45 +290,6 @@ class MockActionAgentQueryMixin:
             reverse=True,
         )
         fact_row = fact_rows[0] if fact_rows else None
-        artifacts: list[InitialMemoryArtifact] = []
-        for artifact_row in self.data.get("memory_artifacts", []):
-            if artifact_row.get("user_id") != user_id:
-                continue
-            source_type = _memory_category(artifact_row.get("source_type"))
-            if source_type is None:
-                continue
-            artifact_id = str(artifact_row.get("artifact_id") or "")
-            file_rows = [
-                row
-                for row in self.data.get("memory_artifact_files", [])
-                if row.get("artifact_id") == artifact_id
-            ]
-            if not file_rows:
-                raise RuntimeError(
-                    f"Memory projection has no files for artifact {artifact_id}."
-                )
-            root_path = str(artifact_row.get("root_path") or "").strip("/")
-            artifacts.append(
-                InitialMemoryArtifact(
-                    source_type=source_type,
-                    source_record_id=str(artifact_row.get("source_record_id") or ""),
-                    artifact_id=artifact_id,
-                    logical_updated_at=str(
-                        artifact_row.get("logical_updated_at") or ""
-                    ),
-                    files=tuple(
-                        InitialMemoryArtifactFile(
-                            storage_path="/".join(
-                                (root_path, str(row.get("relative_path") or ""))
-                            ),
-                            sha256=str(row.get("sha256") or ""),
-                            byte_size=int(row.get("byte_size") or 0),
-                            mime_type=str(row.get("mime_type") or ""),
-                        )
-                        for row in file_rows
-                    ),
-                )
-            )
         return RepositoryResult(
             data=InitialMemoryContext(
                 insight=(
@@ -371,8 +316,6 @@ class MockActionAgentQueryMixin:
                     if fact_row is not None
                     else None
                 ),
-                artifacts=tuple(artifacts),
-                context_epoch=None,
             )
         )
 

@@ -113,8 +113,8 @@ role_rules:
     ## Repository AGENTS.md
     - Repository AGENTS.md files are not attached for you. Only when you will change files in a repository, first read the AGENTS.md files from its root to the directory you change; skip this for read-only work.
 
-# The head shows the workspace, the Pantaray-wide AGENTS.md, the linkable memory
-# and the time as they were on the Action's first turn, and is never rewritten. When a later turn reads a different
+# The head shows the workspace, the Pantaray-wide AGENTS.md and the time as they
+# were on the Action's first turn, and is never rewritten. When a later turn reads a different
 # version, its turn context carries the new one under these headings, and
 # nothing when it is unchanged.
 world_state_updates:
@@ -131,11 +131,6 @@ world_state_updates:
   agents_md_removed: |
     ## AGENTS.md Update
     The earlier ~/.pantaray AGENTS.md instructions no longer apply.
-  linkable_persisted_memory: |
-    ## Linkable Persisted Memory Update
-    This replaces the earlier Linkable Persisted Memory.
-
-    {linkable_persisted_memory}
   current_time: |
     Current time: {current_time}
 
@@ -167,19 +162,6 @@ prompt: |
 
   ## Project Knowledge Base
   {structured_fact_data}
-
-  ## Linked Memory Artifacts
-  {memory_artifact_references}
-
-  ## Linkable Persisted Memory
-  Each `ctx_...` handle identifies the exact persisted fragment shown here. Use it
-  only as `link_memory.target_handle` while this fragment remains in the current
-  context. The relationship itself belongs in `link_memory.note`.
-
-  {linkable_persisted_memory}
-
-  ## Memory Source Coverage
-  {memory_source_coverage}
 
   Current time: {current_time}
 

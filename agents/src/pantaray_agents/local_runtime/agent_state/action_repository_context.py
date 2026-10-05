@@ -6,9 +6,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
-    serialize_memory_epoch,
-)
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryCatalogIntegrityError,
 )
@@ -17,10 +14,6 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryRevision,
     MemorySource,
 )
-from pantaray_agents.local_runtime.memory_catalog.record_context import (
-    VisibleMemoryRecord,
-    build_record_context_epoch,
-)
 from pantaray_agents.local_runtime.memory_catalog.repository import (
     load_latest_active_node_by_source,
     load_revision,
@@ -28,10 +21,7 @@ from pantaray_agents.local_runtime.memory_catalog.repository import (
 from pantaray_agents.repositories.action_support.initial_memory_context_contract import (
     InitialFactsBrief,
     InitialInsightBrief,
-    InitialMemoryArtifact,
-    InitialMemoryArtifactFile,
     InitialMemoryContext,
-    InitialMemorySourceType,
 )
 from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResult
 from pantaray_agents.utils.memory_source_policy import build_short_lookback_range
@@ -62,9 +52,6 @@ class LocalActionRepositoryContextMixin:
     async def get_initial_memory_context(
         self: _ActionRepositoryContextState,
         user_id: str,
-        *,
-        action_id: str,
-        suggestion_id: str | None,
     ) -> RepositoryResult[InitialMemoryContext]:
         with self._connect() as connection:
             connection.execute("BEGIN")
@@ -72,57 +59,6 @@ class LocalActionRepositoryContextMixin:
                 connection, user_id=user_id, source="long_term_insight"
             )
             facts_head = _load_memory_head(connection, user_id=user_id, source="fact")
-            experience_head = _load_memory_head(
-                connection, user_id=user_id, source="agent_experience"
-            )
-            heads: tuple[
-                tuple[MemorySource, InitialMemorySourceType, str, _MemoryHead | None],
-                ...,
-            ] = (
-                (
-                    "long_term_insight",
-                    "long_term_insight",
-                    "current long-term insight",
-                    insight_head,
-                ),
-                ("fact", "facts", "current structured facts", facts_head),
-                (
-                    "agent_experience",
-                    "agent_experience",
-                    "current agent experience",
-                    experience_head,
-                ),
-            )
-            context_records: list[VisibleMemoryRecord] = []
-            if suggestion_id is not None:
-                context_records.append(
-                    VisibleMemoryRecord(
-                        "suggestion", suggestion_id, "accepted suggestion"
-                    )
-                )
-            artifacts: list[InitialMemoryArtifact] = []
-            for catalog_source, source_type, label, head in heads:
-                if head is None:
-                    continue
-                artifacts.append(
-                    _build_memory_artifact(
-                        connection,
-                        user_id=user_id,
-                        source_type=source_type,
-                        head=head,
-                    )
-                )
-                context_records.append(
-                    VisibleMemoryRecord(
-                        catalog_source, head.node.source_record_id, label
-                    )
-                )
-            context_epoch = build_record_context_epoch(
-                connection=connection,
-                user_id=user_id,
-                run_id=action_id,
-                records=tuple(context_records),
-            )
             connection.commit()
 
         insight = (
@@ -149,8 +85,6 @@ class LocalActionRepositoryContextMixin:
             data=InitialMemoryContext(
                 insight=insight,
                 facts=facts,
-                artifacts=tuple(artifacts),
-                context_epoch=serialize_memory_epoch(context_epoch),
             )
         )
 
@@ -212,47 +146,3 @@ def _load_memory_head(
             f"Memory Catalog revision missing for {source} head {node.node_id}."
         )
     return _MemoryHead(node=node, revision=revision)
-
-
-def _build_memory_artifact(
-    connection: sqlite3.Connection,
-    *,
-    user_id: str,
-    source_type: InitialMemorySourceType,
-    head: _MemoryHead,
-) -> InitialMemoryArtifact:
-    revision = head.revision
-    if revision.artifact_root_path is None:
-        raise MemoryCatalogIntegrityError(
-            f"Memory Catalog {source_type} head {revision.revision_id} is not an artifact."
-        )
-    files = connection.execute(
-        """
-        SELECT source_path, content_sha256, content_text
-        FROM memory_fragments
-        WHERE user_id = ? AND revision_id = ? AND block_kind = 'document_root'
-        ORDER BY source_path
-        """,
-        (user_id, revision.revision_id),
-    ).fetchall()
-    if not files:
-        raise MemoryCatalogIntegrityError(
-            "Memory Catalog artifact revision has no document roots for "
-            f"{revision.revision_id}."
-        )
-    root_path = revision.artifact_root_path.strip().strip("/")
-    return InitialMemoryArtifact(
-        source_type=source_type,
-        source_record_id=head.node.source_record_id,
-        artifact_id=revision.revision_id,
-        logical_updated_at=revision.created_at,
-        files=tuple(
-            InitialMemoryArtifactFile(
-                storage_path="/".join((root_path, str(row["source_path"]))),
-                sha256=str(row["content_sha256"]),
-                byte_size=len(str(row["content_text"]).encode("utf-8")),
-                mime_type="text/markdown",
-            )
-            for row in files
-        ),
-    )

@@ -8,9 +8,6 @@ import pytest
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
-from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
-    register_inline_domain_memory,
-)
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryDocument,
@@ -33,20 +30,6 @@ from .local_action_repository_support import (
     bootstrap_action_repository_db,
     build_action_repository,
 )
-
-
-def _register_suggestion(db_path: Path) -> None:
-    with open_memory_catalog_connection(
-        db_path=db_path, busy_timeout_ms=1_000
-    ) as connection:
-        with immediate_transaction(connection):
-            register_inline_domain_memory(
-                connection=connection,
-                user_id=USER_ID,
-                source="suggestion",
-                source_record_id="suggestion-1",
-                content="Accepted suggestion",
-            )
 
 
 def _publish_head(
@@ -130,26 +113,6 @@ def _publish_all_heads(
         entry_path="facts/index.md",
         profile_brief="FACTS-BRIEF",
     )
-    _publish_head(
-        db_path=db_path,
-        artifact_root=artifact_root,
-        user_id=user_id,
-        source="agent_experience",
-        intent_kind="agent_experience",
-        source_record_id=user_id,
-        entry_path="agent_experience/index.md",
-        profile_brief=None,
-    )
-
-
-def _revision_root_path(db_path: Path, revision_id: str) -> str:
-    with sqlite3.connect(db_path) as connection:
-        row = connection.execute(
-            "SELECT artifact_root_path FROM memory_revisions WHERE revision_id = ?",
-            (revision_id,),
-        ).fetchone()
-    assert row is not None
-    return str(row[0])
 
 
 def _assert_legacy_tables_empty(db_path: Path) -> None:
@@ -165,19 +128,14 @@ def _assert_legacy_tables_empty(db_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_initial_memory_context_resolves_three_catalog_heads(
+async def test_initial_memory_context_reads_the_profile_brief_heads(
     tmp_path: Path,
 ) -> None:
     db_path = bootstrap_action_repository_db(tmp_path)
-    _register_suggestion(db_path)
     _publish_all_heads(db_path=db_path, artifact_root=tmp_path / "artifacts")
     _assert_legacy_tables_empty(db_path)
 
-    result = await build_action_repository(db_path).get_initial_memory_context(
-        USER_ID,
-        action_id="action-1",
-        suggestion_id="suggestion-1",
-    )
+    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
 
     assert result.data is not None
     assert result.data.insight is not None
@@ -186,26 +144,6 @@ async def test_initial_memory_context_resolves_three_catalog_heads(
     assert result.data.facts is not None
     assert result.data.facts.fact_id == "fact-1"
     assert result.data.facts.facts_profile_brief == "FACTS-BRIEF"
-    assert [artifact.source_type for artifact in result.data.artifacts] == [
-        "long_term_insight",
-        "facts",
-        "agent_experience",
-    ]
-    for artifact, entry in zip(
-        result.data.artifacts,
-        ("insights/index.md", "facts/index.md", "agent_experience/index.md"),
-        strict=True,
-    ):
-        assert [file.storage_path for file in artifact.files] == [
-            f"{_revision_root_path(db_path, artifact.artifact_id)}/{entry}"
-        ]
-    assert result.data.context_epoch is not None
-    assert {item.source for item in result.data.context_epoch.items} == {
-        "suggestion",
-        "long_term_insight",
-        "fact",
-        "agent_experience",
-    }
 
 
 @pytest.mark.asyncio
@@ -213,7 +151,6 @@ async def test_initial_memory_context_skips_categories_without_a_head(
     tmp_path: Path,
 ) -> None:
     db_path = bootstrap_action_repository_db(tmp_path)
-    _register_suggestion(db_path)
     _publish_head(
         db_path=db_path,
         artifact_root=tmp_path / "artifacts",
@@ -224,16 +161,11 @@ async def test_initial_memory_context_skips_categories_without_a_head(
         profile_brief="FACTS-BRIEF",
     )
 
-    result = await build_action_repository(db_path).get_initial_memory_context(
-        USER_ID,
-        action_id="action-1",
-        suggestion_id="suggestion-1",
-    )
+    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
 
     assert result.data is not None
     assert result.data.insight is None
     assert result.data.facts is not None
-    assert [artifact.source_type for artifact in result.data.artifacts] == ["facts"]
 
 
 @pytest.mark.asyncio
@@ -241,7 +173,6 @@ async def test_initial_memory_context_ignores_other_users_heads(
     tmp_path: Path,
 ) -> None:
     db_path = bootstrap_action_repository_db(tmp_path)
-    _register_suggestion(db_path)
     with sqlite3.connect(db_path) as connection, connection:
         connection.execute(
             """
@@ -253,13 +184,8 @@ async def test_initial_memory_context_ignores_other_users_heads(
         db_path=db_path, artifact_root=tmp_path / "artifacts", user_id="user-2"
     )
 
-    result = await build_action_repository(db_path).get_initial_memory_context(
-        USER_ID,
-        action_id="action-1",
-        suggestion_id="suggestion-1",
-    )
+    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
 
     assert result.data is not None
     assert result.data.insight is None
     assert result.data.facts is None
-    assert result.data.artifacts == ()

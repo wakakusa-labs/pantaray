@@ -55,7 +55,6 @@ from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 from pantaray_agents.schema.agent.action_message_codec import (
     render_action_user_request_text,
 )
-from pantaray_agents.utils.memory_source_policy import MEMORY_SOURCE_ORDER
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
 
@@ -97,7 +96,6 @@ async def test_initialize_context_uses_profile_briefs_for_action_prompt(
             "updated_at": datetime.now(UTC).isoformat(),
         }
     )
-    await _save_profile_artifact_projection(repo)
 
     execution_context = _bootstrap_execution_context(
         tmp_path=tmp_path,
@@ -119,10 +117,6 @@ async def test_initialize_context_uses_profile_briefs_for_action_prompt(
         "organization_name": "Wakakusa",
         "project_name": "Pantaray",
     }
-    coverage = ctx["memory_source_coverage"]
-    assert isinstance(coverage["evaluated_at"], str)
-    assert len(coverage["slots"]) == len(MEMORY_SOURCE_ORDER)
-    assert {slot["source"] for slot in coverage["slots"]} == set(MEMORY_SOURCE_ORDER)
 
 
 @pytest.mark.asyncio
@@ -232,8 +226,6 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
         occurred_at=prior_step.created_at,
         history_phase="init",
     )
-    coverage_reader = AsyncMock(wraps=repo.get_memory_source_coverage_snapshot)
-    repo.get_memory_source_coverage_snapshot = coverage_reader  # type: ignore[method-assign]
     memory_reader = AsyncMock(wraps=repo.get_initial_memory_context)
     repo.get_initial_memory_context = memory_reader  # type: ignore[method-assign]
     first["context"]["insight_data"] = "insight read when the Action started"
@@ -267,9 +259,8 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
         "organization_name": "Prior org",
         "project_name": "Prior project",
     }
-    # Memory and its source coverage are read once per Action; a follow-up
-    # keeps what the head shows.
-    coverage_reader.assert_not_awaited()
+    # The profile briefs are read once per Action; a follow-up keeps what the
+    # head shows.
     memory_reader.assert_not_awaited()
     assert updated["context"]["insight_data"] == "insight read when the Action started"
     assert repo.data.get("action_steps", []) == []
@@ -623,43 +614,10 @@ def _runtime(
         state_config={
             "prompt_name": "action/executing",
             "prompt_version": "1.0",
-            "max_parallel_memory_queries": 2,
         },
         intervening_user_step=intervening_user_step,
         services=agent._runtime_services,  # noqa: SLF001
     )
-
-
-async def _save_profile_artifact_projection(
-    repo: MockActionAgentRepository,
-) -> None:
-    now = datetime.now(UTC).isoformat()
-    for source_type, record_id, artifact_id, relative_path, digest in (
-        ("long_term_insight", "ins-1", "artifact-ins-1", "index.md", "a" * 64),
-        ("facts", "fact-1", "artifact-fact-1", "facts.md", "b" * 64),
-    ):
-        await repo.save_data(
-            "memory_artifacts",
-            {
-                "artifact_id": artifact_id,
-                "user_id": "user-1",
-                "source_type": source_type,
-                "source_record_id": record_id,
-                "root_path": f"artifacts/{source_type}/{artifact_id}",
-                "logical_updated_at": now,
-            },
-        )
-        await repo.save_data(
-            "memory_artifact_files",
-            {
-                "file_id": f"{artifact_id}-file",
-                "artifact_id": artifact_id,
-                "relative_path": relative_path,
-                "sha256": digest,
-                "byte_size": 1,
-                "mime_type": "text/markdown",
-            },
-        )
 
 
 def _bootstrap_execution_context(

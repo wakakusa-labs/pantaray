@@ -23,9 +23,6 @@ from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     StepType,
 )
-from pantaray_agents.utils.memory_source_policy import (
-    build_unknown_memory_source_coverage_snapshot,
-)
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
 _IMAGE_PAYLOAD = b"user-attached-image"
@@ -108,9 +105,6 @@ def _build_state() -> dict:
         {
             "request_summary": "",
             "target_context": {"organization_name": None, "project_name": None},
-            "memory_source_coverage": build_unknown_memory_source_coverage_snapshot(
-                evaluated_at="2026-04-05T00:00:00Z"
-            ),
             "tool_validation_error_streak": 0,
             "local_step_counters": {"S": 1},
         }

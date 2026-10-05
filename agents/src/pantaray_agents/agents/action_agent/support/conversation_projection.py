@@ -12,10 +12,10 @@ What earns the cache read is that one turn's items are the previous turn's items
 with nothing but new items after them. Measured against the live API, a request
 whose input merely *appends* to the previous one reads 81-87% of its input from
 the cache, while rewriting a single item it already sent -- even the last one --
-drops the read back to the first message. So the per-turn context (the time, the
-linkable memory, the pending draft) is not a trailing item that each turn
-replaces: each turn appends its own, and the ones it sent before stay where they
-were, read back from the row that recorded them.
+drops the read back to the first message. So the per-turn context (the time,
+the pending draft) is not a trailing item that each turn replaces: each turn
+appends its own, and the ones it sent before stay where they were, read back
+from the row that recorded them.
 
 Two properties keep that true, and both belong to this projection rather than to
 the contract it builds:

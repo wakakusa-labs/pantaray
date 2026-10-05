@@ -17,9 +17,6 @@ from pantaray_agents.agents.action_agent.runtime.models.conversation import (
 from pantaray_agents.agents.action_agent.runtime.models.execution_context import (
     ExecutionContextModel,
 )
-from pantaray_agents.agents.action_agent.runtime.models.memory_reference import (
-    MemoryArtifactReferenceModel,
-)
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import (
     NextActionModel,
     PendingToolBatchModel,
@@ -35,10 +32,6 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_WORKSPACE,
     ReadAccessScope,
-)
-from pantaray_agents.utils.memory_source_policy import (
-    MemorySourceCoverageSnapshot,
-    build_unknown_memory_source_coverage_snapshot,
 )
 
 # -- タイプエイリアス -----------------------------------------------------------------
@@ -176,9 +169,6 @@ class ActionAgentContext(TypedDict, total=False):
     target_context: TargetContextState
     insight_data: str
     structured_fact_data: str
-    # 完了した Goal の成果物リスト（Supervisor への引き継ぎ用）
-    # memory_search 対象 source の存在統計（初期化時スナップショット）
-    memory_source_coverage: MemorySourceCoverageSnapshot
     analysis_summary: dict[str, JSONValue]
     prompt_name: str
     prompt_version: str
@@ -258,7 +248,6 @@ class ActionAgentState(TypedDict, total=False):
     # 履歴はスコープ単位で独立管理する（Supervisor="S", Goal Worker="G{n}"）
     history_by_scope: dict[str, list[HistoryEntry]]
     goal_conversations: Required[dict[str, GoalConversationStateModel]]
-    memory_artifact_references: Required[tuple[MemoryArtifactReferenceModel, ...]]
     next_action: NextAction | None
     pending_approval_request: NotRequired[PendingApprovalRequest]
     current_approval_blockers: NotRequired[list[PendingApprovalRequest]]
@@ -360,9 +349,6 @@ def create_initial_state(
         context=ActionAgentContext(
             request_summary=None,
             target_context={"organization_name": None, "project_name": None},
-            memory_source_coverage=build_unknown_memory_source_coverage_snapshot(
-                evaluated_at=started_at
-            ),
             additional_notes=[],
             tool_validation_error_streak=0,
             local_step_counters={},
@@ -370,7 +356,6 @@ def create_initial_state(
         ),
         history_by_scope={"S": []},
         goal_conversations={},
-        memory_artifact_references=(),
         next_action=None,
         final_output=None,
         errors=[],

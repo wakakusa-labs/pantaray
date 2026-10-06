@@ -38,6 +38,8 @@ class ActionHistoryCandidate:
     matched_terminal_root_run_id: str | None
     updated_at: str
     matched_assistant_text: str | None
+    # The text of the Suggestion this conversation replied to, when it opens with one.
+    opening_suggestion_text: str | None
     kind: ClassVar[Literal["conversation"]] = "conversation"
 
     @property
@@ -153,7 +155,15 @@ WITH action_source AS (
         AND assistant.action_id=action.action_id AND assistant.step_type='assistant_message'
         AND {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(assistant.llm_response_text)
           LIKE :search_pattern ESCAPE '\'
-      ORDER BY assistant.step_number DESC LIMIT 1) AS matched_assistant_text
+      ORDER BY assistant.step_number DESC LIMIT 1) AS matched_assistant_text,
+    (SELECT CASE WHEN opening.source_suggestion_id IS NOT NULL
+                 THEN opening.llm_response_text END
+      FROM agent_action_steps AS opening
+        INDEXED BY idx_agent_action_steps_action_timeline
+      WHERE opening.action_id=action.action_id AND opening.user_id=action.user_id
+        AND opening.step_number IS NOT NULL
+        AND opening.step_type IN ('user_request','assistant_message','tool_execution')
+      ORDER BY opening.step_number,opening.step_id LIMIT 1) AS opening_suggestion_text
   FROM agent_actions AS action INDEXED BY idx_agent_actions_user_history_recency
   LEFT JOIN agent_suggestions AS suggestion
     ON suggestion.suggestion_id=action.suggestion_id
@@ -212,7 +222,8 @@ WITH action_source AS (
       OR matched_assistant_text IS NOT NULL AS search_match,
     step_name,matched_user_step_name,
     CASE WHEN matched_user_step_id IS NULL AND matched_terminal_root_run_id IS NULL
-      THEN matched_assistant_text END AS matched_assistant_text
+      THEN matched_assistant_text END AS matched_assistant_text,
+    opening_suggestion_text
   FROM action_source
 ), suggestion_evidence AS (
   SELECT 'suggestion' AS kind,suggestion.suggestion_id AS stable_id,
@@ -237,7 +248,8 @@ WITH action_source AS (
       AND {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(
         CASE WHEN typeof(suggestion.answer)='text' THEN suggestion.answer ELSE '' END)
         LIKE :search_pattern ESCAPE '\' AS search_match,
-    NULL AS step_name,NULL AS matched_user_step_name,NULL AS matched_assistant_text
+    NULL AS step_name,NULL AS matched_user_step_name,NULL AS matched_assistant_text,
+    NULL AS opening_suggestion_text
   FROM agent_suggestions AS suggestion
     INDEXED BY idx_agent_suggestions_user_history_recency
   LEFT JOIN agent_actions AS linked
@@ -269,7 +281,7 @@ SELECT kind,stable_id,raw_updated_at,status_hint,action_id,suggestion_id,status,
  matched_user_message_id,matched_user_message_json,matched_user_request_text,
  matched_user_adopted_process_id,matched_user_expected_process_id,
  matched_user_adoption_canceled_at,matched_terminal_root_run_id,
- step_name,matched_user_step_name,matched_assistant_text
+ step_name,matched_user_step_name,matched_assistant_text,opening_suggestion_text
 FROM candidates
 ORDER BY raw_updated_at DESC,kind,stable_id LIMIT :fetch_limit
 """
@@ -381,6 +393,7 @@ def _candidate(row: tuple[object, ...]) -> ConversationHistoryCandidate:
         matched_terminal_root_run_id=cast("str | None", row[32]),
         updated_at=cast("str", row[2]),
         matched_assistant_text=cast("str | None", row[35]),
+        opening_suggestion_text=cast("str | None", row[36]),
     )
 
 

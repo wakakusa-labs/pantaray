@@ -651,7 +651,15 @@ async def test_success_then_followup_projects_two_runs_and_one_history_item(
     assert [
         (item["kind"], item["action_id"], item["title"], item["status"])
         for item in history.json()["items"]
-    ] == [("conversation", first_result["action_id"], "最初の依頼", "running")]
+    ] == [
+        (
+            "conversation",
+            first_result["action_id"],
+            # A conversation begun by replying keeps the replied suggestion as its title.
+            "**先ほどの発言**" if reply else "最初の依頼",
+            "running",
+        )
+    ]
 
     if reply:
         bootstrap = client.get("/api/agent/history/comment-1/overlay-bootstrap")

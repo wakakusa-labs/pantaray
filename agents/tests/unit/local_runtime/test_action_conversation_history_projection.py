@@ -62,6 +62,7 @@ _ACTION = history_candidates.ActionHistoryCandidate(
     None,
     _AT,
     None,
+    None,
 )
 _SUGGESTION = history_candidates.SuggestionHistoryCandidate(
     "suggestion-1", "Approve this", "action_offer", None, "approval_pending", _AT

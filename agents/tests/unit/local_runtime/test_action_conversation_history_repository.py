@@ -271,3 +271,116 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
                 )
                 == expected_ids
             )
+
+
+def test_reply_to_message_suggestion_keeps_the_suggestion_as_its_title(
+    tmp_path: Path,
+) -> None:
+    suggestion_text = "Shall I draft the quarterly Needle summary?"
+    reply = ActionUserMessageInput(message_id="message-reply", content="Yes please")
+    steer = ActionUserMessageInput(message_id="message-steer", content="Keep it short")
+
+    with sqlite3.connect(bootstrap_action_repository_db(tmp_path)) as connection:
+        connection.row_factory = sqlite3.Row
+        register_conversation_history_casefold_sqlite(connection)
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            f"""UPDATE agent_suggestions SET answer=?,interaction_contract='message_only',
+                 created_at='{_SUGGESTION_AT}',updated_at='{_SUGGESTION_AT}'
+               WHERE suggestion_id='sug-1'""",
+            (suggestion_text,),
+        )
+        connection.executescript(
+            f"""
+            UPDATE agent_actions SET suggestion_id=NULL,
+              initial_user_message_id='{reply.message_id}',status='processing',
+              created_at='{_PAUSED_AT}',updated_at='{_PAUSED_AT}'
+            WHERE action_id='act-1';
+            INSERT INTO processes(process_id,user_id,kind,status,action_id,started_at,
+              updated_at,completed_at,heartbeat_at,terminal_event_id,next_event_seq)
+            VALUES ('run-reply','{_USER_ID}','action','running','act-1','{_PAUSED_AT}',
+              '{_PAUSED_AT}',NULL,'{_PAUSED_AT}',NULL,1);
+            INSERT INTO jobs(job_id,user_id,job_type,process_id,status,scheduled_at,
+              started_at,completed_at,logical_key)
+            VALUES ('job-reply','{_USER_ID}','execute_action','run-reply','running',
+              '{_PAUSED_AT}','{_PAUSED_AT}',NULL,'act-1');
+            """
+        )
+        connection.execute(
+            "INSERT INTO job_payloads(job_id,payload_json) VALUES ('job-reply',?)",
+            (
+                json.dumps(
+                    build_action_job_payload(
+                        {
+                            "job_id": "job-reply",
+                            "process_id": "run-reply",
+                            "action_id": "act-1",
+                            "user_id": _USER_ID,
+                            "continuation_ref": {
+                                "kind": "user_step",
+                                "user_step_id": "step-reply",
+                            },
+                        }
+                    )
+                ),
+            ),
+        )
+        # The shape a reply writes: the Suggestion's text as the first assistant
+        # message, then the user's reply as the initial USER message.
+        connection.execute(
+            """INSERT INTO agent_action_steps(
+                   step_id,action_id,user_id,step_number,local_step_number,short_step_id,
+                   step_type,step_name,status,goal_handle,llm_response_text,
+                   adopted_process_id,source_suggestion_id,started_at,completed_at,
+                   created_at)
+               VALUES ('step-opening','act-1',?,1,1,'S-1-ASSISTANT','assistant_message',
+                       'assistant_message','success','S',?,'run-reply','sug-1',?,?,?)""",
+            (_USER_ID, suggestion_text, _SUGGESTION_AT, _SUGGESTION_AT, _SUGGESTION_AT),
+        )
+        insert_user = """INSERT INTO agent_action_steps(
+                   step_id,action_id,user_id,step_number,local_step_number,short_step_id,
+                   step_type,step_name,status,goal_handle,user_message_id,user_message_json,
+                   user_request_text,accepted_sequence,adopted_process_id,started_at,
+                   completed_at,created_at)
+               VALUES (?,'act-1',?,?,?,?,'user_request','user_request','success','S',
+                       ?,?,?,?,'run-reply',?,?,?)"""
+
+        def add_user(
+            step_id: str, number: int, message: ActionUserMessageInput
+        ) -> None:
+            connection.execute(
+                insert_user,
+                (
+                    step_id,
+                    _USER_ID,
+                    number,
+                    number,
+                    f"S-{number}-USER",
+                    message.message_id,
+                    serialize_action_user_message(message),
+                    render_action_user_request_text(message),
+                    number - 1,
+                    _PAUSED_AT,
+                    _PAUSED_AT,
+                    _PAUSED_AT,
+                ),
+            )
+
+        add_user("step-reply", 2, reply)
+        connection.commit()
+
+        def titles(search_text: str = "") -> list[tuple[str, str]]:
+            connection.execute("BEGIN")
+            try:
+                page, _ = _read(connection, search_text)
+            finally:
+                connection.rollback()
+            return [(item.kind, item.title) for item in page.items]
+
+        expected = [("conversation", suggestion_text)]
+        assert titles() == expected
+        add_user("step-steer", 3, steer)
+        connection.commit()
+        assert titles() == expected
+        assert titles("quarterly needle") == expected
+        assert titles("keep it short") == expected

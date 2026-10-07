@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock
 
@@ -20,9 +21,6 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws.action import ActionFlowMixin
 from pantaray_agents.orchestration.ws.handler import WSOrchestrationHandler
-from pantaray_agents.orchestration.ws.handler_process_control import (
-    WSHandlerProcessControlMixin,
-)
 from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
@@ -137,20 +135,26 @@ class _Handler(ActionFlowMixin):
         self.session_errors.append((message, dict(kwargs)))
 
 
-class _ProcessControlHandler(WSHandlerProcessControlMixin, _Handler):
-    async def _is_suggestion_id_accessible(self, suggestion_id: str) -> bool:
-        return suggestion_id == "suggestion-1"
-
-
-def _configure_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+def _use_repository(
+    monkeypatch: pytest.MonkeyPatch, repository: _SuggestionRepository
+) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.is_local_runtime_enabled",
-        lambda: True,
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.read_local_runtime_db_config",
+        lambda: (Path("runtime.db"), 1_000),
     )
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.now_utc_iso",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.LocalSuggestionStateRepository",
+        lambda **_kwargs: repository,
+    )
+
+
+def _configure_runtime(monkeypatch: pytest.MonkeyPatch, handler: _Handler) -> _Handler:
+    _use_repository(monkeypatch, handler._repo)
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.now_utc_iso",
         lambda: APPROVED_AT,
     )
+    return handler
 
 
 def _result(
@@ -174,7 +178,6 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
     monkeypatch: pytest.MonkeyPatch,
     approval_mode: Literal["prompt_each_time", "always_allow"],
 ) -> None:
-    _configure_runtime(monkeypatch)
     captured: list[SubmitActionMessageCommand] = []
 
     def fake_submit_action_message(
@@ -184,10 +187,10 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
         return _result()
 
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         fake_submit_action_message,
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
 
     await handler.execute_action(
         ExecuteActionMessage(
@@ -265,17 +268,15 @@ async def test_execute_action_stamps_a_pending_approval_in_canonical_millisecond
 ) -> None:
     # The approval time is stored with the Suggestion, so it must use the
     # canonical storage form rather than whatever the clock formats.
-    monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.is_local_runtime_enabled",
-        lambda: True,
-    )
+    handler = _Handler()
+    _use_repository(monkeypatch, handler._repo)
     calls: list[SubmitActionMessageCommand] = []
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda command: calls.append(command) or _result(),
     )
 
-    await _Handler().execute_action(
+    await handler.execute_action(
         ExecuteActionMessage(
             approval_mode="prompt_each_time",
             images=(),
@@ -296,13 +297,12 @@ async def test_execute_action_stamps_a_pending_approval_in_canonical_millisecond
 async def test_execute_action_replay_uses_the_same_function_without_a_second_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _configure_runtime(monkeypatch)
     calls: list[SubmitActionMessageCommand] = []
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda command: calls.append(command) or _result(inserted=False),
     )
-    handler = _ProcessControlHandler()
+    handler = _configure_runtime(monkeypatch, _Handler())
     handler._repo.row.update(
         user_reaction="accepted",
         action_status="processing",
@@ -339,9 +339,8 @@ async def test_terminal_replay_uses_submit_identity_without_reloading_detail(
     projected_process_id: str,
     expected_event: str,
 ) -> None:
-    _configure_runtime(monkeypatch)
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda _command: _result(inserted=False, action_status=action_status),
     )
     repository = _SuggestionRepository()
@@ -355,10 +354,10 @@ async def test_terminal_replay_uses_submit_identity_without_reloading_detail(
     repository.get_suggestion_state = AsyncMock(
         side_effect=[
             RepositoryResult(data=repository.row),
-            RepositoryResult(data=repository.row),
             RepositoryResult(data=terminal_row),
         ]
     )
+    _use_repository(monkeypatch, repository)
     repository.get_suggestion_history_row = AsyncMock(
         side_effect=AssertionError("terminal detail must not be reloaded")
     )
@@ -375,11 +374,6 @@ async def test_terminal_replay_uses_submit_identity_without_reloading_detail(
         handler,
         "_get_action_state_repository",
         AsyncMock(return_value=repository),
-    )
-    monkeypatch.setattr(
-        handler,
-        "_is_suggestion_id_accessible",
-        AsyncMock(return_value=True),
     )
 
     await handler.execute_action(
@@ -430,7 +424,6 @@ async def test_execute_action_does_not_replay_or_attach_deferred_submission(
     disposition: Literal["pending", "not_executed"],
     expected_replay_count: int,
 ) -> None:
-    _configure_runtime(monkeypatch)
     result = DeferredActionMessageResult(
         disposition=disposition,
         action_id="action-1",
@@ -442,10 +435,10 @@ async def test_execute_action_does_not_replay_or_attach_deferred_submission(
         inserted=False,
     )
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda _command: result,
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
 
     await handler.execute_action(
         ExecuteActionMessage(
@@ -463,40 +456,29 @@ async def test_execute_action_does_not_replay_or_attach_deferred_submission(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("runtime_enabled", "create_failure", "expected_code"),
+    ("create_failure", "expected_code"),
     [
-        (False, None, "LOCAL_RUNTIME_REQUIRED"),
-        (True, ActionMessageConflictError("conflict"), "WS_ACTION_NOT_ALLOWED"),
+        (ActionMessageConflictError("conflict"), "WS_ACTION_NOT_ALLOWED"),
         (
-            True,
             ActionFileAttachmentUnavailableError("staged file is gone"),
             "WS_ACTION_ATTACHMENT_UNAVAILABLE",
         ),
-        (True, RuntimeError("database unavailable"), "WS_DEPENDENCY_UNAVAILABLE"),
+        (RuntimeError("database unavailable"), "WS_DEPENDENCY_UNAVAILABLE"),
     ],
 )
 async def test_execute_action_fails_closed_before_relay_attachment(
     monkeypatch: pytest.MonkeyPatch,
-    runtime_enabled: bool,
-    create_failure: Exception | None,
+    create_failure: Exception,
     expected_code: str,
 ) -> None:
-    _configure_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.is_local_runtime_enabled",
-        lambda: runtime_enabled,
-    )
-
     def fake_submit_action_message(_command: object) -> SubmitActionMessageResult:
-        if create_failure is not None:
-            raise create_failure
-        return _result()
+        raise create_failure
 
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         fake_submit_action_message,
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
 
     await handler.execute_action(
         ExecuteActionMessage(
@@ -519,12 +501,11 @@ async def test_execute_action_fails_closed_before_relay_attachment(
 async def test_execute_action_rejects_legacy_oversized_suggestion_as_not_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _configure_runtime(monkeypatch)
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda _command: pytest.fail("invalid command must not reach persistence"),
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
     handler._repo.row["answer"] = "x" * (ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS + 1)
 
     await handler.execute_action(
@@ -545,12 +526,11 @@ async def test_execute_action_rejects_legacy_oversized_suggestion_as_not_allowed
 async def test_execute_action_rejects_a_project_ref_outside_its_supplement_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _configure_runtime(monkeypatch)
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda _command: pytest.fail("invalid command must not reach persistence"),
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
 
     await handler.execute_action(
         ExecuteActionMessage(
@@ -580,12 +560,11 @@ async def test_post_commit_attach_failure_is_session_error_not_action_failure(
     failure: str,
     expected_code: str,
 ) -> None:
-    _configure_runtime(monkeypatch)
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message",
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
         lambda _command: _result(),
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
     if failure == "session_limit":
         handler.session_store = _FailingSessionStore()
     else:
@@ -628,12 +607,12 @@ async def test_post_commit_attach_failure_is_session_error_not_action_failure(
 async def test_suggestion_images_reject_foreign_or_escaping_paths(
     monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
-    _configure_runtime(monkeypatch)
     submit = AsyncMock()
     monkeypatch.setattr(
-        "pantaray_agents.orchestration.ws.action.submit_action_message", submit
+        "pantaray_agents.local_runtime.runtime.suggestion_acceptance.submit_action_message",
+        submit,
     )
-    handler = _Handler()
+    handler = _configure_runtime(monkeypatch, _Handler())
     await handler.execute_action(
         ExecuteActionMessage(
             suggestion_id="suggestion-1",

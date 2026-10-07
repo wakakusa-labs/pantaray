@@ -1,230 +1,143 @@
-"""Suggestion approval adapter for the canonical Action creation function."""
+"""WebSocket adapter for accepting a Suggestion."""
 
 from __future__ import annotations
 
 import logging
 import sqlite3
 from collections.abc import Mapping
-from typing import Literal, cast
-
-from pydantic import ValidationError
+from dataclasses import dataclass
+from typing import Final, cast
 
 from pantaray_agents.action_status import is_action_terminal_status
-from pantaray_agents.local_runtime.runtime.action_file_attachments import (
-    ActionFileAttachmentUnavailableError,
-)
 from pantaray_agents.local_runtime.runtime.action_messages import (
-    ActionMessageConflictError,
-    NewActionTarget,
     StartedActionMessageResult,
-    SubmitActionMessageCommand,
-    submit_action_message,
 )
-from pantaray_agents.local_runtime.runtime.bootstrap import is_local_runtime_enabled
-from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
+    ActionLanguage,
+    SuggestionAcceptanceRejected,
+    SuggestionAcceptanceRejection,
+    accept_suggestion,
+)
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.orchestration.ws.action_relay import (
     ACTION_EVENT_CURSOR_START_ID,
     ActionRelayMixin,
 )
 from pantaray_agents.orchestration.ws.base import BaseWSHandler
 from pantaray_agents.orchestration.ws.error_meta import build_session_error_meta
-from pantaray_agents.schema.agent.action import (
-    ActionUserMessageInput,
-    SuggestionApprovalInput,
-)
-from pantaray_agents.schema.agent.action_message import (
-    ActionProjectRef,
-    FileAttachmentInput,
-)
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
-from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.websocket import ExecuteActionMessage
-from pantaray_agents.security.storage_paths import validate_image_storage_path
-from pantaray_agents.utils.public_error import public_ws_error
+from pantaray_agents.utils.public_error import ErrorDetails, public_ws_error
 
 logger = logging.getLogger(__name__)
 
-_LOCAL_RUNTIME_REQUIRED_ERROR_CODE = "LOCAL_RUNTIME_REQUIRED"
-type ActionLanguage = Literal["en", "ja"]
+
+@dataclass(frozen=True, slots=True)
+class _ErrorResponse:
+    error_code: str
+    error_type: ErrorType
+    error_message: str
+    failure_kind: str | None
+    persist_public_event: bool
+    extra_error_details: ErrorDetails | None = None
 
 
-def _optional_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip()
-    return normalized or None
-
-
-def _target_metadata(row: Mapping[str, object]) -> tuple[str | None, str | None]:
-    target_context = row.get("target_context_json")
-    if not isinstance(target_context, Mapping):
-        return None, None
-    return (
-        _optional_text(target_context.get("organization_name")),
-        _optional_text(target_context.get("project_name")),
-    )
-
-
-def _build_suggestion_action_command(
-    *,
-    user_id: str,
-    suggestion_id: str,
-    command_id: str,
-    approved_at: str,
-    language: ActionLanguage | None,
-    supplement: str | None,
-    supplement_project_refs: tuple[ActionProjectRef, ...],
-    approval_mode: ApprovalMode,
-    images: tuple[ImageInput, ...],
-    files: tuple[FileAttachmentInput, ...],
-    suggestion_row: Mapping[str, object],
-) -> SubmitActionMessageCommand:
-    content = _optional_text(suggestion_row.get("answer"))
-    if content is None:
-        raise ActionMessageConflictError("Suggestion answer is empty")
-    organization_name, project_name = _target_metadata(suggestion_row)
-    for image in images:
-        try:
-            validate_image_storage_path(
-                user_id=user_id, storage_path=image.storage_path
-            )
-        except ValueError as exc:
-            raise ActionMessageConflictError(
-                "Suggestion image reference is invalid"
-            ) from exc
-    try:
-        return SubmitActionMessageCommand(
-            user_id=user_id,
-            target=NewActionTarget(
-                suggestion_id=suggestion_id, approval_mode=approval_mode
-            ),
-            message=ActionUserMessageInput(
-                message_id=command_id,
-                content=content,
-                language=language,
-                supplement=supplement,
-                supplement_project_refs=supplement_project_refs,
-                images=images,
-                files=files,
-                suggestion_approval=SuggestionApprovalInput(
-                    suggestion_id=suggestion_id,
-                    approved_at=approved_at,
-                    summary=_optional_text(suggestion_row.get("suggestion_summary")),
-                    organization_name=organization_name,
-                    project_name=project_name,
-                ),
-            ),
-        )
-    except ValidationError as exc:
-        raise ActionMessageConflictError(
-            "Suggestion cannot be submitted as an Action message"
-        ) from exc
+_NOT_ALLOWED_MESSAGE: Final = (
+    "execute_action is not allowed for current suggestion state"
+)
+_REJECTION_RESPONSES: Final[dict[SuggestionAcceptanceRejection, _ErrorResponse]] = {
+    "suggestion_not_found": _ErrorResponse(
+        error_code="WS_SUGGESTION_NOT_FOUND",
+        error_type=ErrorType.VALIDATION_ERROR,
+        error_message="suggestion_id is not accessible for current user",
+        failure_kind=None,
+        persist_public_event=True,
+    ),
+    "state_unavailable": _ErrorResponse(
+        error_code="WS_DEPENDENCY_UNAVAILABLE",
+        error_type=ErrorType.INTERNAL_ERROR,
+        error_message="Failed to load suggestion state (fail-closed).",
+        failure_kind="load_suggestion_state",
+        persist_public_event=True,
+        extra_error_details={"dependency": "local_state"},
+    ),
+    "not_allowed": _ErrorResponse(
+        error_code="WS_ACTION_NOT_ALLOWED",
+        error_type=ErrorType.VALIDATION_ERROR,
+        error_message=_NOT_ALLOWED_MESSAGE,
+        failure_kind=None,
+        persist_public_event=True,
+    ),
+    "already_processing": _ErrorResponse(
+        error_code="WS_ACTION_ALREADY_PROCESSING",
+        error_type=ErrorType.VALIDATION_ERROR,
+        error_message="action is already processing",
+        failure_kind=None,
+        persist_public_event=True,
+    ),
+    "attachment_unavailable": _ErrorResponse(
+        error_code="WS_ACTION_ATTACHMENT_UNAVAILABLE",
+        error_type=ErrorType.INTERNAL_ERROR,
+        error_message="An attached file is no longer available.",
+        failure_kind="attachment_unavailable",
+        persist_public_event=False,
+    ),
+    "creation_conflict": _ErrorResponse(
+        error_code="WS_ACTION_NOT_ALLOWED",
+        error_type=ErrorType.INTERNAL_ERROR,
+        error_message=_NOT_ALLOWED_MESSAGE,
+        failure_kind="action_state_guard",
+        persist_public_event=False,
+    ),
+}
+_CREATION_FAILED_RESPONSE: Final = _ErrorResponse(
+    error_code="WS_DEPENDENCY_UNAVAILABLE",
+    error_type=ErrorType.INTERNAL_ERROR,
+    error_message="Failed to persist Action.",
+    failure_kind="submit_action_message",
+    persist_public_event=False,
+)
 
 
 class ActionFlowMixin(ActionRelayMixin):
-    """Adapt Suggestion approval to the canonical Action message function."""
+    """Turn a WS ``execute_action`` into one Suggestion acceptance and its relay."""
 
     async def execute_action(self, payload: ExecuteActionMessage) -> None:
         command_id = str(payload.command_id)
-        suggestion_id = str(payload.suggestion_id)
-        if not is_local_runtime_enabled():
-            await self._send_preflight_error(
-                suggestion_id=suggestion_id,
-                command_id=command_id,
-                error_code=_LOCAL_RUNTIME_REQUIRED_ERROR_CODE,
-                error_message="Local runtime must be enabled for action execution.",
-                failure_kind="local_runtime_disabled",
-            )
-            return
-
-        repo = await self._get_action_state_repository()
-        if repo is None:
-            await self._send_preflight_error(
-                suggestion_id=suggestion_id,
-                command_id=command_id,
-                error_code="WS_DEPENDENCY_UNAVAILABLE",
-                error_message="Suggestion repository is unavailable.",
-                failure_kind="load_suggestion_state",
-            )
-            return
+        suggestion_id = payload.suggestion_id
         try:
-            state_result = await repo.get_suggestion_state(
-                user_id=str(self.user_id), suggestion_id=suggestion_id
-            )
-        except (MigrationError, OSError, sqlite3.Error):
-            logger.exception("Suggestion read failed: %s", suggestion_id)
-            await self._send_preflight_error(
+            outcome = await accept_suggestion(
+                user_id=str(self.user_id),
                 suggestion_id=suggestion_id,
                 command_id=command_id,
-                error_code="WS_DEPENDENCY_UNAVAILABLE",
-                error_message="Failed to load suggestion state.",
-                failure_kind="load_suggestion_state",
+                approval_mode=payload.approval_mode,
+                language=self._resolve_action_language(payload.language),
+                supplement=payload.supplement,
+                supplement_project_refs=payload.supplement_project_refs,
+                images=payload.images,
+                files=payload.files,
             )
-            return
-        suggestion_row = state_result.data if not state_result.error else None
-        if not isinstance(suggestion_row, Mapping):
-            await self._send_preflight_error(
-                suggestion_id=suggestion_id,
-                command_id=command_id,
-                error_code="WS_DEPENDENCY_UNAVAILABLE",
-                error_message="Failed to load suggestion state.",
-                failure_kind="load_suggestion_state",
-            )
-            return
-
-        approved_at = _optional_text(suggestion_row.get("accepted_at")) or now_utc_iso()
-        language = self._resolve_action_language(payload.language)
-        try:
-            result = submit_action_message(
-                _build_suggestion_action_command(
-                    user_id=str(self.user_id),
-                    suggestion_id=suggestion_id,
-                    command_id=command_id,
-                    approved_at=approved_at,
-                    language=language,
-                    supplement=_optional_text(payload.supplement),
-                    supplement_project_refs=payload.supplement_project_refs,
-                    approval_mode=payload.approval_mode,
-                    images=payload.images,
-                    files=payload.files,
-                    suggestion_row=suggestion_row,
-                )
-            )
-        except ActionFileAttachmentUnavailableError:
-            await self._send_preflight_error(
-                suggestion_id=suggestion_id,
-                command_id=command_id,
-                error_code="WS_ACTION_ATTACHMENT_UNAVAILABLE",
-                error_message="An attached file is no longer available.",
-                failure_kind="attachment_unavailable",
-            )
-            return
-        except ActionMessageConflictError:
-            await self._send_preflight_error(
-                suggestion_id=suggestion_id,
-                command_id=command_id,
-                error_code="WS_ACTION_NOT_ALLOWED",
-                error_message="execute_action is not allowed for current suggestion state",
-                failure_kind="action_state_guard",
-            )
-            return
         except Exception:
             logger.exception(
                 "Failed to create Action: suggestion_id=%s command_id=%s",
                 suggestion_id,
                 command_id,
             )
-            await self._send_preflight_error(
+            await self._send_rejection(
+                _CREATION_FAILED_RESPONSE,
                 suggestion_id=suggestion_id,
                 command_id=command_id,
-                error_code="WS_DEPENDENCY_UNAVAILABLE",
-                error_message="Failed to persist Action.",
-                failure_kind="submit_action_message",
+            )
+            return
+        if isinstance(outcome, SuggestionAcceptanceRejected):
+            await self._send_rejection(
+                _REJECTION_RESPONSES[outcome.reason],
+                suggestion_id=suggestion_id,
+                command_id=command_id,
             )
             return
 
+        result = outcome.action
         if result.disposition == "not_executed":
             return
         if (
@@ -233,17 +146,20 @@ class ActionFlowMixin(ActionRelayMixin):
             and is_action_terminal_status(result.action_status)
         ):
             terminal_status = result.action_status
-            try:
-                terminal_state = await repo.get_suggestion_state(
-                    user_id=str(self.user_id), suggestion_id=suggestion_id
-                )
-            except (MigrationError, OSError, sqlite3.Error):
-                logger.exception(
-                    "Terminal projection read failed: %s", result.action_id
-                )
-                terminal_row = None
-            else:
-                terminal_row = terminal_state.data if not terminal_state.error else None
+            repo = await self._get_action_state_repository()
+            terminal_row = None
+            if repo is not None:
+                try:
+                    terminal_state = await repo.get_suggestion_state(
+                        user_id=str(self.user_id), suggestion_id=suggestion_id
+                    )
+                except (MigrationError, OSError, sqlite3.Error):
+                    logger.exception(
+                        "Terminal projection read failed: %s", result.action_id
+                    )
+                else:
+                    if not terminal_state.error:
+                        terminal_row = terminal_state.data
             identity_matches = (
                 isinstance(terminal_row, Mapping)
                 and _optional_text(terminal_row.get("action_id")) == result.action_id
@@ -290,7 +206,7 @@ class ActionFlowMixin(ActionRelayMixin):
         await self._replay_action_requested(
             suggestion_id=suggestion_id,
             command_id=command_id,
-            accepted_at=approved_at,
+            accepted_at=outcome.accepted_at,
         )
         if result.disposition != "started":
             return
@@ -347,28 +263,27 @@ class ActionFlowMixin(ActionRelayMixin):
                 error_code="ACTION_RELAY_ATTACH_FAILED",
             )
 
-    async def _send_preflight_error(
+    async def _send_rejection(
         self,
+        response: _ErrorResponse,
         *,
         suggestion_id: str,
         command_id: str,
-        error_code: str,
-        error_message: str,
-        failure_kind: str,
     ) -> None:
         await self._send_action_error(
             public_ws_error(
-                error_code=error_code,
+                error_code=response.error_code,
                 request_id=getattr(self, "session_id", None),
-                error_type=ErrorType.INTERNAL_ERROR,
+                error_type=response.error_type,
                 severity=ErrorSeverity.ERROR,
-                error_message=error_message,
+                error_message=response.error_message,
+                extra_error_details=response.extra_error_details,
             ),
             suggestion_id=suggestion_id,
             command_id=command_id,
             action_stage="preflight_rejected",
-            failure_kind=failure_kind,
-            persist_public_event=False,
+            failure_kind=response.failure_kind,
+            persist_public_event=response.persist_public_event,
         )
 
     async def _send_live_attach_error(
@@ -393,3 +308,9 @@ class ActionFlowMixin(ActionRelayMixin):
             ),
             persist_public_event=False,
         )
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None

@@ -175,6 +175,9 @@ def prepare_memory_update_run(
         memory_requests = _load_memory_requests(
             connection=connection, user_id=user_id, terminals=terminals
         )
+        session_memories = _render_session_memories(
+            connection=connection, user_id=user_id, terminals=terminals
+        )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
             user_id=user_id,
@@ -254,6 +257,7 @@ def prepare_memory_update_run(
         action_turns=_render_action_turns(terminals),
         memory_requests=_render_memory_requests(memory_requests),
         memory_request_ids=tuple(request.request_id for request in memory_requests),
+        session_memories=session_memories,
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
@@ -387,14 +391,35 @@ def _render_memory_requests(requests: tuple[MemoryRequest, ...]) -> str:
     )
 
 
+def _render_session_memories(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    terminals: tuple[MemoryUpdateActionTerminal, ...],
+) -> str:
+    # The session memory at a turn's end may have been written in an earlier
+    # turn of the same Action, so the search starts at the Action's first step.
+    entries: list[str] = []
+    for terminal in terminals:
+        row = connection.execute(
+            _SESSION_MEMORY_SQL,
+            (user_id, terminal["action_id"], 1, terminal["turn_end_step_number"]),
+        ).fetchone()
+        if row is not None:
+            entries.append(
+                f"- action_id: {terminal['action_id']} (step {row['short_step_id']}) "
+                f"content: {json.dumps(row['content'], ensure_ascii=False)}"
+            )
+    return "\n".join(entries)
+
+
 # A step retried under one short_step_id resolves to its latest attempt, as the
-# Action history tools resolve it, so only a remember call that finally
-# succeeded counts.
-_REMEMBER_STEPS_SQL = """
+# Action history tools resolve it, so only a call that finally succeeded counts.
+_RESOLVED_STEPS_CTE = """
 WITH ranked_steps AS (
     SELECT
         step_id, short_step_id, step_number, local_step_number, step_name,
-        status, created_at, json_extract(tool_args, '$.args.note') AS note,
+        status, created_at, tool_args,
         ROW_NUMBER() OVER (
             PARTITION BY short_step_id
             ORDER BY
@@ -407,11 +432,29 @@ WITH ranked_steps AS (
     WHERE user_id = ? AND action_id = ? AND step_number BETWEEN ? AND ?
       AND short_step_id IS NOT NULL
 )
-SELECT step_id, short_step_id, note
+"""
+
+_REMEMBER_STEPS_SQL = (
+    _RESOLVED_STEPS_CTE
+    + """
+SELECT step_id, short_step_id, json_extract(tool_args, '$.args.note') AS note
 FROM ranked_steps
 WHERE resolution_rank = 1 AND step_name = 'tool::remember' AND status = 'success'
 ORDER BY step_number, local_step_number, created_at, short_step_id
 """
+)
+
+_SESSION_MEMORY_SQL = (
+    _RESOLVED_STEPS_CTE
+    + """
+SELECT short_step_id, json_extract(tool_args, '$.args.content') AS content
+FROM ranked_steps
+WHERE resolution_rank = 1 AND step_name = 'tool::write_session_memory'
+  AND status = 'success'
+ORDER BY step_number DESC, local_step_number DESC, created_at DESC
+LIMIT 1
+"""
+)
 
 
 def _render_short_insights(

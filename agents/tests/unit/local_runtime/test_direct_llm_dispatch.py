@@ -49,6 +49,7 @@ from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import LlmProxyExecutionError, ProviderError
 from pantaray_llm.profiles import ACTIVITY_SUMMARY_PROFILE_ID, MEMORY_UPDATE_PROFILE_ID
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.providers.anthropic.provider import MISSING_CALL_REPAIR_LIMIT
 from pantaray_llm.providers.openai_responses.retry_policy import (
     LLM_TRANSPORT_MAX_ATTEMPTS,
 )
@@ -74,7 +75,7 @@ FIREWORKS_CONNECTION = ApiKeyConnection(
     api_key=FIREWORKS_KEY,
 )
 ANTHROPIC_CONNECTION = ApiKeyConnection(
-    provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY
+    provider="anthropic", model="claude-sonnet-5-5", api_key=ANTHROPIC_KEY
 )
 CHATGPT_CONNECTION = ChatGptConnection(
     model="gpt-5.6-sol",
@@ -104,7 +105,7 @@ ANSWER_SCHEMA = {
 ANTHROPIC_MESSAGE = {
     "type": "message",
     "id": "msg_anthropic_1",
-    "model": "claude-sonnet-5-2026",
+    "model": "claude-sonnet-5-5",
     "content": [
         {"type": "thinking", "thinking": "considering"},
         {"type": "text", "text": "hello"},
@@ -654,7 +655,7 @@ async def test_a_known_capability_gap_fails_before_any_request(
 
 
 @pytest.mark.parametrize(
-    ("connection", "host", "path", "sends", "headers"),
+    ("connection", "host", "path", "budget", "headers"),
     [
         (
             CHATGPT_CONNECTION,
@@ -680,7 +681,8 @@ async def test_a_known_capability_gap_fails_before_any_request(
             ANTHROPIC_CONNECTION,
             "api.anthropic.com",
             "/v1/messages",
-            1,
+            # Room to ask again after a tool use reply without a call.
+            1 + MISSING_CALL_REPAIR_LIMIT,
             {"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01"},
         ),
     ],
@@ -691,15 +693,15 @@ async def test_each_connection_reaches_only_its_own_endpoint(
     connection: LlmConnection,
     host: str,
     path: str,
-    sends: int,
+    budget: int,
     headers: dict[str, str],
 ) -> None:
     recorder = boundary()
 
     result = await dispatch(connection)
 
-    assert len(recorder.requests) == sends
-    assert recorder.budgets == [sends]
+    assert len(recorder.requests) == 1
+    assert recorder.budgets == [budget]
     assert recorder.subjects == [OWNER_ID]
     assert recorder.targets[-1] == (host, path)
     assert {reached for reached, _ in recorder.targets} == {host}
@@ -722,7 +724,7 @@ async def test_each_connection_reaches_only_its_own_endpoint(
             api_key=FIREWORKS_KEY,
         ),
         ApiKeyConnection(
-            provider="anthropic", model="claude-opus-5", api_key=ANTHROPIC_KEY
+            provider="anthropic", model="claude-opus-5-5", api_key=ANTHROPIC_KEY
         ),
         ChatGptConnection(model=USER_MODEL, credential=CHATGPT_CONNECTION.credential),
     ],

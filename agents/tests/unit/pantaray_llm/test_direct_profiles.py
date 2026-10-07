@@ -63,7 +63,19 @@ def test_selected_responses_model_controls_provider_parameters(
     assert profile.max_output_tokens == output_limit
 
 
-@pytest.mark.parametrize("model", ["claude-opus-5", "claude-sonnet-5"])
+# claude-opus-5 and claude-sonnet-5 left the settings candidates but stay
+# resolvable for connections saved with them.
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-fable-5-1",
+        "claude-opus-5",
+        "claude-sonnet-5",
+    ],
+)
 @pytest.mark.parametrize(
     ("purpose", "effort"),
     [("action.executing", "high"), ("activity_summary", "medium")],

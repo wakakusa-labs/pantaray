@@ -703,3 +703,150 @@ async def test_sdk_broken_trace_survives_provider_error_normalization(
         ):
             await sdk_post(url)
         assert len(requests) == (2 if broken == "missing" else 0)
+
+
+ANTHROPIC_TOOL = {
+    "name": "pick",
+    "description": "Pick a candidate.",
+    "parameters": {
+        "type": "object",
+        "properties": {"choice": {"type": "integer"}},
+        "required": ["choice"],
+        "additionalProperties": False,
+    },
+}
+
+
+def anthropic_replies(*contents):
+    """Answer the n-th Messages POST with the n-th content, repeating the last."""
+
+    sent = 0
+
+    def payload(_headers):
+        nonlocal sent
+        content = contents[min(sent, len(contents) - 1)]
+        sent += 1
+        return json.dumps(
+            {
+                "type": "message",
+                "id": f"msg_{sent}",
+                "model": "claude-opus-5-5",
+                "role": "assistant",
+                "content": content,
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 3},
+            }
+        ).encode()
+
+    return payload
+
+
+TEXT_ONLY = [{"type": "text", "text": "Candidate 1 fits best."}]
+CALL = [{"type": "tool_use", "id": "toolu_1", "name": "pick", "input": {"choice": 1}}]
+
+
+async def anthropic_tool_call(url, monkeypatch):
+    """One single-shot tool use request through the direct Anthropic route."""
+
+    from pantaray_agents.local_runtime.llm_proxy import direct
+    from pantaray_agents.local_runtime.runtime.connection_store import (
+        ApiKeyConnection,
+    )
+    from pantaray_llm.contracts.request import LlmRequest
+    from pantaray_llm.providers.anthropic import transport as anthropic_transport
+
+    monkeypatch.setattr(anthropic_transport, "ANTHROPIC_MESSAGES_URL", url)
+    request = LlmRequest.model_validate(
+        {
+            "purpose": "suggestion",
+            "trace": {"local_job_id": "job"},
+            "messages": [
+                {"role": "user", "content": [{"type": "input_text", "text": "raw"}]}
+            ],
+            "tool_use": {"tools": [ANTHROPIC_TOOL], "continuation_mode": "disabled"},
+        }
+    )
+    return await direct.execute_direct_llm_request(
+        connection=ApiKeyConnection(
+            provider="anthropic", model="claude-opus-5-5", api_key="test-key"
+        ),
+        request=request,
+        uploaded_blobs={},
+        user_id="alice",
+        response_schema=None,
+    )
+
+
+async def test_anthropic_asks_again_within_the_source_request_limit(monkeypatch):
+    gate, source = await active()
+    async with server(payload=anthropic_replies(TEXT_ONLY, CALL)) as (
+        url,
+        _,
+        _,
+        requests,
+    ):
+        with source_transport.source_scope(gate, source):
+            response = await anthropic_tool_call(url, monkeypatch)
+        assert len(requests) == 2
+        assert all(b"raw" in body for _, body in requests)
+    assert response.tool_calls[0].arguments == {"choice": 1}
+    assert response.usage_metadata["total_tokens"] == 26
+
+
+async def test_anthropic_stops_asking_at_the_repair_limit(monkeypatch):
+    from pantaray_llm.providers.anthropic.provider import MISSING_CALL_REPAIR_LIMIT
+
+    gate, source = await active()
+    async with server(payload=anthropic_replies(TEXT_ONLY)) as (url, _, _, requests):
+        with (
+            source_transport.source_scope(gate, source),
+            pytest.raises(LlmProxyExecutionError) as caught,
+        ):
+            await anthropic_tool_call(url, monkeypatch)
+        assert len(requests) == 1 + MISSING_CALL_REPAIR_LIMIT
+    # Still the repairable rejection, billed for every request it sent.
+    assert caught.value.tool_call_violation_reason == "missing_call"
+    assert caught.value.recovery == "repair_next_turn"
+    assert caught.value.usage_metadata["total_tokens"] == 13 * (
+        1 + MISSING_CALL_REPAIR_LIMIT
+    )
+
+
+@pytest.mark.parametrize("cancel_delivered", [True, False])
+async def test_anthropic_revocation_before_the_repair_sends_nothing_more(
+    monkeypatch, cancel_delivered
+):
+    gate, source = await active()
+    reached, release = asyncio.Event(), asyncio.Event()
+    if not cancel_delivered:
+        monkeypatch.setattr(gate, "_cancel_tracked", lambda *_: None)
+    original = source_transport._HeaderTrace.__call__
+
+    async def before_second_header(self, event, info):
+        if event == "http11.send_request_headers.started" and self.started == 1:
+            reached.set()
+            await release.wait()
+        await original(self, event, info)
+
+    monkeypatch.setattr(source_transport._HeaderTrace, "__call__", before_second_header)
+    async with server(payload=anthropic_replies(TEXT_ONLY, CALL)) as (
+        url,
+        _,
+        _,
+        requests,
+    ):
+
+        async def call(url):
+            return await anthropic_tool_call(url, monkeypatch)
+
+        async with start(url, gate, source, call) as task:
+            await reached.wait()
+            await revoke(gate)
+            release.set()
+            # The revocation stops the job like any other; it is not a
+            # repairable rejection that would let the caller ask again.
+            with pytest.raises(
+                asyncio.CancelledError if cancel_delivered else SourceInvalidated
+            ):
+                await task
+            assert len(requests) == 1

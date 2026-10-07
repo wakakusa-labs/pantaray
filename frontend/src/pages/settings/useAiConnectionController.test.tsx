@@ -230,7 +230,7 @@ it('uses refreshed provider metadata and sends the key only to the selected prov
   const updated = saved();
   updated.settings.preferences.provider = 'anthropic';
   // 'test-model' は Anthropic の候補に無いので、切り替えとともに既定へ戻る。
-  updated.settings.preferences.model = 'claude-opus-5';
+  updated.settings.preferences.model = 'claude-opus-5-5';
   api.getState.mockResolvedValue(updated);
   fireEvent.change(provider, { target: { value: 'anthropic' } });
   await waitFor(() => expect(provider).toHaveValue('anthropic'));

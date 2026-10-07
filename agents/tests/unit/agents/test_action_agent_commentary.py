@@ -485,7 +485,7 @@ async def test_commentary_only_think_identity_is_not_reused_after_tool_repair(
 
 
 @pytest.mark.asyncio
-async def test_compiled_graph_continues_commentary_until_budget_finalization(
+async def test_graph_continues_commentary_until_budget_finalization(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

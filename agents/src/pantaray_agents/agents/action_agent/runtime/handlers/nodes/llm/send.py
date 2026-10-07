@@ -1,11 +1,14 @@
 """Send one Executing THINK, and answer a refused replay by dropping it once.
 
-Handing a provider turn back is the only part of a request that depends on state
-the desktop cannot check: an ``encrypted_content`` belongs to the organization
-that issued it and does not keep forever. When the provider refuses the input,
-this run stops replaying turns and sends the same turn once more without them --
-once per run, and dropping nothing else, so a request refused for anything else
-in its input is refused again and raised exactly as it was before.
+The projection hands a turn back only behind the prefix it was produced behind,
+which is everything the desktop can check. What it cannot is who the provider
+now is behind a route: on the cloud route the operator may move a profile to
+another model or organization, and an ``encrypted_content`` or a signature from
+the old one is refused. When the provider refuses an input that carried turns,
+this run discards the turns it holds and sends the same turn once more without
+them, dropping nothing else, so a request refused for anything else in its input
+is refused again and raised exactly as it was before. Turns produced after that
+go back as usual.
 """
 
 from __future__ import annotations
@@ -58,7 +61,7 @@ def build_executing_window(
             state,
             rendering=rendering,
             repair_notice=repair_notice,
-            provider_turns=store.replayable(),
+            provider_turns=store.turns,
         )
 
     return build
@@ -75,11 +78,17 @@ async def send_executing_turn(
     tools: tuple[LlmToolDefinition, ...],
     max_parallel_tool_calls: int,
     system_instruction: str,
-) -> LlmActionTurnResponse:
-    """Send ``prepared``; on a refused input, resend once without the turns."""
+) -> tuple[LlmActionTurnResponse, PreparedWindow]:
+    """Send ``prepared``; on a refused input, resend once without the turns.
 
-    async def send(window: PreparedWindow) -> LlmActionTurnResponse:
-        return await agent._generate_llm_action_turn(
+    Returns the response and the window that produced it, whose fingerprint the
+    response's own provider turn is recorded with.
+    """
+
+    async def send(
+        window: PreparedWindow,
+    ) -> tuple[LlmActionTurnResponse, PreparedWindow]:
+        response = await agent._generate_llm_action_turn(
             sink=sink,
             prompt=window.prompt,
             conversation=window.conversation,
@@ -89,6 +98,7 @@ async def send_executing_turn(
             file_inputs=list(window.file_inputs),
             stage=EXECUTING_STAGE,
         )
+        return response, window
 
     with bind_request_llm_connection(connection):
         try:
@@ -102,14 +112,14 @@ async def send_executing_turn(
                 for item in prepared.conversation or ()
             ):
                 raise
-            store.stop_replaying()
+            store.turns.clear()
             logger.warning(
-                "Execution THINK stopped replaying provider turns for this run: "
-                "the provider refused the input (%s). Resending without them, "
-                "which also drops this run's prompt cache read for one turn.",
+                "Execution THINK discarded this run's provider turns: the provider "
+                "refused the input (%s). Resending without them, which also drops "
+                "this run's prompt cache read for one turn.",
                 exc.upstream_code or exc.error_code,
             )
-        # The window is rebuilt from the store, which now replays nothing. Only the
+        # The window is rebuilt from the store, which now holds nothing. Only the
         # conversation differs; the recorded prompt and the input estimate do not.
         return await send(prepare())
 

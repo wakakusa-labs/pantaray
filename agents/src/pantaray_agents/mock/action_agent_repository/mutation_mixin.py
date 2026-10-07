@@ -246,6 +246,9 @@ class MockActionAgentMutationMixin:
             "provider_turn_identity": (
                 None if provider_turn is None else provider_turn.identity
             ),
+            "provider_turn_fingerprint": (
+                None if provider_turn is None else provider_turn.fingerprint
+            ),
             "runtime_state_checkpoint": runtime_state_checkpoint,
             "runtime_state_checkpoint_version": runtime_state_checkpoint_version,
             "status": status,

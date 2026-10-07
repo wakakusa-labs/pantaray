@@ -21,7 +21,6 @@ from pantaray_agents.schema.agent.action_subagent import (
 from pantaray_agents.schema.agent.base import JSONValue, StepStatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
 from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResult
-from pantaray_llm.contracts.conversation import LlmProviderTurn
 
 type PatchRunStepKind = Literal["llm", "tool"]
 type PatchRunStepStatus = Literal["processing", "success", "error"]
@@ -143,7 +142,7 @@ class ActionRepositoryPort(Protocol):
         user_id: str,
         action_id: str,
         identity: str,
-    ) -> RepositoryResult[dict[str, LlmProviderTurn]]: ...
+    ) -> RepositoryResult[dict[str, ActionProviderTurnRecord]]: ...
 
     async def update_action_status_if_processing(
         self,

@@ -291,6 +291,7 @@ async def execution_think_step(  # noqa: C901
     parse_failed = False
     accepted_turn: LlmActionTurnResponse | None = None
     accepted_provider_turn: LlmProviderTurn | None = None
+    accepted_fingerprint: str | None = None
 
     batch: PendingToolBatchModel | None = None
     batch_notice: str | None = None
@@ -355,7 +356,7 @@ async def execution_think_step(  # noqa: C901
         window_rebuilt = window_rebuilt or prepared.did_rebuild
         usage_before = sink.delta
         try:
-            native_turn = await send_executing_turn(
+            native_turn, sent = await send_executing_turn(
                 agent,
                 sink=sink,
                 prepared=prepared,
@@ -419,6 +420,7 @@ async def execution_think_step(  # noqa: C901
             )
         accepted_turn = native_turn
         accepted_provider_turn = provider_turn
+        accepted_fingerprint = sent.fingerprint
         if DRAFT_FINAL_ANSWER_TOOL_ID in native_turn.dropped_call_names or any(
             call.tool_id == DRAFT_FINAL_ANSWER_TOOL_ID for call in accepted_calls
         ):
@@ -534,10 +536,13 @@ async def execution_think_step(  # noqa: C901
             world_state=prepared.world_state,
             # Held for the rest of this run as it is written, so the next turn
             # hands back the same bytes whether it reads them from here or,
-            # after a restart, from the row this writes.
+            # after a restart, from the row this writes. The fingerprint is of
+            # the window that was sent, repair notice included: a turn accepted
+            # on a retry was produced behind a notice no later turn replays.
             provider_turn=provider_turns.accept(
                 step_id=step_id,
                 turn=accepted_provider_turn,
+                fingerprint=accepted_fingerprint,
             ),
         )
     except LLMStepPersistenceError:

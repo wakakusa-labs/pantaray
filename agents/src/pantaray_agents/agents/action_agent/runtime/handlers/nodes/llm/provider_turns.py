@@ -5,16 +5,16 @@ chain. The turn arrives beside the Action turn, is recorded on the THINK row tha
 produced it, and is handed to the projection, which places it on that THINK's
 assistant item.
 
-Two things decide whether a turn can go back, and both live here rather than in
-the projection, which stays a pure function of the history it is given: whose
-account and model issued it (the stop barrier protects the account, while a
-model may change during a run); and whether the provider still accepts it,
-which only a refusal can answer.
+Whose account and model issued a turn decides whether it can go back at all,
+and that lives here rather than in the projection, which stays a pure function
+of the history it is given: the stop barrier protects the account, while a
+model may change during a run. Where a turn may go -- only behind the prefix it
+was produced behind -- is the projection's to decide, from the fingerprint each
+turn is recorded with.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from pantaray_agents.local_runtime.runtime.connection_store import (
@@ -67,39 +67,34 @@ class ActionProviderTurnStore:
     """One run's provider turns, keyed by the ``step_id`` of the THINK row."""
 
     identity: str | None
-    turns: dict[str, LlmProviderTurn] = field(default_factory=dict)
-    replaying: bool = True
+    turns: dict[str, ActionProviderTurnRecord] = field(default_factory=dict)
 
     def use_identity(self, identity: str | None) -> None:
         """Discard opaque turns when the next request selects another model."""
         if identity != self.identity:
             self.identity = identity
             self.turns.clear()
-            self.replaying = True
 
     def accept(
         self,
         *,
         step_id: str,
         turn: LlmProviderTurn | None,
+        fingerprint: str | None,
     ) -> ActionProviderTurnRecord | None:
         """Keep this THINK's turn, and return what its step row stores.
 
         ``None`` when there is nothing to hand back: a route that reaches no
-        provider is answered with no turn.
+        provider is answered with no turn, and a turn sent as one string has no
+        conversation prefix to go back behind.
         """
-        if turn is None or self.identity is None:
+        if turn is None or self.identity is None or fingerprint is None:
             return None
-        self.turns[step_id] = turn
-        return ActionProviderTurnRecord(turn=turn, identity=self.identity)
-
-    def replayable(self) -> Mapping[str, LlmProviderTurn]:
-        """The turns this turn's projection may place on its assistant items."""
-        return self.turns if self.replaying else {}
-
-    def stop_replaying(self) -> None:
-        """Hand nothing back for the rest of this run."""
-        self.replaying = False
+        record = ActionProviderTurnRecord(
+            turn=turn, identity=self.identity, fingerprint=fingerprint
+        )
+        self.turns[step_id] = record
+        return record
 
 
 async def load_action_provider_turns(

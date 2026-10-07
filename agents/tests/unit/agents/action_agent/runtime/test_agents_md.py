@@ -427,6 +427,7 @@ def test_attached_instructions_survive_output_omission() -> None:
     think.pop("agents_md")
     projection = project_action_conversation(
         cast(Any, [think, entry]),
+        request_fingerprint="",
         omit_before_step_number=3,
         turn_context="TC",
         repair_notice="",

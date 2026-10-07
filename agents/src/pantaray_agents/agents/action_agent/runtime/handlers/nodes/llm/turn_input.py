@@ -30,6 +30,7 @@ from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
 )
 from pantaray_agents.agents.action_agent.support.conversation_projection import (
     TURN_CONTEXT_HEADING,
+    fingerprint_request,
     project_action_conversation,
 )
 from pantaray_agents.agents.action_agent.support.world_state import (
@@ -37,9 +38,9 @@ from pantaray_agents.agents.action_agent.support.world_state import (
     WorldStateUpdate,
     world_state_fields,
 )
+from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.agent.action_history import SUPERVISOR_SCOPE_HANDLE
 from pantaray_agents.utils.local_time import local_now_for_model
-from pantaray_llm.contracts.conversation import LlmProviderTurn
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
 from .context_budget import PreparedWindow, input_bytes, prepare_window
@@ -70,7 +71,7 @@ class ExecutingTurn:
 
     head: str
     system_instruction: str
-    tool_bytes: int
+    tools: tuple[LlmToolDefinition, ...]
     scope_handles: tuple[str, ...]
     sends_conversation: bool
     # What the head shows that this run may have read differently; None when
@@ -83,7 +84,7 @@ class ExecutingTurn:
         *,
         rendering: PromptRenderingService,
         repair_notice: str,
-        provider_turns: Mapping[str, LlmProviderTurn],
+        provider_turns: Mapping[str, ActionProviderTurnRecord],
     ) -> PreparedWindow:
         def assemble(boundary: int) -> PreparedWindow:
             return self._assemble(
@@ -102,7 +103,7 @@ class ExecutingTurn:
         *,
         rendering: PromptRenderingService,
         repair_notice: str,
-        provider_turns: Mapping[str, LlmProviderTurn],
+        provider_turns: Mapping[str, ActionProviderTurnRecord],
         boundary: int,
     ) -> PreparedWindow:
         history = rendering.format_history(state, omit_before_step_number=boundary)
@@ -121,6 +122,11 @@ class ExecutingTurn:
             project_action_conversation(
                 entries,
                 omit_before_step_number=boundary,
+                request_fingerprint=fingerprint_request(
+                    head=self.head,
+                    system_instruction=self.system_instruction,
+                    tools=self.tools,
+                ),
                 turn_context=(
                     None if update is None else TURN_CONTEXT_HEADING + update.text
                 ),
@@ -135,11 +141,15 @@ class ExecutingTurn:
         # estimate measures the shape that actually goes upstream, and the hard
         # 85% check after a rebuild is what keeps the two units safe together.
         history_bytes = input_bytes(history)
+        tool_bytes = sum(
+            len(tool.model_dump_json().encode("utf-8")) for tool in self.tools
+        )
         if projection is None:
             return PreparedWindow(
                 prompt=recorded,
                 recorded_prompt=recorded,
                 conversation=None,
+                fingerprint=None,
                 turn_context=None,
                 world_state=None,
                 file_inputs=tuple(
@@ -151,12 +161,13 @@ class ExecutingTurn:
                 ),
                 history_bytes=history_bytes,
                 rendered_bytes=input_bytes(recorded, self.system_instruction)
-                + self.tool_bytes,
+                + tool_bytes,
             )
         return PreparedWindow(
             prompt=self.head,
             recorded_prompt=recorded,
             conversation=projection.conversation,
+            fingerprint=projection.fingerprint,
             turn_context=projection.turn_context,
             world_state=None if update is None else update.values,
             file_inputs=projection.file_inputs,
@@ -168,7 +179,7 @@ class ExecutingTurn:
             # 1,300 bytes of encrypted state cost about 20 input tokens, so
             # bytes / 4 would overstate it some fifteen times.
             rendered_bytes=input_bytes(self.head, self.system_instruction)
-            + self.tool_bytes
+            + tool_bytes
             + sum(
                 len(item.model_dump_json(exclude={"provider_turn"}).encode("utf-8"))
                 for item in projection.conversation
@@ -238,7 +249,7 @@ def build_executing_turn(
         system_instruction=_system_instruction(
             agent, language=runtime.request.language
         ),
-        tool_bytes=sum(len(tool.model_dump_json().encode("utf-8")) for tool in tools),
+        tools=tools,
         scope_handles=supervisor_prompt_scope_handles(state),
         sends_conversation=sends_conversation,
         world_state=world_state,

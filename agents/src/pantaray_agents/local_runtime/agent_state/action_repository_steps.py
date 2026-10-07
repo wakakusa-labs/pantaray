@@ -33,7 +33,6 @@ from pantaray_agents.schema.repositories.repository import (
     RepositoryErrorKind,
     RepositoryResult,
 )
-from pantaray_llm.contracts.conversation import LlmProviderTurn
 
 from ..runtime.action_checkpoint_retention import prune_action_checkpoints_in_connection
 from .action_llm_turn_commit import (
@@ -162,6 +161,9 @@ class LocalActionRepositoryStepsMixin:
             provider_turn=None if provider_turn is None else provider_turn.turn,
             provider_turn_identity=(
                 None if provider_turn is None else provider_turn.identity
+            ),
+            provider_turn_fingerprint=(
+                None if provider_turn is None else provider_turn.fingerprint
             ),
             runtime_state_checkpoint=runtime_state_checkpoint,
             runtime_state_checkpoint_version=runtime_state_checkpoint_version,
@@ -314,7 +316,7 @@ class LocalActionRepositoryStepsMixin:
         user_id: str,
         action_id: str,
         identity: str,
-    ) -> RepositoryResult[dict[str, LlmProviderTurn]]:
+    ) -> RepositoryResult[dict[str, ActionProviderTurnRecord]]:
         """The turns of this Action that ``identity`` may be handed back.
 
         A run keeps the turns it received in memory; this reloads them after a

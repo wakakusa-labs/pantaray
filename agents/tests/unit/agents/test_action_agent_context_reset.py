@@ -641,7 +641,7 @@ def test_complete_input_is_counted_and_protected_parts_can_exceed_target(
     prepared = turn_input.ExecutingTurn(
         head=memory,
         system_instruction=system,
-        tool_bytes=sum(len(tool.model_dump_json().encode("utf-8")) for tool in tools),
+        tools=tuple(tools),
         scope_handles=("S",),
         sends_conversation=False,
     ).prepare(

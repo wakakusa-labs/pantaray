@@ -3,6 +3,18 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.3.3
+
+- Fixed Suggestions not appearing when connected with ChatGPT.
+- A conversation you start by replying to a suggestion now keeps the suggestion as its title in History.
+- Includes security updates.
+
+---
+
+- ChatGPT で接続していると、提案が表示されなくなっていた問題を直しました。
+- 提案に返信して始めた会話は、履歴で提案の文面を題名として保つようになりました。
+- セキュリティの更新を取り込みました。
+
 ## 0.3.2
 
 - Fixed Pantaray being unable to start, with History stuck loading, when a saved tool result file was missing.

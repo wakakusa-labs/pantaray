@@ -5,6 +5,7 @@ import codecs
 import os
 import signal
 import sys
+import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,8 +52,10 @@ def _emit_message(message: object) -> None:
 def _temp_dir_usage_bytes(root: Path) -> int:
     total = 0
     for path in root.rglob("*"):
-        if path.is_file():
-            total += path.stat().st_size
+        # The command creates and removes its temp files while this walk runs.
+        with suppress(FileNotFoundError):
+            if path.is_file():
+                total += path.stat().st_size
     return total
 
 
@@ -295,12 +298,18 @@ async def _serve_request() -> None:
     request = decode_request(raw_line.decode("utf-8"))
     try:
         await _run_helper(request)
-    finally:
-        # EOF also lets the broker classify helper failures without losing the
-        # tracked group leader, which waits here for the broker to reap it.
+    except Exception:
+        # This process boundary reports every helper failure: the broker shows
+        # this stderr when the output ends without a completion receipt. A gone
+        # broker must not end the helper here, before it can kill the group.
         with suppress(BrokenPipeError):
-            sys.stdout.close()
-        await asyncio.Future()
+            traceback.print_exc()
+    # EOF tells the broker the helper is done, receipt or not. sys.stdout.close()
+    # would leave fd 1 open (the interpreter opens it with closefd=False), so the
+    # broker would wait forever. The tracked group leader then waits here for the
+    # broker to reap it.
+    os.close(sys.stdout.fileno())
+    await asyncio.Future()
 
 
 async def main() -> int:

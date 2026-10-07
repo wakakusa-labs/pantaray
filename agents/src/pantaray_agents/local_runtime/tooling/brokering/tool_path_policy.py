@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import get_close_matches
 from itertools import islice
@@ -31,7 +30,12 @@ from .outside_workspace import (
     resolve_outside_workspace_cwd,
     resolve_outside_workspace_patch_target,
 )
-from .private_app_storage import private_app_storage_error, private_app_storage_filter
+from .private_app_storage import (
+    PrivateAppStorage,
+    private_app_storage,
+    private_app_storage_error,
+)
+from .read_scope import ReadScope
 
 READ_PATH_NOT_FOUND = "READ_PATH_NOT_FOUND"
 READ_PATH_DENIED = "READ_PATH_DENIED"
@@ -58,22 +62,51 @@ class ExecSandboxRoots:
     write_roots: tuple[Path, ...]
 
 
+def read_scope(context: BrokerContext) -> ReadScope:
+    """The read scope of an Action's read/search tool call."""
+
+    if context.path_access_kind != "read":
+        raise BrokerPolicyError(
+            f"tool {context.tool_definition.tool_id} is not a read/search tool",
+            code=READ_PATH_DENIED,
+        )
+    return ReadScope(
+        manifest_roots=context.manifest_roots,
+        cwd_path=Path(context.execution_session.cwd_path),
+        read_access_scope=context.read_access_scope,
+        scratch_root_path=context.scratch_root_path,
+        private_storage=_private_storage(context),
+    )
+
+
 def resolve_read_tool_path(
     *,
     context: BrokerContext,
     raw_path: str,
     must_exist: bool,
     must_be_file: bool = False,
+) -> ResolvedManifestPath:
+    """Resolve a path the Action's ``read`` tool could open (AGENTS.md lookup)."""
+
+    return resolve_read_path(
+        scope=read_scope(context),
+        raw_path=raw_path,
+        must_exist=must_exist,
+        must_be_file=must_be_file,
+    )
+
+
+def resolve_read_path(
+    *,
+    scope: ReadScope,
+    raw_path: str,
+    must_exist: bool,
+    must_be_file: bool = False,
     must_be_dir: bool = False,
 ) -> ResolvedManifestPath:
-    if context.path_access_kind != "read":
-        raise BrokerPolicyError(
-            f"tool {context.tool_definition.tool_id} is not a read/search tool",
-            code=READ_PATH_DENIED,
-        )
     try:
         resolved = _resolve_read_tool_path_unchecked(
-            context=context,
+            scope=scope,
             raw_path=raw_path,
             must_exist=must_exist,
             must_be_file=must_be_file,
@@ -81,26 +114,20 @@ def resolve_read_tool_path(
         )
     except FileNotFoundError as exc:
         suggestions = _resolve_missing_path_suggestions(
-            context=context,
+            scope=scope,
             raw_path=raw_path,
         )
         raise _missing_path_error(
             raw_path=raw_path.strip(),
             suggestions=suggestions,
-            full_access=context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS,
+            full_access=scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS,
         ) from exc
-    reject_private_action_plan_path(context=context, path=resolved.path)
-    if private_app_storage_filter(context)(resolved.path):
+    reject_private_action_plan_path(
+        scratch_root_path=scope.scratch_root_path, path=resolved.path
+    )
+    if scope.private_storage.hides(resolved.path):
         raise private_app_storage_error(code=READ_PATH_DENIED)
     return resolved
-
-
-def hidden_read_path_filter(context: BrokerContext) -> Callable[[Path], bool]:
-    is_private_storage = private_app_storage_filter(context)
-    return lambda path: (
-        is_private_storage(path)
-        or is_private_action_plan_path(context=context, path=path)
-    )
 
 
 def resolve_write_tool_path(
@@ -116,7 +143,7 @@ def resolve_write_tool_path(
             f"tool {context.tool_definition.tool_id} is not a workspace write tool",
             code=WRITE_PATH_DENIED,
         )
-    is_private_storage = private_app_storage_filter(context)
+    is_private_storage = _private_storage(context).hides
     try:
         resolved = resolve_local_path(
             roots=context.manifest_roots,
@@ -152,7 +179,9 @@ def resolve_write_tool_path(
             if is_private_storage(candidate.resolve(strict=False)):
                 raise private_app_storage_error(code=WRITE_PATH_DENIED) from exc
         raise _write_path_denied_error() from exc
-    reject_private_action_plan_path(context=context, path=resolved.path)
+    reject_private_action_plan_path(
+        scratch_root_path=context.scratch_root_path, path=resolved.path
+    )
     # Manifest roots match the most specific root first, so a path in the
     # Action's own storage roots resolves to them and gets their permissions.
     if is_private_storage(resolved.path):
@@ -160,23 +189,12 @@ def resolve_write_tool_path(
     return resolved
 
 
-def is_private_action_plan_path(
-    *,
-    context: BrokerContext,
-    path: Path,
-) -> bool:
-    return is_action_plan_artifact_path(
-        scratch_root=context.scratch_root_path,
-        path=path,
-    )
-
-
 def reject_private_action_plan_path(
     *,
-    context: BrokerContext,
+    scratch_root_path: Path,
     path: Path,
 ) -> None:
-    if not is_private_action_plan_path(context=context, path=path):
+    if not is_action_plan_artifact_path(scratch_root=scratch_root_path, path=path):
         return
     raise BrokerPolicyError(
         "The app-managed Action plan is private to the parent plan tools",
@@ -194,7 +212,7 @@ def resolve_exec_tool_cwd(
             f"tool {context.tool_definition.tool_id} is not a workspace exec tool",
             code=EXEC_CWD_DENIED,
         )
-    is_private_storage = private_app_storage_filter(context)
+    is_private_storage = _private_storage(context).hides
     try:
         resolved = resolve_process_cwd(
             roots=context.manifest_roots,
@@ -264,31 +282,31 @@ def resolve_exec_sandbox_roots(
 
 def _resolve_read_tool_path_unchecked(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     raw_path: str,
     must_exist: bool,
     must_be_file: bool,
     must_be_dir: bool,
 ) -> ResolvedManifestPath:
-    if context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS:
+    if scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS:
         return _resolve_full_access_path(
             raw_path=raw_path,
-            cwd_path=Path(context.execution_session.cwd_path),
-            manifest_roots=context.manifest_roots,
+            cwd_path=scope.cwd_path,
+            manifest_roots=scope.manifest_roots,
             must_exist=must_exist,
             must_be_file=must_be_file,
             must_be_dir=must_be_dir,
         )
-    if context.read_access_scope != READ_ACCESS_SCOPE_WORKSPACE:
+    if scope.read_access_scope != READ_ACCESS_SCOPE_WORKSPACE:
         raise BrokerPolicyError(
-            f"Unsupported read_access_scope: {context.read_access_scope}",
+            f"Unsupported read_access_scope: {scope.read_access_scope}",
             code=READ_PATH_DENIED,
         )
     try:
         return resolve_local_path(
-            roots=context.manifest_roots,
+            roots=scope.manifest_roots,
             raw_path=raw_path,
-            cwd_path=Path(context.execution_session.cwd_path),
+            cwd_path=scope.cwd_path,
             capability="read",
             must_exist=must_exist,
             must_be_file=must_be_file,
@@ -298,7 +316,7 @@ def _resolve_read_tool_path_unchecked(
         if exc.code == WORKSPACE_PATH_ESCAPES_ROOT or (
             exc.code == WORKSPACE_PATH_OUTSIDE_ROOTS
             and _raw_candidate_starts_inside_readable_workspace_root(
-                context=context,
+                scope=scope,
                 raw_path=raw_path,
             )
         ):
@@ -364,14 +382,11 @@ def _resolve_full_access_path(
 
 def _resolve_missing_path_suggestions(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     raw_path: str,
 ) -> tuple[str, ...]:
-    candidate = _candidate_path(
-        raw_path=raw_path,
-        cwd_path=Path(context.execution_session.cwd_path),
-    )
-    _ensure_missing_path_is_in_read_scope(context=context, raw_path=str(candidate))
+    candidate = _candidate_path(raw_path=raw_path, cwd_path=scope.cwd_path)
+    _ensure_missing_path_is_in_read_scope(scope=scope, raw_path=str(candidate))
     parent = candidate.parent
     try:
         resolved_parent = parent.resolve(strict=True)
@@ -379,33 +394,30 @@ def _resolve_missing_path_suggestions(
         return ()
     if not resolved_parent.is_dir():
         return ()
-    _ensure_missing_path_is_in_read_scope(
-        context=context, raw_path=str(resolved_parent)
-    )
-    if private_app_storage_filter(context)(resolved_parent):
+    _ensure_missing_path_is_in_read_scope(scope=scope, raw_path=str(resolved_parent))
+    if scope.private_storage.hides(resolved_parent):
         raise private_app_storage_error(code=READ_PATH_DENIED)
-    is_hidden = hidden_read_path_filter(context)
     visible_suggestions: list[str] = []
     for suggestion in _suggest_local_paths(parent=resolved_parent, raw_path=raw_path):
         try:
             resolved_suggestion = Path(suggestion).resolve(strict=False)
         except RuntimeError:
             continue
-        if not is_hidden(resolved_suggestion):
+        if not scope.hides(resolved_suggestion):
             visible_suggestions.append(suggestion)
     return tuple(visible_suggestions)
 
 
 def _ensure_missing_path_is_in_read_scope(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     raw_path: str,
 ) -> None:
-    if context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS:
+    if scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS:
         return
     try:
         _resolve_read_tool_path_unchecked(
-            context=context,
+            scope=scope,
             raw_path=raw_path,
             must_exist=False,
             must_be_file=False,
@@ -429,20 +441,23 @@ def _candidate_path(*, raw_path: str, cwd_path: Path) -> Path:
     return path if path.is_absolute() else cwd_path / path
 
 
+def _private_storage(context: BrokerContext) -> PrivateAppStorage:
+    return private_app_storage(
+        db_path=context.db_path, manifest_roots=context.manifest_roots
+    )
+
+
 def _dedupe_resolved_paths(*paths: Path) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(path.resolve() for path in paths))
 
 
 def _raw_candidate_starts_inside_readable_workspace_root(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     raw_path: str,
 ) -> bool:
-    candidate = _candidate_path(
-        raw_path=raw_path,
-        cwd_path=Path(context.execution_session.cwd_path),
-    )
-    for root in context.manifest_roots:
+    candidate = _candidate_path(raw_path=raw_path, cwd_path=scope.cwd_path)
+    for root in scope.manifest_roots:
         if not root.can_read:
             continue
         try:
@@ -574,9 +589,10 @@ __all__ = [
     "SUGGESTION_SCAN_LIMIT",
     "WRITE_PATH_DENIED",
     "WRITE_PATH_NOT_FOUND",
-    "hidden_read_path_filter",
+    "read_scope",
     "resolve_exec_sandbox_roots",
     "resolve_exec_tool_cwd",
+    "resolve_read_path",
     "resolve_read_tool_path",
     "resolve_write_tool_path",
 ]

@@ -45,6 +45,7 @@ from .broker_common import (
     BrokerPolicyError,
     FinalizedBrokerPolicyError,
     apply_approval_decision,
+    ensure_session_capabilities,
     ensure_tool_authorization,
     load_broker_context,
 )
@@ -90,6 +91,8 @@ from .broker_protocol import (
 from .broker_registry import BROKER_TOOL_REGISTRY, validate_broker_registry
 from .broker_structured_patch import extract_structured_patch_paths
 from .execution_start import claim_broker_execution_start
+from .read_scope import ReadScope
+from .tool_path_policy import read_scope
 
 
 class BrokerCompletionPersistenceError(RuntimeError):
@@ -380,6 +383,13 @@ def _build_validated_patch_request(
     )
 
 
+def _checked_read_scope(context: BrokerContext) -> ReadScope:
+    """The scope a read/search call runs in, once the Action's own checks pass."""
+
+    ensure_session_capabilities(context=context)
+    return read_scope(context)
+
+
 async def execute_broker_tool(
     *,
     db_path: Path,
@@ -448,7 +458,7 @@ async def execute_broker_tool(
         elif isinstance(validated, ValidatedReadRequest):
             outcome = await asyncio.to_thread(
                 run_read_executor,
-                context=context,
+                scope=_checked_read_scope(context),
                 request=validated,
             )
         elif isinstance(validated, ValidatedRenderPdfPageRequest):
@@ -462,19 +472,19 @@ async def execute_broker_tool(
         elif isinstance(validated, ValidatedListRequest):
             outcome = await asyncio.to_thread(
                 run_list_executor,
-                context=context,
+                scope=_checked_read_scope(context),
                 request=validated,
             )
         elif isinstance(validated, ValidatedGlobRequest):
             outcome = await asyncio.to_thread(
                 run_glob_executor,
-                context=context,
+                scope=_checked_read_scope(context),
                 request=validated,
             )
         elif isinstance(validated, ValidatedGrepRequest):
             outcome = await asyncio.to_thread(
                 run_grep_executor,
-                context=context,
+                scope=_checked_read_scope(context),
                 request=validated,
             )
         else:

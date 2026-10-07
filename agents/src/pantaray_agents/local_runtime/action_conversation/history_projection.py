@@ -231,7 +231,13 @@ def _project_action(
     return ConversationHistoryItem(
         kind="conversation",
         action_id=candidate.action_id,
-        title=_user_history_text(title_entry),
+        # A conversation that opens with a replied-to Suggestion keeps the
+        # title that Suggestion had in the list before the reply.
+        title=(
+            _user_history_text(title_entry)
+            if candidate.opening_suggestion_text is None
+            else candidate.opening_suggestion_text
+        ),
         updated_at=candidate.updated_at,
         status=history_status,
         latest_completion_event_id=completion_event_id,

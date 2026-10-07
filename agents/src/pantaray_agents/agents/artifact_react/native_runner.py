@@ -233,14 +233,12 @@ async def run_native_react[T](
         over_input_limit = _exceeds_input_limit(
             run_input.policy, call_continuation, call_pending_result
         )
-        if over_input_limit or (
-            force_terminal
-            and pending_result is not None
-            and pending_result.name != run_input.terminal_tool.name
-        ):
-            # A continuation request must redeclare the prior tool, and one past
-            # the input limit would be rejected. A fresh turn keeps the results in
-            # the prompt transcript instead.
+        if over_input_limit or force_terminal:
+            # A continuation replays the earlier turns as they were sent, so it
+            # cannot carry a narrowed tool set (Anthropic rejects thinking replayed
+            # after its tools changed) or the final-turn prompt (the replay
+            # replaces the prompt), and past the input limit it would be rejected.
+            # A fresh turn keeps the results in the prompt transcript instead.
             call_continuation = None
             call_pending_result = None
         prompt = _build_bounded_prompt(

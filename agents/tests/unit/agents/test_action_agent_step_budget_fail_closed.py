@@ -147,8 +147,8 @@ async def test_action_step_requires_step_budgets() -> None:
         # NOTE: tool_def 解決までは通す（budget check まで到達させる）
         "next_action": build_next_action(
             tool=build_tool_call(
-                tool_id="read_action_plan",
-                args={},
+                tool_id="write_session_memory",
+                args={"content": "notes"},
             ),
             decided_at="2025-01-01T00:00:00Z",
         ),
@@ -196,8 +196,8 @@ async def test_action_step_rejects_missing_tool_counter() -> None:
         "max_tool_steps": 10,
         "next_action": build_next_action(
             tool=build_tool_call(
-                tool_id="read_action_plan",
-                args={},
+                tool_id="write_session_memory",
+                args={"content": "notes"},
             ),
             decided_at="2025-01-01T00:00:00Z",
         ),
@@ -249,8 +249,8 @@ async def test_action_timeout_updates_updated_at() -> None:
         "tool_steps_taken": 1,
         "next_action": build_next_action(
             tool=build_tool_call(
-                tool_id="read_action_plan",
-                args={},
+                tool_id="write_session_memory",
+                args={"content": "notes"},
             ),
             decided_at="2025-01-01T00:00:00Z",
         ),

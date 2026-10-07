@@ -12,6 +12,10 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
 from pantaray_agents.agents.action_agent.support.world_state import (
     WORLD_STATE_SECTIONS,
 )
+from pantaray_agents.agents.action_agent.tools import (
+    SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+    WRITE_SESSION_MEMORY_TOOL_ID,
+)
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 
@@ -40,7 +44,7 @@ def _executing_prompt_template() -> str:
     return template
 
 
-def _soft_plan_section() -> str:
+def _supervisor_rules() -> str:
     config = _executing_config()
     rules = config.get("role_rules")
     assert isinstance(rules, dict)
@@ -93,40 +97,25 @@ def test_executing_prompt_defines_one_parent_tool_use_rule() -> None:
     assert "{pending_goal_completion_evidence}" not in text
 
 
-def test_executing_prompt_keeps_one_optional_complex_task_plan() -> None:
-    section = _soft_plan_section()
-
-    assert "For a complex task, you may use one `plan.md`" in section
-    assert "Do not create it for a small task" in section
-    assert "same `plan.md`" in section
-    assert all(
-        required_part in section
-        for required_part in (
-            "Explicit user requests",
-            "inferred true purpose, clearly labeled as an inference",
-            "Success criteria",
-            "Constraints and non-goals",
-        )
-    )
-    assert "does not select an Action mode" in section
-    assert "not a mandatory checklist" in section
-    assert "open items neither block finalization nor prove success" in section
+def test_executing_prompt_names_the_session_memory_tool_the_supervisor_has() -> None:
+    assert f"`{WRITE_SESSION_MEMORY_TOOL_ID}`" in _supervisor_rules()
+    assert WRITE_SESSION_MEMORY_TOOL_ID in SUPERVISOR_SINGLE_REACT_TOOL_IDS
 
 
 def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence() -> (
     None
 ):
-    section = _soft_plan_section()
+    section = _supervisor_rules()
 
     evidence_inputs = (
         "latest user instructions",
-        "existing `plan.md`",
+        "your session memory",
         "subagent reports",
         "actual tool results and current DB/file state",
     )
     assert all(input_name in section for input_name in evidence_inputs)
     assert "latest user instructions and verified evidence take precedence" in section
-    assert "Update a stale `plan.md`" in section
+    assert "Update stale session memory" in section
     assert "evidence candidates, not truth" in section
     assert "instead of accepting them blindly" in section
     assert "call `history_fetch`" in section
@@ -138,7 +127,7 @@ def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence()
 
 
 def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> None:
-    section = _soft_plan_section()
+    section = _supervisor_rules()
     prompt_text = _read_text(
         Path(__file__).parents[3]
         / "src"

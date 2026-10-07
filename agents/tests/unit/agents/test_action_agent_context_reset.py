@@ -287,7 +287,7 @@ async def _build_fixture(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         state=state,
-        allowed_tool_ids=("read_action_plan",),
+        allowed_tool_ids=("write_session_memory",),
     )
     await agent.repository.save_action(
         {
@@ -324,7 +324,7 @@ def _install_think(agent: ActionAgent, *, prompt_tokens: int, cached: int = 0) -
             stage="executing",
             may_raise=True,
         )
-        return native_tool_turn("read_action_plan", {})
+        return native_tool_turn("write_session_memory", {"content": "notes"})
 
     agent._generate_llm_action_turn = AsyncMock(side_effect=_call)  # type: ignore[attr-defined]
 
@@ -725,9 +725,9 @@ async def test_repair_attempt_uses_latest_usage_and_records_the_sent_prompt(
             may_raise=True,
         )
         return native_tool_turn(
-            "read_action_plan",
-            {},
-            step_note=None if len(prompts) == 1 else "Read the plan.",
+            "write_session_memory",
+            {"content": "notes"},
+            step_note=None if len(prompts) == 1 else "Note the findings.",
         )
 
     agent._generate_llm_action_turn = AsyncMock(side_effect=call)

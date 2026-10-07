@@ -54,7 +54,7 @@ from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
 PATCH_TOOL = "apply_patch"
-PLAN_TOOL = "read_action_plan"
+SQL_TOOL = "memory_sql"
 _PATCH_ARGS: dict[str, JSONValue] = {
     "changes": [
         {
@@ -152,7 +152,7 @@ async def _build_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path, *, action_id
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         state=state,
-        allowed_tool_ids=(PATCH_TOOL, PLAN_TOOL),
+        allowed_tool_ids=(PATCH_TOOL, SQL_TOOL),
     )
     await agent.repository.save_action(
         {
@@ -307,8 +307,11 @@ async def test_a_parallel_batch_checkpoints_no_remaining_calls(
             calls=[
                 LlmToolCall(
                     call_id=f"call-{index}",
-                    name=PLAN_TOOL,
-                    arguments={STEP_NOTE_ARG: _note(index)},
+                    name=SQL_TOOL,
+                    arguments={
+                        "sql": "SELECT COUNT(*) AS n FROM agent_actions",
+                        STEP_NOTE_ARG: _note(index),
+                    },
                 )
                 for index in range(3)
             ],

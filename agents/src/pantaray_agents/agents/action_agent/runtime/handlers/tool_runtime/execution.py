@@ -18,13 +18,12 @@ from pantaray_agents.agents.action_agent.tools import (
     CANCEL_SUBAGENT_TOOL_ID,
     CAPTURE_SCREEN_TOOL_ID,
     DRAFT_FINAL_ANSWER_TOOL_ID,
-    READ_ACTION_PLAN_TOOL_ID,
     REMEMBER_TOOL_ID,
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL_ID,
     SUBMIT_FINAL_ANSWER_TOOL_ID,
     WAIT_SUBAGENTS_TOOL_ID,
-    WRITE_ACTION_PLAN_TOOL_ID,
+    WRITE_SESSION_MEMORY_TOOL_ID,
     ZANEI_QUERY_TOOL_ID,
     ZANEI_TIMELINE_TOOL_ID,
     ToolDefinition,
@@ -76,9 +75,9 @@ from .memory_links import (
 )
 from .memory_search import run_memory_search_tool
 from .memory_sql import run_memory_sql_tool
-from .plan_document import run_action_plan_tool
 from .remember import run_remember_tool
 from .request_identity import resolve_tool_request_id
+from .session_memory import run_write_session_memory_tool
 from .shared import (
     ApprovalDeniedToolControl,
     ApprovalRequiredToolControl,
@@ -182,16 +181,9 @@ async def run_validated_tool_impl(
         result = await run_submit_final_answer_tool(
             agent, resolved_step_id, tool_def, args, state, actor=actor
         )
-    elif tool_def.tool_id in {
-        READ_ACTION_PLAN_TOOL_ID,
-        WRITE_ACTION_PLAN_TOOL_ID,
-    }:
-        result = await run_action_plan_tool(
-            step_id=resolved_step_id,
-            tool_def=tool_def,
-            args=args,
-            state=state,
-            actor=actor,
+    elif tool_def.tool_id == WRITE_SESSION_MEMORY_TOOL_ID:
+        result = run_write_session_memory_tool(
+            step_id=resolved_step_id, tool_def=tool_def, args=args, actor=actor
         )
     elif tool_def.tool_id == SPAWN_SUBAGENT_TOOL_ID:
         result = await run_spawn_subagent_tool(

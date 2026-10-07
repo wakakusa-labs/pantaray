@@ -397,6 +397,25 @@ def test_an_omitted_turn_drops_its_context_body_and_media() -> None:
     assert kept.output["output"] == {"kind": "file", "content": "body 3"}  # type: ignore[index]
 
 
+def test_an_omitted_session_memory_write_keeps_its_content() -> None:
+    """The latest write's arguments are the session memory; omission keeps them."""
+
+    notes = {"content": "- build: `uv run pytest`"}
+    write = _tool(
+        2,
+        think=2,
+        call_id="call_a",
+        tool_id="write_session_memory",
+        args=notes,
+        output={"status": "written", "bytes": 25, "limit_bytes": 8192},
+    )
+    items = _require([_user(1), _think(2), write, _think(3)], omit=3)
+
+    assistant = cast(LlmTurnAssistantItem, items[1])
+    assert assistant.calls[0].arguments == {**notes, "step_note": "note 2"}
+    assert cast(LlmTurnToolResultItem, items[2]).output["output"] == "…"  # type: ignore[index]
+
+
 def test_an_attached_image_rides_on_the_result_that_produced_it() -> None:
     projection = _project(
         [
@@ -1171,7 +1190,7 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
     for supervisor_only in (
         "draft_final_answer",
         "submit_final_answer",
-        "plan.md",
+        "write_session_memory",
         "spawn_subagent",
         "wait_subagents",
         "step_note",

@@ -36,7 +36,7 @@ from pantaray_agents.mock.mock_repository import MockRepository
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
-_NOTE = "作業計画がまだ無いので、read_action_plan で現状の plan.md を確認する。"
+_NOTE = "調べた結果を後で使うので、セッションメモリに書き留める。"
 
 
 @pytest.fixture(autouse=True)
@@ -213,12 +213,12 @@ async def test_step_note_is_stripped_from_args_and_stored_on_both_history_entrie
         monkeypatch,
         tmp_path,
         action_id="act-step-note-ok",
-        allowed_tool_ids=("read_action_plan",),
+        allowed_tool_ids=("write_session_memory",),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
         return_value=native_tool_turn(
-            "read_action_plan",
-            {},
+            "write_session_memory",
+            {"content": "notes"},
             step_note=f"  {_NOTE}  ",
         )
     )
@@ -229,7 +229,7 @@ async def test_step_note_is_stripped_from_args_and_stored_on_both_history_entrie
 
     next_action = state["next_action"]
     assert next_action is not None and next_action.tool is not None
-    assert next_action.tool.args == {}
+    assert next_action.tool.args == {"content": "notes"}
 
     state = await action_step(
         agent, state, runtime, sink=create_state_token_sink(state)
@@ -244,9 +244,9 @@ async def test_step_note_is_stripped_from_args_and_stored_on_both_history_entrie
     )
     assert think_entry["summary"] == _NOTE
     assert tool_entry["summary"] == _NOTE
-    assert think_entry["args"] == {}
-    assert tool_entry["args"] == {}
-    assert tool_entry["result_line"] == "read_action_plan: ok"
+    assert think_entry["args"] == {"content": "notes"}
+    assert tool_entry["args"] == {"content": "notes"}
+    assert tool_entry["result_line"] == "write_session_memory: ok"
 
     tool_steps = [
         step

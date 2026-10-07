@@ -26,10 +26,10 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.bounded_workspace_
     read_text_page,
     search_text,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
 )
-from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 
 @pytest.mark.asyncio

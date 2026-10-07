@@ -28,9 +28,9 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     MemoryDraftRouter,
     MemoryDraftToolSession,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 
 USER_ID = "user-1"
 RUN_ID = "run-1"

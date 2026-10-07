@@ -26,10 +26,6 @@ from pantaray_agents.local_runtime.storage.migrations import (
     verify_database_integrity,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
-from pantaray_agents.local_runtime.tooling.react_tools.file_session import (
-    ReadOnlyFileToolSession,
-)
 from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
     LocalSuggestionResearchTools,
 )
@@ -38,6 +34,10 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.snapshot import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.files.session import (
+    ReadOnlyFileToolSession,
+)
+from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 
 from .migrated_db import prepare_test_database
 

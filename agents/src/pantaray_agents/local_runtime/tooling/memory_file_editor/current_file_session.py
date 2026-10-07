@@ -35,13 +35,13 @@ from pantaray_agents.local_runtime.memory_catalog.reference_edits import (
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
-from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     tool_error_response,
 )
+from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 
 from .logical_draft_io import require_editable_document_path
 from .memory_domain_tools import memory_file_domain_definitions

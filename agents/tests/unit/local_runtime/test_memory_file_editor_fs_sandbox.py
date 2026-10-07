@@ -33,14 +33,14 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 from pantaray_agents.local_runtime.tooling.memory_file_editor.logical_draft_io import (
     validate_memory_document_path,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
-    MemoryContextSession,
-)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolRegistry,
     ToolCallEnvelope,
+)
+from pantaray_agents.tools.memory.retrieval import (
+    MemoryContextSession,
 )
 
 

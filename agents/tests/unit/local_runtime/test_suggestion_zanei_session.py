@@ -5,10 +5,6 @@ from uuid import UUID
 
 import pytest
 
-from pantaray_agents.agents.insight_agent.zanei_tools import (
-    MAX_TIMELINE_PAGES_PER_RUN,
-    PAGE_TOOL,
-)
 from pantaray_agents.local_runtime.context.source_gate import (
     ActiveSource,
     SourceInvalidated,
@@ -25,6 +21,10 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.zanei import (
 )
 from pantaray_agents.schema.context_source import SourceBinding
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.zanei import (
+    MAX_TIMELINE_PAGES_PER_RUN,
+    PAGE_TOOL,
+)
 
 STORE_ID = "store-1"
 

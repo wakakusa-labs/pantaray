@@ -5,10 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    DEFAULT_MEMORY_SQL_LIMIT,
-    execute_memory_sql,
-)
 from pantaray_agents.agents.action_agent.tools.memory_sql_tool import MEMORY_SQL_TOOL
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
@@ -17,6 +13,10 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     react_tool_response_schema,
     tool_error_response,
+)
+from pantaray_agents.tools.memory.sql import (
+    DEFAULT_MEMORY_SQL_LIMIT,
+    execute_memory_sql,
 )
 
 # The Action guide's "when" part points at memory_search's time_hint, which the

@@ -43,10 +43,10 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 from pantaray_agents.local_runtime.tooling.memory_file_editor.registry import (
     LocalMemoryFileEditorTools,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 
 from .migrated_db import prepare_test_database
 

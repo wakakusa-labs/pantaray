@@ -14,12 +14,6 @@ from pantaray_agents.agents.insight_agent.record_verification import (
     SourceRecordClaim,
     VerifiedRecord,
 )
-from pantaray_agents.agents.insight_agent.zanei_tools import (
-    EVENT_TOOL,
-    PAGE_LIMIT,
-    PAGE_TOOL,
-    ZaneiTools,
-)
 from pantaray_agents.local_runtime.activity_summary_schedule import iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import SourceControl
@@ -81,6 +75,12 @@ from pantaray_agents.schema.context_source import (
     SuspendSource,
 )
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.zanei import (
+    EVENT_TOOL,
+    PAGE_LIMIT,
+    PAGE_TOOL,
+    ZaneiTools,
+)
 
 from .migrated_db import prepare_test_database
 

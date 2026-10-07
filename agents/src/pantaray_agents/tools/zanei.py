@@ -1,4 +1,4 @@
-"""Read the current source incrementally; only this agent receives raw tools."""
+"""Read the current Zanei source incrementally; Insight, Action and Suggestion share these reads."""
 
 import json
 from dataclasses import dataclass, field
@@ -29,8 +29,6 @@ from pantaray_agents.tools.contract import (
     tool_error_response,
 )
 from pantaray_agents.utils.local_time import describe_utc_timestamp, local_zone_name
-
-from .record_verification import ReadEvent
 
 PAGE_TOOL = "zanei_timeline"
 EVENT_TOOL = "zanei_query"
@@ -70,6 +68,17 @@ class _EventArguments(BaseModel):
 # Shared with the Suggestion run, which offers the same two reads.
 PAGE_REQUEST_SCHEMA = _PageArguments.model_json_schema()
 EVENT_REQUEST_SCHEMA = _EventArguments.model_json_schema()
+
+
+@dataclass(frozen=True, slots=True)
+class ReadEvent:
+    """What this run read about one Zanei event."""
+
+    observed_at: str
+    app_name: str | None
+    bundle_id: str | None
+    window_title: str | None
+    texts: tuple[str, ...]
 
 
 @dataclass(slots=True)

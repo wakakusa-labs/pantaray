@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import pantaray_agents.local_runtime.tooling.react_tools.file_access as file_access_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
+import pantaray_agents.tools.files.access as file_access_module
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -68,12 +68,6 @@ from pantaray_agents.local_runtime.tooling.brokering import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerPolicyError,
 )
-from pantaray_agents.local_runtime.tooling.react_tools import (
-    MemoryReadRoot,
-    ReadOnlyFileAccess,
-    WorkspaceReadRoot,
-    memory_revision_by_source,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
     list_workspace_settings,
@@ -89,6 +83,12 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
     ToolCallEnvelope,
+)
+from pantaray_agents.tools.files.access import ReadOnlyFileAccess
+from pantaray_agents.tools.files.roots import (
+    MemoryReadRoot,
+    WorkspaceReadRoot,
+    memory_revision_by_source,
 )
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION
@@ -1024,8 +1024,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
 
@@ -1052,7 +1051,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         follow_reference,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1124,8 +1123,7 @@ async def test_suggestion_memory_search_uses_snapshot_revision(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1198,8 +1196,7 @@ async def test_suggestion_memory_search_content_can_be_read_to_completion(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1273,7 +1270,7 @@ async def test_suggestion_web_search_returns_shared_client_response(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1338,7 +1335,7 @@ async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1409,7 +1406,7 @@ async def test_suggestion_web_extract_pages_content_from_one_snapshot(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1492,7 +1489,7 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(

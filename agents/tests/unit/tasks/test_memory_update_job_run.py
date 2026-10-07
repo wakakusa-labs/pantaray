@@ -545,6 +545,79 @@ async def test_only_the_final_successful_remember_calls_of_the_turn_are_rendered
     )
 
 
+def _seed_session_memory_steps(
+    runtime: LocalMemoryFileEditorRuntime,
+    steps: tuple[tuple[int, str, str], ...],
+) -> None:
+    """write_session_memory calls as (step_number, status, content)."""
+
+    _seed_remember_steps(runtime, ())  # only the Action row
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        for step_number, status, content in steps:
+            connection.execute(
+                """
+                INSERT INTO agent_action_steps(
+                    step_id, action_id, user_id, step_number, local_step_number,
+                    short_step_id, step_type, step_name, status, tool_args,
+                    started_at, completed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'tool_execution',
+                          'tool::write_session_memory', ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"notes-{step_number}",
+                    ACTION_ID,
+                    USER_ID,
+                    step_number,
+                    step_number,
+                    f"S-{step_number}-TOOL",
+                    status,
+                    json.dumps(
+                        {
+                            "tool_id": "write_session_memory",
+                            "args": {"content": content},
+                        }
+                    ),
+                    TRIGGER_AT,
+                    TRIGGER_AT,
+                    TRIGGER_AT,
+                ),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        (
+            (
+                (2, "success", "earlier notes"),
+                (5, "success", 'current "notes"\nline 2'),
+                (6, "error", "rejected notes"),
+                (7, "success", "notes after the turn"),
+            ),
+            'step S-5-TOOL) content: "current \\"notes\\"\\nline 2"',
+        ),
+        # Notes written in an earlier turn are still current at this turn's end.
+        (((2, "success", "earlier notes"),), 'step S-2-TOOL) content: "earlier notes"'),
+    ],
+)
+async def test_the_latest_successful_session_memory_by_the_turn_end_is_rendered(
+    tmp_path: Path, steps: tuple[tuple[int, str, str], ...], expected: str
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    _seed_session_memory_steps(runtime, steps)
+    _with_turn(payload, 4, 6)
+    agent = _ScriptedMemoryAgent(())
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    (context,) = agent.contexts
+    assert context.session_memories == f"- action_id: {ACTION_ID} ({expected}"
+
+
 @pytest.mark.asyncio
 async def test_a_run_hides_only_the_notes_it_rendered_and_reported_applied(
     tmp_path: Path,

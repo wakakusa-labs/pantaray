@@ -76,6 +76,7 @@ from .broker_direct_read_document import (
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedRenderPdfPageRequest
 from .read_path_resolver import ReadTarget, action_reference_paths, resolve_read_target
+from .tool_path_policy import read_scope
 
 RENDER_CONVERTER_UNAVAILABLE = "RENDER_CONVERTER_UNAVAILABLE"
 RENDER_DOCUMENT_ENCRYPTED = "RENDER_DOCUMENT_ENCRYPTED"
@@ -107,7 +108,7 @@ async def run_render_pdf_page_executor(
     *, context: BrokerContext, request: ValidatedRenderPdfPageRequest
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
-    target = resolve_read_target(context=context, raw_path=request.path)
+    target = resolve_read_target(scope=read_scope(context), raw_path=request.path)
     descriptor = open_read_target(target)
     try:
         renderable = _renderable_format(target, descriptor)

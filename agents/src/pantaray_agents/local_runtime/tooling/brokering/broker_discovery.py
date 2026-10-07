@@ -9,11 +9,7 @@ from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 
 from ..action_plan_document import ACTION_PLAN_FILENAME
 from ..sandbox.seatbelt_profiles import render_ripgrep_seatbelt_profile
-from .broker_common import (
-    BrokerContext,
-    BrokerPolicyError,
-    ensure_session_capabilities,
-)
+from .broker_common import BrokerPolicyError
 from .broker_discovery_paths import (
     DiscoveryPath,
     DiscoveryTruncationReason,
@@ -44,11 +40,8 @@ from .broker_protocol import (
 from .manifest_paths import (
     ResolvedManifestPath,
 )
-from .private_app_storage import PrivateAppStorage, private_app_storage
-from .tool_path_policy import (
-    hidden_read_path_filter,
-    resolve_read_tool_path,
-)
+from .read_scope import ReadScope
+from .tool_path_policy import resolve_read_path
 from .workspace_descriptor_access import scan_skip_notes
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
@@ -66,15 +59,9 @@ class GrepAppendResult:
     truncation_reason: DiscoveryTruncationReason | None
 
 
-def _resolve_directory(
-    *,
-    context: BrokerContext,
-    raw_path: str,
-    field_name: str,
-) -> ResolvedManifestPath:
-    del field_name
-    return resolve_read_tool_path(
-        context=context,
+def _resolve_directory(*, scope: ReadScope, raw_path: str) -> ResolvedManifestPath:
+    return resolve_read_path(
+        scope=scope,
         raw_path=raw_path,
         must_exist=True,
         must_be_dir=True,
@@ -97,18 +84,16 @@ def _sort_discovery_paths(paths: Iterable[DiscoveryPath]) -> list[DiscoveryPath]
 
 def run_list_executor(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     request: ValidatedListRequest,
 ) -> UnprojectedBrokerToolOutcome:
-    ensure_session_capabilities(context=context)
-    base = _resolve_directory(context=context, raw_path=request.path, field_name="path")
-    is_hidden = hidden_read_path_filter(context)
+    base = _resolve_directory(scope=scope, raw_path=request.path)
     bounded = list_discovery_paths(
         base=base,
         max_depth=request.max_depth,
         limit=request.limit,
-        include_path=lambda path: not is_hidden(path),
-        exclude_subtree=private_app_storage(context).prunes,
+        include_path=lambda path: not scope.hides(path),
+        exclude_subtree=scope.private_storage.prunes,
     )
     entries = [entry_for_discovery_path(path) for path in bounded.selected]
     entry_values: list[JSONValue] = [_discovery_entry_json(entry) for entry in entries]
@@ -136,7 +121,7 @@ def run_list_executor(
         file_paths=tuple(str(entry["path"]) for entry in entries),
         file_reference_paths=(
             tuple(str(entry["path"]) for entry in entries if entry["kind"] == "file")
-            if base.root in context.manifest_roots
+            if base.root in scope.manifest_roots
             else ()
         ),
     )
@@ -144,34 +129,25 @@ def run_list_executor(
 
 def run_glob_executor(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     request: ValidatedGlobRequest,
 ) -> UnprojectedBrokerToolOutcome:
-    ensure_session_capabilities(context=context)
-    base = _resolve_directory(
-        context=context,
-        raw_path=request.base_path,
-        field_name="base_path",
-    )
+    base = _resolve_directory(scope=scope, raw_path=request.base_path)
     _reject_unsafe_glob_pattern(request.pattern, field_name="pattern")
-    is_hidden = hidden_read_path_filter(context)
-    storage = private_app_storage(context)
-    scope = storage.search_scope(base.path)
+    search_scope = scope.private_storage.search_scope(base.path)
     backend_result = run_ripgrep_files(
         cwd=base.path,
-        sandbox_profile=_ripgrep_sandbox_profile(
-            context=context, base=base, storage=storage
-        ),
+        sandbox_profile=_ripgrep_sandbox_profile(scope=scope, base=base),
         glob_pattern=request.pattern,
         limit=request.limit,
         follow_symlinks=False,
         excluded_relative_path=_private_plan_relative_to_base(
-            context=context,
+            scope=scope,
             base=base,
         ),
-        pruned_relative_paths=scope.pruned,
-        extra_search_paths=scope.own_roots,
-        include_path=lambda path: not is_hidden(path),
+        pruned_relative_paths=search_scope.pruned,
+        extra_search_paths=search_scope.own_roots,
+        include_path=lambda path: not scope.hides(path),
     )
     selected = [
         DiscoveryPath(path=_backend_path(base, relative_path), kind="file")
@@ -203,26 +179,22 @@ def run_glob_executor(
         file_paths=tuple(str(match["path"]) for match in matches),
         file_reference_paths=(
             tuple(str(match["path"]) for match in matches)
-            if base.root in context.manifest_roots
+            if base.root in scope.manifest_roots
             else ()
         ),
     )
 
 
-def _ripgrep_sandbox_profile(
-    *,
-    context: BrokerContext,
-    base: ResolvedManifestPath,
-    storage: PrivateAppStorage,
-) -> str:
+def _ripgrep_sandbox_profile(*, scope: ReadScope, base: ResolvedManifestPath) -> str:
     # ripgrep reopens what it walks by name, so only the kernel's check on what
     # it really opens holds; the backend's paths are reported as they come.
-    full_access = context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
+    full_access = scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
+    storage = scope.private_storage
     return render_ripgrep_seatbelt_profile(
         read_roots=("/",) if full_access else (str(base.root.canonical_real_path),),
         private_storage_roots=tuple(str(root) for root in storage.storage_roots),
         readable_private_roots=tuple(str(root) for root in storage.readable_roots),
-        action_plan_path=str(context.scratch_root_path / ACTION_PLAN_FILENAME),
+        action_plan_path=str(scope.scratch_root_path / ACTION_PLAN_FILENAME),
     )
 
 
@@ -232,16 +204,16 @@ def _backend_path(base: ResolvedManifestPath, relative_path: str) -> Path:
 
 def _private_plan_relative_to_base(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     base: ResolvedManifestPath,
 ) -> str | None:
     try:
-        relative = (context.scratch_root_path / ACTION_PLAN_FILENAME).relative_to(
+        relative = (scope.scratch_root_path / ACTION_PLAN_FILENAME).relative_to(
             base.path
         )
     except ValueError:
         relative = Path(ACTION_PLAN_FILENAME)
-        ancestor = context.scratch_root_path
+        ancestor = scope.scratch_root_path
         while True:
             if ancestor.samefile(base.path):
                 return relative.as_posix()
@@ -352,36 +324,27 @@ def _grep_match_sort_key(match: dict[str, JSONValue]) -> tuple[str, int]:
 
 def run_grep_executor(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     request: ValidatedGrepRequest,
 ) -> UnprojectedBrokerToolOutcome:
-    ensure_session_capabilities(context=context)
-    base = _resolve_directory(
-        context=context,
-        raw_path=request.base_path,
-        field_name="base_path",
-    )
+    base = _resolve_directory(scope=scope, raw_path=request.base_path)
     if request.include_glob is not None:
         _reject_unsafe_glob_pattern(request.include_glob, field_name="include_glob")
-    is_hidden = hidden_read_path_filter(context)
-    storage = private_app_storage(context)
-    scope = storage.search_scope(base.path)
+    search_scope = scope.private_storage.search_scope(base.path)
     backend_result = run_ripgrep_grep(
         cwd=base.path,
-        sandbox_profile=_ripgrep_sandbox_profile(
-            context=context, base=base, storage=storage
-        ),
+        sandbox_profile=_ripgrep_sandbox_profile(scope=scope, base=base),
         pattern=request.pattern,
         include_glob=request.include_glob,
         max_matches=request.max_matches,
         follow_symlinks=False,
         excluded_relative_path=_private_plan_relative_to_base(
-            context=context,
+            scope=scope,
             base=base,
         ),
-        pruned_relative_paths=scope.pruned,
-        extra_search_paths=scope.own_roots,
-        include_path=lambda path: not is_hidden(path),
+        pruned_relative_paths=search_scope.pruned,
+        extra_search_paths=search_scope.own_roots,
+        include_path=lambda path: not scope.hides(path),
     )
     matches: list[dict[str, JSONValue]] = []
     truncation_reason: DiscoveryTruncationReason | None = (
@@ -411,7 +374,7 @@ def run_grep_executor(
         max_matches=request.max_matches,
         lines_excerpted=lines_excerpted,
         truncation_reason=truncation_reason,
-        include_file_references=base.root in context.manifest_roots,
+        include_file_references=base.root in scope.manifest_roots,
     )
 
 

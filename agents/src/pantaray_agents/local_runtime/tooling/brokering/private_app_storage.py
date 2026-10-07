@@ -9,13 +9,13 @@ grants. Suggestion file tools have no such roots and see none of the storage.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..action_plan_document import relative_to_directory_identity
 from ..outside_workspace_grant import app_owned_roots
-from .broker_common import BrokerContext, BrokerPolicyError
+from .broker_common import BrokerPolicyError
+from .manifest_paths import ManifestRoot
 
 _APP_MANAGED_ROOT_SOURCE_TYPES = frozenset({"scratch", "agent_experience"})
 PRIVATE_APP_STORAGE_MESSAGE = (
@@ -75,21 +75,17 @@ class PrivateAppStorage:
         )
 
 
-def private_app_storage(context: BrokerContext) -> PrivateAppStorage:
+def private_app_storage(
+    *, db_path: Path, manifest_roots: tuple[ManifestRoot, ...]
+) -> PrivateAppStorage:
     return PrivateAppStorage(
-        storage_roots=app_owned_roots(context.db_path),
+        storage_roots=app_owned_roots(db_path),
         readable_roots=tuple(
             root.canonical_real_path
-            for root in context.manifest_roots
+            for root in manifest_roots
             if root.can_read and root.source_type in _APP_MANAGED_ROOT_SOURCE_TYPES
         ),
     )
-
-
-def private_app_storage_filter(context: BrokerContext) -> Callable[[Path], bool]:
-    """Return whether a resolved path lies in storage this Action may not use."""
-
-    return private_app_storage(context).hides
 
 
 def private_app_storage_error(*, code: str) -> BrokerPolicyError:
@@ -129,5 +125,4 @@ __all__ = [
     "is_within_any",
     "private_app_storage",
     "private_app_storage_error",
-    "private_app_storage_filter",
 ]

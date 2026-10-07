@@ -12,11 +12,7 @@ from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 
 from ..action_session_temp_paths import SCRATCH_SESSION_TEMP_DIRNAME
 from .attachment_reference import build_workspace_file_attachment
-from .broker_common import (
-    BrokerContext,
-    BrokerPolicyError,
-    ensure_session_capabilities,
-)
+from .broker_common import BrokerPolicyError
 from .broker_direct_read_document import (
     document_format,
     read_document,
@@ -35,7 +31,7 @@ from .read_path_resolver import (
     action_reference_paths,
     resolve_read_target,
 )
-from .tool_path_policy import hidden_read_path_filter
+from .read_scope import ReadScope
 from .workspace_descriptor_access import open_workspace_entry_descriptor
 
 SAMPLE_BYTES = 4_096
@@ -83,16 +79,15 @@ class DirectoryReadResult:
 
 def run_read_executor(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     request: ValidatedReadRequest,
 ) -> UnprojectedBrokerToolOutcome:
-    ensure_session_capabilities(context=context)
-    target = resolve_read_target(context=context, raw_path=request.path)
+    target = resolve_read_target(scope=scope, raw_path=request.path)
     descriptor = open_read_target(target)
     try:
         if stat.S_ISDIR(os.fstat(descriptor).st_mode):
             return _read_directory(
-                context=context,
+                scope=scope,
                 target=target,
                 request=request,
                 descriptor=descriptor,
@@ -230,7 +225,7 @@ def _read_file(
 
 def _read_directory(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     target: ReadTarget,
     request: ValidatedReadRequest,
     descriptor: int,
@@ -241,7 +236,7 @@ def _read_directory(
     offset = request.offset or 1
     limit = request.limit or DEFAULT_READ_LIMIT
     result = _read_bounded_directory_entries(
-        context=context,
+        scope=scope,
         target=target,
         descriptor=descriptor,
         offset=offset,
@@ -272,7 +267,7 @@ def _read_directory(
 
 def _read_bounded_directory_entries(
     *,
-    context: BrokerContext,
+    scope: ReadScope,
     target: ReadTarget,
     descriptor: int,
     offset: int,
@@ -288,8 +283,7 @@ def _read_bounded_directory_entries(
     skipped_symlinks = 0
     unreadable = 0
     first_error: str | None = None
-    is_hidden = hidden_read_path_filter(context)
-    session_temp = context.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
+    session_temp = scope.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
     next_offset: int | None = None
     with os.scandir(descriptor) as iterator:
         for index, child in enumerate(iterator, start=1):
@@ -300,7 +294,7 @@ def _read_bounded_directory_entries(
                 break
             child_path = target.real_path / child.name
             try:
-                if child_path == session_temp or is_hidden(child_path):
+                if child_path == session_temp or scope.hides(child_path):
                     continue
                 if child.is_symlink() and not target.allow_symlink_directory_entries:
                     skipped_symlinks += 1

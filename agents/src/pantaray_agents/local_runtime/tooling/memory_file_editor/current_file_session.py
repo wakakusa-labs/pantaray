@@ -8,12 +8,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -42,6 +36,12 @@ from pantaray_agents.local_runtime.memory_catalog.reference_edits import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
 from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 
 from .logical_draft_io import require_editable_document_path
 from .memory_domain_tools import memory_file_domain_definitions

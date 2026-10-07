@@ -1,13 +1,67 @@
+"""Agent-independent tool contract: definitions, calls, results, and errors."""
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from jsonschema import Draft7Validator, ValidationError  # type: ignore[import-untyped]
 
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .types import ReactToolCall, ReactToolResult
+type ReactToolResultStatus = Literal["success", "error"]
+
+
+@dataclass(frozen=True)
+class ToolCallEnvelope:
+    tool_id: str
+    reason: str | None
+    args: dict[str, JSONValue]
+
+    def __post_init__(self) -> None:
+        if not self.tool_id.strip():
+            raise ValueError("tool_id must not be empty")
+        if self.reason is not None and not self.reason.strip():
+            raise ValueError("tool_call reason must not be blank")
+
+    def to_json(self) -> dict[str, JSONValue]:
+        return {
+            "tool_id": self.tool_id,
+            "reason": self.reason,
+            "args": self.args,
+        }
+
+
+@dataclass(frozen=True)
+class ReactToolCall:
+    tool_name: str
+    tool_args: JSONValue
+    tool_call_envelope: ToolCallEnvelope
+
+    def __post_init__(self) -> None:
+        if not self.tool_name.strip():
+            raise ValueError("tool_name must not be empty")
+        if self.tool_call_envelope.tool_id != self.tool_name:
+            raise ValueError("tool_call_envelope.tool_id must match tool_name")
+
+
+@dataclass(frozen=True)
+class ReactToolResult:
+    tool_name: str
+    status: ReactToolResultStatus
+    output: JSONValue
+    error_message: str | None = None
+    final_step_recorded: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.tool_name.strip():
+            raise ValueError("tool_name must not be empty")
+        if self.status not in ("success", "error"):
+            raise ValueError("tool result status must be success or error")
+        if self.status == "error" and not self.error_message:
+            raise ValueError("error tool result requires error_message")
+
 
 type ReactToolExecutor = Callable[[ReactToolCall, int], Awaitable[ReactToolResult]]
 type JsonSchema = Mapping[str, JSONValue]

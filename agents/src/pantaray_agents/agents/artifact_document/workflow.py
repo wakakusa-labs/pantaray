@@ -8,8 +8,6 @@ from pantaray_agents.agents.artifact_react import (
     PatchCommitResult,
     ReactLoopResult,
     ReactLoopStep,
-    ReactToolCall,
-    ReactToolDefinition,
     build_artifact_react_response_format,
     build_artifact_react_tools_definition_block,
 )
@@ -25,6 +23,7 @@ from pantaray_agents.schema.agent.base import (
     AgentError,
     JSONValue,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ReactToolDefinition
 from pantaray_agents.utils.artifact_patch.errors import ArtifactPatchConflictError
 from pantaray_agents.utils.structured_artifact_patch import (
     StructuredArtifactPatch,

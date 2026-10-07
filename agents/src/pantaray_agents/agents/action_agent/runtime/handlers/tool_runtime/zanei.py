@@ -18,11 +18,6 @@ from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.zanei_tools import (
     RECORDING_UNAVAILABLE_STATUS,
 )
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolResult,
-    ToolCallEnvelope,
-)
 from pantaray_agents.agents.insight_agent.zanei_tools import (
     EVENT_TOOL,
     PAGE_TOOL,
@@ -42,6 +37,11 @@ from pantaray_agents.schema.context_source import SourceBinding
 from pantaray_agents.schema.tool_result import (
     build_runtime_tool_error_output,
     serialize_json_tool_output,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolResult,
+    ToolCallEnvelope,
 )
 
 from .shared import UnprojectedToolExecutionResult

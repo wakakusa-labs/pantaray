@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolDefinition
 
 from .artifact_patch_contract import ARTIFACT_PATCH_TOOL_NAME, COMPLETED_TOOL_NAME
-from .tooling import ReactToolDefinition
 
 RESERVED_ARTIFACT_TOOL_NAMES = frozenset(
     (ARTIFACT_PATCH_TOOL_NAME, COMPLETED_TOOL_NAME)

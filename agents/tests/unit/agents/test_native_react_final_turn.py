@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolResult,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
 from pantaray_agents.agents.artifact_react.native_runner import (
     NativeReactCompletion,
     NativeReactRunInput,
@@ -12,6 +8,7 @@ from pantaray_agents.agents.artifact_react.native_runner import (
 )
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolResult
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
     LlmToolContinuation,

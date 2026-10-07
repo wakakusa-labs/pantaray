@@ -2,24 +2,21 @@ from __future__ import annotations
 
 import json
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolCall,
-    ReactToolResult,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
 from pantaray_agents.agents.artifact_react.native_runner import (
     OMITTED_TOOL_OUTPUT,
     NativeReactCompletion,
     NativeReactRunInput,
     run_native_react,
 )
-from pantaray_agents.agents.artifact_react.tooling import (
-    ReactToolDefinition,
-    react_tool_response_schema,
-)
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    react_tool_response_schema,
+)
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
     LlmToolContinuation,

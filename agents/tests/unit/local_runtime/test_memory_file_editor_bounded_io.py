@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.models import MemoryDocument
 from pantaray_agents.local_runtime.tooling.fs_sandbox import (
@@ -30,6 +29,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.bounded_workspace_
 from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryContextSession,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 
 @pytest.mark.asyncio

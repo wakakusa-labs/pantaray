@@ -5,16 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.local_runtime.suggestion_state.shared import configure_connection
+from pantaray_agents.schema.agent.action_history import history_fetch_refs_schema
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     react_tool_response_schema,
     tool_error_response,
 )
-from pantaray_agents.local_runtime.suggestion_state.shared import configure_connection
-from pantaray_agents.schema.agent.action_history import history_fetch_refs_schema
-from pantaray_agents.schema.agent.base import JSONValue
 
 from .action_history_contract import (
     StoredActionHistoryError,

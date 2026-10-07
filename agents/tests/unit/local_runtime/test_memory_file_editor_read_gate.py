@@ -4,13 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolCall,
-    ReactToolDefinition,
-    ToolCallEnvelope,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
 from pantaray_agents.agents.artifact_react.transcript import (
     build_prompt_with_transcript,
 )
@@ -42,6 +36,11 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.read_gate import (
 )
 from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryContextSession,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ToolCallEnvelope,
 )
 from pantaray_llm.contracts.tool_use import LlmToolCall, OpenAiToolContinuation
 

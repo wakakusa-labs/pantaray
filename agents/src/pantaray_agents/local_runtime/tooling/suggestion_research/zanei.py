@@ -12,12 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.agents.insight_agent.zanei_tools import (
     EVENT_REQUEST_SCHEMA,
     EVENT_TOOL,
@@ -31,6 +25,12 @@ from pantaray_agents.local_runtime.context.source_gate import (
     SourceInvalidated,
 )
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 
 RECORDING_UNAVAILABLE_STATUS = "recording_unavailable"
 ZANEI_READ_FAILED_ERROR_CODE = "ZANEI_READ_FAILED"

@@ -4,13 +4,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopStep,
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    react_tool_response_schema,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
@@ -29,6 +23,12 @@ from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    react_tool_response_schema,
+)
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
     LlmToolDefinition,

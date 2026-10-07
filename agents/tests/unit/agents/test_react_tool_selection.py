@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,

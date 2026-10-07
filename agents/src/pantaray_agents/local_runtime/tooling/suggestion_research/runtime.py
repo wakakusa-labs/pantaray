@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pantaray_agents.agents.artifact_react import ReactToolDefinition
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.tooling.memory_retrieval import (
@@ -17,6 +16,7 @@ from pantaray_agents.local_runtime.tooling.react_tools import (
     WorkspaceReadRoot,
     memory_revision_by_source,
 )
+from pantaray_agents.tools.contract import ReactToolDefinition
 
 from .commands import SuggestionCommandSession
 from .memory_sql import SuggestionMemorySqlSession

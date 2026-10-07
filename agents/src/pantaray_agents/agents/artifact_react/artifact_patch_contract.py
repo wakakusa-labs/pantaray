@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .tooling import JsonSchema, react_tool_response_schema
+from pantaray_agents.tools.contract import JsonSchema, react_tool_response_schema
 
 ARTIFACT_PATCH_TOOL_NAME = "artifact_patch"
 COMPLETED_TOOL_NAME = "completed"

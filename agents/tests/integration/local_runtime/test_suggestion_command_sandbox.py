@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
 )
@@ -14,6 +13,7 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.commands import (
     SuggestionCommandSession,
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .support import (
     INTEGRATION_APPROVAL_TIMESTAMP,

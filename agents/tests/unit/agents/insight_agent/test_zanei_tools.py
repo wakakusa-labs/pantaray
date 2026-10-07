@@ -6,7 +6,6 @@ from uuid import UUID
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.insight_agent.zanei_tools import (
     EVENT_TEXT_CHARACTERS,
     EVENT_TOOL,
@@ -29,6 +28,7 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 )
 from pantaray_agents.local_runtime.context.source_reader import ReadTimeout
 from pantaray_agents.schema.context_source import SourceBinding
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 STORE_ID = "store-1"

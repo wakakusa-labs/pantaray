@@ -13,7 +13,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Final
 
-from pantaray_agents.agents.artifact_react import ReactToolDefinition
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AGENT_EXPERIENCE_ENTRIES_ROOT,
     initial_agent_experience_documents,
@@ -72,6 +71,7 @@ from pantaray_agents.tasks.types import (
     MemoryUpdateActionTerminal,
     MemoryUpdateJobPayload,
 )
+from pantaray_agents.tools.contract import ReactToolDefinition
 from pantaray_agents.utils.local_time import (
     describe_utc_timestamp,
     local_period,

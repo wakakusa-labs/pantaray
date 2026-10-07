@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from pantaray_agents.agents.artifact_react import JsonSchema
-from pantaray_agents.agents.artifact_react.tooling import TOOL_ERROR_RESPONSE_SCHEMA
+from pantaray_agents.tools.contract import TOOL_ERROR_RESPONSE_SCHEMA, JsonSchema
 
 READ_FILE_TOOL_NAME = "read_file"
 SEARCH_FILES_TOOL_NAME = "search_files"

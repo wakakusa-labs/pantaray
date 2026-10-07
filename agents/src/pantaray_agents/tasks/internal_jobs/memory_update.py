@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 import pantaray_agents.dependencies as deps
-from pantaray_agents.agents.artifact_react import ReactToolDefinition
 from pantaray_agents.agents.memory_agent import (
     MemoryUpdateAgent,
     MemoryUpdateAgentResult,
@@ -43,6 +42,7 @@ from pantaray_agents.tasks.memory_update_context import (
     resolve_memory_run_fact_id,
 )
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
+from pantaray_agents.tools.contract import ReactToolDefinition
 
 
 class MemoryUpdateWorkerAgent(Protocol):

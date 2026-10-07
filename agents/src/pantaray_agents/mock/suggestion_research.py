@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_TOOL_IDS
+from pantaray_agents.agents.suggestion_agent.research import (
+    FixedSuggestionResearchTools,
+)
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     react_tool_response_schema,
     tool_error_response,
-)
-from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_TOOL_IDS
-from pantaray_agents.agents.suggestion_agent.research import (
-    FixedSuggestionResearchTools,
 )
 
 

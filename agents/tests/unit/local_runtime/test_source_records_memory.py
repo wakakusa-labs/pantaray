@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
@@ -38,6 +37,7 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.snapshot import (
     SuggestionResearchSnapshot,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .migrated_db import prepare_test_database
 

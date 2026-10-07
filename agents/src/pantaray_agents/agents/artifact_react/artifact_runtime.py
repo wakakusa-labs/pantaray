@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from pantaray_agents.tools.contract import ReactToolDefinition, ReactToolRegistry
+
 from .artifact_patch import parse_artifact_document_react_output
 from .artifact_patch_tool import (
     ArtifactCommitter,
@@ -12,7 +14,6 @@ from .artifact_patch_tool import (
 )
 from .response_schema import validate_extra_react_tool_names
 from .runner import ReactLlmOutput, ReactStepRecorder, run_react_loop
-from .tooling import ReactToolDefinition, ReactToolRegistry
 from .transcript import build_prompt_with_transcript
 from .types import (
     ReactLoopPolicy,

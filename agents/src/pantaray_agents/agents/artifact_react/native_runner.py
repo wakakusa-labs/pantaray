@@ -9,6 +9,11 @@ from pantaray_agents.agents.core.tool_call_repair import (
     build_tool_call_repair_feedback,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
+    ReactToolRegistry,
+    ReactToolResult,
+)
 from pantaray_llm.contracts.tool_use import (
     LlmToolContinuation,
     LlmToolDefinition,
@@ -26,13 +31,7 @@ from .native_tool_calls import (
     run_tool,
     tool_step,
 )
-from .tooling import ReactToolDefinition, ReactToolRegistry
-from .types import (
-    ReactLoopPolicy,
-    ReactLoopResult,
-    ReactLoopStep,
-    ReactToolResult,
-)
+from .types import ReactLoopPolicy, ReactLoopResult, ReactLoopStep
 
 type NativeReactLlmCaller = Callable[
     [

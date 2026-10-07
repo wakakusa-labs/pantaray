@@ -6,12 +6,6 @@ from typing import Literal, cast
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolRegistry,
-    ReactToolResult,
-    ToolCallEnvelope,
-)
 from pantaray_agents.agents.memory_file_editor import tool_result_store
 from pantaray_agents.agents.memory_file_editor.tool_result_projection import (
     project_tool_result,
@@ -23,6 +17,12 @@ from pantaray_agents.agents.memory_file_editor.tool_result_store import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolRegistry,
+    ReactToolResult,
+    ToolCallEnvelope,
+)
 
 
 def _output_with_exact_serialized_size(character_count: int) -> dict[str, str]:

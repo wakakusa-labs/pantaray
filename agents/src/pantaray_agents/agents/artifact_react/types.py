@@ -12,7 +12,6 @@ from pantaray_llm.providers.openai_responses.retry_policy import (
 
 type ReactStepKind = Literal["llm", "tool"]
 type ReactStepStatus = Literal["processing", "success", "error"]
-type ReactToolResultStatus = Literal["success", "error"]
 type ReactRunStatus = Literal["success", "error"]
 
 
@@ -40,56 +39,6 @@ class ReactLoopPolicy:
 class ReactFinish:
     final_text: str
     reason: str | None = None
-
-
-@dataclass(frozen=True)
-class ToolCallEnvelope:
-    tool_id: str
-    reason: str | None
-    args: dict[str, JSONValue]
-
-    def __post_init__(self) -> None:
-        if not self.tool_id.strip():
-            raise ValueError("tool_id must not be empty")
-        if self.reason is not None and not self.reason.strip():
-            raise ValueError("tool_call reason must not be blank")
-
-    def to_json(self) -> dict[str, JSONValue]:
-        return {
-            "tool_id": self.tool_id,
-            "reason": self.reason,
-            "args": self.args,
-        }
-
-
-@dataclass(frozen=True)
-class ReactToolCall:
-    tool_name: str
-    tool_args: JSONValue
-    tool_call_envelope: ToolCallEnvelope
-
-    def __post_init__(self) -> None:
-        if not self.tool_name.strip():
-            raise ValueError("tool_name must not be empty")
-        if self.tool_call_envelope.tool_id != self.tool_name:
-            raise ValueError("tool_call_envelope.tool_id must match tool_name")
-
-
-@dataclass(frozen=True)
-class ReactToolResult:
-    tool_name: str
-    status: ReactToolResultStatus
-    output: JSONValue
-    error_message: str | None = None
-    final_step_recorded: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.tool_name.strip():
-            raise ValueError("tool_name must not be empty")
-        if self.status not in ("success", "error"):
-            raise ValueError("tool result status must be success or error")
-        if self.status == "error" and not self.error_message:
-            raise ValueError("error tool result requires error_message")
 
 
 @dataclass(frozen=True)

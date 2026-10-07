@@ -6,11 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolResult,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
 from pantaray_agents.agents.artifact_react.native_runner import (
     NativeReactCompletion,
     NativeReactRunInput,
@@ -31,6 +27,7 @@ from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryRetrievalSession,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolResult
 from pantaray_agents.utils.prompt_loader import prompt_loader
 from pantaray_llm.contracts.tool_use import (
     LlmToolContinuation,

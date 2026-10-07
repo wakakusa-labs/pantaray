@@ -4,12 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolRegistry,
-    ToolCallEnvelope,
-)
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.epoch import (
     append_memory_context_item,
@@ -41,6 +35,12 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.logical_draft_io i
 )
 from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryContextSession,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolRegistry,
+    ToolCallEnvelope,
 )
 
 

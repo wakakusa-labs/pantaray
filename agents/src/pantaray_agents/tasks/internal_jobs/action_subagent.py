@@ -24,7 +24,6 @@ from pantaray_agents.agents.artifact_react import (
     NativeReactTurnPlan,
     ReactLoopPolicy,
     ReactLoopStep,
-    ReactToolResult,
     run_native_react,
 )
 from pantaray_agents.agents.core import CountingSink
@@ -73,6 +72,7 @@ from pantaray_agents.local_runtime.runtime.job_executor import (
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
+from pantaray_agents.tools.contract import ReactToolResult
 from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.contracts.conversation import LlmConversation
 from pantaray_llm.contracts.tool_use import (

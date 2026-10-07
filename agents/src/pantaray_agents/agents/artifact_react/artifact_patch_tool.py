@@ -5,6 +5,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 from pantaray_agents.utils.artifact_text_patch import ArtifactTextPatchError
 from pantaray_agents.utils.structured_artifact_patch import (
     StructuredArtifactPatch,
@@ -18,8 +24,6 @@ from .artifact_patch_contract import (
     artifact_patch_response_schema,
 )
 from .commit import PatchCommitResult
-from .tooling import ReactToolDefinition, tool_error_response
-from .types import ReactToolCall, ReactToolResult
 
 type ArtifactPatchApplier = Callable[[str, StructuredArtifactPatch], str]
 type ArtifactCommitter = Callable[

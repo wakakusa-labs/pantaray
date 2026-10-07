@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.local_runtime.web_tools import (
     WebContentExecutionError,
     WebContentInvalidResponseError,
@@ -15,6 +9,12 @@ from pantaray_agents.local_runtime.web_tools import (
     invoke_web_tools_wrapper,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 from pantaray_llm.profiles import (
     WEB_EXTRACT_PROFILE_ID,
     WEB_SEARCH_PROFILE_ID,

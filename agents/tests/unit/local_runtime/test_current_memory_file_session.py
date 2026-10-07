@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -47,6 +46,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.registry import (
 from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .migrated_db import prepare_test_database
 

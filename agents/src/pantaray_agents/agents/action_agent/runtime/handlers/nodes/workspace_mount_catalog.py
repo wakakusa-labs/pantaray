@@ -6,16 +6,16 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from pantaray_agents.agents.workspace_context import (
-    WorkspaceContextCatalog,
-    workspace_context_catalog_from_snapshot,
-)
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.tooling.repository.common import (
     _configure_connection,
     _deserialize_json_string_map,
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.schema.workspace_context import (
+    WorkspaceContextCatalog,
+    workspace_context_catalog_from_snapshot,
+)
 
 AGENT_EXPERIENCE_SOURCE_TYPE = "agent_experience"
 AGENT_EXPERIENCE_PROMPT_HINT = (

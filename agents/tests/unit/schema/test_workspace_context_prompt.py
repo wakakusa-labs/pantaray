@@ -7,13 +7,6 @@ from tests.unit.local_runtime.test_workspace_settings_repository import (
     _bootstrap_db,
 )
 
-from pantaray_agents.agents.workspace_context import (
-    WorkspaceContextCatalog,
-    WorkspaceContextFolder,
-    WorkspaceContextOrganization,
-    WorkspaceContextProject,
-    render_workspace_context_prompt,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     load_workspace_context_catalog,
 )
@@ -21,6 +14,13 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
     create_workspace_folder,
     create_workspace_organization,
     create_workspace_project,
+)
+from pantaray_agents.schema.workspace_context import (
+    WorkspaceContextCatalog,
+    WorkspaceContextFolder,
+    WorkspaceContextOrganization,
+    WorkspaceContextProject,
+    render_workspace_context_prompt,
 )
 
 

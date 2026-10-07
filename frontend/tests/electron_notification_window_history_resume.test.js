@@ -74,8 +74,10 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
   const originalLoad = Module._load;
   const targetPath = require.resolve('../electron/notification_window.js');
   const factoryPath = require.resolve('../electron/overlay_window_factory.js');
+  const ipcPath = require.resolve('../electron/notification_window_ipc.js');
   delete require.cache[targetPath];
   delete require.cache[factoryPath];
+  delete require.cache[ipcPath];
 
   const instances = [];
   const registeredIpcSenders = new Set();
@@ -219,6 +221,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
     Module._load = originalLoad;
     delete require.cache[targetPath];
     delete require.cache[factoryPath];
+    delete require.cache[ipcPath];
   }
 }
 
@@ -799,7 +802,47 @@ test('visible history overlay also suppresses main restore for activate points i
   assert.equal(instances.length, 1);
   instances[0].windowEvents.emit('ready-to-show');
 
-  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1050, y: 30 }), true);
+  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 720, y: 450 }), true);
+});
+
+test('overlays the user opens are centered and keep that center until the user acts in them; suggestions stay top-right', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+
+  notificationWindow.showNotification('S1');
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const [suggestion, typed, clicked, history] = instances;
+
+  assert.deepEqual(suggestion.getBounds(), { x: 900, y: 20, width: 520, height: 120 });
+  for (const win of [typed, clicked, history]) {
+    assert.deepEqual(win.getBounds(), { x: 460, y: 390, width: 520, height: 120 });
+  }
+
+  resize(suggestion, 400);
+  assert.equal(suggestion.getBounds().y, 20);
+
+  // Content loading in keeps the window centered, up to the screen edges.
+  for (const height of [401, 120, 401]) resize(history, height);
+  assert.deepEqual(history.getBounds(), { x: 460, y: 250, width: 520, height: 401 });
+  resize(history, 2000);
+  assert.deepEqual(history.getBounds(), { x: 460, y: 8, width: 520, height: 884 });
+
+  // After the user's first key or click, the window grows downward from its top.
+  typed.webContentsEvents.emit('before-input-event', {}, { key: '@' });
+  resize(typed, 320);
+  assert.deepEqual(typed.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
+  handlers.onOverlayInteraction({ sender: clicked.webContents });
+  resize(clicked, 320);
+  assert.deepEqual(clicked.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
 });
 
 test('history overlay is focusable from native window creation on macOS', async () => {

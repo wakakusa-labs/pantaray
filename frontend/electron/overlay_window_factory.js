@@ -99,7 +99,29 @@ function hardDisableDevTools(win) {
   }
 }
 
-function resolveOverlayPosition(index) {
+// A window the user opens is centered and keeps that center while its first
+// content loads in. The user's first key or click returns it to growing downward
+// from its top, so the composer and the text being read stay where they are.
+const overlayCenterYs = new WeakMap();
+
+function getOverlayCenterY(win) {
+  return overlayCenterYs.get(win) ?? null;
+}
+
+function releaseOverlayCenter(win) {
+  overlayCenterYs.delete(win);
+}
+
+function resolveCenteredOverlayPosition() {
+  const workArea = screen.getPrimaryDisplay().workArea;
+  return {
+    x: Math.round(workArea.x + (workArea.width - DEFAULT_OVERLAY_WIDTH_PX) / 2),
+    y: Math.round(workArea.y + (workArea.height - DEFAULT_OVERLAY_HEIGHT_PX) / 2),
+  };
+}
+
+// Suggestions arrive on their own, so they stack in the top-right corner.
+function resolveSuggestionOverlayPosition(index) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const bounds = primaryDisplay.bounds;
   const bx = Number(bounds?.x || 0);
@@ -150,7 +172,9 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     onDidFinishLoad,
     onReadyToShow,
   }) {
-    const position = resolveOverlayPosition(index);
+    const position = interactive
+      ? resolveCenteredOverlayPosition()
+      : resolveSuggestionOverlayPosition(index);
     const win = new BrowserWindow({
       width: DEFAULT_OVERLAY_WIDTH_PX,
       height: DEFAULT_OVERLAY_HEIGHT_PX,
@@ -181,6 +205,10 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
+    if (interactive) {
+      overlayCenterYs.set(win, position.y + DEFAULT_OVERLAY_HEIGHT_PX / 2);
+      win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
+    }
     registerWindow(win);
     loadOverlayPage(win, entryMode, actionId);
     win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
@@ -197,5 +225,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
 module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
+  getOverlayCenterY,
+  releaseOverlayCenter,
   showInteractiveOverlayWindow,
 };

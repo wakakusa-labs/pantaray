@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 
-from pantaray_agents.local_runtime.web_tools import WebContentInvalidResponseError
 from pantaray_agents.schema.agent.base import JSONValue
 
 from .definitions import WEB_SEARCH_RESULT_CONTENT_MAX_CHARS
+from .fetch import WebExtractFailure, WebSearchResponse
 
 WEB_EXTRACT_FAILED_RESULT_MAX_CHARS = 300
 WEB_EXTRACT_QUERY_EXCERPTS_HINT = (
@@ -15,55 +14,8 @@ WEB_EXTRACT_QUERY_EXCERPTS_HINT = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class WebSearchResult:
-    title: str
-    url: str
-    content: str
-    score: float
-
-
-@dataclass(frozen=True, slots=True)
-class WebSearchSnapshot:
-    query: str
-    results: tuple[WebSearchResult, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class WebExtractFailure:
-    url: str
-    error: str
-
-
-def parse_web_search_snapshot(
-    *, wrapper_result: Mapping[str, JSONValue], expected_query: str
-) -> WebSearchSnapshot:
-    query = _required_string(wrapper_result.get("query"), field="query")
-    if query != expected_query:
-        raise WebContentInvalidResponseError("query")
-    raw_results = wrapper_result.get("results")
-    if not isinstance(raw_results, list):
-        raise WebContentInvalidResponseError("results")
-    results: list[WebSearchResult] = []
-    for raw_result in raw_results:
-        if not isinstance(raw_result, dict):
-            raise WebContentInvalidResponseError("results")
-        score = raw_result.get("score")
-        if not isinstance(score, int | float) or isinstance(score, bool):
-            raise WebContentInvalidResponseError("score")
-        results.append(
-            WebSearchResult(
-                title=_required_string(raw_result.get("title"), field="title"),
-                url=_required_string(raw_result.get("url"), field="url"),
-                content=_required_string(raw_result.get("content"), field="content"),
-                score=float(score),
-            )
-        )
-    return WebSearchSnapshot(query=query, results=tuple(results))
-
-
 def web_search_page(
-    *, snapshot: WebSearchSnapshot, offset: int, limit: int
+    *, snapshot: WebSearchResponse, offset: int, limit: int
 ) -> dict[str, JSONValue]:
     _validate_page(offset=offset, limit=limit)
     start = offset - 1
@@ -108,35 +60,6 @@ def web_search_page(
         "truncation_reason": truncation_reason,
         "retry_hint": retry_hint,
     }
-
-
-def parse_web_extract_result(
-    *, wrapper_result: Mapping[str, JSONValue]
-) -> tuple[dict[str, str], tuple[WebExtractFailure, ...]]:
-    raw_results = wrapper_result.get("results")
-    raw_failures = wrapper_result.get("failed_results")
-    if not isinstance(raw_results, list) or not isinstance(raw_failures, list):
-        raise WebContentInvalidResponseError("web_extract result")
-    contents: dict[str, str] = {}
-    for raw_result in raw_results:
-        if not isinstance(raw_result, dict):
-            raise WebContentInvalidResponseError("results")
-        url = _required_string(raw_result.get("url"), field="url")
-        content = _required_string(raw_result.get("raw_content"), field="raw_content")
-        if url in contents:
-            raise WebContentInvalidResponseError("duplicate result URL")
-        contents[url] = content
-    failures: list[WebExtractFailure] = []
-    for raw_failure in raw_failures:
-        if not isinstance(raw_failure, dict):
-            raise WebContentInvalidResponseError("failed_results")
-        failures.append(
-            WebExtractFailure(
-                url=_required_string(raw_failure.get("url"), field="url"),
-                error=_required_string(raw_failure.get("error"), field="error"),
-            )
-        )
-    return contents, tuple(failures)
 
 
 def web_extract_pages(
@@ -215,22 +138,12 @@ def _bounded_failure(*, url: str, error: str) -> dict[str, JSONValue]:
     }
 
 
-def _required_string(value: JSONValue, *, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise WebContentInvalidResponseError(field)
-    return value
-
-
 def _validate_page(*, offset: int, limit: int) -> None:
     if offset <= 0 or limit <= 0:
         raise ValueError("offset and limit must be positive")
 
 
 __all__ = [
-    "WebExtractFailure",
-    "WebSearchSnapshot",
-    "parse_web_extract_result",
-    "parse_web_search_snapshot",
     "web_extract_pages",
     "web_search_page",
 ]

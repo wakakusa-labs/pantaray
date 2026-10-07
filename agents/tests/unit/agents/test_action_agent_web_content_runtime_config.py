@@ -34,7 +34,7 @@ async def test_web_extract_runtime_config_passes_max_retries_to_wrapper(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -87,7 +87,7 @@ async def test_web_crawl_runtime_config_passes_max_retries_to_wrapper(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 

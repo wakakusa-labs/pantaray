@@ -99,11 +99,17 @@ function hardDisableDevTools(win) {
   }
 }
 
-// Windows the user opens are centered; their height then grows around that center.
-const centeredOverlayWindows = new WeakSet();
+// A window the user opens is centered and keeps that center while its first
+// content loads in. The user's first key or click returns it to growing downward
+// from its top, so the composer and the text being read stay where they are.
+const overlayCenterYs = new WeakMap();
 
-function isCenteredOverlayWindow(win) {
-  return centeredOverlayWindows.has(win);
+function getOverlayCenterY(win) {
+  return overlayCenterYs.get(win) ?? null;
+}
+
+function releaseOverlayCenter(win) {
+  overlayCenterYs.delete(win);
 }
 
 function resolveCenteredOverlayPosition() {
@@ -199,7 +205,10 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
-    if (interactive) centeredOverlayWindows.add(win);
+    if (interactive) {
+      overlayCenterYs.set(win, position.y + DEFAULT_OVERLAY_HEIGHT_PX / 2);
+      win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
+    }
     registerWindow(win);
     loadOverlayPage(win, entryMode, actionId);
     win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
@@ -216,6 +225,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
 module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
-  isCenteredOverlayWindow,
+  getOverlayCenterY,
+  releaseOverlayCenter,
   showInteractiveOverlayWindow,
 };

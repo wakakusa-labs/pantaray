@@ -8,14 +8,13 @@ import sqlite3
 from fastapi import HTTPException
 
 from pantaray_agents.action_status import (
-    ACTION_STATUS_PROCESSING,
     parse_stored_suggestion_user_reaction,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.routers.action_cancel_service import execute_action_cancel
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.schema.events import OutboundEvent
-from pantaray_agents.schema.websocket import AckEventMessage, ExecuteActionMessage
+from pantaray_agents.schema.websocket import AckEventMessage
 from pantaray_agents.utils.metrics import (
     record_action_event_acked,
     record_suggestion_event_acked,
@@ -32,120 +31,6 @@ logger = logging.getLogger(__name__)
 
 class WSHandlerProcessControlMixin:
     """Action control / dismiss / ack / close responsibilities."""
-
-    async def execute_action(self, payload: ExecuteActionMessage) -> None:
-        command_id = str(payload.command_id)
-        if not await self._is_suggestion_id_accessible(payload.suggestion_id):
-            await self._send_action_error(
-                public_ws_error(
-                    error_code="WS_SUGGESTION_NOT_FOUND",
-                    request_id=self.session_id,
-                    error_type=ErrorType.VALIDATION_ERROR,
-                    severity=ErrorSeverity.ERROR,
-                    error_message="suggestion_id is not accessible for current user",
-                ),
-                suggestion_id=str(payload.suggestion_id),
-                command_id=command_id,
-                action_stage="preflight_rejected",
-            )
-            return
-        repo = await self._get_action_state_repository()
-        if repo is None:
-            await self._send_action_error(
-                public_ws_error(
-                    error_code="WS_DEPENDENCY_UNAVAILABLE",
-                    request_id=self.session_id,
-                    error_type=ErrorType.INTERNAL_ERROR,
-                    severity=ErrorSeverity.ERROR,
-                    error_message="Failed to load suggestion state (fail-closed).",
-                    extra_error_details={"dependency": "local_state"},
-                ),
-                suggestion_id=str(payload.suggestion_id),
-                command_id=command_id,
-                action_stage="preflight_rejected",
-                failure_kind="load_suggestion_state",
-            )
-            return
-        result = await repo.get_suggestion_state(
-            user_id=str(self.user_id), suggestion_id=str(payload.suggestion_id)
-        )
-        if result.error:
-            await self._send_action_error(
-                public_ws_error(
-                    error_code="WS_DEPENDENCY_UNAVAILABLE",
-                    request_id=self.session_id,
-                    error_type=ErrorType.INTERNAL_ERROR,
-                    severity=ErrorSeverity.ERROR,
-                    error_message="Failed to load suggestion state (fail-closed).",
-                    extra_error_details={"dependency": "local_state"},
-                ),
-                suggestion_id=str(payload.suggestion_id),
-                command_id=command_id,
-                action_stage="preflight_rejected",
-            )
-            return
-        row = result.data
-        if isinstance(row, dict):
-            interaction_contract = (
-                str(row.get("interaction_contract") or "").strip().lower() or None
-            )
-            user_reaction = parse_stored_suggestion_user_reaction(
-                row.get("user_reaction")
-            )
-            action_status_raw = row.get("action_status")
-            action_status = (
-                str(action_status_raw).strip().lower()
-                if action_status_raw is not None
-                else None
-            )
-            current_command_id = str(row.get("action_command_id") or "").strip() or None
-            if interaction_contract != "action_offer":
-                await self._send_action_error(
-                    public_ws_error(
-                        error_code="WS_ACTION_NOT_ALLOWED",
-                        request_id=self.session_id,
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        severity=ErrorSeverity.ERROR,
-                        error_message="execute_action is not allowed for current suggestion state",
-                    ),
-                    suggestion_id=str(payload.suggestion_id),
-                    command_id=command_id,
-                    action_stage="preflight_rejected",
-                )
-                return
-            if user_reaction is None:
-                pass
-            elif current_command_id == command_id and user_reaction == "accepted":
-                pass
-            elif action_status == ACTION_STATUS_PROCESSING:
-                await self._send_action_error(
-                    public_ws_error(
-                        error_code="WS_ACTION_ALREADY_PROCESSING",
-                        request_id=self.session_id,
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        severity=ErrorSeverity.ERROR,
-                        error_message="action is already processing",
-                    ),
-                    suggestion_id=str(payload.suggestion_id),
-                    command_id=command_id,
-                    action_stage="preflight_rejected",
-                )
-                return
-            else:
-                await self._send_action_error(
-                    public_ws_error(
-                        error_code="WS_ACTION_NOT_ALLOWED",
-                        request_id=self.session_id,
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        severity=ErrorSeverity.ERROR,
-                        error_message="execute_action is not allowed for current suggestion state",
-                    ),
-                    suggestion_id=str(payload.suggestion_id),
-                    command_id=command_id,
-                    action_stage="preflight_rejected",
-                )
-                return
-        await super().execute_action(payload)
 
     async def handle_stop_process(self, process_id: str) -> None:
         sess = self.session_store.get(self.session_id)

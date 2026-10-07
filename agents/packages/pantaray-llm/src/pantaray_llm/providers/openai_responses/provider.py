@@ -8,9 +8,10 @@ from typing import cast
 import httpx
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.responses.response import Response
+from openai.types.responses.response_completed_event import ResponseCompletedEvent
 from openai.types.responses.response_create_params import (
-    ResponseCreateParamsBase,
     ResponseCreateParamsNonStreaming,
+    ResponseCreateParamsStreaming,
 )
 from openai.types.responses.response_format_text_json_schema_config_param import (
     ResponseFormatTextJSONSchemaConfigParam,
@@ -119,23 +120,29 @@ async def _create_response(
 ) -> Response:
     if not stream:
         return await client.responses.create(**create_kwargs)
+    # The raw event stream, not `responses.stream()`: that helper returns a
+    # ParsedResponse whose function calls carry the SDK-only `parsed_arguments`,
+    # and the API rejects that key when the output items are replayed next turn.
     stream_kwargs = cast(
-        ResponseCreateParamsBase,
-        {key: value for key, value in create_kwargs.items() if key != "stream"},
+        ResponseCreateParamsStreaming, {**create_kwargs, "stream": True}
     )
-    async with client.responses.stream(**stream_kwargs) as response_stream:
-        completed_items: dict[int, ResponseOutputItem] = {}
-        async for event in response_stream:
+    completed_items: dict[int, ResponseOutputItem] = {}
+    response: Response | None = None
+    async with await client.responses.create(**stream_kwargs) as events:
+        async for event in events:
             if isinstance(event, ResponseOutputItemDoneEvent):
                 completed_items[event.output_index] = event.item
-        response = await response_stream.get_final_response()
-        # Codex can leave the terminal response.output empty after streaming
-        # completed items. Keep the terminal response's status and usage.
-        if response.status == "completed" and not response.output and completed_items:
-            return response.model_copy(
-                update={"output": [completed_items[i] for i in sorted(completed_items)]}
-            )
-        return response
+            elif isinstance(event, ResponseCompletedEvent):
+                response = event.response
+    if response is None:
+        raise RuntimeError("Didn't receive a `response.completed` event.")
+    # Codex can leave the terminal response.output empty after streaming
+    # completed items. Keep the terminal response's status and usage.
+    if response.status == "completed" and not response.output and completed_items:
+        return response.model_copy(
+            update={"output": [completed_items[i] for i in sorted(completed_items)]}
+        )
+    return response
 
 
 def _require_system_instructions(request: LlmRequest) -> str | None:

@@ -67,6 +67,10 @@ MODEL_CATALOG = {
                 "claude-sonnet-5-5",
                 "claude-haiku-5-5",
                 "claude-fable-5-1",
+                # No longer offered in settings, but still served, and a saved
+                # connection may name them.
+                "claude-opus-5",
+                "claude-sonnet-5",
             )
         ),
         ModelCatalogEntry(

@@ -55,9 +55,9 @@ def build_anthropic_tools(tool_use: AnthropicToolRequest) -> list[JSONValue]:
 
 def build_anthropic_tool_choice(tool_use: AnthropicToolRequest) -> JSONValue:
     # Opus 5.5, Sonnet 5.5 and Fable 5.1 reject a forced choice ("any" or
-    # "tool") with a 400, so a tool use request asks with "auto" too. Its
-    # contract of at least one call is enforced on the response: a reply without
-    # one comes back as a repairable missing_call rejection.
+    # "tool") with a 400, so a tool use request asks with "auto" too. The
+    # provider asks again after a reply without a call, and the response
+    # contract rejects one that still has none.
     # https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
     choice: dict[str, JSONValue] = {"type": "auto"}
     if tool_use.max_parallel_tool_calls == 1:

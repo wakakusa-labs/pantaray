@@ -492,6 +492,88 @@ async def test_tool_use_requests_ask_for_one_call_without_forcing_it(
     assert response.meta.outcome == "complete"
 
 
+def _install_sequence(
+    monkeypatch: pytest.MonkeyPatch, responses: list[httpx.Response]
+) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    async def send(
+        *, api_key: str, body: dict[str, object], client: httpx.AsyncClient | None
+    ) -> httpx.Response:
+        calls.append({"api_key": api_key, "body": body})
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(anthropic_provider, "send_anthropic_message", send)
+    return calls
+
+
+_TEXT_ONLY = [
+    {"type": "thinking", "thinking": "", "signature": "sig-0"},
+    {"type": "text", "text": "I will look it up."},
+]
+_REPAIR_REQUEST = {
+    "role": "user",
+    "content": [{"type": "text", "text": anthropic_provider.MISSING_CALL_REPAIR_TEXT}],
+}
+
+
+@pytest.mark.asyncio
+async def test_a_text_only_reply_to_a_tool_use_request_is_asked_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_sequence(
+        monkeypatch,
+        [
+            _ok(_message(content=_TEXT_ONLY)),
+            _ok(_message(content=[_tool_block()], stop_reason="tool_use")),
+        ],
+    )
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "stateless"})
+    )
+
+    first, second = (call["body"]["messages"] for call in calls)
+    assert first == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+    # The reply stays in place, signed thinking included, so the second request
+    # only appends to the first one's prefix.
+    assert second == [
+        *first,
+        {"role": "assistant", "content": _TEXT_ONLY},
+        _REPAIR_REQUEST,
+    ]
+    assert response.meta.outcome == "complete"
+    assert response.tool_use.calls[0].call_id == "toolu_1"
+    assert response.tool_use.continuation.messages == [
+        *second,
+        {"role": "assistant", "content": [_tool_block()]},
+    ]
+    # Both requests are billed.
+    assert response.usage.prompt_tokens == 34
+    assert response.usage.cached_prompt_tokens == 10
+    assert response.usage.total_tokens == 40
+
+
+@pytest.mark.asyncio
+async def test_repeated_text_only_replies_stop_at_the_repair_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = anthropic_provider.MISSING_CALL_REPAIR_LIMIT
+    calls = _install_sequence(
+        monkeypatch, [_ok(_message(content=_TEXT_ONLY))] * (limit + 1)
+    )
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "disabled"})
+    )
+
+    assert len(calls) == limit + 1
+    assert response.meta.outcome == "model_output_rejected"
+    assert response.model_error.violation_reason == "missing_call"
+    assert response.model_error.recovery == "repair_next_turn"
+    assert response.usage.total_tokens == 20 * (limit + 1)
+
+
 @pytest.mark.asyncio
 async def test_action_turns_allow_parallel_calls_and_carry_commentary(
     monkeypatch: pytest.MonkeyPatch,

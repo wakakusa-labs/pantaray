@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import get_args
 
 from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_agents.tools.memory.sql import (
     DEFAULT_MEMORY_SQL_LIMIT,
     MAX_MEMORY_SQL_CELL_CHARS,
@@ -96,6 +97,7 @@ MEMORY_SQL_TOOL = ToolDefinition.from_spec(
                 "applies, and get_memory_reference for explicit fragment links."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=30_000,

@@ -6,6 +6,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchToolArgs,
     apply_patch_tool_output_json_schema,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     ToolDefinition,
@@ -92,6 +93,7 @@ APPLY_PATCH_TOOL = ToolDefinition.from_spec(
                 "that can be represented as a patch."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="surgical_edit",
             required_capabilities=("scoped_write",),

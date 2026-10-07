@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -32,6 +34,7 @@ THINKING_TOOL = ToolDefinition.from_spec(
             ),
             pitfalls="Do not use for fact acquisition. Avoid vague queries; keep one topic per call.",
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=30_000,

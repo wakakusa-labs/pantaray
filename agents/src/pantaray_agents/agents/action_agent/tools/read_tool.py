@@ -6,6 +6,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import Read
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_agents.tools.files.text_lines import (
     MAX_BYTES,
     MAX_LINE_LENGTH,
@@ -116,6 +117,7 @@ READ_TOOL = ToolDefinition.from_spec(
                 "the scratch workspace. warning says what a page skipped."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             required_capabilities=("scoped_read",),

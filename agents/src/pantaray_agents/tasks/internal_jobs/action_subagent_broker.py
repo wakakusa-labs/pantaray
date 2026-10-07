@@ -4,9 +4,6 @@ import uuid
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    PARALLEL_SAFE_TOOL_IDS,
-)
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.bash_tool import (
@@ -259,7 +256,7 @@ def _build_tool(
         # changing call keeps the durable one that lets a restart replay it.
         tool_request_id = (
             str(uuid.uuid4())
-            if definition.tool_id in PARALLEL_SAFE_TOOL_IDS
+            if definition.concurrency.placement == "parallel"
             else next_action_subagent_tool_request_id(
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
@@ -290,4 +287,5 @@ def _build_tool(
             }
         ),
         execute=execute,
+        concurrency=definition.concurrency,
     )

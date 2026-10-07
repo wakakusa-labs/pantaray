@@ -15,6 +15,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ListToolArgs,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_agents.tools.files.grep_lines import GREP_MAX_LINE_CHARS
 from pantaray_agents.tools.files.ripgrep import RIPGREP_TIMEOUT_SECONDS
 
@@ -167,6 +168,7 @@ LIST_TOOL = ToolDefinition.from_spec(
                 "what to do next. Use glob for path patterns and grep for text search."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=_discovery_policy(),
         input_spec=broker_tool_input_spec_from_model(
             model=ListToolArgs,
@@ -219,6 +221,7 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "what to do next; skipped_files counts paths that could not be read."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=_discovery_policy(),
         input_spec=broker_tool_input_spec_from_model(
             model=GlobToolArgs,
@@ -278,6 +281,7 @@ GREP_TOOL = ToolDefinition.from_spec(
                 "not be read."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=_discovery_policy(),
         input_spec=broker_tool_input_spec_from_model(
             model=GrepToolArgs,

@@ -5,15 +5,12 @@ from string import Formatter
 
 import yaml
 
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    PARALLEL_SAFE_TOOL_IDS,
-    SOLO_TURN_TOOL_IDS,
-)
 from pantaray_agents.agents.action_agent.support.world_state import (
     WORLD_STATE_SECTIONS,
 )
 from pantaray_agents.agents.action_agent.tools import (
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+    TOOL_CONCURRENCY,
     WRITE_SESSION_MEMORY_TOOL_ID,
 )
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
@@ -167,10 +164,9 @@ def test_executing_prompt_states_the_tool_batch_rules() -> None:
 
     assert "exactly one provided tool" not in text
     assert "One turn may request several read-only calls at once" in text
-    for tool_id in sorted(PARALLEL_SAFE_TOOL_IDS):
-        assert f"`{tool_id}`" in text
-    for tool_id in sorted(SOLO_TURN_TOOL_IDS):
-        assert f"`{tool_id}`" in text
+    for tool_id, declared in TOOL_CONCURRENCY.items():
+        if declared.placement != "sequential":
+            assert f"`{tool_id}`" in text
     assert "must be the only call of their turn" in text
     assert "Do not request two changing tools" in text
     assert "The runtime may defer or drop requested calls" in text

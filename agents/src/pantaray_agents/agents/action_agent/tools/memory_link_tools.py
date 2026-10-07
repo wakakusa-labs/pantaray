@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .base import (
     FieldSpec,
     InputSpec,
@@ -19,6 +21,7 @@ def _tool(
     description: str,
     fields: tuple[FieldSpec, ...],
     intent_class: ToolIntentClass,
+    concurrency: ToolConcurrency,
     output_properties: dict[str, object],
     output_required: tuple[str, ...],
 ) -> ToolDefinition:
@@ -36,6 +39,7 @@ def _tool(
                     "invented."
                 ),
             ),
+            concurrency=concurrency,
             execution_policy=tool_execution_policy(
                 intent_class=intent_class,
                 default_timeout_ms=30_000,
@@ -59,6 +63,7 @@ LINK_MEMORY_TOOL = _tool(
         "final-answer draft, targeting a memory fragment visible in this turn."
     ),
     intent_class="surgical_edit",
+    concurrency=ToolConcurrency("sequential"),
     fields=(
         field_spec(
             name="target_handle",
@@ -110,6 +115,7 @@ UNLINK_MEMORY_TOOL = _tool(
     name="Unlink Memory",
     description="Remove one complete semantic ref from the Supervisor final-answer draft.",
     intent_class="surgical_edit",
+    concurrency=ToolConcurrency("sequential"),
     fields=(
         field_spec(
             name="local_ref_id",
@@ -139,6 +145,9 @@ GET_MEMORY_REFERENCE_TOOL = _tool(
         "The relationship note is returned before the immutable target fragment."
     ),
     intent_class="read_only",
+    # Reads memory_context_epoch and writes the extended epoch back; two at
+    # once would lose one extension and leave later handles unresolvable.
+    concurrency=ToolConcurrency("parallel", shared_state="memory_context_epoch"),
     fields=(
         field_spec(
             name="source_handle",

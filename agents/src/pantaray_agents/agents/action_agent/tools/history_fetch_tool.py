@@ -7,6 +7,7 @@ from pantaray_agents.schema.agent.action_history import (
     HISTORY_FETCH_SHORT_STEP_PATTERN,
     history_fetch_refs_schema,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     InputSpec,
@@ -42,6 +43,7 @@ HISTORY_FETCH_TOOL = ToolDefinition.from_spec(
                 "during a retry, the cursor is rejected: restart without a cursor."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=30_000,

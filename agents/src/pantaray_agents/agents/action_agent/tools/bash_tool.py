@@ -8,6 +8,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     BashToolArgs,
     SandboxedBashToolArgs,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     ToolDefinition,
@@ -161,6 +162,7 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "intended to survive this call. Shell startup files are not loaded."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="process_exec_local",
             required_capabilities=("process_exec_local",),

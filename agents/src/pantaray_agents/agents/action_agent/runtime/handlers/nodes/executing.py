@@ -15,12 +15,6 @@ from pantaray_agents.agents.action_agent.runtime.error_redaction import (
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.assistant_message import (
     prepare_llm_turn_commit,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
-    ToolBatchPlan,
-    plan_tool_batch,
-)
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import (
     PendingToolBatchModel,
     PendingToolCallModel,
@@ -50,6 +44,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 from pantaray_agents.agents.action_agent.tools import (
     DRAFT_FINAL_ANSWER_TOOL_ID,
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+    TOOL_CONCURRENCY,
     build_native_action_tools,
     select_tool_registry,
     split_step_note,
@@ -62,6 +57,12 @@ from pantaray_agents.application.action.ports import ActionAssistantMessageEmiss
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.budget import ContextCapacityExceeded
 from pantaray_agents.conversation.provider_turns import read_provider_turn_target
+from pantaray_agents.conversation.tool_batch import (
+    EXCLUSION_NOTICES,
+    PROVIDER_DROPPED_NOTICE,
+    ToolBatchPlan,
+    plan_tool_batch,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import StepType
@@ -405,6 +406,7 @@ async def execution_think_step(  # noqa: C901
         if accepted_calls:
             plan = plan_tool_batch(
                 accepted_calls,
+                concurrency=TOOL_CONCURRENCY,
                 max_parallel=max_parallel_tool_calls,
                 remaining_tool_steps=remaining_tool_steps,
             )

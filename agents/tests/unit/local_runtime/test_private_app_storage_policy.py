@@ -15,9 +15,6 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    load_tool_results_root,
-)
 from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
     EXEC_CWD_DENIED,
     READ_PATH_DENIED,
@@ -29,6 +26,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.files.manifest_paths import (
+    load_tool_results_root,
+)
 from pantaray_agents.tools.files.ripgrep import RIPGREP_TRUSTED_PATH
 
 from .broker_test_support import (

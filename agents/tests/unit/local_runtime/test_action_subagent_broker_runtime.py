@@ -16,7 +16,7 @@ from pantaray_agents.local_runtime.runtime.job_claim import claim_next_pending_j
 from pantaray_agents.local_runtime.runtime.job_payload_builder import (
     build_action_subagent_job_payload,
 )
-from pantaray_agents.local_runtime.tooling import ActionExecutionContext
+from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 

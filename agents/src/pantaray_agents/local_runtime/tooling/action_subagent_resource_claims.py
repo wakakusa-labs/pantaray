@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Literal
 
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    WORKSPACE_ROOT_AUTHORITY_INVALID,
+    resolve_local_path,
+)
 
 from ..storage.transactions import SQLiteTransactionOwnershipError
 from .action_subagent_resource_identity import (
@@ -15,10 +19,6 @@ from .action_subagent_resource_identity import (
     WorkspaceResourceIdentity,
     normalize_workspace_resource_key,
     resource_identities_overlap,
-)
-from .brokering.manifest_paths import (
-    WORKSPACE_ROOT_AUTHORITY_INVALID,
-    resolve_local_path,
 )
 from .command_write_grant_store import (
     load_other_actor_command_write_roots,

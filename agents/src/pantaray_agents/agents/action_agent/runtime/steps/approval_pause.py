@@ -25,7 +25,7 @@ from pantaray_agents.agents.action_agent.runtime.steps.tool import (
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.repository import (
     interrupt_approval_session_for_tool_request,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (

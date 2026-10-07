@@ -9,17 +9,21 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+    ensure_action_scratch_execution_context,
+)
+from pantaray_agents.local_runtime.tooling.models import (
     ApprovalPreferenceUpsertInput,
     CapabilityGrantCreateInput,
     ToolInvocationStartInput,
-    bootstrap_local_tooling_catalog,
+    ToolRuntimeResourceCreateInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
     create_capability_grant,
-    ensure_action_scratch_execution_context,
     record_tool_invocation_start,
     upsert_approval_preference,
 )
-from pantaray_agents.local_runtime.tooling.models import ToolRuntimeResourceCreateInput
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
     update_read_access_scope,

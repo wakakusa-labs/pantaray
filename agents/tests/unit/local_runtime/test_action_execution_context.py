@@ -15,16 +15,11 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
 from pantaray_agents.local_runtime.tooling.bootstrap import (
     ActionExecutionContextError,
+    bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
     validate_reusable_action_scratch_execution_context,
-)
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    WORKSPACE_PATH_OUTSIDE_ROOTS,
-    load_manifest_roots,
-    resolve_local_path,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     create_workspace_folder,
@@ -36,6 +31,11 @@ from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_WORKSPACE,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    WORKSPACE_PATH_OUTSIDE_ROOTS,
+    load_manifest_roots,
+    resolve_local_path,
+)
 
 from .action_seed import insert_agent_action
 from .migrated_db import prepare_test_database

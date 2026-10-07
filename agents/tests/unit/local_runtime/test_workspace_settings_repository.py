@@ -13,7 +13,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_project_order import (
     replace_workspace_project_order,
 )

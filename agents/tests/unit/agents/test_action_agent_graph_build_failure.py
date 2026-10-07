@@ -24,11 +24,11 @@ from tests.unit.agents.action_runtime_failure_test_support import (
 from pantaray_agents.agents.action_agent.runtime.steps.counters import (
     CounterInvariantError,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    ActionExecutionContextError,
     ensure_action_scratch_execution_context,
-    load_execution_session,
 )
-from pantaray_agents.local_runtime.tooling.bootstrap import ActionExecutionContextError
+from pantaray_agents.local_runtime.tooling.repository import load_execution_session
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.mock_repository import MockRepository

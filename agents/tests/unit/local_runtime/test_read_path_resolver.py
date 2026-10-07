@@ -12,7 +12,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_discovery import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedListRequest,
 )
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import ManifestRoot
 from pantaray_agents.local_runtime.tooling.brokering.read_path_resolver import (
     READ_PATH_DENIED,
     READ_PATH_NOT_FOUND,
@@ -29,6 +28,7 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import ManifestRoot
 from pantaray_agents.tools.files.private_storage import (
     PRIVATE_APP_STORAGE_MESSAGE,
     PrivateAppStorage,

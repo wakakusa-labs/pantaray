@@ -30,15 +30,15 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerPreflightOutcome,
     BrokerToolOutcome,
 )
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    load_tool_results_root,
-)
 from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
     WRITE_PATH_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    load_tool_results_root,
+)
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

@@ -3,11 +3,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import ManifestRoot, load_manifest_roots
 
 from ...storage.migrations import MigrationError
 from ..models import (
@@ -31,9 +32,6 @@ from ..repository import (
     upsert_approval_session,
 )
 from .broker_protocol import BrokerPathAccessKind
-
-if TYPE_CHECKING:
-    from .manifest_paths import ManifestRoot
 
 READ_TOOL_ID = "read"
 RENDER_PDF_PAGE_TOOL_ID = "render_pdf_page"
@@ -197,8 +195,6 @@ def load_broker_context(
         user_id=user_id,
         manifest_id=manifest_id,
     )
-    from .manifest_paths import load_manifest_roots
-
     manifest_roots = load_manifest_roots(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,

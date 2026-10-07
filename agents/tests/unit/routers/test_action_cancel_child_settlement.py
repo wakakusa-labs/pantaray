@@ -48,13 +48,13 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     reset_desktop_session_store,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling import (
-    bootstrap_local_tooling_catalog,
-    ensure_action_scratch_execution_context,
-)
 from pantaray_agents.local_runtime.tooling.action_subagent_resource_claims import (
     ExternalResourceClaim,
     acquire_action_subagent_resource_claims_in_connection,
+)
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+    ensure_action_scratch_execution_context,
 )
 from pantaray_agents.schema.agent.action import ActionUserMessageInput
 from pantaray_agents.tasks.types import ActionSubagentJobPayload

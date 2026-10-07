@@ -3,9 +3,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from pantaray_agents.local_runtime.tooling import (
-    complete_execution_session,
-)
 from pantaray_agents.local_runtime.tooling.locks.workspace_lock_coordinator import (
     acquire_workspace_root_lock,
 )
@@ -13,6 +10,7 @@ from pantaray_agents.local_runtime.tooling.models import (
     ToolInvocationCompletionInput,
     ToolRuntimeResourceCreateInput,
 )
+from pantaray_agents.local_runtime.tooling.repository import complete_execution_session
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     record_tool_invocation_completion,
 )

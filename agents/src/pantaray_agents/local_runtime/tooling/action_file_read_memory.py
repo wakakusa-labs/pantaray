@@ -15,12 +15,12 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryRevision,
 )
 from pantaray_agents.schema.tool_result import UnprojectedToolOutput
-
-from .brokering.broker_read_protocol import (
+from pantaray_agents.tools.files.read_output import (
     ReadDocumentOutput,
     ReadTextPageOutput,
     ReadToolOutput,
 )
+
 from .models import ToolInvocationReadMemoryInput, ToolInvocationStatus
 
 ACTION_FILE_READ_SOURCE: Final[Literal["action_file_read"]] = "action_file_read"

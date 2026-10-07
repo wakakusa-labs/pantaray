@@ -17,7 +17,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broke
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
     SANDBOX_TEMP_DIR_PREFIX,
 )
-from pantaray_agents.schema.read_access import ReadAccessScope
 
 from .support import (
     INTEGRATION_APPROVAL_TIMESTAMP,
@@ -57,45 +56,6 @@ int main(int argc, char **argv) {
         return 2;
     }
     printf("interpreter-ok:%s\n", argv[1]);
-    return 0;
-}
-"""
-ACTION_PLAN_SANDBOX_PROBE_SOURCE = r"""
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <unistd.h>
-
-static int expect_denied_open(const char *path, int flags) {
-    int fd;
-    errno = 0;
-    fd = open(path, flags);
-    if (fd >= 0) {
-        close(fd);
-        return 1;
-    }
-    return errno == EACCES || errno == EPERM ? 0 : 2;
-}
-
-int main(void) {
-    int neighbor_fd;
-    if (expect_denied_open(__PLAN_PATH__, O_RDONLY) != 0 ||
-        expect_denied_open(__PLAN_PATH__, O_WRONLY | O_TRUNC) != 0 ||
-        expect_denied_open(__SYMLINK_PATH__, O_RDONLY) != 0 ||
-        expect_denied_open(__SYMLINK_PATH__, O_WRONLY | O_TRUNC) != 0) {
-        return 10;
-    }
-    errno = 0;
-    if (link(__PLAN_PATH__, __HARDLINK_PATH__) == 0 ||
-        (errno != EACCES && errno != EPERM)) {
-        return 11;
-    }
-    neighbor_fd = open(__NEIGHBOR_PATH__, O_RDWR | O_APPEND);
-    if (neighbor_fd < 0 || write(neighbor_fd, "ok\n", 3) != 3) {
-        return 12;
-    }
-    close(neighbor_fd);
-    puts("plan-private-neighbor-writable");
     return 0;
 }
 """
@@ -150,50 +110,6 @@ async def test_workspace_executable_runs_via_helper(
     audit = load_latest_audit(db_path=testbed.db_path)
     assert audit["terminal_outcome"] == "exited"
     assert audit["resolved_executable_path"] == "/bin/bash"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("read_access_scope", ["workspace", "full_access"])
-async def test_action_plan_remains_private_inside_broad_workspace_sandbox(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    read_access_scope: ReadAccessScope,
-) -> None:
-    # Under full access the profile also allows reading "/"; the plan deny must
-    # still win.
-    testbed = bootstrap_runtime_testbed(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-        read_access_scope=read_access_scope,
-    )
-    plan_path = testbed.context.workspace_path / "plan.md"
-    symlink_path = testbed.context.workspace_path / "plan-alias.md"
-    hardlink_path = testbed.context.workspace_path / "plan-hardlink.md"
-    neighbor_path = testbed.context.workspace_path / "neighbor.txt"
-    plan_path.write_text("private\n", encoding="utf-8")
-    symlink_path.symlink_to(plan_path)
-    neighbor_path.write_text("public\n", encoding="utf-8")
-    source = (
-        ACTION_PLAN_SANDBOX_PROBE_SOURCE.replace(
-            "__PLAN_PATH__", json.dumps(str(plan_path))
-        )
-        .replace("__SYMLINK_PATH__", json.dumps(str(symlink_path)))
-        .replace("__HARDLINK_PATH__", json.dumps(str(hardlink_path)))
-        .replace("__NEIGHBOR_PATH__", json.dumps(str(neighbor_path)))
-    )
-    compile_workspace_binary(
-        workspace_path=testbed.context.workspace_path,
-        executable_name="planprobe",
-        source_code=source,
-    )
-
-    outcome = await execute_bash(testbed=testbed, command="planprobe")
-
-    assert outcome.status == "success", outcome.output
-    assert outcome.output["stdout"] == "plan-private-neighbor-writable\n"
-    assert plan_path.read_text(encoding="utf-8") == "private\n"
-    assert neighbor_path.read_text(encoding="utf-8") == "public\nok\n"
-    assert not hardlink_path.exists()
 
 
 @pytest.mark.asyncio

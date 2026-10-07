@@ -14,7 +14,6 @@ class ActionSandboxStorage(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    plan_path: str
     workspace_root: str
     published_results_root: str
 

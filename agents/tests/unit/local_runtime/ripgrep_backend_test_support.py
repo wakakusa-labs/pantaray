@@ -12,7 +12,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyE
 from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
     RipgrepGlobResult,
     RipgrepGrepResult,
-    _is_excluded_relative_path,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
     RipgrepGrepMatch,
@@ -34,7 +33,6 @@ def _fake_files(
     glob_pattern: str,
     limit: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
@@ -47,8 +45,6 @@ def _fake_files(
         pruned_relative_paths=pruned_relative_paths,
         extra_search_paths=extra_search_paths,
     ):
-        if _is_excluded_relative_path(relative_path, excluded_relative_path):
-            continue
         if include_path is not None and not include_path(cwd / relative_path):
             continue
         if not _matches_relative_glob(relative_path, glob_pattern):
@@ -75,7 +71,6 @@ def _fake_grep(
     include_glob: str | None,
     max_matches: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
@@ -97,8 +92,6 @@ def _fake_grep(
         pruned_relative_paths=pruned_relative_paths,
         extra_search_paths=extra_search_paths,
     ):
-        if _is_excluded_relative_path(relative_path, excluded_relative_path):
-            continue
         if include_path is not None and not include_path(cwd / relative_path):
             continue
         if include_glob and not _matches_relative_glob(relative_path, include_glob):

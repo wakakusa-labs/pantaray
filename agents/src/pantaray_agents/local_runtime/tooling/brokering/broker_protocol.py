@@ -499,7 +499,6 @@ class ValidatedCommandRequest(BaseModel):
     action_id: str
     approval_session_id: str | None = None
     approval_source: Literal["settings", "prompt"] | None = None
-    action_plan_path: str
     private_storage_roots: list[str]
     action_workspace_root: str
     published_results_root: str

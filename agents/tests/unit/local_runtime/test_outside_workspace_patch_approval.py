@@ -35,7 +35,6 @@ from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
     load_tool_results_root,
 )
 from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    ACTION_PLAN_PATH_PRIVATE,
     WRITE_PATH_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
@@ -297,9 +296,6 @@ async def test_protected_paths_stay_hard_denied(tmp_path: Path, outside: Path) -
         action_id="action-1",
     )
     (outside / "results-link").symlink_to(tool_results)
-    plan = context.workspace_path / "plan.md"
-    plan.write_text("private\n", encoding="utf-8")
-    (outside / "plan-link.md").symlink_to(plan)
     memory_users = read_local_runtime_artifact_root() / "memory_catalog/users"
     memory_users.mkdir(parents=True, exist_ok=True)
 
@@ -320,28 +316,8 @@ async def test_protected_paths_stay_hard_denied(tmp_path: Path, outside: Path) -
             )
         assert caught.value.code == WRITE_PATH_DENIED, label
 
-    with pytest.raises(BrokerPolicyError) as plan_caught:
-        await _patch(
-            db_path=db_path,
-            context=context,
-            request_id="req-plan",
-            args={
-                "changes": [
-                    {
-                        "op": "update",
-                        "path": str(outside / "plan-link.md"),
-                        "edits": [{"old_lines": ["private"], "new_lines": ["x"]}],
-                    }
-                ]
-            },
-        )
-    assert plan_caught.value.code == ACTION_PLAN_PATH_PRIVATE
     assert _approval_rows(db_path) == []
-    assert plan.read_text(encoding="utf-8") == "private\n"
-    assert set(outside.iterdir()) == {
-        outside / "results-link",
-        outside / "plan-link.md",
-    }
+    assert set(outside.iterdir()) == {outside / "results-link"}
 
 
 @pytest.mark.asyncio

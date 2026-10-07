@@ -10,7 +10,6 @@ from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_WORKSPACE,
 )
 
-from ..action_plan_document import is_action_plan_artifact_path
 from ..workspace_manifest_roots import path_belongs_to_manifest_root
 from .broker_common import BrokerContext, BrokerPolicyError
 from .manifest_paths import (
@@ -44,7 +43,6 @@ WRITE_PATH_NOT_FOUND = "WRITE_PATH_NOT_FOUND"
 WRITE_PATH_DENIED = "WRITE_PATH_DENIED"
 EXEC_CWD_NOT_FOUND = "EXEC_CWD_NOT_FOUND"
 EXEC_CWD_DENIED = "EXEC_CWD_DENIED"
-ACTION_PLAN_PATH_PRIVATE = "ACTION_PLAN_PATH_PRIVATE"
 SUGGESTION_LIMIT = 3
 SUGGESTION_SCAN_LIMIT = 200
 
@@ -122,9 +120,6 @@ def resolve_read_path(
             suggestions=suggestions,
             full_access=scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS,
         ) from exc
-    reject_private_action_plan_path(
-        scratch_root_path=scope.scratch_root_path, path=resolved.path
-    )
     if scope.private_storage.hides(resolved.path):
         raise private_app_storage_error(code=READ_PATH_DENIED)
     return resolved
@@ -179,27 +174,11 @@ def resolve_write_tool_path(
             if is_private_storage(candidate.resolve(strict=False)):
                 raise private_app_storage_error(code=WRITE_PATH_DENIED) from exc
         raise _write_path_denied_error() from exc
-    reject_private_action_plan_path(
-        scratch_root_path=context.scratch_root_path, path=resolved.path
-    )
     # Manifest roots match the most specific root first, so a path in the
     # Action's own storage roots resolves to them and gets their permissions.
     if is_private_storage(resolved.path):
         raise private_app_storage_error(code=WRITE_PATH_DENIED)
     return resolved
-
-
-def reject_private_action_plan_path(
-    *,
-    scratch_root_path: Path,
-    path: Path,
-) -> None:
-    if not is_action_plan_artifact_path(scratch_root=scratch_root_path, path=path):
-        return
-    raise BrokerPolicyError(
-        "The app-managed Action plan is private to the parent plan tools",
-        code=ACTION_PLAN_PATH_PRIVATE,
-    )
 
 
 def resolve_exec_tool_cwd(
@@ -579,7 +558,6 @@ def _exec_cwd_denied_error() -> BrokerPolicyError:
 
 
 __all__ = [
-    "ACTION_PLAN_PATH_PRIVATE",
     "ExecSandboxRoots",
     "READ_PATH_DENIED",
     "READ_PATH_NOT_FOUND",

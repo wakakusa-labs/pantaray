@@ -173,13 +173,13 @@ test('offer: inline decisions, expanded instructions and fresh suggestion reset'
   const open = page.getByRole('button', { name: '追加の指示（任意）' });
   const accept = page.getByRole('button', { name: '承認', exact: true });
   await expect(page.getByRole('textbox')).toHaveCount(0);
+  await capture(page, info, 'offer-collapsed');
   const iconBox = (await open.boundingBox())!;
   const acceptBox = (await accept.boundingBox())!;
   expect(
     Math.abs(iconBox.y + iconBox.height / 2 - acceptBox.y - acceptBox.height / 2)
   ).toBeLessThan(2);
   expect(acceptBox.x).toBeGreaterThan(iconBox.x + iconBox.width);
-  await capture(page, info, 'offer-collapsed');
   await open.click();
   const input = page.getByRole('textbox', { name: '追加の指示（任意）' });
   await expect(input).toBeFocused();

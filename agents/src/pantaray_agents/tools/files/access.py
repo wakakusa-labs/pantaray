@@ -363,7 +363,6 @@ def _workspace_grep_matches(
             read_roots=(str(root.canonical_path),),
             private_storage_roots=tuple(str(path) for path in storage_roots),
             readable_private_roots=(),
-            action_plan_path=None,
         ),
         pattern=pattern,
         include_glob=include_glob,

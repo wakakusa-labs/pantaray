@@ -14,10 +14,6 @@ from ..descriptor_access import DescriptorPathError, open_directory_descriptor
 from ..runtime.runtime_env import read_local_runtime_artifact_root
 from ..storage.migrations import MigrationError
 from ..storage.transactions import immediate_transaction
-from .action_plan_document import (
-    ActionPlanDocumentError,
-    remove_abandoned_action_plan_write,
-)
 from .action_session_temp_paths import (
     LOCAL_RUNTIME_WORKSPACE_DIRNAME,
     MANAGED_DIRECTORY_MODE,
@@ -259,13 +255,6 @@ def _ensure_action_storage_layout(
     finally:
         for directory_fd in reversed(open_fds):
             os.close(directory_fd)
-
-    try:
-        remove_abandoned_action_plan_write(action_root=paths.action_root)
-    except ActionPlanDocumentError as exc:
-        raise ActionExecutionContextError(
-            "failed to recover the durable Action storage layout"
-        ) from exc
 
     return paths
 

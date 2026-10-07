@@ -11,7 +11,6 @@ from pathlib import Path
 
 from pantaray_agents.schema.read_access import ReadAccessScope
 
-from ..action_plan_document import is_action_plan_artifact_path
 from .manifest_paths import ManifestRoot
 from .private_app_storage import PrivateAppStorage
 
@@ -27,9 +26,7 @@ class ReadScope:
     def hides(self, path: Path) -> bool:
         """Whether a resolved path is kept out of every read and search result."""
 
-        return self.private_storage.hides(path) or is_action_plan_artifact_path(
-            scratch_root=self.scratch_root_path, path=path
-        )
+        return self.private_storage.hides(path)
 
 
 __all__ = ["ReadScope"]

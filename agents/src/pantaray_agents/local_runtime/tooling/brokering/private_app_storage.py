@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..action_plan_document import relative_to_directory_identity
 from ..outside_workspace_grant import app_owned_roots
 from .broker_common import BrokerPolicyError
 from .manifest_paths import ManifestRoot
@@ -102,9 +101,30 @@ def private_app_storage_error(*, code: str) -> BrokerPolicyError:
 def is_within_any(path: Path, roots: tuple[Path, ...]) -> bool:
     # Directory identity, so a case alias on APFS cannot step around a root.
     return any(
-        relative_to_directory_identity(path=path, directory=root) is not None
+        _relative_to_directory_identity(path=path, directory=root) is not None
         for root in roots
     )
+
+
+def _relative_to_directory_identity(*, path: Path, directory: Path) -> Path | None:
+    try:
+        return path.relative_to(directory)
+    except ValueError:
+        parts: list[str] = []
+        ancestor = path
+        while ancestor.parent != ancestor:
+            if (
+                ancestor.name.casefold() == directory.name.casefold()
+                and _same_directory(ancestor, directory)
+            ):
+                return Path(*reversed(parts))
+            parts.append(ancestor.name)
+            ancestor = ancestor.parent
+        return None
+
+
+def _same_directory(left: Path, right: Path) -> bool:
+    return left == right or (left.is_dir() and right.is_dir() and left.samefile(right))
 
 
 def _below(base: Path, roots: tuple[Path, ...]) -> dict[Path, str]:
@@ -112,7 +132,7 @@ def _below(base: Path, roots: tuple[Path, ...]) -> dict[Path, str]:
 
     below: dict[Path, str] = {}
     for root in roots:
-        relative = relative_to_directory_identity(path=root, directory=base)
+        relative = _relative_to_directory_identity(path=root, directory=base)
         if relative is not None:
             below[root] = relative.as_posix()
     return below

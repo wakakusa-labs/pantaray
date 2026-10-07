@@ -35,7 +35,6 @@ def test_ripgrep_files_uses_fixed_argv(
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
-        assert handle_line(b"src/action[1]/PLAN.MD") is True
         assert handle_line(b"src/app.py") is True
         assert handle_line(b"src/other.py") is False
         return broker_discovery_ripgrep.RipgrepRunResult(
@@ -55,7 +54,7 @@ def test_ripgrep_files_uses_fixed_argv(
         sandbox_profile="",
         glob_pattern="src/*.py",
         limit=1,
-        excluded_relative_path="src/action[1]/plan.md",
+        pruned_relative_paths=("src/action[1]",),
     )
 
     assert captured["cwd"] == tmp_path
@@ -70,7 +69,7 @@ def test_ripgrep_files_uses_fixed_argv(
         "--glob",
         "src/*.py",
         "--glob",
-        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]/[pP][lL][aA][nN].[mM][dD]",
+        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]",
         "--",
         ".",
     )
@@ -98,7 +97,6 @@ def test_ripgrep_grep_uses_fixed_argv(
     ) -> broker_discovery_ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
-        assert handle_line(b"src/action[1]/PLAN.MD\x001:9:private needle")
         assert handle_line(b"src/app.py\x003:1:needle\r")
         return broker_discovery_ripgrep.RipgrepRunResult(
             exit_code=0,
@@ -118,7 +116,7 @@ def test_ripgrep_grep_uses_fixed_argv(
         pattern="needle",
         include_glob="**/*.py",
         max_matches=10,
-        excluded_relative_path="src/action[1]/plan.md",
+        pruned_relative_paths=("src/action[1]",),
     )
 
     assert captured["cwd"] == tmp_path
@@ -141,7 +139,7 @@ def test_ripgrep_grep_uses_fixed_argv(
         "--glob",
         "**/*.py",
         "--glob",
-        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]/[pP][lL][aA][nN].[mM][dD]",
+        r"!/[sS][rR][cC]/[aA][cC][tT][iI][oO][nN]\[1\]",
         "--",
         "needle",
         ".",

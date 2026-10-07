@@ -17,9 +17,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    ACTION_PLAN_PATH_PRIVATE,
-)
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -124,38 +121,6 @@ async def test_command_sandbox_uses_actor_claim_roots_without_parent_bypass(
     assert captured[BROKER_ACTOR_PROCESS_ID].real_write_roots == []
     assert captured["child-owned"].real_write_roots == [str(claimed_path.resolve())]
     assert captured["child-unclaimed"].real_write_roots == []
-
-
-@pytest.mark.asyncio
-async def test_command_rejects_a_preexisting_action_plan_hardlink(
-    tmp_path: Path,
-) -> None:
-    db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
-    plan_path = context.workspace_path / "plan.md"
-    plan_path.write_text("private\n", encoding="utf-8")
-    (context.workspace_path / "plan-hardlink.md").hardlink_to(plan_path)
-
-    with pytest.raises(BrokerPolicyError) as exc_info:
-        await execute_broker_tool(
-            db_path=db_path,
-            busy_timeout_ms=BUSY_TIMEOUT_MS,
-            tool_id="bash",
-            user_id="user-1",
-            actor_process_id=BROKER_ACTOR_PROCESS_ID,
-            manifest_id=context.manifest_id,
-            execution_session_id=context.execution_session_id,
-            tool_request_id="request-linked-plan",
-            args={"command": "pwd", "cwd": "."},
-            preflight_only=True,
-        )
-
-    assert exc_info.value.code == ACTION_PLAN_PATH_PRIVATE
-    assert plan_path.read_text(encoding="utf-8") == "private\n"
 
 
 @pytest.mark.asyncio

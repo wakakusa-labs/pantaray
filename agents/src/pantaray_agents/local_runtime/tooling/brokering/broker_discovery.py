@@ -7,7 +7,6 @@ from pathlib import Path, PurePosixPath
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 
-from ..action_plan_document import ACTION_PLAN_FILENAME
 from ..sandbox.seatbelt_profiles import render_ripgrep_seatbelt_profile
 from .broker_common import BrokerPolicyError
 from .broker_discovery_paths import (
@@ -141,10 +140,6 @@ def run_glob_executor(
         glob_pattern=request.pattern,
         limit=request.limit,
         follow_symlinks=False,
-        excluded_relative_path=_private_plan_relative_to_base(
-            scope=scope,
-            base=base,
-        ),
         pruned_relative_paths=search_scope.pruned,
         extra_search_paths=search_scope.own_roots,
         include_path=lambda path: not scope.hides(path),
@@ -194,35 +189,11 @@ def _ripgrep_sandbox_profile(*, scope: ReadScope, base: ResolvedManifestPath) ->
         read_roots=("/",) if full_access else (str(base.root.canonical_real_path),),
         private_storage_roots=tuple(str(root) for root in storage.storage_roots),
         readable_private_roots=tuple(str(root) for root in storage.readable_roots),
-        action_plan_path=str(scope.scratch_root_path / ACTION_PLAN_FILENAME),
     )
 
 
 def _backend_path(base: ResolvedManifestPath, relative_path: str) -> Path:
     return base.path / PurePosixPath(relative_path)
-
-
-def _private_plan_relative_to_base(
-    *,
-    scope: ReadScope,
-    base: ResolvedManifestPath,
-) -> str | None:
-    try:
-        relative = (scope.scratch_root_path / ACTION_PLAN_FILENAME).relative_to(
-            base.path
-        )
-    except ValueError:
-        relative = Path(ACTION_PLAN_FILENAME)
-        ancestor = scope.scratch_root_path
-        while True:
-            if ancestor.samefile(base.path):
-                return relative.as_posix()
-            if ancestor.parent == ancestor:
-                return None
-            relative = Path(ancestor.name) / relative
-            ancestor = ancestor.parent
-    else:
-        return relative.as_posix()
 
 
 def _discovery_entry_json(entry: dict[str, object]) -> dict[str, JSONValue]:
@@ -338,10 +309,6 @@ def run_grep_executor(
         include_glob=request.include_glob,
         max_matches=request.max_matches,
         follow_symlinks=False,
-        excluded_relative_path=_private_plan_relative_to_base(
-            scope=scope,
-            base=base,
-        ),
         pruned_relative_paths=search_scope.pruned,
         extra_search_paths=search_scope.own_roots,
         include_path=lambda path: not scope.hides(path),

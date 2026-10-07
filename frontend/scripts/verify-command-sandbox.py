@@ -62,7 +62,6 @@ print('sandbox ok')
         real_write_roots=[str(workspace), str(temporary)],
         private_storage_roots=[str(private)],
         action_storage=ActionSandboxStorage(
-            plan_path=str(workspace / "plan.md"),
             workspace_root=str(workspace),
             published_results_root=str(workspace / "results"),
         ),

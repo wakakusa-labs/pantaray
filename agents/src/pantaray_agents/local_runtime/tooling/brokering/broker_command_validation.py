@@ -6,11 +6,6 @@ from typing import cast
 
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 
-from ..action_plan_document import (
-    ACTION_PLAN_FILENAME,
-    ActionPlanDocumentError,
-    action_plan_has_external_hardlinks,
-)
 from ..action_session_temp_paths import resolve_action_storage_paths
 from ..models import BrokerNetworkPolicy
 from ..outside_workspace_grant import app_owned_roots
@@ -40,7 +35,6 @@ from .command_approval_summaries import (
 from .command_runtime import build_command_env
 from .outside_workspace import OutsideWorkspaceCwd
 from .tool_path_policy import (
-    ACTION_PLAN_PATH_PRIVATE,
     ExecSandboxRoots,
     resolve_exec_sandbox_roots,
     resolve_exec_tool_cwd,
@@ -153,20 +147,6 @@ def _resolve_command_sandbox_roots(
     action_temp_dir: Path,
     outside_workspace_folders: tuple[Path, ...],
 ) -> ExecSandboxRoots:
-    try:
-        linked_plan = action_plan_has_external_hardlinks(
-            scratch_root=context.scratch_root_path
-        )
-    except ActionPlanDocumentError as exc:
-        raise BrokerPolicyError(
-            "The app-managed Action plan identity could not be verified",
-            code=ACTION_PLAN_PATH_PRIVATE,
-        ) from exc
-    if linked_plan:
-        raise BrokerPolicyError(
-            "The app-managed Action plan has external hard links",
-            code=ACTION_PLAN_PATH_PRIVATE,
-        )
     candidates = resolve_exec_sandbox_roots(
         context=context,
         action_temp_dir=action_temp_dir,
@@ -304,7 +284,6 @@ def build_validated_command_request(
         action_id=context.execution_session.action_id or "unknown",
         approval_session_id=approval_session_id,
         approval_source=approval_source,
-        action_plan_path=str(context.scratch_root_path / ACTION_PLAN_FILENAME),
         private_storage_roots=[str(root) for root in app_owned_roots(context.db_path)],
         action_workspace_root=str(storage.workspace),
         published_results_root=str(storage.tool_results),
@@ -411,7 +390,6 @@ def build_validated_python_request(
         action_id=context.execution_session.action_id or "unknown",
         approval_session_id=approval_session_id,
         approval_source=approval_source,
-        action_plan_path=str(context.scratch_root_path / ACTION_PLAN_FILENAME),
         private_storage_roots=[str(root) for root in app_owned_roots(context.db_path)],
         action_workspace_root=str(storage.workspace),
         published_results_root=str(storage.tool_results),

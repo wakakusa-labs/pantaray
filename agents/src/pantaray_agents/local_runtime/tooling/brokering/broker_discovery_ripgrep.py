@@ -128,7 +128,6 @@ def run_ripgrep_files(
     glob_pattern: str,
     limit: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
@@ -140,8 +139,6 @@ def run_ripgrep_files(
         nonlocal truncated
         line = raw_line.decode("utf-8", errors="replace")
         if not line:
-            return True
-        if _is_excluded_relative_path(line, excluded_relative_path):
             return True
         if include_path is not None and not include_path(cwd / PurePosixPath(line)):
             return True
@@ -159,11 +156,6 @@ def run_ripgrep_files(
             *(("--follow",) if follow_symlinks else ()),
             "--glob",
             glob_pattern,
-            *(
-                ("--glob", _literal_exclusion_glob(excluded_relative_path))
-                if excluded_relative_path
-                else ()
-            ),
             *_pruning_args(pruned_relative_paths),
             "--",
             ".",
@@ -195,7 +187,6 @@ def run_ripgrep_grep(
     include_glob: str | None,
     max_matches: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
@@ -209,9 +200,8 @@ def run_ripgrep_grep(
     pending = b""
 
     def is_hidden(relative_path: str) -> bool:
-        return _is_excluded_relative_path(relative_path, excluded_relative_path) or (
-            include_path is not None
-            and not include_path(cwd / PurePosixPath(relative_path))
+        return include_path is not None and not include_path(
+            cwd / PurePosixPath(relative_path)
         )
 
     def handle_line(raw_line: bytes) -> bool:
@@ -267,8 +257,6 @@ def run_ripgrep_grep(
         argv.extend(("--sort", "path"))
     if include_glob is not None:
         argv.extend(("--glob", include_glob))
-    if excluded_relative_path is not None:
-        argv.extend(("--glob", _literal_exclusion_glob(excluded_relative_path)))
     argv.extend(_pruning_args(pruned_relative_paths))
     argv.extend(("--", pattern, ".", *extra_search_paths))
     result = _run_ripgrep_lines(
@@ -295,17 +283,6 @@ def run_ripgrep_grep(
 def _first_skip_error(stderr: str) -> str | None:
     first_line = stderr.partition("\n")[0].strip()
     return first_line.removeprefix(RIPGREP_ERROR_PREFIX) or None
-
-
-def _is_excluded_relative_path(path: str, excluded: str | None) -> bool:
-    if excluded is None:
-        return False
-    candidate = PurePosixPath(path)
-    private = PurePosixPath(excluded)
-    return (
-        candidate.parent == private.parent
-        and candidate.name.casefold() == private.name.casefold()
-    )
 
 
 def _pruning_args(relative_paths: tuple[str, ...]) -> tuple[str, ...]:

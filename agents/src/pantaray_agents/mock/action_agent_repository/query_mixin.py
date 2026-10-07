@@ -12,6 +12,7 @@ from pantaray_agents.repositories.action_support.initial_memory_context_contract
     InitialInsightBrief,
     InitialMemoryContext,
 )
+from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.repositories.repository import (
     DBRow,
     DBRows,
@@ -407,7 +408,7 @@ class MockActionAgentQueryMixin:
         user_id: str,
         action_id: str,
         identity: str,
-    ) -> RepositoryResult[dict[str, LlmProviderTurn]]:
+    ) -> RepositoryResult[dict[str, ActionProviderTurnRecord]]:
         action_result = await self.get_action(user_id=user_id, action_id=action_id)
         if action_result.error:
             return RepositoryResult(error=action_result.error)
@@ -415,13 +416,16 @@ class MockActionAgentQueryMixin:
             return RepositoryResult(error="Action not found")
         return RepositoryResult(
             data={
-                str(row["step_id"]): _PROVIDER_TURN_ADAPTER.validate_python(
-                    row["provider_turn"]
+                str(row["step_id"]): ActionProviderTurnRecord(
+                    turn=_PROVIDER_TURN_ADAPTER.validate_python(row["provider_turn"]),
+                    identity=identity,
+                    fingerprint=str(row["provider_turn_fingerprint"]),
                 )
                 for row in self.data.get("action_steps", [])
                 if row.get("action_id") == action_id
                 and row.get("provider_turn") is not None
                 and row.get("provider_turn_identity") == identity
+                and row.get("provider_turn_fingerprint") is not None
             }
         )
 

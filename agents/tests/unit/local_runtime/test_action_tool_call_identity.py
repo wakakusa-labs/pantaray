@@ -168,9 +168,23 @@ async def test_a_provider_turn_survives_the_store(tmp_path: Path) -> None:
         user_id="user-1",
         short_step_id="S-2-THINK",
         local_step_number=2,
-        provider_turn=ActionProviderTurnRecord(turn=turn, identity=_IDENTITY),
+        provider_turn=ActionProviderTurnRecord(
+            turn=turn, identity=_IDENTITY, fingerprint="prefix"
+        ),
     )
     assert saved.error is None
+    # A turn recorded before its prefix was (migration 0122) is never handed
+    # back: nothing says where it may go.
+    with _connect(db_path) as connection:
+        connection.execute(
+            """INSERT INTO agent_action_steps(
+                step_id, action_id, user_id, step_number, local_step_number,
+                short_step_id, step_type, step_name, status, goal_handle,
+                provider_turn, provider_turn_identity, created_at
+            ) VALUES ('legacy-step', 'action-1', 'user-1', 1, 1, 'S-1-THINK',
+                'llm_output', 'supervisor_think', 'success', 'S', ?, ?, ?)""",
+            (turn.model_dump_json(), _IDENTITY, TIMESTAMP),
+        )
 
     reloaded = await repository.get_action_provider_turns(
         user_id="user-1", action_id="action-1", identity=_IDENTITY
@@ -181,8 +195,9 @@ async def test_a_provider_turn_survives_the_store(tmp_path: Path) -> None:
     # another order is another assistant item, and the whole prompt cache read
     # of the run depends on it being the same one.
     assert {
-        step_id: stored.model_dump_json() for step_id, stored in reloaded.data.items()
-    } == {"think-step": turn.model_dump_json()}
+        step_id: (stored.turn.model_dump_json(), stored.fingerprint)
+        for step_id, stored in reloaded.data.items()
+    } == {"think-step": (turn.model_dump_json(), "prefix")}
 
     # The opaque state is readable only by the account that issued it, so
     # another connection is handed none of it.

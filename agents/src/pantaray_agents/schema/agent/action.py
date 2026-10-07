@@ -352,6 +352,11 @@ class ActionProviderTurnRecord(BaseModel):
 
     turn: LlmProviderTurn
     identity: str = Field(min_length=1)
+    # What the request that produced the turn sent before the turn's place --
+    # ``conversation_projection.request_fingerprint`` chained over its items. A
+    # turn goes back only behind the same prefix: a thinking block is bound to
+    # everything before it, and a request that rewrote any of it is refused.
+    fingerprint: str = Field(min_length=1)
 
 
 class ActionStepRecord(BaseModel):
@@ -377,6 +382,7 @@ class ActionStepRecord(BaseModel):
     # can hand it back, and the provider account that may receive it back.
     provider_turn: LlmProviderTurn | None = None
     provider_turn_identity: str | None = None
+    provider_turn_fingerprint: str | None = None
     runtime_state_checkpoint: RuntimeStateCheckpointPayload | None = None
     runtime_state_checkpoint_version: int | None = None
     status: StepStatusType = Field(default=StepStatusType.PROCESSING)

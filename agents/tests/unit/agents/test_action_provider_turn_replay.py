@@ -1,4 +1,4 @@
-"""思考の項目を戻すかどうかを、走りの側で決める規則（誰のものか、まだ受け取るか）。"""
+"""思考の項目を戻すかどうかを、走りの側で決める規則（誰のものか、拒否されたら外す）。"""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     request_llm_connection,
 )
 from pantaray_agents.repositories.runtime_ports import ActionRepositoryPort
+from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse, LlmCommentary
 from pantaray_llm.contracts.conversation import (
@@ -50,6 +51,7 @@ _TURN = OpenAiProviderTurn(
     provider="openai",
     items=[{"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}],
 )
+_RECORD = ActionProviderTurnRecord(turn=_TURN, identity=_IDENTITY, fingerprint="fp")
 
 
 def _refused_input() -> LlmProxyExecutionError:
@@ -64,6 +66,7 @@ def _refused_input() -> LlmProxyExecutionError:
 
 def _window(store: ActionProviderTurnStore) -> PreparedWindow:
     """One item, carrying this store's turn or not, as the real window would."""
+    record = store.turns.get(_STEP_ID)
     return PreparedWindow(
         prompt="HEAD",
         recorded_prompt="HEAD",
@@ -71,9 +74,10 @@ def _window(store: ActionProviderTurnStore) -> PreparedWindow:
             LlmTurnAssistantItem(
                 type="assistant",
                 text=["調べます。"],
-                provider_turn=store.replayable().get(_STEP_ID),
+                provider_turn=None if record is None else record.turn,
             )
         ],
+        fingerprint="with" if record is not None else "without",
         turn_context=None,
         world_state=None,
         file_inputs=(),
@@ -87,9 +91,9 @@ async def _send(
     *,
     responses: list[object],
     connection: LlmConnection | None = None,
-) -> tuple[LlmActionTurnResponse, Any]:
+) -> tuple[LlmActionTurnResponse, PreparedWindow, Any]:
     agent = SimpleNamespace(_generate_llm_action_turn=AsyncMock(side_effect=responses))
-    turn = await send_executing_turn(
+    turn, sent = await send_executing_turn(
         cast(ActionAgent, agent),
         sink=cast(StateTokenSink, None),
         prepared=_window(store),
@@ -100,11 +104,11 @@ async def _send(
         max_parallel_tool_calls=1,
         system_instruction="SYS",
     )
-    return turn, agent._generate_llm_action_turn
+    return turn, sent, agent._generate_llm_action_turn
 
 
 def _store() -> ActionProviderTurnStore:
-    return ActionProviderTurnStore(identity=_IDENTITY, turns={_STEP_ID: _TURN})
+    return ActionProviderTurnStore(identity=_IDENTITY, turns={_STEP_ID: _RECORD})
 
 
 def _replayed(mock: Any) -> list[LlmProviderTurn | None]:
@@ -128,12 +132,16 @@ async def test_a_refused_input_resends_the_same_turn_without_the_thinking() -> N
     )
     store = _store()
 
-    turn, mock = await _send(store, responses=[_refused_input(), accepted])
+    turn, sent, mock = await _send(store, responses=[_refused_input(), accepted])
 
     assert turn is accepted
     assert _replayed(mock) == [_TURN, None]
-    # Every later turn of this run keeps sending the structure without them.
-    assert store.replayable() == {}
+    # The response's own turn is recorded behind what was actually sent.
+    assert sent.fingerprint == "without"
+    assert store.turns == {}
+    # A turn the run receives after that goes back as usual.
+    store.accept(step_id="next-step", turn=_TURN, fingerprint=sent.fingerprint)
+    assert list(store.turns) == ["next-step"]
 
 
 @pytest.mark.asyncio
@@ -172,7 +180,7 @@ async def test_a_failure_that_is_not_a_refused_input_is_never_resent() -> None:
         await _send(store, responses=[rate_limited])
 
     # The transport owns its own retries; nothing here touched the thinking.
-    assert store.replayable() == {_STEP_ID: _TURN}
+    assert store.turns == {_STEP_ID: _RECORD}
 
 
 # --- 誰のものかで決める --------------------------------------------------------
@@ -182,16 +190,26 @@ def test_a_turn_is_kept_only_under_the_account_that_issued_it() -> None:
     """どこにも届かない経路（未設定）では要求を送らないので記録も無い。"""
 
     assert (
-        ActionProviderTurnStore(identity=None).accept(step_id=_STEP_ID, turn=_TURN)
+        ActionProviderTurnStore(identity=None).accept(
+            step_id=_STEP_ID, turn=_TURN, fingerprint="fp"
+        )
         is None
     )
 
     store = ActionProviderTurnStore(identity=_IDENTITY)
-    record = store.accept(step_id=_STEP_ID, turn=_TURN)
+    record = store.accept(step_id=_STEP_ID, turn=_TURN, fingerprint="fp")
 
-    assert record is not None
-    assert record.identity == _IDENTITY
-    assert store.replayable() == {_STEP_ID: _TURN}
+    assert record == _RECORD
+    assert store.turns == {_STEP_ID: _RECORD}
+
+
+def test_a_turn_sent_as_one_string_is_not_kept() -> None:
+    """文字列で送った要求には会話の接頭辞がなく、戻す場所もない。"""
+
+    store = ActionProviderTurnStore(identity=_IDENTITY)
+
+    assert store.accept(step_id=_STEP_ID, turn=_TURN, fingerprint=None) is None
+    assert store.turns == {}
 
 
 def test_model_switch_drops_the_old_models_opaque_turns() -> None:
@@ -200,8 +218,8 @@ def test_model_switch_drops_the_old_models_opaque_turns() -> None:
 
     store.use_identity(new_identity)
 
-    assert store.replayable() == {}
-    record = store.accept(step_id="next-step", turn=_TURN)
+    assert store.turns == {}
+    record = store.accept(step_id="next-step", turn=_TURN, fingerprint="fp")
     assert record is not None and record.identity == new_identity
 
 
@@ -217,7 +235,7 @@ async def test_model_switch_does_not_replay_the_old_turn_on_the_next_send() -> N
     store = _store()
     store.use_identity(_IDENTITY.replace("gpt-5.6-sol", "gpt-6-luna"))
 
-    _, mock = await _send(store, responses=[accepted])
+    _, _, mock = await _send(store, responses=[accepted])
 
     assert _replayed(mock) == [None]
 
@@ -318,7 +336,7 @@ async def test_a_cloud_run_reads_back_what_the_same_route_and_profile_recorded(
     monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
     repository = SimpleNamespace(
         get_action_provider_turns=AsyncMock(
-            return_value=RepositoryResult(data={_STEP_ID: _TURN})
+            return_value=RepositoryResult(data={_STEP_ID: _RECORD})
         )
     )
 
@@ -332,4 +350,4 @@ async def test_a_cloud_run_reads_back_what_the_same_route_and_profile_recorded(
     assert repository.get_action_provider_turns.await_args.kwargs["identity"] == (
         f"cloud:{ACTION_EXECUTING_PROFILE_ID}"
     )
-    assert store.replayable() == {_STEP_ID: _TURN}
+    assert store.turns == {_STEP_ID: _RECORD}

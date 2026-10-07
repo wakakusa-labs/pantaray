@@ -69,6 +69,9 @@ class PreparedWindow:
     # shape was sent.
     recorded_prompt: str
     conversation: LlmConversation | None
+    # The conversation's prefix, which a provider turn this window produces is
+    # recorded with; None when the turn is sent as one string.
+    fingerprint: str | None
     # The context message this turn appended, which the step record keeps so a
     # later turn replays the bytes that were sent rather than rebuilding them.
     turn_context: str | None

@@ -17,22 +17,30 @@ the pending draft) is not a trailing item that each turn replaces: each turn
 appends its own, and the ones it sent before stay where they were, read back
 from the row that recorded them.
 
-Two properties keep that true, and both belong to this projection rather than to
-the contract it builds:
+These properties keep that true, and they belong to this projection rather than
+to the contract it builds:
 
 * a row is final the moment it is appended, and the turn context is recorded
   with it, so nothing an earlier turn sent is ever recomputed;
-* a THINK's provider turn is settled when its response arrives -- recorded on
-  its row, held for the rest of the run, read back byte for byte after a restart
-  -- so an item that carried one carries the same one on every later turn;
 * the body-omission boundary only ever moves forward, so omitting old results
   rewrites those items and leaves every later item alone.
+
+A THINK's provider turn is the one thing that may not ride along a rewrite. A
+thinking block is bound to the system instruction, the tools and every item
+before it, and a provider refuses one whose prefix has changed since -- a body
+omitted, a retry notice that was never recorded, a row a repair replaced, a
+system instruction in another language. So each turn is recorded with the
+fingerprint of the prefix it was produced behind, and goes back only behind the
+same one. Where a rewrite breaks the match, that turn and every turn produced
+behind it stay off; a turn produced after the rewrite matches again.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pantaray_agents.agents.action_agent.runtime.state import HistoryEntry
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
@@ -47,7 +55,7 @@ from pantaray_agents.agents.action_agent.support.formatter_parts.history import 
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
 from pantaray_agents.agents.core.llm_file_inputs import LlmFileInput
-from pantaray_agents.schema.agent.action import StepType
+from pantaray_agents.schema.agent.action import ActionProviderTurnRecord, StepType
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_llm.contracts.conversation import (
     LlmConversation,
@@ -64,7 +72,7 @@ from pantaray_llm.contracts.input_block import (
     LlmInputImageBlock,
     LlmInputTextBlock,
 )
-from pantaray_llm.contracts.tool_use import LlmToolCall
+from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 
 # The same mark the string rendering uses for a body past the omission boundary.
 OMITTED_OUTPUT_MARK = "…"
@@ -86,6 +94,50 @@ class ActionConversationProjection:
     turn_context: str | None
     # The media the items reference, which the request uploads alongside them.
     file_inputs: tuple[LlmFileInput, ...]
+    # The request up to its last item: what a turn this request produces is
+    # recorded with, and handed back only behind.
+    fingerprint: str
+
+
+@dataclass(slots=True)
+class _Layout:
+    """The items laid out so far, and the fingerprint of the request up to them."""
+
+    fingerprint: str
+    items: list[LlmTurnItem] = field(default_factory=list)
+
+    def add(self, item: LlmTurnItem, *, turn_of: str | None = None) -> None:
+        # A placed turn enters as the THINK that produced it rather than as its
+        # bytes: a recorded turn never changes, and its step id reads back the
+        # same after a restart whatever the stored JSON looks like.
+        text = item.model_dump_json(exclude={"provider_turn"})
+        if turn_of is not None:
+            text += f"\0{turn_of}"
+        self.fingerprint = _chain(self.fingerprint, text)
+        self.items.append(item)
+
+
+def fingerprint_request(
+    *, head: str, system_instruction: str, tools: Sequence[LlmToolDefinition]
+) -> str:
+    """What every item of one Action's requests is sent behind."""
+
+    return _chain(
+        "",
+        json.dumps(
+            [
+                head,
+                system_instruction,
+                [tool.model_dump(mode="json") for tool in tools],
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+
+
+def _chain(fingerprint: str, text: str) -> str:
+    return hashlib.sha256(f"{fingerprint}\n{text}".encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +152,11 @@ class _ToolRow:
 def project_action_conversation(
     entries: Sequence[HistoryEntry],
     *,
+    request_fingerprint: str,
     omit_before_step_number: int,
     turn_context: str | None,
     repair_notice: str,
-    provider_turns: Mapping[str, LlmProviderTurn],
+    provider_turns: Mapping[str, ActionProviderTurnRecord],
 ) -> ActionConversationProjection | None:
     """Lay one scope's history out as conversation items, or decline to.
 
@@ -114,10 +167,11 @@ def project_action_conversation(
     that a retry is itself an append to the request that preceded it.
 
     ``provider_turns`` holds the turns this run may hand back, by the
-    ``step_id`` of the THINK that produced each one. The caller decides which
-    ones those are -- whose account issued them, and whether the provider still
-    accepts them -- and this decides only whether a turn still describes the
-    calls its THINK ran.
+    ``step_id`` of the THINK that produced each one. The caller decides whose
+    account issued them; this decides whether a turn still stands behind the
+    prefix it was produced behind (``request_fingerprint`` -- the head, system
+    instruction and tools -- then every item) and still describes the calls its
+    THINK ran.
 
     ``None`` means this window cannot be sent structurally: a tool row in it
     predates the call identity that pairs a result with the call that asked for
@@ -128,7 +182,7 @@ def project_action_conversation(
     tool_rows = _tool_rows_by_llm_step(entries)
     if tool_rows is None:
         return None
-    items: list[LlmTurnItem] = []
+    layout = _Layout(fingerprint=request_fingerprint)
     # An utterance is appended together with the THINK that produced it, so the
     # texts collected here always belong to the next THINK row.
     commentary: list[str] = []
@@ -139,31 +193,31 @@ def project_action_conversation(
             case StepType.USER_REQUEST:
                 # A restored run lists the last turn's answer and then the
                 # follow-up that replied to it, with no THINK row between them.
-                items.extend(_spoken_items(commentary))
+                _add_spoken(layout, commentary)
                 commentary.clear()
-                items.append(_user_item(entry))
+                layout.add(_user_item(entry))
             case StepType.LLM_OUTPUT:
-                items.extend(
-                    _think_items(
-                        entry,
-                        commentary=tuple(commentary),
-                        rows=tool_rows.get(entry["step_id"], ()),
-                        omit_before_step_number=omit_before_step_number,
-                        provider_turn=provider_turns.get(entry["step_id"]),
-                    )
+                _add_think(
+                    layout,
+                    entry,
+                    commentary=tuple(commentary),
+                    rows=tool_rows.get(entry["step_id"], ()),
+                    omit_before_step_number=omit_before_step_number,
+                    record=provider_turns.get(entry["step_id"]),
                 )
                 commentary.clear()
             case StepType.TOOL_EXECUTION:
                 pass  # emitted with the THINK row that declared it
-    items.extend(_spoken_items(commentary))
+    _add_spoken(layout, commentary)
+    items = layout.items
     if turn_context is None and (
         not items or isinstance(items[-1], LlmTurnAssistantItem)
     ):
         turn_context = UNCHANGED_TURN_CONTEXT
     if turn_context is not None:
-        items.append(_text_item(turn_context))
+        layout.add(_text_item(turn_context))
     if repair_notice:
-        items.append(_text_item(repair_notice))
+        layout.add(_text_item(repair_notice))
     return ActionConversationProjection(
         conversation=items,
         turn_context=turn_context,
@@ -175,19 +229,19 @@ def project_action_conversation(
                 prompt="\n".join(_placed_media_refs(items)), owners=entries
             )
         ),
+        fingerprint=layout.fingerprint,
     )
 
 
-def _spoken_items(commentary: Sequence[str]) -> list[LlmTurnItem]:
+def _add_spoken(layout: _Layout, commentary: Sequence[str]) -> None:
     """What the assistant said with no THINK row after it to carry the words."""
 
-    if not commentary:
-        return []
-    return [
-        LlmTurnAssistantItem(
-            type="assistant", text=list(commentary), calls=[], provider_turn=None
+    if commentary:
+        layout.add(
+            LlmTurnAssistantItem(
+                type="assistant", text=list(commentary), calls=[], provider_turn=None
+            )
         )
-    ]
 
 
 def _placed_media_refs(items: Sequence[LlmTurnItem]) -> list[str]:
@@ -243,46 +297,45 @@ def _tool_rows_by_llm_step(
     }
 
 
-def _think_items(
+def _add_think(
+    layout: _Layout,
     entry: HistoryEntry,
     *,
     commentary: tuple[str, ...],
     rows: Sequence[_ToolRow],
     omit_before_step_number: int,
-    provider_turn: LlmProviderTurn | None,
-) -> list[LlmTurnItem]:
+    record: ActionProviderTurnRecord | None,
+) -> None:
     """One THINK: the context it was sent with, what it said, what came back."""
 
-    items: list[LlmTurnItem] = []
     recorded_context = entry.get("turn_context")
     if recorded_context and replays_turn_context(entry, omit_before_step_number):
-        items.append(_text_item(recorded_context))
+        layout.add(_text_item(recorded_context))
     if commentary or rows:
         calls = [_tool_call(row) for row in rows]
-        items.append(
+        turn = _replayable_turn(record, calls, prefix=layout.fingerprint)
+        layout.add(
             LlmTurnAssistantItem(
                 type="assistant",
                 text=list(commentary),
                 calls=calls,
-                # A turn stays on its item past the omission boundary: the
-                # boundary is for the weight of old tool output, and dropping
-                # 20 tokens of encrypted state would rewrite an item the
-                # provider already read, for nothing.
-                provider_turn=_replayable_turn(provider_turn, calls),
+                provider_turn=turn,
+            ),
+            turn_of=None if turn is None else entry["step_id"],
+        )
+    for row in rows:
+        layout.add(
+            _tool_result_item(
+                row, omit=row.entry["step_number"] < omit_before_step_number
             )
         )
-    items.extend(
-        _tool_result_item(row, omit=row.entry["step_number"] < omit_before_step_number)
-        for row in rows
-    )
     notice = entry.get("result_line")
     if notice:
         # A THINK's result line reports what the runtime did with the turn --
         # calls it deferred or dropped, a rebuilt window, an invalid output.
         # Those calls have no ``call_id`` to answer, so the line reaches the
         # model as its own message behind the results it belongs with.
-        items.append(_text_item(_NOTICE_PREFIX + notice))
-    return items
+        layout.add(_text_item(_NOTICE_PREFIX + notice))
 
 
 def replays_turn_context(entry: HistoryEntry, omit_before_step_number: int) -> bool:
@@ -298,21 +351,25 @@ def replays_turn_context(entry: HistoryEntry, omit_before_step_number: int) -> b
 
 
 def _replayable_turn(
-    turn: LlmProviderTurn | None, calls: Sequence[LlmToolCall]
+    record: ActionProviderTurnRecord | None,
+    calls: Sequence[LlmToolCall],
+    *,
+    prefix: str,
 ) -> LlmProviderTurn | None:
-    """The turn to hand back on this item, when it still describes what ran.
+    """The turn to hand back on this item, when it still stands where it was made.
 
-    A turn names every call the model made; the item names the calls that ran.
-    They part company when the batch plan deferred one, or when a run stopped
-    mid-batch, and both providers reject a request showing a call whose result
-    never arrives. The adapters check the same pairing, so an unusable turn is
-    left behind here rather than paid for upstream.
+    It must follow the same prefix it was produced behind, and it must describe
+    what ran. A turn names every call the model made; the item names the calls
+    that ran. They part company when the batch plan deferred one, or when a run
+    stopped mid-batch, and both providers reject a request showing a call whose
+    result never arrives. The adapters check the same pairing, so an unusable
+    turn is left behind here rather than paid for upstream.
     """
 
-    if turn is None:
+    if record is None or record.fingerprint != prefix:
         return None
     executed = [(call.call_id, call.name) for call in calls]
-    return turn if _declared_calls(turn) == executed else None
+    return record.turn if _declared_calls(record.turn) == executed else None
 
 
 def _declared_calls(turn: LlmProviderTurn) -> list[tuple[str, str]]:
@@ -415,4 +472,5 @@ __all__ = [
     "ActionConversationProjection",
     "project_action_conversation",
     "replays_turn_context",
+    "fingerprint_request",
 ]

@@ -26,10 +26,10 @@ from pantaray_agents.agents.action_agent.services.prompt_rendering_service impor
     PromptRenderingService,
 )
 from pantaray_agents.agents.action_agent.support.conversation_projection import (
-    OMITTED_OUTPUT_MARK,
     TURN_CONTEXT_HEADING,
     UNCHANGED_TURN_CONTEXT,
     ActionConversationProjection,
+    fingerprint_request,
     project_action_conversation,
 )
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
@@ -43,6 +43,7 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
     ResolvedContextItem,
 )
 from pantaray_agents.schema.agent.action import (
+    ActionProviderTurnRecord,
     MemoryContextEpochCheckpoint,
     StepType,
 )
@@ -60,6 +61,7 @@ from pantaray_llm.contracts.conversation import (
 from pantaray_llm.contracts.input_block import LlmInputImageBlock, LlmInputTextBlock
 
 _NOW = "Current time: 2026-09-19T00:00:00Z"
+_REQUEST = fingerprint_request(head="HEAD", system_instruction="SYS", tools=())
 _RENDERING = PromptRenderingService(
     PromptRenderingDeps(formatter=ActionAgentFormatter())
 )
@@ -149,6 +151,7 @@ def _project(
 ) -> ActionConversationProjection | None:
     return project_action_conversation(
         entries,
+        request_fingerprint=_REQUEST,
         omit_before_step_number=omit,
         turn_context=turn_context,
         repair_notice=repair,
@@ -485,6 +488,63 @@ def test_an_answer_restored_before_a_follow_up_stays_ahead_of_it() -> None:
 
 
 # --- 前のターンの思考 ---------------------------------------------------------
+#
+# A run records each turn with the fingerprint of the request that produced it,
+# and the projection hands it back only behind the same prefix. These follow a
+# run: project the request, record its turn, append the rows, project the next.
+
+
+def _recorded(
+    turn: LlmProviderTurn,
+    entries: list[Any],
+    *,
+    turn_context: str,
+    repair: str = "",
+    omit: int = 0,
+    provider_turns: dict[str, ActionProviderTurnRecord] | None = None,
+    request: str = _REQUEST,
+) -> ActionProviderTurnRecord:
+    """The turn a request over ``entries`` produced, as its THINK row keeps it."""
+
+    projection = project_action_conversation(
+        entries,
+        request_fingerprint=request,
+        omit_before_step_number=omit,
+        turn_context=turn_context,
+        repair_notice=repair,
+        provider_turns=provider_turns or {},
+    )
+    assert projection is not None
+    return ActionProviderTurnRecord(
+        turn=turn, identity="api_key:openai:m:abc", fingerprint=projection.fingerprint
+    )
+
+
+def _placed(items: list[Any]) -> list[LlmProviderTurn | None]:
+    return [
+        item.provider_turn
+        for item in items
+        if isinstance(item, LlmTurnAssistantItem) and item.calls
+    ]
+
+
+def _run(
+    count: int, *, request: str = _REQUEST
+) -> tuple[list[Any], dict[str, ActionProviderTurnRecord]]:
+    """``count`` THINKs of one call each, every turn recorded as it arrived."""
+
+    entries: list[Any] = [_user(1)]
+    turns: dict[str, ActionProviderTurnRecord] = {}
+    for step in range(2, count + 2):
+        turns[f"THINK-{step}"] = _recorded(
+            _openai_turn((f"call_{step}", "read")),
+            entries,
+            turn_context=f"TC-{step}",
+            provider_turns=turns,
+            request=request,
+        )
+        entries += [_think(step), _tool(step, think=step, call_id=f"call_{step}")]
+    return entries, turns
 
 
 @pytest.mark.parametrize(
@@ -493,9 +553,10 @@ def test_an_answer_restored_before_a_follow_up_stays_ahead_of_it() -> None:
 def test_a_provider_turn_rides_on_the_think_that_produced_it(
     turn: LlmProviderTurn,
 ) -> None:
+    record = _recorded(turn, [_user(1)], turn_context="TC-2")
     items = _require(
         [_user(1), _think(2), _tool(2, think=2, call_id="call_a")],
-        provider_turns={"THINK-2": turn},
+        provider_turns={"THINK-2": record},
     )
 
     assistant = cast(LlmTurnAssistantItem, items[2])
@@ -515,26 +576,134 @@ def test_a_provider_turn_rides_on_the_think_that_produced_it(
 def test_a_turn_that_does_not_describe_what_ran_is_left_behind(
     turn: LlmProviderTurn,
 ) -> None:
+    record = _recorded(turn, [_user(1)], turn_context="TC-2")
     items = _require(
         [_user(1), _think(2), _tool(2, think=2, call_id="call_a")],
-        provider_turns={"THINK-2": turn},
+        provider_turns={"THINK-2": record},
     )
 
     assert cast(LlmTurnAssistantItem, items[2]).provider_turn is None
 
 
-def test_an_omitted_turn_keeps_the_turn_its_item_already_sent() -> None:
-    """境界が進んでも assistant 項目は書き換えない（省略するのは結果の本文）。"""
+def test_appending_rows_keeps_every_turn_on_its_item() -> None:
+    """追記だけ（保留の USER の取り込みを含む）なら、どの思考も送り続ける。"""
 
-    turn = _openai_turn(("call_a", "read"))
-    items = _require(
-        [_user(1), _think(2), _tool(2, think=2, call_id="call_a"), _think(3)],
+    entries, turns = _run(3)
+    entries.append(_user(5, "追加の依頼"))
+
+    items = _require(entries, provider_turns=turns)
+
+    assert _placed(items) == [record.turn for record in turns.values()]
+
+
+def test_an_advanced_omission_boundary_leaves_the_turns_behind_it() -> None:
+    """境界が進むと前が書き換わる。その後ろの思考は送らず、後で作られたものは送る。"""
+
+    entries, turns = _run(3)
+    turns["THINK-5"] = _recorded(
+        _openai_turn(("call_5", "read")),
+        entries,
+        turn_context="TC-5",
         omit=3,
-        provider_turns={"THINK-2": turn},
+        provider_turns=turns,
     )
+    entries += [_think(5), _tool(5, think=5, call_id="call_5")]
 
-    assert cast(LlmTurnAssistantItem, items[1]).provider_turn is turn
-    assert cast(LlmTurnToolResultItem, items[2]).output["output"] == OMITTED_OUTPUT_MARK
+    items = _require(entries, omit=3, provider_turns=turns)
+
+    assert _placed(items) == [None, None, None, turns["THINK-5"].turn]
+
+
+def test_a_turn_accepted_on_a_retry_is_not_sent_behind_the_dropped_notice() -> None:
+    """再試行で受理された思考は、記録されない System Notice の後ろで作られた。"""
+
+    entries, turns = _run(1)
+    turns["THINK-3"] = _recorded(
+        _openai_turn(("call_3", "read")),
+        entries,
+        turn_context="TC-3",
+        repair="\n\n# System Notice\nThe previous output could not be processed.",
+        provider_turns=turns,
+    )
+    entries += [_think(3), _tool(3, think=3, call_id="call_3")]
+    turns["THINK-4"] = _recorded(
+        _openai_turn(("call_4", "read")),
+        entries,
+        turn_context="TC-4",
+        provider_turns=turns,
+    )
+    entries += [_think(4), _tool(4, think=4, call_id="call_4")]
+
+    items = _require(entries, provider_turns=turns)
+
+    assert _placed(items) == [turns["THINK-2"].turn, None, turns["THINK-4"].turn]
+
+
+def test_a_turn_produced_behind_a_replaced_row_is_left_behind() -> None:
+    """ToolValidationError の修復が同じ History Ref の行を置き換えた後。"""
+
+    entries, turns = _run(2)
+    # THINK-B was sent behind THINK-3's rows, which then took THINK-B's place.
+    turns["THINK-B"] = _recorded(
+        _openai_turn(("call_b", "read")),
+        entries,
+        turn_context="TC-B",
+        provider_turns=turns,
+    )
+    replaced = [
+        *entries[:-2],
+        _think(3, step_id="THINK-B", turn_context="TC-B"),
+        _tool(3, think=3, call_id="call_b", llm_step_id="THINK-B"),
+    ]
+
+    items = _require(replaced, provider_turns=turns)
+
+    assert _placed(items) == [turns["THINK-2"].turn, None]
+
+
+def test_another_system_instruction_leaves_every_earlier_turn_behind() -> None:
+    """言語やアプリの更新で system が変わった run では、前の思考を送らない。"""
+
+    entries, turns = _run(2)
+    changed = fingerprint_request(head="HEAD", system_instruction="SYS v2", tools=())
+    turns["THINK-4"] = _recorded(
+        _openai_turn(("call_4", "read")),
+        entries,
+        turn_context="TC-4",
+        provider_turns=turns,
+        request=changed,
+    )
+    entries += [_think(4), _tool(4, think=4, call_id="call_4")]
+
+    items = cast(
+        Any,
+        project_action_conversation(
+            entries,
+            request_fingerprint=changed,
+            omit_before_step_number=0,
+            turn_context=_NOW,
+            repair_notice="",
+            provider_turns=turns,
+        ),
+    ).conversation
+
+    assert _placed(items) == [None, None, turns["THINK-4"].turn]
+
+
+def test_a_turn_sent_without_an_earlier_one_stays_off_when_that_one_returns() -> None:
+    """拒否で思考を外して送った後、次の run で前の思考が戻っても後ろは混ぜない。"""
+
+    entries, turns = _run(1)
+    # The provider refused THINK-2's turn, so THINK-3 was sent without it.
+    turns["THINK-3"] = _recorded(
+        _openai_turn(("call_3", "read")), entries, turn_context="TC-3"
+    )
+    entries += [_think(3), _tool(3, think=3, call_id="call_3")]
+
+    # The next run reads both back from their rows.
+    items = _require(entries, provider_turns=turns)
+
+    assert _placed(items) == [turns["THINK-2"].turn, None]
 
 
 # --- 追記のみ -----------------------------------------------------------------
@@ -570,13 +739,22 @@ def test_a_recorded_turn_keeps_each_turn_a_prefix_of_the_next() -> None:
 
     # The run records turn 2's response before it projects turn 3, so the item
     # that carries the turn is written once and never revised.
-    turns = {"THINK-2": _openai_turn(("call_a", "read"))}
+    turns = {
+        "THINK-2": _recorded(
+            _openai_turn(("call_a", "read")), first_entries, turn_context="TC-2"
+        )
+    }
     second_entries = [*first_entries, _think(2), _tool(2, think=2, call_id="call_a")]
     second = _require(second_entries, turn_context="TC-3", provider_turns=turns)
     assert second[: len(first)] == first
     assert cast(LlmTurnAssistantItem, second[2]).provider_turn is not None
 
-    turns["THINK-3"] = _openai_turn(("call_b", "read"))
+    turns["THINK-3"] = _recorded(
+        _openai_turn(("call_b", "read")),
+        second_entries,
+        turn_context="TC-3",
+        provider_turns=turns,
+    )
     third = _require(
         [*second_entries, _think(3), _tool(3, think=3, call_id="call_b")],
         turn_context="TC-4",
@@ -639,12 +817,19 @@ def _executing_agent() -> Any:
 
 
 def _think_once(
-    state: Any, *, think: int, call_id: str, omit: int = 0, now: str = "T0"
+    state: Any,
+    *,
+    think: int,
+    call_id: str,
+    omit: int = 0,
+    now: str = "T0",
+    turns: dict[str, ActionProviderTurnRecord] | None = None,
 ) -> tuple[str, Any]:
     """One THINK through the production template; its row is then recorded.
 
     The row goes through the checkpoint model, which is what a resumed run
-    reads back.
+    reads back. Given ``turns``, the request hands those back and the turn its
+    response carries is recorded there, as the run records it.
     """
 
     runtime = SimpleNamespace(
@@ -657,8 +842,14 @@ def _think_once(
             _executing_agent(), state, cast(Any, runtime), tools=()
         )
     prepared = turn.prepare(
-        state, rendering=_RENDERING, repair_notice="", provider_turns={}
+        state, rendering=_RENDERING, repair_notice="", provider_turns=turns or {}
     )
+    if turns is not None:
+        turns[f"THINK-{think}"] = ActionProviderTurnRecord(
+            turn=_openai_turn((call_id, "read")),
+            identity="api_key:openai:m:abc",
+            fingerprint=prepared.fingerprint,
+        )
     recorded = _build_llm_history_entry(
         step_id=f"THINK-{think}",
         step_number=think,
@@ -690,6 +881,24 @@ def _two_runs(second_run: dict[str, str]) -> tuple[list[str], Any, Any, Any]:
     head_3, first = _think_once(state, think=5, call_id="c5")
     head_4, after = _think_once(state, think=6, call_id="c6")
     return [head_1, head_2, head_3, head_4], last, first, after
+
+
+def test_a_new_message_and_a_new_run_keep_every_turn_the_action_recorded() -> None:
+    """追記だけ（新しい依頼・次の run・変わった作業場所）なら、思考は全部戻る。"""
+
+    state = _state([_user(1, "りんごを英語にして")])
+    state["context"].update(_RUN_1)
+    turns: dict[str, ActionProviderTurnRecord] = {}
+    _think_once(state, think=2, call_id="c2", turns=turns)
+    _think_once(state, think=3, call_id="c3", turns=turns)
+    state["history_by_scope"]["S"].append(_user(4, "みかんは？"))
+    state["context"].update({"workspace_context_prompt": "W-2"})
+    _think_once(state, think=5, call_id="c5", now="T1", turns=turns)
+    _, last = _think_once(state, think=6, call_id="c6", now="T2", turns=turns)
+
+    assert _placed(list(last.conversation)) == [
+        turns[f"THINK-{step}"].turn for step in (2, 3, 5)
+    ]
 
 
 _UPDATE_HEADINGS = (
@@ -1055,7 +1264,7 @@ def _prepare(
     return turn_input.ExecutingTurn(
         head="HEAD\n",
         system_instruction="SYS",
-        tool_bytes=0,
+        tools=(),
         scope_handles=("S",),
         sends_conversation=sends_conversation,
         world_state=world_state,
@@ -1076,7 +1285,14 @@ def test_the_input_estimate_is_not_dragged_by_a_replayed_turns_bytes() -> None:
         entries,
         sends_conversation=True,
         provider_turns={
-            "THINK-2": _openai_turn(("call_a", "read"), encrypted="x" * 4000)
+            "THINK-2": _recorded(
+                _openai_turn(("call_a", "read"), encrypted="x" * 4000),
+                [_user(1)],
+                turn_context="TC-2",
+                request=fingerprint_request(
+                    head="HEAD\n", system_instruction="SYS", tools=()
+                ),
+            )
         },
     )
 

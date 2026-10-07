@@ -27,7 +27,6 @@ from pantaray_agents.agents.action_agent.tools import (
     LIST_TOOL,
     MEMORY_SEARCH_TOOL,
     MEMORY_SQL_TOOL,
-    READ_ACTION_PLAN_TOOL_ID,
     READ_TOOL,
     REMEMBER_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
@@ -42,7 +41,7 @@ from pantaray_agents.agents.action_agent.tools import (
     WEB_CRAWL_TOOL,
     WEB_EXTRACT_TOOL,
     WEB_SEARCH_TOOL,
-    WRITE_ACTION_PLAN_TOOL_ID,
+    WRITE_SESSION_MEMORY_TOOL_ID,
     ZANEI_QUERY_TOOL_ID,
     ZANEI_TIMELINE_TOOL_ID,
 )
@@ -60,7 +59,6 @@ PARALLEL_SAFE_TOOL_IDS: frozenset[str] = frozenset(
         MEMORY_SQL_TOOL.tool_id,
         GET_MEMORY_REFERENCE_TOOL.tool_id,
         HISTORY_FETCH_TOOL.tool_id,
-        READ_ACTION_PLAN_TOOL_ID,
     }
 )
 """同時実行しても互いの副作用が衝突しない読み取り専用ツール。"""
@@ -109,7 +107,7 @@ SERIAL_ONLY_TOOL_IDS: frozenset[str] = frozenset(
         RUN_PYTHON_TOOL.tool_id,
         CAPTURE_SCREEN_TOOL_ID,
         RENDER_PDF_PAGE_TOOL_ID,
-        WRITE_ACTION_PLAN_TOOL_ID,
+        WRITE_SESSION_MEMORY_TOOL_ID,
         SPAWN_SUBAGENT_TOOL_ID,
         SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
         CANCEL_SUBAGENT_TOOL_ID,

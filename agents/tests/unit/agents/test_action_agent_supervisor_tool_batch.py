@@ -221,18 +221,18 @@ async def test_read_only_batch_runs_in_parallel(
         monkeypatch,
         tmp_path,
         action_id="act-batch-parallel",
-        turns=_batch_turn("read_action_plan", "history_fetch", "memory_sql"),
+        turns=_batch_turn("web_search", "history_fetch", "memory_sql"),
     )
 
     batch = _require_batch(state)
     assert batch.mode == "parallel"
     assert [pending.tool_id for pending in batch.calls] == [
-        "read_action_plan",
+        "web_search",
         "history_fetch",
         "memory_sql",
     ]
     assert [pending.step_note for pending in batch.calls] == [
-        _note_for("read_action_plan"),
+        _note_for("web_search"),
         _note_for("history_fetch"),
         _note_for("memory_sql"),
     ]
@@ -242,7 +242,7 @@ async def test_read_only_batch_runs_in_parallel(
 
     think_entry = _think_history_entry(state)
     assert think_entry["summary"] == (
-        f"1. read_action_plan: {_note_for('read_action_plan')}\n"
+        f"1. web_search: {_note_for('web_search')}\n"
         f"2. history_fetch: {_note_for('history_fetch')}\n"
         f"3. memory_sql: {_note_for('memory_sql')}"
     )

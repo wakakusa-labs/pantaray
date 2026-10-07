@@ -529,7 +529,8 @@ async def test_invalid_tool_args_return_error_to_terminal_writer(
     invalid_arguments = {"content": 1}
     action_use_case._agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]  # noqa: SLF001
         side_effect=[
-            native_tool_turn("write_action_plan", invalid_arguments) for _ in range(5)
+            native_tool_turn("write_session_memory", invalid_arguments)
+            for _ in range(5)
         ]
     )
     request = _request(

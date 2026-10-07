@@ -17,7 +17,8 @@ import pytest
 from tests.unit.agents.test_action_agent_tool_batch_execution import (
     _PATCH_ARGS,
     PATCH_TOOL,
-    PLAN_TOOL,
+    SQL_CALL,
+    SQL_TOOL,
     _act,
     _build_fixture,
     _persisted_tool_steps,
@@ -85,10 +86,10 @@ async def test_stop_cancels_a_long_running_tool_call(
         monkeypatch,
         tmp_path,
         action_id="act-stop-single",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL)
     )
     state = await _think(agent, runtime, state)
 
@@ -121,7 +122,7 @@ async def test_stop_cancels_a_long_running_tool_call(
     assert state["status"] == "canceled"
     assert state["next_action"] is None
     assert [entry["result_line"] for entry in _tool_history(state)] == [
-        f"{PLAN_TOOL}: interrupted by user, outcome unknown"
+        f"{SQL_TOOL}: interrupted by user, outcome unknown"
     ]
     # 発行済みの呼び出しは「結果が不明である」ことを本文で言う。次の THINK はこの
     # 本文だけを見て、同じ副作用をやり直してよいかを判断する。
@@ -146,10 +147,10 @@ async def test_stop_cancels_every_in_flight_call_of_a_parallel_batch(
         monkeypatch,
         tmp_path,
         action_id="act-stop-parallel",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
     state = await _think(agent, runtime, state)
     assert state["next_action"].batch.mode == "parallel"
@@ -186,7 +187,7 @@ async def test_stop_cancels_every_in_flight_call_of_a_parallel_batch(
     assert in_flight == 0
     assert state["status"] == "canceled"
     assert [entry["result_line"] for entry in _tool_history(state)] == [
-        f"{PLAN_TOOL}: interrupted by user, outcome unknown"
+        f"{SQL_TOOL}: interrupted by user, outcome unknown"
     ] * 3
     assert len(_persisted_tool_steps(agent, request.action_id)) == 3
 
@@ -201,10 +202,10 @@ async def test_stop_starts_no_further_call_of_a_sequential_batch(
         monkeypatch,
         tmp_path,
         action_id="act-stop-sequential",
-        allowed_tool_ids=(PATCH_TOOL, PLAN_TOOL),
+        allowed_tool_ids=(PATCH_TOOL, SQL_TOOL),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PATCH_TOOL, _PATCH_ARGS))
+        return_value=_turn(SQL_CALL, (PATCH_TOOL, _PATCH_ARGS))
     )
     state = await _think(agent, runtime, state)
     assert state["next_action"].batch.mode == "sequential"
@@ -228,12 +229,12 @@ async def test_stop_starts_no_further_call_of_a_sequential_batch(
         )
         state = await asyncio.wait_for(act_task, timeout=10)
 
-    assert started_tool_ids == [PLAN_TOOL]
+    assert started_tool_ids == [SQL_TOOL]
     assert state["status"] == "canceled"
     # 打ち切った 1 件と、発行される前に止まった残りは別の終端になる。残りは外部への
     # 影響が無いことが確定しているので、そう言い切れる。
     assert [entry["result_line"] for entry in _tool_history(state)] == [
-        f"{PLAN_TOOL}: interrupted by user, outcome unknown",
+        f"{SQL_TOOL}: interrupted by user, outcome unknown",
         f"{PATCH_TOOL}: not executed, stopped by user",
     ]
     assert _tool_history(state)[1]["output"]["error"]["message"] == (
@@ -261,10 +262,10 @@ async def test_stop_confirmed_between_sequential_calls_starts_no_further_call(
         monkeypatch,
         tmp_path,
         action_id="act-stop-boundary",
-        allowed_tool_ids=(PATCH_TOOL, PLAN_TOOL),
+        allowed_tool_ids=(PATCH_TOOL, SQL_TOOL),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PATCH_TOOL, _PATCH_ARGS))
+        return_value=_turn(SQL_CALL, (PATCH_TOOL, _PATCH_ARGS))
     )
     state = await _think(agent, runtime, state)
     assert state["next_action"].batch.mode == "sequential"
@@ -282,7 +283,7 @@ async def test_stop_confirmed_between_sequential_calls_starts_no_further_call(
     with TraceContextManager(local_job_id=_JOB_ID):
         state = await asyncio.wait_for(_act(agent, runtime, state), timeout=10)
 
-    assert started_tool_ids == [PLAN_TOOL]
+    assert started_tool_ids == [SQL_TOOL]
     assert state["status"] == "canceled"
     assert state["next_action"] is None
     assert [entry["result_line"] for entry in _tool_history(state)][1] == (
@@ -344,7 +345,7 @@ async def test_stop_aborts_the_think_llm_call(
         monkeypatch,
         tmp_path,
         action_id="act-stop-think",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     monkeypatch.setattr(
         graph_module,

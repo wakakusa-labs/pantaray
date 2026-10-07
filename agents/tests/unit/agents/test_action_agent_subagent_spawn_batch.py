@@ -129,9 +129,9 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
     )
     calls = [
         LlmToolCall(
-            call_id="read-plan",
-            name="read_action_plan",
-            arguments={STEP_NOTE_ARG: "既存の作業計画を確認する。"},
+            call_id="write-notes",
+            name="write_session_memory",
+            arguments={STEP_NOTE_ARG: "分担を書き留める。", "content": "notes"},
         ),
         *(
             LlmToolCall(
@@ -226,7 +226,7 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
             with spawn._connect(db_path) as connection:
                 checkpoint = connection.execute(
                     "SELECT runtime_state_checkpoint FROM agent_action_steps "
-                    "WHERE step_name='tool::read_action_plan'"
+                    "WHERE step_name='tool::write_session_memory'"
                 ).fetchone()[0]
             state = restore_runtime_state_checkpoint(
                 json.loads(checkpoint),
@@ -256,7 +256,7 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
             "JOIN jobs USING(job_id) WHERE job_type='execute_action_subagent'"
         ).fetchall()
     assert [tuple(row) for row in steps] == [
-        ("tool::read_action_plan", "success"),
+        ("tool::write_session_memory", "success"),
         ("tool::spawn_subagent", "success"),
         ("tool::spawn_subagent", "success"),
     ]

@@ -33,9 +33,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.parallel_
     ExcludedToolCall,
     plan_tool_batch,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.plan_document import (
-    run_action_plan_tool,
-)
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import ToolCallModel
 from pantaray_agents.agents.action_agent.tools import (
     SUBMIT_SUBAGENT_REPORT_TOOL_ID,
@@ -56,7 +53,6 @@ PARALLEL_SAFE_HANDLERS: dict[str, Callable[..., object]] = {
     "memory_search": run_memory_search_tool,
     "memory_sql": run_memory_sql_tool,
     "get_memory_reference": run_get_memory_reference_tool,
-    "read_action_plan": run_action_plan_tool,
 }
 
 

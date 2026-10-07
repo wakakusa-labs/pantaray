@@ -48,7 +48,12 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
-PLAN_TOOL = "read_action_plan"
+# A read-only tool that really runs against the fixture's local database.
+SQL_TOOL = "memory_sql"
+SQL_CALL: tuple[str, dict[str, JSONValue]] = (
+    SQL_TOOL,
+    {"sql": "SELECT COUNT(*) AS n FROM agent_actions"},
+)
 PATCH_TOOL = "apply_patch"
 _PATCH_ARGS: dict[str, JSONValue] = {
     "changes": [
@@ -239,10 +244,10 @@ async def test_parallel_batch_numbers_and_parents_every_call(
         monkeypatch,
         tmp_path,
         action_id="act-batch-parallel",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -265,7 +270,7 @@ async def test_parallel_batch_numbers_and_parents_every_call(
         _note(2),
     ]
     assert {entry["result_line"] for entry in tool_entries} == {
-        f"{PLAN_TOOL}: ok",
+        f"{SQL_TOOL}: ok",
     }
 
     think_entry = _think_history(state)
@@ -297,10 +302,10 @@ async def test_batch_consumes_one_tool_step_per_call(
         monkeypatch,
         tmp_path,
         action_id="act-batch-budget",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -320,7 +325,7 @@ async def test_batch_consumes_one_tool_step_per_call(
 def test_call_timeout_comes_from_the_declared_tool_policy() -> None:
     """per-call timeout は既存の ``default_timeout_ms`` をそのまま使う。"""
 
-    tool_def = select_supervisor_act_tool_registry()[PLAN_TOOL]
+    tool_def = select_supervisor_act_tool_registry()[SQL_TOOL]
     slot = MagicMock()
     slot.tool_def = tool_def
     assert act.call_timeout_seconds(slot) == (
@@ -338,10 +343,10 @@ async def test_parallel_call_timeout_only_fails_that_call(
         monkeypatch,
         tmp_path,
         action_id="act-batch-timeout",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -362,7 +367,7 @@ async def test_parallel_call_timeout_only_fails_that_call(
     timed_out = [
         entry
         for entry in tool_entries
-        if entry["result_line"] == f"{PLAN_TOOL}: failed TOOL_BATCH_TIMEOUT"
+        if entry["result_line"] == f"{SQL_TOOL}: failed TOOL_BATCH_TIMEOUT"
     ]
     assert len(timed_out) == 1
     assert timed_out[0]["step_number"] == slow_step_number
@@ -370,7 +375,7 @@ async def test_parallel_call_timeout_only_fails_that_call(
         entry["result_line"]
         for entry in tool_entries
         if entry["step_number"] != slow_step_number
-    ] == [f"{PLAN_TOOL}: ok", f"{PLAN_TOOL}: ok"]
+    ] == [f"{SQL_TOOL}: ok", f"{SQL_TOOL}: ok"]
 
     persisted = _persisted_tool_steps(agent, request.action_id)
     assert len(persisted) == 3

@@ -155,7 +155,7 @@ async def test_parent_execution_surface_offers_children_without_legacy_tools() -
     assert _HARD_PLAN_TOOL_IDS.isdisjoint(captured.tool_ids)
     assert _CHILD_TOOL_IDS.issubset(captured.tool_ids)
     assert "Plan Rules" not in captured.system_instruction
-    assert "plan.md" in captured.system_instruction
+    assert "write_session_memory" in captured.system_instruction
     assert captured.stage == "executing"
     assert captured.profile_id == ACTION_EXECUTING_PROFILE_ID
     # 送出した Supervisor プロンプトは Action 全体の最終 LLM 入力として保存される。

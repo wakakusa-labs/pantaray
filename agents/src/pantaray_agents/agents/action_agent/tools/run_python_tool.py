@@ -5,6 +5,7 @@ from __future__ import annotations
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RunPythonToolArgs,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     ToolDefinition,
@@ -93,6 +94,7 @@ RUN_PYTHON_TOOL = ToolDefinition.from_spec(
                 "fix the apply_patch input."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="process_exec_local",
             required_capabilities=("process_exec_local",),

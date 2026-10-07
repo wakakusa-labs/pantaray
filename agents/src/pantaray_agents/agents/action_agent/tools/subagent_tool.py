@@ -14,6 +14,7 @@ from pantaray_agents.schema.agent.action_subagent import (
     ACTION_SUBAGENT_MAX_ACTIVE_CHILDREN_PER_PARENT,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 from .base import (
@@ -124,6 +125,7 @@ SPAWN_SUBAGENT_TOOL = ToolDefinition.from_spec(
                 "with changed content is rejected."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="automation_control",
             default_timeout_ms=30_000,
@@ -191,6 +193,7 @@ SEND_MESSAGE_TO_SUBAGENT_TOOL = ToolDefinition.from_spec(
                 "Acceptance does not mean the child has consumed the message."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="automation_control",
             default_timeout_ms=30_000,
@@ -241,6 +244,8 @@ WAIT_SUBAGENTS_TOOL = ToolDefinition.from_spec(
                 "A nonterminal result may be waited on again."
             ),
         ),
+        # Solo: it blocks until the children settle, so siblings would wait on it.
+        concurrency=ToolConcurrency("solo_turn"),
         execution_policy=tool_execution_policy(
             intent_class="automation_control",
             default_timeout_ms=30_000,
@@ -290,6 +295,7 @@ CANCEL_SUBAGENT_TOOL = ToolDefinition.from_spec(
             when="Use when the parent no longer needs the child's work.",
             pitfalls="Use the exact owned child ID; retry a nonterminal result.",
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="automation_control",
             default_timeout_ms=30_000,

@@ -106,6 +106,37 @@ class ToolResponseValidationError(RuntimeError):
     """An implementation violated its result contract; abort instead of retrying."""
 
 
+type ToolTurnPlacement = Literal["parallel", "sequential", "solo_turn", "run_ending"]
+
+
+@dataclass(frozen=True)
+class ToolConcurrency:
+    """How a tool's calls may share one model turn with other calls.
+
+    Each tool declares this about itself; the turn planner reads only this.
+
+    - ``parallel``: the call only reads. It changes nothing outside its own
+      result (no file, memory, run state or external system), never pauses
+      for the user's approval, holds no workspace lock, takes no token sink,
+      and returns the same whatever the order its siblings run in. A batch of
+      such calls may run at once.
+    - ``sequential``: the call may share its turn, but runs alone, in the
+      order the model gave the calls. Any call that does not meet
+      ``parallel`` is at least this.
+    - ``solo_turn``: the call must be the only one of its turn, because it
+      blocks or settles state its siblings would then run against.
+    - ``run_ending``: a ``solo_turn`` call that ends the run, so it runs only
+      when it is the turn's single call; otherwise siblings would be lost.
+
+    ``shared_state`` names run state a ``parallel`` call reads and writes back.
+    Two calls naming the same state cannot run at once, or one write would be
+    lost, so such a batch runs in order instead.
+    """
+
+    placement: ToolTurnPlacement
+    shared_state: str | None = None
+
+
 @dataclass(frozen=True)
 class ReactToolDefinition:
     name: str
@@ -113,6 +144,9 @@ class ReactToolDefinition:
     request_schema: JsonSchema
     response_schema: JsonSchema
     execute: ReactToolExecutor
+    # Running in the order the model gave is right for any tool; a tool opts
+    # into running at once only when it meets every ``parallel`` condition.
+    concurrency: ToolConcurrency = ToolConcurrency("sequential")
 
     def __post_init__(self) -> None:
         if not self.name.strip():

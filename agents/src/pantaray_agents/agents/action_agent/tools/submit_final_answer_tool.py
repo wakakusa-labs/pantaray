@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -32,6 +34,9 @@ SUBMIT_FINAL_ANSWER_TOOL = ToolDefinition.from_spec(
                 "changes, call `draft_final_answer` again before submitting."
             ),
         ),
+        # Run-ending: it settles the Action's status, so a sibling after it would
+        # write to a finished Action.
+        concurrency=ToolConcurrency("run_ending"),
         execution_policy=tool_execution_policy(
             intent_class="bulk_edit",
             default_timeout_ms=30_000,

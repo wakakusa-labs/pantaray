@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE
 
 from .base import (
@@ -40,6 +41,7 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
                 "not a final answer."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="network_access",
             default_timeout_ms=60_000,

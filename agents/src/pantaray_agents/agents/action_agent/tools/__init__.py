@@ -1,5 +1,9 @@
 """ActionAgent で使用するツール定義を公開するモジュール。"""
 
+from collections.abc import Mapping
+
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .apply_patch_tool import APPLY_PATCH_TOOL
 from .base import ToolDefinition
 from .bash_tool import BASH_TOOL
@@ -110,6 +114,7 @@ __all__ = [
     "SUPERVISOR_SINGLE_REACT_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS",
     "TOOL_REGISTRY",
+    "TOOL_CONCURRENCY",
     "select_tool_registry",
     "build_native_action_tools",
     "split_step_note",
@@ -153,6 +158,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         WAIT_SUBAGENTS_TOOL,
         CANCEL_SUBAGENT_TOOL,
     )
+}
+
+TOOL_CONCURRENCY: Mapping[str, ToolConcurrency] = {
+    tool_id: tool.concurrency for tool_id, tool in TOOL_REGISTRY.items()
 }
 
 SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (

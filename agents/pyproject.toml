@@ -120,7 +120,6 @@ files = [
     "src/pantaray_agents/agents/action_agent/runtime/steps/counters.py",
     "src/pantaray_agents/agents/action_agent/runtime/steps/persistence.py",
     "src/pantaray_agents/agents/action_agent/runtime/state/coercion.py",
-    "src/pantaray_agents/agents/action_agent/runtime/handlers/tool_runtime/parallel_policy.py",
     "src/pantaray_agents/local_runtime/memory_catalog",
     "src/pantaray_agents/local_runtime/embedding_local",
     # 文書の読み取り（documents パッケージと、read ツールの文書分岐・ページ封筒）。

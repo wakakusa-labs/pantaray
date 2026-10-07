@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,11 +10,6 @@ from pantaray_agents.agents.action_agent import ActionAgent
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
     SUBAGENT_ROLE,
     role_system_instruction,
-)
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
-    plan_tool_batch,
 )
 from pantaray_agents.agents.action_agent.tools import SUBMIT_SUBAGENT_REPORT_TOOL_ID
 from pantaray_agents.agents.artifact_react import (
@@ -33,6 +29,11 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
 )
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.tool_batch import (
+    EXCLUSION_NOTICES,
+    PROVIDER_DROPPED_NOTICE,
+    plan_tool_batch,
+)
 from pantaray_agents.local_runtime.llm_proxy import build_local_llm_proxy_client
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     load_pending_action_subagent_approval,
@@ -72,7 +73,7 @@ from pantaray_agents.local_runtime.runtime.job_executor import (
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
-from pantaray_agents.tools.contract import ReactToolResult
+from pantaray_agents.tools.contract import ReactToolResult, ToolConcurrency
 from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.contracts.conversation import LlmConversation
 from pantaray_llm.contracts.tool_use import (
@@ -100,7 +101,7 @@ _ACTION_SUBAGENT_MAX_REPORT_REPAIRS = 2
 
 @dataclass(frozen=True, slots=True)
 class _PlannedCall:
-    """One requested call, in the shape the parent's batch policy reads."""
+    """One requested call, in the shape the turn planner reads."""
 
     call: LlmToolCall
 
@@ -273,15 +274,21 @@ async def execute_action_subagent_job(
                 error_message=settled.error_message,
             )
         )
+    tool_definitions = build_action_subagent_broker_tools(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        payload=payload,
+        authority=broker_authority,
+    )
+    # The report is the loop's terminal tool, outside the registry, so it
+    # declares its concurrency here.
+    concurrency = {tool.name: tool.concurrency for tool in tool_definitions} | {
+        terminal_tool.name: ToolConcurrency("run_ending")
+    }
     result = await run_native_react(
         NativeReactRunInput(
             run_id=payload["process_id"],
-            tool_definitions=build_action_subagent_broker_tools(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                payload=payload,
-                authority=broker_authority,
-            ),
+            tool_definitions=tool_definitions,
             terminal_tool=terminal_tool,
             complete=complete,
             build_prompt=build_turn_input,
@@ -290,7 +297,10 @@ async def execute_action_subagent_job(
             project_tool_result=project_result,
             policy=ReactLoopPolicy(),
             plan_turn=lambda turn, remaining: _plan_turn(
-                turn, max_parallel=max_parallel, remaining_tool_calls=remaining
+                turn,
+                concurrency=concurrency,
+                max_parallel=max_parallel,
+                remaining_tool_calls=remaining,
             ),
             # The pause anchor holds only the call that asked; the resumed run
             # settles it, so the calls after it are answered as not run now.
@@ -458,18 +468,23 @@ def _report_tool_definition() -> LlmToolDefinition:
 
 
 def _plan_turn(
-    turn: LlmToolCallTurn, *, max_parallel: int, remaining_tool_calls: int
+    turn: LlmToolCallTurn,
+    *,
+    concurrency: Mapping[str, ToolConcurrency],
+    max_parallel: int,
+    remaining_tool_calls: int,
 ) -> NativeReactTurnPlan:
-    """Split one turn's calls by the parent's batch policy.
+    """Split one turn's calls by what each called tool declares.
 
     Read-only calls run at once, a changing call runs alone in order, and a call
-    the policy leaves out is answered with the parent's reason for it. A report
+    the plan leaves out is answered with the parent's reason for it. A report
     that is not its turn's single call is one of them, so no requested work and
     no later correction is lost to a report ending the run early.
     """
 
     plan = plan_tool_batch(
         tuple(_PlannedCall(call) for call in turn.calls),
+        concurrency=concurrency,
         max_parallel=max_parallel,
         remaining_tool_steps=remaining_tool_calls,
     )

@@ -37,13 +37,14 @@ from pantaray_agents.agents.action_agent.support.world_state import (
     WorldStateUpdate,
     world_state_fields,
 )
+from pantaray_agents.conversation.budget import input_bytes
 from pantaray_agents.conversation.prefix import fingerprint_request
 from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.agent.action_history import SUPERVISOR_SCOPE_HANDLE
 from pantaray_agents.utils.local_time import local_now_for_model
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
-from .context_budget import PreparedWindow, input_bytes, prepare_window
+from .context_budget import PreparedWindow, prepare_window
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent

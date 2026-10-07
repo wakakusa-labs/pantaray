@@ -14,7 +14,6 @@ from pantaray_agents.agents.insight_agent.record_verification import (
     VerifiedRecord,
     verify_source_records,
 )
-from pantaray_agents.agents.insight_agent.zanei_tools import PAGE_LIMIT, ZaneiTools
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_gate import (
     SourceGate,
@@ -49,6 +48,7 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     load_workspace_structure_prompt,
 )
 from pantaray_agents.schema.context_source import SourceBinding
+from pantaray_agents.tools.zanei import PAGE_LIMIT, ZaneiTools
 
 logger = logging.getLogger(__name__)
 

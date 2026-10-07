@@ -1,6 +1,7 @@
 """Raw computer-activity read tools for the user-initiated Action conversation.
 
-The short Insight agent owns the same two reads (``insight_agent.zanei_tools``).
+The shared tool layer owns the same two reads (``tools.zanei``), which the
+short Insight agent also offers.
 This module only declares the Action-facing contract; the runtime handler reuses
 that implementation so both agents share one reader, cursor and evidence path.
 """

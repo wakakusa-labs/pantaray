@@ -21,13 +21,14 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
 )
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolResult
+from pantaray_agents.tools.memory.retrieval import (
     MEMORY_EDITOR_RETRIEVAL_POLICY,
     MemoryContextSession,
     MemoryRetrievalSession,
 )
-from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.tools.contract import ReactToolResult
+from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.prompt_loader import prompt_loader
 from pantaray_llm.contracts.tool_use import (
     LlmToolContinuation,
@@ -37,7 +38,6 @@ from pantaray_llm.contracts.tool_use import (
 from pantaray_llm.profiles import INSIGHT_PROFILE_ID
 
 from .record_verification import SourceRecordClaim
-from .zanei_tools import ZaneiTools
 
 # The short Insight only needs memory previews for continuity; the memory file
 # editor's untruncated policy would let 6 searches x 8 documents grow without

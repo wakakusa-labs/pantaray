@@ -35,9 +35,6 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     SandboxPathError,
     TextFileError,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
-    MemoryContextSession,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -45,6 +42,9 @@ from pantaray_agents.tools.contract import (
     ReactToolExecutor,
     ReactToolResult,
     tool_error_response,
+)
+from pantaray_agents.tools.memory.retrieval import (
+    MemoryContextSession,
 )
 
 from .logical_draft_io import (

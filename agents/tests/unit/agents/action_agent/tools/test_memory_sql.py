@@ -13,9 +13,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tools import (
     _run_validated_tool_impl,
     _validate_tool_args,
 )
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    MEMORY_SQL_ALLOWED_TABLES,
-)
 from pantaray_agents.agents.action_agent.tools import (
     MEMORY_SQL_TOOL,
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
@@ -25,6 +22,9 @@ from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
+)
+from pantaray_agents.tools.memory.sql import (
+    MEMORY_SQL_ALLOWED_TABLES,
 )
 
 BUSY_TIMEOUT_MS = 1_000

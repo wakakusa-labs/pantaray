@@ -11,13 +11,13 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     require_int_arg,
     require_string_arg,
 )
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    DEFAULT_MEMORY_SQL_LIMIT,
-    run_local_memory_sql,
-)
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.memory.sql import (
+    DEFAULT_MEMORY_SQL_LIMIT,
+    run_local_memory_sql,
+)
 
 from .shared import ToolValidationError, UnprojectedToolExecutionResult
 from .validation import validate_tool_args

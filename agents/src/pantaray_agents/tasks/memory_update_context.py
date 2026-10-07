@@ -58,11 +58,6 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     build_artifact_readable_roots,
     build_local_memory_file_tools,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
-    MEMORY_EDITOR_RETRIEVAL_POLICY,
-    MemoryContextSession,
-    MemoryRetrievalSession,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     load_workspace_structure_prompt,
 )
@@ -72,6 +67,11 @@ from pantaray_agents.tasks.types import (
     MemoryUpdateJobPayload,
 )
 from pantaray_agents.tools.contract import ReactToolDefinition
+from pantaray_agents.tools.memory.retrieval import (
+    MEMORY_EDITOR_RETRIEVAL_POLICY,
+    MemoryContextSession,
+    MemoryRetrievalSession,
+)
 from pantaray_agents.utils.local_time import (
     describe_utc_timestamp,
     local_period,

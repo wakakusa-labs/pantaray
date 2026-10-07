@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-import pantaray_agents.agents.action_agent.services.memory_sql as memory_sql_module
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    MAX_MEMORY_SQL_CELL_CHARS,
-    MEMORY_SQL_CELL_CUT_MARKER,
-    execute_memory_sql,
-)
+import pantaray_agents.tools.memory.sql as memory_sql_module
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
+)
+from pantaray_agents.tools.memory.sql import (
+    MAX_MEMORY_SQL_CELL_CHARS,
+    MEMORY_SQL_CELL_CUT_MARKER,
+    execute_memory_sql,
 )
 
 BUSY_TIMEOUT_MS = 1_000

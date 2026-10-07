@@ -7,10 +7,10 @@ from pantaray_agents.agents.insight_agent.agent import ShortInsightOutput
 from pantaray_agents.agents.insight_agent.record_verification import (
     MAX_QUOTE_CHARACTERS,
     MAX_RECORDS_PER_RUN,
-    ReadEvent,
     SourceRecordClaim,
     verify_source_records,
 )
+from pantaray_agents.tools.zanei import ReadEvent
 
 EVENT, TEAM, DRAFT = "event-1", "チームの連絡", "資料のたたき台"
 QUOTE = "明日の打ち合わせは 14 時からに変わりました"

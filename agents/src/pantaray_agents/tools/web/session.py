@@ -20,8 +20,8 @@ from pantaray_llm.profiles import (
     WEB_SEARCH_PROFILE_ID,
 )
 
-from .web_definitions import build_web_research_definitions
-from .web_paging import (
+from .definitions import build_web_research_definitions
+from .paging import (
     WebExtractFailure,
     WebSearchSnapshot,
     parse_web_extract_result,

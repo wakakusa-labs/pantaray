@@ -13,7 +13,7 @@ from pantaray_agents.tools.contract import (
     react_tool_response_schema,
 )
 
-from .file_access import LIST_MAX_DEPTH
+from .access import LIST_MAX_DEPTH
 
 READ_MAX_LINES = 200
 DISCOVERY_MAX_RESULTS = 100

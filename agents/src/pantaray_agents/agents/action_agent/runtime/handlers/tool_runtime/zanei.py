@@ -1,6 +1,6 @@
 """Raw computer-activity reads for the user-initiated Action conversation.
 
-The reads themselves belong to ``insight_agent.zanei_tools.ZaneiTools``: this
+The reads themselves belong to ``tools.zanei.ZaneiTools``: this
 adapter only resolves the signed-in user's live permit, keeps one reader session
 per Action run in memory, and projects the shared result into an Action tool
 result. The session is never written to Action state, so it does not enter the
@@ -17,11 +17,6 @@ from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.zanei_tools import (
     RECORDING_UNAVAILABLE_STATUS,
-)
-from pantaray_agents.agents.insight_agent.zanei_tools import (
-    EVENT_TOOL,
-    PAGE_TOOL,
-    ZaneiTools,
 )
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
@@ -42,6 +37,11 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolResult,
     ToolCallEnvelope,
+)
+from pantaray_agents.tools.zanei import (
+    EVENT_TOOL,
+    PAGE_TOOL,
+    ZaneiTools,
 )
 
 from .shared import UnprojectedToolExecutionResult

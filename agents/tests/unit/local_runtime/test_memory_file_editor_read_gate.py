@@ -34,13 +34,13 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.read_gate import (
     build_read_snapshot,
     patch_uses_visible_lines,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
-    MemoryContextSession,
-)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ToolCallEnvelope,
+)
+from pantaray_agents.tools.memory.retrieval import (
+    MemoryContextSession,
 )
 from pantaray_llm.contracts.tool_use import LlmToolCall, OpenAiToolContinuation
 

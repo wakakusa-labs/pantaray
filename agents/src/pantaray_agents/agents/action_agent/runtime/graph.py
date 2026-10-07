@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel, ConfigDict
 
 from pantaray_agents.agents.core import TokenBudgetExceeded
-from pantaray_agents.agents.insight_agent.zanei_tools import ZaneiTools
 from pantaray_agents.application.action.cancellation_service import (
     ActionCancellationService,
 )
@@ -30,6 +29,7 @@ from pantaray_agents.repositories.action_runtime_resume_contract import (
 )
 from pantaray_agents.schema.agent.action import ActionAgentRequest
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from ..services.prompt_rendering_service import PromptRenderingService

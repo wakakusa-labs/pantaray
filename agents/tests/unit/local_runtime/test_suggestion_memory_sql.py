@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    MAX_MEMORY_SQL_LIMIT,
-    MAX_MEMORY_SQL_OUTPUT_CHARS,
-)
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_INPUT_BYTES
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
 )
 from pantaray_agents.tools.contract import ReactToolRegistry
+from pantaray_agents.tools.memory.sql import (
+    MAX_MEMORY_SQL_LIMIT,
+    MAX_MEMORY_SQL_OUTPUT_CHARS,
+)
 
 from .test_suggestion_research_tools import (
     BUSY_TIMEOUT_MS,

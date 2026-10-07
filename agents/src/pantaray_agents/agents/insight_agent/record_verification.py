@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pantaray_agents.tools.zanei import ReadEvent
+
 # Bound secondary output without failing the run and stranding its read cursor.
 MAX_RECORDS_PER_RUN = 40
 MAX_QUOTE_CHARACTERS = 400
@@ -49,17 +51,6 @@ class SourceRecordClaim(BaseModel):
     quote: str = Field(
         description=f"Verbatim work-relevant text (including labels/units for values), at most {MAX_QUOTE_CHARACTERS} characters."
     )
-
-
-@dataclass(frozen=True, slots=True)
-class ReadEvent:
-    """What this run read about one Zanei event."""
-
-    observed_at: str
-    app_name: str | None
-    bundle_id: str | None
-    window_title: str | None
-    texts: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

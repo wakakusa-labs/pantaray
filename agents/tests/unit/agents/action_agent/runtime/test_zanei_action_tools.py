@@ -24,13 +24,6 @@ from pantaray_agents.agents.action_agent.tools.zanei_tools import (
     ZANEI_QUERY_TOOL_ID,
     ZANEI_TIMELINE_TOOL_ID,
 )
-from pantaray_agents.agents.insight_agent.zanei_tools import (
-    FREE_TEXT_CHARACTERS,
-    IDENTIFIER_CHARACTERS,
-    MAX_TIMELINE_PAGES_PER_RUN,
-    PAGE_LIMIT,
-    ZaneiTools,
-)
 from pantaray_agents.local_runtime.context.source_control import SourceControl
 from pantaray_agents.local_runtime.context.source_gate import ActiveSource, SourceGate
 from pantaray_agents.local_runtime.context.source_protocol import (
@@ -63,6 +56,13 @@ from pantaray_agents.schema.context_source import (
     SuspendSource,
 )
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.zanei import (
+    FREE_TEXT_CHARACTERS,
+    IDENTIFIER_CHARACTERS,
+    MAX_TIMELINE_PAGES_PER_RUN,
+    PAGE_LIMIT,
+    ZaneiTools,
+)
 
 USER_ID = "user-1"
 STORE_ID = "store-1"

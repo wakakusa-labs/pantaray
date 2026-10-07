@@ -16,11 +16,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep im
     RIPGREP_TRUSTED_PATH,
     RipgrepRunResult,
 )
-from pantaray_agents.local_runtime.tooling.react_tools import (
-    ReadOnlyFileAccess,
-    WorkspaceReadRoot,
-)
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files.access import ReadOnlyFileAccess
+from pantaray_agents.tools.files.roots import WorkspaceReadRoot
 
 from .test_suggestion_research_tools import (
     _bootstrap_db,

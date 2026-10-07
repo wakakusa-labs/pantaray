@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import get_args
 
-from pantaray_agents.agents.action_agent.services.memory_sql import (
+from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
+from pantaray_agents.tools.memory.sql import (
     DEFAULT_MEMORY_SQL_LIMIT,
     MAX_MEMORY_SQL_CELL_CHARS,
     MAX_MEMORY_SQL_LIMIT,
     MAX_MEMORY_SQL_OUTPUT_CHARS,
     MEMORY_SQL_CELL_CUT_MARKER,
 )
-from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
 
 from .base import (
     InputSpec,

@@ -184,10 +184,8 @@ class ReadOnlyFileAccess:
         relative_base = _relative_path(base_path, allow_dot=True)
         _validate_glob_pattern(pattern)
         if isinstance(root, MemoryReadRoot):
-            found = _Found(
-                _memory_glob_matches(
-                    root=root, base_path=relative_base, pattern=pattern
-                )
+            found = _memory_glob_matches(
+                root=root, base_path=relative_base, pattern=pattern
             )
         else:
             found = _workspace_glob_matches(
@@ -419,15 +417,15 @@ def _workspace_list_entries(
 
 def _memory_glob_matches(
     *, root: MemoryReadRoot, base_path: str, pattern: str
-) -> list[str]:
+) -> _Found:
     prefix = "" if base_path == "." else f"{base_path.rstrip('/')}/"
-    matches = [
+    matches = sorted(
         document.source_path
         for document in root.documents
         if document.source_path.startswith(prefix)
         and matches_workspace_glob(document.source_path[len(prefix) :], pattern)
-    ]
-    return sorted(matches)
+    )
+    return _Found([*matches])
 
 
 def _workspace_glob_matches(

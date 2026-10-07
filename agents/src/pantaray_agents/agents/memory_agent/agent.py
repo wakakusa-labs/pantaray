@@ -37,14 +37,14 @@ from pantaray_agents.local_runtime.tooling.agent_experience import (
     LIST_ACTION_STEPS_TOOL_NAME,
     SEARCH_ACTION_STEPS_TOOL_NAME,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
-    GET_MEMORY_REFERENCE_TOOL_NAME,
-    MEMORY_SEARCH_TOOL_NAME,
-)
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
 from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     resolve_react_tool_definitions,
+)
+from pantaray_agents.tools.memory.retrieval import (
+    GET_MEMORY_REFERENCE_TOOL_NAME,
+    MEMORY_SEARCH_TOOL_NAME,
 )
 from pantaray_agents.utils.profile_brief import (
     build_facts_profile_brief_prompt,

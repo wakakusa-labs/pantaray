@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pantaray_agents.local_runtime.web_tools import WebContentInvalidResponseError
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .web_definitions import WEB_SEARCH_RESULT_CONTENT_MAX_CHARS
+from .definitions import WEB_SEARCH_RESULT_CONTENT_MAX_CHARS
 
 WEB_EXTRACT_FAILED_RESULT_MAX_CHARS = 300
 WEB_EXTRACT_QUERY_EXCERPTS_HINT = (

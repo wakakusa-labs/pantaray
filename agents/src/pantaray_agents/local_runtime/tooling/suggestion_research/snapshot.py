@@ -32,15 +32,15 @@ from pantaray_agents.local_runtime.memory_catalog.repository import (
 )
 from pantaray_agents.local_runtime.memory_catalog.resolver import enqueue_memory_repair
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.react_tools import (
-    MemoryReadRoot,
-    ReadOnlyRoot,
-    WorkspaceReadRoot,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.files.roots import (
+    MemoryReadRoot,
+    ReadOnlyRoot,
+    WorkspaceReadRoot,
+)
 
 from ..outside_workspace_grant import app_owned_roots
 from .commands import commands_run_without_asking

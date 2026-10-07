@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from openai import AsyncOpenAI
+from openai.types.responses.response_completed_event import ResponseCompletedEvent
 
 from pantaray_llm.contracts.request import LlmProxyRequest
 from pantaray_llm.errors import ProviderError
@@ -71,41 +72,35 @@ class _NoTokenCount:
         raise AssertionError("input token count must not be requested")
 
 
-class _FakeStreamManager:
+class _FakeEventStream:
     def __init__(self, response: object) -> None:
         self._response = response
-        self._events: tuple[object, ...] = ()
 
-    async def __aenter__(self) -> _FakeStreamManager:
+    async def __aenter__(self) -> _FakeEventStream:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
         return None
 
-    async def get_final_response(self) -> object:
-        return self._response
-
     async def __aiter__(self) -> AsyncIterator[object]:
-        for event in self._events:
-            yield event
+        yield ResponseCompletedEvent.model_construct(
+            type="response.completed", response=self._response, sequence_number=0
+        )
 
 
 class _FakeResponses:
     def __init__(self, response: object) -> None:
         self.input_tokens = _NoTokenCount()
         self.kwargs: dict[str, object] | None = None
-        self.stream_kwargs: dict[str, object] | None = None
         self._response = response
 
     async def create(self, **kwargs: object) -> object:
         self.kwargs = kwargs
         if isinstance(self._response, Exception):
             raise self._response
+        if kwargs["stream"]:
+            return _FakeEventStream(self._response)
         return self._response
-
-    def stream(self, **kwargs: object) -> _FakeStreamManager:
-        self.stream_kwargs = kwargs
-        return _FakeStreamManager(self._response)
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, responses: _FakeResponses) -> None:
@@ -138,47 +133,42 @@ async def test_chatgpt_transport_streams_without_a_token_precheck(
         "OpenAI-Beta": "responses=experimental",
         "Accept": "text/event-stream",
     }
-    assert responses.kwargs is None
-    assert responses.stream_kwargs is not None
-    assert "stream" not in responses.stream_kwargs
-    assert responses.stream_kwargs["store"] is False
-    assert responses.stream_kwargs["instructions"] == "sys"
-    assert responses.stream_kwargs["include"] == ["reasoning.encrypted_content"]
+    assert responses.kwargs is not None
+    assert responses.kwargs["stream"] is True
+    assert responses.kwargs["store"] is False
+    assert responses.kwargs["instructions"] == "sys"
+    assert responses.kwargs["include"] == ["reasoning.encrypted_content"]
     assert response.meta.upstream_provider == "openai_codex"
     assert response.output[0].content[0].text == "hello"
     assert response.meta.resolved_model == "test-model-2026"
 
 
-@pytest.mark.asyncio
-async def test_chatgpt_stream_recovers_done_items_from_empty_terminal() -> None:
-    message = {
-        "type": "message",
-        "id": "msg_1",
-        "role": "assistant",
-        "status": "completed",
-        "content": [{"type": "output_text", "text": "hello", "annotations": []}],
-    }
-    call = {
-        "type": "function_call",
-        "id": "fc_1",
-        "call_id": "call_1",
-        "name": "echo",
-        "arguments": "{}",
-        "status": "completed",
-    }
+_ECHO_CALL = {
+    "type": "function_call",
+    "id": "fc_1",
+    "call_id": "call_1",
+    "name": "echo",
+    "arguments": "{}",
+    "status": "completed",
+}
+
+
+def _sse_client(*, items: list[dict[str, object]], terminal_output: list[object]):
+    """An SDK client whose /responses answers one SSE stream of `items`."""
+
     response = {
         "id": "resp_1",
         "object": "response",
         "created_at": 1,
         "model": "test-model",
         "status": "completed",
-        "output": [],
+        "output": terminal_output,
         "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
     }
-    events = [
+    events: list[dict[str, object]] = [
         {"type": "response.created", "response": {**response, "status": "in_progress"}}
     ]
-    for index, item in enumerate((message, call)):
+    for index, item in enumerate(items):
         events.append(
             {"type": "response.output_item.added", "output_index": index, "item": item}
         )
@@ -197,17 +187,25 @@ async def test_chatgpt_stream_recovers_done_items_from_empty_terminal() -> None:
             )
         )
     )
+    client = AsyncOpenAI(
+        api_key="test-token",
+        base_url="https://example.test/v1",
+        http_client=http_client,
+    )
+    return http_client, client
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_stream_recovers_done_items_from_empty_terminal() -> None:
+    message = {
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": "hello", "annotations": []}],
+    }
+    http_client, client = _sse_client(items=[message, _ECHO_CALL], terminal_output=[])
     async with http_client:
-        client = AsyncOpenAI(
-            api_key="test-token",
-            base_url="https://example.test/v1",
-            http_client=http_client,
-        )
-        async with client.responses.stream(
-            model="test-model", input="hi", store=False
-        ) as stream:
-            terminal = await stream.get_final_response()
-        assert terminal.output == []
         result = await openai_provider._create_response(
             client=client,
             create_kwargs={
@@ -226,6 +224,40 @@ async def test_chatgpt_stream_recovers_done_items_from_empty_terminal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chatgpt_stream_items_replay_without_sdk_only_fields() -> None:
+    # Codex rejected the next turn with `Unknown parameter:
+    # 'input[1].parsed_arguments'` once its terminal response carried output.
+    http_client, client = _sse_client(items=[_ECHO_CALL], terminal_output=[_ECHO_CALL])
+    async with http_client:
+        result = await openai_provider._create_response(
+            client=client,
+            create_kwargs={
+                "model": "test-model",
+                "input": "hi",
+                "store": False,
+                "stream": False,
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "echo",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": False,
+                        },
+                        "strict": True,
+                    }
+                ],
+            },
+            stream=True,
+        )
+
+    assert [
+        item.model_dump(mode="json", exclude_none=True) for item in result.output
+    ] == [_ECHO_CALL]
+
+
+@pytest.mark.asyncio
 async def test_non_streaming_transport_without_token_count_calls_create(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,7 +271,6 @@ async def test_non_streaming_transport_without_token_count_calls_create(
         transport=fireworks_transport(api_key="key"),
     )
 
-    assert responses.stream_kwargs is None
     assert responses.kwargs is not None
     assert responses.kwargs["stream"] is False
     assert "include" not in responses.kwargs

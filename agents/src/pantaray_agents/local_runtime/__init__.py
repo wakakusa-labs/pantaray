@@ -26,14 +26,6 @@ _EXPORTS = {
         "list_runtime_recovery_audit_events",
     ),
     "is_local_runtime_enabled": (".runtime.bootstrap", "is_local_runtime_enabled"),
-    "bootstrap_local_tooling_catalog": (
-        ".tooling",
-        "bootstrap_local_tooling_catalog",
-    ),
-    "ensure_action_scratch_execution_context": (
-        ".tooling",
-        "ensure_action_scratch_execution_context",
-    ),
     "rebuild_memory_artifact_blocks_fts": (
         ".storage.artifact_block_fts",
         "rebuild_memory_artifact_blocks_fts",

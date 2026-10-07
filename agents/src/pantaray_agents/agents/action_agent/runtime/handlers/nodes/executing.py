@@ -60,6 +60,7 @@ from pantaray_agents.agents.core.tool_call_repair import (
 )
 from pantaray_agents.application.action.ports import ActionAssistantMessageEmission
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.budget import ContextCapacityExceeded
 from pantaray_agents.conversation.provider_turns import read_provider_turn_target
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
@@ -337,7 +338,7 @@ async def execution_think_step(  # noqa: C901
         )
         try:
             prepared = prepare()
-        except context_budget.ContextCapacityExceeded as exc:
+        except ContextCapacityExceeded as exc:
             error = runtime.services.response.build_agent_error(
                 error_type="context_capacity_exceeded",
                 error_code="ACTION_CONTEXT_CAPACITY_EXCEEDED",

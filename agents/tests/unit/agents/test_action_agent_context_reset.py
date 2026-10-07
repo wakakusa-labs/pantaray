@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,6 +39,7 @@ from pantaray_agents.agents.action_agent.runtime.state import create_initial_sta
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
 from pantaray_agents.agents.action_agent.tools import HISTORY_FETCH_TOOL
 from pantaray_agents.agents.core.mixins.llm_usage import LlmUsage
+from pantaray_agents.conversation.budget import ContextBudget
 from pantaray_agents.mock.mock_action_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.mock_repository import MockRepository
@@ -529,10 +531,19 @@ def test_a_think_without_provider_usage_keeps_the_previous_baseline() -> None:
 
 
 def test_the_body_omission_boundary_never_moves_backwards() -> None:
-    context = _context()
+    window = SimpleNamespace(history_bytes=0, rendered_bytes=4_000)
+    assembled: list[int] = []
 
-    assert context_budget.store_body_omission(context, boundary=12) == 12
-    assert context_budget.store_body_omission(context, boundary=3) == 12
+    def assemble(boundary: int) -> SimpleNamespace:
+        assembled.append(boundary)
+        return window
+
+    fitted = ContextBudget(window_tokens=30_000, baseline=None, reset_pending=True).fit(
+        assemble, omit_before=12, resolve_boundary=lambda _byte_budget: 3
+    )
+
+    assert fitted.rebuilt_at == 12
+    assert assembled == [12, 12]
 
 
 # --- 既存 checkpoint の互換 -----------------------------------------------------------
@@ -563,7 +574,9 @@ def test_a_checkpoint_without_the_new_bookkeeping_fields_restores_unchanged() ->
     assert restored["context"] == state["context"]
     assert context_budget.stored_body_omission(restored["context"]) == 0
     assert (
-        context_budget.must_rebuild_window(restored["context"], rendered_bytes=10**7)
+        context_budget.read_budget(restored["context"]).must_rebuild(
+            rendered_bytes=10**7
+        )
         is True
     )
 
@@ -579,7 +592,7 @@ def test_checkpoint_restores_the_same_pruned_prompt_and_raw_results() -> None:
         token_budget=None,
     )
     state["history_by_scope"]["S"] = cast(Any, _turns(4))
-    context_budget.store_body_omission(state["context"], boundary=3)
+    state["context"]["context_body_omitted_before_step"] = 3
     before = _FORMATTER.format_history(state, omit_before_step_number=3)
     _record(state["context"], prompt_tokens=4000, cached=0)
     restored = restore_runtime_state_checkpoint(
@@ -589,9 +602,9 @@ def test_checkpoint_restores_the_same_pruned_prompt_and_raw_results() -> None:
         expected_user_id="user-1",
     )
     boundary = context_budget.stored_body_omission(restored["context"])
-    assert context_budget.estimate_input_tokens(
-        restored["context"], rendered_bytes=2000
-    ) == context_budget.estimate_input_tokens(state["context"], rendered_bytes=2000)
+    assert context_budget.read_budget(restored["context"]).estimate(
+        rendered_bytes=2000
+    ) == context_budget.read_budget(state["context"]).estimate(rendered_bytes=2000)
     assert (
         _FORMATTER.format_history(restored, omit_before_step_number=boundary) == before
     )
@@ -664,13 +677,12 @@ def test_usage_calibration_accounts_for_input_growth_and_pruning(
     rendered_bytes: int,
     expected: int,
 ) -> None:
-    context = _context(
-        context_input_baseline={"prompt_tokens": 2000, "rendered_bytes": 4000}
+    budget = ContextBudget(
+        window_tokens=30_000,
+        baseline={"prompt_tokens": 2000, "rendered_bytes": 4000},
+        reset_pending=False,
     )
-    assert (
-        context_budget.estimate_input_tokens(context, rendered_bytes=rendered_bytes)
-        == expected
-    )
+    assert budget.estimate(rendered_bytes=rendered_bytes) == expected
 
 
 @pytest.mark.asyncio

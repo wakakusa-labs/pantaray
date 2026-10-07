@@ -63,7 +63,10 @@ from pantaray_llm.errors import (
     resolve_proxy_recovery,
 )
 from pantaray_llm.profiles.direct import resolve_direct_profile
-from pantaray_llm.providers.anthropic.provider import execute_anthropic_request
+from pantaray_llm.providers.anthropic.provider import (
+    MISSING_CALL_REPAIR_LIMIT,
+    execute_anthropic_request,
+)
 from pantaray_llm.providers.openai_responses.provider import execute_openai_request
 from pantaray_llm.providers.openai_responses.retry_policy import OPENAI_SDK_MAX_RETRIES
 from pantaray_llm.providers.openai_responses.transport import (
@@ -139,7 +142,10 @@ async def _dispatch(
             provider="anthropic", model=connection.model, request=request
         )
         async with source_http_client(
-            user_id, timeout=_PROVIDER_TIMEOUT, max_requests=1
+            user_id,
+            timeout=_PROVIDER_TIMEOUT,
+            # A tool use reply without a call is asked again on the same client.
+            max_requests=1 + MISSING_CALL_REPAIR_LIMIT,
         ) as http_client:
             return await execute_anthropic_request(
                 request=request,

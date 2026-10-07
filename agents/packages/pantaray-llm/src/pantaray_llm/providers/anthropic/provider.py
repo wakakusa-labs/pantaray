@@ -41,7 +41,6 @@ from pantaray_llm.providers.anthropic.response_error import (
 )
 from pantaray_llm.providers.anthropic.settings import (
     AnthropicAdaptiveThinking,
-    AnthropicBudgetThinking,
     AnthropicLlmProfile,
 )
 from pantaray_llm.providers.anthropic.tool_use import (
@@ -96,16 +95,26 @@ async def execute_anthropic_request(
         "model": profile.model,
         "max_tokens": profile.max_output_tokens,
         "messages": cast(JSONValue, messages),
+        # Automatic caching puts the breakpoint on the last cacheable block, so
+        # it moves forward as a conversation is appended to and each turn reads
+        # the previous one. It stays out of the messages themselves, which a
+        # continuation stores and replays.
+        # https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+        "cache_control": {"type": "ephemeral"},
     }
     if instructions is not None:
-        body["system"] = instructions
+        # A second breakpoint closes the tools and system prefix, which requests
+        # with the same tools and instructions share even when their messages
+        # differ.
+        body["system"] = [
+            {
+                "type": "text",
+                "text": instructions,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
     output_config: dict[str, JSONValue] = {}
-    if isinstance(profile.thinking, AnthropicBudgetThinking):
-        body["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": profile.thinking.budget_tokens,
-        }
-    elif isinstance(profile.thinking, AnthropicAdaptiveThinking):
+    if isinstance(profile.thinking, AnthropicAdaptiveThinking):
         body["thinking"] = {"type": "adaptive"}
         output_config["effort"] = profile.thinking.effort
     if compiled_schema is not None:

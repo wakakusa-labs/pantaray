@@ -18,7 +18,7 @@ export const API_KEY_PROVIDERS: readonly ApiKeyProvider[] = ['openai', 'anthropi
 /** 候補モデル。ここに無い名前もそのまま入力できる（カスタム）。先頭がその宛先の既定。 */
 export const PROVIDER_MODEL_CANDIDATES: Record<ApiKeyProvider, readonly string[]> = {
   openai: ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-luna'],
-  anthropic: ['claude-opus-5', 'claude-sonnet-5'],
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
   fireworks: [],
 };
 

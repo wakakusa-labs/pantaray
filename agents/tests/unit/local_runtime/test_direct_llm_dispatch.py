@@ -74,7 +74,7 @@ FIREWORKS_CONNECTION = ApiKeyConnection(
     api_key=FIREWORKS_KEY,
 )
 ANTHROPIC_CONNECTION = ApiKeyConnection(
-    provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY
+    provider="anthropic", model="claude-sonnet-5-5", api_key=ANTHROPIC_KEY
 )
 CHATGPT_CONNECTION = ChatGptConnection(
     model="gpt-5.6-sol",
@@ -104,7 +104,7 @@ ANSWER_SCHEMA = {
 ANTHROPIC_MESSAGE = {
     "type": "message",
     "id": "msg_anthropic_1",
-    "model": "claude-sonnet-5-2026",
+    "model": "claude-sonnet-5-5",
     "content": [
         {"type": "thinking", "thinking": "considering"},
         {"type": "text", "text": "hello"},
@@ -722,7 +722,7 @@ async def test_each_connection_reaches_only_its_own_endpoint(
             api_key=FIREWORKS_KEY,
         ),
         ApiKeyConnection(
-            provider="anthropic", model="claude-opus-5", api_key=ANTHROPIC_KEY
+            provider="anthropic", model="claude-opus-5-5", api_key=ANTHROPIC_KEY
         ),
         ChatGptConnection(model=USER_MODEL, credential=CHATGPT_CONNECTION.credential),
     ],

@@ -23,13 +23,15 @@ _MULTIMODAL_CAPABILITIES: Mapping[LlmCapability, bool] = {
     "structured_output": True,
 }
 
-# Verified 2026-09-30 against the model/effort documentation, not API aliases
-# guessed from names. ChatGPT capabilities come from Codex's models-manager
-# catalog and Responses request builder, independently of the public API.
+# Verified against the model/effort documentation, not API aliases guessed
+# from names (OpenAI 2026-09-30, Anthropic 2026-10-08). ChatGPT capabilities
+# come from Codex's models-manager catalog and Responses request builder,
+# independently of the public API.
 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
 # https://developers.openai.com/api/docs/models/gpt-6-luna
+# https://platform.claude.com/docs/en/about-claude/models/overview
 # https://platform.claude.com/docs/en/build-with-claude/effort
-# https://platform.claude.com/docs/en/build-with-claude/context-windows
+# https://platform.claude.com/docs/en/build-with-claude/structured-outputs
 # https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
 # https://fireworks.ai/models/fireworks/gpt-oss-120b
 MODEL_CATALOG = {
@@ -60,7 +62,12 @@ MODEL_CATALOG = {
             ModelCatalogEntry(
                 "anthropic", model, _MULTIMODAL_CAPABILITIES, "adaptive", 128000
             )
-            for model in ("claude-opus-5", "claude-sonnet-5")
+            for model in (
+                "claude-opus-5-5",
+                "claude-sonnet-5-5",
+                "claude-haiku-5-5",
+                "claude-fable-5-1",
+            )
         ),
         ModelCatalogEntry(
             "fireworks",

@@ -14,16 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery_ripgrep
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.files.ripgrep import (
     RIPGREP_TRUSTED_PATH,
     RipgrepRunResult,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -90,7 +88,7 @@ def _swap_for_link_while_ripgrep_runs(
     back, with the same file names in it, and a link only while ripgrep reads.
     """
 
-    run = broker_discovery_ripgrep._run_ripgrep_lines
+    run = ripgrep._run_ripgrep_lines
 
     def swapped(**kwargs: object) -> RipgrepRunResult:
         shutil.rmtree(directory)
@@ -104,7 +102,7 @@ def _swap_for_link_while_ripgrep_runs(
                 if entry.is_file():
                     (directory / entry.name).write_text("harmless\n", encoding="utf-8")
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", swapped)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", swapped)
 
 
 @pytest.mark.parametrize("tool_id", ["grep", "glob"])

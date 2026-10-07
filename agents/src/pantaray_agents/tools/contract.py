@@ -81,6 +81,27 @@ TOOL_ERROR_RESPONSE_SCHEMA: JsonSchema = {
 }
 
 
+class BrokerPolicyError(RuntimeError):
+    """A tool call refused by policy, with optional LLM repair guidance.
+
+    The file tools and the Action broker both raise it, so one handler turns
+    every refusal into the same coded error the model can act on.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "BROKER_POLICY_REJECTED",
+        fix_hint: str | None = None,
+        examples: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.fix_hint = fix_hint
+        self.examples = examples
+
+
 class ToolResponseValidationError(RuntimeError):
     """An implementation violated its result contract; abort instead of retrying."""
 

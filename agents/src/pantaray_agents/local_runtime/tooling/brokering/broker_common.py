@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ...storage.migrations import MigrationError
 from ..models import (
@@ -53,23 +54,6 @@ APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
 APPROVAL_STATUS_APPROVED_ONCE: Literal["approved_once"] = "approved_once"
 APPROVAL_STATUS_DENIED: Literal["denied"] = "denied"
 BROKER_TOOL_TIMEOUT_ERROR_TYPE = "ToolTimeoutError"
-
-
-class BrokerPolicyError(RuntimeError):
-    """Broker policy rejection with optional LLM repair guidance."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "BROKER_POLICY_REJECTED",
-        fix_hint: str | None = None,
-        examples: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.fix_hint = fix_hint
-        self.examples = examples
 
 
 class BrokerExecutionError(RuntimeError):
@@ -578,7 +562,6 @@ __all__ = [
     "BrokerApprovalRequiredError",
     "BrokerContext",
     "BrokerExecutionError",
-    "BrokerPolicyError",
     "READ_TOOL_ID",
     "RENDER_PDF_PAGE_TOOL_ID",
     "RUN_PYTHON_TOOL_ID",

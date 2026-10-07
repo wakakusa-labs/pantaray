@@ -8,16 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import (
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import (
     workspace_descriptor_access as descriptor_access,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    read_text_descriptor_lines,
-)
-from pantaray_agents.local_runtime.tooling.brokering.workspace_descriptor_access import (
+from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
+from pantaray_agents.tools.files.workspace_descriptor_access import (
     glob_workspace_files,
     open_workspace_file_descriptor,
     scan_workspace_entries,

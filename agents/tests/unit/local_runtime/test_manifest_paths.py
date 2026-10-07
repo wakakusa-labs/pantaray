@@ -5,15 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
 from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
     ManifestRoot,
     resolve_local_path,
     resolve_process_cwd,
     resolve_tool_results_root,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 
 def test_resolve_local_path_accepts_cwd_relative_workspace_path(

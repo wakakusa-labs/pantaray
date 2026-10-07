@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from io import StringIO
 from typing import TextIO
 
-from .broker_common import BrokerPolicyError
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 MAX_BYTES = 50 * 1024
 MAX_LINE_LENGTH = 2_000

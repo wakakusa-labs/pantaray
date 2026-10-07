@@ -7,9 +7,6 @@ from typing import Literal
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     InvocationToolResultOwner,
     ToolResultFinalizationRequest,
@@ -18,6 +15,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .resource_recovery_test_support import (
     bootstrap_runtime_db,

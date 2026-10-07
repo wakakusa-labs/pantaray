@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from pantaray_agents.tools.contract import BrokerPolicyError
+
 from ..storage.transactions import SQLiteTransactionOwnershipError
 from .action_subagent_resource_identity import (
     ActionSubagentResourceIdentityError,
@@ -14,7 +16,6 @@ from .action_subagent_resource_identity import (
     normalize_workspace_resource_key,
     resource_identities_overlap,
 )
-from .brokering.broker_common import BrokerPolicyError
 from .brokering.manifest_paths import (
     WORKSPACE_ROOT_AUTHORITY_INVALID,
     resolve_local_path,

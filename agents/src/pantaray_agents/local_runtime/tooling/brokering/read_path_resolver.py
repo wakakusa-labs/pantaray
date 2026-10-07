@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
+from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .broker_common import BrokerPolicyError
 from .read_scope import ReadScope
 from .tool_path_policy import (
     READ_PATH_DENIED,

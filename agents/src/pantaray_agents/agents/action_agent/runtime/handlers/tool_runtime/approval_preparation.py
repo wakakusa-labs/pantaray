@@ -12,9 +12,6 @@ from pathlib import Path
 
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
 from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
 )
@@ -24,6 +21,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     finalize_local_tool_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .shared import (
     APPROVAL_DENIED_OUTPUT_KIND,

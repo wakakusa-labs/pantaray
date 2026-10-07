@@ -9,9 +9,15 @@ from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.private_storage import (
+    PrivateAppStorage,
+    private_app_storage_error,
+)
 
+from ..outside_workspace_grant import app_owned_roots
 from ..workspace_manifest_roots import path_belongs_to_manifest_root
-from .broker_common import BrokerContext, BrokerPolicyError
+from .broker_common import BrokerContext
 from .manifest_paths import (
     WORKSPACE_PATH_ESCAPES_ROOT,
     WORKSPACE_PATH_OUTSIDE_ROOTS,
@@ -29,11 +35,6 @@ from .outside_workspace import (
     resolve_outside_workspace_cwd,
     resolve_outside_workspace_patch_target,
 )
-from .private_app_storage import (
-    PrivateAppStorage,
-    private_app_storage,
-    private_app_storage_error,
-)
 from .read_scope import ReadScope
 
 READ_PATH_NOT_FOUND = "READ_PATH_NOT_FOUND"
@@ -45,6 +46,8 @@ EXEC_CWD_NOT_FOUND = "EXEC_CWD_NOT_FOUND"
 EXEC_CWD_DENIED = "EXEC_CWD_DENIED"
 SUGGESTION_LIMIT = 3
 SUGGESTION_SCAN_LIMIT = 200
+# The app's own storage roots that an Action's manifest may grant back to it.
+_APP_MANAGED_ROOT_SOURCE_TYPES = frozenset({"scratch", "agent_experience"})
 
 _READ_WORKSPACE_SCOPE_ERROR_CODES = frozenset(
     {
@@ -421,8 +424,13 @@ def _candidate_path(*, raw_path: str, cwd_path: Path) -> Path:
 
 
 def _private_storage(context: BrokerContext) -> PrivateAppStorage:
-    return private_app_storage(
-        db_path=context.db_path, manifest_roots=context.manifest_roots
+    return PrivateAppStorage(
+        storage_roots=app_owned_roots(context.db_path),
+        readable_roots=tuple(
+            root.canonical_real_path
+            for root in context.manifest_roots
+            if root.can_read and root.source_type in _APP_MANAGED_ROOT_SOURCE_TYPES
+        ),
     )
 
 

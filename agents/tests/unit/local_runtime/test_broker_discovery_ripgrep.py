@@ -6,13 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import (
-    broker_discovery_ripgrep,
-    broker_grep_lines,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import grep_lines, ripgrep
 
 
 def test_ripgrep_files_uses_fixed_argv(
@@ -21,7 +16,7 @@ def test_ripgrep_files_uses_fixed_argv(
 ) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
@@ -31,13 +26,13 @@ def test_ripgrep_files_uses_fixed_argv(
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
         assert handle_line(b"src/app.py") is True
         assert handle_line(b"src/other.py") is False
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        return ripgrep.RipgrepRunResult(
             exit_code=0,
             stderr="",
             stderr_truncated=False,
@@ -47,9 +42,9 @@ def test_ripgrep_files_uses_fixed_argv(
             stopped_early=True,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
-    result = broker_discovery_ripgrep.run_ripgrep_files(
+    result = ripgrep.run_ripgrep_files(
         cwd=tmp_path,
         sandbox_profile="",
         glob_pattern="src/*.py",
@@ -83,7 +78,7 @@ def test_ripgrep_grep_uses_fixed_argv(
 ) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
@@ -93,12 +88,12 @@ def test_ripgrep_grep_uses_fixed_argv(
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
         captured["argv"] = argv
         captured["cwd"] = cwd
         assert handle_line(b"src/app.py\x003:1:needle\r")
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        return ripgrep.RipgrepRunResult(
             exit_code=0,
             stderr="",
             stderr_truncated=False,
@@ -108,9 +103,9 @@ def test_ripgrep_grep_uses_fixed_argv(
             stopped_early=False,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
-    result = broker_discovery_ripgrep.run_ripgrep_grep(
+    result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
         sandbox_profile="",
         pattern="needle",
@@ -145,7 +140,7 @@ def test_ripgrep_grep_uses_fixed_argv(
         ".",
     )
     assert result.matches == (
-        broker_grep_lines.RipgrepGrepMatch(
+        grep_lines.RipgrepGrepMatch(
             relative_path="src/app.py",
             line_number=3,
             line="needle",
@@ -159,7 +154,7 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
@@ -169,9 +164,9 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
+        return ripgrep.RipgrepRunResult(
             exit_code=-9,
             stderr="",
             stderr_truncated=False,
@@ -181,9 +176,9 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
             stopped_early=False,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
-    result = broker_discovery_ripgrep.run_ripgrep_grep(
+    result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
         sandbox_profile="",
         pattern="needle",
@@ -200,7 +195,7 @@ def test_ripgrep_files_classifies_glob_parse_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
@@ -210,9 +205,9 @@ def test_ripgrep_files_classifies_glob_parse_errors(
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
+        return ripgrep.RipgrepRunResult(
             exit_code=2,
             stderr="rg: error parsing glob '[': unclosed character class",
             stderr_truncated=False,
@@ -222,10 +217,10 @@ def test_ripgrep_files_classifies_glob_parse_errors(
             stopped_early=False,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
     with pytest.raises(BrokerPolicyError) as exc_info:
-        broker_discovery_ripgrep.run_ripgrep_files(
+        ripgrep.run_ripgrep_files(
             cwd=tmp_path,
             sandbox_profile="",
             glob_pattern="[",
@@ -233,15 +228,15 @@ def test_ripgrep_files_classifies_glob_parse_errors(
         )
 
     assert exc_info.value.code == "GLOB_PATTERN_INVALID"
-    assert exc_info.value.fix_hint == broker_discovery_ripgrep.GLOB_PATTERN_FIX_HINT
-    assert exc_info.value.examples == broker_discovery_ripgrep.GLOB_PATTERN_EXAMPLES
+    assert exc_info.value.fix_hint == ripgrep.GLOB_PATTERN_FIX_HINT
+    assert exc_info.value.examples == ripgrep.GLOB_PATTERN_EXAMPLES
 
 
 def test_ripgrep_runner_drains_stderr_without_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(broker_discovery_ripgrep, "RIPGREP_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(ripgrep, "RIPGREP_TIMEOUT_SECONDS", 0.5)
     script = (
         "import sys\n"
         "sys.stderr.write('x' * 200000)\n"
@@ -249,7 +244,7 @@ def test_ripgrep_runner_drains_stderr_without_timeout(
         "raise SystemExit(2)\n"
     )
 
-    result = broker_discovery_ripgrep._run_ripgrep_lines(
+    result = ripgrep._run_ripgrep_lines(
         argv=(sys.executable, "-c", script),
         cwd=tmp_path,
         sandbox_profile="(version 1)\n(allow default)",
@@ -259,7 +254,7 @@ def test_ripgrep_runner_drains_stderr_without_timeout(
     assert result.exit_code == 2
     assert result.timed_out is False
     assert result.stderr_truncated is True
-    assert len(result.stderr) <= broker_discovery_ripgrep.RIPGREP_MAX_STDERR_CHARS
+    assert len(result.stderr) <= ripgrep.RIPGREP_MAX_STDERR_CHARS
 
 
 @pytest.mark.parametrize(
@@ -281,7 +276,7 @@ def test_ripgrep_grep_classifies_backend_failures(
     expected_code: str,
 ) -> None:
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
@@ -291,9 +286,9 @@ def test_ripgrep_grep_classifies_backend_failures(
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
+        return ripgrep.RipgrepRunResult(
             exit_code=2,
             stderr=stderr,
             stderr_truncated=False,
@@ -303,10 +298,10 @@ def test_ripgrep_grep_classifies_backend_failures(
             stopped_early=False,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
     with pytest.raises(BrokerPolicyError) as exc_info:
-        broker_discovery_ripgrep.run_ripgrep_grep(
+        ripgrep.run_ripgrep_grep(
             cwd=tmp_path,
             sandbox_profile="",
             pattern="needle",
@@ -316,17 +311,11 @@ def test_ripgrep_grep_classifies_backend_failures(
 
     assert exc_info.value.code == expected_code
     if expected_code == "GREP_PATTERN_INVALID":
-        assert exc_info.value.fix_hint == broker_discovery_ripgrep.GREP_PATTERN_FIX_HINT
-        assert exc_info.value.examples == broker_discovery_ripgrep.GREP_PATTERN_EXAMPLES
+        assert exc_info.value.fix_hint == ripgrep.GREP_PATTERN_FIX_HINT
+        assert exc_info.value.examples == ripgrep.GREP_PATTERN_EXAMPLES
     elif expected_code == "GREP_INCLUDE_GLOB_INVALID":
-        assert (
-            exc_info.value.fix_hint
-            == broker_discovery_ripgrep.GREP_INCLUDE_GLOB_FIX_HINT
-        )
-        assert (
-            exc_info.value.examples
-            == broker_discovery_ripgrep.GREP_INCLUDE_GLOB_EXAMPLES
-        )
+        assert exc_info.value.fix_hint == ripgrep.GREP_INCLUDE_GLOB_FIX_HINT
+        assert exc_info.value.examples == ripgrep.GREP_INCLUDE_GLOB_EXAMPLES
 
 
 @pytest.mark.parametrize("installed", [True, False])
@@ -342,12 +331,12 @@ def test_ripgrep_selection_never_uses_parent_path(
         executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(untrusted))
-    monkeypatch.setattr(broker_discovery_ripgrep, "RIPGREP_TRUSTED_PATH", str(trusted))
+    monkeypatch.setattr(ripgrep, "RIPGREP_TRUSTED_PATH", str(trusted))
     if installed:
-        assert broker_discovery_ripgrep._resolve_ripgrep_executable() == trusted / "rg"
+        assert ripgrep._resolve_ripgrep_executable() == trusted / "rg"
     else:
         with pytest.raises(BrokerPolicyError) as exc_info:
-            broker_discovery_ripgrep._resolve_ripgrep_executable()
+            ripgrep._resolve_ripgrep_executable()
         assert exc_info.value.code == "DISCOVERY_BACKEND_UNAVAILABLE"
 
 
@@ -356,19 +345,19 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        broker_discovery_ripgrep,
+        ripgrep,
         "_resolve_ripgrep_executable",
         lambda: Path("/trusted/bin/rg"),
     )
-    preview = b"a" * broker_grep_lines.RIPGREP_MAX_COLUMNS
+    preview = b"a" * grep_lines.RIPGREP_MAX_COLUMNS
 
     def fake_run(
         *,
         argv: tuple[str, ...],
         cwd: Path,
         sandbox_profile: str,
-        handle_line: broker_discovery_ripgrep.LineHandler,
-    ) -> broker_discovery_ripgrep.RipgrepRunResult:
+        handle_line: ripgrep.LineHandler,
+    ) -> ripgrep.RipgrepRunResult:
         # A preview of a longer line whose first match is past its end.
         assert handle_line(
             b"./big.jsonl\x007:70001:" + preview + b" [... 1 more match]"
@@ -389,7 +378,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         assert handle_line(
             b'./db.sqlite: binary file matches (found "\\0" byte around offset 9)'
         )
-        return broker_discovery_ripgrep.RipgrepRunResult(
+        return ripgrep.RipgrepRunResult(
             exit_code=2,
             stderr="rg: ./locked: Permission denied (os error 13)\n",
             stderr_truncated=False,
@@ -399,9 +388,9 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
             stopped_early=False,
         )
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", fake_run)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", fake_run)
 
-    result = broker_discovery_ripgrep.run_ripgrep_grep(
+    result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
         sandbox_profile="",
         pattern="needle",
@@ -409,7 +398,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         max_matches=10,
     )
 
-    limit = broker_grep_lines.GREP_MAX_LINE_CHARS
+    limit = grep_lines.GREP_MAX_LINE_CHARS
     assert [(match.line_number, match.line) for match in result.matches] == [
         (7, "a" * limit + "…"),
         (9, "…" + "a" * limit + "…"),
@@ -449,7 +438,7 @@ def test_grep_match_centres_long_lines_on_the_first_match(
     cut: bool,
     expected: tuple[str, bool],
 ) -> None:
-    match = broker_grep_lines.grep_match(
+    match = grep_lines.grep_match(
         relative_path="a.txt",
         line_number=1,
         text=text,
@@ -461,16 +450,14 @@ def test_grep_match_centres_long_lines_on_the_first_match(
 
 
 _REAL_RIPGREP = pytest.mark.skipif(
-    shutil.which("rg", path=broker_discovery_ripgrep.RIPGREP_TRUSTED_PATH) is None,
+    shutil.which("rg", path=ripgrep.RIPGREP_TRUSTED_PATH) is None,
     reason="ripgrep is not installed in a trusted location",
 )
 _ALLOW_ALL_PROFILE = "(version 1)\n(allow default)"
 
 
-def _real_grep(
-    cwd: Path, *, max_matches: int = 100
-) -> broker_discovery_ripgrep.RipgrepGrepResult:
-    return broker_discovery_ripgrep.run_ripgrep_grep(
+def _real_grep(cwd: Path, *, max_matches: int = 100) -> ripgrep.RipgrepGrepResult:
+    return ripgrep.run_ripgrep_grep(
         cwd=cwd,
         sandbox_profile=_ALLOW_ALL_PROFILE,
         pattern="needle",
@@ -519,7 +506,7 @@ def test_real_ripgrep_excerpts_very_long_lines_around_the_match(
     # Past ripgrep's preview the excerpt is the line's start, still marked cut.
     late = by_path["./late.jsonl"]
     assert late.line_truncated is True
-    assert late.line == "x" * broker_grep_lines.GREP_MAX_LINE_CHARS + "…"
+    assert late.line == "x" * grep_lines.GREP_MAX_LINE_CHARS + "…"
 
 
 @_REAL_RIPGREP
@@ -564,7 +551,7 @@ def test_real_ripgrep_glob_reports_unreadable_paths_instead_of_failing(
     (locked / "b.txt").write_text("b\n", encoding="utf-8")
     locked.chmod(0o000)
     try:
-        result = broker_discovery_ripgrep.run_ripgrep_files(
+        result = ripgrep.run_ripgrep_files(
             cwd=tmp_path,
             sandbox_profile=_ALLOW_ALL_PROFILE,
             glob_pattern="**/*.txt",

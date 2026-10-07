@@ -55,7 +55,6 @@ from pantaray_agents.local_runtime.tooling.brokering.attachment_reference import
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
-    BrokerPolicyError,
     ensure_tool_authorization,
     load_broker_context,
 )
@@ -64,6 +63,7 @@ from pantaray_agents.local_runtime.tooling.brokering.execution_start import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
+from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.utils.local_time import describe_local_time
 from pantaray_agents.utils.trace_context import get_trace_context
 

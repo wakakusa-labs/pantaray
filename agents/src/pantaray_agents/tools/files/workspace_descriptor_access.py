@@ -17,8 +17,7 @@ from pantaray_agents.local_runtime.descriptor_access import (
     open_directory_descriptor,
     open_regular_file_descriptor,
 )
-
-from .broker_common import BrokerPolicyError
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
 _FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK

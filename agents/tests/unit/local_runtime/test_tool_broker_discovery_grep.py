@@ -8,10 +8,8 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -144,12 +142,8 @@ async def test_grep_reports_skipped_files_as_warning(
     (context.workspace_path / "notes.txt").write_text("needle\n", encoding="utf-8")
 
     from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-    from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-        RipgrepGrepResult,
-    )
-    from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
-        RipgrepGrepMatch,
-    )
+    from pantaray_agents.tools.files.grep_lines import RipgrepGrepMatch
+    from pantaray_agents.tools.files.ripgrep import RipgrepGrepResult
 
     def fake_grep(**_: object) -> RipgrepGrepResult:
         return RipgrepGrepResult(

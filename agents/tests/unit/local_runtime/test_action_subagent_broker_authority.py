@@ -17,7 +17,6 @@ from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_auth
     ACTION_SUBAGENT_WRITE_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
     execute_broker_tool,
 )
@@ -27,6 +26,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .action_seed import insert_agent_action
 from .broker_test_support import (

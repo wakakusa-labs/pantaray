@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..action_session_temp_paths import resolve_action_storage_paths
 from ..models import BrokerNetworkPolicy
@@ -17,7 +18,6 @@ from .action_subagent_broker_authority import (
 )
 from .broker_common import (
     BrokerContext,
-    BrokerPolicyError,
     ensure_tool_authorization,
 )
 from .broker_protocol import (

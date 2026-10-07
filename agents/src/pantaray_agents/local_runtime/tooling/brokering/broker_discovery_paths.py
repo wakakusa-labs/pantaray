@@ -5,8 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from pantaray_agents.tools.files.workspace_descriptor_access import (
+    WorkspaceScanSkips,
+    scan_workspace_entries,
+)
+
 from .manifest_paths import ResolvedManifestPath
-from .workspace_descriptor_access import WorkspaceScanSkips, scan_workspace_entries
 
 type DiscoveryTruncationReason = Literal[
     "limit",

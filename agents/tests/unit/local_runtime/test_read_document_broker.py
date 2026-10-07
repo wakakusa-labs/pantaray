@@ -39,7 +39,6 @@ from pantaray_agents.local_runtime.tooling import documents as documents_package
 from pantaray_agents.local_runtime.tooling.action_file_read_memory import (
     build_action_file_read_memory_input,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
 from pantaray_agents.local_runtime.tooling.brokering.broker_read_protocol import (
     ReadToolOutput,
 )
@@ -60,6 +59,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .read_tool_broker_support import bootstrap_read_runtime_db, execute_read_tool
 

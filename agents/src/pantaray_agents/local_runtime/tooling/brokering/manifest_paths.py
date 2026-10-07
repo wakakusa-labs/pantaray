@@ -4,6 +4,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from pantaray_agents.tools.contract import BrokerPolicyError
+
 from ..repository.common import _configure_connection
 from ..workspace_manifest_roots import (
     ManifestRoot,
@@ -15,7 +17,6 @@ from ..workspace_manifest_roots import (
 from ..workspace_root_authority import (
     WorkspaceRootAuthorityError,
 )
-from .broker_common import BrokerPolicyError
 
 WORKSPACE_PATH_ESCAPES_ROOT = "WORKSPACE_PATH_ESCAPES_ROOT"
 WORKSPACE_PATH_OUTSIDE_ROOTS = "WORKSPACE_PATH_OUTSIDE_ROOTS"

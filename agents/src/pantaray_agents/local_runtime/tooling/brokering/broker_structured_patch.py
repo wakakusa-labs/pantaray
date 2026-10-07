@@ -29,9 +29,8 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchEdit,
     ApplyPatchUpdateChange,
 )
-
-from .broker_common import BrokerPolicyError
-from .workspace_descriptor_access import (
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.workspace_descriptor_access import (
     WorkspacePathMissingError,
     open_workspace_file_descriptor,
 )

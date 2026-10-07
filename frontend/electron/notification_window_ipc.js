@@ -1,6 +1,12 @@
+const { isCenteredOverlayWindow } = require('./overlay_window_factory');
+
 const OVERLAY_RESIZE_TOP_MARGIN_PX = 8;
 const OVERLAY_RESIZE_BOTTOM_MARGIN_PX = 8;
 const OVERLAY_MIN_HEIGHT_PX = 120;
+
+// The vertical center each centered window grows around, with the y last set from
+// it. Re-deriving the center from rounded bounds would drift a pixel per resize.
+const centerAnchors = new WeakMap();
 
 function clampOverlayBounds(screen, win, requestedHeight) {
   if (!win || win.isDestroyed()) return null;
@@ -15,8 +21,18 @@ function clampOverlayBounds(screen, win, requestedHeight) {
   const height = Math.max(OVERLAY_MIN_HEIGHT_PX, Math.min(requested, maximumHeight));
   const minimumY = workArea.y + OVERLAY_RESIZE_TOP_MARGIN_PX;
   const maximumY = workArea.y + workArea.height - OVERLAY_RESIZE_BOTTOM_MARGIN_PX - height;
-  const y = Math.max(minimumY, Math.min(bounds.y, maximumY));
-  return { previousY: bounds.y, height, y };
+  let preferredY = bounds.y;
+  let centerY = null;
+  if (isCenteredOverlayWindow(win)) {
+    // A window the user dragged no longer sits at the y last set, so it grows
+    // around wherever it was put instead.
+    const anchor = centerAnchors.get(win);
+    centerY = anchor && anchor.y === bounds.y ? anchor.centerY : bounds.y + bounds.height / 2;
+    preferredY = Math.round(centerY - height / 2);
+  }
+  const y = Math.max(minimumY, Math.min(preferredY, maximumY));
+  if (centerY !== null) centerAnchors.set(win, { centerY, y });
+  return { height, y };
 }
 
 function resizeWindow(screen, win, requestedHeight) {

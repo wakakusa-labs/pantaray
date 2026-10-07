@@ -99,7 +99,23 @@ function hardDisableDevTools(win) {
   }
 }
 
-function resolveOverlayPosition(index) {
+// Windows the user opens are centered; their height then grows around that center.
+const centeredOverlayWindows = new WeakSet();
+
+function isCenteredOverlayWindow(win) {
+  return centeredOverlayWindows.has(win);
+}
+
+function resolveCenteredOverlayPosition() {
+  const workArea = screen.getPrimaryDisplay().workArea;
+  return {
+    x: Math.round(workArea.x + (workArea.width - DEFAULT_OVERLAY_WIDTH_PX) / 2),
+    y: Math.round(workArea.y + (workArea.height - DEFAULT_OVERLAY_HEIGHT_PX) / 2),
+  };
+}
+
+// Suggestions arrive on their own, so they stack in the top-right corner.
+function resolveSuggestionOverlayPosition(index) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const bounds = primaryDisplay.bounds;
   const bx = Number(bounds?.x || 0);
@@ -150,7 +166,9 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     onDidFinishLoad,
     onReadyToShow,
   }) {
-    const position = resolveOverlayPosition(index);
+    const position = interactive
+      ? resolveCenteredOverlayPosition()
+      : resolveSuggestionOverlayPosition(index);
     const win = new BrowserWindow({
       width: DEFAULT_OVERLAY_WIDTH_PX,
       height: DEFAULT_OVERLAY_HEIGHT_PX,
@@ -181,6 +199,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
+    if (interactive) centeredOverlayWindows.add(win);
     registerWindow(win);
     loadOverlayPage(win, entryMode, actionId);
     win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
@@ -197,5 +216,6 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
 module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
+  isCenteredOverlayWindow,
   showInteractiveOverlayWindow,
 };

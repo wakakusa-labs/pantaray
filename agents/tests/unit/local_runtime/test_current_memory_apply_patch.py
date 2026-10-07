@@ -22,10 +22,10 @@ from pantaray_agents.local_runtime.memory_catalog.editable_files import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

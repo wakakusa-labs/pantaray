@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .audit_payloads import build_run_python_request_audit_args
 from .bootstrap import resolve_tool_audit_metadata
@@ -18,7 +19,6 @@ from .brokering.broker_common import (
     READ_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
-    BrokerPolicyError,
 )
 from .brokering.broker_protocol import ApplyPatchToolArgs
 from .brokering.broker_structured_patch import extract_structured_patch_paths

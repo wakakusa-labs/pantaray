@@ -6,10 +6,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import BrokerContext
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
@@ -17,6 +14,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

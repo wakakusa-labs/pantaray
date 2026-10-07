@@ -55,6 +55,7 @@ from pantaray_agents.local_runtime.tooling.documents.office_convert import (
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
@@ -63,7 +64,6 @@ from .attachment_reference import (
 )
 from .broker_common import (
     BrokerContext,
-    BrokerPolicyError,
     ensure_session_capabilities,
 )
 from .broker_direct_read import SAMPLE_BYTES, open_read_target, read_leading_bytes

@@ -19,7 +19,6 @@ from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_auth
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
-    BrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import BrokerContext
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
@@ -44,6 +43,7 @@ from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
     PROFILE_TIMEOUT_MS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

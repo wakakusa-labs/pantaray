@@ -13,17 +13,13 @@ from pantaray_agents.local_runtime.descriptor_access import (
     open_regular_file_at_descriptor,
     open_regular_file_descriptor,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    read_text_descriptor_lines,
-)
 from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     TextFileError,
     TextFileErrorCode,
     resolve_sandbox_path,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
 
 DEFAULT_READ_LINE_LIMIT = 400
 MAX_READ_LINE_LIMIT = 2_000

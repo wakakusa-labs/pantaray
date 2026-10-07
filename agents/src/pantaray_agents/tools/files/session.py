@@ -7,19 +7,15 @@ from pantaray_agents.local_runtime.memory_catalog.epoch import resolve_context_h
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryContextExpiredError,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
-    read_text_value_lines,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
+    BrokerPolicyError,
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     tool_error_response,
 )
+from pantaray_agents.tools.files.text_lines import read_text_value_lines
 from pantaray_agents.tools.memory.retrieval import (
     CONTEXT_ROOT_ID,
     MemoryContextSession,

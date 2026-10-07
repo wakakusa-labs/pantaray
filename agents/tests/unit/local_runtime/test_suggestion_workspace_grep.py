@@ -8,16 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery_ripgrep
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.files.access import ReadOnlyFileAccess
+from pantaray_agents.tools.files.ripgrep import (
     RIPGREP_TRUSTED_PATH,
     RipgrepRunResult,
 )
-from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.tools.files.access import ReadOnlyFileAccess
 from pantaray_agents.tools.files.roots import WorkspaceReadRoot
 
 from .test_suggestion_research_tools import (
@@ -214,7 +212,7 @@ def _swap_for_link_while_ripgrep_runs(
 ) -> None:
     """Point ``directory`` at ``target`` only while ripgrep reads it."""
 
-    run = broker_discovery_ripgrep._run_ripgrep_lines
+    run = ripgrep._run_ripgrep_lines
 
     def swapped(**kwargs: object) -> RipgrepRunResult:
         shutil.rmtree(directory)
@@ -225,7 +223,7 @@ def _swap_for_link_while_ripgrep_runs(
             directory.unlink()
             directory.mkdir()
 
-    monkeypatch.setattr(broker_discovery_ripgrep, "_run_ripgrep_lines", swapped)
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", swapped)
 
 
 @_SANDBOXED

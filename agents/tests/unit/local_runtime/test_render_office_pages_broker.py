@@ -30,7 +30,6 @@ from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_action_storage_paths,
 )
 from pantaray_agents.local_runtime.tooling.brokering import broker_direct_render_pdf
-from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RenderPdfPageOutput,
 )
@@ -47,6 +46,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_validation import (
     validate_successful_tool_output,
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .read_tool_broker_support import ReadRuntimeContext, bootstrap_read_runtime_db
 from .test_read_document_broker import write_sample_pptx

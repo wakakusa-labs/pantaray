@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..locks.workspace_lock_coordinator import (
     WorkspaceLockConflictError,
@@ -16,7 +17,6 @@ from .action_subagent_broker_authority import authorize_direct_workspace_writes
 from .broker_common import (
     BrokerContext,
     BrokerExecutionError,
-    BrokerPolicyError,
 )
 from .broker_current_memory_patch import run_current_memory_patch
 from .broker_outcome import UnprojectedBrokerToolOutcome

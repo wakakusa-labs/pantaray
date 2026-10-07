@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-    RipgrepGlobResult,
-    RipgrepGrepResult,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.grep_lines import (
     RipgrepGrepMatch,
     grep_match,
+)
+from pantaray_agents.tools.files.ripgrep import (
+    RipgrepGlobResult,
+    RipgrepGrepResult,
 )
 
 

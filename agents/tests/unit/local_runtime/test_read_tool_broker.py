@@ -11,12 +11,10 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.local_runtime.tooling import (
     bootstrap_local_tooling_catalog,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .action_seed import insert_agent_action
 from .migrated_db import prepare_test_database

@@ -23,7 +23,6 @@ from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_auth
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
-    BrokerPolicyError,
     apply_approval_decision,
     execute_broker_tool,
 )
@@ -39,6 +38,7 @@ from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

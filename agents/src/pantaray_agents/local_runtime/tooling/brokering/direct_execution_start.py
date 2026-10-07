@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..audit_payloads import build_run_python_request_audit_args
 from ..models import CommandToolInvocationStartInput, ToolInvocationStartInput
@@ -11,10 +12,7 @@ from ..repository import (
     ToolInvocationSessionConflictError,
     record_tool_invocation_start,
 )
-from .broker_common import (
-    BrokerContext,
-    BrokerPolicyError,
-)
+from .broker_common import BrokerContext
 from .broker_protocol import (
     ValidatedCommandRequest,
     ValidatedGlobRequest,

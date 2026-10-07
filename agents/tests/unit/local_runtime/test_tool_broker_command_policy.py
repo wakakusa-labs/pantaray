@@ -138,7 +138,7 @@ async def test_execute_broker_tool_uses_allowlisted_env_only(
 
 @pytest.mark.asyncio
 async def test_shell_input_rejects_nul_before_process_launch(tmp_path: Path) -> None:
-    from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
+    from pantaray_agents.tools.contract import BrokerPolicyError
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
     _grant_workspace_full_access(

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -42,7 +43,6 @@ from .broker_common import (
     BrokerApprovalRequiredError,
     BrokerContext,
     BrokerExecutionError,
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
     apply_approval_decision,
     ensure_session_capabilities,
@@ -584,7 +584,6 @@ __all__ = [
     "BrokerApprovalRequiredError",
     "BrokerCompletionPersistenceError",
     "BrokerExecutionError",
-    "BrokerPolicyError",
     "BrokerPreflightOutcome",
     "BrokerToolOutcome",
     "FinalizedBrokerPolicyError",

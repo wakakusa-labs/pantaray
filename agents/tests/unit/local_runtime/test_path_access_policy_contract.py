@@ -8,10 +8,7 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerApprovalRequiredError,
     BrokerContext,
@@ -42,6 +39,7 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
     READ_ACCESS_SCOPE_WORKSPACE,
     update_read_access_scope,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import BROKER_ACTOR_PROCESS_ID
 from .path_access_policy_support import (

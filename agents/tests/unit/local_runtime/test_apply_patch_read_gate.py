@@ -10,9 +10,6 @@ import pytest
 from pantaray_agents.local_runtime.tooling.brokering import (
     broker_structured_patch,
 )
-from pantaray_agents.local_runtime.tooling.brokering import (
-    workspace_descriptor_access as descriptor_access,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerToolOutcome,
@@ -42,6 +39,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     load_action_file_json_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files import (
+    workspace_descriptor_access as descriptor_access,
+)
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

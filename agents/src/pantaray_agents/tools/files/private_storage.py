@@ -12,11 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..outside_workspace_grant import app_owned_roots
-from .broker_common import BrokerPolicyError
-from .manifest_paths import ManifestRoot
+from pantaray_agents.tools.contract import BrokerPolicyError
 
-_APP_MANAGED_ROOT_SOURCE_TYPES = frozenset({"scratch", "agent_experience"})
 PRIVATE_APP_STORAGE_MESSAGE = (
     "This path is in Pantaray's private app storage, which tools cannot read or change."
 )
@@ -72,19 +69,6 @@ class PrivateAppStorage:
                 if is_within_any(root, tuple(pruned)) and root.is_dir()
             ),
         )
-
-
-def private_app_storage(
-    *, db_path: Path, manifest_roots: tuple[ManifestRoot, ...]
-) -> PrivateAppStorage:
-    return PrivateAppStorage(
-        storage_roots=app_owned_roots(db_path),
-        readable_roots=tuple(
-            root.canonical_real_path
-            for root in manifest_roots
-            if root.can_read and root.source_type in _APP_MANAGED_ROOT_SOURCE_TYPES
-        ),
-    )
 
 
 def private_app_storage_error(*, code: str) -> BrokerPolicyError:
@@ -143,6 +127,5 @@ __all__ = [
     "PrivateAppStorage",
     "PrivateSearchScope",
     "is_within_any",
-    "private_app_storage",
     "private_app_storage_error",
 ]

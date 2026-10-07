@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.files.private_storage import PrivateAppStorage
 
 from .manifest_paths import ManifestRoot
-from .private_app_storage import PrivateAppStorage
 
 
 @dataclass(frozen=True, slots=True)

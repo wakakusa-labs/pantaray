@@ -9,10 +9,14 @@ from typing import cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
+from pantaray_agents.tools.files.workspace_descriptor_access import (
+    open_workspace_entry_descriptor,
+)
 
 from ..action_session_temp_paths import SCRATCH_SESSION_TEMP_DIRNAME
 from .attachment_reference import build_workspace_file_attachment
-from .broker_common import BrokerPolicyError
 from .broker_direct_read_document import (
     document_format,
     read_document,
@@ -23,7 +27,6 @@ from .broker_direct_read_page import (
     bound_text_page,
     text_page_output,
 )
-from .broker_direct_read_text import read_text_descriptor_lines
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedReadRequest
 from .read_path_resolver import (
@@ -32,7 +35,6 @@ from .read_path_resolver import (
     resolve_read_target,
 )
 from .read_scope import ReadScope
-from .workspace_descriptor_access import open_workspace_entry_descriptor
 
 SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024

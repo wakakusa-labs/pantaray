@@ -18,10 +18,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     ApprovalDecisionError,
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
-    BrokerPolicyError,
     apply_approval_decision,
     execute_broker_tool,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

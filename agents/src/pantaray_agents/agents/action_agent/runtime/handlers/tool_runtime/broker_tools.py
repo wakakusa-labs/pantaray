@@ -16,7 +16,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
     BrokerCompletionPersistenceError,
     BrokerExecutionError,
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
     execute_broker_tool,
 )
@@ -31,6 +30,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .approval_preparation import (

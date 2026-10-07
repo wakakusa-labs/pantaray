@@ -8,12 +8,10 @@ from typing import cast
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker_structured_patch
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,

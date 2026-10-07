@@ -63,12 +63,6 @@ from pantaray_agents.local_runtime.memory_catalog.semantic_index import (
     store_embedding_success,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.brokering import (
-    workspace_descriptor_access as descriptor_access,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
     list_workspace_settings,
@@ -81,9 +75,13 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     build_suggestion_research_snapshot,
 )
 from pantaray_agents.tools.contract import (
+    BrokerPolicyError,
     ReactToolCall,
     ReactToolRegistry,
     ToolCallEnvelope,
+)
+from pantaray_agents.tools.files import (
+    workspace_descriptor_access as descriptor_access,
 )
 from pantaray_agents.tools.files.access import ReadOnlyFileAccess
 from pantaray_agents.tools.files.roots import (

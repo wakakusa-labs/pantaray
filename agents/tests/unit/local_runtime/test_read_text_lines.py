@@ -8,11 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_direct_read_text
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_text import (
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import text_lines
+from pantaray_agents.tools.files.text_lines import (
     ReadLinesResult,
     read_text_descriptor_lines,
 )
@@ -58,29 +56,27 @@ def _patch_path_stream(
     *,
     stream: _CountingLineStream,
 ) -> None:
-    monkeypatch.setattr(broker_direct_read_text.os, "open", lambda *args: 42)
+    monkeypatch.setattr(text_lines.os, "open", lambda *args: 42)
     monkeypatch.setattr(
-        broker_direct_read_text.os,
+        text_lines.os,
         "fstat",
         lambda _fd: SimpleNamespace(st_mode=stat.S_IFREG, st_size=0),
     )
     monkeypatch.setattr(
-        broker_direct_read_text,
+        text_lines,
         "open",
         lambda *args, **kwargs: stream,
         raising=False,
     )
-    monkeypatch.setattr(broker_direct_read_text.os, "close", lambda _fd: None)
+    monkeypatch.setattr(text_lines.os, "close", lambda _fd: None)
     # The stream stands in for the text reader, which then skips lines itself.
-    monkeypatch.setattr(broker_direct_read_text, "_skip_lines", lambda _fd, _n: 0)
+    monkeypatch.setattr(text_lines, "_skip_lines", lambda _fd, _n: 0)
 
 
 def test_read_text_descriptor_lines_borrows_descriptor(tmp_path: Path) -> None:
     path = tmp_path / "borrowed.txt"
     path.write_text("first\nsecond\n", encoding="utf-8")
-    descriptor = broker_direct_read_text.os.open(
-        path, broker_direct_read_text.os.O_RDONLY
-    )
+    descriptor = text_lines.os.open(path, text_lines.os.O_RDONLY)
     try:
         result = read_text_descriptor_lines(
             descriptor=descriptor,
@@ -89,19 +85,17 @@ def test_read_text_descriptor_lines_borrows_descriptor(tmp_path: Path) -> None:
         )
 
         assert result.content == "first\n"
-        assert (
-            broker_direct_read_text.os.fstat(descriptor).st_size == path.stat().st_size
-        )
+        assert text_lines.os.fstat(descriptor).st_size == path.stat().st_size
     finally:
-        broker_direct_read_text.os.close(descriptor)
+        text_lines.os.close(descriptor)
 
 
 def test_read_text_descriptor_lines_rejects_non_regular_without_closing(
     tmp_path: Path,
 ) -> None:
-    descriptor = broker_direct_read_text.os.open(
+    descriptor = text_lines.os.open(
         tmp_path,
-        broker_direct_read_text.os.O_RDONLY,
+        text_lines.os.O_RDONLY,
     )
     try:
         with pytest.raises(OSError) as exc_info:
@@ -112,9 +106,9 @@ def test_read_text_descriptor_lines_rejects_non_regular_without_closing(
             )
 
         assert exc_info.value.errno == errno.EINVAL
-        broker_direct_read_text.os.fstat(descriptor)
+        text_lines.os.fstat(descriptor)
     finally:
-        broker_direct_read_text.os.close(descriptor)
+        text_lines.os.close(descriptor)
 
 
 def test_read_text_descriptor_lines_keeps_descriptor_after_decode_error(
@@ -122,9 +116,7 @@ def test_read_text_descriptor_lines_keeps_descriptor_after_decode_error(
 ) -> None:
     path = tmp_path / "invalid.txt"
     path.write_bytes(b"\xff\n")
-    descriptor = broker_direct_read_text.os.open(
-        path, broker_direct_read_text.os.O_RDONLY
-    )
+    descriptor = text_lines.os.open(path, text_lines.os.O_RDONLY)
     try:
         with pytest.raises(UnicodeDecodeError):
             read_text_descriptor_lines(
@@ -133,9 +125,9 @@ def test_read_text_descriptor_lines_keeps_descriptor_after_decode_error(
                 limit=1,
             )
 
-        broker_direct_read_text.os.fstat(descriptor)
+        text_lines.os.fstat(descriptor)
     finally:
-        broker_direct_read_text.os.close(descriptor)
+        text_lines.os.close(descriptor)
 
 
 def test_read_text_lines_counts_total_lines_after_limit_boundary(
@@ -164,7 +156,7 @@ def test_read_text_lines_counts_total_lines_after_byte_cap_boundary(
 ) -> None:
     stream = _CountingLineStream("abc\nde\nthird\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_BYTES", 5)
+    monkeypatch.setattr(text_lines, "MAX_BYTES", 5)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=2_000)
 
@@ -184,9 +176,9 @@ def test_read_text_lines_counts_total_after_long_line_exceeds_byte_budget(
 ) -> None:
     stream = _CountingLineStream("fit\n" + ("a" * 10_000) + "\nnext\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_BYTES", 20)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_LINE_LENGTH", 8)
-    monkeypatch.setattr(broker_direct_read_text, "_LINE_READ_AHEAD_CHARS", 9)
+    monkeypatch.setattr(text_lines, "MAX_BYTES", 20)
+    monkeypatch.setattr(text_lines, "MAX_LINE_LENGTH", 8)
+    monkeypatch.setattr(text_lines, "_LINE_READ_AHEAD_CHARS", 9)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=2_000)
 
@@ -206,8 +198,8 @@ def test_read_text_lines_stops_after_long_line_clamp(
 ) -> None:
     stream = _CountingLineStream(("a" * 10_000) + "\nnext\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_LINE_LENGTH", 8)
-    monkeypatch.setattr(broker_direct_read_text, "_LINE_READ_AHEAD_CHARS", 9)
+    monkeypatch.setattr(text_lines, "MAX_LINE_LENGTH", 8)
+    monkeypatch.setattr(text_lines, "_LINE_READ_AHEAD_CHARS", 9)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=1)
 
@@ -227,8 +219,8 @@ def test_read_text_lines_consumes_skipped_long_lines_to_reach_offset(
 ) -> None:
     stream = _CountingLineStream(("a" * 10_000) + "\nnext\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_LINE_LENGTH", 8)
-    monkeypatch.setattr(broker_direct_read_text, "_LINE_READ_AHEAD_CHARS", 9)
+    monkeypatch.setattr(text_lines, "MAX_LINE_LENGTH", 8)
+    monkeypatch.setattr(text_lines, "_LINE_READ_AHEAD_CHARS", 9)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=2, limit=1)
 
@@ -244,8 +236,8 @@ def test_read_text_lines_continues_long_line_from_column(
 ) -> None:
     stream = _CountingLineStream(("abcdefghij" * 2) + "\nnext\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_LINE_LENGTH", 8)
-    monkeypatch.setattr(broker_direct_read_text, "_LINE_READ_AHEAD_CHARS", 9)
+    monkeypatch.setattr(text_lines, "MAX_LINE_LENGTH", 8)
+    monkeypatch.setattr(text_lines, "_LINE_READ_AHEAD_CHARS", 9)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, column=9, limit=1)
 
@@ -262,7 +254,7 @@ def test_read_text_lines_pages_multibyte_line_without_stalling(
 ) -> None:
     stream = _CountingLineStream("あ" * 10 + "\n")
     _patch_path_stream(monkeypatch, stream=stream)
-    monkeypatch.setattr(broker_direct_read_text, "MAX_BYTES", 10)
+    monkeypatch.setattr(text_lines, "MAX_BYTES", 10)
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=1)
 
@@ -304,7 +296,7 @@ def test_newline_at_chunk_boundary_preserves_lines_and_columns(
     newline: str,
 ) -> None:
     path = tmp_path / "boundary.txt"
-    line = "x" * broker_direct_read_text.MAX_LINE_LENGTH
+    line = "x" * text_lines.MAX_LINE_LENGTH
     path.write_bytes((line + newline + "tail" + newline).encode("utf-8"))
     result = read_text_lines(filepath=path, offset=1, limit=2)
     assert result.content == line + "\ntail\n"

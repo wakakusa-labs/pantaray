@@ -28,6 +28,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.action_st
 from pantaray_agents.agents.action_agent.runtime.steps.llm import (
     LLMStepPersistenceError,
 )
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.application.action.cancellation_service import (
     ActionCancellationService,
 )
@@ -105,14 +106,15 @@ async def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return agent, runtime, state, request, db_path
 
 
-def _commentary_turn(*, with_tool: bool = False) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _commentary_turn(*, with_tool: bool = False) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[
             LlmCommentary(phase="commentary", source_message_id="msg-1", text=MESSAGE)
         ],
-        calls=_turn(SQL_CALL).calls if with_tool else [],
+        calls=_turn(SQL_CALL).response.calls if with_tool else [],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _rows(db_path: Path, sql: str) -> list[sqlite3.Row]:
@@ -144,8 +146,8 @@ async def test_draft_turn_suppresses_commentary_and_submits_after_resume(
     if draft_position == "dropped":
         retry_turns.append(turn)
         turn = _turn(SQL_CALL, SQL_CALL)
-        turn.dropped_call_names = ["draft_final_answer"]
-    turn.messages = [
+        turn.response.dropped_call_names = ["draft_final_answer"]
+    turn.response.messages = [
         LlmCommentary(
             phase="commentary", source_message_id="draft-msg", text=commentary
         )
@@ -435,7 +437,7 @@ async def test_invalid_call_discards_its_commentary_before_repair(
 ) -> None:
     agent, runtime, state, _, db_path = await _fixture(monkeypatch, tmp_path)
     invalid = _commentary_turn(with_tool=True)
-    invalid.calls[0].name = "not_an_allowed_tool"
+    invalid.response.calls[0].name = "not_an_allowed_tool"
     agent._generate_llm_action_turn = AsyncMock(side_effect=[invalid, _turn(SQL_CALL)])
     runtime.emit_action_step = AsyncMock()
     state = await _think(agent, runtime, state)

@@ -36,6 +36,7 @@ from pantaray_agents.agents.action_agent.tools import (
     STEP_NOTE_ARG,
     select_supervisor_act_tool_registry,
 )
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
 )
@@ -75,8 +76,8 @@ def _note(index: int) -> str:
     return f"{index} 件目の呼び出しとして、必要な情報をここで確認する。"
 
 
-def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=[
@@ -88,6 +89,7 @@ def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> LlmActionTurnResponse:
             for index, (tool_id, args) in enumerate(calls)
         ],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _make_agent() -> ActionAgent:

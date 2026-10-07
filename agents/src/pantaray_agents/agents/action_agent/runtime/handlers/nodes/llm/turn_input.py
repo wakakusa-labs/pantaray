@@ -30,7 +30,6 @@ from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
 )
 from pantaray_agents.agents.action_agent.support.conversation_projection import (
     TURN_CONTEXT_HEADING,
-    fingerprint_request,
     project_action_conversation,
 )
 from pantaray_agents.agents.action_agent.support.world_state import (
@@ -38,6 +37,7 @@ from pantaray_agents.agents.action_agent.support.world_state import (
     WorldStateUpdate,
     world_state_fields,
 )
+from pantaray_agents.conversation.prefix import fingerprint_request
 from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.agent.action_history import SUPERVISOR_SCOPE_HANDLE
 from pantaray_agents.utils.local_time import local_now_for_model

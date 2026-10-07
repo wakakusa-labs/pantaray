@@ -15,18 +15,16 @@ from tests.unit.agents.action_agent.native_tool_test_support import native_tool_
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes import (
     execution_think_step,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.provider_turns import (
-    ActionProviderTurnStore,
-)
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.schema.agent.base import AgentError
 
 
 class _ProviderTurnStore:
     """走りの置き場だけを備えた runtime の代役（未設定なので identity は無い）。"""
 
-    async def open_provider_turn_store(self, _state: object) -> ActionProviderTurnStore:
-        return ActionProviderTurnStore(identity=None)
+    async def open_provider_turn_store(self, _state: object) -> ProviderTurnStore:
+        return ProviderTurnStore(identity=None)
 
 
 def _build_runtime_services() -> SimpleNamespace:

@@ -29,11 +29,11 @@ from pantaray_agents.agents.action_agent.support.conversation_projection import 
     TURN_CONTEXT_HEADING,
     UNCHANGED_TURN_CONTEXT,
     ActionConversationProjection,
-    fingerprint_request,
     project_action_conversation,
 )
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
 from pantaray_agents.agents.action_agent.support.world_state import WorldState
+from pantaray_agents.conversation.prefix import fingerprint_request
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     serialize_memory_epoch,
 )

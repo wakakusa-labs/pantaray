@@ -38,6 +38,7 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     create_initial_state,
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.application.action.approval_resume_restoration import (
     normalize_approval_resume_state,
 )
@@ -83,8 +84,8 @@ def _note(index: int) -> str:
     return f"{index} 件目の呼び出しとして、必要な変更をここで適用する。"
 
 
-def _turn(count: int) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _turn(count: int) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=[
@@ -96,6 +97,7 @@ def _turn(count: int) -> LlmActionTurnResponse:
             for index in range(count)
         ],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _make_agent() -> ActionAgent:

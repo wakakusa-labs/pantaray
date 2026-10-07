@@ -9,14 +9,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from pantaray_agents.agents.action_agent import ActionAgent
-from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm import (
-    provider_turns,
-)
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.context_budget import (
     PreparedWindow,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.provider_turns import (
-    ActionProviderTurnStore,
+    load_action_provider_turns,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.send import (
     send_executing_turn,
@@ -24,6 +21,9 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.send import 
 from pantaray_agents.agents.action_agent.services.token_accounting_service import (
     StateTokenSink,
 )
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
+from pantaray_agents.conversation import provider_turns
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.local_runtime.runtime.connection_store import (
     ApiKeyConnection,
     LlmConnection,
@@ -64,7 +64,7 @@ def _refused_input() -> LlmProxyExecutionError:
     )
 
 
-def _window(store: ActionProviderTurnStore) -> PreparedWindow:
+def _window(store: ProviderTurnStore) -> PreparedWindow:
     """One item, carrying this store's turn or not, as the real window would."""
     record = store.turns.get(_STEP_ID)
     return PreparedWindow(
@@ -86,12 +86,16 @@ def _window(store: ActionProviderTurnStore) -> PreparedWindow:
     )
 
 
+def _reply(response: LlmActionTurnResponse) -> ActionTurnReply:
+    return ActionTurnReply(response=response, provider_turn=None)
+
+
 async def _send(
-    store: ActionProviderTurnStore,
+    store: ProviderTurnStore,
     *,
     responses: list[object],
     connection: LlmConnection | None = None,
-) -> tuple[LlmActionTurnResponse, PreparedWindow, Any]:
+) -> tuple[ActionTurnReply, PreparedWindow, Any]:
     agent = SimpleNamespace(_generate_llm_action_turn=AsyncMock(side_effect=responses))
     turn, sent = await send_executing_turn(
         cast(ActionAgent, agent),
@@ -107,8 +111,8 @@ async def _send(
     return turn, sent, agent._generate_llm_action_turn
 
 
-def _store() -> ActionProviderTurnStore:
-    return ActionProviderTurnStore(identity=_IDENTITY, turns={_STEP_ID: _RECORD})
+def _store() -> ProviderTurnStore:
+    return ProviderTurnStore(identity=_IDENTITY, turns={_STEP_ID: _RECORD})
 
 
 def _replayed(mock: Any) -> list[LlmProviderTurn | None]:
@@ -132,9 +136,11 @@ async def test_a_refused_input_resends_the_same_turn_without_the_thinking() -> N
     )
     store = _store()
 
-    turn, sent, mock = await _send(store, responses=[_refused_input(), accepted])
+    turn, sent, mock = await _send(
+        store, responses=[_refused_input(), _reply(accepted)]
+    )
 
-    assert turn is accepted
+    assert turn.response is accepted
     assert _replayed(mock) == [_TURN, None]
     # The response's own turn is recorded behind what was actually sent.
     assert sent.fingerprint == "without"
@@ -160,7 +166,7 @@ async def test_a_second_refusal_is_raised_as_the_fault_it_is() -> None:
 async def test_a_refusal_of_a_turn_that_carried_none_is_raised_where_it_was() -> None:
     """思考を載せていない要求の 400 は、ほかの入力の誤り。再送で隠さない。"""
 
-    store = ActionProviderTurnStore(identity=_IDENTITY)
+    store = ProviderTurnStore(identity=_IDENTITY)
 
     with pytest.raises(LlmProxyExecutionError):
         await _send(store, responses=[_refused_input()])
@@ -190,13 +196,13 @@ def test_a_turn_is_kept_only_under_the_account_that_issued_it() -> None:
     """どこにも届かない経路（未設定）では要求を送らないので記録も無い。"""
 
     assert (
-        ActionProviderTurnStore(identity=None).accept(
+        ProviderTurnStore(identity=None).accept(
             step_id=_STEP_ID, turn=_TURN, fingerprint="fp"
         )
         is None
     )
 
-    store = ActionProviderTurnStore(identity=_IDENTITY)
+    store = ProviderTurnStore(identity=_IDENTITY)
     record = store.accept(step_id=_STEP_ID, turn=_TURN, fingerprint="fp")
 
     assert record == _RECORD
@@ -206,7 +212,7 @@ def test_a_turn_is_kept_only_under_the_account_that_issued_it() -> None:
 def test_a_turn_sent_as_one_string_is_not_kept() -> None:
     """文字列で送った要求には会話の接頭辞がなく、戻す場所もない。"""
 
-    store = ActionProviderTurnStore(identity=_IDENTITY)
+    store = ProviderTurnStore(identity=_IDENTITY)
 
     assert store.accept(step_id=_STEP_ID, turn=_TURN, fingerprint=None) is None
     assert store.turns == {}
@@ -235,7 +241,7 @@ async def test_model_switch_does_not_replay_the_old_turn_on_the_next_send() -> N
     store = _store()
     store.use_identity(_IDENTITY.replace("gpt-5.6-sol", "gpt-6-luna"))
 
-    _, _, mock = await _send(store, responses=[accepted])
+    _, _, mock = await _send(store, responses=[_reply(accepted)])
 
     assert _replayed(mock) == [None]
 
@@ -255,9 +261,9 @@ async def test_replay_and_send_keep_one_connection_snapshot() -> None:
     store = _store()
     seen: list[LlmConnection | None] = []
 
-    async def respond(**_kwargs: object) -> LlmActionTurnResponse:
+    async def respond(**_kwargs: object) -> ActionTurnReply:
         seen.append(request_llm_connection())
-        return accepted
+        return _reply(accepted)
 
     agent = SimpleNamespace(_generate_llm_action_turn=AsyncMock(side_effect=respond))
 
@@ -340,7 +346,7 @@ async def test_a_cloud_run_reads_back_what_the_same_route_and_profile_recorded(
         )
     )
 
-    store = await provider_turns.load_action_provider_turns(
+    store = await load_action_provider_turns(
         cast(ActionRepositoryPort, repository),
         user_id="user-1",
         action_id="action-1",

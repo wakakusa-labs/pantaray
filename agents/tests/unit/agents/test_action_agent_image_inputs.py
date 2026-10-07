@@ -12,10 +12,8 @@ from pantaray_agents.agents.action_agent import ActionAgent
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes import (
     execution_think_step,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.provider_turns import (
-    ActionProviderTurnStore,
-)
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.agent.action import (
@@ -71,7 +69,7 @@ def _build_runtime(agent: ActionAgent) -> SimpleNamespace:
         emit_action_step=AsyncMock(),
         emit_error=AsyncMock(),
         open_provider_turn_store=AsyncMock(
-            return_value=ActionProviderTurnStore(identity=None)
+            return_value=ProviderTurnStore(identity=None)
         ),
         services=agent._runtime_services,  # noqa: SLF001
         request=ActionAgentRequest(

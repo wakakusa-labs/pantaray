@@ -16,6 +16,7 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     LlmToolUseResponseError,
 )
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
+from pantaray_llm.contracts.conversation import OpenAiProviderTurn
 from pantaray_llm.errors import LlmProxyExecutionError
 
 
@@ -51,13 +52,31 @@ async def test_commentary_only_preserves_messages_and_accounts_for_usage() -> No
         max_parallel_tool_calls=3,
     )
 
-    assert [message.text for message in turn.messages] == ["確認します。"]
-    assert turn.calls == []
+    assert [message.text for message in turn.response.messages] == ["確認します。"]
+    assert turn.response.calls == []
     assert (sink.delta.prompt_tokens, sink.delta.completion_tokens) == (2, 3)
     request = models.generate_content.call_args.kwargs["config"].tool_use
     assert request.mode == "action_turn"
     assert request.max_parallel_tool_calls == 3
     assert [tool.name for tool in request.tools] == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_the_provider_turn_comes_back_with_its_own_turn_only() -> None:
+    provider_turn = OpenAiProviderTurn(provider="openai", items=[{"type": "x"}])
+    typed, untyped = _response(), _response()
+    typed.provider_turn = provider_turn
+    untyped.provider_turn = provider_turn.model_dump(mode="json")
+    host = _Host(_Models([typed, untyped, _response()]))
+
+    replies = [
+        await host._generate_llm_action_turn(
+            sink=CountingSink(), prompt="test", tools=(_tool_definition(),)
+        )
+        for _ in range(3)
+    ]
+
+    assert [reply.provider_turn for reply in replies] == [provider_turn, None, None]
 
 
 @pytest.mark.asyncio

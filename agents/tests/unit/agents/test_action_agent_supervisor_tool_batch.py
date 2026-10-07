@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     create_initial_state,
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
@@ -65,20 +66,21 @@ def _call(
 def _turn(
     *calls: LlmToolCall,
     dropped_call_names: tuple[str, ...] = (),
-) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=list(calls),
         dropped_call_names=list(dropped_call_names),
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _note_for(tool_id: str) -> str:
     return f"{tool_id} の結果が必要なので、この呼び出しで確認する。"
 
 
-def _batch_turn(*tool_ids: str) -> LlmActionTurnResponse:
+def _batch_turn(*tool_ids: str) -> ActionTurnReply:
     return _turn(
         *(
             _call(tool_id, note=_note_for(tool_id), index=index)
@@ -176,7 +178,7 @@ async def _think(
     tmp_path,
     *,
     action_id: str,
-    turns: LlmActionTurnResponse | list[LlmActionTurnResponse],
+    turns: ActionTurnReply | list[ActionTurnReply],
     max_tool_steps: int = 20,
 ) -> tuple[ActionAgent, ActionGraphRuntime, ActionAgentState]:
     agent, runtime, state = await _build_supervisor_fixture(

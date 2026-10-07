@@ -38,6 +38,7 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     create_initial_state,
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.application.action.resume_service import (
     _RESTORED_OPTIONAL_STATE_FIELDS,
 )
@@ -79,8 +80,8 @@ def _note(index: int) -> str:
     return f"{index} 件目の呼び出しとして、必要な情報をここで確認する。"
 
 
-def _turn(count: int) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _turn(count: int) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=[
@@ -92,6 +93,7 @@ def _turn(count: int) -> LlmActionTurnResponse:
             for index in range(count)
         ],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _make_agent() -> ActionAgent:
@@ -301,20 +303,23 @@ async def test_a_parallel_batch_checkpoints_no_remaining_calls(
         monkeypatch, tmp_path, action_id="act-batch-parallel-remainder"
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=LlmActionTurnResponse(
-            mode="action_turn",
-            messages=[],
-            calls=[
-                LlmToolCall(
-                    call_id=f"call-{index}",
-                    name=SQL_TOOL,
-                    arguments={
-                        "sql": "SELECT COUNT(*) AS n FROM agent_actions",
-                        STEP_NOTE_ARG: _note(index),
-                    },
-                )
-                for index in range(3)
-            ],
+        return_value=ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn",
+                messages=[],
+                calls=[
+                    LlmToolCall(
+                        call_id=f"call-{index}",
+                        name=SQL_TOOL,
+                        arguments={
+                            "sql": "SELECT COUNT(*) AS n FROM agent_actions",
+                            STEP_NOTE_ARG: _note(index),
+                        },
+                    )
+                    for index in range(3)
+                ],
+            ),
+            provider_turn=None,
         )
     )
 

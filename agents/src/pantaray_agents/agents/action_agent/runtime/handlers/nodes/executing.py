@@ -60,6 +60,7 @@ from pantaray_agents.agents.core.tool_call_repair import (
 )
 from pantaray_agents.application.action.ports import ActionAssistantMessageEmission
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.provider_turns import read_provider_turn_target
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import StepType
@@ -77,7 +78,6 @@ from .llm.helpers import (
     _apply_llm_step_state_update,
     _infer_supervisor_think_short_step_id,
 )
-from .llm.provider_turns import read_provider_turn_target
 from .llm.recorder import record_llm_step
 from .llm.send import EXECUTING_STAGE, build_executing_window, send_executing_turn
 from .llm.turn_input import build_executing_turn
@@ -356,7 +356,7 @@ async def execution_think_step(  # noqa: C901
         window_rebuilt = window_rebuilt or prepared.did_rebuild
         usage_before = sink.delta
         try:
-            native_turn, sent = await send_executing_turn(
+            reply, sent = await send_executing_turn(
                 agent,
                 sink=sink,
                 prepared=prepared,
@@ -387,9 +387,9 @@ async def execution_think_step(  # noqa: C901
                 rendered_bytes=prepared.rendered_bytes,
                 did_rebuild=prepared.did_rebuild,
             )
+        native_turn = reply.response
         response_text = native_turn.model_dump_json()
         thinking = agent._consume_llm_thoughts() or ""
-        provider_turn = agent._consume_action_provider_turn()
         step_completed_at = datetime.now(UTC)
 
         # 許可外 tool_id と step_note 違反はどちらも repair loop へ戻す。
@@ -419,7 +419,7 @@ async def execution_think_step(  # noqa: C901
                 provider_dropped_call_names=native_turn.dropped_call_names,
             )
         accepted_turn = native_turn
-        accepted_provider_turn = provider_turn
+        accepted_provider_turn = reply.provider_turn
         accepted_fingerprint = sent.fingerprint
         if DRAFT_FINAL_ANSWER_TOOL_ID in native_turn.dropped_call_names or any(
             call.tool_id == DRAFT_FINAL_ANSWER_TOOL_ID for call in accepted_calls

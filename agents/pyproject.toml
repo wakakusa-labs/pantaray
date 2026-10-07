@@ -101,6 +101,7 @@ files = [
     #   stdlib + fastapi + 自前schema で閉じている範囲から段階的に広げる。
     "src/pantaray_agents/security",
     "src/pantaray_agents/tools",
+    "src/pantaray_agents/conversation",
     "src/pantaray_agents/config_tunables.py",
     "src/pantaray_agents/utils/public_error.py",
     "src/pantaray_agents/utils/trace_context.py",

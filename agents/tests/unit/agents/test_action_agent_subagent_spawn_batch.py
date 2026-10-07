@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.step import 
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.local_runtime.agent_state import LocalActionRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.repositories.repository import RepositoryResult
@@ -157,16 +158,19 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
     if scenario == "legacy_checkpoint":
         calls = calls[1:2]
     agent._generate_llm_action_turn = AsyncMock(
-        return_value=LlmActionTurnResponse(
-            mode="action_turn",
-            messages=[
-                LlmCommentary(
-                    phase="commentary",
-                    source_message_id="spawn-plan",
-                    text="計画を確認し、独立した二つの範囲を調べます。",
-                )
-            ],
-            calls=calls,
+        return_value=ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn",
+                messages=[
+                    LlmCommentary(
+                        phase="commentary",
+                        source_message_id="spawn-plan",
+                        text="計画を確認し、独立した二つの範囲を調べます。",
+                    )
+                ],
+                calls=calls,
+            ),
+            provider_turn=None,
         )
     )
     save_step = repository.save_action_step

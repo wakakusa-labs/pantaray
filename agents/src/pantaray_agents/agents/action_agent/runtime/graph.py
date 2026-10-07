@@ -16,6 +16,7 @@ from pantaray_agents.application.action.cancellation_service import (
 from pantaray_agents.application.action.ports import ActionStepEmitter
 from pantaray_agents.application.action.response_service import ActionResponseService
 from pantaray_agents.application.action.resume_service import ActionResumeService
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.local_runtime.runtime.action_user_adoption import (
     adopt_pending_action_user_steps_at_parent_think,
 )
@@ -51,10 +52,7 @@ from .handlers.nodes import (
     finalize_step,
     initialize_context,
 )
-from .handlers.nodes.llm.provider_turns import (
-    ActionProviderTurnStore,
-    load_action_provider_turns,
-)
+from .handlers.nodes.llm.provider_turns import load_action_provider_turns
 from .handlers.nodes.llm.send import EXECUTING_STAGE
 from .models.approval import PendingApprovalRequestModel
 from .state import (
@@ -119,11 +117,11 @@ class ActionGraphRuntime:
     # The provider turns this run may hand back, opened at its first THINK. Out
     # of the checkpoint too: a turn is 1-4 KB and the checkpoint is rewritten on
     # every step, so the turns live on their own step rows.
-    provider_turns: ActionProviderTurnStore | None = None
+    provider_turns: ProviderTurnStore | None = None
 
     async def open_provider_turn_store(
         self, state: ActionAgentState
-    ) -> ActionProviderTurnStore:
+    ) -> ProviderTurnStore:
         """This run's store, reading back what earlier runs recorded, once."""
 
         if self.provider_turns is None:

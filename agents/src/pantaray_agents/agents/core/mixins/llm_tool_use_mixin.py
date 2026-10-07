@@ -53,6 +53,17 @@ class LlmToolCallTurn:
         return self.calls[0]
 
 
+@dataclass(frozen=True, slots=True)
+class ActionTurnReply:
+    """One Action turn, and the provider output the next turn may hand back."""
+
+    response: LlmActionTurnResponse
+    # Beside the response rather than inside it: ``LlmActionTurnResponse`` is
+    # validated closed and shared with the cloud. None on a request that sent
+    # no conversation, and from a cloud deployment that predates the field.
+    provider_turn: LlmProviderTurn | None
+
+
 class LlmToolUseResponseError(RuntimeError):
     pass
 
@@ -83,17 +94,6 @@ def _validate_tool_call_response(
 
 
 class LlmToolUseMixin(LLMGenerationMixin):
-    # The output items the last Action turn produced. They cannot ride inside
-    # ``LlmActionTurnResponse``, which is validated closed and shared with the
-    # cloud, so they arrive beside it and are consumed as thoughts are.
-    _last_action_provider_turn: LlmProviderTurn | None = None
-
-    def _consume_action_provider_turn(self) -> LlmProviderTurn | None:
-        """The last Action turn's provider turn, cleared as it is read."""
-        turn = self._last_action_provider_turn
-        self._last_action_provider_turn = None
-        return turn
-
     async def _generate_llm_tool_call(
         self,
         *,
@@ -139,7 +139,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         conversation: LlmConversation | None = None,
         stage: str | None = None,
         before_attempt: Callable[[], None] | None = None,
-    ) -> LlmActionTurnResponse:
+    ) -> ActionTurnReply:
         return await self._generate_llm_native_turn(
             sink=sink,
             prompt=prompt,
@@ -179,7 +179,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         file_inputs: list[LlmFileInput] | None,
         stage: str | None,
         before_attempt: Callable[[], None] | None,
-    ) -> LlmActionTurnResponse: ...
+    ) -> ActionTurnReply: ...
 
     async def _generate_llm_native_turn(
         self,
@@ -191,7 +191,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         file_inputs: list[LlmFileInput] | None,
         stage: str | None,
         before_attempt: Callable[[], None] | None,
-    ) -> LlmToolCallTurn | LlmActionTurnResponse:
+    ) -> LlmToolCallTurn | ActionTurnReply:
         sink.guard()
         use_system_instruction = self._resolve_system_instruction(system_instruction)
         inference_profile = self._resolve_inference_profile_id(stage=stage)
@@ -250,22 +250,22 @@ class LlmToolUseMixin(LLMGenerationMixin):
         self._last_llm_thoughts = thoughts
         _LLM_THOUGHTS_CONTEXT.set(thoughts)
         try:
-            turn: LlmToolCallTurn | LlmActionTurnResponse
+            turn: LlmToolCallTurn | ActionTurnReply
             if isinstance(request, LlmActionTurnRequest):
                 action_turn = getattr(response, "action_turn", None)
                 if not isinstance(action_turn, LlmActionTurnResponse):
                     raise LlmToolUseResponseError("LLM proxy returned no Action turn")
-                # Absent on a request that sent no conversation, and on a cloud
-                # deployment that predates the field.
                 provider_turn = getattr(response, "provider_turn", None)
-                self._last_action_provider_turn = (
-                    provider_turn
-                    if isinstance(
-                        provider_turn, OpenAiProviderTurn | AnthropicProviderTurn
-                    )
-                    else None
+                turn = ActionTurnReply(
+                    response=action_turn,
+                    provider_turn=(
+                        provider_turn
+                        if isinstance(
+                            provider_turn, OpenAiProviderTurn | AnthropicProviderTurn
+                        )
+                        else None
+                    ),
                 )
-                turn = action_turn
             else:
                 turn = _validate_tool_call_response(
                     response=response,
@@ -278,4 +278,9 @@ class LlmToolUseMixin(LLMGenerationMixin):
         return turn
 
 
-__all__ = ["LlmToolCallTurn", "LlmToolUseMixin", "LlmToolUseResponseError"]
+__all__ = [
+    "ActionTurnReply",
+    "LlmToolCallTurn",
+    "LlmToolUseMixin",
+    "LlmToolUseResponseError",
+]

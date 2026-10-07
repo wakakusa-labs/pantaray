@@ -16,8 +16,8 @@ from tests.unit.agents.test_action_agent_tool_batch_execution import (
     _turn,
 )
 
-from pantaray_agents.agents.action_agent.runtime.handlers import web_search_runtime
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
+from pantaray_agents.tools.web import fetch as web_fetch
 from pantaray_agents.utils.trace_context import TraceContextManager
 
 
@@ -110,7 +110,7 @@ async def test_non_broker_failure_history_uses_finalized_status(
     # Simulate a transport failure at the network boundary. Error mapping,
     # audit, spill projection, ACT and history all use their real implementations.
     monkeypatch.setattr(
-        web_search_runtime,
+        web_fetch,
         "invoke_web_tools_wrapper",
         AsyncMock(side_effect=RuntimeError("upstream unavailable")),
     )

@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from pantaray_agents.local_runtime.web_tools import (
     WebContentExecutionError,
     WebContentInvalidResponseError,
+    WebToolsWrapperContext,
     build_web_tools_wrapper_context,
-    invoke_web_tools_wrapper,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
@@ -15,20 +15,16 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     tool_error_response,
 )
-from pantaray_llm.profiles import (
-    WEB_EXTRACT_PROFILE_ID,
-    WEB_SEARCH_PROFILE_ID,
-)
 
 from .definitions import build_web_research_definitions
-from .paging import (
+from .fetch import (
     WebExtractFailure,
-    WebSearchSnapshot,
-    parse_web_extract_result,
-    parse_web_search_snapshot,
-    web_extract_pages,
-    web_search_page,
+    WebExtractResponse,
+    WebSearchResponse,
+    fetch_web_extract,
+    fetch_web_search,
 )
+from .paging import web_extract_pages, web_search_page
 
 
 def _arguments(call: ReactToolCall) -> dict[str, JSONValue]:
@@ -88,7 +84,7 @@ def _expected_error(
 @dataclass(slots=True)
 class WebResearchToolSession:
     user_id: str
-    search_snapshots: dict[str, WebSearchSnapshot] = field(default_factory=dict)
+    search_snapshots: dict[str, WebSearchResponse] = field(default_factory=dict)
     extract_snapshots: dict[tuple[str, str | None], str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -108,19 +104,13 @@ class WebResearchToolSession:
         query = _string_arg(args, "query")
         snapshot = self.search_snapshots.get(query)
         if snapshot is None:
-            result = await self._run_web_tool(
-                call=call,
-                profile_id=WEB_SEARCH_PROFILE_ID,
-                wrapper_args={"query": query},
-            )
-            if result.status != "success":
-                return result
             try:
-                snapshot = parse_web_search_snapshot(
-                    wrapper_result=_web_wrapper_result(result),
-                    expected_query=query,
+                snapshot = await fetch_web_search(
+                    context=self._context(),
+                    query=query,
+                    max_retries=1,
                 )
-            except WebContentInvalidResponseError as exc:
+            except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
                 return _expected_error(
                     tool_name=call.tool_name,
                     error_code="WEB_TOOL_FAILED",
@@ -147,26 +137,21 @@ class WebResearchToolSession:
         )
         failures: tuple[WebExtractFailure, ...] = ()
         if missing_urls:
-            wrapper_args: dict[str, JSONValue] = {"urls": list(missing_urls)}
-            if query is not None:
-                wrapper_args["query"] = query
-            result = await self._run_web_tool(
-                call=call,
-                profile_id=WEB_EXTRACT_PROFILE_ID,
-                wrapper_args=wrapper_args,
-            )
-            if result.status != "success":
-                return result
             try:
-                contents, failures = parse_web_extract_result(
-                    wrapper_result=_web_wrapper_result(result)
+                response = await fetch_web_extract(
+                    context=self._context(),
+                    urls=missing_urls,
+                    query=query,
+                    max_retries=1,
                 )
+                contents = _contents_by_url(response)
+                failures = response.failed_results
                 _validate_web_extract_coverage(
                     requested_urls=missing_urls,
                     contents=contents,
                     failures=failures,
                 )
-            except WebContentInvalidResponseError as exc:
+            except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
                 return _expected_error(
                     tool_name=call.tool_name,
                     error_code="WEB_TOOL_FAILED",
@@ -186,51 +171,17 @@ class WebResearchToolSession:
             ),
         )
 
-    async def _run_web_tool(
-        self,
-        *,
-        call: ReactToolCall,
-        profile_id: str,
-        wrapper_args: dict[str, JSONValue],
-    ) -> ReactToolResult:
-        context = build_web_tools_wrapper_context(
-            user_id=self.user_id,
-            action_id=None,
-        )
-        try:
-            response = await invoke_web_tools_wrapper(
-                tool_id=call.tool_name,
-                web_tool_profile=profile_id,
-                args=wrapper_args,
-                context=context,
-                max_retries=1,
-            )
-            if response["status"] != "success" or response.get("result") is None:
-                return tool_error_response(
-                    tool_name=call.tool_name,
-                    error_code="WEB_TOOL_FAILED",
-                    message="Web tool returned no successful result.",
-                    details=response.get("error"),
-                )
-            return _success(
-                call.tool_name,
-                {"status": "success", "result": response["result"]},
-            )
-        except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-            return _expected_error(
-                tool_name=call.tool_name,
-                error_code="WEB_TOOL_FAILED",
-                error=exc,
-            )
+    def _context(self) -> WebToolsWrapperContext:
+        return build_web_tools_wrapper_context(user_id=self.user_id, action_id=None)
 
 
-def _web_wrapper_result(result: ReactToolResult) -> dict[str, JSONValue]:
-    if result.status != "success" or not isinstance(result.output, dict):
-        raise AssertionError("web tool result must be successful")
-    wrapper_result = result.output.get("result")
-    if not isinstance(wrapper_result, dict):
-        raise WebContentInvalidResponseError("result")
-    return wrapper_result
+def _contents_by_url(response: WebExtractResponse) -> dict[str, str]:
+    contents: dict[str, str] = {}
+    for page in response.results:
+        if page.url in contents:
+            raise WebContentInvalidResponseError("duplicate result URL")
+        contents[page.url] = page.raw_content
+    return contents
 
 
 def _validate_web_extract_coverage(

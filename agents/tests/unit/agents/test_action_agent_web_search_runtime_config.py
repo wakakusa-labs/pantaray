@@ -44,7 +44,7 @@ async def test_web_search_runtime_config_passes_max_retries_to_wrapper(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 

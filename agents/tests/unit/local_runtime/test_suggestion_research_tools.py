@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -90,6 +91,7 @@ from pantaray_agents.tools.files.roots import (
     WorkspaceReadRoot,
     memory_revision_by_source,
 )
+from pantaray_agents.tools.web.session import WebResearchToolSession
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION
 from .test_memory_artifact_publication import (
@@ -1266,11 +1268,16 @@ async def test_suggestion_web_search_returns_shared_client_response(
         captured.update(kwargs)
         return {
             "status": "success",
-            "result": {"query": "current evidence", "results": []},
+            "result": {
+                "status": "success",
+                "query": "current evidence",
+                "results": [],
+                "images": [],
+            },
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1321,6 +1328,7 @@ async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
         return {
             "status": "success",
             "result": {
+                "status": "success",
                 "query": "current evidence",
                 "results": [
                     {
@@ -1331,11 +1339,12 @@ async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
                     }
                     for index in range(1, 4)
                 ],
+                "images": [],
             },
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1406,7 +1415,7 @@ async def test_suggestion_web_extract_pages_content_from_one_snapshot(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1489,7 +1498,7 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.tools.web.session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1520,6 +1529,43 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
     assert row["truncated"] is True
     assert row["truncation_reason"] == "query_excerpts"
     assert "query=null" in row["retry_hint"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "args", "result"),
+    [
+        (
+            "web_search",
+            {"query": "evidence", "offset": 1, "limit": 8},
+            {"status": "success", "query": "other", "results": [], "images": []},
+        ),
+        (
+            "web_extract",
+            {"urls": ["https://example.com/a"], "query": None, "offset": 1, "limit": 9},
+            {
+                "results": [{"url": "https://e.com/b", "raw_content": "body"}],
+                "failed_results": [],
+            },
+        ),
+    ],
+)
+async def test_suggestion_web_tools_reject_a_result_for_another_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    args: dict[str, object],
+    result: dict[str, object],
+) -> None:
+    invoke = AsyncMock(return_value={"result": result})
+    monkeypatch.setattr(
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
+    )
+    registry = ReactToolRegistry(WebResearchToolSession(user_id="user-1").definitions())
+
+    results = [await registry.execute(_tool_call(tool_name, args), n) for n in (1, 2)]
+
+    assert [r.output["error_code"] for r in results] == ["WEB_TOOL_FAILED"] * 2
+    assert invoke.await_count == 2
 
 
 def _publish_insight_tree(

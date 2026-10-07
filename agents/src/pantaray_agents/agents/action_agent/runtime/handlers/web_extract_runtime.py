@@ -12,11 +12,10 @@ from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentInvalidResponseError,
     build_web_tools_wrapper_context,
-    invoke_web_tools_wrapper,
     require_non_empty_string,
-    require_non_empty_text,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.web.fetch import WebExtractResponse, fetch_web_extract
 from pantaray_llm.errors import (
     PROXY_OUTCOME_COMPLETE,
     PROXY_OUTCOME_NO_RESULTS,
@@ -37,23 +36,6 @@ QUERY_EXCERPTS_RETRY_HINT = (
     "excerpts relevant to it, joined by [...], not the full page. Call "
     "web_extract again without query to read the full page."
 )
-
-
-class _TavilyExtractRow(TypedDict, total=False):
-    url: str
-    raw_content: str
-
-
-class _TavilyExtractFailedRow(TypedDict, total=False):
-    url: str
-    error: str
-
-
-class _TavilyExtractResponse(TypedDict, total=False):
-    results: list[_TavilyExtractRow]
-    failed_results: list[_TavilyExtractFailedRow]
-    response_time: float
-    request_id: str
 
 
 class WebExtractResult(TypedDict, total=False):
@@ -84,105 +66,19 @@ class WebExtractExecutionOutcome:
     completion_tokens: int
 
 
-def _coerce_extract_row(value: object) -> _TavilyExtractRow | None:
-    if not isinstance(value, dict):
-        return None
-    row: _TavilyExtractRow = {}
-    if "url" in value:
-        row["url"] = value.get("url")
-    if "raw_content" in value:
-        row["raw_content"] = value.get("raw_content")
-    return row
-
-
-def _coerce_extract_failed_row(value: object) -> _TavilyExtractFailedRow | None:
-    if not isinstance(value, dict):
-        return None
-    row: _TavilyExtractFailedRow = {}
-    if "url" in value:
-        row["url"] = value.get("url")
-    if "error" in value:
-        row["error"] = value.get("error")
-    return row
-
-
-def _coerce_extract_response(value: object) -> _TavilyExtractResponse | None:
-    if not isinstance(value, dict):
-        return None
-    results_value = value.get("results")
-    if results_value is not None and not isinstance(results_value, list):
-        return None
-    failed_value = value.get("failed_results")
-    if failed_value is not None and not isinstance(failed_value, list):
-        return None
-
-    rows: list[_TavilyExtractRow] = []
-    for row in results_value or []:
-        typed_row = _coerce_extract_row(row)
-        if typed_row is None:
-            return None
-        rows.append(typed_row)
-
-    failed_rows: list[_TavilyExtractFailedRow] = []
-    for row in failed_value or []:
-        typed_row = _coerce_extract_failed_row(row)
-        if typed_row is None:
-            return None
-        failed_rows.append(typed_row)
-
-    response: _TavilyExtractResponse = {
-        "results": rows,
-        "failed_results": failed_rows,
-    }
-    response_time = value.get("response_time")
-    if response_time is not None:
-        if not isinstance(response_time, int | float):
-            return None
-        response["response_time"] = float(response_time)
-    request_id = value.get("request_id")
-    if request_id is not None:
-        if not isinstance(request_id, str):
-            return None
-        response["request_id"] = request_id
-
-    return response
-
-
-def _normalize_extract_result_row(
-    row: _TavilyExtractRow,
-) -> WebExtractResult:
-    url = require_non_empty_string(row.get("url"), field_name="url")
-    raw_content = require_non_empty_text(row.get("raw_content"), field_name="content")
-    return {
-        "url": url,
-        "raw_content": raw_content,
-    }
-
-
-def _normalize_failed_extract_row(
-    row: _TavilyExtractFailedRow,
-) -> WebExtractFailedResult:
-    return {
-        "url": require_non_empty_string(row.get("url"), field_name="url"),
-        "error": require_non_empty_string(row.get("error"), field_name="error"),
-    }
-
-
-def _normalize_extract_payload(
-    response: _TavilyExtractResponse,
-) -> WebExtractPayload:
+def _extract_payload(response: WebExtractResponse) -> WebExtractPayload:
     payload: WebExtractPayload = {
         "results": [
-            _normalize_extract_result_row(row) for row in response.get("results") or []
+            {"url": page.url, "raw_content": page.raw_content}
+            for page in response.results
         ],
         "failed_results": [
-            _normalize_failed_extract_row(row)
-            for row in response.get("failed_results") or []
+            {"url": failure.url, "error": failure.error}
+            for failure in response.failed_results
         ],
     }
-    response_time = response.get("response_time")
-    if isinstance(response_time, float):
-        payload["response_time"] = response_time
+    if response.response_time is not None:
+        payload["response_time"] = response.response_time
     return payload
 
 
@@ -256,20 +152,13 @@ async def run_web_extract_tool(
     )
 
     try:
-        wrapper_args: dict[str, JSONValue] = {"urls": urls}
-        if query is not None:
-            wrapper_args["query"] = query
-        wrapper_response = await invoke_web_tools_wrapper(
-            tool_id="web_extract",
-            web_tool_profile=WEB_EXTRACT_PROFILE_ID,
-            args=wrapper_args,
+        response = await fetch_web_extract(
             context=request_context,
+            urls=urls,
+            query=query,
             max_retries=max_retries,
         )
-        parsed = _coerce_extract_response(wrapper_response.get("result") or {})
-        if parsed is None:
-            raise WebContentInvalidResponseError("response")
-        payload = _normalize_extract_payload(parsed)
+        payload = _extract_payload(response)
         payload["truncated"] = query is not None and bool(payload["results"])
         payload["retry_hint"] = (
             QUERY_EXCERPTS_RETRY_HINT if payload["truncated"] else None
@@ -277,7 +166,7 @@ async def run_web_extract_tool(
         payload["meta"] = _build_extract_meta(
             payload=payload,
             request_id=request_context["request_id"],
-            upstream_request_id=parsed.get("request_id"),
+            upstream_request_id=response.upstream_request_id,
         )
         status = _aggregate_web_extract_status(payload)
     except (RuntimeError, WebContentInvalidResponseError, ValueError) as exc:

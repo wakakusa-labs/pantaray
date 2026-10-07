@@ -121,7 +121,7 @@ async def test_web_search_returns_normalized_results_and_images(monkeypatch) -> 
         return _success_wrapper_payload("test-query")
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -191,7 +191,7 @@ async def test_web_search_success_with_empty_results(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -221,7 +221,7 @@ async def test_web_search_invalid_result_row_maps_to_error(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -240,7 +240,7 @@ async def test_web_search_invalid_result_row_maps_to_error(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_web_search_transport_failure_maps_to_error(monkeypatch) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             side_effect=WebContentExecutionError(
                 error_code="PROXY_REQUEST_FAILED",

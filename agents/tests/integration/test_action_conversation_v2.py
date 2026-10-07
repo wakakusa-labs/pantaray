@@ -22,7 +22,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request imp
     project_persisted_user_request_step,
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.app.shared import install_common_exception_handlers
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
@@ -73,6 +72,7 @@ from pantaray_agents.schema.action_conversation import (
 )
 from pantaray_agents.schema.agent.action import RuntimeStateCheckpointPayload
 from pantaray_agents.tasks.types import ActionJobRuntimePayload
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"

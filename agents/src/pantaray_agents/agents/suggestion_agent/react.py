@@ -10,8 +10,6 @@ from pantaray_agents.agents.artifact_react import (
     NativeReactRunInput,
     ReactLoopPolicy,
     ReactLoopStep,
-    ReactToolResult,
-    resolve_react_tool_definitions,
     run_native_react,
 )
 from pantaray_agents.agents.artifact_react.transcript import (
@@ -25,6 +23,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionExtraction,
     SuggestionStructuredOutput,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolResult,
+    resolve_react_tool_definitions,
 )
 from pantaray_llm.contracts.tool_use import (
     LlmToolContinuation,

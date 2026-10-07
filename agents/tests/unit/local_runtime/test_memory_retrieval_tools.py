@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_epoch,
     serialize_memory_epoch,
@@ -41,6 +40,7 @@ from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryRetrievalPolicy,
     MemoryRetrievalSession,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 MEMORY_RETRIEVAL_CALL_LIMIT = 6
 

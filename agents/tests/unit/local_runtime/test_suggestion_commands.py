@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 import pantaray_agents.local_runtime.tooling.suggestion_research.commands as commands
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.suggestion_agent.react import (
     SUGGESTION_COMMAND_TOOL_ID,
     SUGGESTION_TOOL_IDS,
@@ -40,6 +39,7 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.commands import (
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .test_suggestion_research_tools import (
     BUSY_TIMEOUT_MS,

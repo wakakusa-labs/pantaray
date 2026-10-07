@@ -9,12 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopResult,
-    ReactToolCall,
-    ReactToolDefinition,
-    ToolCallEnvelope,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopResult
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
@@ -78,6 +73,11 @@ from pantaray_agents.tasks.internal_jobs.memory_update import (
     execute_memory_update_job,
 )
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ToolCallEnvelope,
+)
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"

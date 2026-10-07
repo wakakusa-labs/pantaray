@@ -5,13 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    react_tool_response_schema,
-    tool_error_response,
-)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -44,6 +37,13 @@ from pantaray_agents.local_runtime.memory_catalog.search_service import (
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.memory_embeddings import (
     MEMORY_SEARCH_SEMANTIC_STATUS_VALUES,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    react_tool_response_schema,
+    tool_error_response,
 )
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 

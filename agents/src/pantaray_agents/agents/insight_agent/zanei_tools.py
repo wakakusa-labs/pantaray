@@ -6,12 +6,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.local_runtime.context.source_gate import ActiveSource
 from pantaray_agents.local_runtime.context.source_protocol import (
     DeniedResponse,
@@ -28,6 +22,12 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 )
 from pantaray_agents.local_runtime.context.source_reader import ReadResult, SourceReader
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 from pantaray_agents.utils.local_time import describe_utc_timestamp, local_zone_name
 
 from .record_verification import ReadEvent

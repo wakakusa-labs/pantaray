@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolDefinition,
-    ReactToolExecutor,
-    react_tool_response_schema,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
     GREP_MAX_LINE_CHARS,
 )
@@ -12,6 +7,11 @@ from pantaray_agents.local_runtime.tooling.brokering.workspace_descriptor_access
     SEARCH_TIMEOUT_SECONDS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
+    ReactToolExecutor,
+    react_tool_response_schema,
+)
 
 from .file_access import LIST_MAX_DEPTH
 

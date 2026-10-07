@@ -3,12 +3,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.local_runtime.memory_catalog.epoch import resolve_context_handle
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryContextExpiredError,
@@ -24,6 +18,12 @@ from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryContextSession,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 
 from .file_access import ReadOnlyFileAccess
 from .file_definitions import build_read_only_file_definitions

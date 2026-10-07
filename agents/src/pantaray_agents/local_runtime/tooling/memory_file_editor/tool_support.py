@@ -2,12 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 
-from pantaray_agents.agents.artifact_react import (
-    JsonSchema,
-    ReactToolDefinition,
-    ReactToolResult,
-)
-from pantaray_agents.agents.artifact_react.tooling import TOOL_ERROR_RESPONSE_SCHEMA
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     DescriptorPathPolicyError,
@@ -28,6 +22,12 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     TextFileError,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    TOOL_ERROR_RESPONSE_SCHEMA,
+    JsonSchema,
+    ReactToolDefinition,
+    ReactToolResult,
+)
 
 from .bounded_workspace_io import MAX_READ_LINE_LIMIT
 

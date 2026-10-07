@@ -8,7 +8,6 @@ from uuid import UUID
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.insight_agent.agent import (
     SHORT_INSIGHT_RETRIEVAL_POLICY,
     _completion_rejection,
@@ -33,6 +32,7 @@ from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MemoryRetrievalSession,
 )
 from pantaray_agents.schema.context_source import SourceBinding
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 RUN = "run-1"
 STORE_ID = "store-1"

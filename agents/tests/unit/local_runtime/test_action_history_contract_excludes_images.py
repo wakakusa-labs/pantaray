@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 from jsonschema import validate
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
     ACTION_RESUME_STEP_NAME,
@@ -38,6 +37,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.tool_result import FormalToolStepOutput
 from pantaray_agents.tasks.action_user_message import serialize_action_user_message
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .local_action_repository_support import (
     ACTION_ID,

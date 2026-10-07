@@ -7,8 +7,6 @@ from pantaray_agents.agents.artifact_react import (
     ReactLoopPolicy,
     ReactLoopResult,
     ReactLoopStep,
-    ReactToolDefinition,
-    resolve_react_tool_definitions,
 )
 from pantaray_agents.agents.artifact_react.transcript import (
     build_prompt_with_transcript,
@@ -44,6 +42,10 @@ from pantaray_agents.local_runtime.tooling.memory_retrieval import (
     MEMORY_SEARCH_TOOL_NAME,
 )
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
+from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
+    resolve_react_tool_definitions,
+)
 from pantaray_agents.utils.profile_brief import (
     build_facts_profile_brief_prompt,
     build_insight_profile_brief_prompt,

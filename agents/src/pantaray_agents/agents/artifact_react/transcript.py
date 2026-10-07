@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from .types import ReactToolResult
+from pantaray_agents.tools.contract import ReactToolResult
 
 
 def build_prompt_with_transcript(

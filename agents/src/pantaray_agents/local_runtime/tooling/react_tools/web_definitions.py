@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolExecutor,
     react_tool_response_schema,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE, WEB_SEARCH_RESULT_LIMIT
 
 WEB_EXTRACT_MAX_URLS = 3

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog import draft as memory_draft
 from pantaray_agents.local_runtime.memory_catalog import repository
 from pantaray_agents.local_runtime.memory_catalog.connection import (
@@ -30,6 +29,7 @@ from pantaray_agents.local_runtime.tooling.agent_experience import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.memory_update_context import prepare_memory_update_run
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .test_memory_update_publication import (
     BUSY_TIMEOUT_MS,

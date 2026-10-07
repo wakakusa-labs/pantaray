@@ -8,11 +8,6 @@ import pytest
 
 import pantaray_agents.local_runtime.tooling.react_tools.file_access as file_access_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolRegistry,
-    ToolCallEnvelope,
-)
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -89,6 +84,11 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models 
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolRegistry,
+    ToolCallEnvelope,
 )
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION

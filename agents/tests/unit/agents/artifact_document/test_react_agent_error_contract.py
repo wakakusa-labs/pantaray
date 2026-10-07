@@ -6,19 +6,19 @@ from typing import Literal
 import pytest
 
 from pantaray_agents.agents.artifact_document import ReActAgent, ReActAgentHost
+from pantaray_agents.agents.artifact_react import (
+    PatchCommitResult,
+    ReactLoopResult,
+    ReactLoopStep,
+)
 from pantaray_agents.agents.core import TokenSink
 from pantaray_agents.agents.core.error_contract import (
     ERROR_SPEC_BY_PHASE,
     AgentErrorPhase,
 )
-from pantaray_agents.agents.core.react_loop import (
-    PatchCommitResult,
-    ReactLoopResult,
-    ReactLoopStep,
-    ReactToolCall,
-)
 from pantaray_agents.schema.agent import AgentRequest, AgentResponse
 from pantaray_agents.schema.agent.base import AgentError, JSONValue
+from pantaray_agents.tools.contract import ReactToolCall
 from pantaray_agents.utils.artifact_patch.errors import ArtifactPatchConflictError
 from pantaray_agents.utils.artifact_text_patch import ArtifactTextPatchError
 from pantaray_agents.utils.structured_artifact_patch import StructuredArtifactPatch

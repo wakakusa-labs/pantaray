@@ -8,13 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolDefinition,
-    ReactToolResult,
-    react_tool_response_schema,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
 from pantaray_agents.agents.artifact_react.transcript import (
     build_prompt_with_transcript,
 )
@@ -31,6 +25,11 @@ from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
+    ReactToolResult,
+    react_tool_response_schema,
+)
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
     LlmToolContinuation,

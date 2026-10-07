@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.memory_file_editor.tools import (
     APPLY_PATCH_TOOL_NAME,
     DELETE_MEMORY_FILE_TOOL_NAME,
@@ -31,6 +30,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 )
 from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 USER_ID = "user-1"
 RUN_ID = "run-1"

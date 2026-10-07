@@ -10,16 +10,14 @@ from pantaray_agents.agents.action_agent.services.memory_sql import (
     execute_memory_sql,
 )
 from pantaray_agents.agents.action_agent.tools.memory_sql_tool import MEMORY_SQL_TOOL
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
-)
-from pantaray_agents.agents.artifact_react.tooling import (
     react_tool_response_schema,
     tool_error_response,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 
 # The Action guide's "when" part points at memory_search's time_hint, which the
 # Suggestion run's memory_search does not take, so only the other parts are shown.

@@ -4,6 +4,11 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolExecutor,
+    ReactToolResult,
+)
 from pantaray_agents.utils.structured_logging import (
     fingerprint_text,
     log_structured_event,
@@ -19,8 +24,6 @@ from .types import (
     ReactLoopResult,
     ReactLoopStep,
     ReactParseError,
-    ReactToolCall,
-    ReactToolResult,
     stringify_llm_output,
 )
 
@@ -28,7 +31,6 @@ type ReactParsedOutput = ReactFinish | ReactToolCall
 type ReactLlmOutput = str | object
 type ReactLlmCaller = Callable[[str], Awaitable[ReactLlmOutput]]
 type ReactOutputParser = Callable[[ReactLlmOutput], ReactParsedOutput]
-type ReactToolExecutor = Callable[[ReactToolCall, int], Awaitable[ReactToolResult]]
 type ReactStepRecorder = Callable[[ReactLoopStep], Awaitable[None]]
 type ReactPromptBuilder = Callable[[tuple[ReactToolResult, ...], str | None], str]
 type ReactThoughtConsumer = Callable[[], str | None]

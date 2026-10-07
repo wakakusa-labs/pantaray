@@ -34,10 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.artifact_react.tooling import tool_error_output
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
+from pantaray_agents.tools.contract import tool_error_output
 
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection

@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.chat.turn_runs import (
 )
 from pantaray_agents.local_runtime.runtime.admission import admission_closed
 from pantaray_agents.local_runtime.runtime.identity import OwnerMismatchError
+from pantaray_agents.local_runtime.runtime.job_types import CHAT_TURN_TRACE_TYPE
 from pantaray_agents.tasks import chat_turns
 from pantaray_agents.utils.trace_context import get_trace_context
 
@@ -53,6 +54,8 @@ class _Chat:
         # The model client refuses a request that names no user.
         trace = get_trace_context()
         assert trace is not None and trace.user_id == plan.user_id
+        # The model client keys the user's chat by this, across its turns.
+        assert trace.extra["job_type"] == CHAT_TURN_TRACE_TYPE
         self.runs.append(plan.user_id)
         self.loops.add(id(asyncio.get_running_loop()))
         self.started.set()

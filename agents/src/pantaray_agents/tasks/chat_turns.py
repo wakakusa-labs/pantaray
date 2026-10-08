@@ -27,6 +27,7 @@ from pantaray_agents.agents.chat_agent.turn import (
 from pantaray_agents.local_runtime.chat.turn_runs import run_chat_turn_in_thread
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
 from pantaray_agents.local_runtime.runtime.identity import OwnerMismatchError
+from pantaray_agents.local_runtime.runtime.job_types import CHAT_TURN_TRACE_TYPE
 from pantaray_agents.utils.structured_logging import (
     fingerprint_text,
     log_structured_event,
@@ -111,7 +112,11 @@ async def _run(plan: ChatTurnPlan) -> ChatWindow | None:
 
     try:
         # The model client names every request after the work that sends it.
-        with TraceContextManager(user_id=plan.user_id, local_job_id=f"chat:{plan.key}"):
+        with TraceContextManager(
+            user_id=plan.user_id,
+            local_job_id=f"chat:{plan.key}",
+            extra={"job_type": CHAT_TURN_TRACE_TYPE},
+        ):
             return await run_chat_turn(
                 plan,
                 send=ChatModel(client=deps.get_llm_client()).send,

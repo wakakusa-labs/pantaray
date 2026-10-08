@@ -42,6 +42,7 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
+    ToolConcurrency,
     react_tool_response_schema,
     tool_error_response,
 )
@@ -49,6 +50,8 @@ from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 MEMORY_SEARCH_TOOL_NAME = "memory_search"
 GET_MEMORY_REFERENCE_TOOL_NAME = "get_memory_reference"
+# A search sets the run's context epoch, which a reference reads.
+_CONTEXT_EPOCH = ToolConcurrency("parallel", shared_state="memory_context_epoch")
 
 
 @dataclass(slots=True)
@@ -158,6 +161,7 @@ class MemoryRetrievalSession:
                     success_schema=_search_success_schema()
                 ),
                 execute=self.search,
+                concurrency=_CONTEXT_EPOCH,
             ),
             ReactToolDefinition(
                 name=GET_MEMORY_REFERENCE_TOOL_NAME,
@@ -178,6 +182,7 @@ class MemoryRetrievalSession:
                     success_schema=_reference_success_schema()
                 ),
                 execute=self.follow_reference,
+                concurrency=_CONTEXT_EPOCH,
             ),
         )
 

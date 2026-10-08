@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -39,6 +41,7 @@ from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolExecutor,
     ReactToolResult,
+    ToolConcurrency,
     ToolImage,
     react_tool_response_schema,
     tool_error_response,
@@ -274,6 +277,9 @@ class _ReadOnlyFileTools:
                 required=("path", "pages"),
                 success={"required": ["kind", "path"]},
                 execute=self._executor(RenderPdfPageToolArgs, self._render),
+                # As in the Action: one call sends up to eight images, and
+                # several at once would send dozens.
+                concurrency=ToolConcurrency("sequential"),
             ),
         )
 
@@ -376,7 +382,12 @@ class _ReadOnlyFileTools:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
             name = f"page-{page.number}-{attachment_id}.png"
-            (pages_dir / name).write_bytes(page.payload)
+            # Lens runs of one Suggestion share this folder and may draw the
+            # same page at once; the file is sent from, so never half-written.
+            handle, temp_path = tempfile.mkstemp(prefix=".page-", dir=pages_dir)
+            with os.fdopen(handle, "wb") as temp_file:
+                temp_file.write(page.payload)
+            os.replace(temp_path, pages_dir / name)
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
@@ -427,6 +438,8 @@ def _definition(
     required: tuple[str, ...],
     success: dict[str, JSONValue],
     execute: ReactToolExecutor,
+    # Each only reads, and a spill goes to a file of its own.
+    concurrency: ToolConcurrency = ToolConcurrency("parallel"),
 ) -> ReactToolDefinition:
     return ReactToolDefinition(
         name=name,
@@ -441,6 +454,7 @@ def _definition(
             success_schema={"type": "object", **success}
         ),
         execute=execute,
+        concurrency=concurrency,
     )
 
 

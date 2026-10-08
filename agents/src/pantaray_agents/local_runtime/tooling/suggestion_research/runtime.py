@@ -1,21 +1,13 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
-from pantaray_agents.tools.contract import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
-from pantaray_agents.tools.files.read_only_tools import (
-    RENDER_PDF_PAGE_TOOL_NAME,
-    build_read_only_file_tools,
-)
+from pantaray_agents.tools.contract import ReactToolDefinition
+from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
@@ -39,7 +31,6 @@ MEMORY_SEARCH_CONTENT_MAX_CHARS = 6_000
 MEMORY_SEARCH_MAX_RESULTS = 8
 MEMORY_REFERENCE_CONTENT_MAX_CHARS = 4_000
 SUGGESTION_TOOL_RESULTS_DIRNAME = "suggestion_tool_results"
-READ_IMAGE_NOT_SUPPORTED = "READ_IMAGE_NOT_SUPPORTED"
 
 
 def suggestion_tool_results_root(*, db_path: Path, run_id: str) -> Path:
@@ -108,19 +99,14 @@ class LocalSuggestionResearchTools:
                 busy_timeout_ms=self.busy_timeout_ms,
                 user_id=user_id,
             ).definition(),
-            *(
-                _without_images(tool)
-                for tool in build_read_only_file_tools(
-                    db_path=self.db_path,
-                    folders=self.snapshot.folders,
-                    read_access_scope=self.snapshot.read_access_scope,
-                    app_storage_roots=app_owned_roots(self.db_path),
-                    spill_root=suggestion_tool_results_root(
-                        db_path=self.db_path, run_id=run_id
-                    ),
-                )
-                # Drawn pages are images only, which this run cannot show.
-                if tool.name != RENDER_PDF_PAGE_TOOL_NAME
+            *build_read_only_file_tools(
+                db_path=self.db_path,
+                folders=self.snapshot.folders,
+                read_access_scope=self.snapshot.read_access_scope,
+                app_storage_roots=app_owned_roots(self.db_path),
+                spill_root=suggestion_tool_results_root(
+                    db_path=self.db_path, run_id=run_id
+                ),
             ),
             *WebResearchToolSession(user_id=user_id).definitions(),
             *SuggestionZaneiSession(
@@ -139,26 +125,6 @@ class LocalSuggestionResearchTools:
                 else ()
             ),
         )
-
-
-def _without_images(tool: ReactToolDefinition) -> ReactToolDefinition:
-    """The tool, refusing an image: Suggestion's model call carries no files."""
-
-    async def execute(call: ReactToolCall, step_number: int) -> ReactToolResult:
-        result = await tool.execute(call, step_number)
-        if not result.images:
-            return result
-        return tool_error_response(
-            tool_name=call.tool_name,
-            error_code=READ_IMAGE_NOT_SUPPORTED,
-            message=(
-                f"{result.images[0].display_path} is an image "
-                f"({result.images[0].mime_type}); this run reads text only and "
-                "cannot view it."
-            ),
-        )
-
-    return replace(tool, execute=execute)
 
 
 __all__ = [

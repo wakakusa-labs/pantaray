@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -73,9 +74,6 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models 
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
-)
-from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
-    READ_IMAGE_NOT_SUPPORTED,
 )
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -588,6 +586,7 @@ def test_suggestion_research_tool_set_is_read_only(
         "list",
         "glob",
         "grep",
+        "render_pdf_page",
         "web_search",
         "web_extract",
         "zanei_timeline",
@@ -1410,7 +1409,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     tmp_path: Path,
 ) -> None:
     from pantaray_agents.agents.artifact_react import ReactLoopStep
-    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
     from pantaray_agents.agents.suggestion_agent.output import (
         parse_suggestion_output,
     )
@@ -1418,6 +1417,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         SUBMIT_SUGGESTION_TOOL_NAME,
         run_suggestion_react,
     )
+    from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
     from pantaray_llm.contracts.tool_use import LlmToolCall
 
     db_path = _bootstrap_db(tmp_path)
@@ -1435,10 +1435,15 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         )
     )
 
-    async def generate_tool_call(**_kwargs) -> LlmToolCallTurn:  # noqa: ANN003
+    async def send_turn(_request: object, _sink: object) -> ActionTurnReply:
         name, arguments = next(turns)
         call = LlmToolCall(call_id=name, name=name, arguments=arguments())
-        return LlmToolCallTurn(calls=(call,), continuation=None)
+        return ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn", messages=[], calls=[call]
+            ),
+            provider_turn=None,
+        )
 
     async def record_step(step: ReactLoopStep) -> None:
         if step.step_kind == "tool" and step.status == "success":
@@ -1447,7 +1452,8 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     result = await run_suggestion_react(
         user_id="user-1",
         suggestion_id="suggestion-1",
-        initial_prompt="context",
+        context="context",
+        lens="lens",
         system_instruction="system",
         research_tools=LocalSuggestionResearchTools(
             db_path=db_path,
@@ -1455,10 +1461,9 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
             snapshot=_snapshot(db_path=db_path),
             activity_start=None,
         ),
-        generate_tool_call=generate_tool_call,
+        send_turn=send_turn,
         parse_output=parse_suggestion_output,
         record_step=record_step,
-        discard_llm_thoughts=lambda: None,
     )
 
     assert result["has_suggestion"] is False
@@ -1469,14 +1474,13 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
 
 
 @pytest.mark.asyncio
-async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
+async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
     tmp_path: Path,
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
     folder = (tmp_path / "home").resolve()
     folder.mkdir()
     (folder / "chart.png").write_bytes(PIXEL_PNG)
-    (folder / "notes.md").write_text("plan\n", encoding="utf-8")
     snapshot = dataclasses.replace(_snapshot(db_path=db_path), folders=(folder,))
     registry = ReactToolRegistry(
         LocalSuggestionResearchTools(
@@ -1490,12 +1494,22 @@ async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
     image = await registry.execute(
         _tool_call("read", {"path": str(folder / "chart.png")}), 1
     )
-    text = await registry.execute(
-        _tool_call("read", {"path": str(folder / "notes.md")}), 2
+
+    # Its sender passes the image as a file, so the run keeps it.
+    assert image.status == "success"
+    assert [item.display_path for item in image.images] == [str(folder / "chart.png")]
+
+
+def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:
+    from pantaray_agents.conversation.tool_batch import plan_tool_batch
+
+    tools = WebResearchToolSession(user_id="user-1").definitions()
+    # Run at once, two pages of one query would each fetch and store a snapshot.
+    plan = plan_tool_batch(
+        [SimpleNamespace(tool_id="web_search")] * 2,
+        concurrency={tool.name: tool.concurrency for tool in tools},
+        max_parallel=3,
+        remaining_tool_steps=3,
     )
 
-    # The shared read returns the image; Suggestion sends no files, so it refuses.
-    assert image.status == "error"
-    assert image.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
-    assert image.images == ()
-    assert text.status == "success"
+    assert plan.mode == "sequential"

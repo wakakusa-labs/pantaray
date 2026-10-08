@@ -11,6 +11,7 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
+    ToolConcurrency,
     react_tool_response_schema,
     tool_error_response,
 )
@@ -47,6 +48,7 @@ class SuggestionMemorySqlSession:
                 success_schema=dict(MEMORY_SQL_TOOL.output_schema)
             ),
             execute=self._execute,
+            concurrency=ToolConcurrency("parallel"),
         )
 
     async def _execute(self, call: ReactToolCall, _step: int) -> ReactToolResult:

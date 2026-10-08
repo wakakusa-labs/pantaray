@@ -336,3 +336,14 @@ async def test_an_office_file_converts_into_the_runs_folder_once_its_viewer_is_r
 
 def _page(number: int, payload: bytes) -> RenderedPage:
     return RenderedPage(number=number, width_px=10, height_px=10, payload=payload)
+
+
+def test_drawn_pages_run_one_call_at_a_time_and_reads_together(
+    tmp_path: Path,
+) -> None:
+    registry, _folder, _storage, _spill = _tools(tmp_path)
+    placements = {tool.name: tool.concurrency.placement for tool in registry.tools}
+
+    # One render sends up to eight images; several at once would send dozens.
+    assert placements.pop(RENDER_PDF_PAGE_TOOL_NAME) == "sequential"
+    assert set(placements.values()) == {"parallel"}

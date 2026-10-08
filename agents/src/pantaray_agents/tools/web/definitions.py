@@ -4,6 +4,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolExecutor,
+    ToolConcurrency,
     react_tool_response_schema,
 )
 from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE, WEB_SEARCH_RESULT_LIMIT
@@ -53,6 +54,8 @@ def _definition(
         },
         response_schema=react_tool_response_schema(success_schema=success_schema),
         execute=execute,
+        # The session fetches a query or page once and pages over that snapshot.
+        concurrency=ToolConcurrency("parallel", shared_state="web_snapshots"),
     )
 
 

@@ -646,5 +646,23 @@ def test_what_the_chat_wrote_is_pantarays_and_the_task_is_told_so() -> None:
     assert "it is not the user's own words" in told
     assert render_action_user_request_text(relayed) == (
         "Come up with three puns\n\nYour note from your chat with the user (you "
-        "wrote this; the user's own words are above):\nKeep them work-safe."
+        "wrote this; it is not the user's own words):\nKeep them work-safe."
     )
+
+
+def test_a_chat_note_on_an_approval_stays_pantarays() -> None:
+    message = ActionUserMessageInput(
+        message_id="chat-3",
+        content="Draft the case study.",
+        supplement="その条件でお願い",
+        suggestion_approval=SuggestionApprovalInput(
+            suggestion_id="suggestion-1", approved_at="2026-08-30T00:00:00Z"
+        ),
+        chat_handoff=ChatHandoffInput(
+            relayed_item_ids=("item-1",), note="社名は匿名化する"
+        ),
+    )
+    entry = project_action_user_entry(_handoff_row(message))
+    assert entry.approved_suggestion is not None
+    assert entry.content == "その条件でお願い"
+    assert entry.chat_note == "社名は匿名化する"

@@ -31,8 +31,8 @@ _CHAT_INSTRUCTION_TRAILER = (
     "handed this work over; it is not the user's own words.)"
 )
 _CHAT_NOTE_HEADING = (
-    "Your note from your chat with the user (you wrote this; the user's own "
-    "words are above):"
+    "Your note from your chat with the user (you wrote this; it is not the "
+    "user's own words):"
 )
 
 
@@ -75,7 +75,7 @@ def render_action_user_visible_text(*, content: str, supplement: str | None) -> 
 
 def render_action_user_request_text(message: ActionUserMessageInput) -> str:
     handoff = message.chat_handoff
-    if handoff is not None and not handoff.relayed_item_ids:
+    if message.is_chat_instruction:
         sections = [message.content, _CHAT_INSTRUCTION_TRAILER]
     else:
         sections = [

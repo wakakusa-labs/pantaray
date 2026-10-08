@@ -210,7 +210,7 @@ def _project_action(
         if user_proof is not None:
             _require(
                 normalized_search
-                in _user_history_text(project_action_user_entry(user_proof)).casefold()
+                in _user_search_text(project_action_user_entry(user_proof)).casefold()
             )
         elif assistant_text is not None:
             _require(normalized_search in assistant_text.casefold())
@@ -242,6 +242,15 @@ def _project_action(
         status=history_status,
         latest_completion_event_id=completion_event_id,
     )
+
+
+def _user_search_text(entry: UserEntry) -> str:
+    """What a search finds a message by: what the History shows of it, and the
+    chat's note shown beside the user's words."""
+
+    text = _user_history_text(entry)
+    beside = entry.content is not None or entry.approved_suggestion is not None
+    return f"{text}\n{entry.chat_note}" if beside and entry.chat_note else text
 
 
 def _user_history_text(entry: UserEntry) -> str:

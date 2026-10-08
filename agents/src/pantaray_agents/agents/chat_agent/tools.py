@@ -151,7 +151,8 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             user_id=plan.user_id,
             applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
         )
-        relayed = _relayed(plan, "accept_suggestion", _strings(args["relay"]))
+        relay = _strings(args["relay"])
+        relayed = _relayed(plan, "accept_suggestion", relay)
         if isinstance(relayed, ReactToolResult):
             return relayed
         outcome = await accept_suggestion(
@@ -165,6 +166,9 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             supplement_project_refs=relayed.project_refs,
             images=relayed.images,
             files=relayed.files,
+            chat_handoff=ChatHandoffInput(
+                relayed_item_ids=tuple(relay), note=_note(args["note"])
+            ),
         )
         if isinstance(outcome, SuggestionAccepted):
             return _started("accept_suggestion", outcome.action.action_id)
@@ -219,6 +223,14 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
                         "Ids of the user's chat messages that add to their yes "
                         "(a condition, a file), passed on as they wrote them; [] "
                         "when they only agreed."
+                    ),
+                },
+                "note": {
+                    **_NOTE,
+                    "description": (
+                        "What you and the user settled about this suggestion that "
+                        "their relayed words leave out, as your own note in the "
+                        "language they use with you; null when nothing was."
                     ),
                 },
             },

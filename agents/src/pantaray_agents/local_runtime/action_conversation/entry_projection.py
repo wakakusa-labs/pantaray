@@ -89,18 +89,15 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
             )
             content = message.supplement
             project_refs = message.supplement_project_refs
-        elif (
-            message.chat_handoff is not None
-            and not message.chat_handoff.relayed_item_ids
-        ):
+        elif message.is_chat_instruction:
             # The chat's own instruction: Pantaray's words, not the user's.
             content = None
             chat_note = message.content
         else:
             content = message.content
             project_refs = message.project_refs
-            if message.chat_handoff is not None:
-                chat_note = message.chat_handoff.note
+        if message.chat_handoff is not None and not message.is_chat_instruction:
+            chat_note = message.chat_handoff.note
         images = message.images
         files = message.files
 

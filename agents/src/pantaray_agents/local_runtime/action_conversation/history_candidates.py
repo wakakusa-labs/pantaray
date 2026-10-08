@@ -199,6 +199,9 @@ WITH action_source AS (
                    LIKE :search_pattern ESCAPE '\'
               OR {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(CASE WHEN json_type(searched_user.user_message_json,'$.supplement')='text'
                        THEN json_extract(searched_user.user_message_json,'$.supplement') ELSE '' END)
+                   LIKE :search_pattern ESCAPE '\'
+              OR {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(CASE WHEN json_type(searched_user.user_message_json,'$.chat_handoff.note')='text'
+                       THEN json_extract(searched_user.user_message_json,'$.chat_handoff.note') ELSE '' END)
                    LIKE :search_pattern ESCAPE '\')))
     ORDER BY searched_user.accepted_sequence DESC,searched_user.step_id DESC LIMIT 1)
   WHERE action.user_id=:user_id

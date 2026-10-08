@@ -14,6 +14,12 @@ from pantaray_agents.agents.chat_agent import tools
 from pantaray_agents.agents.chat_agent.context import turn_context
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
+from pantaray_agents.local_runtime.action_conversation.history_candidates import (
+    register_conversation_history_casefold_sqlite,
+)
+from pantaray_agents.local_runtime.action_conversation.history_repository import (
+    read_conversation_history_page_in_connection,
+)
 from pantaray_agents.local_runtime.chat.store import append_chat_item
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
@@ -43,6 +49,9 @@ from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
     ChatHandoffInput,
+)
+from pantaray_agents.schema.agent.action_message_codec import (
+    render_action_user_request_text,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
@@ -260,19 +269,24 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
         "accept_suggestion",
         suggestion_id="sug-1",
         relay=[pictured.item_id],
+        note=None,
     )
     # The same turn after a crash, as it was, and with the addition left out.
     replayed = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
         relay=[pictured.item_id],
+        note=None,
     )
     again = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
         relay=[],
+        note=None,
     )
-    gone = await _turn("a2")("accept_suggestion", suggestion_id="sug-1", relay=[])
+    gone = await _turn("a2")(
+        "accept_suggestion", suggestion_id="sug-1", relay=[], note=None
+    )
 
     assert isinstance(taken, dict) and replayed == taken
     assert isinstance(again, dict)
@@ -480,3 +494,54 @@ def _sent_messages(db_path: Path, action_id: str) -> list[ActionUserMessageInput
             (action_id,),
         ).fetchall()
     return [ActionUserMessageInput.model_validate_json(row[0]) for row in rows]
+
+
+async def test_a_yes_carries_what_the_chat_settled_with_the_user(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "suggestion_summary, interaction_contract, has_suggestion, created_at, "
+            "updated_at) VALUES ('sug-2', ?, 'success', 'Draft the case study.', "
+            "'Draft the case study', 'action_offer', 1, ?, ?)",
+            (USER, NOW, NOW),
+        )
+    yes = _say_with("m-1", "その条件でお願い", ())
+
+    taken = await _turn("a0")(
+        "accept_suggestion",
+        suggestion_id="sug-2",
+        relay=[yes],
+        note="社名は匿名化する",
+    )
+
+    assert isinstance(taken, dict) and "action_id" in taken
+    (message,) = _sent_messages(db_path, str(taken["action_id"]))
+    # The suggestion is the content, the user's yes their words, the condition ours.
+    assert message.content == "Draft the case study."
+    assert message.supplement == "その条件でお願い"
+    assert message.chat_handoff == ChatHandoffInput(
+        relayed_item_ids=(yes,), note="社名は匿名化する"
+    )
+    assert "社名は匿名化する" in render_action_user_request_text(message)
+
+
+async def test_the_history_finds_a_task_by_the_chats_note(db_path: Path) -> None:
+    go = _say_with("m-1", "それで進めて", ())
+    started = await _turn("a0")(
+        "start_action", relay=[go], note="Aurora の見積書を金曜までに作る"
+    )
+    assert isinstance(started, dict)
+
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        register_conversation_history_casefold_sqlite(connection)
+        connection.execute("BEGIN")
+        page = read_conversation_history_page_in_connection(
+            connection=connection,
+            user_id=USER,
+            search_text="aurora",
+            cursor=None,
+            limit=10,
+        )
+    # Found by the note shown beside the user's words; titled by their words.
+    assert [item.title for item in page.items] == ["それで進めて"]

@@ -278,10 +278,11 @@ class SuggestionApprovalInput(BaseModel):
 class ChatHandoffInput(BaseModel):
     """What Pantaray's chat put into this message when it handed work to the task.
 
-    ``relayed_item_ids`` names the user's chat messages whose words are
-    ``content``, verbatim; ``note`` is the chat's own instruction beside them.
-    With nothing relayed, ``content`` is the chat's instruction itself. Either
-    way, what the chat wrote is Pantaray's, never shown as the user's words.
+    ``relayed_item_ids`` names the user's chat messages whose words are in the
+    message, verbatim: ``content``, or ``supplement`` on a Suggestion approval.
+    ``note`` is the chat's own instruction beside them. With nothing relayed and
+    no approval, ``content`` is the chat's instruction itself. Either way, what
+    the chat wrote is Pantaray's, never shown as the user's words.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -292,15 +293,6 @@ class ChatHandoffInput(BaseModel):
     _validate_item_ids = field_validator("relayed_item_ids", mode="before")(
         _bounded_items(limit=ACTION_MESSAGE_MAX_RELAYED_ITEMS, unit="relayed_items")
     )
-
-    @model_validator(mode="after")
-    def _require_relayed_words_for_a_note(self) -> Self:
-        if self.note is not None and not self.relayed_item_ids:
-            raise PydanticCustomError(
-                "action_message_not_allowed",
-                "a chat note goes beside relayed words; alone it is the content",
-            )
-        return self
 
 
 class ActionUserMessageInput(BaseModel):
@@ -341,6 +333,30 @@ class ActionUserMessageInput(BaseModel):
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
         return require_project_ref_spans(refs, info, text_field="supplement")
+
+    @property
+    def is_chat_instruction(self) -> bool:
+        """``content`` is what Pantaray's chat wrote, not the user's words."""
+
+        handoff = self.chat_handoff
+        return (
+            handoff is not None
+            and not handoff.relayed_item_ids
+            and self.suggestion_approval is None
+        )
+
+    @model_validator(mode="after")
+    def _require_relayed_words_for_a_note(self) -> Self:
+        if (
+            self.is_chat_instruction
+            and self.chat_handoff is not None
+            and self.chat_handoff.note is not None
+        ):
+            raise PydanticCustomError(
+                "action_message_not_allowed",
+                "a chat note goes beside relayed words; alone it is the content",
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_suggestion_approval_for_supplement(self) -> Self:

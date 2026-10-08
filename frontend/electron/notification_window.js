@@ -366,7 +366,7 @@ function createHistoryOverlayWindow(id) {
   return createMappedOverlayWindow(id, {
     interactive: true,
     placementKind: 'history',
-    onReadyToShow: (win) => showInteractiveOverlayWindow(win, { visibleOnAllWorkspaces: true }),
+    onReadyToShow: (win) => showInteractiveOverlayWindow(win),
   });
 }
 

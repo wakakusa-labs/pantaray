@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from starlette.responses import Response
 from starlette.websockets import WebSocketState
 
+import pantaray_agents.dependencies as deps
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
 from pantaray_agents.local_runtime.runtime.identity import current_owner_id
@@ -62,6 +63,7 @@ from pantaray_agents.schema.websocket import (
     SessionStartedMessage,
     StopProcessMessage,
 )
+from pantaray_agents.tasks.chat_turns import request_chat_turn
 from pantaray_agents.utils.public_error import (
     PUBLIC_INTERNAL_ERROR_MESSAGE,
     public_ws_error,
@@ -245,6 +247,9 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
         # 進行中の suggestion process を検出して中継するだけの責務を持つ。
         handler.start_suggestion_relay()
         handler.start_chat_relay()
+        if not deps.is_mock_mode():
+            # A turn the app quit in runs again once the user is back.
+            request_chat_turn(user_id)
 
         # WS DoS safety（接続単位の簡易制限。単一プロセスでも最低限は守る）
         ws_cfg = load_local_runtime_tunables().websocket

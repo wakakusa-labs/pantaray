@@ -66,6 +66,20 @@ async def _wait_for_events(websocket: MagicMock, count: int) -> None:
             await asyncio.sleep(0.01)
 
 
+def _turn_states(websocket: MagicMock) -> list[object]:
+    return [
+        call.args[0]["data"]["running"]
+        for call in websocket.send_json.call_args_list
+        if call.args[0]["event"] == "chat_turn_state"
+    ]
+
+
+async def _wait_for_states(websocket: MagicMock, count: int) -> None:
+    async with asyncio.timeout(5):
+        while len(_turn_states(websocket)) < count:
+            await asyncio.sleep(0.01)
+
+
 def _handler() -> tuple[WSOrchestrationHandler, MagicMock]:
     websocket = MagicMock()
     websocket.client_state = WebSocketState.CONNECTED
@@ -103,6 +117,26 @@ async def test_items_appended_after_the_session_starts_are_relayed_in_order() ->
         "suggestion_event",
     ]
     assert relayed[0]["content"]["text"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_the_session_hears_when_a_turn_starts_and_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    running = False
+    monkeypatch.setattr(chat_relay, "chat_turn_running", lambda _user: running)
+    handler, websocket = _handler()
+    handler.start_chat_relay()
+    try:
+        await _wait_for_states(websocket, 1)
+        running = True
+        await _wait_for_states(websocket, 2)
+        running = False
+        await _wait_for_states(websocket, 3)
+    finally:
+        await handler.close()
+
+    assert _turn_states(websocket) == [False, True, False]
 
 
 @pytest.mark.asyncio

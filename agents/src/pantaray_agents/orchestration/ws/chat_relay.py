@@ -4,6 +4,9 @@
 session follows the table from the newest item it saw when it started. A client
 reads the chat over HTTP once `session_started` arrives; an item it also gets
 from the relay is the same item, by `item_id`.
+
+Each tick also sends `chat_turn_state` when a turn starts or ends, and once at
+the start. It is read before the items, so a turn's end follows its reply.
 """
 
 from __future__ import annotations
@@ -17,10 +20,11 @@ from pantaray_agents.local_runtime.chat.store import (
     read_chat_items_after,
     read_latest_chat_sequence,
 )
+from pantaray_agents.local_runtime.chat.turn_runs import chat_turn_running
 from pantaray_agents.orchestration.ws.background_task import spawn_ws_background_task
 from pantaray_agents.orchestration.ws.base import BaseWSHandler
 from pantaray_agents.orchestration.ws.task_supervisor import WsTaskSupervisor
-from pantaray_agents.schema.chat import ChatItemAppendedMessage
+from pantaray_agents.schema.chat import ChatItemAppendedMessage, ChatTurnStateMessage
 from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.utils.ws_observability import RateLimiter
 
@@ -64,8 +68,19 @@ class ChatRelayMixin(BaseWSHandler):
 
     async def _chat_relay_loop(self, after: int) -> None:
         user_id = str(self.user_id)
+        sent_running: bool | None = None
         try:
             while not self._is_closed:
+                running = chat_turn_running(user_id)
+                if running != sent_running:
+                    if not await self._send(
+                        OutboundEvent.CHAT_TURN_STATE.value,
+                        ChatTurnStateMessage(running=running),
+                        store_in_session_store=False,
+                        persist_public_event=False,
+                    ):
+                        return
+                    sent_running = running
                 try:
                     for item in await asyncio.to_thread(
                         read_chat_items_after, user_id=user_id, after=after

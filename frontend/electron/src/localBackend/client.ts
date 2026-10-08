@@ -69,6 +69,7 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/messages$/, methods: new Set(['POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/items$/, methods: new Set(['GET']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/chat\/turns\/retry$/, methods: new Set(['POST']) },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/state$/,
     methods: new Set(['GET']),

@@ -7,7 +7,11 @@
 
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
-import { ChatItemPageRequestSchema, ChatMessageRequestSchema } from '../../chat/chatContracts';
+import {
+  ChatItemPageRequestSchema,
+  ChatMessageRequestSchema,
+  ChatTurnRetryRequestSchema,
+} from '../../chat/chatContracts';
 import { parseInput } from '../schemas/error';
 
 export function registerChatHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
@@ -16,5 +20,8 @@ export function registerChatHandlers(ctx: MainContext, registrar: IpcRegistrar):
   );
   registrar.handle('chat:listItems', async (_event, request) =>
     ctx.chat.listItems(parseInput(ChatItemPageRequestSchema, 'chat:listItems', request))
+  );
+  registrar.handle('chat:retryTurn', async (_event, request) =>
+    ctx.chat.retryTurn(parseInput(ChatTurnRetryRequestSchema, 'chat:retryTurn', request))
   );
 }

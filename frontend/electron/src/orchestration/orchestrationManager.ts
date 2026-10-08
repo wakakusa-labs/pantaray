@@ -11,7 +11,7 @@
 import type { BrowserWindow } from 'electron';
 
 import type { ActionConversationPage } from '../actions/actionContracts';
-import { parseChatItem } from '../chat/chatContracts';
+import { parseChatItem, parseChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
 import type {
@@ -23,7 +23,11 @@ import type {
   OrchestrationStatusPayload,
   ResumeProcessRequest,
 } from './contracts';
-import { isChatItemAppendedEvent, isScreenCaptureRequestedEvent } from './eventContracts';
+import {
+  isChatItemAppendedEvent,
+  isChatTurnStateEvent,
+  isScreenCaptureRequestedEvent,
+} from './eventContracts';
 import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
@@ -349,6 +353,16 @@ export function createOrchestrationManager(params: {
    * carries no conversation content and the answer goes back over HTTP, so it is
    * handled here and never reaches a renderer.
    */
+  function sendToMainWindow(
+    channel: 'chat:itemAppended' | 'chat:turnState',
+    payload: unknown
+  ): void {
+    const mainWindow = params.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  }
+
   function forwardEventToRenderers(message: OrchestrationServerEvent): void {
     if (isScreenCaptureRequestedEvent(message)) {
       void params.respondToScreenCapture?.({
@@ -360,13 +374,14 @@ export function createOrchestrationManager(params: {
       });
       return;
     }
+    // The chat is the main window's alone. Off the wire contract throws to the WS message
+    // handler, which logs it.
     if (isChatItemAppendedEvent(message)) {
-      // An item off the wire contract throws to the WS message handler, which logs it.
-      const item = parseChatItem(message.data.item);
-      const mainWindow = params.getMainWindow();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('chat:itemAppended', item);
-      }
+      sendToMainWindow('chat:itemAppended', parseChatItem(message.data.item));
+      return;
+    }
+    if (isChatTurnStateEvent(message)) {
+      sendToMainWindow('chat:turnState', parseChatTurnState(message.data));
       return;
     }
     rendererBridge.forwardEventToRenderers(message);

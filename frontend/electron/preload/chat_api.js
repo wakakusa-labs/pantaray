@@ -4,10 +4,16 @@ function createChatApi({ ipcRenderer }) {
     chat: {
       sendMessage: (request) => ipcRenderer.invoke('chat:sendMessage', request),
       listItems: (request) => ipcRenderer.invoke('chat:listItems', request),
+      retryTurn: (request) => ipcRenderer.invoke('chat:retryTurn', request),
       onItemAppended: (callback) => {
         const listener = (_event, item) => callback(item);
         ipcRenderer.on('chat:itemAppended', listener);
         return () => ipcRenderer.removeListener('chat:itemAppended', listener);
+      },
+      onTurnState: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('chat:turnState', listener);
+        return () => ipcRenderer.removeListener('chat:turnState', listener);
       },
     },
   };

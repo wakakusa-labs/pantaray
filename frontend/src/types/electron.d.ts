@@ -39,6 +39,9 @@ import type {
   ChatItemPageRequest,
   ChatMessageRequest,
   ChatMessageSendResult,
+  ChatTurnRetryRequest,
+  ChatTurnRetryResult,
+  ChatTurnState,
 } from '../../electron/src/chat/chatContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
@@ -232,6 +235,10 @@ declare global {
         /** Newest first; pass the page's `next_cursor` as `before` for older items. */
         listItems: (request: ChatItemPageRequest) => Promise<ChatItemPage>;
         onItemAppended: (callback: (item: ChatItem) => void) => () => void;
+        /** Runs the turn that ended in this failure again (the chat's 「もう一度」). */
+        retryTurn: (request: ChatTurnRetryRequest) => Promise<ChatTurnRetryResult>;
+        /** Whether a turn is answering: the typing bubble. */
+        onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };
       actionFiles?: {
         open: (params: { path: string }) => Promise<void>;

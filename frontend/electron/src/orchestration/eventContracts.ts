@@ -364,6 +364,12 @@ export type ChatItemAppendedEvent = OrchestrationEventEnvelope<
   { item: unknown }
 >;
 
+/** Whether a turn is answering the owner's chat: the main window's typing bubble. */
+export type ChatTurnStateEvent = OrchestrationEventEnvelope<
+  'chat_turn_state',
+  { running: unknown }
+>;
+
 export type OrchestrationServerEvent =
   | SuggestionChunkEvent
   | SuggestionReactionCommittedEvent
@@ -375,6 +381,7 @@ export type OrchestrationServerEvent =
   | ProcessPausedActionEvent
   | ScreenCaptureRequestedEvent
   | ChatItemAppendedEvent
+  | ChatTurnStateEvent
   | ProcessCompletedSuggestionEvent
   | ProcessCompletedActionEvent
   | SessionResumedEvent
@@ -439,6 +446,10 @@ export function isChatItemAppendedEvent(
   event: OrchestrationServerEvent
 ): event is ChatItemAppendedEvent {
   return event.event === 'chat_item_appended';
+}
+
+export function isChatTurnStateEvent(event: OrchestrationServerEvent): event is ChatTurnStateEvent {
+  return event.event === 'chat_turn_state';
 }
 
 export function isProcessCompletedSuggestionEvent(

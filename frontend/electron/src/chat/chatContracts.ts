@@ -44,6 +44,13 @@ export const ChatItemPageRequestSchema = z
   })
   .strict();
 
+/** Run the turn that ended in this failure again. */
+export const ChatTurnRetryRequestSchema = z
+  .object({ failure_item_id: ActionMessageIdSchema })
+  .strict();
+
+const ChatTurnStateSchema = z.object({ running: z.boolean() }).strict();
+
 const ChatCardSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -121,6 +128,10 @@ export const ChatMessageRejectedSchema = z
 
 export type ChatMessageRequest = z.infer<typeof ChatMessageRequestSchema>;
 export type ChatItemPageRequest = z.infer<typeof ChatItemPageRequestSchema>;
+export type ChatTurnRetryRequest = z.infer<typeof ChatTurnRetryRequestSchema>;
+export type ChatTurnState = z.infer<typeof ChatTurnStateSchema>;
+/** `stale`: another turn has ended since the failure, so there is nothing to retry. */
+export type ChatTurnRetryResult = Readonly<{ kind: 'started' | 'stale' }>;
 export type ChatCard = z.infer<typeof ChatCardSchema>;
 export type ChatItemContent = z.infer<typeof ChatItemContentSchema>;
 export type ChatItem = z.infer<typeof ChatItemSchema>;
@@ -133,6 +144,12 @@ export type ChatMessageSendResult =
 export function parseChatItem(payload: unknown): ChatItem {
   const result = ChatItemSchema.safeParse(payload);
   if (!result.success) throw new ActionWireContractError('chat item');
+  return result.data;
+}
+
+export function parseChatTurnState(payload: unknown): ChatTurnState {
+  const result = ChatTurnStateSchema.safeParse(payload);
+  if (!result.success) throw new ActionWireContractError('chat turn state');
   return result.data;
 }
 

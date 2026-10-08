@@ -43,6 +43,11 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     ChatGptCredential,
     LlmConnection,
 )
+from pantaray_agents.local_runtime.runtime.job_types import (
+    LOCAL_ACTION_JOB_TYPE,
+    LOCAL_ACTION_SUBAGENT_JOB_TYPE,
+)
+from pantaray_agents.utils.trace_context import TraceContextManager
 from pantaray_llm.contracts.request import (
     LlmProxyResponse,
     LlmRequest,
@@ -835,6 +840,33 @@ async def test_a_chatgpt_conversation_keeps_one_cache_session_per_job(
     assert "job-a" not in str(sessions[0])
     # Another provider keeps the key it was given and gets no session header.
     assert sent[3] == (None, {**sent[3][1], "prompt_cache_key": "owner-key"})
+
+
+async def test_an_actions_runs_share_one_session_and_its_children_do_not(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """A follow-up run continues the Action's conversation; a child has its own."""
+
+    recorder = boundary()
+
+    async def run(job_id: str, job_type: str) -> str | None:
+        request = llm_request().model_copy(
+            update={"trace": LlmRequestTrace(local_job_id=job_id)}
+        )
+        # What the job executor binds for every job it runs.
+        trace = {"action_id": "action-1", "extra": {"job_type": job_type}}
+        with TraceContextManager(user_id=OWNER_ID, local_job_id=job_id, **trace):
+            await dispatch(CHATGPT_CONNECTION, request=request)
+        return recorder.requests[-1].headers.get("session-id")
+
+    first = await run("job-1", LOCAL_ACTION_JOB_TYPE)
+    follow_up = await run("job-2", LOCAL_ACTION_JOB_TYPE)
+    child = await run("job-3", LOCAL_ACTION_SUBAGENT_JOB_TYPE)
+    sibling = await run("job-4", LOCAL_ACTION_SUBAGENT_JOB_TYPE)
+
+    assert first == follow_up
+    assert len({first, child, sibling}) == 3
+    assert "action-1" not in str(first)
 
 
 async def test_a_credential_never_reaches_the_caller_or_the_log(

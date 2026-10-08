@@ -48,7 +48,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
 )

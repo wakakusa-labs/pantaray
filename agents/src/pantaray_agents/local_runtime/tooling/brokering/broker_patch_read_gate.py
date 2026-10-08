@@ -19,9 +19,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchEdit,
     ApplyPatchUpdateChange,
 )
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    resolve_tool_results_root,
-)
 from pantaray_agents.local_runtime.tooling.read_windows import (
     READ_WINDOW_MAX_BYTES,
     ReadWindow,
@@ -36,6 +33,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     load_action_file_json_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files.manifest_paths import (
+    resolve_tool_results_root,
+)
 
 from .broker_structured_patch import (
     PATCH_ERROR_DELETE_REQUIRES_FULL_FILE_READ,

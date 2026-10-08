@@ -14,8 +14,10 @@ from pantaray_agents.agents.action_agent.runtime.graph import (
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentStateConfig
 from pantaray_agents.application.action.ports import ActionStepEmitter
-from pantaray_agents.local_runtime.tooling import load_approval_session_by_request
 from pantaray_agents.local_runtime.tooling.models import StoredApprovalSession
+from pantaray_agents.local_runtime.tooling.repository import (
+    load_approval_session_by_request,
+)
 from pantaray_agents.repositories.action_runtime_resume_contract import (
     ActionResumeUserStep,
 )

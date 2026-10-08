@@ -13,13 +13,17 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from pantaray_agents.tools.files.manifest_paths import (
+    ManifestRoot,
+    ResolvedManifestPath,
+)
+
 from ..outside_workspace_grant import (
     app_owned_roots,
     folder_can_be_granted,
     path_is_within,
 )
 from .broker_common import BrokerContext
-from .manifest_paths import ManifestRoot, ResolvedManifestPath
 
 
 @dataclass(frozen=True, slots=True)

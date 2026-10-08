@@ -15,7 +15,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+)
 from pantaray_agents.local_runtime.tooling.models import (
     ExecutionSessionCreateInput,
     ToolInvocationCompletionInput,

@@ -6,6 +6,10 @@ from pathlib import Path
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    ManifestRoot,
+    ResolvedManifestPath,
+)
 
 from ..locks.workspace_lock_coordinator import (
     WorkspaceLockConflictError,
@@ -32,7 +36,6 @@ from .broker_structured_patch import (
     structured_patch_llm_feedback,
 )
 from .command_approval_summaries import build_apply_patch_summary
-from .manifest_paths import ManifestRoot, ResolvedManifestPath
 from .outside_workspace import (
     OutsideWorkspacePatchTarget,
     outside_workspace_resolved_path,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from pantaray_agents.tools.files.read_output import ReadToolOutput
+
 from .broker_protocol import (
     ApplyPatchToolArgs,
     ApplyPatchToolOutput,
@@ -22,7 +24,6 @@ from .broker_protocol import (
     RunPythonToolOutput,
     ToolError,
 )
-from .broker_read_protocol import ReadToolOutput
 
 
 class BrokerModelRegistry(BaseModel):

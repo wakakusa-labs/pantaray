@@ -37,14 +37,14 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     RUN_PYTHON_TOOL_ID,
     BrokerContext,
 )
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    ResolvedManifestPath,
-)
 from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
     resolve_read_tool_path,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    ResolvedManifestPath,
+)
 
 logger = logging.getLogger(__name__)
 

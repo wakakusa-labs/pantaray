@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling import complete_execution_session
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.invocation_audit import (
     start_local_tool_invocation_audit,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     ToolInvocationSessionConflictError,
+    complete_execution_session,
 )
 
 from .broker_test_support import (

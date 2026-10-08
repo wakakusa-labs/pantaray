@@ -6,21 +6,23 @@ from pathlib import Path
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
-    create_capability_grant,
     ensure_action_scratch_execution_context,
-    load_active_capability_grants,
-    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.brokering.approval_identity import (
     build_approval_preference_id,
     build_capability_grant_id,
 )
+from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalPreferenceUpsertInput,
+    CapabilityGrantCreateInput,
+)
 from pantaray_agents.local_runtime.tooling.repository import (
     apply_approval_preference_setting,
+    create_capability_grant,
+    load_active_capability_grants,
+    upsert_approval_preference,
 )
 
 from .action_seed import insert_agent_action

@@ -14,6 +14,9 @@ from pantaray_agents.tools.files.grep_lines import (
     RipgrepGrepMatch,
     binary_match_warning,
 )
+from pantaray_agents.tools.files.manifest_paths import (
+    ResolvedManifestPath,
+)
 from pantaray_agents.tools.files.ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
@@ -36,9 +39,6 @@ from .broker_protocol import (
     ValidatedGlobRequest,
     ValidatedGrepRequest,
     ValidatedListRequest,
-)
-from .manifest_paths import (
-    ResolvedManifestPath,
 )
 from .read_scope import ReadScope
 from .tool_path_policy import resolve_read_path

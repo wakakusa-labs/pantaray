@@ -10,15 +10,7 @@ from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_WORKSPACE,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.private_storage import (
-    PrivateAppStorage,
-    private_app_storage_error,
-)
-
-from ..outside_workspace_grant import app_owned_roots
-from ..workspace_manifest_roots import path_belongs_to_manifest_root
-from .broker_common import BrokerContext
-from .manifest_paths import (
+from pantaray_agents.tools.files.manifest_paths import (
     WORKSPACE_PATH_ESCAPES_ROOT,
     WORKSPACE_PATH_OUTSIDE_ROOTS,
     WORKSPACE_PATH_ROOT_NOT_READABLE,
@@ -29,6 +21,14 @@ from .manifest_paths import (
     resolve_process_cwd,
     validate_manifest_root,
 )
+from pantaray_agents.tools.files.private_storage import (
+    PrivateAppStorage,
+    private_app_storage_error,
+)
+
+from ..outside_workspace_grant import app_owned_roots
+from ..workspace_manifest_roots import path_belongs_to_manifest_root
+from .broker_common import BrokerContext
 from .outside_workspace import (
     OutsideWorkspaceCwd,
     OutsideWorkspacePatchTarget,

@@ -9,19 +9,19 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ExecutionSessionTerminalStatus,
-    bootstrap_local_tooling_catalog,
-    complete_execution_session,
-)
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_action_session_temp_leaf,
     resolve_action_storage_paths,
 )
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+)
 from pantaray_agents.local_runtime.tooling.models import (
     ExecutionSessionCreateInput,
+    ExecutionSessionTerminalStatus,
     ToolRuntimeResourceCreateInput,
 )
+from pantaray_agents.local_runtime.tooling.repository import complete_execution_session
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     create_execution_session_in_connection,
 )

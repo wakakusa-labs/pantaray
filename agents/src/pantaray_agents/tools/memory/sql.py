@@ -8,7 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
-from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.runtime_env import (
+    read_local_runtime_db_config,
+)
 from pantaray_agents.schema.repositories.repository import (
     JSONValue,
     RepositoryErrorKind,

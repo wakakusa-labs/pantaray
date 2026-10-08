@@ -11,9 +11,11 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     PRIVATE_TEMP_DIRNAME,
+)
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     execute_broker_tool,

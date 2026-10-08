@@ -42,16 +42,20 @@ from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
-    create_capability_grant,
     ensure_action_scratch_execution_context,
-    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
+)
+from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalPreferenceUpsertInput,
+    CapabilityGrantCreateInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    create_capability_grant,
+    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
     BrokerLocalBudget,

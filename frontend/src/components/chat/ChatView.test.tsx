@@ -151,9 +151,13 @@ it('shows messages and cards, with a work’s status on its latest card only', a
   expect(gone).toHaveTextContent('削除された作業の要約');
   expect(within(gone).queryByText('実行中')).not.toBeInTheDocument();
 
-  expect(screen.getByText('AI に接続できず、返信できませんでした。')).toBeInTheDocument();
-  // The newest failure, with nothing after it, can be run again.
-  expect(screen.getByRole('button', { name: 'もう一度' })).toBeInTheDocument();
+  // A failed turn has no notice of its own: a retry icon under the user's last message names why.
+  expect(screen.queryByText('AI に接続できず、返信できませんでした。')).not.toBeInTheDocument();
+  expect(
+    within(mine).getByRole('button', {
+      name: 'AI に接続できず、返信できませんでした。もう一度送る',
+    })
+  ).toHaveAttribute('title', 'AI に接続できず、返信できませんでした。もう一度送る');
   expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
 });
 
@@ -444,16 +448,19 @@ it('runs the newest failed turn again, and reads the chat again when another tur
     },
   ];
   renderPage();
-  await screen.findByRole('button', { name: 'もう一度' });
-  // Only the newest failure offers it; the older one was followed by another turn.
-  expect(screen.getAllByRole('button', { name: 'もう一度' })).toHaveLength(1);
+  const retryName = 'AI への依頼が失敗し、返信できませんでした。もう一度送る';
+  const lastMessage = await screen.findByRole('article', { name: 'あなた' });
+  // Only the newest failure offers it, under the user's last message.
+  expect(screen.getAllByRole('button', { name: /もう一度送る/ })).toHaveLength(1);
+  expect(within(lastMessage).getByRole('button', { name: retryName })).toBeInTheDocument();
 
   act(() => publishTurnState({ running: true }));
-  expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /もう一度送る/ })).not.toBeInTheDocument();
   act(() => publishTurnState({ running: false }));
 
   retryTurn.mockResolvedValueOnce({ kind: 'started' });
-  await userEvent.click(screen.getByRole('button', { name: 'もう一度' }));
+  screen.getByRole('button', { name: retryName }).focus();
+  await userEvent.keyboard('{Enter}');
   expect(retryTurn).toHaveBeenCalledWith({ failure_item_id: 'item-3' });
   expect(listItems).toHaveBeenCalledTimes(1);
 
@@ -464,9 +471,9 @@ it('runs the newest failed turn again, and reads the chat again when another tur
       next_cursor: null,
     },
   ];
-  await userEvent.click(screen.getByRole('button', { name: 'もう一度' }));
+  await userEvent.click(screen.getByRole('button', { name: retryName }));
   expect(await screen.findByText('答えました。')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /もう一度送る/ })).not.toBeInTheDocument();
 });
 
 it('a page loaded mid-turn shows the typing bubble from the state main last heard', async () => {
@@ -522,5 +529,9 @@ it('a closed session clears the typing bubble, so a failed turn can be retried',
     },
   ];
   await userEvent.click(screen.getByRole('button', { name: '再読み込み' }));
-  expect(await screen.findByRole('button', { name: 'もう一度' })).toBeInTheDocument();
+  expect(
+    await screen.findByRole('button', {
+      name: 'AI に接続できず、返信できませんでした。もう一度送る',
+    })
+  ).toBeInTheDocument();
 });

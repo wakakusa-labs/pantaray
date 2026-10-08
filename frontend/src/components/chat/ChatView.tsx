@@ -16,9 +16,8 @@ import { ChatMessage } from './ChatMessage';
 import {
   cardWorkKey,
   isChatMessage,
-  isShownInChat,
   latestCardPositions,
-  retryableFailureId,
+  retryableFailure,
   type WorkKey,
 } from './chatTimeline';
 import type { ChatComposerControl } from './useChatComposer';
@@ -86,8 +85,9 @@ export function ChatView({
     [chat.items]
   );
   const latestCards = useMemo(() => latestCardPositions(chat.items), [chat.items]);
-  const shown = useMemo(() => chat.items.filter(isShownInChat), [chat.items]);
-  const retryableFailure = useMemo(() => retryableFailureId(chat.items), [chat.items]);
+  // Bridge events and turn failures feed the chat's model; the user sees the messages.
+  const shown = useMemo(() => chat.items.filter(isChatMessage), [chat.items]);
+  const failure = useMemo(() => retryableFailure(chat.items), [chat.items]);
   const [retrying, setRetrying] = useState(false);
   const turnInProgress = chat.turnRunning;
   useChatReveal({
@@ -145,52 +145,41 @@ export function ChatView({
       <li key={`day:${day.key}`} className="chat-day">
         <h2>{day.label}</h2>
       </li>,
-      ...day.items.map((item) => {
-        if (isChatMessage(item)) {
-          return (
-            <li key={item.item_id}>
-              <ChatMessage
-                item={item}
-                quoted={
-                  item.content.quote_item_id === null
-                    ? undefined
-                    : itemsById.get(item.content.quote_item_id)
-                }
-                time={formatTime.format(new Date(item.created_at))}
-                latestCards={latestCards}
-                works={works.states}
-                openWork={openWork}
-                t={t}
-                onOpenCard={(card) => void handleOpenCard(card)}
-                onQuote={
-                  composer.state.pending === null
-                    ? () => {
-                        composer.setQuote(item);
-                        textareaRef.current?.focus();
-                      }
-                    : null
-                }
-              />
-            </li>
-          );
-        }
-        if (item.content.kind !== 'turn_failure') return null;
-        return (
-          <li key={item.item_id} className="chat-failure">
-            <p>{t(`history.chat.failure.${item.content.reason}`)}</p>
-            {item.item_id === retryableFailure && !turnInProgress ? (
-              <button
-                type="button"
-                className="history-filter-button"
-                disabled={retrying}
-                onClick={() => void handleRetryTurn(item.item_id)}
-              >
-                {t('history.chat.retry')}
-              </button>
-            ) : null}
-          </li>
-        );
-      }),
+      ...day.items.map((item) => (
+        <li key={item.item_id}>
+          <ChatMessage
+            item={item}
+            quoted={
+              item.content.quote_item_id === null
+                ? undefined
+                : itemsById.get(item.content.quote_item_id)
+            }
+            time={formatTime.format(new Date(item.created_at))}
+            latestCards={latestCards}
+            works={works.states}
+            openWork={openWork}
+            t={t}
+            onOpenCard={(card) => void handleOpenCard(card)}
+            onQuote={
+              composer.state.pending === null
+                ? () => {
+                    composer.setQuote(item);
+                    textareaRef.current?.focus();
+                  }
+                : null
+            }
+            retry={
+              failure !== null && failure.messageItemId === item.item_id && !turnInProgress
+                ? {
+                    label: t(`history.chat.retry.${failure.reason}`),
+                    disabled: retrying,
+                    onRetry: () => void handleRetryTurn(failure.failureItemId),
+                  }
+                : null
+            }
+          />
+        </li>
+      )),
     ]);
 
   const renderBody = () => {
@@ -281,7 +270,9 @@ export function ChatView({
               name: t('history.chat.pantaray'),
               text: chat.arrived.content.text,
             })
-          : null}
+          : chat.arrived?.content.kind === 'turn_failure'
+            ? t(`history.chat.failure.${chat.arrived.content.reason}`)
+            : null}
       </div>
     </div>
   );

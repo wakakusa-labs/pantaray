@@ -360,13 +360,22 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
     ],
     next_cursor: null,
   });
-  const retry = page.getByRole('button', { name: 'もう一度' });
+  const lastMessage = page.getByRole('article', { name: 'あなた' }).last();
+  const retry = lastMessage.getByRole('button', {
+    name: 'AI に接続できず、返信できませんでした。もう一度送る',
+  });
   await expect(retry).toBeVisible();
-  await expect(page.getByText('AI に接続できず、返信できませんでした。')).toBeVisible();
+  await expect(retry).toHaveAttribute(
+    'title',
+    'AI に接続できず、返信できませんでした。もう一度送る'
+  );
+  // No notice text: the icon under the message is all there is.
+  await expect(page.getByText('AI に接続できず、返信できませんでした。')).toHaveCount(0);
+  await retry.focus();
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('chat-turn-failure.png') });
 
-  await retry.click();
+  await page.keyboard.press('Enter');
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { e2eRetried?: string }).e2eRetried))
     .toBe('item-11');

@@ -73,13 +73,25 @@ export function latestCardPositions(items: readonly ChatItem[]): ReadonlyMap<Wor
   return latest;
 }
 
-/** Bridge and turn events feed the chat's model; the user sees the message that follows them. */
-export function isShownInChat(item: ChatItem): boolean {
-  return item.content.kind !== 'suggestion_event' && item.content.kind !== 'action_event';
-}
+type TurnFailureReason = Extract<ChatItem['content'], { kind: 'turn_failure' }>['reason'];
 
-/** The failure a retry can still run again: the newest turn_failure, if nothing came after it. */
-export function retryableFailureId(items: readonly ChatItem[]): string | null {
-  const last = [...items].reverse().find(isShownInChat);
-  return last?.content.kind === 'turn_failure' ? last.item_id : null;
+/**
+ * The failed turn a retry can still run again: the newest turn_failure with no message after it,
+ * and the user's last message, which the retry is offered under. Bridge events do not count.
+ */
+export function retryableFailure(
+  items: readonly ChatItem[]
+): { failureItemId: string; reason: TurnFailureReason; messageItemId: string } | null {
+  const newestFirst = [...items].reverse();
+  const last = newestFirst.find(
+    (item) => item.content.kind !== 'suggestion_event' && item.content.kind !== 'action_event'
+  );
+  if (last?.content.kind !== 'turn_failure') return null;
+  const message = newestFirst.find((item) => item.content.kind === 'user_message');
+  if (!message) return null;
+  return {
+    failureItemId: last.item_id,
+    reason: last.content.reason,
+    messageItemId: message.item_id,
+  };
 }

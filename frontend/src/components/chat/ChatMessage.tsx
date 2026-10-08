@@ -1,4 +1,4 @@
-import { Reply } from 'lucide-react';
+import { Reply, RotateCcw } from 'lucide-react';
 
 import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/chat/chatContracts';
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
@@ -50,6 +50,7 @@ export function ChatMessage({
   t,
   onOpenCard,
   onQuote,
+  retry,
 }: {
   item: ChatMessageItem;
   quoted: ChatItem | undefined;
@@ -61,6 +62,8 @@ export function ChatMessage({
   onOpenCard: (card: ChatCardData) => void;
   /** Starts a reply that quotes this message; null while the composer cannot take one. */
   onQuote: (() => void) | null;
+  /** Runs the failed turn this message started again; its label names why there is no reply. */
+  retry: { label: string; disabled: boolean; onRetry: () => void } | null;
 }) {
   const { language } = useI18n();
   const { content } = item;
@@ -95,6 +98,18 @@ export function ChatMessage({
               </li>
             ))}
           </ul>
+        ) : null}
+        {retry ? (
+          <button
+            type="button"
+            className="chat-retry"
+            aria-label={retry.label}
+            title={retry.label}
+            disabled={retry.disabled}
+            onClick={retry.onRetry}
+          >
+            <RotateCcw size={15} aria-hidden="true" />
+          </button>
         ) : null}
         {content.kind === 'assistant_message'
           ? content.cards.map((card, index) => {

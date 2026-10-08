@@ -275,6 +275,9 @@ class _ReadOnlyFileTools:
                 required=("path", "pages"),
                 success={"required": ["kind", "path"]},
                 execute=self._executor(RenderPdfPageToolArgs, self._render),
+                # As in the Action: one call sends up to eight images, and
+                # several at once would send dozens.
+                concurrency=ToolConcurrency("sequential"),
             ),
         )
 
@@ -428,6 +431,8 @@ def _definition(
     required: tuple[str, ...],
     success: dict[str, JSONValue],
     execute: ReactToolExecutor,
+    # Each only reads, and a spill goes to a file of its own.
+    concurrency: ToolConcurrency = ToolConcurrency("parallel"),
 ) -> ReactToolDefinition:
     return ReactToolDefinition(
         name=name,
@@ -442,8 +447,7 @@ def _definition(
             success_schema={"type": "object", **success}
         ),
         execute=execute,
-        # Each only reads, and a spill goes to a file of its own.
-        concurrency=ToolConcurrency("parallel"),
+        concurrency=concurrency,
     )
 
 

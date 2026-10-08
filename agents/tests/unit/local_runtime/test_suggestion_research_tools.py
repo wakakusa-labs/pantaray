@@ -75,9 +75,6 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
 )
-from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
-    READ_IMAGE_NOT_SUPPORTED,
-)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -589,6 +586,7 @@ def test_suggestion_research_tool_set_is_read_only(
         "list",
         "glob",
         "grep",
+        "render_pdf_page",
         "web_search",
         "web_extract",
         "zanei_timeline",
@@ -1476,14 +1474,13 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
 
 
 @pytest.mark.asyncio
-async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
+async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
     tmp_path: Path,
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
     folder = (tmp_path / "home").resolve()
     folder.mkdir()
     (folder / "chart.png").write_bytes(PIXEL_PNG)
-    (folder / "notes.md").write_text("plan\n", encoding="utf-8")
     snapshot = dataclasses.replace(_snapshot(db_path=db_path), folders=(folder,))
     registry = ReactToolRegistry(
         LocalSuggestionResearchTools(
@@ -1497,15 +1494,10 @@ async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
     image = await registry.execute(
         _tool_call("read", {"path": str(folder / "chart.png")}), 1
     )
-    text = await registry.execute(
-        _tool_call("read", {"path": str(folder / "notes.md")}), 2
-    )
 
-    # The shared read returns the image; Suggestion sends no files, so it refuses.
-    assert image.status == "error"
-    assert image.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
-    assert image.images == ()
-    assert text.status == "success"
+    # Its sender passes the image as a file, so the run keeps it.
+    assert image.status == "success"
+    assert [item.display_path for item in image.images] == [str(folder / "chart.png")]
 
 
 def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:

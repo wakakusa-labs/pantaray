@@ -82,6 +82,7 @@ SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "list",
     "glob",
     "grep",
+    "render_pdf_page",
     "web_search",
     "web_extract",
     "zanei_timeline",

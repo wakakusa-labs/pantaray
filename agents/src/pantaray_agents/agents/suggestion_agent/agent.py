@@ -10,6 +10,7 @@ from pantaray_agents.agents.capability_envelopes import (
     ACTION_AGENT_CAPABILITY_ENVELOPE,
 )
 from pantaray_agents.agents.core import BaseAgent, CountingSink
+from pantaray_agents.agents.core.llm_file_inputs import tool_image_file_input
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
     LlmToolCallTurn,
@@ -427,6 +428,8 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             tools=request.tools,
             max_parallel_tool_calls=request.max_parallel_tool_calls,
             system_instruction=request.system_instruction,
+            # The images the items show, read from their files when sent.
+            file_inputs=[tool_image_file_input(image) for image in request.images],
             conversation=request.conversation,
             stage="suggestion",
         )

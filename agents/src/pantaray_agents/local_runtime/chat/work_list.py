@@ -114,7 +114,9 @@ class SubmittedMessage:
 
     action_id: str
     suggestion_id: str | None
-    text: str
+    text: str  # what the task reads, with the attachments it was given
+    # Sent while the task was stopped: kept, but never run.
+    dropped: bool
 
 
 def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage | None:
@@ -122,7 +124,8 @@ def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         row = connection.execute(
-            "SELECT steps.action_id, actions.suggestion_id, steps.user_message_json "
+            "SELECT steps.action_id, actions.suggestion_id, steps.user_message_json, "
+            "steps.adoption_canceled_at IS NOT NULL "
             "FROM agent_action_steps AS steps JOIN agent_actions AS actions "
             "ON actions.action_id = steps.action_id "
             "WHERE steps.user_id = ? AND steps.user_message_id = ?",
@@ -130,12 +133,18 @@ def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage
         ).fetchone()
     if row is None:
         return None
-    action_id, suggestion_id, message_json = row
-    text = render_action_user_request_text(parse_action_user_message(str(message_json)))
+    action_id, suggestion_id, message_json, dropped = row
+    message = parse_action_user_message(str(message_json))
+    attached = [
+        *(f"image {image.storage_path}" for image in message.images),
+        *(f"file {file.name}" for file in message.files),
+    ]
     return SubmittedMessage(
         action_id=str(action_id),
         suggestion_id=None if suggestion_id is None else str(suggestion_id),
-        text=_line(text) or "",
+        text=render_action_user_request_text(message)
+        + (f"\n(attached: {', '.join(attached)})" if attached else ""),
+        dropped=bool(dropped),
     )
 
 

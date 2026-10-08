@@ -15,12 +15,16 @@ from pantaray_agents.agents.chat_agent.context import turn_context
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
 from pantaray_agents.local_runtime.chat.store import append_chat_item
-from pantaray_agents.local_runtime.chat.work_list import read_chat_work_list
+from pantaray_agents.local_runtime.chat.work_list import (
+    SubmittedMessage,
+    read_chat_work_list,
+)
 from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import (
     ActionJobRuntimeRepository,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     DeferredActionMessageResult,
+    MessageIdentityConflictError,
     NewActionTarget,
     SubmitActionMessageCommand,
 )
@@ -132,7 +136,22 @@ async def test_an_instruction_to_a_stopped_task_is_not_reported_done(
         "send_to_action", action_id="act-1", message="Go on", attachments_from=[]
     )
 
+    # Run again after a restart: what went in was dropped, not done.
+    def already_in(command: SubmitActionMessageCommand) -> object:
+        raise MessageIdentityConflictError("reworded")
+
+    monkeypatch.setattr(tools, "submit_action_message", already_in)
+    monkeypatch.setattr(
+        tools,
+        "read_submitted_message",
+        lambda **_: SubmittedMessage("act-1", None, "Go on", dropped=True),
+    )
+    rerun = await _turn("a0")(
+        "send_to_action", action_id="act-1", message="Keep going", attachments_from=[]
+    )
+
     assert isinstance(result, dict) and result["error_code"] == "TASK_STOPPED"
+    assert isinstance(rerun, dict) and rerun["error_code"] == "TASK_STOPPED"
 
 
 async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -> None:
@@ -252,9 +271,10 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     )
 
     assert isinstance(taken, dict) and replayed == taken
-    assert (
-        isinstance(again, dict) and again["error_code"] == "ALREADY_SENT_IN_THIS_TURN"
-    )
+    assert isinstance(again, dict)
+    assert again["error_code"] == "ALREADY_SENT_IN_THIS_TURN"
+    # It shows what went in, attachments included, so a missing addition shows.
+    assert f"image {IMAGE['storage_path']}" in str(again["message"])
     with sqlite3.connect(db_path) as connection:
         (message_json,) = connection.execute(
             "SELECT user_message_json FROM agent_action_steps "

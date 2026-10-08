@@ -282,14 +282,18 @@ def _submit(
             "Not done: that task cannot take a message right now.",
         )
     if result.disposition == "not_executed":
-        return _refused(
-            tool,
-            "TASK_STOPPED",
-            "Not done: the user stopped this task, and an instruction sent while "
-            "it is stopped is not run when they resume it. Tell the user; once "
-            "they resume it, send it again.",
-        )
+        return _stopped(tool)
     return _started(tool, result.action_id)
+
+
+def _stopped(tool: str) -> ReactToolResult:
+    return _refused(
+        tool,
+        "TASK_STOPPED",
+        "Not done: the user stopped this task, and an instruction sent while it "
+        "is stopped is not run when they resume it. Tell the user; once they "
+        "resume it, send it again.",
+    )
 
 
 def _attachments(
@@ -315,12 +319,15 @@ def _attachments(
 def _already_sent(tool: str, sent: SubmittedMessage) -> ReactToolResult:
     # This place in the turn already sent something before a restart, and the
     # turn, asked again, may have reordered or reworded what it sends.
+    if sent.dropped:
+        return _stopped(tool)
     return _refused(
         tool,
         "ALREADY_SENT_IN_THIS_TURN",
         f"Not sent again: before a restart, this turn already gave your task "
-        f'{sent.action_id} this: "{sent.text}". If that is this request, it is '
-        f"in hand (send_to_action adds anything new); if not, call {tool} again.",
+        f'{sent.action_id} this:\n"""\n{sent.text}\n"""\nIf that is this request, it '
+        "is in hand, and send_to_action adds anything it lacks; if not, call "
+        f"{tool} again.",
     )
 
 

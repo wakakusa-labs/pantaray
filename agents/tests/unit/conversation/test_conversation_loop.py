@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import pytest
 
 from pantaray_agents.conversation import provider_turns
+from pantaray_agents.conversation.budget import ContextBudget, ContextCapacityExceeded
 from pantaray_agents.conversation.loop import (
     ENDING_REJECTED_ERROR_CODE,
     NOT_RUN_ERROR_CODE,
@@ -25,6 +27,7 @@ from pantaray_agents.conversation.loop import (
     run_conversation,
 )
 from pantaray_agents.conversation.provider_turns import ProviderTurnStore
+from pantaray_agents.conversation.window import OMITTED_OUTPUT_MARK, WindowState
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -168,6 +171,46 @@ def _tool(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Totals:
+    prompt_tokens: int
+    fields: dict[str, int]
+
+
+def _window(
+    window_tokens: int = 1_000_000, *, omit_before: int = 0, reset_pending: bool = False
+) -> WindowState:
+    return WindowState(
+        budget=ContextBudget(
+            window_tokens=window_tokens, baseline=None, reset_pending=reset_pending
+        ),
+        omit_before=omit_before,
+    )
+
+
+def _ran(call_id: str, size: int) -> list[ConversationEntry]:
+    """One earlier turn that called ``a`` and got ``size`` bytes back."""
+
+    return [
+        ConversationEntry(
+            LlmTurnAssistantItem(type="assistant", text=[], calls=[_call(call_id, "a")])
+        ),
+        ConversationEntry(
+            LlmTurnToolResultItem(
+                type="tool_result", call_id=call_id, name="a", output="x" * size
+            )
+        ),
+    ]
+
+
+def _outputs(request: ConversationRequest) -> dict[str, JSONValue]:
+    return {
+        item.call_id: item.output
+        for item in request.conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    }
+
+
 @dataclass
 class _Run:
     """A scripted model and a caller that keeps what the loop reports."""
@@ -188,6 +231,12 @@ class _Run:
     results: dict[str, LlmTurnToolResultItem] = field(default_factory=dict)
     notices: list[str] = field(default_factory=list)
     idle: list[IdleTurn] = field(default_factory=list)
+    window: WindowState = field(default_factory=_window)
+    # The input tokens each send reports; it reads none from the cache.
+    reported: Sequence[int] = ()
+
+    def usage(self) -> _Totals:
+        return _Totals(sum(self.reported[: len(self.requests)]), {})
 
     async def send(self, request: ConversationRequest) -> _Reply:
         # What the real client builds: a call answered twice fails here.
@@ -241,6 +290,8 @@ class _Run:
                 max_turns=max_turns,
                 max_tool_calls=10,
                 max_parallel_tool_calls=4,
+                window=self.window,
+                usage=self.usage,
                 send=self.send,
                 before_send=self.before_send,
                 on_turn=self.on_turn,
@@ -452,3 +503,73 @@ async def test_a_stopped_batch_answers_every_call_that_did_not_finish(
         for n, answer in enumerate(answers, start=1)
         if answer != "-"
     }
+
+
+async def test_past_95_percent_even_the_last_turn_is_rebuilt_with_its_tools() -> None:
+    history = [ConversationEntry(_user("Do the task.")), *_ran("c0", 4000)]
+    history += _ran("c1", 4000)
+    run = _Run([_reply(_end("c2"))], history=history, window=_window(2000))
+
+    assert await run(max_turns=1) == "done"
+
+    (request,) = run.requests
+    # The older result goes, the latest one stays, and so does every tool.
+    assert _outputs(request) == {"c0": OMITTED_OUTPUT_MARK, "c1": "x" * 4000}
+    assert [tool.name for tool in request.tools] == ["finish", "a"]
+    assert "This is the last turn" in _text(request.conversation[-1])
+    assert run.turns[0].window.omit_before == 3
+
+
+async def test_reaching_85_percent_arms_a_rebuild_that_is_no_cache_miss(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    script = [_reply(_call("c1", "a")), _reply(_call("c2", "a")), _reply(_end("c3"))]
+    history = [ConversationEntry(_user("Do the task.")), *_ran("c0", 4000)]
+    # The bytes alone are a tenth of the window; the provider says 86%.
+    run = _Run(
+        script, history=history, window=_window(10_000), reported=[8600, 3000, 3100]
+    )
+
+    with caplog.at_level(logging.INFO, logger="pantaray_agents.conversation"):
+        await run()
+
+    assert [_outputs(request)["c0"] for request in run.requests] == [
+        "x" * 4000,
+        OMITTED_OUTPUT_MARK,
+        OMITTED_OUTPUT_MARK,
+    ]
+    armed, rebuilt, _ = (turn.window for turn in run.turns)
+    assert armed.budget.reset_pending
+    assert armed.budget.baseline is not None
+    assert armed.budget.baseline["prompt_tokens"] == 8600
+    assert (rebuilt.omit_before, rebuilt.budget.reset_pending) == (3, False)
+    # The rebuilt send lost its cache read on purpose; only the next one missed.
+    assert [record.getMessage() for record in caplog.records] == [
+        "Conversation prompt cache missed outside a rebuild: "
+        "cache_misses=3000 prompt_tokens=3100 cache_read_tokens=0"
+    ]
+
+
+async def test_protected_input_past_the_budget_raises_at_the_boundary_reached() -> None:
+    history = [ConversationEntry(_user("Do the task.")), *_ran("c0", 4000)]
+    history += _ran("c1", 20_000)
+    run = _Run([_reply(_end("c2"))], history=history, window=_window(4000))
+
+    with pytest.raises(ContextCapacityExceeded) as raised:
+        await run()
+
+    assert raised.value.omit_before == 3
+    assert run.requests == []
+
+
+async def test_a_resumed_run_keeps_its_boundary_and_never_moves_it_back() -> None:
+    history = [ConversationEntry(_user("Do the task.")), *_ran("c0", 10)]
+    history += _ran("c1", 10)
+    # A rebuild is due, and the window has room to show every output again.
+    stored = _window(omit_before=3, reset_pending=True)
+    run = _Run([_reply(_end("c2"))], history=history, window=stored)
+
+    await run()
+
+    assert _outputs(run.requests[0]) == {"c0": OMITTED_OUTPUT_MARK, "c1": "x" * 10}
+    assert run.turns[0].window.omit_before == 3

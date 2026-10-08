@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 
@@ -126,7 +126,6 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
     isRealtimeSyncing,
     searchText,
     setSearchText,
-    refresh,
     loadMore,
     hasMore,
     isUnread,
@@ -327,15 +326,6 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
         <div className="history-toolbar">
           {modeSwitch}
           <HistorySearchField searchText={searchText} onSearch={setSearchText} />
-          <button
-            type="button"
-            className="history-toolbar__icon-button"
-            aria-label={t('history.reload')}
-            title={t('history.reload')}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-          </button>
           <NewWorkButton
             shortcutHint={shortcutHint}
             t={t}

@@ -15,7 +15,6 @@ export type ChatItemsResult = {
   hasOlder: boolean;
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
-  reload: () => Promise<void>;
   /** Adds an item this window appended itself; the relay's copy of it is the same item. */
   appendItem: (item: ChatItem) => void;
   /** True while a turn is answering the chat. */
@@ -158,7 +157,6 @@ export function useChatItems(): ChatItemsResult {
     hasOlder: olderCursor !== null,
     loadingOlder,
     loadOlder,
-    reload,
     turnRunning,
     retryTurn,
     appendItem: useCallback(

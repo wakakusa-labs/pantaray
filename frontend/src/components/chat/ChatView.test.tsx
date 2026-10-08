@@ -551,7 +551,8 @@ it('a closed session clears the typing bubble, so a failed turn can be retried',
       next_cursor: null,
     },
   ];
-  await userEvent.click(screen.getByRole('button', { name: '再読み込み' }));
+  // The session that starts again reads the chat again.
+  act(() => publishStatus({ status: 'session_started' }));
   expect(
     await screen.findByRole('button', {
       name: 'AI に接続できず、返信できませんでした。もう一度送る',

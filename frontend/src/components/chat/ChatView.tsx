@@ -1,4 +1,3 @@
-import { RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
@@ -168,7 +167,7 @@ export function ChatView({
             }
             time={formatTime.format(new Date(item.created_at))}
             latestCards={latestCards}
-            works={works.states}
+            works={works}
             openWork={openWork}
             t={t}
             onOpenCard={(card) => void handleOpenCard(card)}
@@ -246,18 +245,6 @@ export function ChatView({
         <div className="history-toolbar">
           {modeSwitch}
           <span className="history-toolbar__spacer" />
-          <button
-            type="button"
-            className="history-toolbar__icon-button"
-            aria-label={t('history.reload')}
-            title={t('history.reload')}
-            onClick={() => {
-              void chat.reload();
-              void works.reload();
-            }}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-          </button>
           <NewWorkButton shortcutHint={shortcutHint} t={t} onClick={() => void handleNewWork()} />
         </div>
         {notice ? (

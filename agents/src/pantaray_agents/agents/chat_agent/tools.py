@@ -261,8 +261,13 @@ def _submit(
     if isinstance(attached, ReactToolResult):
         return attached
     images, files = attached
+    # Something already went in under this key (a re-run): the submission
+    # replays it, or answers what went in, with the files where they went.
+    sent_before = read_submitted_message(user_id=plan.user_id, message_id=key)
     holders = {
-        file.attachment_id: read_attachment_holder(
+        file.attachment_id: None
+        if sent_before is not None
+        else read_attachment_holder(
             user_id=plan.user_id, attachment_id=file.attachment_id
         )
         for file in files

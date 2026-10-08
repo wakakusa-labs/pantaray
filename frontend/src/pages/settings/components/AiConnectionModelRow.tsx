@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { Translate } from '../types';
 import { AiConnectionRow } from './AiConnectionRow';
 
+/**
+ * A model is a per-request setting, not an account boundary: changing it stops nothing that is
+ * running, so a choice is saved as soon as it is made. A blank name is never saved, because
+ * clearing the model would disconnect the route and stop running work.
+ */
 export function AiConnectionModelRow({
   model,
   candidates,
@@ -18,28 +23,47 @@ export function AiConnectionModelRow({
   const selectedModel = selectionOnly && !candidates.includes(model) ? '' : model;
   const [draft, setDraft] = useState(selectedModel);
   const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState<'saved' | 'saveFailed' | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
+  // Saving locks the control, which drops its focus. Return focus where the user left it.
+  const focusAfter = useRef<Element | null>(null);
   useEffect(() => {
     setDraft(selectedModel);
   }, [selectedModel]);
   useEffect(() => {
-    if (failed && !saving) (selectionOnly ? selectRef : inputRef).current?.focus();
-  }, [failed, saving, selectionOnly]);
+    if (saving) return;
+    const control = selectionOnly ? selectRef.current : inputRef.current;
+    const target = result === 'saveFailed' ? control : focusAfter.current;
+    focusAfter.current = null;
+    if (result === 'saveFailed' || document.activeElement === document.body) {
+      if (target instanceof HTMLElement) target.focus();
+    }
+  }, [result, saving, selectionOnly]);
 
-  const save = async () => {
-    if (selectionOnly && !candidates.includes(draft)) return;
+  const save = async (value: string, returnFocusTo: Element | null) => {
+    focusAfter.current = returnFocusTo;
     setSaving(true);
-    setFailed(false);
+    setResult(null);
     try {
-      await onSave(draft.trim());
+      await onSave(value);
+      setResult('saved');
     } catch {
       // Main may persist the model before runtime apply fails; the same value still needs a retry.
-      setFailed(true);
+      setResult('saveFailed');
     } finally {
       setSaving(false);
     }
+  };
+
+  const commit = (value: string, returnFocusTo: Element | null) => {
+    if (saving) return;
+    const next = value.trim();
+    if (!next) {
+      setDraft(selectedModel);
+      return;
+    }
+    if (next !== model) void save(next, returnFocusTo);
   };
 
   return (
@@ -48,7 +72,7 @@ export function AiConnectionModelRow({
         className="ai-inline"
         onSubmit={(event) => {
           event.preventDefault();
-          void save();
+          commit(draft, inputRef.current);
         }}
       >
         {selectionOnly ? (
@@ -58,7 +82,10 @@ export function AiConnectionModelRow({
             className="history-filter-select"
             value={draft}
             disabled={saving}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              commit(event.target.value, event.target);
+            }}
           >
             <option value="" disabled>
               {t('settings.aiConnection.modelSelectPlaceholder')}
@@ -81,19 +108,27 @@ export function AiConnectionModelRow({
             value={draft}
             disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
+            onBlur={(event) => commit(draft, event.relatedTarget)}
           />
         )}
-        <button
-          type="submit"
-          className="settings-action-button"
-          disabled={
-            saving ||
-            (selectionOnly && !candidates.includes(draft)) ||
-            (!failed && draft.trim() === model)
-          }
+        {result === 'saveFailed' ? (
+          <button
+            type="button"
+            className="settings-text-button"
+            disabled={saving}
+            onClick={() =>
+              void save(draft.trim(), selectionOnly ? selectRef.current : inputRef.current)
+            }
+          >
+            {t('settings.aiConnection.model.retry')}
+          </button>
+        ) : null}
+        <span
+          className={result === 'saveFailed' ? 'ai-check ai-check--failed' : 'ai-note'}
+          role="status"
         >
-          {t('settings.aiConnection.model.save')}
-        </button>
+          {result ? t(`settings.aiConnection.model.${result}`) : ''}
+        </span>
       </form>
       {!selectionOnly && candidates.length > 0 ? (
         <datalist id="ai-model-candidates">
@@ -108,9 +143,6 @@ export function AiConnectionModelRow({
             ? 'settings.aiConnection.chatgptModelHint'
             : 'settings.aiConnection.modelHint'
         )}
-      </p>
-      <p className="ai-check ai-check--failed" role="status">
-        {failed ? t('settings.aiConnection.model.saveFailed') : ''}
       </p>
     </AiConnectionRow>
   );

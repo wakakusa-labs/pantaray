@@ -59,7 +59,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.operation.running': 'Applying changes…',
     'settings.aiConnection.chatgpt.waiting': 'Waiting for authorization in your browser…',
     'settings.aiConnection.chatgpt.cancel': 'Cancel sign-in',
-    'settings.aiConnection.model.save': 'Save model',
+    'settings.aiConnection.model.saved': 'Model saved.',
+    'settings.aiConnection.model.retry': 'Try again',
     'settings.aiConnection.model.saveFailed': 'Could not apply the model.',
     'settings.aiConnection.secretsUnavailable':
       'This system cannot encrypt stored credentials, so keys cannot be saved.',
@@ -348,7 +349,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.operation.running': '変更を反映中…',
     'settings.aiConnection.chatgpt.waiting': 'ブラウザでの認証を待っています…',
     'settings.aiConnection.chatgpt.cancel': 'ログインをキャンセル',
-    'settings.aiConnection.model.save': 'モデルを保存',
+    'settings.aiConnection.model.saved': 'モデルを保存しました。',
+    'settings.aiConnection.model.retry': 'もう一度反映',
     'settings.aiConnection.model.saveFailed': 'モデルを反映できませんでした。',
     'settings.aiConnection.secretsUnavailable':
       'この環境では資格情報を暗号化して保存できないため、キーを保存できません。',

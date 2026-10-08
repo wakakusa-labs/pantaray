@@ -148,6 +148,8 @@ def _tool(
         await asyncio.sleep(0)
         if name == "boom":
             raise _Pause
+        if name == "slow":
+            await asyncio.Event().wait()
         log.append(f"end {name}")
         return ReactToolResult(tool_name=name, status="success", output={"ran": name})
 
@@ -267,28 +269,6 @@ async def test_a_turn_without_calls_carries_on_or_ends_as_the_caller_says() -> N
     # The notice is kept, so the next request does not end on the model's turn.
     assert run.notices == ["Call finish to end the run."]
     assert _text(run.requests[1].conversation[-1]) == run.notices[0]
-
-
-@pytest.mark.parametrize(
-    ("placement", "expected"),
-    [
-        ("parallel", ["start a", "start b", "end a", "end b"]),
-        ("sequential", ["start a", "end a", "start b", "end b"]),
-    ],
-)
-async def test_a_batch_runs_at_once_only_when_every_call_may(
-    placement: ToolTurnPlacement, expected: list[str]
-) -> None:
-    tools = (("a", placement), ("b", placement))
-    run = _Run(
-        [_reply(_call("c1", "a"), _call("c2", "b")), _reply(_end("c3"))], tools=tools
-    )
-
-    await run()
-
-    assert run.log == expected
-    # Answered in the model's order, whichever finished first.
-    assert list(run.results) == ["c1", "c2"]
 
 
 async def test_calls_the_plan_holds_back_are_answered_as_not_run() -> None:
@@ -433,24 +413,37 @@ async def test_a_stop_from_before_send_or_the_model_propagates_as_raised() -> No
 
 
 @pytest.mark.parametrize(
-    ("kind", "after_failure"),
-    [("parallel", None), ("sequential", NOT_RUN_ERROR_CODE)],
+    ("kind", "stopper", "answers"),
+    # Per call c1..c4: R ran, N answered as not run, - no result.
+    [
+        ("parallel", "boom", "R-RN"),
+        ("sequential", "boom", "R-NN"),
+        ("parallel", "slow", "RNRN"),
+        ("sequential", "slow", "RNNN"),
+    ],
 )
-async def test_a_failing_call_propagates_after_the_rest_is_answered(
-    kind: ToolTurnPlacement, after_failure: str | None
+async def test_a_stopped_batch_answers_every_call_that_did_not_finish(
+    kind: ToolTurnPlacement, stopper: str, answers: str
 ) -> None:
-    tools: _Tools = [("a", kind), ("boom", kind), ("b", kind)]
-    calls = (_call("c1", "a"), _call("c2", "boom"), _call("c3", "b"), _end("c4"))
-    run = _Run([_reply(*calls)], tools=tools)
+    calls = (_call("c1", "a"), _call("c2", stopper), _call("c3", "b"), _end("c4"))
+    run = _Run([_reply(*calls)], tools=[("a", kind), (stopper, kind), ("b", kind)])
+    task = asyncio.create_task(run())
+    if stopper == "slow":
+        # The user stops the run while the slow call is still running.
+        while "start slow" not in run.log or (
+            kind == "parallel" and "end b" not in run.log
+        ):
+            await asyncio.sleep(0)
+        task.cancel()
 
-    with pytest.raises(_Pause):
-        await run()
+    with pytest.raises(_Pause if stopper == "boom" else asyncio.CancelledError):
+        await task
 
-    # What ran, what never ran and what was held back are answered; the
-    # failed call is not, as a paused one is the resumed run's to settle.
+    # A parallel batch ran b beside the slow call; a sequential one never
+    # started it. A call that raised by itself gets no result (a paused one is
+    # the resumed run's to settle); every other call is answered once.
     assert {call_id: run.code(call_id) for call_id in run.results} == {
-        "c1": None,
-        "c3": after_failure,
-        "c4": NOT_RUN_ERROR_CODE,
+        f"c{n}": None if answer == "R" else NOT_RUN_ERROR_CODE
+        for n, answer in enumerate(answers, start=1)
+        if answer != "-"
     }
-    assert run.results["c1"].output == {"ran": "a"}

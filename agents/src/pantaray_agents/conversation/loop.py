@@ -97,10 +97,7 @@ class ConversationEntry:
 
 @dataclass(frozen=True, slots=True)
 class ConversationRequest:
-    """Everything one send carries, for ``send`` to pass on as is.
-
-    ``media_refs`` are the refs of the images the items place, in item order.
-    """
+    """One send, for ``send`` to pass on; ``media_refs`` in item order."""
 
     prompt: str
     system_instruction: str
@@ -141,11 +138,7 @@ class Finish[T]:
 
 @dataclass(frozen=True, slots=True)
 class Continue:
-    """Carry on, and tell the model why.
-
-    The notice answers the ending call as refused, or follows a turn without
-    one as a message, so the next request never ends on the model's own turn.
-    """
+    """Carry on: the notice answers the ending call, or follows as a message."""
 
     notice: str
 
@@ -161,9 +154,9 @@ class ConversationRun[T]:
     for ``decide``. ``max_turns`` counts answered turns, not repaired sends;
     ``max_tool_calls`` the calls run. ``before_send`` raises to stop, or returns
     the items that arrived. ``on_result`` stores, redacts or spills a result and
-    returns what is sent. When a tool raises -- a pause for approval included --
-    the turn's calls that did not run are answered as not run, the one that
-    raised gets no result, and the exception propagates.
+    returns what is sent. When a tool raises or the run is cancelled, the
+    turn's calls that did not finish are answered as not run before the
+    exception propagates; a tool that raised by itself gets no result.
     """
 
     prompt: str
@@ -423,7 +416,12 @@ class _Run[T]:
             try:
                 result = await self.registry.execute(_react_call(call), self.tool_calls)
             except BaseException as failure:
-                await self._fail(failure, calls[index + 1 :], excluded)
+                # A call the run's cancellation stopped did not finish, so it
+                # is answered; one that raised by itself gets no result.
+                stopped = isinstance(failure, asyncio.CancelledError)
+                await self._fail(
+                    failure, calls[index + (0 if stopped else 1) :], excluded
+                )
             await self._append_result(call, result)
         await self._answer_all(excluded)
 
@@ -434,39 +432,46 @@ class _Run[T]:
     ) -> None:
         first = self.tool_calls + 1
         self.tool_calls += len(calls)
-        # Waits for every call, so none is left running behind a failure, and
-        # answers what came back before the first failure in the model's order.
-        outcomes = await asyncio.gather(
-            *(
-                self.registry.execute(_react_call(call), first + index)
-                for index, call in enumerate(calls)
-            ),
-            return_exceptions=True,
-        )
+        tasks = [
+            asyncio.ensure_future(self.registry.execute(_react_call(call), first + n))
+            for n, call in enumerate(calls)
+        ]
         failure: BaseException | None = None
-        for call, outcome in zip(calls, outcomes, strict=True):
-            if isinstance(outcome, BaseException):
-                failure = failure or outcome
+        try:
+            # Waits for every call, so none is left running behind a failure.
+            await asyncio.wait(tasks)
+        except asyncio.CancelledError as cancelled:
+            # The run was stopped: stop what still runs, keep what finished.
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks)
+            failure = cancelled
+        stopped: list[LlmToolCall] = []
+        for call, task in zip(calls, tasks, strict=True):
+            if task.cancelled():
+                stopped.append(call)
+            elif (error := task.exception()) is not None:
+                failure = failure or error
             else:
-                await self._append_result(call, outcome)
+                await self._append_result(call, task.result())
         if failure is not None:
-            await self._fail(failure, (), excluded)
+            await self._fail(failure, stopped, excluded)
         await self._answer_all(excluded)
 
     async def _fail(
         self,
         failure: BaseException,
-        after: Sequence[LlmToolCall],
+        stopped: Sequence[LlmToolCall],
         excluded: Sequence[tuple[LlmToolCall, str]],
     ) -> NoReturn:
-        """Answer the calls that did not run, then raise ``failure`` as it was.
+        """Answer ``stopped`` and ``excluded`` as not run, then raise ``failure``.
 
-        The call that failed gets no result: a pause leaves it to the resumed
-        run, and any other failure ends the run.
+        A call that raised by itself gets no result: a pause leaves it to the
+        resumed run, and any other failure ends the run.
         """
 
-        notice = _not_run("came after a call that stopped the run")
-        await self._answer_all([*((later, notice) for later in after), *excluded])
+        notice = _not_run("did not run to the end because the run stopped")
+        await self._answer_all([*((call, notice) for call in stopped), *excluded])
         raise failure
 
     async def _close_last_turn(

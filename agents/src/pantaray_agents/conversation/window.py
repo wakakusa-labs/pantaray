@@ -8,6 +8,10 @@ notice stay, so each call keeps its answer and nothing is summarized. The
 latest run of results is never omitted, and neither are the head, the system
 instruction and the tools: when what is left still reaches the budget, the run
 cannot go on (``ContextCapacityExceeded``).
+
+The images the window shows have a cap of their own, ``MAX_WINDOW_IMAGE_BYTES``:
+the token budget leaves media out of its measure, so before it runs the
+boundary moves past the oldest runs of results until the images left fit.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Final
 
 from pantaray_agents.conversation.budget import ContextBudget, TurnUsage
 from pantaray_agents.conversation.prefix import ConversationLayout, replayable_turn
@@ -24,9 +29,15 @@ from pantaray_llm.contracts.conversation import (
     LlmTurnItem,
     LlmTurnToolResultItem,
 )
+from pantaray_llm.contracts.input_block import LlmInputImageBlock
 
 # The same mark the Action sends for a body past its omission boundary.
 OMITTED_OUTPUT_MARK = "…"
+# The image bytes one request may show. Anthropic refuses a request over 32 MB
+# and sends each image base64-encoded, at 4/3 of its size: 16 MiB of images is
+# 21.3 MiB encoded and leaves the text its room. OpenAI and the ChatGPT route
+# take up to 512 MB a request, so this one cap holds for every provider.
+MAX_WINDOW_IMAGE_BYTES: Final[int] = 16 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +67,28 @@ class WindowState:
         lay: Callable[[int], LaidOutWindow],
     ) -> tuple[WindowState, LaidOutWindow]:
         """The window to send, laid out by ``lay`` at a boundary, and where the
-        state stands after it: rebuilt behind a later boundary when it must be.
+        state stands after it: past the images over the cap first, then rebuilt
+        behind a later boundary when the text must be.
         """
 
+        omit_before = resolve_omission(
+            history,
+            omit_before=self.omit_before,
+            byte_budget=MAX_WINDOW_IMAGE_BYTES,
+            measure=_image_bytes,
+        )
         fitted = self.budget.fit(
             lay,
-            omit_before=self.omit_before,
+            omit_before=omit_before,
             resolve_boundary=lambda byte_budget: resolve_omission(
-                history, omit_before=self.omit_before, byte_budget=byte_budget
+                history,
+                omit_before=omit_before,
+                byte_budget=byte_budget,
+                measure=_item_bytes,
             ),
         )
         if fitted.rebuilt_at is None:
-            return self, fitted.window
+            return replace(self, omit_before=omit_before), fitted.window
         rebuilt = WindowState(
             budget=replace(self.budget, reset_pending=False),
             omit_before=fitted.rebuilt_at,
@@ -163,16 +184,22 @@ def lay_out(
 
 
 def resolve_omission(
-    history: Sequence[ConversationEntry], *, omit_before: int, byte_budget: int
+    history: Sequence[ConversationEntry],
+    *,
+    omit_before: int,
+    byte_budget: int,
+    measure: Callable[[LlmTurnItem], int],
 ) -> int:
     """The boundary past the oldest runs of results that brings the history
     within ``byte_budget``, never into the latest run and never back.
 
-    What is left may still exceed the budget; ``ContextBudget.fit`` checks it.
+    ``measure`` sizes an item as shown. What is left may still exceed the
+    budget; ``ContextBudget.fit`` checks the text, and a provider refuses images
+    the latest run alone carries past the cap.
     """
 
     remaining = sum(
-        _item_bytes(_shown(entry.item, omit=index < omit_before))
+        measure(_shown(entry.item, omit=index < omit_before))
         for index, entry in enumerate(history)
     )
     boundary = omit_before
@@ -182,7 +209,7 @@ def resolve_omission(
         for index in run:
             if index >= boundary:
                 item = history[index].item
-                remaining -= _item_bytes(item) - _item_bytes(_shown(item, omit=True))
+                remaining -= measure(item) - measure(_shown(item, omit=True))
         boundary = max(boundary, run[-1] + 1)
     return boundary
 
@@ -213,7 +240,18 @@ def _item_bytes(item: LlmTurnItem) -> int:
     return len(item.model_dump_json(exclude={"provider_turn"}).encode("utf-8"))
 
 
+def _image_bytes(item: LlmTurnItem) -> int:
+    if isinstance(item, LlmTurnAssistantItem):
+        return 0
+    return sum(
+        block.image.byte_size
+        for block in item.content
+        if isinstance(block, LlmInputImageBlock)
+    )
+
+
 __all__ = [
+    "MAX_WINDOW_IMAGE_BYTES",
     "OMITTED_OUTPUT_MARK",
     "ConversationEntry",
     "LaidOutWindow",

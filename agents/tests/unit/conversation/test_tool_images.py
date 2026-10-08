@@ -23,7 +23,11 @@ from pantaray_agents.conversation.loop import (
     run_conversation,
 )
 from pantaray_agents.conversation.provider_turns import ProviderTurnStore
-from pantaray_agents.conversation.window import WindowState
+from pantaray_agents.conversation.window import (
+    MAX_WINDOW_IMAGE_BYTES,
+    WindowState,
+    lay_out,
+)
 from pantaray_agents.local_runtime.llm_proxy.request_builder import build_llm_request
 from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
 from pantaray_agents.utils.llm_types import types
@@ -33,10 +37,15 @@ from pantaray_llm.contracts.action_turn import (
 )
 from pantaray_llm.contracts.conversation import (
     LlmProviderTurn,
+    LlmTurnAssistantItem,
     LlmTurnToolResultItem,
     LlmTurnUserItem,
 )
-from pantaray_llm.contracts.input_block import LlmInputImageBlock, LlmInputTextBlock
+from pantaray_llm.contracts.input_block import (
+    LlmImageDescriptor,
+    LlmInputImageBlock,
+    LlmInputTextBlock,
+)
 from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 
 from ..local_runtime.test_read_document_broker import PIXEL_PNG
@@ -191,3 +200,91 @@ async def test_an_image_past_the_window_boundary_is_neither_shown_nor_sent(
     answer = second.conversation[-1]
     assert isinstance(answer, LlmTurnToolResultItem) and answer.content == []
     assert (second.images, second.media_refs) == ((), ())
+
+
+def _looked(call_id: str, byte_size: int) -> list[ConversationEntry]:
+    """One turn that read an image of ``byte_size`` bytes."""
+
+    image = LlmInputImageBlock(
+        type="input_image",
+        image=LlmImageDescriptor(
+            blob_ref=f"blob-{call_id}",
+            mime_type="image/png",
+            byte_size=byte_size,
+            sha256="0" * 64,
+            application_ref=f"tool_attachment:{call_id}",
+        ),
+    )
+    return [
+        ConversationEntry(
+            LlmTurnAssistantItem(
+                type="assistant",
+                calls=[LlmToolCall(call_id=call_id, name="read", arguments={})],
+            )
+        ),
+        ConversationEntry(
+            LlmTurnToolResultItem(
+                type="tool_result",
+                call_id=call_id,
+                name="read",
+                output="ok",
+                content=[image],
+            )
+        ),
+    ]
+
+
+def _fit_images(
+    history: list[ConversationEntry], state: WindowState
+) -> tuple[WindowState, list[str]]:
+    state, window = state.fit(
+        history,
+        lambda omit_before: lay_out(
+            history,
+            omit_before=omit_before,
+            fingerprint="f",
+            turns={},
+            notices=(),
+            head_bytes=0,
+        ),
+    )
+    return state, list(window.layout.media_refs())
+
+
+def test_the_oldest_images_drop_once_the_window_shows_more_than_the_cap() -> None:
+    third = MAX_WINDOW_IMAGE_BYTES * 2 // 5
+    history = [
+        ConversationEntry(
+            LlmTurnUserItem(
+                type="user",
+                content=[LlmInputTextBlock(type="input_text", text="Look.")],
+            )
+        ),
+        *_looked("c1", third),
+        *_looked("c2", third),
+    ]
+    state = WindowState(
+        budget=ContextBudget(
+            window_tokens=1_000_000, baseline=None, reset_pending=False
+        ),
+        omit_before=0,
+    )
+
+    state, refs = _fit_images(history, state)
+    assert (state.omit_before, refs) == (
+        0,
+        ["tool_attachment:c1", "tool_attachment:c2"],
+    )
+
+    history += _looked("c3", third)
+    state, refs = _fit_images(history, state)
+    # Past the first run, which leaves two thirds of the cap and the text whole.
+    assert (state.omit_before, refs) == (
+        3,
+        ["tool_attachment:c2", "tool_attachment:c3"],
+    )
+
+    history += _looked("c4", MAX_WINDOW_IMAGE_BYTES * 2)
+    state, refs = _fit_images(history, state)
+    # The latest run stays whatever it weighs; everything before it goes.
+    assert (state.omit_before, refs) == (7, ["tool_attachment:c4"])

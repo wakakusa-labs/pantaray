@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactLoopResult
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
@@ -129,11 +128,6 @@ class _ScriptedMemoryAgent:
             assert isinstance(result.output, dict)
             draft_revision = str(result.output["draft_revision"])
         return MemoryUpdateAgentResult(
-            loop_result=ReactLoopResult(
-                status="success",
-                final_text="done",
-                steps=(),
-            ),
             applied_memory_request_ids=self.applied_memory_request_ids,
         )
 
@@ -309,10 +303,7 @@ class _AgentThatReplacesTheRoute:
             expires_at="2099-08-16T00:00:00Z",
             session_version="2",
         )
-        return MemoryUpdateAgentResult(
-            loop_result=ReactLoopResult(status="success", final_text="done", steps=()),
-            applied_memory_request_ids=(),
-        )
+        return MemoryUpdateAgentResult(applied_memory_request_ids=())
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str

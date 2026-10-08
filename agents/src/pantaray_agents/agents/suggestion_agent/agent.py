@@ -3,7 +3,7 @@
 import logging
 import random
 from datetime import UTC, datetime
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.capability_envelopes import (
@@ -79,9 +79,7 @@ from pantaray_agents.schema.repository_errors import repository_data_or_raise
 from pantaray_agents.utils.local_time import describe_local_time, local_zone_name
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
     LlmToolDefinition,
-    LlmToolResult,
 )
 from pantaray_llm.profiles import SUGGESTION_PROFILE_ID
 
@@ -355,9 +353,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             *,
             prompt: str,
             tools: tuple[LlmToolDefinition, ...],
-            continuation_mode: Literal["disabled", "stateless"],
-            continuation: LlmToolContinuation | None,
-            tool_result: LlmToolResult | None,
             system_instruction: str,
             stage: str,
         ) -> LlmToolCallTurn:
@@ -365,9 +360,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 sink=sink,
                 prompt=prompt,
                 tools=tools,
-                continuation_mode=continuation_mode,
-                continuation=continuation,
-                tool_result=tool_result,
                 system_instruction=system_instruction,
                 stage=stage,
             )

@@ -4,15 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
-from pantaray_agents.agents.artifact_react.transcript import (
-    build_prompt_with_transcript,
-)
-from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
+from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.agents.memory_file_editor.runner import (
     MemoryFileEditorRunInput,
     run_memory_file_editor,
 )
+from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
 from pantaray_agents.local_runtime.memory_catalog.models import (
     DraftLink,
@@ -42,7 +40,9 @@ from pantaray_agents.tools.contract import (
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
 )
-from pantaray_llm.contracts.tool_use import LlmToolCall, OpenAiToolContinuation
+from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
+from pantaray_llm.contracts.conversation import LlmTurnToolResultItem
+from pantaray_llm.contracts.tool_use import LlmToolCall
 
 
 @pytest.mark.asyncio
@@ -58,55 +58,51 @@ async def test_patch_reference_rejection_reaches_next_turn_and_can_be_corrected(
             _tool_call("completed", {}),
         )
     )
-    recorded: list[ReactLoopStep] = []
-    prompts: list[str] = []
+    requests: list[ConversationRequest] = []
 
-    async def call_llm(prompt, _tools, _continuation, _result):
-        prompts.append(prompt)
-        if len(prompts) == 3:
-            assert "MEMORY_LINK_INVALID" in prompt
-            assert "Use link_memory to add" in prompt
+    async def send(request: ConversationRequest) -> ActionTurnReply:
+        requests.append(request)
+        if len(requests) == 3:
+            rejected = request.conversation[-1]
+            assert isinstance(rejected, LlmTurnToolResultItem)
+            assert "MEMORY_LINK_INVALID" in str(rejected.output)
+            assert "Use link_memory to add" in str(rejected.output)
+            assert rejected.output["details"]["path"] == "facts.md"
             assert _document_text(session) == "- current\n"
         call = next(calls)
-        return LlmToolCallTurn(
-            calls=(
-                LlmToolCall(
-                    call_id=str(len(prompts)),
-                    name=call.tool_name,
-                    arguments=call.tool_args,
-                ),
+        return ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn",
+                messages=[],
+                calls=[
+                    LlmToolCall(
+                        call_id=str(len(requests)),
+                        name=call.tool_name,
+                        arguments=call.tool_args,
+                    )
+                ],
             ),
-            continuation=OpenAiToolContinuation(
-                provider="openai",
-                history_items=[{"role": "user", "content": "prompt"}],
-            ),
+            provider_turn=None,
         )
-
-    async def record_step(step: ReactLoopStep) -> None:
-        recorded.append(step)
 
     with MemoryRunWorkspaceScope() as workspace:
         workspace.create(artifact_root=tmp_path, user_id="user-1", run_id="run-1")
-        result = await run_memory_file_editor(
+        await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id="run-1",
                 tool_result_directory_fd=workspace.require_tool_results_fd(),
                 tool_definitions=tools,
-                build_prompt=lambda results, error: build_prompt_with_transcript(
-                    initial_prompt="Update memory",
-                    tool_results=results,
-                    last_error=error,
-                ),
-                call_llm=call_llm,
-                record_step=record_step,
-                policy=ReactLoopPolicy(max_llm_turns=5, max_tool_calls=4),
+                prompt="Update memory",
+                task="Edit the draft.",
+                system_instruction="system",
+                send=send,
+                usage=lambda: CountingSink().delta,
+                max_turns=5,
+                max_tool_calls=4,
             )
         )
 
-    assert result.loop_result.status == "success"
     assert _document_text(session) == "- corrected\n"
-    rejected = next(step for step in recorded if step.status == "error")
-    assert rejected.tool_output["details"]["path"] == "facts.md"
 
 
 @pytest.mark.asyncio

@@ -193,9 +193,6 @@ async def decide_with_lenses(
     turn = await generate_tool_call(
         prompt=prompt,
         tools=(_selector_tool(len(candidates)),),
-        continuation_mode="disabled",
-        continuation=None,
-        tool_result=None,
         system_instruction=selector_config.system_instruction,
         stage="suggestion_selector",
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, overload
+from typing import overload
 
 from pantaray_agents.agents.core.llm_file_inputs import (
     LlmFileInput,
@@ -21,13 +21,9 @@ from pantaray_llm.contracts.conversation import (
     OpenAiProviderTurn,
 )
 from pantaray_llm.contracts.tool_use import (
-    AnthropicToolContinuation,
     LlmToolCall,
-    LlmToolContinuation,
     LlmToolDefinition,
-    LlmToolResult,
     LlmToolUseRequest,
-    OpenAiToolContinuation,
 )
 from pantaray_llm.errors import LlmProxyExecutionError
 
@@ -45,7 +41,6 @@ from .llm_usage import (
 @dataclass(frozen=True, slots=True)
 class LlmToolCallTurn:
     calls: tuple[LlmToolCall, ...]
-    continuation: LlmToolContinuation | None
     dropped_call_names: tuple[str, ...] = ()
 
     @property
@@ -68,28 +63,18 @@ class LlmToolUseResponseError(RuntimeError):
     pass
 
 
-def _validate_tool_call_response(
-    *, response: object, continuation_mode: Literal["disabled", "stateless"]
-) -> LlmToolCallTurn:
+def _validate_tool_call_response(*, response: object) -> LlmToolCallTurn:
     calls = getattr(response, "tool_calls", ())
     if not isinstance(calls, tuple) or not calls:
         raise LlmToolUseResponseError("LLM proxy returned no native tool call")
-    dropped_call_names = getattr(response, "dropped_tool_call_names", ())
-    continuation = getattr(response, "tool_continuation", None)
-    if continuation is not None and not isinstance(
-        continuation, OpenAiToolContinuation | AnthropicToolContinuation
-    ):
-        raise LlmToolUseResponseError("LLM proxy returned invalid continuation state")
-    if continuation_mode == "stateless" and continuation is None:
-        raise LlmToolUseResponseError("LLM proxy omitted required continuation state")
-    if continuation_mode == "disabled" and continuation is not None:
+    # A one-shot call sends no continuation state and must get none back.
+    if getattr(response, "tool_continuation", None) is not None:
         raise LlmToolUseResponseError(
             "LLM proxy returned unexpected continuation state"
         )
     return LlmToolCallTurn(
         calls=calls,
-        continuation=continuation,
-        dropped_call_names=dropped_call_names,
+        dropped_call_names=getattr(response, "dropped_tool_call_names", ()),
     )
 
 
@@ -100,9 +85,6 @@ class LlmToolUseMixin(LLMGenerationMixin):
         sink: TokenSink,
         prompt: str,
         tools: tuple[LlmToolDefinition, ...],
-        continuation_mode: Literal["disabled", "stateless"],
-        continuation: LlmToolContinuation | None = None,
-        tool_result: LlmToolResult | None = None,
         conversation: LlmConversation | None = None,
         max_parallel_tool_calls: int = 1,
         system_instruction: str | None = None,
@@ -115,9 +97,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
             prompt=prompt,
             request=LlmToolUseRequest(
                 tools=list(tools),
-                continuation_mode=continuation_mode,
-                continuation=continuation,
-                tool_result=tool_result,
+                continuation_mode="disabled",
                 conversation=conversation,
                 max_parallel_tool_calls=max_parallel_tool_calls,
             ),
@@ -267,10 +247,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
                     ),
                 )
             else:
-                turn = _validate_tool_call_response(
-                    response=response,
-                    continuation_mode=request.continuation_mode,
-                )
+                turn = _validate_tool_call_response(response=response)
         except LlmToolUseResponseError:
             sink.record(usage_ledger, stage=stage, may_raise=False)
             raise

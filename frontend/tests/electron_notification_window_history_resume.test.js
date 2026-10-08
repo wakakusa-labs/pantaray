@@ -90,6 +90,15 @@ function loadNotificationWindowModule(
   const instances = [];
   const registeredIpcSenders = new Set();
   let appActive = true;
+  // The main window, focused while Pantaray is the active app: the History list and its chat.
+  const mainWindow = {
+    id: 'main-window',
+    focusableChanges: [],
+    setFocusable(value) {
+      this.focusableChanges.push(value);
+    },
+    isDestroyed: () => false,
+  };
   const display = {
     bounds: { x: 0, y: 0, width: 1440, height: 900 },
     workArea,
@@ -125,7 +134,7 @@ function loadNotificationWindowModule(
 
     // Another Pantaray window (the history list) holds focus while Pantaray is the active app.
     static getFocusedWindow() {
-      return appActive ? { id: 'main-window' } : null;
+      return appActive ? mainWindow : null;
     }
 
     static fromWebContents(webContents) {
@@ -222,6 +231,7 @@ function loadNotificationWindowModule(
       notificationWindow,
       instances,
       registeredIpcSenders,
+      mainWindow,
       setAppActive: (active) => {
         appActive = active;
       },
@@ -238,9 +248,7 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   let owner = 'owner-a';
   const { notificationWindow: windows, instances, registeredIpcSenders } =
     loadNotificationWindowModule(() => owner);
-  const main = { isDestroyed: () => false, setFocusable: value => { main.focusable = value; } };
   const handlers = windows.createNotificationIpcHandlers({
-    getMainWindow: () => main,
     resolveOverlayBootstrap: async () => createBootstrapResponse({ snapshot: createSnapshot({ suggestionId: 'history' }) }),
   });
   windows.showNotification('suggestion');
@@ -252,7 +260,6 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   windows.sendToOverlay('suggestion', 'ws:event', { private: 'old event' });
   windows.sendToOverlay('queued-without-window', 'ws:event', { private: 'queued event' });
   assert.equal(instances.length, 3);
-  if (process.platform === 'darwin') assert.equal(main.focusable, false);
 
   owner = null;
   windows.clearForOwnerChange();
@@ -260,7 +267,6 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   assert.equal(registeredIpcSenders.size, 0);
   assert.equal(windows.resolveOverlayId({ actionId: 'old-action' }), null);
   assert.equal(windows.resolveOverlayId({ processId: 'old-process' }), null);
-  if (process.platform === 'darwin') assert.equal(main.focusable, true);
   owner = 'owner-b';
   windows.showNotification('suggestion');
   windows.showNotification('queued-without-window');
@@ -928,46 +934,37 @@ test('hide overlay hides window instead of destroying it', () => {
   assert.equal(instances[0].hideCalls || 0, 1);
 });
 
-test('history overlay detaches main window from focus candidates while visible', async () => {
+test('an open overlay of any kind leaves the main window able to take typing', async () => {
+  // The main window holds the chat composer and the History search box. A History overlay used
+  // to make it unfocusable on macOS while open, so it took clicks but no keys.
   const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', {
-    value: 'darwin',
-    configurable: true,
-  });
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
   try {
-    const { notificationWindow } = loadNotificationWindowModule();
-    const mainWindow = {
-      focusable: true,
-      setFocusable(value) {
-        this.focusable = value;
-      },
-      isDestroyed() {
-        return false;
-      },
-    };
+    const { notificationWindow, instances, mainWindow } = loadNotificationWindowModule();
     const handlers = notificationWindow.createNotificationIpcHandlers({
       resumeLiveProcess: () => {},
       resolveOverlayBootstrap: async (suggestionId) =>
-        createBootstrapResponse({
-          suggestionId,
-          snapshot: createSnapshot({ suggestionId }),
-        }),
-      getMainWindow: () => mainWindow,
+        createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
     });
 
     handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
     await new Promise((resolve) => setImmediate(resolve));
-
-    assert.equal(mainWindow.focusable, false);
-
+    notificationWindow.showNotification('S2');
+    notificationWindow.openStandaloneConversationOverlay('standalone:1');
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+    for (const win of instances) {
+      win.webContentsEvents.emit('did-finish-load');
+      win.windowEvents.emit('ready-to-show');
+    }
+    handlers.onOverlayInteraction({ sender: instances[0].webContents });
     notificationWindow.hideOverlay('S1');
+    handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+    await new Promise((resolve) => setImmediate(resolve));
 
-    assert.equal(mainWindow.focusable, true);
+    assert.equal(instances.filter((win) => win.isVisible()).length, 4);
+    assert.deepEqual(mainWindow.focusableChanges, []);
   } finally {
-    Object.defineProperty(process, 'platform', {
-      value: originalPlatform,
-      configurable: true,
-    });
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   }
 });
 

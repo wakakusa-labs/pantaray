@@ -1,5 +1,3 @@
-import type { BrowserWindow } from 'electron';
-
 import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
 
 import type {
@@ -117,7 +115,6 @@ export type CreateNotificationIpcHandlers = (options: {
   resumeLiveProcess: (payload: ResumeProcessRequest) => void;
   resolveOverlayBootstrap: (suggestionId: string) => Promise<OverlayBootstrapResponse | null>;
   refreshActionConversation: (actionId: string) => void;
-  getMainWindow?: () => BrowserWindow | null;
 }) => NotificationIpcHandlers;
 
 export type NotificationWindowApi = {

@@ -9,18 +9,24 @@ tools can read back, as the Action's tool results do.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 from pydantic import BaseModel, ValidationError
 
+from pantaray_agents.local_runtime.tooling.documents import (
+    MAX_RENDERED_PAGES,
+    RENDERED_PAGE_MEDIA_TYPE,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     release_stored_tool_result,
     store_tool_result,
 )
+from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
@@ -38,6 +44,11 @@ from pantaray_agents.tools.contract import (
     tool_error_response,
 )
 
+from .attachment_reference import (
+    ATTACHMENT_BLOB_REF_PREFIX,
+    ATTACHMENT_ID_HEX_LENGTH,
+    TOOL_ATTACHMENT_REF_PREFIX,
+)
 from .discovery import GREP_MAX_OUTPUT_BYTES, run_glob, run_grep, run_list
 from .grep_lines import GREP_MAX_LINE_CHARS
 from .manifest_paths import PATH_NOT_ABSOLUTE, ManifestRoot
@@ -53,6 +64,13 @@ from .read_contract import (
     ReadToolResult,
 )
 from .read_scope import ReadScope
+from .render_pages import (
+    CONTINUE_WITH_READ,
+    DrawnDocument,
+    RendererPreparing,
+    RenderPdfPageToolArgs,
+    draw_document_pages,
+)
 from .ripgrep import RIPGREP_TIMEOUT_SECONDS
 
 _SPILL_ROOT_MODE = 0o700
@@ -70,20 +88,27 @@ _POSITIVE: dict[str, JSONValue] = {"type": "integer", "minimum": 1}
 _SPILLED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 # run_read and the discovery bodies, each called as body(scope=..., request=...).
 type _Body = Callable[..., ReadToolResult]
+type _RunCall = Callable[[ReactToolCall, BaseModel], Awaitable[ReactToolResult]]
+RENDER_PDF_PAGE_TOOL_NAME = "render_pdf_page"
+# Inside the run's own folder, so both go with it when the run ends.
+_PAGES_DIRNAME = "rendered_pages"
+_CONVERTED_DIRNAME = "converted_documents"
 
 
 def build_read_only_file_tools(
     *,
+    db_path: Path,
     folders: tuple[Path, ...],
     read_access_scope: ReadAccessScope,
     app_storage_roots: tuple[Path, ...],
     spill_root: Path,
 ) -> tuple[ReactToolDefinition, ...]:
-    """The four tools over ``folders``, which they only read.
+    """The tools over ``folders``, which they only read.
 
     Paths are absolute: there is no current directory and no scratch workspace.
-    ``app_storage_roots`` stay hidden except ``spill_root``, created here, where
-    a large result is written and read back from.
+    ``app_storage_roots`` stay hidden except ``spill_root``, created here: the
+    run's own folder, where a large result is written and read back from and
+    drawn pages and converted documents are kept, all removed with it.
     """
 
     spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
@@ -104,7 +129,9 @@ def build_read_only_file_tools(
             storage_roots=app_storage_roots, readable_roots=(spill_path,)
         ),
     )
-    return _ReadOnlyFileTools(scope=scope, spill_root=spill_path).definitions()
+    return _ReadOnlyFileTools(
+        db_path=db_path, scope=scope, spill_root=spill_path
+    ).definitions()
 
 
 def _read_only_root(root_id: str, path: Path) -> ManifestRoot:
@@ -124,6 +151,7 @@ def _read_only_root(root_id: str, path: Path) -> ManifestRoot:
 
 @dataclass(frozen=True, slots=True)
 class _ReadOnlyFileTools:
+    db_path: Path  # where the Office converter is installed from
     scope: ReadScope
     spill_root: Path
 
@@ -158,7 +186,7 @@ class _ReadOnlyFileTools:
                 },
                 required=("path",),
                 success={"anyOf": [{"required": ["kind", "path"]}, _SPILLED]},
-                execute=self._executor(ReadToolArgs, run_read),
+                execute=self._executor(ReadToolArgs, self._off_loop(run_read)),
             ),
             _definition(
                 name="list",
@@ -175,7 +203,7 @@ class _ReadOnlyFileTools:
                 },
                 required=("path",),
                 success=_DISCOVERY_SUCCESS,
-                execute=self._executor(ListToolArgs, run_list),
+                execute=self._executor(ListToolArgs, self._off_loop(run_list)),
             ),
             _definition(
                 name="glob",
@@ -193,7 +221,7 @@ class _ReadOnlyFileTools:
                 },
                 required=("base_path", "pattern"),
                 success=_DISCOVERY_SUCCESS,
-                execute=self._executor(GlobToolArgs, run_glob),
+                execute=self._executor(GlobToolArgs, self._off_loop(run_glob)),
             ),
             _definition(
                 name="grep",
@@ -219,11 +247,39 @@ class _ReadOnlyFileTools:
                 },
                 required=("base_path", "pattern"),
                 success=_DISCOVERY_SUCCESS,
-                execute=self._executor(GrepToolArgs, run_grep),
+                execute=self._executor(GrepToolArgs, self._off_loop(run_grep)),
+            ),
+            _definition(
+                name=RENDER_PDF_PAGE_TOOL_NAME,
+                description=(
+                    "Draw pages of a PDF, Word (.docx), PowerPoint (.pptx) or "
+                    "Excel (.xlsx) file, by its absolute path, as images to look "
+                    "at, where this run can show images: for a scan, a chart, a "
+                    "figure, a slide's layout or a table whose layout carries "
+                    "the meaning. read still returns the text. Pages are the "
+                    "ones read uses; a slide or a sheet number is its page "
+                    f"number. At most {MAX_RENDERED_PAGES} pages per call. If "
+                    "the result says the viewer is still being set up, continue "
+                    "with read. " + notes
+                ),
+                properties={
+                    "path": _PATH,
+                    "pages": {
+                        "type": "array",
+                        "items": _POSITIVE,
+                        "minItems": 1,
+                        "maxItems": MAX_RENDERED_PAGES,
+                    },
+                },
+                required=("path", "pages"),
+                success={"required": ["kind", "path"]},
+                execute=self._executor(RenderPdfPageToolArgs, self._render),
             ),
         )
 
-    def _executor(self, args_model: type[BaseModel], body: _Body) -> ReactToolExecutor:
+    def _executor(
+        self, args_model: type[BaseModel], run: _RunCall
+    ) -> ReactToolExecutor:
         async def execute(call: ReactToolCall, _step_number: int) -> ReactToolResult:
             try:
                 request = args_model.model_validate(call.tool_args)
@@ -235,9 +291,7 @@ class _ReadOnlyFileTools:
                     details={"message": str(exc)},
                 )
             try:
-                # A read can stream far into a large file and a spill syncs a
-                # file to disk, so both stay off the event loop.
-                return await asyncio.to_thread(self._run, call, body, request)
+                return await run(call, request)
             except BrokerPolicyError as exc:
                 details: dict[str, JSONValue] = {}
                 if exc.code == PATH_NOT_ABSOLUTE:
@@ -264,6 +318,78 @@ class _ReadOnlyFileTools:
                 )
 
         return execute
+
+    def _off_loop(self, body: _Body) -> _RunCall:
+        # A read can stream far into a large file and a spill syncs a file to
+        # disk, so both stay off the event loop.
+        return lambda call, request: asyncio.to_thread(self._run, call, body, request)
+
+    async def _render(self, call: ReactToolCall, request: BaseModel) -> ReactToolResult:
+        args = cast(RenderPdfPageToolArgs, request)
+        drawn = await draw_document_pages(
+            db_path=self.db_path,
+            scope=self.scope,
+            raw_path=args.path,
+            pages=args.pages,
+            converted_dir=self.spill_root / _CONVERTED_DIRNAME,
+        )
+        path = drawn.target.display_path
+        if isinstance(drawn, RendererPreparing):
+            return ReactToolResult(
+                tool_name=call.tool_name,
+                status="success",
+                output={
+                    "kind": RENDERER_PREPARING_OUTPUT_KIND,
+                    "path": path,
+                    "message": (
+                        f"Pages of {path} cannot be drawn yet: the viewer for "
+                        f"this format is still being set up. {CONTINUE_WITH_READ}"
+                    ),
+                },
+            )
+        images = await asyncio.to_thread(self._keep_pages, drawn)
+        return ReactToolResult(
+            tool_name=call.tool_name,
+            status="success",
+            output={
+                "kind": "pdf_pages",
+                "path": path,
+                "page_count": drawn.page_count,
+                "message": (
+                    f"Drew pages of {path}, which has {drawn.page_count} pages. "
+                    + " ".join(
+                        f"Page {page.number}: {image.ref}"
+                        for page, image in zip(drawn.pages, images, strict=True)
+                    )
+                ),
+            },
+            images=images,
+        )
+
+    def _keep_pages(self, drawn: DrawnDocument) -> tuple[ToolImage, ...]:
+        """Write each page into the run's folder, the file its image is sent from."""
+
+        pages_dir = self.spill_root / _PAGES_DIRNAME
+        pages_dir.mkdir(mode=_SPILL_ROOT_MODE, exist_ok=True)
+        images = []
+        for page in drawn.pages:
+            sha256 = hashlib.sha256(page.payload).hexdigest()
+            attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
+            name = f"page-{page.number}-{attachment_id}.png"
+            (pages_dir / name).write_bytes(page.payload)
+            images.append(
+                ToolImage(
+                    ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
+                    blob_ref=f"{ATTACHMENT_BLOB_REF_PREFIX}{attachment_id}",
+                    display_path=name,
+                    mime_type=RENDERED_PAGE_MEDIA_TYPE,
+                    byte_size=len(page.payload),
+                    sha256=sha256,
+                    workspace_root_path=str(self.spill_root),
+                    workspace_relative_path=f"{_PAGES_DIRNAME}/{name}",
+                )
+            )
+        return tuple(images)
 
     def _run(
         self, call: ReactToolCall, body: _Body, request: BaseModel
@@ -333,4 +459,4 @@ def _image(attachment: Mapping[str, JSONValue]) -> ToolImage:
     )
 
 
-__all__ = ["build_read_only_file_tools"]
+__all__ = ["RENDER_PDF_PAGE_TOOL_NAME", "build_read_only_file_tools"]

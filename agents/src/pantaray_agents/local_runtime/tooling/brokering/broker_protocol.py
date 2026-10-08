@@ -7,13 +7,9 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
-    field_validator,
     model_validator,
 )
 
-from pantaray_agents.local_runtime.tooling.documents.page_render import (
-    MAX_RENDERED_PAGES,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.files.read_contract import (
     DiscoveryTruncationReason,
@@ -22,6 +18,7 @@ from pantaray_agents.tools.files.read_contract import (
     ListToolArgs,
     ReadToolArgs,
 )
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..models import BrokerNetworkPolicy
 
@@ -44,24 +41,6 @@ BrokerExecutableSourceKind = Literal[
     "app_runtime_python",
     "trusted_system_executable",
 ]
-
-
-class RenderPdfPageToolArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    path: str = Field(min_length=1, pattern=r"\S")
-    pages: list[Annotated[int, Field(ge=1)]] = Field(
-        min_length=1, max_length=MAX_RENDERED_PAGES
-    )
-
-    @field_validator("pages")
-    @classmethod
-    def _reject_repeated_pages(cls, pages: list[int]) -> list[int]:
-        # A repeat would spend one of the few page slots on an image the
-        # caller already has, so it is a mistake to report rather than honour.
-        if len(set(pages)) != len(pages):
-            raise ValueError("pages must not name the same page twice")
-        return pages
 
 
 class ApplyPatchEdit(BaseModel):

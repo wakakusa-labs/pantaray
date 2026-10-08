@@ -12,7 +12,10 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     tool_error_response,
 )
-from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
+from pantaray_agents.tools.files.read_only_tools import (
+    RENDER_PDF_PAGE_TOOL_NAME,
+    build_read_only_file_tools,
+)
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
@@ -108,6 +111,7 @@ class LocalSuggestionResearchTools:
             *(
                 _without_images(tool)
                 for tool in build_read_only_file_tools(
+                    db_path=self.db_path,
                     folders=self.snapshot.folders,
                     read_access_scope=self.snapshot.read_access_scope,
                     app_storage_roots=app_owned_roots(self.db_path),
@@ -115,6 +119,8 @@ class LocalSuggestionResearchTools:
                         db_path=self.db_path, run_id=run_id
                     ),
                 )
+                # Drawn pages are images only, which this run cannot show.
+                if tool.name != RENDER_PDF_PAGE_TOOL_NAME
             ),
             *WebResearchToolSession(user_id=user_id).definitions(),
             *SuggestionZaneiSession(

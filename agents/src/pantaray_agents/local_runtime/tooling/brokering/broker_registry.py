@@ -9,6 +9,7 @@ from pantaray_agents.tools.files.read_contract import (
     ReadToolArgs,
 )
 from pantaray_agents.tools.files.read_output import ReadToolOutput
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from .broker_protocol import (
     ApplyPatchToolArgs,
@@ -21,7 +22,6 @@ from .broker_protocol import (
     GrepToolOutput,
     ListToolOutput,
     RenderPdfPageOutput,
-    RenderPdfPageToolArgs,
     RunPythonToolArgs,
     RunPythonToolOutput,
     ToolError,

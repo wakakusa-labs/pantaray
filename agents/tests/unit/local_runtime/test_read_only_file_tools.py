@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime.office_runtime import (
+    OfficeRuntimePreparing,
+    OfficeRuntimeReady,
+)
+from pantaray_agents.local_runtime.tooling.documents import RenderedPage
+from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -14,8 +22,12 @@ from pantaray_agents.tools.contract import (
     ToolCallEnvelope,
 )
 from pantaray_agents.tools.files import ripgrep
-from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
+from pantaray_agents.tools.files.read_only_tools import (
+    RENDER_PDF_PAGE_TOOL_NAME,
+    build_read_only_file_tools,
+)
 
+from .test_pdf_page_render import write_pdf
 from .test_read_document_broker import (
     PIXEL_PNG,
     write_sample_docx,
@@ -23,6 +35,12 @@ from .test_read_document_broker import (
     write_sample_pptx,
     write_sample_xlsx,
 )
+from .test_render_office_pages_broker import (
+    FakeOfficeRuntime,
+    stub_converter,
+    use_runtime,
+)
+from .test_render_pdf_page_broker import stub_renderer
 
 
 def _tools(
@@ -36,6 +54,7 @@ def _tools(
     (storage / "pantaray.db").write_text("app-storage-secret", encoding="utf-8")
     spill_root = storage / "suggestion_tool_results" / "run-1"
     definitions = build_read_only_file_tools(
+        db_path=tmp_path / "runtime.sqlite3",
         folders=(folder.resolve(),),
         read_access_scope=read_access_scope,
         app_storage_roots=(storage.resolve(),),
@@ -263,3 +282,57 @@ async def test_grep_skips_app_storage_but_searches_a_spilled_result(
 
     assert in_folder.output["matches"] == []
     assert len(in_spill.output["matches"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_drawn_pages_are_kept_in_the_runs_folder_and_sent_from_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, folder, _storage, spill = _tools(tmp_path)
+    write_pdf(folder / "scan.pdf", marks=[(0.1, 0.2, 0.3)] * 3)
+    drawn = (_page(1, b"page-one"), _page(3, b"page-three"))
+    asked = stub_renderer(monkeypatch, pages=drawn, page_count=3)
+
+    result = await _call(
+        registry,
+        RENDER_PDF_PAGE_TOOL_NAME,
+        {"path": str(folder / "scan.pdf"), "pages": [1, 3]},
+    )
+
+    assert result.status == "success"
+    assert (result.output["kind"], result.output["page_count"]) == ("pdf_pages", 3)
+    assert asked["pages"] == [1, 3]
+    # Each image is its page's bytes, in a file inside the run's own folder,
+    # so the request reads it from there and it goes when the run's folder does.
+    for page, image in zip(drawn, result.images, strict=True):
+        source = Path(image.workspace_root_path, image.workspace_relative_path)
+        assert source.parent.parent == spill.resolve()
+        assert source.read_bytes() == page.payload
+        assert image.sha256 == hashlib.sha256(page.payload).hexdigest()
+        assert image.ref in result.output["message"]
+
+
+@pytest.mark.asyncio
+async def test_an_office_file_converts_into_the_runs_folder_once_its_viewer_is_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, folder, _storage, spill = _tools(tmp_path)
+    write_sample_pptx(folder / "deck.pptx")
+    args = {"path": str(folder / "deck.pptx"), "pages": [1]}
+    stub_renderer(monkeypatch, pages=(_page(1, b"slide-one"),), page_count=1)
+    runtime = use_runtime(monkeypatch, FakeOfficeRuntime(OfficeRuntimePreparing()))
+
+    waiting = await _call(registry, RENDER_PDF_PAGE_TOOL_NAME, args)
+    runtime.state = runtime.after_ensure = OfficeRuntimeReady(bundle_path=tmp_path)
+    conversions = stub_converter(monkeypatch)
+    drawn = await _call(registry, RENDER_PDF_PAGE_TOOL_NAME, args)
+
+    assert waiting.status == "success" and waiting.images == ()
+    assert waiting.output["kind"] == RENDERER_PREPARING_OUTPUT_KIND
+    assert len(drawn.images) == 1
+    (conversion,) = conversions
+    assert cast(Path, conversion["destination"]).parent.parent == spill.resolve()
+
+
+def _page(number: int, payload: bytes) -> RenderedPage:
+    return RenderedPage(number=number, width_px=10, height_px=10, payload=payload)

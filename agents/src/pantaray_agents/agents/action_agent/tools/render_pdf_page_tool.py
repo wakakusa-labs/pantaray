@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
-    RenderPdfPageToolArgs,
-)
 from pantaray_agents.local_runtime.tooling.documents import MAX_RENDERED_PAGES
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from .base import (
     ToolDefinition,

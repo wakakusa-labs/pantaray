@@ -71,13 +71,15 @@ def run_chat_turn_in_thread[T](
         _RUNS[user_id] = _Run(loop=loop, cancel=task.cancel, finished=finished)
 
     def run() -> None:
+        outcome: T | ChatTurnStopped = "stopped"
+        failure: BaseException | None = None
         try:
-            done.set_result(loop.run_until_complete(task))
+            outcome = loop.run_until_complete(task)
         except asyncio.CancelledError:
-            done.set_result("stopped")
+            pass
         except BaseException as exc:  # noqa: BLE001
             # Handed to the waiting caller, which owns the failure.
-            done.set_exception(exc)
+            failure = exc
         finally:
             # A cancelled await on a thread leaves that thread running: the
             # turn has stopped once those threads have finished too.
@@ -86,6 +88,11 @@ def run_chat_turn_in_thread[T](
             with _LOCK:
                 _RUNS.pop(user_id, None)
             finished.set_result(None)
+        # Last, so the caller's next turn starts only after this one is gone.
+        if failure is None:
+            done.set_result(outcome)
+        else:
+            done.set_exception(failure)
 
     threading.Thread(target=run, name="chat-turn", daemon=True).start()
     return done

@@ -10,6 +10,7 @@ import pytest
 
 from pantaray_agents.agents.chat_agent.context import ChatWindow
 from pantaray_agents.agents.chat_agent.turn import ChatTurnInterrupted, ChatTurnPlan
+from pantaray_agents.local_runtime.chat import turn_runs
 from pantaray_agents.local_runtime.chat.turn_runs import (
     chat_turn_running,
     run_chat_turn_in_thread,
@@ -168,3 +169,33 @@ async def test_a_stopped_turn_has_stopped_once_its_threaded_write_is_done() -> N
 
     assert writes == ["reply"]
     assert outcome.result(timeout=5) == "stopped"
+
+
+async def test_the_next_turn_waits_for_a_stopped_turns_late_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The barrier gives up waiting long before the write ends.
+    monkeypatch.setattr(turn_runs, "CHAT_TURN_STOP_WAIT_SECONDS", 0.01)
+    chat = _Chat(monkeypatch)
+    chat.waiting = 1
+    chat.gate.set()
+    writes: list[str] = []
+    seen_by_next: list[list[str]] = []
+    first_run = chat.run
+
+    async def run(plan: ChatTurnPlan, **fields: object) -> ChatWindow:
+        if not writes and not seen_by_next:
+            seen_by_next.append([])
+            chat.started.set()
+            await asyncio.to_thread(lambda: (time.sleep(0.4), writes.append("reply")))
+        seen_by_next.append(list(writes))
+        return await first_run(plan, **fields)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(chat_turns, "run_chat_turn", run)
+    drain = chat_turns.request_chat_turn("late")
+    await asyncio.to_thread(chat.started.wait, 5)
+
+    await stop_chat_turns(owner_id="late")
+    await drain
+
+    assert seen_by_next[-1] == ["reply"]

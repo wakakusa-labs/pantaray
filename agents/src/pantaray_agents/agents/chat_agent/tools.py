@@ -21,6 +21,7 @@ from pantaray_agents.local_runtime.chat.store import (
     read_user_message,
 )
 from pantaray_agents.local_runtime.chat.work_list import (
+    SubmittedMessage,
     read_latest_run_process,
     read_submitted_message,
 )
@@ -83,6 +84,11 @@ _ATTACHMENTS: dict[str, JSONValue] = {
         "needs; [] for none."
     ),
 }
+# A file goes to one task only: handing it over moves it there.
+_HANDED_OVER = (
+    "Not done: a file from those messages has already gone to another of your "
+    "tasks. Add this to that task, or ask the user to attach it again."
+)
 _SUCCESS: JsonSchema = {
     "type": "object",
     "required": ["action_id"],
@@ -129,6 +135,12 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
         )
         supplement = args.get("supplement")
+        attached = _attachments(
+            plan, "accept_suggestion", _strings(args["attachments_from"])
+        )
+        if isinstance(attached, ReactToolResult):
+            return attached
+        images, files = attached
         outcome = await accept_suggestion(
             user_id=plan.user_id,
             suggestion_id=str(args["suggestion_id"]),
@@ -137,15 +149,18 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             language=None,
             supplement=supplement if isinstance(supplement, str) else None,
             supplement_project_refs=(),
-            images=(),
-            files=(),
+            images=images,
+            files=files,
         )
         if isinstance(outcome, SuggestionAccepted):
             return _started("accept_suggestion", outcome.action.action_id)
-        # Taken up before a restart, with other words for the supplement.
         sent = read_submitted_message(user_id=plan.user_id, message_id=key)
-        if sent is not None and sent.suggestion_id == args["suggestion_id"]:
-            return _started("accept_suggestion", sent.action_id)
+        if sent is not None:
+            return _already_sent("accept_suggestion", sent)
+        if outcome.reason == "attachment_unavailable":
+            return _refused(
+                "accept_suggestion", "ATTACHMENT_ALREADY_HANDED_OVER", _HANDED_OVER
+            )
         return _refused(
             "accept_suggestion",
             f"SUGGESTION_{outcome.reason.upper()}",
@@ -187,6 +202,7 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
                     "type": ["string", "null"],
                     "description": "What the user added to their yes, or null.",
                 },
+                "attachments_from": _ATTACHMENTS,
             },
             accept,
         ),
@@ -229,18 +245,10 @@ def _submit(
     message: str,
     attachments_from: list[str],
 ) -> ReactToolResult:
-    images: list[ImageInput] = []
-    files: list[FileAttachmentInput] = []
-    for item_id in attachments_from:
-        attached = read_user_message(user_id=plan.user_id, item_id=item_id)
-        if attached is None:
-            return _refused(
-                tool,
-                "UNKNOWN_MESSAGE",
-                f"Not done: {item_id} is not a message of the user.",
-            )
-        images.extend(attached.images)
-        files.extend(attached.files)
+    attached = _attachments(plan, tool, attachments_from)
+    if isinstance(attached, ReactToolResult):
+        return attached
+    images, files = attached
     try:
         command = SubmitActionMessageCommand(
             user_id=plan.user_id,
@@ -248,8 +256,8 @@ def _submit(
             message=ActionUserMessageInput(
                 message_id=key,
                 content=message,
-                images=tuple(images),
-                files=tuple(files),
+                images=images,
+                files=files,
             ),
         )
     except ValidationError:
@@ -259,28 +267,14 @@ def _submit(
     try:
         result = submit_action_message(command)
     except MessageIdentityConflictError:
-        # This place in the turn already sent something before a restart, and
-        # the turn, asked again, may have reordered what it sends.
         sent = read_submitted_message(user_id=plan.user_id, message_id=key)
         if sent is None:
             raise
-        return _refused(
-            tool,
-            "ALREADY_SENT_IN_THIS_TURN",
-            f"Not sent again: before a restart, this turn already gave your task "
-            f'{sent.action_id} this: "{sent.text}". If that is this request, '
-            f"it is in hand; if not, call {tool} again.",
-        )
+        return _already_sent(tool, sent)
     except ActionNotFoundError:
         return _refused(tool, "UNKNOWN_TASK", "Not done: no task of yours has that id.")
     except ActionFileAttachmentUnavailableError:
-        # A file goes to one task only: handing it over moves it there.
-        return _refused(
-            tool,
-            "ATTACHMENT_ALREADY_HANDED_OVER",
-            "Not done: a file from those messages has already gone to another of "
-            "your tasks. Add this to that task, or ask the user to attach it again.",
-        )
+        return _refused(tool, "ATTACHMENT_ALREADY_HANDED_OVER", _HANDED_OVER)
     except ActionMessageConflictError:
         return _refused(
             tool,
@@ -291,10 +285,43 @@ def _submit(
         return _refused(
             tool,
             "TASK_STOPPED",
-            "Not done yet: the user stopped this task. The instruction is kept in "
-            "it and runs when they resume the task.",
+            "Not done: the user stopped this task, and an instruction sent while "
+            "it is stopped is not run when they resume it. Tell the user; once "
+            "they resume it, send it again.",
         )
     return _started(tool, result.action_id)
+
+
+def _attachments(
+    plan: ChatTurnPlan, tool: str, item_ids: list[str]
+) -> tuple[tuple[ImageInput, ...], tuple[FileAttachmentInput, ...]] | ReactToolResult:
+    """The images and files of the user's messages ``item_ids``."""
+
+    images: list[ImageInput] = []
+    files: list[FileAttachmentInput] = []
+    for item_id in item_ids:
+        attached = read_user_message(user_id=plan.user_id, item_id=item_id)
+        if attached is None:
+            return _refused(
+                tool,
+                "UNKNOWN_MESSAGE",
+                f"Not done: {item_id} is not a message of the user.",
+            )
+        images.extend(attached.images)
+        files.extend(attached.files)
+    return tuple(images), tuple(files)
+
+
+def _already_sent(tool: str, sent: SubmittedMessage) -> ReactToolResult:
+    # This place in the turn already sent something before a restart, and the
+    # turn, asked again, may have reordered or reworded what it sends.
+    return _refused(
+        tool,
+        "ALREADY_SENT_IN_THIS_TURN",
+        f"Not sent again: before a restart, this turn already gave your task "
+        f'{sent.action_id} this: "{sent.text}". If that is this request, it is '
+        f"in hand (send_to_action adds anything new); if not, call {tool} again.",
+    )
 
 
 def _started(tool: str, action_id: str) -> ReactToolResult:

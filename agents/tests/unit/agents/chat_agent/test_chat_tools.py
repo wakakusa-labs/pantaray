@@ -37,6 +37,7 @@ from pantaray_agents.local_runtime.runtime.job_queue_runtime import (
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.chat import UserMessageContent
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -47,6 +48,7 @@ from pantaray_agents.tools.contract import (
 USER = "user-1"
 NOW = "2026-10-08T09:00:00Z"
 FILE_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+IMAGE = {"kind": "image", "storage_path": f"{USER}/2026-10-08/{FILE_ID}.png"}
 
 
 @pytest.fixture
@@ -215,18 +217,50 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
         "sug-1"
     ]
 
-    taken = await _turn("a0")(
-        "accept_suggestion", suggestion_id="sug-1", supplement=None
+    pictured = append_chat_item(
+        user_id=USER,
+        message_id="m-1",
+        content=UserMessageContent(
+            kind="user_message",
+            text="Yes, with this logo",
+            quote_item_id=None,
+            images=(ImageInput.model_validate(IMAGE),),
+            files=(),
+        ),
     )
-    # The same turn after a crash, with the user's addition worded anew.
+    taken = await _turn("a0")(
+        "accept_suggestion",
+        suggestion_id="sug-1",
+        supplement=None,
+        attachments_from=[pictured.item_id],
+    )
+    # The same turn after a crash, as it was, and with an addition worded anew.
+    replayed = await _turn("a0")(
+        "accept_suggestion",
+        suggestion_id="sug-1",
+        supplement=None,
+        attachments_from=[pictured.item_id],
+    )
     again = await _turn("a0")(
-        "accept_suggestion", suggestion_id="sug-1", supplement="with our logo"
+        "accept_suggestion",
+        suggestion_id="sug-1",
+        supplement="with our logo",
+        attachments_from=[],
     )
     gone = await _turn("a2")(
-        "accept_suggestion", suggestion_id="sug-1", supplement=None
+        "accept_suggestion", suggestion_id="sug-1", supplement=None, attachments_from=[]
     )
 
-    assert isinstance(taken, dict) and again == taken
+    assert isinstance(taken, dict) and replayed == taken
+    assert (
+        isinstance(again, dict) and again["error_code"] == "ALREADY_SENT_IN_THIS_TURN"
+    )
+    with sqlite3.connect(db_path) as connection:
+        (message_json,) = connection.execute(
+            "SELECT user_message_json FROM agent_action_steps "
+            "WHERE user_message_id = 'chat-turn/a0/accept_suggestion/1'"
+        ).fetchone()
+    assert json.loads(message_json)["images"] == [IMAGE]
     assert _actions(db_path) == [(taken["action_id"], "sug-1")]
     assert isinstance(gone, dict) and gone["status"] == "error"
     assert read_chat_work_list(user_id=USER).suggestions == ()

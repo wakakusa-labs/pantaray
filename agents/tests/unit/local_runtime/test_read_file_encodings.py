@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import codecs
+import shutil
 from pathlib import Path
 
 import pytest
 
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files import read as read_module
+from pantaray_agents.tools.files import ripgrep
 from pantaray_agents.tools.files.read_output import ReadToolOutput
 
 from .read_tool_broker_support import (
@@ -117,3 +119,38 @@ async def test_read_refuses_utf16_text_over_the_in_memory_cap(
         await _read(tmp_path, payload)
 
     assert exc_info.value.code == "READ_TEXT_FILE_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    shutil.which("rg", path=ripgrep.RIPGREP_TRUSTED_PATH) is None,
+    reason="ripgrep is not installed in a trusted location",
+)
+async def test_grep_shows_a_cp932_line_valid_as_utf8_as_read_shows_it(
+    tmp_path: Path,
+) -> None:
+    # Half-width katakana ﾂｩ is C2 A9 in CP932, which UTF-8 reads as ©, so only
+    # the whole file says which one the line is.
+    short = "ﾂｩ needle"
+    long = "ﾂｩ" * 400 + "needle" + "ﾂｩ" * 400
+    payload = f"{short}\r\n{long}\r\n' 日本語\r\n".encode("cp932")
+    [read] = await _read(tmp_path, payload)
+    search_root = tmp_path / "search-root"
+    search_root.mkdir()
+    (search_root / "source.txt").write_bytes(payload)
+
+    grep = ripgrep.run_ripgrep_grep(
+        cwd=search_root,
+        sandbox_profile="(version 1)\n(allow default)",
+        pattern="needle",
+        include_glob=None,
+        max_matches=10,
+    )
+
+    assert read["encoding"] == "cp932"
+    assert read["content"] == f"{short}\n{long}\n' 日本語\n"
+    # The long line's excerpt is centred on the match counted in that text.
+    assert [(match.line_number, match.line) for match in grep.matches] == [
+        (1, short),
+        (2, "…" + "ﾂｩ" * 125 + "needle" + "ﾂｩ" * 122 + "…"),
+    ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -17,7 +18,9 @@ from .grep_lines import (
     RIPGREP_MAX_COLUMNS,
     RipgrepGrepMatch,
     grep_match_from_ripgrep,
+    match_line_codec,
 )
+from .text_encoding import UnmarkedTextEncoding
 
 RIPGREP_COMMAND = "rg"
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -193,7 +196,8 @@ def run_ripgrep_grep(
     include_path: Callable[[Path], bool] | None = None,
     sorted_by_path: bool = False,
 ) -> RipgrepGrepResult:
-    matches: list[RipgrepGrepMatch] = []
+    # Path bytes, relative path, line number, column and line, as printed.
+    printed: list[tuple[bytes, str, int, int, bytes]] = []
     binary_match_paths: list[str] = []
     truncated = False
     # --null ends a path with NUL but keeps a newline inside it, which splits
@@ -224,15 +228,16 @@ def run_ripgrep_grep(
         relative_path = raw_path.decode("utf-8", errors="replace")
         if is_hidden(relative_path):
             return True
-        if len(matches) >= max_matches:
+        if len(printed) >= max_matches:
             truncated = True
             return False
-        matches.append(
-            grep_match_from_ripgrep(
-                relative_path=relative_path,
-                line_number=int(parsed.group(1)),
-                column=int(parsed.group(2)),
-                content=parsed.group(3).removesuffix(b"\r"),
+        printed.append(
+            (
+                raw_path,
+                relative_path,
+                int(parsed.group(1)),
+                int(parsed.group(2)),
+                parsed.group(3).removesuffix(b"\r"),
             )
         )
         return True
@@ -267,6 +272,24 @@ def run_ripgrep_grep(
         handle_line=handle_line,
     )
     _raise_if_ripgrep_grep_failed(result=result)
+    # Decided once per file and only after ripgrep exits, so the whole-file
+    # decode is not charged to ripgrep's timeout.
+    line_codecs: dict[bytes, UnmarkedTextEncoding] = {}
+    matches: list[RipgrepGrepMatch] = []
+    for raw_path, relative_path, line_number, column, content in printed:
+        codec = line_codecs.get(raw_path)
+        if codec is None:
+            codec = match_line_codec(cwd / os.fsdecode(raw_path))
+            line_codecs[raw_path] = codec
+        matches.append(
+            grep_match_from_ripgrep(
+                relative_path=relative_path,
+                line_number=line_number,
+                column=column,
+                content=content,
+                codec=codec,
+            )
+        )
     return RipgrepGrepResult(
         matches=tuple(matches),
         truncated=truncated or result.stdout_truncated or result.timed_out,

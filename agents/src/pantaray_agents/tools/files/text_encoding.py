@@ -19,7 +19,7 @@ type TextEncoding = Literal["utf-8", "utf-8-sig", "utf-16-le", "utf-16-be", "cp9
 type UnmarkedTextEncoding = Literal["utf-8", "cp932"]
 
 READ_TEXT_ENCODING_UNSUPPORTED = "READ_TEXT_ENCODING_UNSUPPORTED"
-# Tried in this order on a file, or a grep match line, that has no mark.
+# Tried in this order on a file that has no mark.
 UNMARKED_TEXT_ENCODINGS: tuple[UnmarkedTextEncoding, ...] = ("utf-8", "cp932")
 
 _VALIDATION_CHUNK_BYTES = 1024 * 1024
@@ -47,20 +47,19 @@ def byte_order_mark(sample: bytes) -> ByteOrderMark | None:
     return None
 
 
-def unmarked_text_encoding(
-    descriptor: int, *, display_path: str
-) -> UnmarkedTextEncoding:
-    """The first of UTF-8 and CP932 that decodes the whole file.
+def whole_file_encoding(descriptor: int) -> UnmarkedTextEncoding | None:
+    """The first of UTF-8 and CP932 that decodes the whole unmarked file.
 
-    Design limit: the whole file is decoded on every read, about 0.5 s per
-    100 MB of UTF-8 Japanese and 1 s per 100 MB of CP932; remember the decision
-    per file size and mtime when read latency on such files is reported.
+    Design limit: the whole file is decoded on every read and for every file a
+    grep matches in, about 0.5 s per 100 MB of UTF-8 Japanese and 1 s per
+    100 MB of CP932; remember the decision per file size and mtime when read
+    or grep latency on such files is reported.
     """
 
     for encoding in UNMARKED_TEXT_ENCODINGS:
         if _decodes_whole_file(descriptor, encoding=encoding):
             return encoding
-    raise text_encoding_unsupported(display_path=display_path, encoding=None)
+    return None
 
 
 def text_encoding_unsupported(
@@ -83,17 +82,6 @@ def text_encoding_unsupported(
     )
 
 
-def decode_unmarked_text(content: bytes) -> tuple[str, UnmarkedTextEncoding]:
-    """Text of bytes with no mark, replacing what neither encoding decodes."""
-
-    for encoding in UNMARKED_TEXT_ENCODINGS:
-        try:
-            return content.decode(encoding), encoding
-        except UnicodeDecodeError:
-            continue
-    return content.decode("utf-8", errors="replace"), "utf-8"
-
-
 def _decodes_whole_file(descriptor: int, *, encoding: UnmarkedTextEncoding) -> bool:
     decoder = codecs.getincrementaldecoder(encoding)("strict")
     position = 0
@@ -113,7 +101,6 @@ __all__ = [
     "TextEncoding",
     "UnmarkedTextEncoding",
     "byte_order_mark",
-    "decode_unmarked_text",
     "text_encoding_unsupported",
-    "unmarked_text_encoding",
+    "whole_file_encoding",
 ]

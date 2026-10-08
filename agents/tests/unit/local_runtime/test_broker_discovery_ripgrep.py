@@ -345,6 +345,8 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A file's lines are decoded in the encoding decided for the whole file.
+    (tmp_path / "sjis.txt").write_bytes("日本語 needle\n".encode("cp932"))
     monkeypatch.setattr(
         ripgrep,
         "_resolve_ripgrep_executable",

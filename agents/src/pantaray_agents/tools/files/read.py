@@ -28,7 +28,7 @@ from .text_encoding import (
     TextEncoding,
     byte_order_mark,
     text_encoding_unsupported,
-    unmarked_text_encoding,
+    whole_file_encoding,
 )
 from .text_lines import (
     ReadLinesResult,
@@ -239,9 +239,11 @@ def _read_text_page(
 ) -> tuple[ReadLinesResult, TextEncoding]:
     try:
         if mark is None:
-            encoding = unmarked_text_encoding(
-                descriptor, display_path=target.display_path
-            )
+            encoding = whole_file_encoding(descriptor)
+            if encoding is None:
+                raise text_encoding_unsupported(
+                    display_path=target.display_path, encoding=None
+                )
             return read_text_descriptor_lines(
                 descriptor=descriptor,
                 offset=offset,

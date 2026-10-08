@@ -143,8 +143,7 @@ class ChatWindow:
 
     @classmethod
     def fresh(cls) -> ChatWindow:
-        # The chat runs on the models an Action does, under the same input cap.
-        window_tokens = load_local_runtime_tunables().action_agent.context_window_tokens
+        window_tokens = load_local_runtime_tunables().chat.context_window_tokens
         return cls(
             budget=ContextBudget(
                 window_tokens=window_tokens, baseline=None, reset_pending=False

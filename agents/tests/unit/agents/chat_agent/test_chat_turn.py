@@ -6,7 +6,7 @@ import asyncio
 import itertools
 import os
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +24,7 @@ from pantaray_agents.agents.core.mixins.llm_usage import TokenSink
 from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.local_runtime.chat.store import (
     append_chat_item,
+    chat_turn_end_message_id,
     read_chat_items_after,
 )
 from pantaray_agents.local_runtime.runtime.identity import (
@@ -34,6 +35,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.chat import (
     AssistantMessageContent,
     ChatItem,
+    TurnFailureContent,
     UserMessageContent,
 )
 from pantaray_agents.tools.contract import (
@@ -380,3 +382,45 @@ async def test_a_turn_planned_before_the_owner_changed_reads_and_sends_nothing()
         await run_chat_turn(plan, send=model.send, tools=(), window=ChatWindow.fresh())
 
     assert model.requests == []
+
+
+async def test_calls_that_come_back_after_the_route_changed_do_not_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("m-1", "Find the deck")
+    routes = iter(["first", "first", "second"])
+    monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: next(routes))
+    monkeypatch.setattr(
+        chat_turn,
+        "effective_route_identity",
+        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
+    )
+    ran: list[str] = []
+    look = LlmToolCall(call_id="c", name="look", arguments={})
+
+    with pytest.raises(ChatTurnInterrupted):
+        await _run(
+            _Model([_turn(look, text="Looking.")]),
+            tools=(_tool("look", lambda: ran.append("look")),),
+        )
+
+    assert ran == []
+    assert [getattr(i.content, "text", None) for i in _items()] == ["Find the deck"]
+
+
+async def test_a_retry_reads_waiting_items_the_window_had_passed() -> None:
+    asked = _say("m-1", "Summarize my week")
+    failure = append_chat_item(
+        user_id=USER,
+        message_id=chat_turn_end_message_id("a0", "failure", asked.sequence),
+        content=TurnFailureContent(kind="turn_failure", reason="llm_connection"),
+    )
+    plan = plan_chat_turn(user_id=USER, retry_of=failure.item_id)
+    assert plan is not None
+    model = _Model([_reply_call("Here it is.")])
+    passed = replace(ChatWindow.fresh(), after=failure.sequence)
+
+    await run_chat_turn(plan, send=model.send, tools=(), window=passed)
+
+    assert any("Summarize my week" in t for t in _texts(model.requests[0].conversation))
+    assert getattr(_items()[-1].content, "text", None) == "Here it is."

@@ -66,6 +66,7 @@ from pantaray_agents.local_runtime.runtime.identity import (
     verify_current_owner,
 )
 from pantaray_agents.local_runtime.runtime.route_identity import (
+    EffectiveRouteIdentity,
     effective_route_identity,
     read_route_inputs,
 )
@@ -236,23 +237,27 @@ class _ChatTurn:
     seen: int = 0  # the newest item read so far
     checked: dict[str, AssistantMessageContent | str] = field(default_factory=dict)
     nudged: bool = False
+    route: EffectiveRouteIdentity | None = None  # what the turn started on
 
     async def run(
         self, send: ChatSend, tools: tuple[ReactToolDefinition, ...]
     ) -> AssistantMessageContent:
-        started = effective_route_identity(read_route_inputs())
+        self.route = effective_route_identity(read_route_inputs())
         # The owner may have changed since the plan: nothing of this chat is
         # read for, or sent on, anyone else's route.
-        if started.owner_id != self.plan.user_id:
+        if self.route.owner_id != self.plan.user_id:
             raise ChatTurnInterrupted("the chat's owner no longer owns the data")
         sink = CountingSink()
 
         async def send_turn(request: ConversationRequest) -> TurnReply:
-            # A turn started for one owner and account never reaches another.
-            if effective_route_identity(read_route_inputs()) != started:
-                raise ChatTurnInterrupted("the route changed under the turn")
+            self.require_route()
             return await send(request, sink)
 
+        # A retry answers items from before the window's boundary too, and a
+        # waiting item is never left out of the turn that answers it.
+        self.window = replace(
+            self.window, after=min(self.window.after, self.plan.cursor)
+        )
         items = await asyncio.to_thread(
             read_chat_items_for_turn, user_id=self.plan.user_id, after=self.window.after
         )
@@ -310,8 +315,16 @@ class _ChatTurn:
             for entry in render_item(item)
         ]
 
+    def require_route(self) -> None:
+        """A turn started for one owner and account never reaches another."""
+
+        if effective_route_identity(read_route_inputs()) != self.route:
+            raise ChatTurnInterrupted("the route changed under the turn")
+
     async def on_turn(self, turn: RecordedTurn) -> None:
         self.window = replace(self.window, budget=turn.window.budget)
+        # A reply that came back after the route changed runs none of its calls.
+        self.require_route()
         response = turn.reply.response
         if response.calls:
             # Said beside the calls, so the user reads it before they run.

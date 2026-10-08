@@ -299,8 +299,15 @@ async def test_a_turn_whose_every_output_is_refused_logs_what_broke(
         tool_call_violation_reason="invalid_response",
     )
 
+    # A call id comes from the model's output too.
+    reused = LlmToolCall(call_id="secret-id", name="look", arguments={})
+    doubled = _turn(reused, LlmToolCall(call_id="secret-id", name="look", arguments={}))
+
     with caplog.at_level(logging.WARNING):
-        await _run(_Model([refused] * REPAIR_MAX_ATTEMPTS))
+        await _run(
+            _Model([refused] * (REPAIR_MAX_ATTEMPTS - 1) + [doubled]),
+            tools=(_tool("look", lambda: None),),
+        )
 
     failure = _items()[-1].content
     assert isinstance(failure, TurnFailureContent) and failure.reason == "llm_request"
@@ -310,9 +317,12 @@ async def test_a_turn_whose_every_output_is_refused_logs_what_broke(
         if "CHAT_TURN_FAILED" in r.getMessage()
     ]
     assert logged["error_class"] == "ConversationOutputInvalid"
-    assert logged["violations"] == ["invalid_response"] * REPAIR_MAX_ATTEMPTS
+    assert logged["violations"] == ["invalid_response"] * (REPAIR_MAX_ATTEMPTS - 1) + [
+        "call_id_taken"
+    ]
     # What was refused can quote the model's output: never logged.
     assert "Hello there" not in caplog.text
+    assert "secret-id" not in caplog.text
 
 
 async def test_an_answer_in_text_alone_is_sent_back_once() -> None:

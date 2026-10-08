@@ -190,7 +190,15 @@ class ConversationRun[T]:
 
 
 class ConversationOutputInvalid(RuntimeError):
-    """Every send of one turn came back refused; ``args`` are the reasons."""
+    """Every send of one turn came back refused; ``args`` are the reasons.
+
+    ``violations`` names what each refused output broke, in fixed codes: the
+    reasons can quote the output, the codes never do.
+    """
+
+    def __init__(self, *reasons: str, violations: tuple[str, ...]) -> None:
+        super().__init__(*reasons)
+        self.violations = violations
 
 
 class ConversationTurnsExhausted(RuntimeError):
@@ -311,6 +319,7 @@ class _Run[T]:
         max_parallel = 1 if final else min(self.spec.max_parallel_tool_calls, left)
         last = f"This is the last turn, where {self.what_counts}."
         reasons: list[str] = []
+        violations: list[str] = []
         for _ in range(REPAIR_MAX_ATTEMPTS):
             # A repair notice goes last, so a repaired send is an append to the
             # one it repairs. It is never kept, and the turn produced behind it
@@ -341,6 +350,7 @@ class _Run[T]:
                 detail = exc.error_message.strip() or "the output was invalid"
                 violation = exc.tool_call_violation_reason or "invalid_response"
                 reasons.append(f"{violation}: {detail}")
+                violations.append(violation)
                 continue
             finally:
                 # A refused send was paid for too, and measures the same input.
@@ -357,7 +367,8 @@ class _Run[T]:
                 return reply, sent.request
             # Its result would answer two calls, which refuses every later request.
             reasons.append(f"call_id {taken[0]!r} is already taken; use a new one.")
-        raise ConversationOutputInvalid(*reasons)
+            violations.append("call_id_taken")
+        raise ConversationOutputInvalid(*reasons, violations=tuple(violations))
 
     def _request(self, notices: list[str], max_parallel: int) -> _Prepared:
         """The request to send, rebuilt behind a later boundary when it must be.

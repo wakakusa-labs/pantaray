@@ -287,10 +287,8 @@ async def run_chat_turn(
             reason=reason,
             error_class=type(exc).__name__,
             error_code=getattr(exc, "error_code", None),
-            # What each refused output broke, without the details, which may
-            # quote the model's output.
             violations=(
-                [str(cause).partition(":")[0] for cause in exc.args]
+                list(exc.violations)
                 if isinstance(exc, ConversationOutputInvalid)
                 else None
             ),

@@ -338,3 +338,47 @@ it('opens on the chat at the Action’s latest card when the Overlay asks, readi
   expect(screen.getByRole('button', { name: 'チャット', pressed: true })).toBeInTheDocument();
   expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
 });
+
+it('keeps the draft and a failed request across a switch to the list', async () => {
+  pages = [{ items: [], next_cursor: null }];
+  renderPage();
+  const input = await screen.findByRole('textbox', { name: 'メッセージ' });
+  sendMessage.mockRejectedValueOnce(new Error('response lost'));
+  await userEvent.type(input, '届いたかわからない{Enter}');
+  await screen.findByRole('button', { name: '同じメッセージを再送' });
+
+  await userEvent.click(screen.getByRole('button', { name: '一覧' }));
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('届いたかわからない');
+
+  sendMessage.mockResolvedValueOnce({ kind: 'rejected', field: 'body' });
+  await userEvent.click(screen.getByRole('button', { name: '同じメッセージを再送' }));
+  expect(sendMessage.mock.calls[1][0].message_id).toBe(sendMessage.mock.calls[0][0].message_id);
+});
+
+it('discards a document whose write finishes after the page closed', async () => {
+  pages = [{ items: [], next_cursor: null }];
+  let finishWrite: () => void = () => {};
+  attachFile.mockImplementationOnce(
+    ({ name }) =>
+      new Promise((resolve) => {
+        finishWrite = () =>
+          resolve({ attachmentId: '00000000-0000-4000-8000-000000000002', name, byteSize: 15 });
+      })
+  );
+  const { unmount } = renderPage();
+  await screen.findByRole('textbox', { name: 'メッセージ' });
+  await userEvent.upload(
+    screen
+      .getByRole('form', { name: 'Pantaray へのメッセージ' })
+      .querySelector('input[type="file"]')!,
+    new File(['%PDF-1.4\n'], '遅い.pdf', { type: 'application/pdf' })
+  );
+  unmount();
+  await act(async () => finishWrite());
+  await waitFor(() =>
+    expect(discardAttachment).toHaveBeenCalledWith({
+      attachmentId: '00000000-0000-4000-8000-000000000002',
+    })
+  );
+});

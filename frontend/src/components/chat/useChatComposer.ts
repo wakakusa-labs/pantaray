@@ -47,16 +47,29 @@ const EMPTY: ChatComposerState = {
   problem: null,
 };
 
-/** The chat's composer: one message with an optional quote and attachments, sent once. */
+export type ChatComposerControl = ReturnType<typeof useChatComposer>;
+
+/**
+ * The chat's composer: one message with an optional quote and attachments, sent once. It lives
+ * as long as the History page, so switching to the list keeps the draft and a failed request.
+ */
 export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }) {
   const [state, setState] = useState<ChatComposerState>(EMPTY);
   const actions = window.electron?.actions;
-  // Documents staged here and never sent are discarded when the chat closes.
+  // Documents staged here and never sent are discarded when the page closes, including those
+  // whose write finishes after it closed.
   const unsentRef = useRef<readonly ComposerAttachment[]>([]);
+  const closedRef = useRef(false);
   useEffect(() => {
     unsentRef.current = state.pending === null ? state.attachments : [];
   });
-  useEffect(() => () => discardDocuments(actions, unsentRef.current), [actions]);
+  useEffect(() => {
+    closedRef.current = false;
+    return () => {
+      closedRef.current = true;
+      discardDocuments(actions, unsentRef.current);
+    };
+  }, [actions]);
 
   const deliver = (request: ChatMessageRequest) => {
     const chat = window.electron?.chat;
@@ -108,6 +121,10 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
     if (!actions || state.pending !== null || picked.length === 0) return;
     setState((current) => ({ ...current, attachmentsInFlight: current.attachmentsInFlight + 1 }));
     const { accepted, failure } = await stageFiles(actions, picked, state.attachments);
+    if (closedRef.current) {
+      discardDocuments(actions, accepted);
+      return;
+    }
     setState((current) => {
       const added = addStagedAttachments(actions, current.attachments, accepted, failure);
       return {

@@ -7,7 +7,7 @@ import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHi
 import { useI18n } from '@/context/useI18n';
 import { groupByLocalDay } from '@/history/historyDayGroups';
 import { openNewWork } from '@/history/newWork';
-import { useChatItems } from '@/hooks/useChatItems';
+import type { ChatItemsResult } from '@/hooks/useChatItems';
 import { useChatWorkStates } from '@/hooks/useChatWorkStates';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
 
@@ -20,7 +20,7 @@ import {
   latestCardPositions,
   type WorkKey,
 } from './chatTimeline';
-import { useChatComposer } from './useChatComposer';
+import type { ChatComposerControl } from './useChatComposer';
 import { useChatReveal, type ChatReveal } from './useChatReveal';
 import { useChatScroll } from './useChatScroll';
 
@@ -48,11 +48,16 @@ async function openCard(card: ChatCardData): Promise<void> {
  */
 export function ChatView({
   modeSwitch,
+  chat,
+  composer,
   reveal,
   turnInProgress,
   onRetryTurn,
 }: {
   modeSwitch: ReactNode;
+  /** The chat and its composer outlive this view, so switching to the list loses neither. */
+  chat: ChatItemsResult;
+  composer: ChatComposerControl;
   /** The Action whose latest card the Overlay asked to show, or null. */
   reveal: ChatReveal | null;
   /** True while a chat turn runs; drawn as a 「…」 bubble after the last message. */
@@ -62,7 +67,6 @@ export function ChatView({
 }) {
   const { t, language } = useI18n();
   const shortcutHint = useGlobalShortcutHint();
-  const chat = useChatItems();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
   const [openWork, setOpenWork] = useState<WorkKey | null>(null);
@@ -97,12 +101,6 @@ export function ChatView({
     loadOlder: chat.loadOlder,
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const composer = useChatComposer({
-    onSent: (item) => {
-      scroll.followNewest();
-      chat.appendItem(item);
-    },
-  });
 
   const handleNewWork = async (): Promise<void> => {
     setNotice(null);
@@ -256,7 +254,15 @@ export function ChatView({
         ) : null}
       </div>
       {renderBody()}
-      <ChatComposer composer={composer} textareaRef={textareaRef} t={t} />
+      <ChatComposer
+        composer={composer}
+        textareaRef={textareaRef}
+        t={t}
+        onSend={() => {
+          scroll.followNewest();
+          composer.send();
+        }}
+      />
       <div className="chat-announcer" role="status">
         {chat.arrived?.content.kind === 'assistant_message'
           ? t('history.chat.announce', {

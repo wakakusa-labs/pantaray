@@ -28,8 +28,11 @@ export function ChatComposer({
   composer,
   textareaRef,
   t,
+  onSend,
 }: {
   composer: ReturnType<typeof useChatComposer>;
+  /** Sends the draft; the chat also scrolls to the newest message for it. */
+  onSend: () => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }) {
@@ -42,7 +45,7 @@ export function ChatComposer({
       aria-label={t('history.chat.composer.label')}
       onSubmit={(event) => {
         event.preventDefault();
-        composer.send();
+        onSend();
       }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
@@ -120,7 +123,7 @@ export function ChatComposer({
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
-            if (composer.canSend) composer.send();
+            if (composer.canSend) onSend();
           }}
           onPaste={(event) => {
             const files = Array.from(event.clipboardData.files);

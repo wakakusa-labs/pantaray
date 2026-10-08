@@ -8,6 +8,7 @@ import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
 import HistorySearchField from '@/components/history/HistorySearchField';
 import { getConversationHistoryStatusMeta } from '@/components/history/statusTokens';
 import { ChatView } from '@/components/chat/ChatView';
+import { useChatComposer } from '@/components/chat/useChatComposer';
 import { HistoryModeSwitch } from '@/components/history/HistoryModeSwitch';
 import { NewWorkButton } from '@/components/history/NewWorkButton';
 import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
@@ -26,6 +27,7 @@ import {
   type HistoryViewMode,
 } from '@/history/historyViewMode';
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
+import { useChatItems } from '@/hooks/useChatItems';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
@@ -360,6 +362,8 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
 const SuggestionHistoryPage = () => {
   const { t } = useI18n();
   const [mode, setMode] = useState<HistoryViewMode>(readHistoryViewMode);
+  const chat = useChatItems();
+  const composer = useChatComposer({ onSent: chat.appendItem });
   // `Layout` brings the page here with the Action the Overlay asked to show in the chat.
   const location = useLocation();
   const reveal = readShowChatState(location.state, location.key);
@@ -390,7 +394,14 @@ const SuggestionHistoryPage = () => {
     <HistoryListView modeSwitch={modeSwitch} />
   ) : (
     // The chat's turn state and retry are not delivered to the renderer yet (later nodes).
-    <ChatView modeSwitch={modeSwitch} reveal={reveal} turnInProgress={false} onRetryTurn={null} />
+    <ChatView
+      modeSwitch={modeSwitch}
+      chat={chat}
+      composer={composer}
+      reveal={reveal}
+      turnInProgress={false}
+      onRetryTurn={null}
+    />
   );
 };
 

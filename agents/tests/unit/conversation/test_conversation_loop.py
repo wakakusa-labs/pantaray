@@ -384,6 +384,29 @@ async def test_the_last_turn_keeps_the_tools_and_runs_only_the_end() -> None:
     assert run.idle[0].final
 
 
+@pytest.mark.parametrize("ends", (True, False))
+async def test_a_last_turn_that_reaches_for_a_tool_gets_one_more(ends: bool) -> None:
+    script = [_reply(_call("c1", "a")), _reply(_call("c2", "a"), _call("c3", "a"))]
+    run = _Run([*script, _reply(_end("c4")) if ends else _reply(_call("c4", "a"))])
+
+    if ends:
+        assert await run(max_turns=2) == "done"
+    else:
+        with pytest.raises(ConversationTurnsExhausted):
+            await run(max_turns=2)
+
+    # One extra last turn, never two, with the tools unchanged and none run.
+    assert len(run.requests) == 3
+    assert run.requests[2].tools == run.requests[0].tools
+    assert "This is the last turn" in _text(run.requests[2].conversation[-1])
+    assert run.log == ["start a", "end a"]
+    for call_id in ("c2", "c3", *(() if ends else ("c4",))):
+        assert run.code(call_id) == NOT_RUN_ERROR_CODE
+        assert "Call finish now." in str(run.results[call_id].output)
+    # The reach is not judged; only the extra turn is.
+    assert [turn.final for turn in run.idle] == [True]
+
+
 async def test_a_refusal_on_the_last_turn_is_answered_before_the_run_fails() -> None:
     first = _Run([_reply(_end("c1", "draft"))], decide=lambda _: Continue("Not yet."))
 

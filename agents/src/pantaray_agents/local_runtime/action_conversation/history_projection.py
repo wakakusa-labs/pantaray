@@ -249,8 +249,10 @@ def _user_history_text(entry: UserEntry) -> str:
         return render_action_user_visible_text(
             content=entry.approved_suggestion.content, supplement=entry.content
         )
-    # USER validation requires ordinary message content.
-    assert entry.content is not None
+    if entry.content is None:
+        # The chat handed the task over in its own words.
+        assert entry.chat_note is not None  # USER validation requires one of them
+        return entry.chat_note
     return entry.content
 
 

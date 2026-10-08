@@ -11,6 +11,7 @@ again if this is a different request.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -55,6 +56,7 @@ from pantaray_agents.local_runtime.tooling.repository import (
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionUserMessageInput,
+    ChatHandoffInput,
     FileAttachmentInput,
 )
 from pantaray_agents.schema.agent.base import JSONValue
@@ -69,29 +71,37 @@ from pantaray_agents.tools.contract import (
     tool_error_response,
 )
 
+# Between the user's messages relayed together, as between paragraphs.
+_RELAY_SEPARATOR = "\n\n"
+
 type _Run = Callable[[dict[str, JSONValue], str], Awaitable[ReactToolResult]]
 
-_MESSAGE: dict[str, JSONValue] = {
-    "type": "string",
-    "description": (
-        "The user's request in their own words, as close to what they wrote as "
-        "you can; add only what the task cannot know otherwise. What you want to "
-        "ask the user goes in your reply to them, not here."
-    ),
-}
-_ATTACHMENTS: dict[str, JSONValue] = {
+_RELAY: dict[str, JSONValue] = {
     "type": "array",
     "items": {"type": "string"},
     "description": (
-        "Ids of the user's chat messages whose attached images and files, and "
-        "the workspace projects they named with @, the task needs; [] for none."
+        "Ids of the user's chat messages to pass to the task as they wrote them, "
+        "with the files they attached and the projects they named with @. When "
+        "the user's own words already say what to do, relay them and write no "
+        "note. [] when none of their messages is the instruction."
+    ),
+}
+_NOTE: dict[str, JSONValue] = {
+    "type": ["string", "null"],
+    "description": (
+        "Your own instruction to the task, shown as yours, not the user's. Write "
+        "one only when their words need context to be understood -- what "
+        '"that" points at, what you and they settled earlier -- or when no '
+        "message of theirs says what to do. null otherwise. What you want to ask "
+        "the user goes in your reply to them, not here."
     ),
 }
 # A file goes to one task only: handing it over moves it there.
 _HANDED_OVER = (
     "Not done: nothing was sent. A file from those messages already went to one "
     "of your tasks, which keeps it. If this is for that task, send it again "
-    "with attachments_from []; otherwise ask the user to attach the file again."
+    "without relaying that message; otherwise ask the user to attach the file "
+    "again."
 )
 _SUCCESS: JsonSchema = {
     "type": "object",
@@ -109,8 +119,8 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             key,
             "start_action",
             NewActionTarget(),
-            str(args["message"]),
-            _strings(args["attachments_from"]),
+            _strings(args["relay"]),
+            _note(args["note"]),
         )
 
     async def send(args: dict[str, JSONValue], key: str) -> ReactToolResult:
@@ -126,8 +136,8 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             key,
             "send_to_action",
             target,
-            str(args["message"]),
-            _strings(args["attachments_from"]),
+            _strings(args["relay"]),
+            _note(args["note"]),
         )
 
     async def accept(args: dict[str, JSONValue], key: str) -> ReactToolResult:
@@ -138,26 +148,20 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             user_id=plan.user_id,
             applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
         )
-        supplement = args.get("supplement")
-        attached = _attachments(
-            plan, "accept_suggestion", _strings(args["attachments_from"])
-        )
-        if isinstance(attached, ReactToolResult):
-            return attached
-        images, files, project_refs = attached
-        supplement, supplement_refs = _with_projects(
-            supplement if isinstance(supplement, str) else None, project_refs
-        )
+        relayed = _relayed(plan, "accept_suggestion", _strings(args["relay"]))
+        if isinstance(relayed, ReactToolResult):
+            return relayed
         outcome = await accept_suggestion(
             user_id=plan.user_id,
             suggestion_id=str(args["suggestion_id"]),
             command_id=key,
             approval_mode=preference.approval_mode,
             language=None,
-            supplement=supplement,
-            supplement_project_refs=supplement_refs,
-            images=images,
-            files=files,
+            # What the user added to their yes, in their own words.
+            supplement=relayed.text,
+            supplement_project_refs=relayed.project_refs,
+            images=relayed.images,
+            files=relayed.files,
         )
         if isinstance(outcome, SuggestionAccepted):
             return _started("accept_suggestion", outcome.action.action_id)
@@ -182,7 +186,7 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             "Start working on a task the user asks of you, as your own task: "
             "making, changing, sending or running something, or research too long "
             "to answer here. Not for answering a question yourself.",
-            {"message": _MESSAGE, "attachments_from": _ATTACHMENTS},
+            {"relay": _RELAY, "note": _NOTE},
             start,
         ),
         _tool(
@@ -193,8 +197,8 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             "step, and a finished one starts again with it.",
             {
                 "action_id": {"type": "string"},
-                "message": _MESSAGE,
-                "attachments_from": _ATTACHMENTS,
+                "relay": _RELAY,
+                "note": _NOTE,
             },
             send,
         ),
@@ -206,11 +210,14 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             "one more task in your work list.",
             {
                 "suggestion_id": {"type": "string"},
-                "supplement": {
-                    "type": ["string", "null"],
-                    "description": "What the user added to their yes, or null.",
+                "relay": {
+                    **_RELAY,
+                    "description": (
+                        "Ids of the user's chat messages that add to their yes "
+                        "(a condition, a file), passed on as they wrote them; [] "
+                        "when they only agreed."
+                    ),
                 },
-                "attachments_from": _ATTACHMENTS,
             },
             accept,
         ),
@@ -258,13 +265,20 @@ def _submit(
     key: str,
     tool: str,
     target: NewActionTarget | ExistingActionTarget,
-    message: str,
-    attachments_from: list[str],
+    relay: list[str],
+    note: str | None,
 ) -> ReactToolResult:
-    attached = _attachments(plan, tool, attachments_from)
-    if isinstance(attached, ReactToolResult):
-        return attached
-    images, files, project_refs = attached
+    relayed = _relayed(plan, tool, relay)
+    if isinstance(relayed, ReactToolResult):
+        return relayed
+    if relayed.text is None and note is None:
+        return _refused(
+            tool,
+            "NOTHING_TO_SEND",
+            "Not done: nothing was sent. Relay the user's message that says what "
+            "to do, or write your note.",
+        )
+    images, files = relayed.images, relayed.files
     # Something already went in under this key (a re-run): the submission
     # replays it, or answers what went in, with the files where they went.
     sent_before = read_submitted_message(user_id=plan.user_id, message_id=key)
@@ -291,7 +305,9 @@ def _submit(
             "call send_to_action for it; otherwise ask the user to attach the "
             "file again.",
         )
-    content, content_refs = _with_projects(message, project_refs)
+    # The user's words go in as theirs; the chat's note goes beside them, or
+    # alone as the message when none of theirs is relayed.
+    content = relayed.text if relayed.text is not None else note
     try:
         command = SubmitActionMessageCommand(
             user_id=plan.user_id,
@@ -301,7 +317,11 @@ def _submit(
                 content=content or "",
                 images=images,
                 files=files,
-                project_refs=content_refs,
+                project_refs=relayed.project_refs,
+                chat_handoff=ChatHandoffInput(
+                    relayed_item_ids=tuple(relay),
+                    note=note if relayed.text is not None else None,
+                ),
             ),
         )
     except ValidationError:
@@ -340,59 +360,52 @@ def _stopped(tool: str) -> ReactToolResult:
     )
 
 
-def _attachments(
-    plan: ChatTurnPlan, tool: str, item_ids: list[str]
-) -> (
-    tuple[
-        tuple[ImageInput, ...],
-        tuple[FileAttachmentInput, ...],
-        tuple[ActionProjectRef, ...],
-    ]
-    | ReactToolResult
-):
-    """The images, files and named projects of the user's messages ``item_ids``."""
+@dataclass(frozen=True, slots=True)
+class _Relayed:
+    """The user's messages to relay, as one text with what they carry."""
 
+    text: str | None
+    images: tuple[ImageInput, ...]
+    files: tuple[FileAttachmentInput, ...]
+    project_refs: tuple[ActionProjectRef, ...]
+
+
+def _relayed(
+    plan: ChatTurnPlan, tool: str, item_ids: list[str]
+) -> _Relayed | ReactToolResult:
+    """The user's messages ``item_ids`` in their own words, one after another.
+
+    Each named project keeps its span, moved by where its message lands.
+    """
+
+    texts: list[str] = []
     images: list[ImageInput] = []
     files: list[FileAttachmentInput] = []
     project_refs: list[ActionProjectRef] = []
     for item_id in item_ids:
-        attached = read_user_message(user_id=plan.user_id, item_id=item_id)
-        if attached is None:
+        message = read_user_message(user_id=plan.user_id, item_id=item_id)
+        if message is None:
             return _refused(
                 tool,
                 "UNKNOWN_MESSAGE",
                 f"Not done: {item_id} is not a message of the user.",
             )
-        images.extend(attached.images)
-        files.extend(attached.files)
-        project_refs.extend(attached.project_refs)
-    return tuple(images), tuple(files), tuple(project_refs)
-
-
-def _with_projects(
-    text: str | None, refs: tuple[ActionProjectRef, ...]
-) -> tuple[str | None, tuple[ActionProjectRef, ...]]:
-    """Point each named project at its name in ``text``, as an Action message does.
-
-    The model writes the text, so a name it left out is added at the end as the
-    user wrote it, with @. Each project is named once, in text order.
-    """
-
-    text = None if text is None else text.strip()
-    anchored: list[ActionProjectRef] = []
-    seen: set[str] = set()
-    cursor = 0
-    for ref in refs:
-        if ref.project_id in seen:
-            continue
-        seen.add(ref.project_id)
-        start = -1 if text is None else text.find(ref.display_name, cursor)
-        if start < 0:
-            text = f"{text}\n@{ref.display_name}" if text else f"@{ref.display_name}"
-            start = len(text) - len(ref.display_name)
-        cursor = start + len(ref.display_name)
-        anchored.append(ref.model_copy(update={"start": start, "end": cursor}))
-    return text, tuple(anchored)
+        offset = sum(len(text) + len(_RELAY_SEPARATOR) for text in texts)
+        texts.append(message.text)
+        images.extend(message.images)
+        files.extend(message.files)
+        project_refs.extend(
+            ref.model_copy(
+                update={"start": ref.start + offset, "end": ref.end + offset}
+            )
+            for ref in message.project_refs
+        )
+    return _Relayed(
+        text=_RELAY_SEPARATOR.join(texts) if texts else None,
+        images=tuple(images),
+        files=tuple(files),
+        project_refs=tuple(project_refs),
+    )
 
 
 def _already_sent(tool: str, sent: SubmittedMessage) -> ReactToolResult:
@@ -428,6 +441,10 @@ def _started(tool: str, action_id: str) -> ReactToolResult:
 
 def _refused(tool: str, code: str, message: str) -> ReactToolResult:
     return tool_error_response(tool_name=tool, error_code=code, message=message)
+
+
+def _note(value: JSONValue) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
 
 
 def _strings(value: JSONValue) -> list[str]:

@@ -29,26 +29,45 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
       </span>
     ) : null;
 
-  if (content === null && images.length === 0 && files.length === 0) return state;
+  // What Pantaray's chat wrote when it handed this over: Pantaray's, never a user bubble.
+  const chatNote = item.source === 'canonical' ? item.entry.chat_note : null;
+  const hasUserPart = content !== null || images.length > 0 || files.length > 0;
+  const note =
+    chatNote !== null ? (
+      <section className="action-conversation__chat-note" aria-label={copy.chatNote}>
+        <span className="action-conversation__chat-note-label" aria-hidden="true">
+          {copy.chatNote}
+        </span>
+        <p>{chatNote}</p>
+        {hasUserPart ? null : state}
+      </section>
+    ) : null;
+  if (!hasUserPart) return note ?? state;
   return (
-    <article className="action-conversation__user" aria-label={copy.you}>
-      {content !== null ? (
-        <p>
-          <ProjectRefText text={content} refs={projectRefs} />
-        </p>
-      ) : null}
-      {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
-      {files.length > 0 ? (
-        <ul className="action-conversation__attachments" aria-label={copy.userFiles(files.length)}>
-          {files.map((file, index) => (
-            // A message may carry two files with the same name; the order is stable.
-            <li key={index}>
-              <AttachedFileChip name={file.name} byteSize={file.byte_size} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {state}
-    </article>
+    <>
+      <article className="action-conversation__user" aria-label={copy.you}>
+        {content !== null ? (
+          <p>
+            <ProjectRefText text={content} refs={projectRefs} />
+          </p>
+        ) : null}
+        {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
+        {files.length > 0 ? (
+          <ul
+            className="action-conversation__attachments"
+            aria-label={copy.userFiles(files.length)}
+          >
+            {files.map((file, index) => (
+              // A message may carry two files with the same name; the order is stable.
+              <li key={index}>
+                <AttachedFileChip name={file.name} byteSize={file.byte_size} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {state}
+      </article>
+      {note}
+    </>
   );
 }

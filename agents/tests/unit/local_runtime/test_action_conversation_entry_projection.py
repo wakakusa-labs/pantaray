@@ -26,6 +26,7 @@ from pantaray_agents.schema.action_conversation import ActionStepStatus
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionUserMessageInput,
+    ChatHandoffInput,
     FileAttachmentInput,
     SuggestionApprovalInput,
 )
@@ -604,4 +605,46 @@ def test_projects_a_denied_approval_the_gated_tool_actually_persists() -> None:
         "success",
         "denied",
         "src/app.py",
+    )
+
+
+def _handoff_row(message: ActionUserMessageInput) -> ActionHistoryUserRow:
+    return replace(
+        _modern_user_row(),
+        user_message_id=message.message_id,
+        user_message_json=serialize_action_user_message(message),
+        user_request_text=render_action_user_request_text(message),
+    )
+
+
+def test_what_the_chat_wrote_is_pantarays_and_the_task_is_told_so() -> None:
+    note_only = ActionUserMessageInput(
+        message_id="chat-1",
+        content="Continue from that history and list the customers.",
+        chat_handoff=ChatHandoffInput(relayed_item_ids=()),
+    )
+    relayed = ActionUserMessageInput(
+        message_id="chat-2",
+        content="Come up with three puns",
+        chat_handoff=ChatHandoffInput(
+            relayed_item_ids=("item-1",), note="Keep them work-safe."
+        ),
+    )
+
+    instruction = project_action_user_entry(_handoff_row(note_only))
+    words = project_action_user_entry(_handoff_row(relayed))
+
+    # The chat's own instruction is never shown as the user's message.
+    assert instruction.content is None
+    assert instruction.chat_note == "Continue from that history and list the customers."
+    # Relayed words stay the user's, with the chat's note beside them.
+    assert words.content == "Come up with three puns"
+    assert words.chat_note == "Keep them work-safe."
+    # The task reads whose words are whose; the text itself stays first.
+    told = render_action_user_request_text(note_only)
+    assert told.startswith("Continue from that history and list the customers.\n\n")
+    assert "it is not the user's own words" in told
+    assert render_action_user_request_text(relayed) == (
+        "Come up with three puns\n\nYour note from your chat with the user (you "
+        "wrote this; the user's own words are above):\nKeep them work-safe."
     )

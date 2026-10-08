@@ -166,6 +166,7 @@ function withUserMessage(
 ): ConversationUpdate {
   update.snapshot.page.unadopted_messages.push({
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: `step-${messageId}`,
     step_number: null,
@@ -188,6 +189,7 @@ function withApprovedSuggestion(
   update.snapshot.page.runs[0].entries = [
     {
       step_kind: 'user',
+      chat_note: null,
       step_id: 'approval',
       step_number: 1,
       message_id: 'approval-message',
@@ -450,6 +452,7 @@ describe('AgentOverlay broader E2E', () => {
         entries: [
           {
             step_kind: 'user',
+            chat_note: null,
             step_id: `ask-${index}`,
             step_number: sequence,
             message_id: `message-${index}`,
@@ -1339,6 +1342,7 @@ describe('AgentOverlay broader E2E', () => {
     firstPage.snapshot.page.runs[0].entries = [
       {
         step_kind: 'user',
+        chat_note: null,
         approved_suggestion: null,
         step_id: 'reply-1',
         step_number: 2,
@@ -1539,6 +1543,7 @@ describe('AgentOverlay broader E2E', () => {
       followup.snapshot.pageVersion += 1;
       followup.snapshot.page.runs[0].entries.unshift({
         step_kind: 'user',
+        chat_note: null,
         step_id: 'followup',
         step_number: 2,
         message_id: 'followup-message',
@@ -1792,7 +1797,8 @@ describe('AgentOverlay broader E2E', () => {
       // prettier-ignore
       { step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null },
       // prettier-ignore
-      { step_kind: 'user', approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: '00000000-0000-4000-8000-000000000044', accepted_sequence: 1, content: 'Do the thing', images: [], project_refs: [], status: 'adopted' }
+      { step_kind: 'user',
+    chat_note: null, approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: '00000000-0000-4000-8000-000000000044', accepted_sequence: 1, content: 'Do the thing', images: [], project_refs: [], status: 'adopted' }
     );
     await act(async () => snapshotListener?.(createResumedSnapshot()));
     await act(async () => conversationListener?.(update));

@@ -2,6 +2,8 @@ import type { ImageGridCopy } from './AttachedImages';
 
 type UserMessageCopy = {
   you: string;
+  /** Names what Pantaray's chat wrote when it handed work to the task. */
+  chatNote: string;
   userImages: ImageGridCopy;
   userFiles: (count: number) => string;
   userStatus: Record<
@@ -13,6 +15,7 @@ type UserMessageCopy = {
 export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
   en: {
     you: 'You',
+    chatNote: 'From the chat',
     userImages: {
       list: (count) => `${count} attached image${count === 1 ? '' : 's'}`,
       // The image content is unknown here, so the text describes the attachment, never its subject.
@@ -36,6 +39,7 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
   },
   ja: {
     you: 'あなた',
+    chatNote: 'チャットから',
     userImages: {
       list: (count) => `添付画像 ${count} 件`,
       imageAlt: (position, count) => `添付画像 ${position} / ${count}`,

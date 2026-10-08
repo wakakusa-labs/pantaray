@@ -540,7 +540,7 @@ async def test_a_retried_turn_never_starts_a_task_twice() -> None:
     start = LlmToolCall(
         call_id="s1",
         name="start_action",
-        arguments={"message": "Draft the Q3 report", "attachments_from": []},
+        arguments={"relay": [], "note": "Draft the Q3 report"},
     )
     unavailable = LlmProxyExecutionError(
         error_code=PROXY_UPSTREAM_UNAVAILABLE, error_message="down", retryable=True
@@ -574,7 +574,7 @@ async def test_two_starts_in_one_breath_start_one_task() -> None:
         LlmToolCall(
             call_id=f"s{n}",
             name="start_action",
-            arguments={"message": "Draft the Q3 report", "attachments_from": []},
+            arguments={"relay": [], "note": "Draft the Q3 report"},
         )
         for n in range(2)
     ]

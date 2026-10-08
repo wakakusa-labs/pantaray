@@ -111,6 +111,7 @@ describe('conversation paging', () => {
       unadopted_messages: [
         {
           step_kind: 'user',
+          chat_note: null,
           approved_suggestion: null,
           step_id: `step-${id}`,
           step_number: null,
@@ -267,6 +268,7 @@ describe('conversation paging', () => {
     pending.unadopted_messages = [
       {
         step_kind: 'user',
+        chat_note: null,
         approved_suggestion: null,
         step_id: 'step-pending',
         step_number: null,

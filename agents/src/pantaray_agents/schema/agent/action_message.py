@@ -39,6 +39,8 @@ ACTION_PROJECT_REF_MAX_PATHS = 32
 ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS = 200
 ACTION_PROJECT_REF_PATH_MAX_CODEPOINTS = 4096
 ACTION_MESSAGE_MAX_FILES = 10
+# The user's chat messages one hand-off relays as their words.
+ACTION_MESSAGE_MAX_RELAYED_ITEMS = 32
 # The document formats the read tool extracts, with the name the model sees for
 # each. The Electron attach IPC admits the same extensions.
 ACTION_FILE_TYPE_LABEL_BY_EXTENSION: Mapping[str, str] = MappingProxyType(
@@ -273,6 +275,34 @@ class SuggestionApprovalInput(BaseModel):
     _validate_approved_at = field_validator("approved_at")(_non_blank_text)
 
 
+class ChatHandoffInput(BaseModel):
+    """What Pantaray's chat put into this message when it handed work to the task.
+
+    ``relayed_item_ids`` names the user's chat messages whose words are
+    ``content``, verbatim; ``note`` is the chat's own instruction beside them.
+    With nothing relayed, ``content`` is the chat's instruction itself. Either
+    way, what the chat wrote is Pantaray's, never shown as the user's words.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    relayed_item_ids: tuple[str, ...]
+    note: Annotated[str, AfterValidator(_non_blank_text)] | None = None
+
+    _validate_item_ids = field_validator("relayed_item_ids", mode="before")(
+        _bounded_items(limit=ACTION_MESSAGE_MAX_RELAYED_ITEMS, unit="relayed_items")
+    )
+
+    @model_validator(mode="after")
+    def _require_relayed_words_for_a_note(self) -> Self:
+        if self.note is not None and not self.relayed_item_ids:
+            raise PydanticCustomError(
+                "action_message_not_allowed",
+                "a chat note goes beside relayed words; alone it is the content",
+            )
+        return self
+
+
 class ActionUserMessageInput(BaseModel):
     """Canonical durable USER envelope used by internal Action callers."""
 
@@ -289,6 +319,7 @@ class ActionUserMessageInput(BaseModel):
     project_refs: tuple[ActionProjectRef, ...] = ()
     supplement_project_refs: tuple[ActionProjectRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
+    chat_handoff: ChatHandoffInput | None = None
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
@@ -527,6 +558,7 @@ __all__ = [
     "ActionProjectRef",
     "ActionResumeHttpRequest",
     "ActionUserMessageInput",
+    "ChatHandoffInput",
     "FileAttachmentInput",
     "SuggestionApprovalInput",
     "validate_action_user_message_for_submit",

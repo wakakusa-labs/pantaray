@@ -29,6 +29,7 @@ const canonicalUser = (key: string, content: string): CanonicalUserItem => ({
   visibility: 'always',
   entry: {
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: `step-${key}`,
     step_number: 1,

@@ -211,8 +211,12 @@ class UserEntry(_ActionConversationModel):
     step_number: PositiveInt | None
     message_id: ActionConversationIdentity | None
     accepted_sequence: PositiveInt
+    # The user's own words; None when the message carries none of them.
     content: NonBlankText | None
     approved_suggestion: ApprovedSuggestion | None
+    # What Pantaray's chat wrote when it handed this to the task: shown as
+    # Pantaray's, never as the user's.
+    chat_note: NonBlankText | None = None
     images: tuple[ImageInput, ...]
     project_refs: tuple[UserEntryProjectRef, ...]
     files: tuple[UserEntryFile, ...]
@@ -220,10 +224,14 @@ class UserEntry(_ActionConversationModel):
 
     @model_validator(mode="after")
     def validate_user_entry(self) -> Self:
-        if self.content is None and self.approved_suggestion is None:
+        if (
+            self.content is None
+            and self.approved_suggestion is None
+            and self.chat_note is None
+        ):
             raise PydanticCustomError(
                 "action_conversation_user_content_missing",
-                "USER requires content or an approved suggestion",
+                "USER requires content, an approved suggestion or a chat note",
             )
         if (self.status == "adopted") != (self.step_number is not None):
             raise PydanticCustomError(

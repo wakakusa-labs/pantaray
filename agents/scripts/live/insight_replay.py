@@ -1,15 +1,17 @@
-"""Replay one short Insight run against the real OpenAI API, for before/after.
+"""Compare the short Insight before and after a change, on the real OpenAI API.
 
-Runs ``InsightAgent.generate`` from whatever tree ``PYTHONPATH`` points at over
-a fixed Zanei timeline served from memory, so two trees can be compared on the
-same input with the production model. The default timeline is synthetic and
-holds no private data; ``--fixture`` takes a JSON file of the same shape
-(``pages``: page responses, ``evidence``: ``"<event id>:<field>"`` to text).
-The memory tools search an empty, freshly migrated database.
+One invocation checks the ``--before`` revision out into a temporary worktree,
+runs ``InsightAgent.generate`` from it and from this tree over the same fixed
+Zanei timeline, served from memory, prints the two side by side and removes the
+worktree. The default timeline is synthetic and holds no private data;
+``--fixture`` takes a JSON file of the same shape (``pages``: page responses,
+``evidence``: ``"<event id>:<field>"`` to text). The memory tools search an
+empty, freshly migrated database. The model defaults to the one the insight
+purpose runs on in production.
 
 Reads the key from OPENAI_API_KEY and never prints it. Each run writes
-``run-<n>.json`` (the outputs, request count, tool calls and token usage) to
-``--out``; ``--compare BEFORE AFTER`` prints the two directories side by side.
+``run-<n>.json`` (the outputs, request count, tool calls and token usage) under
+``--out``.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -47,9 +50,11 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.schema.context_source import SourceBinding
 from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.trace_context import TraceContextManager
+from pantaray_llm.profiles import OPENAI_GPT_6_LUNA_MODEL
+
+AGENTS_DIR = Path(__file__).resolve().parents[2]
 
 OWNER = "insight-replay-owner"
-MODEL = os.environ.get("SMOKE_MODEL", "gpt-6-luna")
 STORE_ID = "replay-store"
 _ABSENT = {"kind": "absent"}
 
@@ -277,19 +282,42 @@ def _compare(before: Path, after: Path) -> int:
     return 0
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--fixture", type=Path)
-    parser.add_argument("--compare", nargs=2, type=Path)
-    args = parser.parse_args()
-    if args.compare:
-        return _compare(*args.compare)
-    key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
-    if not key or args.out is None:
-        print("Set OPENAI_API_KEY and pass --out DIR")
-        return 2
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(AGENTS_DIR), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _replay_both(args: argparse.Namespace) -> int:
+    """Replay the before revision and this tree, each in its own interpreter."""
+
+    before_rev = args.before or _git("merge-base", "HEAD", "origin/develop")
+    args.out.mkdir(parents=True, exist_ok=False)
+    with tempfile.TemporaryDirectory(prefix="insight-before-") as raw_tree:
+        tree = Path(raw_tree) / "tree"
+        _git("worktree", "add", "--detach", str(tree), before_rev)
+        try:
+            for side, agents in (("before", tree / "agents"), ("after", AGENTS_DIR)):
+                print(f"== replaying {side} ({agents})")
+                command = [sys.executable, __file__, "--side", side]
+                command += ["--out", str(args.out), "--runs", str(args.runs)]
+                command += ["--model", args.model]
+                if args.fixture:
+                    command += ["--fixture", str(args.fixture.resolve())]
+                source = f"{agents}/src:{agents}/packages/pantaray-llm/src"
+                env = {**os.environ, "PYTHONPATH": source}
+                if subprocess.run(command, env=env, check=False).returncode:
+                    return 1
+        finally:
+            _git("worktree", "remove", "--force", str(tree))
+    print(f"before={before_rev} model={args.model} results={args.out}")
+    return _compare(args.out / "before", args.out / "after")
+
+
+async def _replay_side(args: argparse.Namespace, key: str) -> int:
     fixture = (
         json.loads(args.fixture.read_text("utf-8"))
         if args.fixture
@@ -297,9 +325,11 @@ async def main() -> int:
     )
     register_logged_out_owner(OWNER)
     mark_configured()
-    set_llm_connection(ApiKeyConnection(provider="openai", model=MODEL, api_key=key))
-    # A fresh directory per replay, so no older result stands in for a run.
-    args.out.mkdir(parents=True, exist_ok=False)
+    set_llm_connection(
+        ApiKeyConnection(provider="openai", model=args.model, api_key=key)
+    )
+    out = args.out / args.side
+    out.mkdir(parents=True, exist_ok=False)
     failures = 0
     with tempfile.TemporaryDirectory() as raw_tmp:
         db_path = Path(raw_tmp) / "runtime.sqlite3"
@@ -311,17 +341,38 @@ async def main() -> int:
                 failures += 1
                 print(f"FAIL run-{index}: {str(error).replace(key, '<redacted>')}")
                 continue
-            (args.out / f"run-{index}.json").write_text(
+            (out / f"run-{index}.json").write_text(
                 json.dumps(run, ensure_ascii=False, indent=2), "utf-8"
             )
             print(f"PASS run-{index}: requests={run['requests']} usage={run['usage']}")
     if failures:
         # Half a replay cannot be compared run for run.
-        for path in args.out.glob("run-*.json"):
+        for path in out.glob("run-*.json"):
             path.unlink()
-    print(f"model={MODEL} failures={failures}")
     return 1 if failures else 0
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--before", help="revision to compare against")
+    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--fixture", type=Path)
+    parser.add_argument("--model", default=OPENAI_GPT_6_LUNA_MODEL)
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path(tempfile.gettempdir()) / f"insight-replay-{int(time.time())}",
+    )
+    parser.add_argument("--side", choices=("before", "after"), help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
+    if not key:
+        print("Set OPENAI_API_KEY")
+        return 2
+    if args.side:
+        return asyncio.run(_replay_side(args, key))
+    return _replay_both(args)
+
+
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(main())

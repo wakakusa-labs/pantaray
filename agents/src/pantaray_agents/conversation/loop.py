@@ -122,7 +122,8 @@ class IdleTurn:
 
     ``ending_call`` is the ending call the turn made alone, or as the only one
     on its last turn. On a ``final`` turn a ``Continue`` is answered as usual
-    and then fails the run.
+    and then fails the run, but for one that reached for other tools: it is
+    not judged, and gets one more last turn, once, as a refused output does.
     """
 
     response: LlmActionTurnResponse
@@ -222,10 +223,15 @@ class _Run[T]:
         )
         self.registry = ReactToolRegistry(run.tools)
         self.ending_names = frozenset(tool.name for tool in run.ending_tools)
-        self.what_counts = (
-            f"only a single call to {' or '.join(sorted(self.ending_names))} counts"
-            if self.ending_names
-            else "no tool call runs"
+        ending = " or ".join(sorted(self.ending_names))
+        self.what_counts, end_now = (
+            (f"only a single call to {ending} counts", f"Call {ending} now.")
+            if ending
+            else ("no tool call runs", "Answer without one now.")
+        )
+        self.last_not_run = (
+            f"Not run: this call came on the last turn, where {self.what_counts}. "
+            + end_now
         )
         self.concurrency = {
             tool.name: tool.concurrency for tool in run.tools
@@ -245,13 +251,17 @@ class _Run[T]:
         }
         self.tool_calls = 0
         self.turn = _Turn(calls=())
+        self.sent = 0
+        self.turns_allowed = run.max_turns
+        self.extra_last_turn = True
 
     async def run(self) -> T:
-        for turn_index in range(self.spec.max_turns):
-            last_index = self.spec.max_turns - 1
+        while self.sent < self.turns_allowed:
             final = (
-                turn_index == last_index or self.tool_calls >= self.spec.max_tool_calls
+                self.sent == self.turns_allowed - 1
+                or self.tool_calls >= self.spec.max_tool_calls
             )
+            self.sent += 1
             self.history.extend(
                 ConversationEntry(item) for item in await self.spec.before_send()
             )
@@ -276,8 +286,7 @@ class _Run[T]:
                 entry=entry, reply=reply, provider_turn=record, window=self.window
             )
             _, stop = await _to_the_end(self.spec.on_turn(recorded))
-            # The caller now holds the turn, so whatever is raised from here on,
-            # a stop included, leaves only once every call of it is answered.
+            # The caller holds the turn: a raise leaves once every call is answered.
             try:
                 if stop is not None:
                     raise stop
@@ -391,6 +400,10 @@ class _Run[T]:
         if ran:
             return None
         ending = self.turn.ending
+        if final and ending is None and response.calls and self.extra_last_turn:
+            self.extra_last_turn = False
+            self.turns_allowed = max(self.turns_allowed, self.sent + 1)
+            return None
         decision = self.spec.decide(
             IdleTurn(response=response, ending_call=ending, final=final)
         )
@@ -413,13 +426,10 @@ class _Run[T]:
         if final:
             ending = [call for call in response.calls if call.name in self.ending_names]
             turn.ending = ending[0] if len(ending) == 1 else None
-            last = (
-                f"Not run: this call came on the last turn, where {self.what_counts}."
-            )
             turn.held = {
                 call.call_id: _not_run(EXCLUSION_NOTICES["run_ending_tool"])
                 if call.name in self.ending_names
-                else last
+                else self.last_not_run
                 for call in response.calls
             }
             await self._settle()

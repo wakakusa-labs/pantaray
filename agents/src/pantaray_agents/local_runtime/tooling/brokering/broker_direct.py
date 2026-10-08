@@ -17,6 +17,7 @@ from ..locks.workspace_lock_coordinator import (
     release_workspace_lock,
 )
 from ..outside_workspace_grant import folder_can_be_granted
+from .action_path_policy import resolve_write_tool_path
 from .action_subagent_broker_authority import authorize_direct_workspace_writes
 from .broker_common import (
     BrokerContext,
@@ -40,7 +41,6 @@ from .outside_workspace import (
     OutsideWorkspacePatchTarget,
     outside_workspace_resolved_path,
 )
-from .tool_path_policy import resolve_write_tool_path
 
 PATCH_ERROR_PATH_MULTIPLE_MOUNTS = "PATCH_PATH_MOUNT_MISMATCH"
 PATCH_ERROR_PATH_CONFLICT = "PATCH_PATH_CONFLICT"

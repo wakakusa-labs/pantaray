@@ -27,6 +27,9 @@ from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathMissingError,
     open_regular_file_descriptor,
 )
+from pantaray_agents.local_runtime.tooling.brokering.action_path_policy import (
+    resolve_read_tool_path,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     APPLY_PATCH_TOOL_ID,
     BASH_TOOL_ID,
@@ -36,9 +39,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     READ_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
     BrokerContext,
-)
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    resolve_read_tool_path,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError

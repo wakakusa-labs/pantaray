@@ -12,16 +12,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_discovery import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedListRequest,
 )
-from pantaray_agents.local_runtime.tooling.brokering.read_path_resolver import (
-    READ_PATH_DENIED,
-    READ_PATH_NOT_FOUND,
-    READ_SCOPE_DENIED,
-    resolve_read_target,
-)
-from pantaray_agents.local_runtime.tooling.brokering.read_scope import ReadScope
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    resolve_read_path,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
@@ -33,6 +23,14 @@ from pantaray_agents.tools.files.private_storage import (
     PRIVATE_APP_STORAGE_MESSAGE,
     PrivateAppStorage,
 )
+from pantaray_agents.tools.files.read_paths import (
+    READ_PATH_DENIED,
+    READ_PATH_NOT_FOUND,
+    READ_SCOPE_DENIED,
+    resolve_read_path,
+)
+from pantaray_agents.tools.files.read_scope import ReadScope
+from pantaray_agents.tools.files.read_target import resolve_read_target
 
 
 def test_relative_path_resolves_from_execution_cwd(tmp_path: Path) -> None:

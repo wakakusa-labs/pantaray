@@ -17,6 +17,9 @@ from pantaray_agents.local_runtime.tooling.action_subagent_resource_claims impor
     acquire_action_subagent_resource_claims_in_connection,
 )
 from pantaray_agents.local_runtime.tooling.brokering import broker_direct
+from pantaray_agents.local_runtime.tooling.brokering.action_path_policy import (
+    WRITE_PATH_DENIED,
+)
 from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_authority import (
     ACTION_SUBAGENT_WRITE_DENIED,
 )
@@ -29,9 +32,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerPreflightOutcome,
     BrokerToolOutcome,
-)
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    WRITE_PATH_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue

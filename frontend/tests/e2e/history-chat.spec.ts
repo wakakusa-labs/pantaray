@@ -382,9 +382,20 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
   expect(Math.abs(icon!.x + icon!.width - (bubble!.x + bubble!.width))).toBeLessThan(2);
   // No notice text: the icon under the message is all there is.
   await expect(page.getByText('AI に接続できず、返信できませんでした。')).toHaveCount(0);
-  await retry.focus();
+  // A small glyph, with a hit area of at least 24 × 24.
+  expect(icon!.width).toBeGreaterThanOrEqual(24);
+  expect(icon!.height).toBeGreaterThanOrEqual(24);
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('chat-turn-failure.png') });
+  // Reached from the composer by keyboard, it shows the focus ring.
+  // Backwards from the message field: the attach button, the bubble's quote button, then this.
+  await page.getByRole('textbox', { name: 'メッセージ' }).focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(retry).toBeFocused();
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-turn-failure-focus.png') });
 
   await page.keyboard.press('Enter');
   await expect

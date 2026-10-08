@@ -234,33 +234,36 @@
    the bubble's bottom like every other message. */
 /* The room is the row's own margin: one on the stack would count in the row's bottom alignment. */
 .chat-row:has(.chat-retry) {
-  margin-bottom: 34px;
+  margin-bottom: 28px;
 }
 
+/* Quiet like the time: a glyph in its muted color, with a 24px hit area around it. */
 .chat-retry {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--fog-text-2);
+  color: var(--fog-text-3);
   cursor: pointer;
 }
 
 .chat-retry:hover:not(:disabled) {
-  background: var(--fog-mist-strong);
-  color: #fff;
+  color: var(--fog-text-2);
+}
+
+.chat-retry:focus {
+  outline: none;
 }
 
 .chat-retry:focus-visible {
-  outline: none;
   box-shadow: var(--focus-ring);
 }
 

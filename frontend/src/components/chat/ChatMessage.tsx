@@ -108,7 +108,7 @@ export function ChatMessage({
             disabled={retry.disabled}
             onClick={retry.onRetry}
           >
-            <RotateCcw size={15} aria-hidden="true" />
+            <RotateCcw size={12} aria-hidden="true" />
           </button>
         ) : null}
         {content.kind === 'assistant_message'

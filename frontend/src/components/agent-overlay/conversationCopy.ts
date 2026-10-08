@@ -41,6 +41,10 @@ export function formatConversationTranscript(
           message.content,
           message.images.length > 0 ? copy.images(message.images.length) : null,
         ]);
+        // What the chat wrote when it handed the work over is Pantaray's.
+        if (line.source === 'canonical' && line.entry.chat_note !== null) {
+          add(copy.pantaray, [line.entry.chat_note]);
+        }
       } else if (
         line.kind === 'assistant' ||
         line.kind === 'final_output' ||

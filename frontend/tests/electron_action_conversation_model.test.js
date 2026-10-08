@@ -34,6 +34,7 @@ function outcomes(view) {
 function user(stepId, messageId, acceptedSequence, status = 'adopted') {
   return {
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: stepId,
     step_number: status === 'adopted' ? acceptedSequence : null,

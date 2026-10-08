@@ -22,6 +22,7 @@ from pantaray_agents.schema.agent.action import (
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
+    ChatHandoffInput,
     FileAttachmentInput,
 )
 from pantaray_agents.schema.agent.image import ImageInput
@@ -78,6 +79,7 @@ async def accept_suggestion(
     supplement_project_refs: tuple[ActionProjectRef, ...],
     images: tuple[ImageInput, ...],
     files: tuple[FileAttachmentInput, ...],
+    chat_handoff: ChatHandoffInput | None = None,
 ) -> SuggestionAcceptanceResult:
     """Approve one ``action_offer`` Suggestion and create its Action once.
 
@@ -118,6 +120,7 @@ async def accept_suggestion(
                 approval_mode=approval_mode,
                 images=images,
                 files=files,
+                chat_handoff=chat_handoff,
                 suggestion_row=row,
             )
         )
@@ -165,6 +168,7 @@ def _build_command(
     approval_mode: ApprovalMode,
     images: tuple[ImageInput, ...],
     files: tuple[FileAttachmentInput, ...],
+    chat_handoff: ChatHandoffInput | None,
     suggestion_row: Mapping[str, object],
 ) -> SubmitActionMessageCommand:
     content = _optional_text(suggestion_row.get("answer"))
@@ -194,6 +198,7 @@ def _build_command(
                 supplement_project_refs=supplement_project_refs,
                 images=images,
                 files=files,
+                chat_handoff=chat_handoff,
                 suggestion_approval=SuggestionApprovalInput(
                     suggestion_id=suggestion_id,
                     approved_at=approved_at,

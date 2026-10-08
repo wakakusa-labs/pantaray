@@ -114,7 +114,7 @@ async def test_the_chat_hears_when_its_own_task_waits_and_ends(owner: Path) -> N
     registry = ReactToolRegistry(
         chat_tools(ChatTurnPlan(user_id=USER, key="a0", cursor=0))
     )
-    args = {"message": "Draft the report", "attachments_from": []}
+    args = {"relay": [], "note": "Draft the report"}
     started = await registry.execute(
         ReactToolCall(
             tool_name="start_action",

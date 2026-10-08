@@ -188,6 +188,8 @@ const UserEntrySchema = z
     accepted_sequence: z.number().int().positive(),
     content: NonBlankTextSchema.nullable(),
     approved_suggestion: ApprovedSuggestionSchema.nullable(),
+    // What Pantaray's chat wrote when it handed this to the task: Pantaray's, not the user's.
+    chat_note: NonBlankTextSchema.nullable(),
     images: z.array(ImageReferenceSchema),
     // Code-point spans of workspace projects named in `content`, as sent.
     project_refs: z.array(
@@ -207,7 +209,7 @@ const UserEntrySchema = z
   })
   .strict()
   .superRefine((entry, context) => {
-    if (entry.content === null && entry.approved_suggestion === null) {
+    if (entry.content === null && entry.approved_suggestion === null && entry.chat_note === null) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'USER content is missing' });
     }
     if ((entry.status === 'adopted') !== (entry.step_number !== null)) {

@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.runtime import (
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
+    ChatHandoffInput,
     SuggestionApprovalInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -172,3 +173,18 @@ def test_approved_proposal_remains_the_history_title_and_search_evidence(
         _project(
             (replace(candidate, matched_user=row),), (_ACTIVE,), "private provenance"
         )
+
+
+def test_a_task_the_chat_started_in_its_own_words_takes_them_as_its_title() -> None:
+    message = ActionUserMessageInput(
+        message_id="m",
+        content="List the customers from that history",
+        chat_handoff=ChatHandoffInput(relayed_item_ids=()),
+    )
+    row = replace(
+        _USER,
+        user_message_json=serialize_action_user_message(message),
+        user_request_text=render_action_user_request_text(message),
+    )
+    page = _project((replace(_ACTION, initial_user=row),), (_ACTIVE,))
+    assert page.items[0].title == "List the customers from that history"

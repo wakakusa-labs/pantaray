@@ -41,6 +41,7 @@ function conversation(settled: boolean, includeLastTool = true): ActionConversat
   });
   const user = (step: number, sequence: number, content: string) => ({
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: `step-${step}`,
     step_number: step,
@@ -616,3 +617,72 @@ for (const language of ['ja', 'en'] as const) {
     expect(await scroll.evaluate((element) => element.scrollTop)).toBe(100);
   });
 }
+
+test("ja: what the chat wrote shows as Pantaray's note, never as the user's bubble", async ({
+  page,
+}, info) => {
+  const user = (
+    step: number,
+    sequence: number,
+    content: string | null,
+    chatNote: string | null
+  ) => ({
+    step_kind: 'user',
+    chat_note: chatNote,
+    approved_suggestion: null,
+    step_id: `step-${step}`,
+    step_number: step,
+    content,
+    message_id: `message-${sequence}`,
+    accepted_sequence: sequence,
+    images: [],
+    project_refs: [],
+    status: 'adopted',
+  });
+  const handedOver = parseActionConversationPage({
+    action: {
+      action_id: 'action-1',
+      suggestion_id: null,
+      status: 'success',
+      latest_run_id: 'run-1',
+      approved_suggestion: null,
+      resumable: false,
+    },
+    runs: [
+      {
+        run_id: 'run-1',
+        status: 'success',
+        started_at: '2026-10-09T00:00:00.000000Z',
+        completed_at: '2026-10-09T00:01:00.000000Z',
+        completion_event_id: 'completion-1',
+        final_output: '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。',
+        error: null,
+        entries: [
+          // The user's own words, relayed as they wrote them, with the chat's note beside them.
+          user(1, 1, '別作業でダジャレを3つ考えて', null),
+          // The chat's own instruction: Pantaray's, so no user bubble.
+          user(
+            2,
+            2,
+            null,
+            'その履歴の続きで、顧客をリストで教えて。記録の有無を回答するだけではなく、会社名と最終連絡日も添えて。'
+          ),
+        ].reverse(),
+      },
+    ],
+    unadopted_messages: [],
+    next_cursor: null,
+  });
+  await installBridge(page, 'ja');
+  await page.goto(`${baseUrl}notification.html?mode=standalone&actionId=action-1`);
+  await expect(page.locator('html')).toHaveAttribute('data-conversation-ready', 'true');
+  await publish(page, 1, handedOver);
+
+  const mine = page.getByRole('article', { name: 'あなた' });
+  await expect(mine).toHaveCount(1);
+  await expect(mine).toHaveText('別作業でダジャレを3つ考えて');
+  const note = page.getByRole('region', { name: 'チャットから' });
+  await expect(note).toContainText('その履歴の続きで、顧客をリストで教えて。');
+  await expect(mine.getByText('その履歴の続きで', { exact: false })).toHaveCount(0);
+  await capture(page, info, 'chat-handoff-note');
+});

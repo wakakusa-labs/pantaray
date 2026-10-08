@@ -48,6 +48,25 @@
   background: var(--surface-bg);
 }
 
+.action-conversation__chat-note {
+  display: grid;
+  gap: 2px;
+  max-width: 85%;
+  padding: 0 var(--space-xs);
+  color: var(--text-secondary);
+  font-size: var(--text-meta-size);
+}
+
+.action-conversation__chat-note-label {
+  color: var(--text-muted);
+}
+
+.action-conversation__chat-note p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .action-conversation__user p,
 .action-conversation__outcome > p {
   margin: 0;

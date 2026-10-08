@@ -14,6 +14,12 @@ from pantaray_agents.agents.chat_agent import tools
 from pantaray_agents.agents.chat_agent.context import turn_context
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
+from pantaray_agents.local_runtime.action_conversation.history_candidates import (
+    register_conversation_history_casefold_sqlite,
+)
+from pantaray_agents.local_runtime.action_conversation.history_repository import (
+    read_conversation_history_page_in_connection,
+)
 from pantaray_agents.local_runtime.chat.store import append_chat_item
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
@@ -40,7 +46,13 @@ from pantaray_agents.local_runtime.runtime.job_queue_runtime import (
     claim_next_pending_action_job,
 )
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
-from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.agent.action_message import (
+    ActionUserMessageInput,
+    ChatHandoffInput,
+)
+from pantaray_agents.schema.agent.action_message_codec import (
+    render_action_user_request_text,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.chat import UserMessageContent
@@ -96,17 +108,13 @@ def _actions(db_path: Path) -> list[tuple[str, str | None]]:
 
 
 async def test_a_turn_run_again_never_sends_a_call_twice(db_path: Path) -> None:
-    first = await _turn("a0")(
-        "start_action", message="Draft the Q3 report", attachments_from=[]
-    )
+    first = await _turn("a0")("start_action", relay=[], note="Draft the Q3 report")
     # The same turn after a crash, sending the same words again ...
-    replayed = await _turn("a0")(
-        "start_action", message="Draft the Q3 report", attachments_from=[]
-    )
+    replayed = await _turn("a0")("start_action", relay=[], note="Draft the Q3 report")
     # ... or, asked again, another request first: it is told what went in.
     rerun = _turn("a0")
-    reordered = await rerun("start_action", message="Book a room", attachments_from=[])
-    booked = await rerun("start_action", message="Book a room", attachments_from=[])
+    reordered = await rerun("start_action", relay=[], note="Book a room")
+    booked = await rerun("start_action", relay=[], note="Book a room")
 
     assert isinstance(first, dict) and replayed == first
     assert isinstance(reordered, dict)
@@ -135,7 +143,7 @@ async def test_an_instruction_to_a_stopped_task_is_not_reported_done(
     monkeypatch.setattr(tools, "submit_action_message", kept_while_stopped)
 
     result = await _turn("a0")(
-        "send_to_action", action_id="act-1", message="Go on", attachments_from=[]
+        "send_to_action", action_id="act-1", relay=[], note="Go on"
     )
 
     # Run again after a restart: what went in was dropped, not done.
@@ -149,7 +157,7 @@ async def test_an_instruction_to_a_stopped_task_is_not_reported_done(
         lambda **_: SubmittedMessage("act-1", None, "Go on", dropped=True),
     )
     rerun = await _turn("a0")(
-        "send_to_action", action_id="act-1", message="Keep going", attachments_from=[]
+        "send_to_action", action_id="act-1", relay=[], note="Keep going"
     )
 
     assert isinstance(result, dict) and result["error_code"] == "TASK_STOPPED"
@@ -157,7 +165,7 @@ async def test_an_instruction_to_a_stopped_task_is_not_reported_done(
 
 
 async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -> None:
-    started = await _turn("a0")("start_action", message="Draft it", attachments_from=[])
+    started = await _turn("a0")("start_action", relay=[], note="Draft it")
     assert isinstance(started, dict)
     # The worker has started the task; a message now names its run.
     payload = claim_next_pending_action_job(
@@ -171,12 +179,10 @@ async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -
     sent = await later(
         "send_to_action",
         action_id=started["action_id"],
-        message="Make the deadline two weeks later",
-        attachments_from=[],
+        relay=[],
+        note="Make the deadline two weeks later",
     )
-    unknown = await later(
-        "send_to_action", action_id="nope", message="x", attachments_from=[]
-    )
+    unknown = await later("send_to_action", action_id="nope", relay=[], note="x")
 
     assert isinstance(sent, dict) and sent["action_id"] == started["action_id"]
     assert isinstance(unknown, dict) and unknown["error_code"] == "UNKNOWN_TASK"
@@ -211,12 +217,8 @@ async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
     )
 
     turn = _turn("a0")
-    handed = await turn(
-        "start_action", message="Summarize it", attachments_from=[asked.item_id]
-    )
-    twice = await turn(
-        "start_action", message="Translate it", attachments_from=[asked.item_id]
-    )
+    handed = await turn("start_action", relay=[asked.item_id], note="Summarize it")
+    twice = await turn("start_action", relay=[asked.item_id], note="Translate it")
 
     assert isinstance(handed, dict) and "action_id" in handed
     assert not staged.exists()  # moved into the first task
@@ -225,15 +227,15 @@ async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
     assert handed["action_id"] in str(twice["message"])  # names where it went
     # The same turn run again after a crash finds what it started.
     rerun = await _turn("a0")(
-        "start_action", message="Summarize it", attachments_from=[asked.item_id]
+        "start_action", relay=[asked.item_id], note="Summarize it"
     )
     assert isinstance(rerun, dict) and rerun["action_id"] == handed["action_id"]
     # Adding to the task that holds the file needs no second hand-off.
     added = await turn(
         "send_to_action",
         action_id=handed["action_id"],
-        message="Also make a comparison table",
-        attachments_from=[asked.item_id],
+        relay=[asked.item_id],
+        note="Also make a comparison table",
     )
     assert isinstance(added, dict) and added["action_id"] == handed["action_id"]
     assert len(_actions(db_path)) == 1
@@ -266,24 +268,24 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     taken = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        supplement=None,
-        attachments_from=[pictured.item_id],
+        relay=[pictured.item_id],
+        note=None,
     )
-    # The same turn after a crash, as it was, and with an addition worded anew.
+    # The same turn after a crash, as it was, and with the addition left out.
     replayed = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        supplement=None,
-        attachments_from=[pictured.item_id],
+        relay=[pictured.item_id],
+        note=None,
     )
     again = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        supplement="with our logo",
-        attachments_from=[],
+        relay=[],
+        note=None,
     )
     gone = await _turn("a2")(
-        "accept_suggestion", suggestion_id="sug-1", supplement=None, attachments_from=[]
+        "accept_suggestion", suggestion_id="sug-1", relay=[], note=None
     )
 
     assert isinstance(taken, dict) and replayed == taken
@@ -335,9 +337,7 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
         connection.execute(
             "UPDATE processes SET status = 'paused' WHERE action_id = ?", (waiting,)
         )
-    started = await _turn("a0")(
-        "start_action", message="Draft the Q3 report", attachments_from=[]
-    )
+    started = await _turn("a0")("start_action", relay=[], note="Draft the Q3 report")
 
     work = read_chat_work_list(user_id=USER)
     shown = turn_context(
@@ -366,9 +366,7 @@ async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> N
     )
     other = _overlay_task("old-other", "Book a room")
     _finish(db_path, other, "2026-10-01T00:00:00.500Z", "Booked room 3.")
-    running = await _turn("a0")(
-        "start_action", message="Draft the plan", attachments_from=[]
-    )
+    running = await _turn("a0")("start_action", relay=[], note="Draft the plan")
     assert isinstance(running, dict)
     payload = claim_next_pending_action_job(
         db_path=db_path, busy_timeout_ms=1_000, owner_user_id=USER, claimed_by="w"
@@ -379,8 +377,8 @@ async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> N
     await _turn("a1")(
         "send_to_action",
         action_id=running["action_id"],
-        message="Add the budget table",
-        attachments_from=[],
+        relay=[],
+        note="Add the budget table",
     )
 
     def found(query: str | None, since: str | None = None) -> list[str]:
@@ -422,17 +420,17 @@ async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> N
 
 async def test_a_rerun_that_skips_a_refused_call_finds_the_task(db_path: Path) -> None:
     first_run = _turn("a0")
-    refused = await first_run("start_action", message="   ", attachments_from=[])
-    started = await first_run("start_action", message="Draft it", attachments_from=[])
+    refused = await first_run("start_action", relay=[], note="   ")
+    started = await first_run("start_action", relay=[], note="Draft it")
     # After a restart the model gets the wording right the first time.
-    rerun = await _turn("a0")("start_action", message="Draft it", attachments_from=[])
+    rerun = await _turn("a0")("start_action", relay=[], note="Draft it")
 
-    assert isinstance(refused, dict) and refused["error_code"] == "INVALID_MESSAGE"
+    assert isinstance(refused, dict) and refused["error_code"] == "NOTHING_TO_SEND"
     assert isinstance(started, dict) and rerun == started
     assert len(_actions(db_path)) == 1
 
 
-async def test_a_named_project_goes_with_the_task_the_message_starts(
+async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
     db_path: Path,
 ) -> None:
     ref = {
@@ -442,49 +440,114 @@ async def test_a_named_project_goes_with_the_task_the_message_starts(
         "start": 0,
         "end": 10,
     }
-    asked = append_chat_item(
+    earlier = _say_with("m-1", "前回の見積もりの件", ())
+    named = _say_with("m-2", "Aurora Web で作り直して", (ref,))
+
+    turn = _turn("a0")
+    relayed = await turn("start_action", relay=[earlier, named], note=None)
+    assert isinstance(relayed, dict) and "action_id" in relayed
+    action_id = str(relayed["action_id"])
+    await turn("send_to_action", action_id=action_id, relay=[], note="納期は金曜")
+    await turn(
+        "send_to_action", action_id=action_id, relay=[earlier], note="単価は据え置き"
+    )
+    nothing = await turn("start_action", relay=[], note=None)
+
+    first, second, third = _sent_messages(db_path, action_id)
+    # Relayed: the user's words, verbatim and in order, with their project's span moved.
+    assert first.content == "前回の見積もりの件\n\nAurora Web で作り直して"
+    (project,) = first.project_refs
+    assert first.content[project.start : project.end] == "Aurora Web"
+    assert project.paths == ("/Users/me/aurora",)
+    assert first.chat_handoff == ChatHandoffInput(relayed_item_ids=(earlier, named))
+    # The chat's own instruction is the message, marked as relaying none of theirs.
+    assert second.content == "納期は金曜"
+    assert second.chat_handoff == ChatHandoffInput(relayed_item_ids=())
+    assert second.project_refs == ()
+    # Both: the user's words, and the chat's note beside them.
+    assert third.content == "前回の見積もりの件"
+    assert third.chat_handoff == ChatHandoffInput(
+        relayed_item_ids=(earlier,), note="単価は据え置き"
+    )
+    assert isinstance(nothing, dict) and nothing["error_code"] == "NOTHING_TO_SEND"
+
+
+def _say_with(message_id: str, text: str, refs: tuple[dict[str, object], ...]) -> str:
+    return append_chat_item(
         user_id=USER,
-        message_id="m-1",
+        message_id=message_id,
         content=UserMessageContent.model_validate_json(
             json.dumps(
                 {
                     "kind": "user_message",
-                    "text": "Aurora Web で見積書を作って",
+                    "text": text,
                     "quote_item_id": None,
                     "images": [],
                     "files": [],
-                    "project_refs": [ref],
+                    "project_refs": list(refs),
                 }
             )
         ),
-    )
-
-    turn = _turn("a0")
-    named = await turn(
-        "start_action",
-        message="Aurora Web のフォルダで見積書を作って",
-        attachments_from=[asked.item_id],
-    )
-    # The model left the name out: it is added as the user wrote it.
-    unnamed = await turn(
-        "start_action", message="見積書を作って", attachments_from=[asked.item_id]
-    )
-
-    assert isinstance(named, dict) and isinstance(unnamed, dict)
-    sent = [_sent_message(db_path, str(r["action_id"])) for r in (named, unnamed)]
-    assert sent[0].content == "Aurora Web のフォルダで見積書を作って"
-    assert sent[1].content == "見積書を作って\n@Aurora Web"
-    for message in sent:
-        (project,) = message.project_refs
-        assert project.paths == ("/Users/me/aurora",)
-        assert message.content[project.start : project.end] == "Aurora Web"
+    ).item_id
 
 
-def _sent_message(db_path: Path, action_id: str) -> ActionUserMessageInput:
+def _sent_messages(db_path: Path, action_id: str) -> list[ActionUserMessageInput]:
     with sqlite3.connect(db_path) as connection:
-        row = connection.execute(
+        rows = connection.execute(
             "SELECT user_message_json FROM agent_action_steps "
-            "WHERE action_id = ? AND user_message_json IS NOT NULL",
+            "WHERE action_id = ? AND user_message_json IS NOT NULL "
+            "ORDER BY accepted_sequence",
             (action_id,),
-        ).fetchone()
-    return ActionUserMessageInput.model_validate_json(row[0])
+        ).fetchall()
+    return [ActionUserMessageInput.model_validate_json(row[0]) for row in rows]
+
+
+async def test_a_yes_carries_what_the_chat_settled_with_the_user(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "suggestion_summary, interaction_contract, has_suggestion, created_at, "
+            "updated_at) VALUES ('sug-2', ?, 'success', 'Draft the case study.', "
+            "'Draft the case study', 'action_offer', 1, ?, ?)",
+            (USER, NOW, NOW),
+        )
+    yes = _say_with("m-1", "その条件でお願い", ())
+
+    taken = await _turn("a0")(
+        "accept_suggestion",
+        suggestion_id="sug-2",
+        relay=[yes],
+        note="社名は匿名化する",
+    )
+
+    assert isinstance(taken, dict) and "action_id" in taken
+    (message,) = _sent_messages(db_path, str(taken["action_id"]))
+    # The suggestion is the content, the user's yes their words, the condition ours.
+    assert message.content == "Draft the case study."
+    assert message.supplement == "その条件でお願い"
+    assert message.chat_handoff == ChatHandoffInput(
+        relayed_item_ids=(yes,), note="社名は匿名化する"
+    )
+    assert "社名は匿名化する" in render_action_user_request_text(message)
+
+
+async def test_the_history_finds_a_task_by_the_chats_note(db_path: Path) -> None:
+    go = _say_with("m-1", "それで進めて", ())
+    started = await _turn("a0")(
+        "start_action", relay=[go], note="Aurora の見積書を金曜までに作る"
+    )
+    assert isinstance(started, dict)
+
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        register_conversation_history_casefold_sqlite(connection)
+        connection.execute("BEGIN")
+        page = read_conversation_history_page_in_connection(
+            connection=connection,
+            user_id=USER,
+            search_text="aurora",
+            cursor=None,
+            limit=10,
+        )
+    # Found by the note shown beside the user's words; titled by their words.
+    assert [item.title for item in page.items] == ["それで進めて"]

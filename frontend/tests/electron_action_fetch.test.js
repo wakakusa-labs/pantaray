@@ -35,6 +35,7 @@ const MESSAGE_RESPONSE = {
 };
 const USER_ENTRY = {
   step_kind: 'user',
+  chat_note: null,
   approved_suggestion: null,
   step_id: 'step-user-2',
   step_number: 2,

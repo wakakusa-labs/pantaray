@@ -75,6 +75,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
     content: str | None
     images: tuple[ImageInput, ...]
     approved_suggestion: ApprovedSuggestion | None = None
+    chat_note: str | None = None
     project_refs: tuple[ActionProjectRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
     if message is None:
@@ -88,9 +89,15 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
             )
             content = message.supplement
             project_refs = message.supplement_project_refs
+        elif message.is_chat_instruction:
+            # The chat's own instruction: Pantaray's words, not the user's.
+            content = None
+            chat_note = message.content
         else:
             content = message.content
             project_refs = message.project_refs
+        if message.chat_handoff is not None and not message.is_chat_instruction:
+            chat_note = message.chat_handoff.note
         images = message.images
         files = message.files
 
@@ -110,6 +117,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
             accepted_sequence=row.accepted_sequence,
             content=content,
             approved_suggestion=approved_suggestion,
+            chat_note=chat_note,
             images=images,
             project_refs=tuple(
                 UserEntryProjectRef(

@@ -25,6 +25,7 @@ const user = (
   imageCount = 0
 ): Entry => ({
   step_kind: 'user',
+  chat_note: null,
   step_id: `user-${step}`,
   step_number: step,
   message_id: `message-${step}`,
@@ -79,6 +80,27 @@ const page = (runs: Run[], suggestion: string | null = null): ActionConversation
 });
 
 describe('formatConversationTranscript', () => {
+  it("copies what the chat wrote as Pantaray's, beside the user's relayed words", () => {
+    const handed = run(
+      'run-1',
+      [
+        { ...user(1, 1, 'Three puns, please'), chat_note: 'Keep them work-safe.' } as Entry,
+        { ...user(2, 2, null), chat_note: 'List the customers from that history.' } as Entry,
+      ],
+      { final_output: 'Done.', error: null }
+    );
+    expect(
+      formatConversationTranscript(projectActionConversationView([page([handed])]), COPY)
+    ).toBe(
+      [
+        'あなた\nThree puns, please',
+        'Pantaray\nKeep them work-safe.',
+        'Pantaray\nList the customers from that history.',
+        'Pantaray\nDone.',
+      ].join('\n\n')
+    );
+  });
+
   it('copies the approved Suggestion, messages, and outcomes in order without the folded work', () => {
     const first = run(
       'run-1',

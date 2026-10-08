@@ -173,7 +173,7 @@ class ChatTurnMarks:
 
     ``answered_through`` is the ``read_through`` of the last end, a reply or a
     failure, and ``replied_through`` that of the last reply. ``last_failure``
-    is the last end when it is a failure, which a retry runs again, and
+    is the last end when it is a failure with input a retry can answer again, and
     ``failed_turn_key`` the key of the turn that failed; ``waiting`` says a
     trigger item past ``answered_through`` waits for a turn.
     """
@@ -220,20 +220,35 @@ def read_chat_turn_marks(*, user_id: str) -> ChatTurnMarks:
             else last_end
         )
         answered_through = _read_through(last_end)
-        waiting = connection.execute(
-            "SELECT 1 FROM chat_items WHERE user_id = ? AND sequence > ? "
-            f"AND kind IN ({_TRIGGER_KINDS_SQL}) LIMIT 1",
-            (user_id, answered_through),
-        ).fetchone()
+        replied_through = _read_through(last_reply)
+        waiting = _has_trigger_after(
+            connection, user_id=user_id, after=answered_through
+        )
+        # A failure whose only input was a suggestion's arrival, no longer
+        # read, has nothing a retry could answer: it is not offered again.
+        retryable = failed and _has_trigger_after(
+            connection, user_id=user_id, after=replied_through
+        )
     return ChatTurnMarks(
         answered_through=answered_through,
-        replied_through=_read_through(last_reply),
-        last_failure=_item(last_end) if failed and last_end is not None else None,
+        replied_through=replied_through,
+        last_failure=_item(last_end) if retryable and last_end is not None else None,
         failed_turn_key=_turn_key(last_end)
-        if failed and last_end is not None
+        if retryable and last_end is not None
         else None,
-        waiting=waiting is not None,
+        waiting=waiting,
     )
+
+
+def _has_trigger_after(
+    connection: sqlite3.Connection, *, user_id: str, after: int
+) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM chat_items WHERE user_id = ? AND sequence > ? "
+        f"AND kind IN ({_TRIGGER_KINDS_SQL}) LIMIT 1",
+        (user_id, after),
+    ).fetchone()
+    return row is not None
 
 
 def read_unavailable_reference(

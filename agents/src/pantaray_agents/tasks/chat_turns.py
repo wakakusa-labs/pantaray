@@ -115,7 +115,7 @@ async def _run(plan: ChatTurnPlan) -> ChatWindow | None:
         # The model client names every request after the work that sends it.
         with TraceContextManager(
             user_id=plan.user_id,
-            local_job_id=f"chat:{plan.key}",
+            local_job_id=f"chat:{plan.item_key}",
             extra={"job_type": CHAT_TURN_TRACE_TYPE},
         ):
             return await run_chat_turn(

@@ -170,13 +170,15 @@ class ChatTurnMarks:
 
     ``answered_through`` is the ``read_through`` of the last end, a reply or a
     failure, and ``replied_through`` that of the last reply. ``last_failure``
-    is the last end when it is a failure, which a retry runs again; ``waiting``
-    says a trigger item past ``answered_through`` waits for a turn.
+    is the last end when it is a failure, which a retry runs again, and
+    ``failed_turn_key`` the key of the turn that failed; ``waiting`` says a
+    trigger item past ``answered_through`` waits for a turn.
     """
 
     answered_through: int
     replied_through: int
     last_failure: ChatItem | None
+    failed_turn_key: str | None
     waiting: bool
 
 
@@ -223,6 +225,9 @@ def read_chat_turn_marks(*, user_id: str) -> ChatTurnMarks:
         answered_through=answered_through,
         replied_through=_read_through(last_reply),
         last_failure=_item(last_end) if failed and last_end is not None else None,
+        failed_turn_key=_turn_key(last_end)
+        if failed and last_end is not None
+        else None,
         waiting=waiting is not None,
     )
 
@@ -284,6 +289,11 @@ def _read_last(
         (user_id,),
     ).fetchone()
     return row
+
+
+def _turn_key(end: sqlite3.Row) -> str:
+    # `chat-turn/{key}[.{attempt}]/{end}/{read_through}`
+    return str(end["message_id"]).split("/")[1].split(".")[0]
 
 
 def _read_through(end: sqlite3.Row | None) -> int:

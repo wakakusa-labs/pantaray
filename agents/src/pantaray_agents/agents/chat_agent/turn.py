@@ -147,13 +147,20 @@ type ChatSend = Callable[
 class ChatTurnPlan:
     """One turn to run.
 
-    ``key`` is the same each time this turn runs again, so what it appends and
-    does is keyed by it. Trigger items after ``cursor`` wait for this turn.
+    ``key`` is the same each time this turn runs again -- after a crash, or as
+    a retry of its failure -- so what it does is keyed by it, and a task it
+    started is never started twice. ``attempt`` tells a retry's own items
+    apart from the failed run's. Trigger items after ``cursor`` wait for it.
     """
 
     user_id: str
     key: str
     cursor: int
+    attempt: str = ""
+
+    @property
+    def item_key(self) -> str:
+        return self.key if not self.attempt else f"{self.key}.{self.attempt}"
 
 
 class ChatTurnInterrupted(RuntimeError):
@@ -200,8 +207,12 @@ def plan_chat_turn(*, user_id: str, retry_of: str | None) -> ChatTurnPlan | None
     marks = read_chat_turn_marks(user_id=user_id)
     failure = marks.last_failure
     if failure is not None and failure.item_id == retry_of:
+        assert marks.failed_turn_key is not None  # a failure names its turn
         return ChatTurnPlan(
-            user_id=user_id, key=f"r{failure.sequence}", cursor=marks.replied_through
+            user_id=user_id,
+            key=marks.failed_turn_key,
+            cursor=marks.replied_through,
+            attempt=f"r{failure.sequence}",
         )
     if not marks.waiting:
         return None
@@ -366,7 +377,7 @@ class _ChatTurn:
             for index, message in enumerate(response.messages):
                 await self.append(
                     chat_turn_message_id(
-                        self.plan.key, f"say/{turn.entry.turn_id}/{index}"
+                        self.plan.item_key, f"say/{turn.entry.turn_id}/{index}"
                     ),
                     AssistantMessageContent(
                         kind="assistant_message",
@@ -407,7 +418,7 @@ class _ChatTurn:
     async def end(self, content: ChatItemContent) -> None:
         end: ChatTurnEnd = "failure" if content.kind == "turn_failure" else "reply"
         await self.append(
-            chat_turn_end_message_id(self.plan.key, end, self.seen), content
+            chat_turn_end_message_id(self.plan.item_key, end, self.seen), content
         )
 
     async def append(self, message_id: str, content: ChatItemContent) -> None:

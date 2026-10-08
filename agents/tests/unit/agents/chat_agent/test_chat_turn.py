@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import os
+import sqlite3
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -15,6 +16,7 @@ from tests.unit.local_runtime.action_seed import insert_agent_action
 
 from pantaray_agents.agents.chat_agent import turn as chat_turn
 from pantaray_agents.agents.chat_agent.context import ChatWindow
+from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import (
     ChatTurnInterrupted,
     plan_chat_turn,
@@ -31,6 +33,7 @@ from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
 )
+from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.chat import (
     AssistantMessageContent,
@@ -527,3 +530,36 @@ async def test_a_route_change_during_one_call_stops_the_next(
         )
 
     assert ran == ["one"]
+
+
+async def test_a_retried_turn_never_starts_a_task_twice() -> None:
+    _say("m-1", "Draft the Q3 report")
+    with sqlite3.connect(os.environ["LOCAL_DB_PATH"]) as connection:
+        ensure_user_row(connection, user_id=USER, timestamp="2026-10-08T00:00:00Z")
+    start = LlmToolCall(
+        call_id="s1",
+        name="start_action",
+        arguments={"message": "Draft the Q3 report", "attachments_from": []},
+    )
+    unavailable = LlmProxyExecutionError(
+        error_code=PROXY_UPSTREAM_UNAVAILABLE, error_message="down", retryable=True
+    )
+
+    async def run(model: _Model, retry_of: str | None = None) -> None:
+        plan = plan_chat_turn(user_id=USER, retry_of=retry_of)
+        assert plan is not None
+        await run_chat_turn(
+            plan, send=model.send, tools=chat_tools(plan), window=ChatWindow.fresh()
+        )
+
+    # The task starts, then the model fails before the turn can answer.
+    await run(_Model([_turn(start), unavailable]))
+    failure = _items()[-1]
+    # The user retries; the model starts the same task again.
+    again = start.model_copy(update={"call_id": "s2"})
+    await run(_Model([_turn(again), _reply_call("On it.")]), retry_of=failure.item_id)
+
+    with sqlite3.connect(os.environ["LOCAL_DB_PATH"]) as connection:
+        actions = connection.execute("SELECT COUNT(*) FROM agent_actions").fetchone()
+    assert actions == (1,)
+    assert getattr(_items()[-1].content, "text", None) == "On it."

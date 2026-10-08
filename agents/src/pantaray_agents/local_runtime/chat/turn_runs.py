@@ -84,9 +84,11 @@ def run_chat_turn_in_thread[T](
             # A cancelled await on a thread leaves that thread running: the
             # turn has stopped once those threads have finished too.
             loop.run_until_complete(loop.shutdown_default_executor())
-            loop.close()
+            # Unregistered before the loop closes, under the lock a stop asks
+            # under, so a registered loop always takes the stop.
             with _LOCK:
                 _RUNS.pop(user_id, None)
+            loop.close()
             finished.set_result(None)
         # Last, so the caller's next turn starts only after this one is gone.
         if failure is None:
@@ -108,9 +110,9 @@ async def stop_chat_turns(*, owner_id: str) -> None:
 
     with _LOCK:
         run = _RUNS.get(owner_id)
-    if run is None:
-        return
-    run.loop.call_soon_threadsafe(run.cancel)
+        if run is None:
+            return
+        run.loop.call_soon_threadsafe(run.cancel)
     _, pending = await asyncio.wait(
         {asyncio.wrap_future(run.finished)}, timeout=CHAT_TURN_STOP_WAIT_SECONDS
     )

@@ -199,3 +199,14 @@ async def test_the_next_turn_waits_for_a_stopped_turns_late_write(
     await drain
 
     assert seen_by_next[-1] == ["reply"]
+
+
+async def test_a_stop_that_races_the_turns_own_end_still_returns() -> None:
+    for _ in range(50):
+
+        async def turn() -> str:
+            return "answered"
+
+        outcome = run_chat_turn_in_thread("racer", turn)
+        await stop_chat_turns(owner_id="racer")  # must never raise
+        assert outcome.result(timeout=5) in ("answered", "stopped")

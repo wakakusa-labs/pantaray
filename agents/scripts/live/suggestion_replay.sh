@@ -2,15 +2,19 @@
 # Compare Suggestion output of two git refs on the same recent Insights.
 #
 #   OPENAI_API_KEY=... agents/scripts/live/suggestion_replay.sh [BEFORE_REF] [AFTER_REF]
+#   REPLAY_PROVIDER=chatgpt agents/scripts/live/suggestion_replay.sh ...
 #
 # Copies the app's database and artifacts under /tmp, replays the latest
 # $LATEST (5) Insights on each ref with suggestion_replay.py and prints the
 # comparison. Refs default to origin/develop and HEAD. PYTHON names the
 # interpreter (default: agents/.venv/bin/python); PANTARAY_APP_DIR the app's
-# data folder. The copy and outputs stay in the printed /tmp folder.
+# data folder. REPLAY_PROVIDER=chatgpt sends on the app's ChatGPT route with the
+# Codex CLI's sign-in (~/.codex/auth.json) instead of an API key. The copy and
+# outputs stay in the printed /tmp folder.
 set -euo pipefail
 
-: "${OPENAI_API_KEY:?OPENAI_API_KEY is not set}"
+provider=${REPLAY_PROVIDER:-openai}
+[ "$provider" = chatgpt ] || : "${OPENAI_API_KEY:?OPENAI_API_KEY is not set}"
 before_ref=${1:-origin/develop}
 after_ref=${2:-HEAD}
 live=$(cd "$(dirname "$0")" && pwd)
@@ -30,7 +34,7 @@ for side in before after; do
   PYTHONPATH="$tree/src:$tree/packages/pantaray-llm/src" "$python" \
     "$live/suggestion_replay.py" run --db "$work/local-backend.sqlite3" \
     --artifact-root "$work/artifacts" --label "$side" --out "$work/$side.jsonl" \
-    --latest "${LATEST:-5}" || status=$?
+    --latest "${LATEST:-5}" --provider "$provider" || status=$?
   # 1 means some replay failed, which the comparison shows; anything else stops.
   [ "$status" -le 1 ] || exit "$status"
 done

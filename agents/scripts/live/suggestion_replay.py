@@ -2,8 +2,9 @@
 
 `run` decides a Suggestion for each chosen Insight of the copy the way the job
 does -- the same prompt, lenses, research tools, selector and writer -- over the
-direct route with the OpenAI key in OPENAI_API_KEY (and TAVILY_API_KEY for web
-search when set), and writes one JSON line per Insight. Nothing is published:
+direct route with the OpenAI key in OPENAI_API_KEY, or with `--provider
+chatgpt` on the ChatGPT route the app uses, signed in with the Codex CLI's
+token (and TAVILY_API_KEY for web search when set), and writes one JSON line per Insight. Nothing is published:
 the run's steps land in the copy only. `compare` pairs two such files by
 Insight. `suggestion_replay.sh` runs both sides on two git refs and compares.
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import sqlite3
@@ -23,6 +25,7 @@ import time
 import traceback
 import uuid
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pantaray_llm.profiles import OPENAI_GPT_6_LUNA_MODEL
@@ -194,11 +197,42 @@ async def _replay_one(
     }
 
 
+def _chatgpt_connection(auth_path: Path) -> tuple[str, object]:
+    """The app's ChatGPT route, signed in with the Codex CLI's token.
+
+    The token is read here and handed to the connection store only; it is
+    never printed or written.
+    """
+    from pantaray_agents.local_runtime.runtime.connection_store import (
+        ChatGptConnection,
+        ChatGptCredential,
+    )
+
+    tokens = json.loads(auth_path.read_text(encoding="utf-8"))["tokens"]
+    access_token = str(tokens["access_token"])
+    # The JWT's exp claim, read without verifying: the backend verifies it.
+    claims = access_token.split(".")[1]
+    payload = json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))
+    expires_at = datetime.fromtimestamp(int(payload["exp"]), UTC).isoformat()
+    return access_token, ChatGptConnection(
+        model=MODEL,
+        credential=ChatGptCredential(
+            access_token=access_token,
+            expires_at=expires_at,
+            account_id=str(tokens["account_id"]),
+        ),
+    )
+
+
 async def _run(args: argparse.Namespace) -> int:
-    key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
-    if not key:
-        print("OPENAI_API_KEY is not set")
-        return 2
+    if args.provider == "chatgpt":
+        key, connection = _chatgpt_connection(args.codex_auth)
+    else:
+        key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
+        if not key:
+            print("OPENAI_API_KEY is not set")
+            return 2
+        connection = None
     db, artifact_root = args.db.resolve(), args.artifact_root.resolve()
     if LIVE_STORE_MARKER in str(db) or LIVE_STORE_MARKER in str(artifact_root):
         print("Refusing to replay on the live store: pass a copy.")
@@ -236,7 +270,9 @@ async def _run(args: argparse.Namespace) -> int:
         print("No Insight to replay.")
         return 2
     mark_configured()
-    set_llm_connection(ApiKeyConnection(provider="openai", model=MODEL, api_key=key))
+    set_llm_connection(
+        connection or ApiKeyConnection(provider="openai", model=MODEL, api_key=key)
+    )
     tavily = os.environ.get("TAVILY_API_KEY", "").strip().strip("'\"")
     if tavily:
         set_web_search_credential(WebSearchCredential(api_key=tavily))
@@ -311,6 +347,15 @@ def main() -> int:
     run.add_argument("--out", type=Path, required=True)
     run.add_argument("--insight-id", action="append", default=[])
     run.add_argument("--latest", type=int, default=5)
+    run.add_argument(
+        "--provider",
+        choices=("openai", "chatgpt"),
+        default="openai",
+        help="openai: OPENAI_API_KEY; chatgpt: the ChatGPT route, Codex CLI sign-in",
+    )
+    run.add_argument(
+        "--codex-auth", type=Path, default=Path.home() / ".codex" / "auth.json"
+    )
     compare = commands.add_parser("compare", help="pair two replay outputs")
     compare.add_argument("before", type=Path)
     compare.add_argument("after", type=Path)

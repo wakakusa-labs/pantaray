@@ -123,6 +123,8 @@ OPENAI_API_KEY="$(your-secret-lookup openai)" \
 Refs default to `origin/develop` and `HEAD`. `LATEST` sets how many Insights
 (5), `PYTHON` the interpreter (`agents/.venv/bin/python`), `SMOKE_MODEL` the
 model (the one Cloud serves Suggestion with), `PANTARAY_APP_DIR` the app's data
-folder, and `TAVILY_API_KEY` enables web search. Raw activity is never read,
+folder, and `TAVILY_API_KEY` enables web search. `REPLAY_PROVIDER=chatgpt`
+sends on the ChatGPT route the app uses, signed in with the Codex CLI's
+`~/.codex/auth.json` (read in-process, never printed), instead of an API key. Raw activity is never read,
 and memory search is lexical unless `LOCAL_EMBEDDING_MODEL_DIR` names the
 bundled model; both sides run under the same conditions.

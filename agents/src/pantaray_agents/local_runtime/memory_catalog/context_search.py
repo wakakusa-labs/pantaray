@@ -17,7 +17,6 @@ from .epoch import build_memory_context_epoch, merge_memory_context_epochs
 from .fragment_visibility import (
     MEMORY_FRAGMENT_COLUMNS,
     VISIBLE_FRAGMENT_JOINS,
-    VISIBLE_FRAGMENTS_FROM_NODES,
     revision_visibility_predicate,
     visible_fragment_predicate,
 )
@@ -212,7 +211,8 @@ def _exact_hits(
     rows = connection.execute(
         f"""
         SELECT {MEMORY_FRAGMENT_COLUMNS}
-        FROM {VISIBLE_FRAGMENTS_FROM_NODES}
+        FROM memory_fragments AS fragments
+        {VISIBLE_FRAGMENT_JOINS}
         WHERE {visibility}
           AND (
             fragments.fragment_id = ? OR fragments.revision_id = ?

@@ -200,6 +200,10 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
       ...(!interactive && { focusable: true }),
       ...(process.platform === 'darwin' && {
         type: 'panel',
+        // A frameless window with rounded corners keeps an invisible title bar, and a
+        // click in that top strip activates the app despite the non-activating panel.
+        // The card draws its own corners on the transparent window.
+        roundedCorners: false,
         fullscreenable: false,
         ...(interactive && { focusable: true }),
         acceptFirstMouse: true,

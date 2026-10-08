@@ -845,6 +845,26 @@ test('overlays the user opens are centered and keep that center until the user a
   assert.deepEqual(clicked.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
 });
 
+test('macOS overlays have no hidden title bar, whose clicks would activate the app', () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', {
+    value: 'darwin',
+    configurable: true,
+  });
+  try {
+    const { notificationWindow, instances } = loadNotificationWindowModule();
+    notificationWindow.showNotification('S1');
+
+    assert.equal(instances[0].options.type, 'panel');
+    assert.equal(instances[0].options.roundedCorners, false);
+  } finally {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      configurable: true,
+    });
+  }
+});
+
 test('history overlay is focusable from native window creation on macOS', async () => {
   const originalPlatform = process.platform;
   Object.defineProperty(process, 'platform', {

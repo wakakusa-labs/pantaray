@@ -445,6 +445,47 @@ async def test_apply_patch_needs_read_text_omits_bom_and_edit_keeps_one(
 
 
 @pytest.mark.asyncio
+async def test_apply_patch_window_keeps_interior_bom_character_visible(
+    tmp_path: Path,
+) -> None:
+    db_path, context = _bootstrap_workspace_write_context(tmp_path)
+    target = context.workspace_path / "joined.txt"
+    long_before = "x" * 40_000
+    long_after = "y" * 40_000
+    target.write_bytes(f"{long_before}\n\ufefftarget\n{long_after}\n".encode())
+
+    first = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name, old_lines=["\ufefftarget"], new_lines=["x"]
+        ),
+        invocation_suffix="interior-bom-window",
+    )
+
+    assert first.output["status"] == "needs_read"
+    windows = first.output["windows"]
+    assert isinstance(windows, list) and len(windows) == 1
+    window = windows[0]
+    assert isinstance(window, dict)
+    assert (window["start_line"], window["end_line"]) == (2, 2)
+    copied_line = str(window["text"]).split("\n")[0]
+
+    retried = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name, old_lines=[copied_line], new_lines=["changed"]
+        ),
+        invocation_suffix="interior-bom-retry",
+    )
+
+    # The success diff is large enough to be stored as an action file.
+    assert retried.status == "success"
+    assert target.read_bytes() == (f"{long_before}\nchanged\n{long_after}\n".encode())
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_read_failure_reports_read_failed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1197,24 +1238,6 @@ def test_apply_patch_visible_check_accepts_same_window_sequence() -> None:
         file_sha256=text_sha256(""),
         full_file=False,
         visible_texts=("section A\ncontext\nold 1\nold 2\nmore context\nsection B\n",),
-    )
-
-    assert change_uses_visible_lines(change=change, snapshot=snapshot)
-
-
-def test_apply_patch_visible_check_matches_first_line_of_bom_crlf_window() -> None:
-    change = ApplyPatchUpdateChange.model_validate(
-        {
-            "op": "update",
-            "path": "Module1.vb",
-            "edits": [{"old_lines": ["Imports System"], "new_lines": ["Imports IO"]}],
-        }
-    )
-    snapshot = PatchReadSnapshot(
-        path="Module1.vb",
-        file_sha256=text_sha256(""),
-        full_file=False,
-        visible_texts=("\ufeffImports System\r\nModule Module1\r\n",),
     )
 
     assert change_uses_visible_lines(change=change, snapshot=snapshot)

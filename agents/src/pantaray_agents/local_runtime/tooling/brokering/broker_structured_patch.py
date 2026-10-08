@@ -409,9 +409,14 @@ def patch_line_segments(text: str) -> tuple[str, ...]:
     )
 
 
-def patch_line_texts(text: str) -> tuple[str, ...]:
-    """Return the lines patch edits match against, without BOM or endings."""
-    return tuple(line for line, _ending in _split_lines(text.removeprefix(_UTF8_BOM)))
+def patch_line_texts(file_text: str) -> tuple[str, ...]:
+    """Return a whole file's lines as edits match them: no file BOM, no endings."""
+    return returned_line_texts(file_text.removeprefix(_UTF8_BOM))
+
+
+def returned_line_texts(text: str) -> tuple[str, ...]:
+    """Split text already returned to the model; U+FEFF here is content."""
+    return tuple(line for line, _ending in _split_lines(text))
 
 
 def _split_lines(text: str) -> list[tuple[str, str]]:

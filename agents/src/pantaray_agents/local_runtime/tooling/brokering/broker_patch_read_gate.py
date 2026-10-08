@@ -43,6 +43,7 @@ from .broker_structured_patch import (
     StructuredPatchError,
     patch_line_segments,
     patch_line_texts,
+    returned_line_texts,
 )
 
 FULL_READ_MAX_LINES = 800
@@ -354,7 +355,7 @@ def _edit_visible_in_any_text(
     visible_texts: tuple[str, ...],
 ) -> bool:
     return any(
-        _edit_visible_in_text(edit=edit, line_texts=patch_line_texts(visible_text))
+        _edit_visible_in_text(edit=edit, line_texts=returned_line_texts(visible_text))
         for visible_text in visible_texts
     )
 

@@ -32,6 +32,13 @@ type TrayCaptureStatusCopy = {
   detail: string | null;
 };
 
+export type EditMenuCopy = {
+  cut: string;
+  copy: string;
+  paste: string;
+  selectAll: string;
+};
+
 export type StartupDialogCopy = {
   runtimeConfigTitle: string;
   runtimeConfigBody: (detail: string) => string;
@@ -206,6 +213,12 @@ export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
           return hasUpdateReady ? `${base} (update ready)` : base;
         },
       };
+}
+
+export function getEditMenuCopy(lang: UiLanguage): EditMenuCopy {
+  return lang === 'ja'
+    ? { cut: '切り取り', copy: 'コピー', paste: 'ペースト', selectAll: 'すべてを選択' }
+    : { cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All' };
 }
 
 export function getStartupDialogCopy(lang: UiLanguage): StartupDialogCopy {

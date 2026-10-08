@@ -34,6 +34,7 @@ import { createUpdateUiManager } from './main_runtime/updateUi';
 import { createTrayController } from './main_runtime/trayController';
 import { installDesktopApplicationLifecycle } from './main_runtime/applicationLifecycle';
 import { openNewWindowsInDefaultBrowser } from './security/windowOpenPolicy';
+import { showEditContextMenus } from './ui/editContextMenu';
 import { startDesktopBackgroundRuntime } from './main_runtime/backgroundStartup';
 import { createDesktopRuntime, loadDevelopmentEnvironment } from './main_runtime/desktopRuntime';
 import { createDesktopFeatureRuntime } from './main_runtime/featureRuntime';
@@ -492,6 +493,12 @@ function startBackgroundRuntime(): void {
 }
 
 openNewWindowsInDefaultBrowser({ app, openExternal: (url) => shell.openExternal(url), logger });
+showEditContextMenus({
+  app,
+  menu: Menu,
+  windowFor: (contents) => BrowserWindow.fromWebContents(contents),
+  getUiLanguage: () => uiLanguage,
+});
 
 installDesktopApplicationLifecycle({
   app,

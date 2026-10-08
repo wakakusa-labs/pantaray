@@ -185,10 +185,8 @@ def _tasks(rows: Iterable[Sequence[object]]) -> tuple[ChatTask, ...]:
 def _stored_time(value: str) -> str:
     """``value`` as the timestamps are stored, so they compare as strings."""
 
-    moment = datetime.fromisoformat(value)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return format_utc_iso(moment.astimezone(UTC))
+    # A time without an offset is the user's local time, as the chat shows times.
+    return format_utc_iso(datetime.fromisoformat(value).astimezone(UTC))
 
 
 def _escape_like(text: str) -> str:

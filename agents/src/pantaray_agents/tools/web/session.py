@@ -82,15 +82,24 @@ def _success(tool_name: str, output: dict[str, JSONValue]) -> ReactToolResult:
 # fix per connection and the raiser's suggested action says which. Every other
 # failure is the system's, so the model gets no code or provider detail to pass
 # on.
+# Where the web search key is set, as the app labels it: the UI's i18n keys
+# nav.settings > settings.aiConnection.title > settings.aiConnection.webSearch.title
+# and settings.aiConnection.webSearch.keyLabel (frontend/src/i18n/messageCatalog).
+# The UI language lives in the desktop app, not here, so both are given and the
+# chat uses the one it replies in.
+_WEB_SEARCH_KEY_PLACE = (
+    "the Tavily API key in Settings > AI connection > Web search (in Japanese: "
+    '"Tavily API キー" in 設定 > AI 接続 > Web 検索)'
+)
 _USER_FIX_BY_FAILURE: dict[tuple[str, str], tuple[str, str]] = {
     (PROXY_CONNECTION_NOT_CONFIGURED, "configure_connection"): (
         "Web search is not set up",
-        "they can turn it on by signing in to Pantaray or by saving a Tavily "
-        "API key in Settings > AI connection > Web search",
+        "they can turn it on by signing in to Pantaray or by saving "
+        f"{_WEB_SEARCH_KEY_PLACE}",
     ),
     (PROXY_AUTHENTICATION_FAILED, "configure_connection"): (
         "The Tavily API key saved for web search was rejected",
-        "they can save a working key in Settings > AI connection > Web search",
+        f"they can save a working key as {_WEB_SEARCH_KEY_PLACE}",
     ),
     (PROXY_AUTHENTICATION_FAILED, "reauthenticate"): (
         "The user's Pantaray sign-in has expired",

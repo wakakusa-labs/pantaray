@@ -54,6 +54,7 @@ from pantaray_agents.tools.memory.retrieval import (
 )
 from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.tools.web.session import WebResearchToolSession
+from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 CHAT_TOOL_RESULTS_DIRNAME: Final[str] = "chat_tool_results"
 # Suggestion's research bounds: memory is read through these tools only.
@@ -178,7 +179,7 @@ def _search_tasks_tool(user_id: str) -> ReactToolDefinition:
                         "action_id": task.action_id,
                         "title": task.title,
                         "status": task.status,
-                        "updated_at": task.updated_at,
+                        "updated_at": describe_utc_timestamp(task.updated_at),
                         "latest": task.latest,
                     }
                     for task in found
@@ -194,7 +195,7 @@ def _search_tasks_tool(user_id: str) -> ReactToolDefinition:
             "done, wherever it was started -- beyond the ones your work list "
             "shows. Use this, not memory_search, for a task: by words in what you were asked or what "
             "you answered (query), and by when they were last updated (since, "
-            "until: ISO 8601 UTC). Newest first, each with its id, title, status "
+            "until: ISO 8601; a time without an offset is the user's local time). Newest first, each with its id, title, status "
             "and the first line of its answer; memory_sql reads a task's whole "
             "answer from agent_actions.final_output."
         ),

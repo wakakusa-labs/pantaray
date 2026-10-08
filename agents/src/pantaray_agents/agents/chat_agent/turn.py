@@ -88,6 +88,7 @@ from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolResult,
 )
+from pantaray_agents.utils.local_time import local_now_for_model
 from pantaray_agents.utils.structured_logging import (
     fingerprint_text,
     log_structured_event,
@@ -128,8 +129,9 @@ CHAT_SYSTEM_INSTRUCTION: Final[str] = (
     "Your tasks move only through your tools: a task starts or hears from you "
     'when a call says it did, and a result that begins with "Not done" '
     "means nothing happened, which is what you then tell the user.\n"
-    "If you need to look something up, first say so in one short line, then "
-    "look it up; if you can answer right away, answer."
+    "Text you write beside a tool call reaches the user while the call runs, "
+    "so a look-up can open with one short line on what you are checking. "
+    "reply carries the answer itself and ends your turn."
 )
 _NUDGE: Final[str] = (
     "Your answer has not reached the user: only what you send with reply does."
@@ -335,7 +337,7 @@ class _ChatTurn:
             self.window.fit,
             items,
             waiting_from=waiting[0].sequence,
-            tail=turn_context(waiting, work),
+            tail=turn_context(waiting, work, now=local_now_for_model()),
             head_bytes=input_bytes(CHAT_HEAD, CHAT_SYSTEM_INSTRUCTION)
             + sum(len(tool.model_dump_json().encode()) for tool in definitions),
             media=media,

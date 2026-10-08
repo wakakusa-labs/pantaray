@@ -39,6 +39,7 @@ from pantaray_agents.schema.chat import (
     TurnFailureContent,
     UserMessageContent,
 )
+from pantaray_agents.utils.local_time import describe_utc_timestamp
 from pantaray_llm.contracts.conversation import (
     LlmTurnAssistantItem,
     LlmTurnItem,
@@ -56,7 +57,7 @@ _TASK_STATES: dict[ActionStatus, str] = {
 
 CHAT_HEAD = (
     "Your chat with the user follows, oldest first. Every item but yours "
-    "starts with its id and time in brackets."
+    "starts with its id and the user's local time in brackets."
 )
 
 
@@ -94,8 +95,11 @@ def render_item(entry: TurnChatItem, media: ItemMedia) -> list[ConversationEntry
     ]
 
 
-def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUserItem:
-    """The work list and the items waiting for this turn, behind the chat."""
+def turn_context(
+    waiting: Sequence[ChatItem], work: ChatWorkList, *, now: str
+) -> LlmTurnUserItem:
+    """The time, the work list and the items waiting for this turn, behind the
+    chat. ``now`` is the user's local time, as ``local_now_for_model`` gives it."""
 
     tasks = [
         f"- {task.action_id} "
@@ -109,7 +113,7 @@ def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUser
     ]
     ids = ", ".join(item.item_id for item in waiting)
     return _user_item(
-        f"{TURN_CONTEXT_HEADING}"
+        f"{TURN_CONTEXT_HEADING}Now: {now}.\n"
         + "\n".join(
             [
                 "Your tasks, wherever they were started: all in hand, then the "
@@ -214,7 +218,8 @@ def _lay(entries: Sequence[ConversationEntry], *, head_bytes: int) -> LaidOutWin
 
 
 def _header(item: ChatItem) -> str:
-    return f"[{item.item_id} {item.created_at}]"
+    # Stored in UTC; the model reasons about "today" on the user's clock.
+    return f"[{item.item_id} {describe_utc_timestamp(item.created_at)}]"
 
 
 def _body(

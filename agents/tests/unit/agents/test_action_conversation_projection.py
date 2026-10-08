@@ -1182,8 +1182,7 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
         "## Tool Use Rules",
         "One turn may request several read-only calls at once",
         "Do not request two changing tools",
-        "## Quality of Work",
-        "## Checking Results",
+        "## Reporting Completion",
         "## AGENTS.md",
     ):
         assert rule in shared

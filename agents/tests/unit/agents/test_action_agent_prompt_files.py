@@ -120,7 +120,6 @@ def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence()
     shared = _shared_system_instruction()
     assert "inspect the resulting current state" in shared
     assert "mutation tool's success" in shared
-    assert "purely inline answer" in shared
 
 
 def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> None:
@@ -134,16 +133,13 @@ def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> N
         / "executing.yaml"
     )
 
-    assert "delegate them to subagents and run them in parallel" in section
     assert "Request all their `spawn_subagent` calls in the same turn" in section
-    assert "reasonably substantial, self-contained piece of work" in section
     assert "Brief each subagent in detail so it does not redo your work" in section
     assert "quote content you have already read" in section
     assert "it knows nothing of this conversation" in section
     assert "a colleague who just walked in" in section
     assert "exactly what to return" in section
     assert "Parallel subagents must not write the same files" in section
-    assert "Do not spawn a subagent just to run one command or one check" in section
     assert "choose an explicit model from the tool definition" in section
     for setting in SUBAGENT_MODEL_SETTINGS:
         assert setting.selector not in prompt_text

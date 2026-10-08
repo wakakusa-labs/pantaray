@@ -108,7 +108,9 @@ class LocalSuggestionResearchTools:
                     db_path=self.db_path, run_id=run_id
                 ),
             ),
-            *WebResearchToolSession(user_id=user_id).definitions(),
+            *WebResearchToolSession(
+                user_id=user_id, speaks_to_user=False
+            ).definitions(),
             *SuggestionZaneiSession(
                 reader=SourceReader(context_source_control.gate),
                 start=self.activity_start,

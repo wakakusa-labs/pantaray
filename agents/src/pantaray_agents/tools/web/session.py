@@ -15,6 +15,12 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     tool_error_response,
 )
+from pantaray_llm.errors import (
+    PROXY_AUTHENTICATION_FAILED,
+    PROXY_CONNECTION_NOT_CONFIGURED,
+    ProxySurfaceId,
+    build_proxy_agent_error,
+)
 
 from .definitions import build_web_research_definitions
 from .fetch import (
@@ -71,19 +77,69 @@ def _success(tool_name: str, output: dict[str, JSONValue]) -> ReactToolResult:
     return ReactToolResult(tool_name=tool_name, status="success", output=output)
 
 
-def _expected_error(
-    *, tool_name: str, error_code: str, error: Exception
+# A failure only the user can fix states its reason and the fix in the user's
+# terms, keyed like the Action's connection terminals: one code has a different
+# fix per connection and the raiser's suggested action says which. Every other
+# failure is the system's, so the model gets no code or provider detail to pass
+# on.
+_USER_FIX_BY_FAILURE: dict[tuple[str, str], tuple[str, str]] = {
+    (PROXY_CONNECTION_NOT_CONFIGURED, "configure_connection"): (
+        "Web search is not set up",
+        "they can turn it on by signing in to Pantaray or by saving a Tavily "
+        "API key in Settings > AI connection > Web search",
+    ),
+    (PROXY_AUTHENTICATION_FAILED, "configure_connection"): (
+        "The Tavily API key saved for web search was rejected",
+        "they can save a working key in Settings > AI connection > Web search",
+    ),
+    (PROXY_AUTHENTICATION_FAILED, "reauthenticate"): (
+        "The user's Pantaray sign-in has expired",
+        "web search works again once they sign in",
+    ),
+}
+
+
+def _web_tool_error(
+    *,
+    tool_name: str,
+    surface_id: ProxySurfaceId,
+    error: Exception,
+    speaks_to_user: bool,
 ) -> ReactToolResult:
+    user_fix = None
+    if isinstance(error, WebContentExecutionError):
+        suggested_action = build_proxy_agent_error(
+            surface_id=surface_id,
+            error_code=error.error_code,
+            suggested_action=error.suggested_action,
+        )["error_details"]["suggested_action"]
+        user_fix = _USER_FIX_BY_FAILURE.get((error.error_code, suggested_action))
+    if user_fix is None:
+        return tool_error_response(
+            tool_name=tool_name,
+            error_code="WEB_TOOL_FAILED",
+            message="Web search is unavailable right now, so nothing was looked up.",
+        )
+    reason, fix = user_fix
     return tool_error_response(
         tool_name=tool_name,
-        error_code=error_code,
-        message=str(error) or type(error).__name__,
+        error_code="WEB_TOOL_NEEDS_USER",
+        message=f"{reason}, so nothing was looked up."
+        + (f" Tell the user {fix}." if speaks_to_user else ""),
     )
 
 
 @dataclass(slots=True)
 class WebResearchToolSession:
+    """Web research tools for one run.
+
+    ``speaks_to_user`` is set where the model answers the user directly (the
+    chat): only there does a failure the user can fix ask the model to tell
+    them how. Suggestion research would otherwise turn it into a nag.
+    """
+
     user_id: str
+    speaks_to_user: bool
     search_snapshots: dict[str, WebSearchResponse] = field(default_factory=dict)
     extract_snapshots: dict[tuple[str, str | None], str] = field(default_factory=dict)
 
@@ -111,10 +167,11 @@ class WebResearchToolSession:
                     max_retries=1,
                 )
             except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-                return _expected_error(
+                return _web_tool_error(
                     tool_name=call.tool_name,
-                    error_code="WEB_TOOL_FAILED",
+                    surface_id="web_search",
                     error=exc,
+                    speaks_to_user=self.speaks_to_user,
                 )
             self.search_snapshots[query] = snapshot
         return _success(
@@ -152,10 +209,11 @@ class WebResearchToolSession:
                     failures=failures,
                 )
             except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-                return _expected_error(
+                return _web_tool_error(
                     tool_name=call.tool_name,
-                    error_code="WEB_TOOL_FAILED",
+                    surface_id="web_extract",
                     error=exc,
+                    speaks_to_user=self.speaks_to_user,
                 )
             for url, content in contents.items():
                 self.extract_snapshots[(url, query)] = content

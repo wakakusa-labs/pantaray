@@ -39,6 +39,8 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 from pantaray_agents.local_runtime.llm_proxy.client import LocalLlmProxyClient
 from pantaray_agents.local_runtime.runtime.connection_store import (
     ApiKeyConnection,
+    ChatGptConnection,
+    ChatGptCredential,
     set_llm_connection,
 )
 from pantaray_agents.local_runtime.runtime.identity import register_logged_out_owner
@@ -206,15 +208,31 @@ class _CountingModels:
         self.requests = 0
         self.calls = 0
         self.usage: dict[str, int] = {}
+        # (input tokens, of which read from the prompt cache) per request.
+        self.per_request: list[tuple[int, int]] = []
+        self.last_turn = False
+        self.extra_last_turn = False
 
     async def generate_content(self, **kwargs: Any) -> Any:
         self.requests += 1
+        # What the request said, to see whether a run reached its last turn
+        # (either loop's wording) and whether it took the extra one.
+        sent = str(kwargs["contents"]) + kwargs["config"].tool_use.model_dump_json()
+        self.last_turn |= any(
+            mark in sent for mark in ("This is the last turn", "tool budget is spent")
+        )
+        self.extra_last_turn |= "came on the last turn" in sent
         response = await self.models.generate_content(**kwargs)
         turn = getattr(response, "action_turn", None)
         calls = turn.calls if turn is not None else response.tool_calls
         self.calls += len(calls)
-        for key, value in (response.usage_metadata or {}).items():
-            self.usage[key] = self.usage.get(key, 0) + value
+        usage = response.usage_metadata or {}
+        for key, value in usage.items():
+            if value is not None:
+                self.usage[key] = self.usage.get(key, 0) + value
+        self.per_request.append(
+            (usage.get("prompt_tokens") or 0, usage.get("cached_prompt_tokens") or 0)
+        )
         return response
 
 
@@ -255,8 +273,11 @@ async def _run(fixture: dict[str, Any], db_path: Path, index: int) -> dict[str, 
         "requests": counting.requests,
         "tool_calls": counting.calls,
         "usage": counting.usage,
+        "per_request": counting.per_request,
         "events_read": zanei.events_read,
         "range_drained": not zanei.has_more,
+        "last_turn_reached": counting.last_turn,
+        "extra_last_turn": counting.extra_last_turn,
         "seconds": round(time.monotonic() - started, 1),
     }
 
@@ -272,6 +293,8 @@ def _compare(before: Path, after: Path) -> int:
             print(
                 f"== {label} {path.stem}: requests={run['requests']} "
                 f"tool_calls={run['tool_calls']} drained={run['range_drained']} "
+                f"last_turn={run['last_turn_reached']} "
+                f"extra_last_turn={run['extra_last_turn']} "
                 f"records={len(run['output']['records'])} usage={run['usage']}"
             )
             print(f"-- activity\n{run['output']['activity']}")
@@ -282,9 +305,9 @@ def _compare(before: Path, after: Path) -> int:
     return 0
 
 
-def _git(*args: str) -> str:
+def _git(*args: str, cwd: Path = AGENTS_DIR) -> str:
     return subprocess.run(
-        ["git", "-C", str(AGENTS_DIR), *args],
+        ["git", "-C", str(cwd), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -295,16 +318,18 @@ def _replay_both(args: argparse.Namespace) -> int:
     """Replay the before revision and this tree, each in its own interpreter."""
 
     before_rev = args.before or _git("merge-base", "HEAD", "origin/develop")
+    # Worktrees are added from the main checkout, whichever one this runs in.
+    main = Path(_git("rev-parse", "--path-format=absolute", "--git-common-dir")).parent
     args.out.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="insight-before-") as raw_tree:
         tree = Path(raw_tree) / "tree"
-        _git("worktree", "add", "--detach", str(tree), before_rev)
+        _git("worktree", "add", "--detach", str(tree), before_rev, cwd=main)
         try:
             for side, agents in (("before", tree / "agents"), ("after", AGENTS_DIR)):
                 print(f"== replaying {side} ({agents})")
                 command = [sys.executable, __file__, "--side", side]
                 command += ["--out", str(args.out), "--runs", str(args.runs)]
-                command += ["--model", args.model]
+                command += ["--model", args.model, "--route", args.route]
                 if args.fixture:
                     command += ["--fixture", str(args.fixture.resolve())]
                 source = f"{agents}/src:{agents}/packages/pantaray-llm/src"
@@ -312,9 +337,29 @@ def _replay_both(args: argparse.Namespace) -> int:
                 if subprocess.run(command, env=env, check=False).returncode:
                     return 1
         finally:
-            _git("worktree", "remove", "--force", str(tree))
+            _git("worktree", "remove", "--force", str(tree), cwd=main)
     print(f"before={before_rev} model={args.model} results={args.out}")
     return _compare(args.out / "before", args.out / "after")
+
+
+def _codex_connection(model: str) -> ChatGptConnection:
+    """The ChatGPT sign-in the Codex CLI keeps, read in-process and never shown.
+
+    The production app sends the same account's token to the same backend.
+    """
+
+    tokens = json.loads((Path.home() / ".codex" / "auth.json").read_text("utf-8"))[
+        "tokens"
+    ]
+    return ChatGptConnection(
+        model=model,
+        credential=ChatGptCredential(
+            access_token=tokens["access_token"],
+            # Not checked on this path; the backend refuses an expired token.
+            expires_at="2099-01-01T00:00:00Z",
+            account_id=tokens["account_id"],
+        ),
+    )
 
 
 async def _replay_side(args: argparse.Namespace, key: str) -> int:
@@ -325,9 +370,17 @@ async def _replay_side(args: argparse.Namespace, key: str) -> int:
     )
     register_logged_out_owner(OWNER)
     mark_configured()
-    set_llm_connection(
-        ApiKeyConnection(provider="openai", model=args.model, api_key=key)
+    connection = (
+        _codex_connection(args.model)
+        if args.route == "codex"
+        else ApiKeyConnection(provider="openai", model=args.model, api_key=key)
     )
+    secret = (
+        connection.credential.access_token
+        if isinstance(connection, ChatGptConnection)
+        else connection.api_key
+    )
+    set_llm_connection(connection)
     out = args.out / args.side
     out.mkdir(parents=True, exist_ok=False)
     failures = 0
@@ -339,7 +392,7 @@ async def _replay_side(args: argparse.Namespace, key: str) -> int:
                 run = await _run(fixture, db_path, index)
             except Exception as error:  # replay harness: report every failure kind
                 failures += 1
-                print(f"FAIL run-{index}: {str(error).replace(key, '<redacted>')}")
+                print(f"FAIL run-{index}: {str(error).replace(secret, '<redacted>')}")
                 continue
             (out / f"run-{index}.json").write_text(
                 json.dumps(run, ensure_ascii=False, indent=2), "utf-8"
@@ -363,10 +416,16 @@ def main() -> int:
         type=Path,
         default=Path(tempfile.gettempdir()) / f"insight-replay-{int(time.time())}",
     )
+    parser.add_argument(
+        "--route",
+        choices=("openai", "codex"),
+        default="openai",
+        help="openai: OPENAI_API_KEY; codex: the ChatGPT sign-in in ~/.codex/auth.json",
+    )
     parser.add_argument("--side", choices=("before", "after"), help=argparse.SUPPRESS)
     args = parser.parse_args()
     key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
-    if not key:
+    if args.route == "openai" and not key:
         print("Set OPENAI_API_KEY")
         return 2
     if args.side:

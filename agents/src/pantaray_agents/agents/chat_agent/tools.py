@@ -21,6 +21,7 @@ from pantaray_agents.local_runtime.chat.store import (
 )
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
+    read_attachment_holder,
     read_latest_run_process,
     read_submitted_message,
 )
@@ -62,6 +63,7 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
+    ToolConcurrency,
     react_tool_response_schema,
     tool_error_response,
 )
@@ -72,7 +74,8 @@ _MESSAGE: dict[str, JSONValue] = {
     "type": "string",
     "description": (
         "The user's request in their own words, as close to what they wrote as "
-        "you can; add only what the task cannot know otherwise."
+        "you can; add only what the task cannot know otherwise. What you want to "
+        "ask the user goes in your reply to them, not here."
     ),
 }
 _ATTACHMENTS: dict[str, JSONValue] = {
@@ -85,8 +88,9 @@ _ATTACHMENTS: dict[str, JSONValue] = {
 }
 # A file goes to one task only: handing it over moves it there.
 _HANDED_OVER = (
-    "Not done: a file from those messages has already gone to another of your "
-    "tasks. Add this to that task, or ask the user to attach it again."
+    "Not done: nothing was sent. A file from those messages already went to one "
+    "of your tasks, which keeps it. If this is for that task, send it again "
+    "with attachments_from []; otherwise ask the user to attach the file again."
 )
 _SUCCESS: JsonSchema = {
     "type": "object",
@@ -193,8 +197,9 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
         _tool(
             plan,
             "accept_suggestion",
-            "Take up one of your open suggestions when the user agrees to it; "
-            "you then work on it as your task.",
+            "Take up one of your open suggestions when the user agrees to it. "
+            "This starts the suggested work as your task by itself; it becomes "
+            "one more task in your work list.",
             {
                 "suggestion_id": {"type": "string"},
                 "supplement": {
@@ -238,6 +243,9 @@ def _tool(
         },
         response_schema=react_tool_response_schema(success_schema=_SUCCESS),
         execute=execute,
+        # One per model turn: the model sees each result before it sends the
+        # next, so a request is not sent twice in one breath.
+        concurrency=ToolConcurrency("solo_turn"),
     )
 
 
@@ -253,6 +261,32 @@ def _submit(
     if isinstance(attached, ReactToolResult):
         return attached
     images, files = attached
+    # Something already went in under this key (a re-run): the submission
+    # replays it, or answers what went in, with the files where they went.
+    sent_before = read_submitted_message(user_id=plan.user_id, message_id=key)
+    holders = {
+        file.attachment_id: None
+        if sent_before is not None
+        else read_attachment_holder(
+            user_id=plan.user_id, attachment_id=file.attachment_id
+        )
+        for file in files
+    }
+    target_id = target.action_id if isinstance(target, ExistingActionTarget) else None
+    # A file the target task already holds needs no second hand-off.
+    files = tuple(
+        f for f in files if target_id is None or holders[f.attachment_id] != target_id
+    )
+    taken = sorted({h for f in files if (h := holders[f.attachment_id]) is not None})
+    if taken:
+        return _refused(
+            tool,
+            "ATTACHMENT_ALREADY_HANDED_OVER",
+            "Not done: nothing was sent. A file from those messages already went "
+            f"to your task {taken[0]}, which keeps it. To add this to that task, "
+            "call send_to_action for it; otherwise ask the user to attach the "
+            "file again.",
+        )
     try:
         command = SubmitActionMessageCommand(
             user_id=plan.user_id,
@@ -335,9 +369,19 @@ def _already_sent(tool: str, sent: SubmittedMessage) -> ReactToolResult:
     )
 
 
+# What a success did, in words: the model reports this, not its own guess.
+_DONE = {
+    "start_action": "Started: this is now your task, and it is working on it.",
+    "send_to_action": "Added: your task takes this in.",
+    "accept_suggestion": "Taken up: the suggestion is now your task, working on it.",
+}
+
+
 def _started(tool: str, action_id: str) -> ReactToolResult:
     return ReactToolResult(
-        tool_name=tool, status="success", output={"action_id": action_id}
+        tool_name=tool,
+        status="success",
+        output={"action_id": action_id, "done": _DONE[tool]},
     )
 
 

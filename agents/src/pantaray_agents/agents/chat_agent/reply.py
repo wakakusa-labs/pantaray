@@ -51,8 +51,8 @@ def _card_schema(kind: str) -> dict[str, JSONValue]:
 REPLY_TOOL = LlmToolDefinition(
     name=REPLY_TOOL_NAME,
     description=(
-        "Send your answer to the user. It ends your turn, so call it alone, "
-        "once the answer is ready."
+        "Send your whole answer to the user, in one message. It ends your turn, "
+        "so call it alone, once the answer is ready."
     ),
     parameters={
         "type": "object",

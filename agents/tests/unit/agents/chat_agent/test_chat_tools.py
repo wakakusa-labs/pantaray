@@ -176,7 +176,7 @@ async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -
         "send_to_action", action_id="nope", message="x", attachments_from=[]
     )
 
-    assert sent == started
+    assert isinstance(sent, dict) and sent["action_id"] == started["action_id"]
     assert isinstance(unknown, dict) and unknown["error_code"] == "UNKNOWN_TASK"
     with sqlite3.connect(db_path) as connection:
         messages = connection.execute(
@@ -220,6 +220,20 @@ async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
     assert not staged.exists()  # moved into the first task
     assert isinstance(twice, dict)
     assert twice["error_code"] == "ATTACHMENT_ALREADY_HANDED_OVER"
+    assert handed["action_id"] in str(twice["message"])  # names where it went
+    # The same turn run again after a crash finds what it started.
+    rerun = await _turn("a0")(
+        "start_action", message="Summarize it", attachments_from=[asked.item_id]
+    )
+    assert isinstance(rerun, dict) and rerun["action_id"] == handed["action_id"]
+    # Adding to the task that holds the file needs no second hand-off.
+    added = await turn(
+        "send_to_action",
+        action_id=handed["action_id"],
+        message="Also make a comparison table",
+        attachments_from=[asked.item_id],
+    )
+    assert isinstance(added, dict) and added["action_id"] == handed["action_id"]
     assert len(_actions(db_path)) == 1
 
 

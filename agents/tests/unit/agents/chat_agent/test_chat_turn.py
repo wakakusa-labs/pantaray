@@ -564,3 +564,30 @@ async def test_a_retried_turn_never_starts_a_task_twice() -> None:
         actions = connection.execute("SELECT COUNT(*) FROM agent_actions").fetchone()
     assert actions == (1,)
     assert getattr(_items()[-1].content, "text", None) == "On it."
+
+
+async def test_two_starts_in_one_breath_start_one_task() -> None:
+    _say("m-1", "Draft the Q3 report")
+    with sqlite3.connect(os.environ["LOCAL_DB_PATH"]) as connection:
+        ensure_user_row(connection, user_id=USER, timestamp="2026-10-08T00:00:00Z")
+    starts = [
+        LlmToolCall(
+            call_id=f"s{n}",
+            name="start_action",
+            arguments={"message": "Draft the Q3 report", "attachments_from": []},
+        )
+        for n in range(2)
+    ]
+    plan = plan_chat_turn(user_id=USER, retry_of=None)
+    assert plan is not None
+    model = _Model([_turn(*starts), _reply_call("On it.")])
+
+    await run_chat_turn(
+        plan, send=model.send, tools=chat_tools(plan), window=ChatWindow.fresh()
+    )
+
+    with sqlite3.connect(os.environ["LOCAL_DB_PATH"]) as connection:
+        actions = connection.execute("SELECT COUNT(*) FROM agent_actions").fetchone()
+    assert actions == (1,)
+    # The second is answered as not run, so the model sees it before resending.
+    assert "Not run" in str(model.requests[1].conversation[-1])

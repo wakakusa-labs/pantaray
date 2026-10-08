@@ -149,6 +149,22 @@ def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage
     )
 
 
+def read_attachment_holder(*, user_id: str, attachment_id: str) -> str | None:
+    """The Action a staged file was handed to; handing it over moved it there."""
+
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        row = connection.execute(
+            "SELECT steps.action_id FROM agent_action_steps AS steps, "
+            "json_each(steps.user_message_json, '$.files') AS files "
+            "WHERE steps.user_id = ? "
+            "AND json_extract(files.value, '$.attachment_id') = ? LIMIT 1",
+            (user_id, attachment_id),
+        ).fetchone()
+    return None if row is None else str(row[0])
+
+
 def read_suggestion_texts(*, user_id: str, ids: Sequence[str]) -> dict[str, str]:
     """What each suggestion says to the user, by id."""
 
@@ -201,6 +217,7 @@ __all__ = [
     "ChatWorkList",
     "SubmittedMessage",
     "read_submitted_message",
+    "read_attachment_holder",
     "read_chat_work_list",
     "read_latest_run_process",
     "read_suggestion_texts",

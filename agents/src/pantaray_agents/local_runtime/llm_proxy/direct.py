@@ -39,6 +39,8 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     ChatGptConnection,
     LlmConnection,
 )
+from pantaray_agents.local_runtime.runtime.job_types import LOCAL_ACTION_JOB_TYPE
+from pantaray_agents.utils.trace_context import get_trace_context
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.request import (
     LlmModelOutputError,
@@ -162,9 +164,9 @@ async def _dispatch(
     if isinstance(connection, ChatGptConnection):
         # The ChatGPT backend keeps a session's prompt cache together by its
         # session-id header, which Codex sets, with the prompt_cache_key, to
-        # its conversation. Ours is the job, one Action run or one child's
-        # run: at Action scale a per-job session read 88% of the input from
-        # the cache, the per-owner key 37%.
+        # its conversation: the Action across its runs, otherwise the job. At
+        # Action scale a per-job session read 88% of the input from the cache,
+        # the per-owner key 37%.
         session = _conversation_session(request)
         request = request.model_copy(update={"prompt_cache_key": session})
         headers["session-id"] = session
@@ -196,9 +198,23 @@ async def _dispatch(
 
 
 def _conversation_session(request: LlmRequest) -> str:
-    """One conversation's key: the job it runs in, digested off the wire."""
+    """One conversation's key, digested off the wire.
 
-    return hashlib.sha256(request.trace.local_job_id.encode()).hexdigest()
+    An Action's own runs continue one conversation, so a follow-up run reads
+    the cache the last one left: the job executor names the Action in the
+    trace it runs under. A subagent's job names its parent's Action too, but
+    sends its own prefix, so it keeps its job, as every other job does.
+    """
+
+    trace = get_trace_context()
+    conversation = (
+        f"action:{trace.action_id}"
+        if trace is not None
+        and trace.action_id is not None
+        and trace.extra.get("job_type") == LOCAL_ACTION_JOB_TYPE
+        else request.trace.local_job_id
+    )
+    return hashlib.sha256(conversation.encode()).hexdigest()
 
 
 def _openai_transport(connection: LlmConnection) -> OpenAiResponsesTransport:

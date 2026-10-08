@@ -20,6 +20,7 @@ import {
   type WorkKey,
 } from './chatTimeline';
 import type { ChatComposerControl } from './useChatComposer';
+import { useChatReadMark } from './useChatReadMark';
 import { useChatReveal, type ChatReveal } from './useChatReveal';
 import { useChatScroll } from './useChatScroll';
 
@@ -79,6 +80,7 @@ export function ChatView({
     loadingOlder: chat.loadingOlder,
     loadOlder: chat.loadOlder,
   });
+  const markRead = useChatReadMark(chat.items, scroll.isFollowing);
   const itemsById = useMemo(
     () => new Map(chat.items.map((item) => [item.item_id, item])),
     [chat.items]
@@ -204,7 +206,14 @@ export function ChatView({
     if (shown.length === 0 && !chat.hasOlder && !turnInProgress)
       return <div className="history-empty">{t('history.chat.empty')}</div>;
     return (
-      <div ref={scroll.scrollRef} className="chat-scroll" onScroll={scroll.onScroll}>
+      <div
+        ref={scroll.scrollRef}
+        className="chat-scroll"
+        onScroll={() => {
+          scroll.onScroll();
+          markRead();
+        }}
+      >
         <div className="chat-column">
           {chat.hasOlder ? (
             <button

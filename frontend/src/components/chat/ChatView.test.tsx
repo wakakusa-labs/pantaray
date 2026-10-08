@@ -11,6 +11,7 @@ import type {
 } from '../../../electron/src/chat/chatContracts';
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import type { OrchestrationStatus } from '../../../electron/src/orchestration/eventContracts';
+import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
@@ -120,16 +121,20 @@ function WorkspaceStub() {
   );
 }
 
+const OWNER = { id: 'user-1', kind: 'account' } as const;
+
 const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
       <UiLanguageProvider initialLanguage="ja">
-        <ChatSessionProvider>
-          <Routes>
-            <Route path="/history" element={<SuggestionHistoryPage />} />
-            <Route path="/workspace" element={<WorkspaceStub />} />
-          </Routes>
-        </ChatSessionProvider>
+        <LocalOwnerContext.Provider value={OWNER}>
+          <ChatSessionProvider>
+            <Routes>
+              <Route path="/history" element={<SuggestionHistoryPage />} />
+              <Route path="/workspace" element={<WorkspaceStub />} />
+            </Routes>
+          </ChatSessionProvider>
+        </LocalOwnerContext.Provider>
       </UiLanguageProvider>
     </MemoryRouter>
   );

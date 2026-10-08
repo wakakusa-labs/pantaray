@@ -120,7 +120,8 @@ const HISTORY: ConversationHistoryListItem[] = [
 async function installBridge(
   page: Page,
   mode: 'chat' | 'list' | null,
-  chatPage: ChatItemPage = CHAT
+  chatPage: ChatItemPage = CHAT,
+  historyItems: ConversationHistoryListItem[] = HISTORY
 ) {
   await page.addInitScript(
     ({ chat, history, storedMode }) => {
@@ -181,7 +182,13 @@ async function installBridge(
                 },
               };
             },
-            onItemAppended: () => noop,
+            // Every subscriber hears an item the test appends, as main's relay reaches them all.
+            onItemAppended: (callback: (item: unknown) => void) => {
+              const target = window as unknown as { e2eAppended?: Set<(item: unknown) => void> };
+              target.e2eAppended ??= new Set();
+              target.e2eAppended.add(callback);
+              return () => target.e2eAppended?.delete(callback);
+            },
             onTurnState: (callback: (state: { running: boolean }) => void) => {
               Object.defineProperty(window, 'e2eTurnState', {
                 value: callback,
@@ -219,6 +226,9 @@ async function installBridge(
               return noop;
             },
           },
+          agentOverlay: {
+            showHistory: (payload: { suggestionId: string }) => opened.push(payload.suggestionId),
+          },
           actions: {
             attachFile: async ({ name, bytes }: { name: string; bytes: ArrayBuffer }) => ({
               attachmentId: '00000000-0000-4000-8000-000000000001',
@@ -232,7 +242,7 @@ async function installBridge(
         },
       });
     },
-    { chat: chatPage, history: HISTORY, storedMode: mode }
+    { chat: chatPage, history: historyItems, storedMode: mode }
   );
   await page.goto(`${baseUrl}#/history`);
 }
@@ -469,4 +479,106 @@ test('text in either side’s bubbles, with its quote and link, copies with the 
   await expect
     .poll(clipboard)
     .toMatch(/納期を 2 週間うしろに[\s\S]*直しました。見積書 を見てください。/);
+});
+
+const READ_POSITION_KEY = 'pantaray.chat-read:account:user-1';
+
+/** Delivers a chat item the way main relays one that was appended while the window is open. */
+async function appendLive(page: Page, chatItem: ChatItem) {
+  await page.evaluate((value) => {
+    const target = window as unknown as { e2eAppended?: Set<(item: unknown) => void> };
+    for (const callback of target.e2eAppended ?? []) callback(value);
+  }, chatItem);
+}
+
+test('unread Pantaray messages mark the rail and the chat switch until the chat is read', async ({
+  page,
+}, info) => {
+  // Read up to the user's first message before this window opened: four replies came after it.
+  await page.addInitScript((key) => {
+    if (sessionStorage.getItem('read-seeded')) return;
+    localStorage.setItem(key, '2');
+    sessionStorage.setItem('read-seeded', '1');
+  }, READ_POSITION_KEY);
+  await installBridge(page, 'list');
+  const history = page.getByRole('button', { name: '履歴' });
+  const chatSwitch = page.getByRole('button', { name: 'チャット', exact: true });
+  await expect(history).toHaveAccessibleDescription('未読 4 件');
+  await expect(chatSwitch).toHaveAccessibleDescription('未読 4 件');
+  await expect(chatSwitch).toHaveText('チャット4');
+  await expect(history.locator('.app-rail-unread-dot')).toBeVisible();
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('unread-rail-and-switch.png') });
+  await page.screenshot({
+    path: info.outputPath('unread-rail-and-switch-detail.png'),
+    clip: { x: 0, y: 0, width: 620, height: 160 },
+  });
+
+  // Opening the chat shows its newest message, so everything is read.
+  await chatSwitch.click();
+  await expect(page.getByText('納期を直しますね。')).toBeInViewport();
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+  await expect(history.locator('.app-rail-unread-dot')).toHaveCount(0);
+  await expect(chatSwitch).toHaveText('チャット');
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('9');
+
+  // A reply that arrives while the newest message is in view is read as it lands.
+  await appendLive(page, reply(10, 40, '下書きを直しました。'));
+  await expect(
+    page.getByRole('list', { name: 'Pantaray とのチャット' }).getByText('下書きを直しました。')
+  ).toBeVisible();
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+
+  // On the task list, Pantaray's replies count and the user's own messages never do.
+  await page.getByRole('button', { name: '作業', exact: true }).click();
+  await appendLive(page, user(11, 41, 'ありがとう'));
+  await appendLive(page, reply(12, 42, 'ほかに直すところがあれば言ってください。'));
+  await expect(history).toHaveAccessibleDescription('未読 1 件');
+  await expect(page.getByRole('button', { name: 'チャット', exact: true })).toHaveText('チャット1');
+
+  // A restart reads the stored position, so what was read stays read.
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: '作業', exact: true, pressed: true })
+  ).toBeVisible();
+  await expect(page.locator('html')).toBeVisible();
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+});
+
+test('a first run marks the existing chat read instead of showing it all as unread', async ({
+  page,
+}) => {
+  await installBridge(page, 'list');
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
+    .toBe('9');
+  await expect(page.getByRole('button', { name: '履歴' })).not.toHaveAccessibleDescription(/未読/);
+});
+
+test('a suggestion the user has not answered is listed as 提案 and reopens its Overlay', async ({
+  page,
+}, info) => {
+  await installBridge(page, 'list', CHAT, [
+    {
+      kind: 'suggestion',
+      suggestion_id: 'suggestion-1',
+      title: '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？',
+      updated_at: at(9, 40),
+      status: 'approval_pending',
+    },
+    ...HISTORY,
+  ]);
+  const row = page.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
+  await expect(row.getByText('提案', { exact: true })).toBeVisible();
+  // An Action waiting for approval keeps its own label.
+  await expect(page.getByRole('button', { name: /見積書のたたき台を作る/ }).first()).toContainText(
+    '実行中'
+  );
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('tasks-suggestion.png') });
+  await row.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { e2eOpened: string[] }).e2eOpened))
+    .toEqual(['suggestion-1']);
 });

@@ -337,6 +337,20 @@ html:lang(ja) .history-day {
   white-space: nowrap;
 }
 
+.history-mode-switch__count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(125, 171, 220, 0.22);
+  color: var(--fog-text);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  text-align: center;
+}
+
 .history-mode-switch__button:hover {
   color: var(--fog-text);
 }

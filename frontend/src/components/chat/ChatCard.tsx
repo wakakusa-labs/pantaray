@@ -2,7 +2,10 @@ import { ArrowUpRight } from 'lucide-react';
 import { useId } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
-import { getConversationHistoryStatusMeta } from '@/components/history/statusTokens';
+import {
+  badgeClassName,
+  getConversationHistoryStatusMeta,
+} from '@/components/history/statusTokens';
 import type { ChatWorkState } from '@/hooks/useChatWorkStates';
 import type { MessageKey } from '@/i18n/types';
 
@@ -46,7 +49,7 @@ export function ChatCard({
         <span className="chat-card__top">
           <span className="chat-card__title">{work.title}</span>
           {statusMeta ? (
-            <span id={statusId} className={`badge badge--${statusMeta.tone}`}>
+            <span id={statusId} className={badgeClassName(statusMeta.tone)}>
               {t(statusMeta.labelKey)}
             </span>
           ) : null}

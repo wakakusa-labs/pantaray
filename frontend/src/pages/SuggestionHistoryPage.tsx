@@ -6,7 +6,7 @@ import type { ConversationHistoryListItem } from '../../electron/src/history/his
 import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
 import HistorySearchField from '@/components/history/HistorySearchField';
-import { getConversationHistoryStatusMeta } from '@/components/history/statusTokens';
+import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
 import { ChatView } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HistoryModeSwitch } from '@/components/history/HistoryModeSwitch';
@@ -231,7 +231,7 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
             </h2>,
             ...day.items.map((item) => {
               const identity = itemIdentity(item);
-              const statusMeta = getConversationHistoryStatusMeta(item.status);
+              const statusMeta = getHistoryItemStatusMeta(item);
               const liveStage =
                 item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
               const content = (
@@ -255,7 +255,7 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
                   <div className="history-item-status">
                     {isUnread(item) ? <span aria-label={t('history.unread')}>●</span> : null}
                     {statusMeta ? (
-                      <span className={`badge badge--${statusMeta.tone}`}>
+                      <span className={badgeClassName(statusMeta.tone)}>
                         {t(statusMeta.labelKey)}
                       </span>
                     ) : null}

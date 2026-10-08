@@ -74,6 +74,18 @@
   color: #eef3fb;
 }
 
+/* New messages from Pantaray in the chat; static, so there is no motion to reduce. */
+.app-rail-unread-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7dabdc;
+  box-shadow: 0 0 0 2px #121720;
+}
+
 .app-rail-item:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);

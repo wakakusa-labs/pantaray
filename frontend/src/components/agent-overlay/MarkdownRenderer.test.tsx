@@ -74,4 +74,35 @@ describe('MarkdownBlock', () => {
     ]);
     expect(screen.getByText('pantaray-file:///Users/name/a.md')).toBeTruthy();
   });
+
+  it('ends a bare file URL where the sentence around it goes on', () => {
+    render(
+      <MarkdownBlock
+        isStreamFinished
+        text={
+          '（pantaray-file:///Users/name/report.pdf）を開いてください。\n\n' +
+          'See "pantaray-file:///Users/name/notes.md",then reply.'
+        }
+      />
+    );
+
+    expect(
+      screen.getAllByRole('link').map((link) => [link.textContent, link.getAttribute('href')])
+    ).toEqual([
+      ['report.pdf', 'pantaray-file:///Users/name/report.pdf'],
+      ['notes.md', 'pantaray-file:///Users/name/notes.md'],
+    ]);
+  });
+
+  it('holds back a file URL streamed output may still be cutting', async () => {
+    const { container } = render(
+      <MarkdownBlock
+        isStreamFinished={false}
+        text="まず pantaray-file:///Users/name/a.md を見て、次に pantaray-file:///Users/name/repo"
+      />
+    );
+
+    await waitFor(() => expect(container.textContent).toContain('次に pantaray-file:///'));
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['a.md']);
+  });
 });

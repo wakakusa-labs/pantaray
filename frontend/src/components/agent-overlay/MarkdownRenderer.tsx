@@ -130,38 +130,57 @@ function localPathFromPantarayFileHref(href: string): string | null {
 
 // A reply often names a file as a bare pantaray-file:/// URL rather than a Markdown
 // link, and GFM links only http(s) and www on its own. Japanese prose runs on with
-// no space, so the URL also ends at a full stop, comma or quote bracket, and loses
-// the punctuation and unmatched closing bracket that end the sentence around it.
-const BARE_FILE_URL = /pantaray-file:\/\/\/[^\s<>。、「」『』]+/gu;
-const TRAILING_PUNCTUATION = /[.,:;!?'"]$/u;
+// no space, so the URL ends at whitespace, a quote, a Japanese stop, comma or quote
+// bracket, or a closing bracket it did not open, and drops trailing punctuation.
+const BARE_FILE_URL_START = 'pantaray-file:///';
+const URL_STOPS = new Set([...'<>"“”。、「」『』']);
 const CLOSING_BRACKETS: Record<string, string> = { ')': '(', '）': '（', ']': '[', '】': '【' };
+const OPENING_BRACKETS = new Set(Object.values(CLOSING_BRACKETS));
+const TRAILING_PUNCTUATION = /[.,:;!?']+$/u;
 
-function trimSentenceEnd(url: string): string {
-  let trimmed = url;
-  for (;;) {
-    const last = trimmed.slice(-1);
-    const opening = CLOSING_BRACKETS[last];
-    const unmatched =
-      opening !== undefined && trimmed.split(opening).length < trimmed.split(last).length;
-    if (!TRAILING_PUNCTUATION.test(last) && !unmatched) return trimmed;
-    trimmed = trimmed.slice(0, -1);
+function bareFileUrlAt(text: string, start: number): string {
+  const depth = new Map<string, number>();
+  let end = start + BARE_FILE_URL_START.length;
+  for (; end < text.length; end += 1) {
+    const char = text[end];
+    if (/\s/u.test(char) || URL_STOPS.has(char)) break;
+    if (OPENING_BRACKETS.has(char)) depth.set(char, (depth.get(char) ?? 0) + 1);
+    const opening = CLOSING_BRACKETS[char];
+    if (opening !== undefined) {
+      const open = depth.get(opening) ?? 0;
+      if (open === 0) break;
+      depth.set(opening, open - 1);
+    }
   }
+  return text.slice(start, end).replace(TRAILING_PUNCTUATION, '');
 }
 
 // The few mdast fields this pass reads and writes.
-type MarkdownNode = { type: string; value?: string; url?: string; children?: MarkdownNode[] };
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: MarkdownNode[];
+  position?: { end: { offset?: number } };
+};
 
-function linkBareFileUrls(text: string): MarkdownNode[] | null {
+/** ``openEnded``: the text ends where streamed output does, so its last URL may be cut. */
+function linkBareFileUrls(text: string, openEnded: boolean): MarkdownNode[] | null {
   const nodes: MarkdownNode[] = [];
   let end = 0;
-  for (const match of text.matchAll(BARE_FILE_URL)) {
-    const url = trimSentenceEnd(match[0]);
+  for (
+    let start = text.indexOf(BARE_FILE_URL_START);
+    start !== -1;
+    start = text.indexOf(BARE_FILE_URL_START, start + BARE_FILE_URL_START.length)
+  ) {
+    if (start < end) continue;
+    const url = bareFileUrlAt(text, start);
     const localPath = localPathFromPantarayFileHref(url);
-    if (!localPath) continue;
-    if (match.index > end) nodes.push({ type: 'text', value: text.slice(end, match.index) });
+    if (!localPath || (openEnded && start + url.length === text.length)) continue;
+    if (start > end) nodes.push({ type: 'text', value: text.slice(end, start) });
     const name = localPath.split('/').filter(Boolean).pop() ?? localPath;
     nodes.push({ type: 'link', url, children: [{ type: 'text', value: name }] });
-    end = match.index + url.length;
+    end = start + url.length;
   }
   if (nodes.length === 0) return null;
   if (end < text.length) nodes.push({ type: 'text', value: text.slice(end) });
@@ -169,16 +188,23 @@ function linkBareFileUrls(text: string): MarkdownNode[] | null {
 }
 
 /** Links bare file URLs in prose; code and existing links hold no text node it reads. */
-function remarkBareFileLinks() {
-  const visit = (node: MarkdownNode): void => {
-    if (!node.children || node.type === 'link' || node.type === 'linkReference') return;
-    node.children = node.children.flatMap((child) => {
-      if (child.type === 'text' && child.value) return linkBareFileUrls(child.value) ?? [child];
-      visit(child);
-      return [child];
-    });
+function remarkBareFileLinks(options: { streaming: boolean }) {
+  return (tree: MarkdownNode, file: { value: unknown }): void => {
+    // The block's source ends in a newline the stream has not written.
+    const sourceLength = String(file.value).trimEnd().length;
+    const visit = (node: MarkdownNode): void => {
+      if (!node.children || node.type === 'link' || node.type === 'linkReference') return;
+      node.children = node.children.flatMap((child) => {
+        if (child.type === 'text' && child.value) {
+          const openEnded = options.streaming && child.position?.end.offset === sourceLength;
+          return linkBareFileUrls(child.value, openEnded) ?? [child];
+        }
+        visit(child);
+        return [child];
+      });
+    };
+    visit(tree);
   };
-  return visit;
 }
 
 function markdownUrlTransform(url: string): string {
@@ -220,7 +246,7 @@ export const MarkdownBlock: React.FC<{
   const markdownFallbackBlock: LLMOutputFallbackBlock = {
     component: ({ blockMatch }: { blockMatch: BlockMatch }) => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBareFileLinks]}
+        remarkPlugins={[remarkGfm, [remarkBareFileLinks, { streaming: !isStreamFinished }]]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

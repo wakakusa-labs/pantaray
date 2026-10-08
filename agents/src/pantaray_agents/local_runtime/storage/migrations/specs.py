@@ -138,6 +138,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0120_insight_source_cursor.sql",
         "0121_memory_note_source.sql",
         "0122_action_provider_turn_fingerprint.sql",
+        "0123_chat_items.sql",
     )
     return tuple(
         MigrationSpec(

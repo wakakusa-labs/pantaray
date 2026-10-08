@@ -37,6 +37,7 @@ from pantaray_agents.repositories.runtime_ports import (
 )
 from pantaray_agents.utils.ws_observability import RateLimiter
 
+from .chat_relay import ChatRelayMixin
 from .handler_process_control import WSHandlerProcessControlMixin
 from .handler_shared import ProcessMetadata, SuggestionStatusPersistenceError
 from .task_supervisor import WsTaskSupervisor
@@ -52,6 +53,7 @@ class WSOrchestrationHandler(
     SuggestionFlowMixin,
     WSHandlerProcessControlMixin,
     ActionFlowMixin,
+    ChatRelayMixin,
     BaseWSHandler,
 ):
     def __init__(

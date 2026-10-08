@@ -141,7 +141,13 @@ class _Model:
     script: list[_Step]
     requests: list[ConversationRequest] = field(default_factory=list)
 
-    async def send(self, request: ConversationRequest, _sink: TokenSink) -> _Reply:
+    async def send(
+        self,
+        request: ConversationRequest,
+        _sink: TokenSink,
+        before_attempt: Callable[[], None],
+    ) -> _Reply:
+        before_attempt()
         # What the real client builds: an unanswered or doubled call fails here.
         LlmActionTurnRequest(
             mode="action_turn",
@@ -424,3 +430,63 @@ async def test_a_retry_reads_waiting_items_the_window_had_passed() -> None:
 
     assert any("Summarize my week" in t for t in _texts(model.requests[0].conversation))
     assert getattr(_items()[-1].content, "text", None) == "Here it is."
+
+
+def _switch_routes(monkeypatch: pytest.MonkeyPatch, *routes: str) -> None:
+    """The route reads ``routes`` in turn, the last one from then on."""
+
+    reads = itertools.chain(routes, itertools.repeat(routes[-1]))
+    monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: next(reads))
+    monkeypatch.setattr(
+        chat_turn,
+        "effective_route_identity",
+        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
+    )
+
+
+async def test_a_transport_retry_never_goes_out_on_a_changed_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("m-1", "Hi")
+    _switch_routes(monkeypatch, "first", "first", "second")
+    attempts: list[object] = []
+
+    async def generate_content(**_kwargs: object) -> object:
+        attempts.append(_kwargs)
+        raise LlmProxyExecutionError(
+            error_code=PROXY_UPSTREAM_UNAVAILABLE, error_message="down", retryable=True
+        )
+
+    async def no_backoff(_attempt: int) -> None:
+        return None
+
+    model = chat_turn.ChatModel(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=generate_content)
+            )
+        )
+    )
+    monkeypatch.setattr(model, "_sleep_llm_retry_backoff", no_backoff)
+
+    with pytest.raises(ChatTurnInterrupted):
+        await _run(SimpleNamespace(send=model.send))  # type: ignore[arg-type]
+
+    assert len(attempts) == 1
+    assert plan_chat_turn(user_id=USER, retry_of=None) is not None
+
+
+async def test_a_send_that_fails_after_the_route_changed_leaves_no_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("m-1", "Hi")
+    _switch_routes(monkeypatch, "first", "first", "second")
+    failed = LlmProxyExecutionError(
+        error_code=PROXY_UPSTREAM_UNAVAILABLE, error_message="down", retryable=True
+    )
+
+    with pytest.raises(ChatTurnInterrupted):
+        await _run(_Model([failed]))
+
+    assert [i.content.kind for i in _items()] == ["user_message"]
+    assert plan_chat_turn(user_id=USER, retry_of=None) is not None

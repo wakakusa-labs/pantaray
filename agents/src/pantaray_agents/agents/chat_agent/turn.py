@@ -125,7 +125,11 @@ _CONNECTION_ERROR_CODES: Final = frozenset(
     }
 )
 
-type ChatSend = Callable[[ConversationRequest, TokenSink], Awaitable[TurnReply]]
+# Sends one request; ``before_attempt`` runs before every attempt, a transport
+# retry included, and raises to stop it.
+type ChatSend = Callable[
+    [ConversationRequest, TokenSink, Callable[[], None]], Awaitable[TurnReply]
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,10 +160,14 @@ class ChatModel(LlmToolUseMixin):
         self.llm_config = {}
 
     async def send(
-        self, request: ConversationRequest, sink: TokenSink
+        self,
+        request: ConversationRequest,
+        sink: TokenSink,
+        before_attempt: Callable[[], None],
     ) -> ActionTurnReply:
         return await self._generate_llm_action_turn(
             sink=sink,
+            before_attempt=before_attempt,
             prompt=request.prompt,
             tools=request.tools,
             max_parallel_tool_calls=request.max_parallel_tool_calls,
@@ -213,6 +221,9 @@ async def run_chat_turn(
     except (ChatTurnInterrupted, OwnerMismatchError):
         raise
     except Exception as exc:
+        # A send that failed after the route changed leaves its items waiting
+        # for the turn that runs again on the new route.
+        turn.require_route()
         reason = _failure_reason(exc)
         log_structured_event(
             logger,
@@ -250,8 +261,7 @@ class _ChatTurn:
         sink = CountingSink()
 
         async def send_turn(request: ConversationRequest) -> TurnReply:
-            self.require_route()
-            return await send(request, sink)
+            return await send(request, sink, self.require_route)
 
         # A retry answers items from before the window's boundary too, and a
         # waiting item is never left out of the turn that answers it.

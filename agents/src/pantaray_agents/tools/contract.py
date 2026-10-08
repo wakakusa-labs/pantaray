@@ -38,6 +38,9 @@ class ReactToolCall:
     tool_name: str
     tool_args: JSONValue
     tool_call_envelope: ToolCallEnvelope
+    # The id the model gave the call, which the conversation loop answers it by;
+    # None from a caller that pairs results by order.
+    call_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.tool_name.strip():

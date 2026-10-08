@@ -125,6 +125,7 @@ async def execute_action_subagent_broker_tool(
     tool_id: str,
     args: dict[str, JSONValue],
     tool_request_id: str,
+    call_id: str,
 ) -> ReactToolResult:
     """Run one child broker call, turning approval control into a typed pause."""
 
@@ -150,6 +151,7 @@ async def execute_action_subagent_broker_tool(
             args=args,
             tool_request_id=tool_request_id,
             approval_session_id=exc.approval_session_id,
+            call_id=call_id,
         ) from exc
     except BrokerApprovalDeniedError:
         return ReactToolResult(
@@ -220,6 +222,7 @@ def _approval_pause(
     args: dict[str, JSONValue],
     tool_request_id: str,
     approval_session_id: str,
+    call_id: str,
 ) -> ActionSubagentApprovalPause:
     session = load_approval_session_by_request(
         db_path=db_path,
@@ -236,6 +239,7 @@ def _approval_pause(
         arguments=args,
         tool_request_id=tool_request_id,
         approval_session_id=approval_session_id,
+        call_id=call_id,
         intent_class=session.intent_class,
         command_summary=dict(session.command_summary_json),
     )
@@ -250,9 +254,11 @@ def _build_tool(
     authority: ActionSubagentBrokerAuthority,
 ) -> ReactToolDefinition:
     async def execute(call: ReactToolCall, _step_number: int) -> ReactToolResult:
-        # The durable identity is the next transcript row, which calls running
-        # at once would share. Only read-only calls run at once, and they need
-        # no replay after a restart, so each gets an identity of its own; a
+        if call.call_id is None:
+            raise RuntimeError("A child tool runs only on the conversation loop")
+        # The durable identity is the next history row, which calls running at
+        # once would share. Only read-only calls run at once, and they need no
+        # replay after a restart, so each gets an identity of its own; a
         # changing call keeps the durable one that lets a restart replay it.
         tool_request_id = (
             str(uuid.uuid4())
@@ -261,6 +267,7 @@ def _build_tool(
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
                 process_id=payload["process_id"],
+                call_id=call.call_id,
             )
         )
         return await execute_action_subagent_broker_tool(
@@ -271,6 +278,7 @@ def _build_tool(
             tool_id=definition.tool_id,
             args=cast(dict[str, JSONValue], call.tool_args),
             tool_request_id=tool_request_id,
+            call_id=call.call_id,
         )
 
     return ReactToolDefinition(

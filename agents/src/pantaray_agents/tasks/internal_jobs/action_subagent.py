@@ -1,9 +1,18 @@
+"""One Action subagent's job: a private conversation on the shared loop.
+
+The child runs on ``run_conversation`` behind its parent's frozen context, and
+stores every item it appends as a row of its own process events
+(``action_subagent_history``), so a pause, a restart or a crash resumes the
+same conversation. What the parent sees is only the terminal result.
+"""
+
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent import ActionAgent
@@ -12,27 +21,21 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input i
     role_system_instruction,
 )
 from pantaray_agents.agents.action_agent.tools import SUBMIT_SUBAGENT_REPORT_TOOL_ID
-from pantaray_agents.agents.artifact_react import (
-    NativeReactCompletion,
-    NativeReactRunInput,
-    NativeReactSkippedCall,
-    NativeReactTurnInterrupt,
-    NativeReactTurnPlan,
-    ReactLoopPolicy,
-    ReactLoopStep,
-    run_native_react,
-)
 from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
-    LlmToolCallTurn,
+    ActionTurnReply,
     LlmToolUseMixin,
 )
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
 from pantaray_agents.config_tunables import load_local_runtime_tunables
-from pantaray_agents.conversation.tool_batch import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
-    plan_tool_batch,
+from pantaray_agents.conversation import provider_turns
+from pantaray_agents.conversation.loop import (
+    Continue,
+    ConversationRequest,
+    ConversationRun,
+    Finish,
+    IdleTurn,
+    run_conversation,
 )
 from pantaray_agents.local_runtime.llm_proxy import build_local_llm_proxy_client
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
@@ -44,11 +47,6 @@ from pantaray_agents.local_runtime.runtime.action_subagent_broker_authority impo
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_cancel import (
     action_subagent_cancellation_requested,
-)
-from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
-    append_action_subagent_tool_transcript,
-    build_action_subagent_conversation,
-    load_action_subagent_transcript,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_pause import (
     ActionSubagentApprovalPause,
@@ -70,18 +68,14 @@ from pantaray_agents.local_runtime.runtime.db_execution_context import (
 from pantaray_agents.local_runtime.runtime.job_executor import (
     persist_local_job_transition_with_retry,
 )
-from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
-from pantaray_agents.tools.contract import ReactToolResult, ToolConcurrency
-from pantaray_agents.utils.prompt_loader import load_config
-from pantaray_llm.contracts.conversation import LlmConversation
-from pantaray_llm.contracts.tool_use import (
-    LlmToolCall,
-    LlmToolContinuation,
-    LlmToolDefinition,
-    LlmToolResult,
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
 )
+from pantaray_agents.utils.prompt_loader import load_config
+from pantaray_llm.contracts.tool_use import LlmToolDefinition
 from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
@@ -89,6 +83,7 @@ from .action_subagent_broker import (
     build_action_subagent_broker_tools,
     execute_action_subagent_broker_tool,
 )
+from .action_subagent_history import SubagentHistoryWriter, load_subagent_history
 
 ACTION_SUBAGENT_PROFILE_UNAVAILABLE = "ACTION_SUBAGENT_PROFILE_UNAVAILABLE"
 ACTION_SUBAGENT_EXECUTION_FAILED = "ACTION_SUBAGENT_EXECUTION_FAILED"
@@ -97,17 +92,13 @@ _CONFIGURED_PROFILE_IDS = frozenset(
     settings.profile_id for settings in SUBAGENT_MODEL_SETTINGS
 )
 _ACTION_SUBAGENT_MAX_REPORT_REPAIRS = 2
-
-
-@dataclass(frozen=True, slots=True)
-class _PlannedCall:
-    """One requested call, in the shape the turn planner reads."""
-
-    call: LlmToolCall
-
-    @property
-    def tool_id(self) -> str:
-        return self.call.name
+# The bounds the child ran under on the generic ReAct loop.
+_MAX_TURNS = 100
+_MAX_TOOL_CALLS = 100
+_REPORT_REQUIRED = (
+    "Respond with tool calls. When the task is done, or cannot be done, call "
+    f"`{SUBMIT_SUBAGENT_REPORT_TOOL_ID}` alone with your report."
+)
 
 
 class ActionSubagentJobFailed(RuntimeError):
@@ -133,117 +124,17 @@ async def execute_action_subagent_job(
     broker_authority: ActionSubagentBrokerAuthority,
 ) -> ActionSubagentTerminalSuccess:
     sink = CountingSink()
-    terminal_tool = _report_tool_definition()
-    max_parallel = load_local_runtime_tunables().action_agent.max_parallel_tool_calls
+    tunables = load_local_runtime_tunables().action_agent
+    check_cancel = functools.partial(
+        _raise_if_cancellation_requested,
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        payload=payload,
+    )
+    writer = SubagentHistoryWriter(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload
+    )
     rejected_reports = 0
-    turn_conversation: LlmConversation | None = None
-
-    async def call_llm(
-        prompt: str,
-        tools: tuple[LlmToolDefinition, ...],
-        _continuation: LlmToolContinuation | None,
-        _tool_result: LlmToolResult | None,
-    ) -> LlmToolCallTurn:
-        # Every turn is rebuilt from process_events so that a message the parent
-        # sends mid-run, and a restart, both reach the model. That leaves no turn
-        # on which a continuation could be replayed, so asking for one would only
-        # make the adapter assemble state this loop drops.
-        turn = await runner._generate_llm_tool_call(
-            sink=sink,
-            prompt=prompt,
-            tools=tools,
-            continuation_mode="disabled",
-            conversation=turn_conversation,
-            max_parallel_tool_calls=max_parallel,
-            before_attempt=lambda: _raise_if_cancellation_requested(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                payload=payload,
-            ),
-        )
-        _raise_if_cancellation_requested(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            payload=payload,
-        )
-        return turn
-
-    async def record_tool_step(step: ReactLoopStep) -> None:
-        if step.step_kind != "tool" or step.status == "processing":
-            return
-        if step.tool_name is None:
-            raise RuntimeError("completed Action subagent Tool step requires a name")
-        append_action_subagent_tool_transcript(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=payload["user_id"],
-            action_id=payload["action_id"],
-            process_id=payload["process_id"],
-            job_id=payload["job_id"],
-            tool_name=step.tool_name,
-            status="completed" if step.status == "success" else "error",
-            arguments=(
-                {}
-                if step.tool_name == SUBMIT_SUBAGENT_REPORT_TOOL_ID
-                and step.status == "error"
-                else step.tool_args
-            ),
-            output=step.tool_output,
-            error_message=step.error_message,
-            completed_at=now_utc_iso(),
-        )
-
-    def build_turn_input(
-        _tool_results: tuple[ReactToolResult, ...], last_error: str | None
-    ) -> str:
-        # The loop calls this immediately before ``call_llm`` and nothing runs
-        # between them, so the items recorded here are the ones that turn sends.
-        nonlocal turn_conversation
-        entries = load_action_subagent_transcript(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            process_id=payload["process_id"],
-        )
-        turn_conversation = build_action_subagent_conversation(
-            entries,
-            assigned_task=_assigned_task_message(payload),
-            repair_notice=last_error,
-        )
-        # The parent's frozen head, byte for byte on every turn and for every
-        # child of that parent: the cache prefix the task and the transcript
-        # grow behind.
-        return payload["action_context"]
-
-    async def project_result(result: ReactToolResult) -> ReactToolResult:
-        _raise_if_cancellation_requested(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            payload=payload,
-        )
-        return result
-
-    def complete(
-        arguments: dict[str, JSONValue],
-        _final_turn: bool,
-    ) -> NativeReactCompletion[ActionSubagentTerminalSuccess]:
-        nonlocal rejected_reports
-        report = arguments.get("report")
-        try:
-            if not isinstance(report, str):
-                raise ActionSubagentReportError(
-                    "submit_subagent_report requires a string report"
-                )
-            terminal_result = build_action_subagent_success_result(report)
-        except ActionSubagentReportError as exc:
-            rejected_reports += 1
-            if rejected_reports > _ACTION_SUBAGENT_MAX_REPORT_REPAIRS:
-                raise ActionSubagentJobFailed(ACTION_SUBAGENT_EXECUTION_FAILED) from exc
-            return NativeReactCompletion(
-                value=None,
-                final_text="",
-                error_message=str(exc),
-            )
-        return NativeReactCompletion(value=terminal_result, final_text="")
 
     resumed = load_pending_action_subagent_approval(
         db_path=db_path,
@@ -252,7 +143,8 @@ async def execute_action_subagent_job(
     )
     if resumed is not None:
         # The saved gated request settles exactly once: the broker either runs
-        # the approved call or reports the denial as one skipped result.
+        # the approved call or reports the denial, which answers the call left
+        # waiting.
         settled = await execute_action_subagent_broker_tool(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -261,60 +153,90 @@ async def execute_action_subagent_job(
             tool_id=resumed.tool_id,
             args=resumed.arguments,
             tool_request_id=resumed.tool_request_id,
+            call_id=resumed.call_id,
         )
-        await record_tool_step(
-            ReactLoopStep(
-                run_id=payload["process_id"],
-                step_number=1,
-                step_kind="tool",
-                status=settled.status,
-                tool_name=resumed.tool_id,
-                tool_args=resumed.arguments,
-                tool_output=settled.output,
-                error_message=settled.error_message,
-            )
+        writer.answer_waiting_call(resumed.call_id, resumed.tool_id, settled)
+    history = load_subagent_history(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        process_id=payload["process_id"],
+        assigned_task=_assigned_task_message(payload),
+        window_tokens=tunables.context_window_tokens,
+    )
+    entries = await writer.answer_unanswered(history)
+    identity, _ = provider_turns.read_provider_turn_target(
+        inference_profile=payload["inference_profile_id"]
+    )
+    store = provider_turns.ProviderTurnStore(
+        identity=identity,
+        turns={
+            turn_id: record
+            for turn_id, record in history.turns.items()
+            if record.identity == identity
+        },
+    )
+
+    async def send(request: ConversationRequest) -> ActionTurnReply:
+        reply = await runner._generate_llm_action_turn(
+            sink=sink,
+            prompt=request.prompt,
+            tools=request.tools,
+            max_parallel_tool_calls=request.max_parallel_tool_calls,
+            system_instruction=request.system_instruction,
+            conversation=request.conversation,
+            before_attempt=check_cancel,
         )
-    tool_definitions = build_action_subagent_broker_tools(
+        check_cancel()
+        return reply
+
+    def decide(turn: IdleTurn) -> Finish[ActionSubagentTerminalSuccess] | Continue:
+        nonlocal rejected_reports
+        if turn.ending_call is None:
+            return Continue(_REPORT_REQUIRED)
+        report = turn.ending_call.arguments.get("report")
+        try:
+            if not isinstance(report, str):
+                raise ActionSubagentReportError(
+                    "submit_subagent_report requires a string report"
+                )
+            return Finish(build_action_subagent_success_result(report))
+        except ActionSubagentReportError as exc:
+            rejected_reports += 1
+            if rejected_reports > _ACTION_SUBAGENT_MAX_REPORT_REPAIRS:
+                raise ActionSubagentJobFailed(ACTION_SUBAGENT_EXECUTION_FAILED) from exc
+            return Continue(str(exc))
+
+    tools = build_action_subagent_broker_tools(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         payload=payload,
         authority=broker_authority,
     )
-    # The report is the loop's terminal tool, outside the registry, so it
-    # declares its concurrency here.
-    concurrency = {tool.name: tool.concurrency for tool in tool_definitions} | {
-        terminal_tool.name: ToolConcurrency("run_ending")
-    }
-    result = await run_native_react(
-        NativeReactRunInput(
-            run_id=payload["process_id"],
-            tool_definitions=tool_definitions,
-            terminal_tool=terminal_tool,
-            complete=complete,
-            build_prompt=build_turn_input,
-            call_llm=call_llm,
-            record_step=record_tool_step,
-            project_tool_result=project_result,
-            policy=ReactLoopPolicy(),
-            plan_turn=lambda turn, remaining: _plan_turn(
-                turn,
-                concurrency=concurrency,
-                max_parallel=max_parallel,
-                remaining_tool_calls=remaining,
-            ),
-            # The pause anchor holds only the call that asked; the resumed run
-            # settles it, so the calls after it are answered as not run now.
-            turn_interrupt=NativeReactTurnInterrupt(
-                exception=ActionSubagentApprovalPause,
-                not_run_reason=_not_run_reason(
-                    "came after a call that waited for the user's approval"
-                ),
-            ),
+    return await run_conversation(
+        ConversationRun(
+            # The parent's frozen head, byte for byte on every turn and for every
+            # child of that parent: the cache prefix the task and the history
+            # grow behind.
+            prompt=payload["action_context"],
+            system_instruction=_subagent_system_instruction(),
+            tools=tuple(_checked(tool, check_cancel) for tool in tools),
+            ending_tools=(_report_tool_definition(),),
+            history=entries,
+            provider_turns=store,
+            inference_profile=payload["inference_profile_id"],
+            max_turns=_MAX_TURNS,
+            max_tool_calls=_MAX_TOOL_CALLS,
+            max_parallel_tool_calls=tunables.max_parallel_tool_calls,
+            window=history.window,
+            usage=lambda: sink.delta,
+            send=send,
+            before_send=writer.before_send,
+            on_turn=writer.on_turn,
+            on_result=writer.on_result,
+            on_notice=writer.on_notice,
+            decide=decide,
         )
     )
-    if result.loop_result.status != "success" or result.value is None:
-        raise ActionSubagentJobFailed(ACTION_SUBAGENT_EXECUTION_FAILED)
-    return result.value
 
 
 def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
@@ -467,57 +389,16 @@ def _report_tool_definition() -> LlmToolDefinition:
     )
 
 
-def _plan_turn(
-    turn: LlmToolCallTurn,
-    *,
-    concurrency: Mapping[str, ToolConcurrency],
-    max_parallel: int,
-    remaining_tool_calls: int,
-) -> NativeReactTurnPlan:
-    """Split one turn's calls by what each called tool declares.
+def _checked(
+    tool: ReactToolDefinition, check_cancel: Callable[[], None]
+) -> ReactToolDefinition:
+    """The tool, run only while no cancel has been requested."""
 
-    Read-only calls run at once, a changing call runs alone in order, and a call
-    the plan leaves out is answered with the parent's reason for it. A report
-    that is not its turn's single call is one of them, so no requested work and
-    no later correction is lost to a report ending the run early.
-    """
+    async def execute(call: ReactToolCall, step_number: int) -> ReactToolResult:
+        check_cancel()
+        return await tool.execute(call, step_number)
 
-    plan = plan_tool_batch(
-        tuple(_PlannedCall(call) for call in turn.calls),
-        concurrency=concurrency,
-        max_parallel=max_parallel,
-        remaining_tool_steps=remaining_tool_calls,
-    )
-    skipped = [
-        (
-            entry.call.call.name,
-            entry.call.call.arguments,
-            EXCLUSION_NOTICES[entry.reason],
-        )
-        for entry in (*plan.deferred, *plan.dropped)
-    ]
-    skipped.extend(
-        (name, {}, PROVIDER_DROPPED_NOTICE) for name in turn.dropped_call_names
-    )
-    return NativeReactTurnPlan(
-        calls=tuple(planned.call for planned in plan.calls),
-        parallel=plan.mode == "parallel",
-        skipped=tuple(
-            NativeReactSkippedCall(
-                name=name,
-                arguments=arguments,
-                reason=_not_run_reason(notice),
-            )
-            for name, arguments, notice in skipped
-        ),
-    )
-
-
-def _not_run_reason(notice: str) -> str:
-    return (
-        f"Not run: this call {notice}. "
-        "Request it again in a later turn if it is still needed."
-    )
+    return replace(tool, execute=execute)
 
 
 def _subagent_system_instruction() -> str:

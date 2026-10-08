@@ -292,14 +292,16 @@ async def test_calls_a_stopped_turn_left_are_answered_before_the_run_goes_on(
     )
     done = ReactToolResult(tool_name="look", status="success", output={"ok": True})
     await writer.on_result(calls[0], done)
-    # An answer written outside the loop names no call: it answers the first
-    # call of its tool still waiting, the one that was running.
+    # Two calls of one tool can be in flight at once; an answer written outside
+    # the loop goes to the call it names, not to the first one waiting.
     writer.answer_waiting_call(
-        "edit", ReactToolResult(tool_name="edit", status="success", output="patched")
+        "e2",
+        "edit",
+        ReactToolResult(tool_name="edit", status="success", output="patched"),
     )
 
     history = _load(db_path)
-    assert history.unanswered == (calls[2],)
+    assert history.unanswered == (calls[1],)
     entries = await writer.answer_unanswered(history)
 
     answers = {
@@ -307,9 +309,9 @@ async def test_calls_a_stopped_turn_left_are_answered_before_the_run_goes_on(
         for entry in entries
         if isinstance(entry.item, LlmTurnToolResultItem)
     }
-    assert list(answers) == ["a1", "e1", "e2"]
-    assert "patched" in answers["e1"]
-    assert NOT_RUN_ERROR_CODE in answers["e2"] and "interrupted" in answers["e2"]
+    assert list(answers) == ["a1", "e2", "e1"]
+    assert "patched" in answers["e2"]
+    assert NOT_RUN_ERROR_CODE in answers["e1"] and "interrupted" in answers["e1"]
     # The answer is stored too, so the next rebuild has nothing left waiting.
     rebuilt = _load(db_path)
     assert rebuilt.unanswered == ()

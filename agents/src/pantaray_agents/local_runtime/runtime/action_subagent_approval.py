@@ -75,6 +75,8 @@ class PendingActionSubagentApproval:
     arguments: dict[str, JSONValue]
     tool_request_id: str
     approval_session_id: str
+    # The call of the paused turn this request answers.
+    call_id: str
 
 
 def load_pending_action_subagent_approval(
@@ -107,8 +109,8 @@ def load_pending_action_subagent_approval(
         return None
     anchor = anchor_object(row[0])
     blocker = anchor_blocker(anchor)
-    arguments = anchor.get("tool_arguments")
-    if not isinstance(arguments, dict):
+    arguments, call_id = anchor.get("tool_arguments"), anchor.get("call_id")
+    if not isinstance(arguments, dict) or not isinstance(call_id, str):
         raise LocalJobEnvelopeIntegrityError(
             "Subagent pause anchor has no saved request"
         )
@@ -117,6 +119,7 @@ def load_pending_action_subagent_approval(
         arguments=cast(dict[str, JSONValue], arguments),
         tool_request_id=str(blocker["tool_request_id"]),
         approval_session_id=str(blocker["approval_session_id"]),
+        call_id=call_id,
     )
 
 

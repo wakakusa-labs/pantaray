@@ -150,6 +150,7 @@ def _pause_child(db_path: Path, payload: ActionSubagentJobPayload) -> str:
             payload=payload,
             pause=ActionSubagentApprovalPause(
                 tool_id="apply_patch",
+                call_id="call-1",
                 arguments={"path": "a"},
                 tool_request_id=request_id,
                 approval_session_id=session_id,

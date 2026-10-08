@@ -54,8 +54,11 @@ from pantaray_agents.security.storage_paths import validate_image_storage_path
 _ITEM_COLUMNS = "sequence, item_id, created_at, payload"
 _TURN_MESSAGE_PREFIX = "chat-turn/"
 # The kinds a turn answers; the others are what a turn itself appends.
-CHAT_TRIGGER_KINDS = ("user_message", "suggestion_event", "action_event")
+CHAT_TRIGGER_KINDS = ("user_message", "action_event")
 _TRIGGER_KINDS_SQL = ", ".join(f"'{kind}'" for kind in CHAT_TRIGGER_KINDS)
+# A suggestion's arrival, no longer written: rows a store still holds are left
+# out of every read.
+_SHOWN_SQL = "kind != 'suggestion_event'"
 # A turn's ends, as their keys spell them. Only a turn appends these kinds, so
 # a user message whose client chose a key of the same shape is never one.
 _REPLY_END_SQL = (
@@ -133,7 +136,7 @@ def read_chat_page(*, user_id: str, before: int | None, limit: int) -> ChatItemP
     with _connection() as connection:
         rows = connection.execute(
             f"SELECT {_ITEM_COLUMNS} FROM chat_items "
-            "WHERE user_id = ? AND (? IS NULL OR sequence < ?) "
+            f"WHERE user_id = ? AND (? IS NULL OR sequence < ?) AND {_SHOWN_SQL} "
             "ORDER BY sequence DESC LIMIT ?",
             (user_id, before, before, limit + 1),
         ).fetchall()
@@ -150,7 +153,7 @@ def read_chat_items_after(*, user_id: str, after: int) -> tuple[ChatItem, ...]:
     with _connection() as connection:
         rows = connection.execute(
             f"SELECT {_ITEM_COLUMNS} FROM chat_items "
-            "WHERE user_id = ? AND sequence > ? ORDER BY sequence",
+            f"WHERE user_id = ? AND sequence > ? AND {_SHOWN_SQL} ORDER BY sequence",
             (user_id, after),
         ).fetchall()
     return tuple(_item(row) for row in rows)
@@ -170,7 +173,7 @@ class ChatTurnMarks:
 
     ``answered_through`` is the ``read_through`` of the last end, a reply or a
     failure, and ``replied_through`` that of the last reply. ``last_failure``
-    is the last end when it is a failure, which a retry runs again, and
+    is the last end when it is a failure with input a retry can answer again, and
     ``failed_turn_key`` the key of the turn that failed; ``waiting`` says a
     trigger item past ``answered_through`` waits for a turn.
     """
@@ -196,7 +199,8 @@ def read_chat_items_for_turn(*, user_id: str, after: int) -> tuple[TurnChatItem,
     with _connection() as connection:
         rows = connection.execute(
             f"SELECT {_ITEM_COLUMNS}, {_REPLY_END_SQL} AS is_reply "
-            "FROM chat_items WHERE user_id = ? AND sequence > ? ORDER BY sequence",
+            "FROM chat_items WHERE user_id = ? AND sequence > ? "
+            f"AND {_SHOWN_SQL} ORDER BY sequence",
             (user_id, after),
         ).fetchall()
     return tuple(
@@ -216,20 +220,35 @@ def read_chat_turn_marks(*, user_id: str) -> ChatTurnMarks:
             else last_end
         )
         answered_through = _read_through(last_end)
-        waiting = connection.execute(
-            "SELECT 1 FROM chat_items WHERE user_id = ? AND sequence > ? "
-            f"AND kind IN ({_TRIGGER_KINDS_SQL}) LIMIT 1",
-            (user_id, answered_through),
-        ).fetchone()
+        replied_through = _read_through(last_reply)
+        waiting = _has_trigger_after(
+            connection, user_id=user_id, after=answered_through
+        )
+        # A failure whose only input was a suggestion's arrival, no longer
+        # read, has nothing a retry could answer: it is not offered again.
+        retryable = failed and _has_trigger_after(
+            connection, user_id=user_id, after=replied_through
+        )
     return ChatTurnMarks(
         answered_through=answered_through,
-        replied_through=_read_through(last_reply),
-        last_failure=_item(last_end) if failed and last_end is not None else None,
+        replied_through=replied_through,
+        last_failure=_item(last_end) if retryable and last_end is not None else None,
         failed_turn_key=_turn_key(last_end)
-        if failed and last_end is not None
+        if retryable and last_end is not None
         else None,
-        waiting=waiting is not None,
+        waiting=waiting,
     )
+
+
+def _has_trigger_after(
+    connection: sqlite3.Connection, *, user_id: str, after: int
+) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM chat_items WHERE user_id = ? AND sequence > ? "
+        f"AND kind IN ({_TRIGGER_KINDS_SQL}) LIMIT 1",
+        (user_id, after),
+    ).fetchone()
+    return row is not None
 
 
 def read_unavailable_reference(
@@ -267,24 +286,6 @@ def read_user_message(*, user_id: str, item_id: str) -> UserMessageContent | Non
     content = _item(row).content
     assert isinstance(content, UserMessageContent)
     return content
-
-
-def user_wrote_after_suggestion(
-    *, user_id: str, suggestion_id: str, after: int
-) -> bool:
-    """Whether a message of the user's past ``after`` follows the suggestion's
-    arrival in the chat (any message, when it never arrived here)."""
-
-    with _connection() as connection:
-        row = connection.execute(
-            "SELECT EXISTS (SELECT 1 FROM chat_items WHERE user_id = ? "
-            "AND kind = 'user_message' AND sequence > ? AND sequence > COALESCE("
-            "(SELECT MAX(sequence) FROM chat_items WHERE user_id = ? "
-            "AND kind = 'suggestion_event' "
-            "AND json_extract(payload, '$.suggestion_id') = ?), 0))",
-            (user_id, after, user_id, suggestion_id),
-        ).fetchone()
-    return bool(row[0])
 
 
 def read_latest_chat_sequence(*, user_id: str) -> int:

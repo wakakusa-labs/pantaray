@@ -271,22 +271,6 @@ def read_attachment_holder(*, user_id: str, attachment_id: str) -> str | None:
     return None if row is None else str(row[0])
 
 
-def read_suggestion_texts(*, user_id: str, ids: Sequence[str]) -> dict[str, str]:
-    """What each suggestion says to the user, by id."""
-
-    if not ids:
-        return {}
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
-    with sqlite3.connect(db_path) as connection:
-        configure_connection(connection, busy_timeout_ms)
-        rows = connection.execute(
-            "SELECT suggestion_id, answer FROM agent_suggestions "
-            f"WHERE user_id = ? AND suggestion_id IN ({', '.join('?' * len(ids))})",
-            (user_id, *ids),
-        ).fetchall()
-    return {str(row[0]): str(row[1] or "") for row in rows}
-
-
 def answered_after_suggestion(
     *, user_id: str, suggestion_id: str, item_ids: Sequence[str]
 ) -> bool:
@@ -349,5 +333,4 @@ __all__ = [
     "read_chat_work_list",
     "search_tasks",
     "read_latest_run_process",
-    "read_suggestion_texts",
 ]

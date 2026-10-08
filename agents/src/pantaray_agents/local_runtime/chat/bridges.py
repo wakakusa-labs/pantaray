@@ -1,11 +1,10 @@
-"""Tell the chat what happened to its work: new suggestions, and its runs' ends.
+"""Tell the chat what happened to its own work: its runs' approval waits and ends.
 
-The chat reads what the Suggestion and Action sides have already stored; they
-never write to the chat. A suggestion delivered since the chat began, which the
-user has not reacted to, becomes a `suggestion_event`. A run the chat started
-or sent a message into becomes an `action_event` when it waits for an approval
-and when it ends. Each item is keyed by the event it reports, so telling it
-again appends nothing.
+The chat reads what the Action side has already stored; it never writes to the
+chat. A run the chat started or sent a message into becomes an `action_event`
+when it waits for an approval and when it ends. Each item is keyed by the event
+it reports, so telling it again appends nothing. Work started elsewhere, a
+suggestion included, stays out of the chat.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from pantaray_agents.schema.chat import (
     ActionEventContent,
     ChatActionEventKind,
     ChatItemContent,
-    SuggestionEventContent,
 )
 
 # A run's root process status once it has ended, as the chat tells it.
@@ -77,26 +75,7 @@ def bridge_chat_events(*, user_id: str) -> int:
 
 
 def _events(connection: sqlite3.Connection, *, user_id: str) -> list[_Event]:
-    began = connection.execute(
-        "SELECT MIN(created_at) FROM chat_items WHERE user_id = ?", (user_id,)
-    ).fetchone()[0]
-    if began is None:
-        return []  # no chat yet: suggestions keep to the Overlay alone
-    events = [
-        _Event(
-            at=str(created_at),
-            message_id=f"suggestion:{suggestion_id}",
-            content=SuggestionEventContent(
-                kind="suggestion_event", suggestion_id=str(suggestion_id)
-            ),
-        )
-        for suggestion_id, created_at in connection.execute(
-            "SELECT suggestion_id, created_at FROM agent_suggestions "
-            "WHERE user_id = ? AND status = 'success' AND has_suggestion = 1 "
-            "AND user_reaction IS NULL AND created_at >= ?",
-            (user_id, began),
-        )
-    ]
+    events: list[_Event] = []
     runs = connection.execute(
         """
         SELECT DISTINCT steps.action_id, runs.process_id, runs.status,

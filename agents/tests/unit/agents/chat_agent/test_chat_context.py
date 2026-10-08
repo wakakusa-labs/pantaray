@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import sqlite3
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from pantaray_agents.agents.chat_agent.context import (
 )
 from pantaray_agents.agents.chat_agent.media import NO_MEDIA
 from pantaray_agents.agents.chat_agent.reply import REPLY_TOOL, check_reply
+from pantaray_agents.agents.chat_agent.turn import plan_chat_turn
 from pantaray_agents.conversation.budget import ContextBudget, ContextCapacityExceeded
 from pantaray_agents.conversation.window import ConversationEntry, lay_out
 from pantaray_agents.local_runtime.chat.store import (
@@ -139,6 +141,27 @@ def test_the_marks_follow_the_last_reply_and_failure() -> None:
         entry.is_reply for entry in read_chat_items_for_turn(user_id=USER, after=0)
     ]
     assert reply_flags == [False, False, False, True, False, False, False]
+
+
+def test_a_failure_that_answered_only_a_suggestion_arrival_is_not_retried() -> None:
+    _say("m-1")
+    _end("a0", "reply", 1)
+    with sqlite3.connect(os.environ["LOCAL_DB_PATH"]) as connection:  # an old row
+        connection.execute(
+            "INSERT INTO chat_items(item_id, user_id, message_id, kind, payload, "
+            "created_at) VALUES ('arrival', ?, 'suggestion:s-1', 'suggestion_event', "
+            '\'{"kind": "suggestion_event", "suggestion_id": "s-1"}\', '
+            "'2026-10-08T00:00:00Z')",
+            (USER,),
+        )
+    failure = _end("a2", "failure", 3)
+
+    marks = read_chat_turn_marks(user_id=USER)
+
+    assert (marks.last_failure, marks.waiting) == (None, False)
+    assert plan_chat_turn(user_id=USER, retry_of=failure.item_id) is None
+    _say("m-5")
+    assert plan_chat_turn(user_id=USER, retry_of=None) is not None
 
 
 def test_a_stored_reply_goes_back_as_the_call_that_sent_it() -> None:

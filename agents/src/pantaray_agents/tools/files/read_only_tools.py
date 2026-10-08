@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -380,7 +382,12 @@ class _ReadOnlyFileTools:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
             name = f"page-{page.number}-{attachment_id}.png"
-            (pages_dir / name).write_bytes(page.payload)
+            # Lens runs of one Suggestion share this folder and may draw the
+            # same page at once; the file is sent from, so never half-written.
+            handle, temp_path = tempfile.mkstemp(prefix=".page-", dir=pages_dir)
+            with os.fdopen(handle, "wb") as temp_file:
+                temp_file.write(page.payload)
+            os.replace(temp_path, pages_dir / name)
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",

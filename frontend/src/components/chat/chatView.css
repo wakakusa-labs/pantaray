@@ -366,22 +366,10 @@
   box-shadow: var(--focus-ring);
 }
 
-.chat-composer__input {
+.chat-composer__field {
   flex: 1;
   min-width: 0;
-  max-height: calc(8lh + 12px);
-  padding: 6px 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--fog-text);
-  font: inherit;
-  field-sizing: content;
-  resize: none;
-}
-
-.chat-composer__input::placeholder {
-  color: var(--fog-text-3);
+  padding: 1px 0;
 }
 
 .chat-icon-button {

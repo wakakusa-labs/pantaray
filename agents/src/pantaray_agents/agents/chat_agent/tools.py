@@ -53,6 +53,7 @@ from pantaray_agents.local_runtime.tooling.repository import (
     load_effective_approval_preference,
 )
 from pantaray_agents.schema.agent.action_message import (
+    ActionProjectRef,
     ActionUserMessageInput,
     FileAttachmentInput,
 )
@@ -82,8 +83,8 @@ _ATTACHMENTS: dict[str, JSONValue] = {
     "type": "array",
     "items": {"type": "string"},
     "description": (
-        "Ids of the user's chat messages whose attached images and files the task "
-        "needs; [] for none."
+        "Ids of the user's chat messages whose attached images and files, and "
+        "the workspace projects they named with @, the task needs; [] for none."
     ),
 }
 # A file goes to one task only: handing it over moves it there.
@@ -143,15 +144,18 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
         )
         if isinstance(attached, ReactToolResult):
             return attached
-        images, files = attached
+        images, files, project_refs = attached
+        supplement, supplement_refs = _with_projects(
+            supplement if isinstance(supplement, str) else None, project_refs
+        )
         outcome = await accept_suggestion(
             user_id=plan.user_id,
             suggestion_id=str(args["suggestion_id"]),
             command_id=key,
             approval_mode=preference.approval_mode,
             language=None,
-            supplement=supplement if isinstance(supplement, str) else None,
-            supplement_project_refs=(),
+            supplement=supplement,
+            supplement_project_refs=supplement_refs,
             images=images,
             files=files,
         )
@@ -260,7 +264,7 @@ def _submit(
     attached = _attachments(plan, tool, attachments_from)
     if isinstance(attached, ReactToolResult):
         return attached
-    images, files = attached
+    images, files, project_refs = attached
     # Something already went in under this key (a re-run): the submission
     # replays it, or answers what went in, with the files where they went.
     sent_before = read_submitted_message(user_id=plan.user_id, message_id=key)
@@ -287,15 +291,17 @@ def _submit(
             "call send_to_action for it; otherwise ask the user to attach the "
             "file again.",
         )
+    content, content_refs = _with_projects(message, project_refs)
     try:
         command = SubmitActionMessageCommand(
             user_id=plan.user_id,
             target=target,
             message=ActionUserMessageInput(
                 message_id=key,
-                content=message,
+                content=content or "",
                 images=images,
                 files=files,
+                project_refs=content_refs,
             ),
         )
     except ValidationError:
@@ -336,11 +342,19 @@ def _stopped(tool: str) -> ReactToolResult:
 
 def _attachments(
     plan: ChatTurnPlan, tool: str, item_ids: list[str]
-) -> tuple[tuple[ImageInput, ...], tuple[FileAttachmentInput, ...]] | ReactToolResult:
-    """The images and files of the user's messages ``item_ids``."""
+) -> (
+    tuple[
+        tuple[ImageInput, ...],
+        tuple[FileAttachmentInput, ...],
+        tuple[ActionProjectRef, ...],
+    ]
+    | ReactToolResult
+):
+    """The images, files and named projects of the user's messages ``item_ids``."""
 
     images: list[ImageInput] = []
     files: list[FileAttachmentInput] = []
+    project_refs: list[ActionProjectRef] = []
     for item_id in item_ids:
         attached = read_user_message(user_id=plan.user_id, item_id=item_id)
         if attached is None:
@@ -351,7 +365,34 @@ def _attachments(
             )
         images.extend(attached.images)
         files.extend(attached.files)
-    return tuple(images), tuple(files)
+        project_refs.extend(attached.project_refs)
+    return tuple(images), tuple(files), tuple(project_refs)
+
+
+def _with_projects(
+    text: str | None, refs: tuple[ActionProjectRef, ...]
+) -> tuple[str | None, tuple[ActionProjectRef, ...]]:
+    """Point each named project at its name in ``text``, as an Action message does.
+
+    The model writes the text, so a name it left out is added at the end as the
+    user wrote it, with @. Each project is named once, in text order.
+    """
+
+    text = None if text is None else text.strip()
+    anchored: list[ActionProjectRef] = []
+    seen: set[str] = set()
+    cursor = 0
+    for ref in refs:
+        if ref.project_id in seen:
+            continue
+        seen.add(ref.project_id)
+        start = -1 if text is None else text.find(ref.display_name, cursor)
+        if start < 0:
+            text = f"{text}\n@{ref.display_name}" if text else f"@{ref.display_name}"
+            start = len(text) - len(ref.display_name)
+        cursor = start + len(ref.display_name)
+        anchored.append(ref.model_copy(update={"start": start, "end": cursor}))
+    return text, tuple(anchored)
 
 
 def _already_sent(tool: str, sent: SubmittedMessage) -> ReactToolResult:

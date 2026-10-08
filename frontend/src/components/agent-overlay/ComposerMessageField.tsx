@@ -110,6 +110,7 @@ export function ComposerMessageField({
   onChange,
   onKeyDown,
   onPaste,
+  onAddProject,
 }: {
   id: string;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -122,6 +123,8 @@ export function ComposerMessageField({
   onChange: (draft: string, mentions: ComposerMention[]) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** "Add project": the Overlay brings the main window to Workspace; the chat goes there. */
+  onAddProject: () => void;
 }) {
   const listId = useId();
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -201,7 +204,7 @@ export function ComposerMessageField({
     const option = options[index];
     if (!trigger) return;
     if (option.kind === 'add') {
-      window.electron?.agentOverlay?.openWorkspaceSettings?.();
+      onAddProject();
       dismiss(trigger.start);
       return;
     }

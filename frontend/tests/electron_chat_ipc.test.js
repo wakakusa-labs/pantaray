@@ -18,6 +18,7 @@ const USER_ITEM = {
     quote_item_id: null,
     images: [{ kind: 'image', storage_path: 'user 1/2026-10-08/a.png' }],
     files: [],
+    project_refs: [],
   },
 };
 
@@ -187,6 +188,7 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     quote_item_id: null,
     images: [],
     files: [],
+    project_refs: [],
   };
 
   await ipc.invoke('chat:sendMessage', valid);
@@ -206,6 +208,9 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     { ...valid, images: tooManyImages },
     { ...valid, files: [{ attachment_id: 'not-a-uuid', name: 'a.pdf', byte_size: 1 }] },
     { ...valid, user_id: 'someone-else' },
+    // A named project has the Action message's shape: a code-point span and its folders.
+    { ...valid, project_refs: [{ project_id: 'p-1', display_name: 'hello', start: 0, end: 5 }] },
+    { ...valid, project_refs: undefined },
   ]) {
     await assert.rejects(ipc.invoke('chat:sendMessage', payload), IpcValidationError);
   }

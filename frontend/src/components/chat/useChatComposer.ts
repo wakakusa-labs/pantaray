@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { codePointSpanInTrimmedText } from '../../../electron/src/actions/actionContracts';
 import {
   ChatMessageRequestSchema,
   type ChatItem,
@@ -16,6 +17,7 @@ import {
   type AttachmentFailure,
   type ComposerAttachment,
 } from '@/components/agent-overlay/attachmentStaging';
+import type { ComposerMention } from '@/components/agent-overlay/composerMentions';
 
 import type { ChatMessageItem } from './chatTimeline';
 
@@ -24,6 +26,8 @@ export type ChatSendProblem = ChatMessageRejectedField | 'transport';
 
 type ChatComposerState = {
   draft: string;
+  /** Workspace projects named in `draft` with @, in text order. */
+  mentions: readonly ComposerMention[];
   quote: ChatMessageItem | null;
   attachments: readonly ComposerAttachment[];
   /** Attach round trips still running; sending waits for them. */
@@ -39,6 +43,7 @@ type ChatComposerState = {
 
 const EMPTY: ChatComposerState = {
   draft: '',
+  mentions: [],
   quote: null,
   attachments: [],
   attachmentsInFlight: 0,
@@ -105,6 +110,12 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
       text: state.draft,
       quote_item_id: state.quote?.item_id ?? null,
       ...attachmentPayload(state.attachments),
+      project_refs: state.mentions.map((mention) => ({
+        project_id: mention.projectId,
+        display_name: mention.displayName,
+        paths: [...mention.paths],
+        ...codePointSpanInTrimmedText(state.draft, mention.start, mention.end),
+      })),
     });
     if (!parsed.success) {
       setState((current) => ({ ...current, problem: 'text' }));
@@ -152,11 +163,14 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
     state,
     canAttach: canAttachMore(state.attachments) && state.pending === null,
     canSend: state.pending === null && state.attachmentsInFlight === 0 && state.draft.trim() !== '',
-    setDraft: (draft: string) =>
+    setDraft: (draft: string, mentions: readonly ComposerMention[]) =>
       setState((current) => ({
         ...current,
         draft,
-        problem: current.problem === 'text' || current.problem === 'body' ? null : current.problem,
+        mentions,
+        problem: ['text', 'body', 'project_refs'].includes(current.problem ?? '')
+          ? null
+          : current.problem,
       })),
     setQuote: (quote: ChatMessageItem | null) =>
       setState((current) => ({

@@ -20,6 +20,7 @@ from pantaray_agents.conversation.budget import ContextBudget, ContextCapacityEx
 from pantaray_agents.conversation.window import ConversationEntry
 from pantaray_agents.local_runtime.chat.store import (
     ChatTurnEnd,
+    TurnChatItem,
     append_chat_item,
     chat_turn_end_message_id,
     chat_turn_message_id,
@@ -231,3 +232,37 @@ def test_waiting_items_are_never_dropped_to_fit() -> None:
 
     with pytest.raises(ContextCapacityExceeded):
         _fit(_window(window_tokens=2_000), waiting)
+
+
+def test_a_named_project_reaches_the_model_with_its_folders() -> None:
+    item = append_chat_item(
+        user_id=USER,
+        message_id="m-1",
+        content=UserMessageContent.model_validate(
+            {
+                "kind": "user_message",
+                "text": "Aurora Web の README を要約して",
+                "quote_item_id": None,
+                "images": (),
+                "files": (),
+                "project_refs": (
+                    {
+                        "project_id": "p-1",
+                        "display_name": "Aurora Web",
+                        "paths": ("/Users/me/aurora",),
+                        "start": 0,
+                        "end": 10,
+                    },
+                ),
+            }
+        ),
+    )
+
+    (entry,) = render_item(TurnChatItem(item=item, is_reply=False), NO_MEDIA)
+
+    text = entry.item.content[0].text
+    assert text.endswith(
+        "Aurora Web の README を要約して\n\n"
+        "Referenced workspace projects:\n- Aurora Web: /Users/me/aurora\n"
+        "Your own read tools can open these folders."
+    )

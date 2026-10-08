@@ -336,3 +336,61 @@ async def test_a_rerun_that_skips_a_refused_call_finds_the_task(db_path: Path) -
     assert isinstance(refused, dict) and refused["error_code"] == "INVALID_MESSAGE"
     assert isinstance(started, dict) and rerun == started
     assert len(_actions(db_path)) == 1
+
+
+async def test_a_named_project_goes_with_the_task_the_message_starts(
+    db_path: Path,
+) -> None:
+    ref = {
+        "project_id": "p-1",
+        "display_name": "Aurora Web",
+        "paths": ["/Users/me/aurora"],
+        "start": 0,
+        "end": 10,
+    }
+    asked = append_chat_item(
+        user_id=USER,
+        message_id="m-1",
+        content=UserMessageContent.model_validate_json(
+            json.dumps(
+                {
+                    "kind": "user_message",
+                    "text": "Aurora Web で見積書を作って",
+                    "quote_item_id": None,
+                    "images": [],
+                    "files": [],
+                    "project_refs": [ref],
+                }
+            )
+        ),
+    )
+
+    turn = _turn("a0")
+    named = await turn(
+        "start_action",
+        message="Aurora Web のフォルダで見積書を作って",
+        attachments_from=[asked.item_id],
+    )
+    # The model left the name out: it is added as the user wrote it.
+    unnamed = await turn(
+        "start_action", message="見積書を作って", attachments_from=[asked.item_id]
+    )
+
+    assert isinstance(named, dict) and isinstance(unnamed, dict)
+    sent = [_sent_message(db_path, str(r["action_id"])) for r in (named, unnamed)]
+    assert sent[0].content == "Aurora Web のフォルダで見積書を作って"
+    assert sent[1].content == "見積書を作って\n@Aurora Web"
+    for message in sent:
+        (project,) = message.project_refs
+        assert project.paths == ("/Users/me/aurora",)
+        assert message.content[project.start : project.end] == "Aurora Web"
+
+
+def _sent_message(db_path: Path, action_id: str) -> ActionUserMessageInput:
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT user_message_json FROM agent_action_steps "
+            "WHERE action_id = ? AND user_message_json IS NOT NULL",
+            (action_id,),
+        ).fetchone()
+    return ActionUserMessageInput.model_validate_json(row[0])

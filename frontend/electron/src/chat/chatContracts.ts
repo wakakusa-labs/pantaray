@@ -13,6 +13,7 @@ import {
   ActionFileAttachmentsSchema,
   ActionMessageContentSchema,
   ActionMessageIdSchema,
+  ActionProjectRefsSchema,
   ActionWireContractError,
   CanonicalIdentitySchema,
   ImageReferenceSchema,
@@ -33,6 +34,9 @@ export const ChatMessageRequestSchema = z
     quote_item_id: ActionMessageIdSchema.nullable(),
     images: z.array(ImageReferenceSchema).max(ACTION_MESSAGE_MAX_IMAGES),
     files: ActionFileAttachmentsSchema,
+    // Workspace projects named with @, in the Action message's shape: code-point spans into
+    // the trimmed text. The backend checks each span names its project.
+    project_refs: ActionProjectRefsSchema,
   })
   .strict();
 
@@ -76,6 +80,7 @@ const ChatItemContentSchema = z.discriminatedUnion('kind', [
       quote_item_id: CanonicalIdentitySchema.nullable(),
       images: z.array(ImageReferenceSchema),
       files: ActionFileAttachmentsSchema,
+      project_refs: ActionProjectRefsSchema,
     })
     .strict(),
   z
@@ -122,7 +127,7 @@ const ChatItemPageSchema = z
 export const ChatMessageRejectedSchema = z
   .object({
     type: z.literal('ChatMessageRejected'),
-    field: z.enum(['body', 'text', 'quote_item_id', 'images', 'files']),
+    field: z.enum(['body', 'text', 'quote_item_id', 'images', 'files', 'project_refs']),
   })
   .strict();
 

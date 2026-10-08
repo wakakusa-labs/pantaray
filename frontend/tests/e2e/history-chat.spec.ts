@@ -29,6 +29,7 @@ const user = (sequence: number, minute: number, text: string, quote: string | nu
     quote_item_id: quote,
     images: [],
     files: [],
+    project_refs: [],
   });
 const reply = (
   sequence: number,
@@ -160,6 +161,7 @@ async function installBridge(
               quote_item_id: string | null;
               images: unknown[];
               files: unknown[];
+              project_refs: unknown[];
             }) => {
               sequence += 1;
               return {
@@ -174,6 +176,7 @@ async function installBridge(
                     quote_item_id: request.quote_item_id,
                     images: request.images,
                     files: request.files,
+                    project_refs: request.project_refs,
                   },
                 },
               };

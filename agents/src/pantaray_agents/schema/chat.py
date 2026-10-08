@@ -9,7 +9,15 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+)
 
 from pantaray_agents.schema.action_conversation import ActionConversationIdentity
 from pantaray_agents.schema.agent.action_message import (
@@ -17,7 +25,10 @@ from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_MAX_FILES,
     ACTION_MESSAGE_MAX_IMAGES,
     ActionMessageId,
+    ActionProjectRef,
     FileAttachmentInput,
+    bounded_project_refs,
+    require_project_ref_spans,
 )
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.conversation_history import ConversationHistoryTimestamp
@@ -78,12 +89,26 @@ type ChatCard = Annotated[
 ]
 
 
+def _project_refs_in_text(
+    refs: tuple[ActionProjectRef, ...], info: ValidationInfo
+) -> tuple[ActionProjectRef, ...]:
+    return require_project_ref_spans(refs, info, text_field="text")
+
+
 class UserMessageContent(_ChatModel):
     kind: Literal["user_message"]
     text: ChatText
     quote_item_id: ActionMessageId | None
     images: ChatImages
     files: ChatFiles
+    # Workspace projects named with @, as an Action message names them; after
+    # ``text``, which their spans point into.
+    project_refs: tuple[ActionProjectRef, ...] = ()
+
+    _bound_project_refs = field_validator("project_refs", mode="before")(
+        bounded_project_refs
+    )
+    _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
 
 
 class AssistantMessageContent(_ChatModel):
@@ -145,10 +170,16 @@ class ChatMessageHttpRequest(_ChatModel):
     quote_item_id: ActionMessageId | None = None
     images: ChatImages = ()
     files: ChatFiles = ()
+    project_refs: tuple[ActionProjectRef, ...] = ()
+
+    _bound_project_refs = field_validator("project_refs", mode="before")(
+        bounded_project_refs
+    )
+    _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
 
 
 type ChatMessageRejectedField = Literal[
-    "body", "text", "quote_item_id", "images", "files"
+    "body", "text", "quote_item_id", "images", "files", "project_refs"
 ]
 
 

@@ -1,8 +1,10 @@
 import { ArrowUp, Plus, X } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
+import { ComposerMessageField } from '@/components/agent-overlay/ComposerMessageField';
 import type { MessageKey } from '@/i18n/types';
 
 import { speakerKey } from './chatTimeline';
@@ -18,6 +20,7 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
   quote_item_id: 'history.chat.composer.quoteRejected',
   images: 'history.chat.composer.attachmentsRejected',
   files: 'history.chat.composer.attachmentsRejected',
+  project_refs: 'history.chat.composer.projectsRejected',
 };
 
 /**
@@ -37,6 +40,7 @@ export function ChatComposer({
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const { state } = composer;
   const readOnly = state.pending !== null;
   return (
@@ -109,29 +113,32 @@ export function ChatComposer({
         <label className="chat-sr-only" htmlFor={MESSAGE_FIELD_ID}>
           {t('overlay.composer.label')}
         </label>
-        <textarea
-          ref={textareaRef}
-          id={MESSAGE_FIELD_ID}
-          className="chat-composer__input"
-          rows={1}
-          value={state.draft}
-          readOnly={readOnly}
-          placeholder={t('overlay.composer.placeholder')}
-          aria-invalid={state.problem === 'text' || undefined}
-          aria-describedby={state.problem ? PROBLEM_ID : undefined}
-          onChange={(event) => composer.setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            if (composer.canSend) onSend();
-          }}
-          onPaste={(event) => {
-            const files = Array.from(event.clipboardData.files);
-            if (readOnly || files.length === 0) return;
-            event.preventDefault();
-            void composer.attachFiles(files);
-          }}
-        />
+        <div className="chat-composer__field">
+          {/* The Overlay composer's field: @ names a workspace project, from the same list. */}
+          <ComposerMessageField
+            id={MESSAGE_FIELD_ID}
+            textareaRef={textareaRef}
+            value={state.draft}
+            mentions={state.mentions}
+            readOnly={readOnly}
+            placeholder={t('overlay.composer.placeholder')}
+            invalid={state.problem === 'text' || state.problem === 'project_refs'}
+            describedBy={state.problem ? PROBLEM_ID : undefined}
+            onChange={composer.setDraft}
+            onAddProject={() => navigate('/workspace')}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey) return;
+              event.preventDefault();
+              if (composer.canSend) onSend();
+            }}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files);
+              if (readOnly || files.length === 0) return;
+              event.preventDefault();
+              void composer.attachFiles(files);
+            }}
+          />
+        </div>
         <button
           type="submit"
           className="chat-send"

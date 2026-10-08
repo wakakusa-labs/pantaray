@@ -6,6 +6,8 @@ import {
   type ChatItemPageRequest,
   type ChatMessageRequest,
   type ChatMessageSendResult,
+  type ChatTurnRetryRequest,
+  type ChatTurnRetryResult,
   parseChatItem,
   parseChatItemPage,
 } from './chatContracts';
@@ -20,6 +22,7 @@ export function createChatFetcher(params: {
 }): {
   sendMessage: (request: ChatMessageRequest) => Promise<ChatMessageSendResult>;
   listItems: (request: ChatItemPageRequest) => Promise<ChatItemPage>;
+  retryTurn: (request: ChatTurnRetryRequest) => Promise<ChatTurnRetryResult>;
 } {
   const chatPath = (): string => {
     const userId = params.getUserId();
@@ -56,5 +59,21 @@ export function createChatFetcher(params: {
           timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
         })
       ),
+    retryTurn: async (request): Promise<ChatTurnRetryResult> => {
+      try {
+        await params.requestJson<unknown>({
+          path: `${chatPath()}/turns/retry`,
+          method: 'POST',
+          body: request,
+          timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+        });
+      } catch (error) {
+        if (error instanceof LocalBackendRequestError && error.status === 409) {
+          return { kind: 'stale' };
+        }
+        throw error;
+      }
+      return { kind: 'started' };
+    },
   };
 }

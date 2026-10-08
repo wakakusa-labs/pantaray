@@ -37,6 +37,7 @@ export const validReceiveChannels = [
   'action:conversationUpdated',
   // Main window only: an item appended to the user's chat, and the overlay's "show in chat"
   'chat:itemAppended',
+  'chat:turnState',
   'history:showChat',
   // Screenshot status change notification
   'screenshot:statusChanged',
@@ -96,6 +97,7 @@ export const validInvokeChannels = [
   // The single chat (main window only)
   'chat:sendMessage',
   'chat:listItems',
+  'chat:retryTurn',
   // Suggestion history (main SSOT)
   'history:fetch',
   'history:markCompletionViewed',

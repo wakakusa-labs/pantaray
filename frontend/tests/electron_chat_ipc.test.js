@@ -129,6 +129,27 @@ test('a 400 names the rejected field; other failures and off-contract items thro
   );
 });
 
+test('a retry starts the failed turn again, or reports that another turn has ended since', async () => {
+  const responses = [
+    new Response(null, { status: 204 }),
+    jsonResponse(409, { type: 'ChatTurnRetryStale' }),
+    jsonResponse(500, { detail: 'down' }),
+  ];
+  await withChatBackend(
+    (count) => responses[count - 1],
+    async (chat, requests) => {
+      const request = { failure_item_id: 'item-8' };
+      assert.deepEqual(await chat.retryTurn(request), { kind: 'started' });
+      assert.deepEqual(await chat.retryTurn(request), { kind: 'stale' });
+      await assert.rejects(chat.retryTurn(request), (error) => error.status === 500);
+      assert.deepEqual(
+        [requests[0].options.method, requests[0].url, JSON.parse(requests[0].options.body)],
+        ['POST', 'http://127.0.0.1:61131/v1/agents/users/user%201/chat/turns/retry', request]
+      );
+    }
+  );
+});
+
 function chatHandlers() {
   const handlers = new Map();
   const calls = [];
@@ -142,6 +163,10 @@ function chatHandlers() {
         listItems: async (request) => {
           calls.push(['list', request]);
           return { items: [], next_cursor: null };
+        },
+        retryTurn: async (request) => {
+          calls.push(['retry', request]);
+          return { kind: 'started' };
         },
       },
     },
@@ -186,7 +211,12 @@ test('chat IPC validates the renderer payload before anything reaches the backen
   for (const payload of [{ before: 0, limit: 10 }, { before: null, limit: 201 }, { limit: 10 }]) {
     await assert.rejects(ipc.invoke('chat:listItems', payload), IpcValidationError);
   }
-  assert.equal(ipc.calls.length, 2);
+  await ipc.invoke('chat:retryTurn', { failure_item_id: 'item-8' });
+  for (const payload of [{}, { failure_item_id: '' }, { failure_item_id: 'f', extra: 1 }]) {
+    await assert.rejects(ipc.invoke('chat:retryTurn', payload), IpcValidationError);
+  }
+  assert.deepEqual(ipc.calls.at(-1), ['retry', { failure_item_id: 'item-8' }]);
+  assert.equal(ipc.calls.length, 3);
 });
 
 test('overlay:showChat validates the Action id and asks main to show it', async () => {

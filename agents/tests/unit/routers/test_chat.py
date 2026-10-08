@@ -14,6 +14,10 @@ from tests.unit.local_runtime.migrated_db import prepare_test_database
 
 from pantaray_agents.app.shared import install_common_exception_handlers
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.chat.store import (
+    append_chat_item,
+    chat_turn_end_message_id,
+)
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
@@ -22,11 +26,14 @@ from pantaray_agents.local_runtime.storage.migrations import load_default_migrat
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.routers import chat as chat_router
 from pantaray_agents.routers.local.registry import register_local_routers
+from pantaray_agents.schema.chat import TurnFailureContent
 
 USER = "user-1"
 MESSAGES = f"/v1/agents/users/{USER}/chat/messages"
 ITEMS = f"/v1/agents/users/{USER}/chat/items"
+RETRY = f"/v1/agents/users/{USER}/chat/turns/retry"
 FILE_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 PAYLOAD = b"%PDF-1.7 staged"
 
@@ -46,7 +53,18 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture
-def client(db_path: Path) -> Iterator[TestClient]:
+def turns(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str | None]]:
+    requested: list[tuple[str, str | None]] = []
+
+    def request(user_id: str, *, retry_of: str | None = None) -> None:
+        requested.append((user_id, retry_of))
+
+    monkeypatch.setattr(chat_router, "request_chat_turn", request)
+    return requested
+
+
+@pytest.fixture
+def client(db_path: Path, turns: list[tuple[str, str | None]]) -> Iterator[TestClient]:
     app = FastAPI()
     register_local_routers(app)
     install_common_exception_handlers(app)
@@ -83,6 +101,28 @@ def test_resending_a_message_id_returns_the_one_item(
     assert _row_count(db_path) == 1
 
 
+def test_a_message_starts_a_turn_and_a_retry_runs_the_last_failed_one(
+    client: TestClient, turns: list[tuple[str, str | None]]
+) -> None:
+    client.post(MESSAGES, json=_message())
+    failed = [
+        append_chat_item(
+            user_id=USER,
+            message_id=chat_turn_end_message_id(f"a{n}", "failure", 1),
+            content=TurnFailureContent(kind="turn_failure", reason="llm_connection"),
+        )
+        for n in range(2)
+    ]
+
+    stale = client.post(RETRY, json={"failure_item_id": failed[0].item_id})
+    latest = client.post(RETRY, json={"failure_item_id": failed[1].item_id})
+
+    assert stale.status_code == 409
+    assert stale.json() == {"type": "ChatTurnRetryStale"}
+    assert latest.status_code == 204
+    assert turns == [(USER, None), (USER, failed[1].item_id)]
+
+
 def test_a_quote_must_name_an_item_of_this_chat(client: TestClient) -> None:
     quoted = client.post(MESSAGES, json=_message("m-1")).json()
 
@@ -117,6 +157,8 @@ def test_another_users_chat_is_forbidden(client: TestClient) -> None:
 
     assert client.post(f"{other}/messages", json=_message()).status_code == 403
     assert client.get(f"{other}/items").status_code == 403
+    retry = {"failure_item_id": "f-1"}
+    assert client.post(f"{other}/turns/retry", json=retry).status_code == 403
 
 
 @pytest.mark.parametrize(

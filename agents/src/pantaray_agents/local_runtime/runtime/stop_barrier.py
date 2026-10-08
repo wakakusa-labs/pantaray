@@ -9,6 +9,7 @@ the order is written down:
 1. close admission, so nothing new is claimed and no WebSocket is accepted while
    the swap is in flight;
 2. record the cancel of every Action run the old identity still has in flight;
+   and stop its chat turn, which runs again under the new identity;
 3. close the WebSockets bound to the old owner, when the owner is changing;
 4. swap the identity, holding the source gate so the departing owner loses its
    context-source permits in the same turn;
@@ -53,6 +54,7 @@ from pathlib import Path
 from typing import Final
 
 from pantaray_agents.action_status import ACTION_STATUS_PROCESSING
+from pantaray_agents.local_runtime.chat.turn_runs import stop_chat_turns
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
@@ -150,6 +152,7 @@ async def apply_with_stop_barrier[T](
     with admission_closed():
         if before.configured:
             await _cancel_in_flight_actions(owner_id=before_identity.owner_id)
+            await stop_chat_turns(owner_id=before_identity.owner_id)
         owner_changed = before_identity.owner_id != after.owner_id
         if owner_changed:
             closed_socket_count = await close_owner_bound_sockets(

@@ -45,7 +45,14 @@ function conversationPage(actionId, status = 'processing') {
 }
 
 function actionRequest(supplement = null, commandId = null) {
-  return { suggestionId: 'sug-1', commandId, supplement, supplementProjectRefs: [], approvalMode: 'prompt_each_time', images: [] };
+  return {
+    suggestionId: 'sug-1',
+    commandId,
+    supplement,
+    supplementProjectRefs: [],
+    approvalMode: 'prompt_each_time',
+    images: [],
+  };
 }
 
 function createManagerHarness(overrides = {}) {
@@ -131,9 +138,12 @@ function createManagerHarness(overrides = {}) {
   };
 }
 
-test('OrchestrationManager: reconnect replaces an unfinished handshake with current owner credentials', t => {
+test('OrchestrationManager: reconnect replaces an unfinished handshake with current owner credentials', (t) => {
   const { createOrchestrationWS } = require('../electron/ws_orchestration');
-  const { createFakeWebSocketClass, createFakeTimers: socketTimers } = require('./helpers/electron_ws_fakes');
+  const {
+    createFakeWebSocketClass,
+    createFakeTimers: socketTimers,
+  } = require('./helpers/electron_ws_fakes');
   const previousPort = process.env.FRONTEND_PORT;
   process.env.FRONTEND_PORT = '3001';
   t.after(() => {
@@ -146,9 +156,13 @@ test('OrchestrationManager: reconnect replaces an unfinished handshake with curr
   const harness = createManagerHarness({
     getOwnerId: () => owner,
     getLocalApiToken: () => token,
-    createOrchestrationWS: opts => createOrchestrationWS({ ...opts,
-      WebSocketImpl: FakeWebSocket, timers: socketTimers(), now: () => 1000,
-    }),
+    createOrchestrationWS: (opts) =>
+      createOrchestrationWS({
+        ...opts,
+        WebSocketImpl: FakeWebSocket,
+        timers: socketTimers(),
+        now: () => 1000,
+      }),
   });
   harness.manager.ensureConnected();
   const first = instances[0];
@@ -171,7 +185,11 @@ test('OrchestrationManager: reconnect replaces an unfinished handshake with curr
   assert.equal(instances[2].options.headers.Authorization, 'Bearer token-b-refreshed');
   assert.equal(harness.manager.isConnected(), false);
   harness.manager.disconnect();
-  assert.equal(harness.mainWindowMessages.filter(message => message.channel === 'ws:status').at(-1).payload.status, 'closed');
+  assert.equal(
+    harness.mainWindowMessages.filter((message) => message.channel === 'ws:status').at(-1).payload
+      .status,
+    'closed'
+  );
 });
 
 test('OrchestrationManager: local backend URL から loopback WS endpoint を組み立てる', () => {
@@ -371,10 +389,10 @@ test('OrchestrationManager: Action conversation reader未注入ではfail-fast�
           resumeProcess: () => true,
         }),
         getMainWindow: () => null,
-            getLocalApiToken: () => 'local-api-token',
+        getLocalApiToken: () => 'local-api-token',
         getOwnerId: () => 'user-1',
         getRuntimeState: () => ({ status: 'ready', message: null }),
-                getUiLanguage: () => 'en',
+        getUiLanguage: () => 'en',
       }),
     /Action conversation read/
   );
@@ -457,9 +475,18 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
   let language = 'ja';
   const harness = createManagerHarness({ getUiLanguage: () => language });
 
-  const images = [{ kind: 'image', storage_path: 'user-1/2026-09-11/11111111-1111-4111-8111-111111111111.png' }];
-  const files = [{ attachment_id: '22222222-2222-4222-8222-222222222222', name: 'plan.pdf', byte_size: 42 }];
-  const snapshot = await harness.manager.acceptAction({ ...actionRequest('Keep this condition'), approvalMode: 'always_allow', images, files });
+  const images = [
+    { kind: 'image', storage_path: 'user-1/2026-09-11/11111111-1111-4111-8111-111111111111.png' },
+  ];
+  const files = [
+    { attachment_id: '22222222-2222-4222-8222-222222222222', name: 'plan.pdf', byte_size: 42 },
+  ];
+  const snapshot = await harness.manager.acceptAction({
+    ...actionRequest('Keep this condition'),
+    approvalMode: 'always_allow',
+    images,
+    files,
+  });
   assert.ok(snapshot);
   const executeEnvelope = {
     event: 'execute_action',
@@ -1150,11 +1177,20 @@ test('standalone terminal notification is delivered to the bound Overlay even if
 test('OrchestrationManager: an existing transport cannot send or queue work while the local owner is unpublished', async () => {
   let owner = 'alice';
   const resumes = [];
-  const h = createManagerHarness({ getOwnerId: () => owner, onResumeProcess: req => resumes.push(req) });
+  const h = createManagerHarness({
+    getOwnerId: () => owner,
+    onResumeProcess: (req) => resumes.push(req),
+  });
   h.manager.ensureConnected();
   owner = null;
-  await assert.rejects(h.manager.sendFromRenderer({ event: 'stop_process', data: { process_id: 'old-run' } }), /owner is unavailable/);
-  assert.throws(() => h.manager.enqueueResumeRequest({ kind: 'action', processId: 'old-run' }), /owner is unavailable/);
+  await assert.rejects(
+    h.manager.sendFromRenderer({ event: 'stop_process', data: { process_id: 'old-run' } }),
+    /owner is unavailable/
+  );
+  assert.throws(
+    () => h.manager.enqueueResumeRequest({ kind: 'action', processId: 'old-run' }),
+    /owner is unavailable/
+  );
   assert.deepEqual(h.sentMessages, []);
   assert.deepEqual(resumes, []);
 });
@@ -1162,7 +1198,10 @@ test('OrchestrationManager: an existing transport cannot send or queue work whil
 test('OrchestrationManager: an owner change discards unsent resumes before connecting the next owner', () => {
   let owner = 'alice';
   const resumes = [];
-  const h = createManagerHarness({ getOwnerId: () => owner, onResumeProcess: req => resumes.push(req) });
+  const h = createManagerHarness({
+    getOwnerId: () => owner,
+    onResumeProcess: (req) => resumes.push(req),
+  });
   h.manager.enqueueResumeRequest({ kind: 'action', processId: 'old-run' });
   assert.deepEqual(resumes, []);
   owner = null;
@@ -1171,17 +1210,22 @@ test('OrchestrationManager: an owner change discards unsent resumes before conne
   h.manager.ensureConnected();
   assert.deepEqual(resumes, []);
   h.manager.enqueueResumeRequest({ kind: 'action', processId: 'new-run' });
-  assert.deepEqual(resumes.map(req => req.processId), ['new-run']);
+  assert.deepEqual(
+    resumes.map((req) => req.processId),
+    ['new-run']
+  );
 });
 
 test('OrchestrationManager: owner loss during an asynchronous refresh abandons its internal resume', async () => {
   let ownerId = 'owner-a';
   let resolvePage;
-  const pendingPage = new Promise(resolve => { resolvePage = resolve; });
+  const pendingPage = new Promise((resolve) => {
+    resolvePage = resolve;
+  });
   const resumed = [];
   const harness = createManagerHarness({
     getOwnerId: () => ownerId,
-    onResumeProcess: request => resumed.push(request),
+    onResumeProcess: (request) => resumed.push(request),
     readLatestActionConversationPage: () => pendingPage,
   });
   harness.manager.ensureConnected();
@@ -1190,9 +1234,15 @@ test('OrchestrationManager: owner loss during an asynchronous refresh abandons i
   resolvePage(conversationPage('action-a'));
   await new Promise(setImmediate);
   assert.deepEqual(resumed, []);
-  assert.throws(() => harness.manager.enqueueResumeRequest({
-    kind: 'action', actionId: 'action-a', processId: 'run-1',
-  }), /Local owner is unavailable/);
+  assert.throws(
+    () =>
+      harness.manager.enqueueResumeRequest({
+        kind: 'action',
+        actionId: 'action-a',
+        processId: 'run-1',
+      }),
+    /Local owner is unavailable/
+  );
 });
 
 test('OrchestrationManager: a chat item reaches only the main window, parsed', () => {
@@ -1203,7 +1253,12 @@ test('OrchestrationManager: a chat item reaches only the main window, parsed', (
     sequence: 3,
     item_id: 'item-3',
     created_at: '2026-10-08T01:02:03.456Z',
-    content: { kind: 'action_event', action_id: 'act-1', event: 'completed', final_answer_excerpt: 'Done.' },
+    content: {
+      kind: 'action_event',
+      action_id: 'act-1',
+      event: 'completed',
+      final_answer_excerpt: 'Done.',
+    },
   };
 
   hooks.forwardEventToRenderers({ event: 'chat_item_appended', data: { item }, event_id: 'evt-1' });
@@ -1219,4 +1274,14 @@ test('OrchestrationManager: a chat item reaches only the main window, parsed', (
     /chat item response is invalid/
   );
   assert.equal(harness.mainWindowMessages.length, 1);
+
+  hooks.forwardEventToRenderers({ event: 'chat_turn_state', data: { running: true } });
+  assert.deepEqual(harness.mainWindowMessages[1], {
+    channel: 'chat:turnState',
+    payload: { running: true },
+  });
+  assert.throws(() =>
+    hooks.forwardEventToRenderers({ event: 'chat_turn_state', data: { running: 'yes' } })
+  );
+  assert.deepEqual(harness.overlayWindowMessages, []);
 });

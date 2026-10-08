@@ -169,6 +169,24 @@ class ChatItemAppendedMessage(_ChatModel):
     item: ChatItem
 
 
+class ChatTurnStateMessage(_ChatModel):
+    """WS ``chat_turn_state``: whether a turn is answering the owner's chat."""
+
+    running: bool
+
+
+class ChatTurnRetryHttpRequest(_ChatModel):
+    """Run the turn a ``turn_failure`` ended again, reading the same items."""
+
+    failure_item_id: ActionMessageId
+
+
+class ChatTurnRetryStale(_ChatModel):
+    """The failure is no longer how the chat's last turn ended."""
+
+    type: Literal["ChatTurnRetryStale"] = "ChatTurnRetryStale"
+
+
 __all__ = [
     "CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS",
     "CHAT_CARD_SUMMARY_MAX_CODEPOINTS",
@@ -187,6 +205,9 @@ __all__ = [
     "ChatMessageRejectedField",
     "ChatSuggestionCard",
     "ChatTurnFailureReason",
+    "ChatTurnRetryHttpRequest",
+    "ChatTurnRetryStale",
+    "ChatTurnStateMessage",
     "SuggestionEventContent",
     "TurnFailureContent",
     "UserMessageContent",

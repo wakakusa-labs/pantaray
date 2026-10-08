@@ -23,6 +23,7 @@ import { registerHistoryHandlers } from './handlers/history';
 import { registerOverlayHandlers } from './handlers/overlay';
 import { registerPrivacyHandlers } from './handlers/privacy';
 import { registerScreenshotHandlers } from './handlers/screenshot';
+import { registerOverlayPlacementHandlers } from './handlers/overlayPlacement';
 import { registerShortcutHandlers } from './handlers/shortcut';
 import { registerUiLanguageHandlers } from './handlers/uiLanguage';
 import { registerUpdateHandlers } from './handlers/update';
@@ -45,6 +46,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerAuthHandlers(ctx, registrar);
   registerApprovalHandlers(ctx, registrar);
   registerShortcutHandlers(ctx, registrar);
+  registerOverlayPlacementHandlers(ctx, registrar);
   registerWorkspaceSettingsHandlers(ctx, registrar);
   registerActionFileHandlers(ctx, registrar);
   registerActionHandlers(ctx, registrar);

@@ -44,6 +44,7 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
@@ -94,6 +95,11 @@ function safely<T>(operation: () => T, fallback: T): T {
 export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   let settingsScopeUserId: string | null = null;
   params.notificationWindow.setLocalOwnerIdGetter(params.supabaseWiring.getLocalOwnerId);
+  const overlayPlacement = createOverlayPlacementStore({
+    userDataDir: app.getPath('userData'),
+    reportInvalid: (reason) => params.logger?.warn?.('OVERLAY_PLACEMENT_INVALID', { reason }),
+  });
+  params.notificationWindow.setOverlayPlacementGetter(overlayPlacement.get);
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -372,6 +378,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           if (result.ok) rebuildMenus();
           return result;
         },
+        overlayPlacement,
         workspaceSettingsGet: workspaceSettingsFetch.get,
         workspaceSettingsGetReadAccessScope: workspaceSettingsFetch.getReadAccessScope,
         workspaceSettingsGetCommandNetwork: workspaceSettingsFetch.getCommandNetwork,

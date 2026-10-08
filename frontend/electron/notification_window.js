@@ -22,6 +22,7 @@ const historyOverlayIds = new Set();
 const conversationOverlayIds = new Set();
 let getMainWindowForOverlayIsolation = null;
 let getUiLanguage = null;
+let getOverlayPlacements = null;
 let getActionLiveSnapshot = null;
 let getLocalOwnerId = null;
 let ownerGeneration = 0;
@@ -45,6 +46,20 @@ function setUiLanguageGetter(getter) {
     throw new Error('setUiLanguageGetter requires a function.');
   }
   getUiLanguage = getter;
+}
+
+function setOverlayPlacementGetter(getter) {
+  if (typeof getter !== 'function') {
+    throw new Error('setOverlayPlacementGetter requires a function.');
+  }
+  getOverlayPlacements = getter;
+}
+
+function overlayCellFor(placementKind) {
+  if (!getOverlayPlacements) {
+    throw new Error('Overlay placement getter is required before creating overlay windows.');
+  }
+  return getOverlayPlacements()[placementKind];
 }
 
 function setActionLiveSnapshotGetter(getter) {
@@ -288,8 +303,10 @@ function createMappedOverlayWindow(id, options) {
   if (options.conversation) conversationOverlayIds.add(id);
   const win = overlayWindowFactory.createConversationOverlayWindow({
     actionId: options.actionId ?? null,
+    cell: overlayCellFor(options.placementKind),
     entryMode: options.entryMode,
-    index: countVisibleOverlayWindows(),
+    // Only Suggestions arrive while others are showing; a window the user opens takes its cell.
+    stackIndex: options.placementKind === 'suggestion' ? countVisibleOverlayWindows() : 0,
     interactive: options.interactive,
     onDidFinishLoad: () => {
       if (overlayWindows.get(id) !== win || win.isDestroyed()) return;
@@ -329,6 +346,7 @@ function createHistoryOverlayWindow(id) {
   return createMappedOverlayWindow(id, {
     history: true,
     interactive: true,
+    placementKind: 'history',
     onReadyToShow: (win) => showInteractiveOverlayWindow(win, { visibleOnAllWorkspaces: true }),
   });
 }
@@ -342,6 +360,9 @@ function createStandaloneConversationOverlayWindow(id, actionId) {
     conversation: true,
     entryMode: 'standalone',
     interactive: true,
+    // A conversation with an Action is one reopened from History (its list or its chat); a
+    // new one is started by the user.
+    placementKind: actionId ? 'history' : 'started',
     onReadyToShow: showInteractiveOverlayWindow,
   });
 }
@@ -356,6 +377,7 @@ function getOrCreateOverlayWindow(id) {
   }
   return createMappedOverlayWindow(id, {
     interactive: false,
+    placementKind: 'suggestion',
     onReadyToShow: (overlay, state) => applyOverlayShellMode(overlay, state.shellMode),
   });
 }
@@ -531,6 +553,7 @@ module.exports = {
   destroyOverlayWindow,
   dispatchEventToOverlay,
   setActionLiveSnapshotGetter,
+  setOverlayPlacementGetter,
   setUiLanguageGetter,
   configureIpcWindowSecurity: auxiliaryWindowIpcSecurity.configure,
   isVisibleOverlayAtPoint: (point) => overlayActivationTracker.isVisibleOverlayAtPoint(point),

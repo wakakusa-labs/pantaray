@@ -1,4 +1,4 @@
-const { getOverlayCenterY, releaseOverlayCenter } = require('./overlay_window_factory');
+const { getOverlayVerticalAnchor, releaseOverlayCenter } = require('./overlay_window_factory');
 
 const OVERLAY_RESIZE_TOP_MARGIN_PX = 8;
 const OVERLAY_RESIZE_BOTTOM_MARGIN_PX = 8;
@@ -17,8 +17,13 @@ function clampOverlayBounds(screen, win, requestedHeight) {
   const height = Math.max(OVERLAY_MIN_HEIGHT_PX, Math.min(requested, maximumHeight));
   const minimumY = workArea.y + OVERLAY_RESIZE_TOP_MARGIN_PX;
   const maximumY = workArea.y + workArea.height - OVERLAY_RESIZE_BOTTOM_MARGIN_PX - height;
-  const centerY = getOverlayCenterY(win);
-  const preferredY = centerY === null ? bounds.y : Math.round(centerY - height / 2);
+  const anchor = getOverlayVerticalAnchor(win);
+  const preferredY =
+    anchor?.kind === 'center'
+      ? Math.round(anchor.y - height / 2)
+      : anchor?.kind === 'bottom'
+        ? bounds.y + bounds.height - height
+        : bounds.y;
   const y = Math.max(minimumY, Math.min(preferredY, maximumY));
   return { height, y };
 }

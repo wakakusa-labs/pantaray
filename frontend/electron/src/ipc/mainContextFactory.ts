@@ -66,6 +66,7 @@ export function buildMainContext(params: {
   setWorkspaceEditCommandPreference: MainContext['approval']['setWorkspaceEditCommandPreference'];
   getGlobalShortcutState: MainContext['shortcut']['getState'];
   setGlobalShortcutAccelerator: MainContext['shortcut']['setAccelerator'];
+  overlayPlacement: MainContext['overlayPlacement'];
   workspaceSettingsGet: MainContext['workspaceSettings']['get'];
   workspaceSettingsGetReadAccessScope: MainContext['workspaceSettings']['getReadAccessScope'];
   workspaceSettingsGetCommandNetwork: MainContext['workspaceSettings']['getCommandNetwork'];
@@ -270,6 +271,8 @@ export function buildMainContext(params: {
       getState: params.getGlobalShortcutState,
       setAccelerator: params.setGlobalShortcutAccelerator,
     },
+
+    overlayPlacement: params.overlayPlacement,
 
     workspaceSettings: {
       get: async () => params.workspaceSettingsGet(),

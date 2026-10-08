@@ -68,6 +68,8 @@ export const validInvokeChannels = [
   'approval:setWorkspaceEditCommandPreference',
   'shortcut:getState',
   'shortcut:setAccelerator',
+  'overlayPlacement:get',
+  'overlayPlacement:set',
   'workspaceSettings:get',
   'workspaceSettings:getReadAccessScope',
   'workspaceSettings:getCommandNetwork',

@@ -505,6 +505,68 @@
   white-space: nowrap;
 }
 
+.overlay-position-list {
+  display: grid;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.overlay-position-row {
+  align-items: center;
+}
+
+/* A miniature screen split into the 3 x 5 cells an overlay can open in. */
+.overlay-position-screen {
+  aspect-ratio: 16 / 10;
+  background: var(--fog-mist);
+  border: 1px solid var(--border-color-hover);
+  border-radius: 8px;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 3px;
+  touch-action: none;
+  user-select: none;
+  width: 176px;
+}
+
+.overlay-position-cell {
+  border: 1px dashed var(--fog-line);
+  border-radius: 4px;
+  margin: 1px;
+}
+
+.overlay-position-block {
+  background: var(--fog-light);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  margin: 1px;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+  z-index: 1;
+}
+
+.overlay-position-block:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.overlay-position-block--dragging {
+  cursor: grabbing;
+  transform: scale(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-position-block {
+    transition: none;
+  }
+}
+
 @media (max-width: 760px) {
   .settings-control-row {
     align-items: stretch;

@@ -70,7 +70,15 @@ function createBootstrapResponse(overrides = {}) {
   };
 }
 
-function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
+const { DEFAULT_OVERLAY_PLACEMENTS } = require('../electron/dist/settings/overlayPlacement.js');
+
+function loadNotificationWindowModule(
+  getOwnerId = () => 'owner-a',
+  {
+    getPlacements = () => DEFAULT_OVERLAY_PLACEMENTS,
+    workArea = { x: 0, y: 0, width: 1440, height: 900 },
+  } = {}
+) {
   const originalLoad = Module._load;
   const targetPath = require.resolve('../electron/notification_window.js');
   const factoryPath = require.resolve('../electron/overlay_window_factory.js');
@@ -84,7 +92,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
   let appActive = true;
   const display = {
     bounds: { x: 0, y: 0, width: 1440, height: 900 },
-    workArea: { x: 0, y: 0, width: 1440, height: 900 },
+    workArea,
   };
 
   class FakeBrowserWindow {
@@ -201,6 +209,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
   try {
     const notificationWindow = require(targetPath);
     notificationWindow.setUiLanguageGetter(() => 'en');
+    notificationWindow.setOverlayPlacementGetter(getPlacements);
     notificationWindow.setLocalOwnerIdGetter(getOwnerId);
     notificationWindow.configureIpcWindowSecurity({
       registerWindow: (role, sender) => {
@@ -1159,4 +1168,85 @@ test('a server event binds the Action to its Suggestion once the bound window is
   bridge.forwardEventToRenderers(actionProcessStarted());
 
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+});
+
+// A macOS work area: below a 33 px menu bar, above a 70 px Dock.
+const MAC_WORK_AREA = { x: 0, y: 33, width: 1512, height: 879 };
+
+test('each kind of overlay opens in the cell chosen for it, read when the window opens', async () => {
+  let placements = {
+    suggestion: { row: 2, column: 0 },
+    started: { row: 0, column: 4 },
+    history: { row: 2, column: 3 },
+  };
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => placements,
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+
+  notificationWindow.showNotification('S1');
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+  assert.deepEqual(instances.map(position), [
+    { x: 20, y: 772 },
+    { x: 972, y: 53 },
+    { x: 798, y: 772 },
+    { x: 798, y: 772 },
+  ]);
+
+  // A Suggestion arriving over the four shown windows stacks upward from the bottom row; a
+  // moved setting applies to the next window only.
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  assert.equal(instances.filter((win) => win.isVisible()).length, 4);
+  notificationWindow.showNotification('S3');
+  assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 4 * 132 });
+  placements = { ...placements, started: { row: 1, column: 0 } };
+  notificationWindow.openStandaloneConversationOverlay('standalone:2');
+  assert.deepEqual(position(instances[5]), { x: 20, y: 413 });
+  assert.deepEqual(position(instances[1]), { x: 972, y: 53 });
+});
+
+test('a bottom-row overlay grows upward from where it is and stays on screen', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({
+      suggestion: { row: 2, column: 4 },
+      started: { row: 2, column: 2 },
+      history: { row: 0, column: 0 },
+    }),
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({});
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.showNotification('S1');
+  const [typed, suggestion] = instances;
+  const workAreaBottom = 33 + 879;
+
+  resize(typed, 300);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 772 + 120 - 300, width: 520, height: 300 });
+  // The user's first key does not turn it downward, off the bottom of the screen.
+  typed.webContentsEvents.emit('before-input-event', {}, { key: 'a' });
+  handlers.onOverlayInteraction({ sender: typed.webContents });
+  resize(typed, 400);
+  assert.equal(typed.getBounds().y + typed.getBounds().height, 892);
+  resize(typed, 2000);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 33 + 8, width: 520, height: 879 - 16 });
+
+  // Dragged elsewhere, it keeps its new bottom edge.
+  typed.setBounds({ y: 200, height: 300 });
+  resize(typed, 200);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 300, width: 520, height: 200 });
+
+  resize(suggestion, 500);
+  assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
+  assert.ok(suggestion.getBounds().y + 500 <= workAreaBottom);
 });

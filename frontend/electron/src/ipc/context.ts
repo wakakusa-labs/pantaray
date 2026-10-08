@@ -11,6 +11,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
 
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
@@ -197,6 +198,11 @@ export type MainContext = {
   shortcut: {
     getState: () => GlobalShortcutState;
     setAccelerator: (accelerator: string) => GlobalShortcutChangeResult;
+  };
+
+  overlayPlacement: {
+    get: () => OverlayPlacements;
+    set: (update: OverlayPlacementUpdate) => OverlayPlacements;
   };
 
   workspaceSettings: {

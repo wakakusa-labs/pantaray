@@ -8,6 +8,7 @@ import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
+import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
 import { ShortcutSection } from './settings/components/ShortcutSection';
@@ -15,19 +16,26 @@ import type { Translate } from './settings/types';
 import { useSettingsPageController } from './settings/useSettingsPageController';
 import './settings/settingsPage.css';
 
-type SettingsSectionId = 'ai_connection' | 'language' | 'execution' | 'shortcuts' | 'screenshots';
+type SettingsSectionId =
+  | 'ai_connection'
+  | 'language'
+  | 'execution'
+  | 'shortcuts'
+  | 'overlay_position'
+  | 'screenshots';
 
 const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
   'language',
   'execution',
   'shortcuts',
+  'overlay_position',
   'screenshots',
 ];
 
 /**
  * Recording and execution act on the local owner's own data. The AI connection, the
- * language and the shortcut belong to the installation, and the connection section owns a
+ * language, the shortcut and the overlay position belong to the installation, and the connection section owns a
  * browser sign-in that its unmount cancels, so none of them may hang off the owner.
  */
 const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
@@ -54,6 +62,7 @@ const SettingsPage: React.FC = () => {
     language: t('settings.language.title'),
     execution: t('settings.approvalMode.title'),
     shortcuts: t('settings.shortcut.title'),
+    overlay_position: t('settings.overlayPosition.title'),
     screenshots: t('settings.screenshotCapture.title'),
   };
 
@@ -92,6 +101,7 @@ const SettingsPage: React.FC = () => {
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
         {activeSection === 'shortcuts' ? <ShortcutSection t={t} /> : null}
+        {activeSection === 'overlay_position' ? <OverlayPositionSection t={t} /> : null}
         {/* Editing the filter pauses the recorder, and that pause outlives a section
             change, so this stays mounted for every section. Only a section that is itself
             owner-scoped has anything to report when there is no owner. */}

@@ -1,36 +1,9 @@
-import type { ReactNode } from 'react';
-
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages } from './AttachedImages';
+import { ProjectRefText } from './ProjectRefText';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
-
-type ProjectRefSpan = Readonly<{ start: number; end: number }>;
-
-/**
- * Split the text so each referenced workspace project renders in its own span.
- * Spans are Unicode code-point offsets (as the backend stores them), so the text is
- * indexed by code point rather than by UTF-16 unit. The backend guarantees the spans
- * are in order, do not overlap, and fall inside the text.
- */
-function withProjectRefs(content: string, refs: readonly ProjectRefSpan[]): ReactNode {
-  if (refs.length === 0) return content;
-  const codePoints = Array.from(content);
-  const parts: ReactNode[] = [];
-  let cursor = 0;
-  for (const ref of refs) {
-    parts.push(codePoints.slice(cursor, ref.start).join(''));
-    parts.push(
-      <span key={ref.start} className="action-conversation__project-ref">
-        {codePoints.slice(ref.start, ref.end).join('')}
-      </span>
-    );
-    cursor = ref.end;
-  }
-  parts.push(codePoints.slice(cursor).join(''));
-  return parts;
-}
 
 export function UserItem({ item }: { item: ActionConversationUserItem }) {
   const { language } = useI18n();
@@ -59,7 +32,11 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
   if (content === null && images.length === 0 && files.length === 0) return state;
   return (
     <article className="action-conversation__user" aria-label={copy.you}>
-      {content !== null ? <p>{withProjectRefs(content, projectRefs)}</p> : null}
+      {content !== null ? (
+        <p>
+          <ProjectRefText text={content} refs={projectRefs} />
+        </p>
+      ) : null}
       {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
       {files.length > 0 ? (
         <ul className="action-conversation__attachments" aria-label={copy.userFiles(files.length)}>

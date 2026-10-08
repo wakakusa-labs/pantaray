@@ -93,10 +93,6 @@
  * so a deeper blue such as #7dabdc falls near 3:1; this one measures about 4.6:1 on the
  * brightest bubble area.
  */
-.action-conversation__project-ref {
-  color: #a8d0ff;
-}
-
 .action-conversation__state {
   display: inline-block;
   margin-top: var(--space-xs);

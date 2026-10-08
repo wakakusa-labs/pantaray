@@ -135,7 +135,7 @@ def _bounded_items(*, limit: int, unit: str) -> Callable[[object], object]:
 _bounded_images = _bounded_items(
     limit=ACTION_MESSAGE_MAX_IMAGES, unit="image_references"
 )
-_bounded_project_refs = _bounded_items(
+bounded_project_refs = _bounded_items(
     limit=ACTION_MESSAGE_MAX_PROJECT_REFS, unit="project_references"
 )
 _bounded_files = _bounded_items(limit=ACTION_MESSAGE_MAX_FILES, unit="files")
@@ -230,7 +230,7 @@ class FileAttachmentInput(BaseModel):
         return f"{ACTION_ATTACHMENTS_DIRNAME}/{self.attachment_id}/{self.name}"
 
 
-def _require_project_ref_spans(
+def require_project_ref_spans(
     refs: tuple[ActionProjectRef, ...], info: ValidationInfo, *, text_field: str
 ) -> tuple[ActionProjectRef, ...]:
     """Check each reference names its own span of the text, in order.
@@ -294,7 +294,7 @@ class ActionUserMessageInput(BaseModel):
     _validate_content = field_validator("content")(_non_blank_text)
     _bound_project_refs = field_validator(
         "project_refs", "supplement_project_refs", mode="before"
-    )(_bounded_project_refs)
+    )(bounded_project_refs)
     _bound_files = field_validator("files", mode="before")(_bounded_files)
 
     @field_validator("project_refs")
@@ -302,14 +302,14 @@ class ActionUserMessageInput(BaseModel):
     def _validate_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="content")
+        return require_project_ref_spans(refs, info, text_field="content")
 
     @field_validator("supplement_project_refs")
     @classmethod
     def _validate_supplement_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="supplement")
+        return require_project_ref_spans(refs, info, text_field="supplement")
 
     @model_validator(mode="after")
     def _require_suggestion_approval_for_supplement(self) -> Self:
@@ -378,7 +378,7 @@ class ActionMessageHttpMessage(_ActionMessageHttpModel):
     _validate_content = field_validator("content")(_bounded_content)
     _validate_images = field_validator("images", mode="before")(_bounded_images)
     _bound_project_refs = field_validator("project_refs", mode="before")(
-        _bounded_project_refs
+        bounded_project_refs
     )
     _bound_files = field_validator("files", mode="before")(_bounded_files)
 
@@ -387,7 +387,7 @@ class ActionMessageHttpMessage(_ActionMessageHttpModel):
     def _validate_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="content")
+        return require_project_ref_spans(refs, info, text_field="content")
 
     @field_validator("version", mode="before")
     @classmethod
@@ -492,6 +492,8 @@ def validate_action_user_message_for_submit(
 
 
 __all__ = [
+    "bounded_project_refs",
+    "require_project_ref_spans",
     "ACTION_ATTACHMENTS_DIRNAME",
     "ACTION_FILE_NAME_MAX_BYTES",
     "ACTION_FILE_TYPE_LABEL_BY_EXTENSION",

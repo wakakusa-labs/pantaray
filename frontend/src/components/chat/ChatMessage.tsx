@@ -3,6 +3,7 @@ import { Reply, RotateCcw } from 'lucide-react';
 import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/chat/chatContracts';
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
 import { AttachedImages } from '@/components/action-conversation/AttachedImages';
+import { ProjectRefText } from '@/components/action-conversation/ProjectRefText';
 import { USER_MESSAGE_COPY } from '@/components/action-conversation/userMessageCopy';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { useI18n } from '@/context/useI18n';
@@ -78,7 +79,9 @@ export function ChatMessage({
         <div className="chat-bubble">
           {content.quote_item_id !== null ? <QuotedMessage quoted={quoted} t={t} /> : null}
           {mine ? (
-            <p className="chat-bubble__text">{content.text}</p>
+            <p className="chat-bubble__text">
+              <ProjectRefText text={content.text} refs={content.project_refs} />
+            </p>
           ) : (
             <MarkdownBlock text={content.text} isStreamFinished />
           )}

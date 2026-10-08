@@ -212,3 +212,37 @@ def test_items_cannot_be_rewritten_but_leave_with_their_user(
         connection.execute("DELETE FROM users WHERE user_id = ?", (USER,))
 
     assert _row_count(db_path) == 0
+
+
+def test_a_named_project_follows_the_action_message_contract(
+    client: TestClient,
+) -> None:
+    ref = {
+        "project_id": "p-1",
+        "display_name": "Aurora Web",
+        "paths": ["/Users/me/aurora"],
+        "start": 0,
+        "end": 10,
+    }
+    sent = client.post(
+        MESSAGES,
+        json=_message(text="  Aurora Web の README を要約して", project_refs=[ref]),
+    )
+    # The span must name the project in the trimmed text, and paths are absolute.
+    off_span = client.post(
+        MESSAGES, json=_message("m-2", text="README of Aurora Web", project_refs=[ref])
+    )
+    relative = client.post(
+        MESSAGES,
+        json=_message(
+            "m-3", text="Aurora Web", project_refs=[{**ref, "paths": ["aurora"]}]
+        ),
+    )
+
+    assert sent.status_code == 200
+    assert sent.json()["content"]["project_refs"] == [ref]
+    stored = client.get(ITEMS).json()["items"][0]["content"]
+    assert stored["project_refs"] == [ref]
+    for rejected in (off_span, relative):
+        assert rejected.status_code == 400
+        assert rejected.json()["field"] == "project_refs"

@@ -13,6 +13,7 @@ const user = (sequence: number): ChatItem => ({
     quote_item_id: null,
     images: [],
     files: [],
+    project_refs: [],
   },
 });
 

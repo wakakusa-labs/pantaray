@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { launchElectronE2E } from './harness';
 
@@ -64,6 +67,62 @@ test('the History chat sends to the local backend and reads its messages back', 
       files: [{ name: '議事録.pdf' }],
     });
   } finally {
+    await stop({ keepArtifacts: testInfo.status !== testInfo.expectedStatus });
+  }
+});
+
+// eslint-disable-next-line no-empty-pattern
+test('a project named with @ in the chat reaches the local backend with its folder', async ({}, testInfo) => {
+  const { harness, stop } = await launchElectronE2E();
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-e2e-project-'));
+  try {
+    const { page } = harness;
+    await page.waitForURL(/#\/history$/);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.electron!.workspaceSettings!.get().then(
+            () => 'ready',
+            (error: Error) => error.message
+          )
+        )
+      )
+      .toBe('ready');
+    // The folder as the workspace keeps it is what a named project carries.
+    const realPath = await page.evaluate(async (folder) => {
+      const settings = window.electron!.workspaceSettings!;
+      const project = await settings.createProject({
+        displayName: 'Aurora Web',
+        organizationIds: [],
+      });
+      const created = await settings.createFolder({
+        displayName: 'aurora',
+        realPath: folder,
+        organizationIds: [],
+        projectIds: [project.project_id],
+      });
+      return created.real_path;
+    }, fs.realpathSync(folder));
+    await page.reload();
+
+    const input = page.getByRole('textbox', { name: 'メッセージ' });
+    await input.pressSequentially('@Au');
+    await page.getByRole('option', { name: 'Aurora Web' }).click();
+    await input.pressSequentially('の README を要約して');
+    await input.press('Enter');
+    const sent = page.getByRole('article', { name: 'あなた' });
+    await expect(sent).toContainText('Aurora Web の README を要約して');
+
+    const items = await page.evaluate(() =>
+      window.electron!.chat!.listItems({ before: null, limit: 50 })
+    );
+    const message = items.items.find((item) => item.content.kind === 'user_message');
+    expect(message?.content).toMatchObject({
+      text: 'Aurora Web の README を要約して',
+      project_refs: [{ display_name: 'Aurora Web', paths: [realPath], start: 0, end: 10 }],
+    });
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
     await stop({ keepArtifacts: testInfo.status !== testInfo.expectedStatus });
   }
 });

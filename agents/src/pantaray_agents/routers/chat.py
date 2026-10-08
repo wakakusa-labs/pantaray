@@ -37,6 +37,7 @@ _REJECTABLE_FIELDS: dict[str, ChatMessageRejectedField] = {
     "quote_item_id": "quote_item_id",
     "images": "images",
     "files": "files",
+    "project_refs": "project_refs",
 }
 
 router = APIRouter(prefix="/v1/agents/users", tags=["Chat"])
@@ -79,6 +80,7 @@ async def post_chat_message(
         quote_item_id=body.quote_item_id,
         images=body.images,
         files=body.files,
+        project_refs=body.project_refs,
     )
     try:
         item = await asyncio.to_thread(

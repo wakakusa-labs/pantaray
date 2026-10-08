@@ -35,6 +35,7 @@ function renderField(get: () => Promise<unknown>) {
           }}
           onKeyDown={onKeyDown}
           onPaste={() => {}}
+          onAddProject={() => {}}
         />
       </form>
     );

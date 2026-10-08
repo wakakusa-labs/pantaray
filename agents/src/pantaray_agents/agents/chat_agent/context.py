@@ -30,6 +30,7 @@ from pantaray_agents.conversation.window import (
 from pantaray_agents.local_runtime.chat.store import TurnChatItem
 from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
 from pantaray_agents.schema.action_conversation import ActionStatus
+from pantaray_agents.schema.agent.action_message_codec import render_project_refs
 from pantaray_agents.schema.chat import (
     ActionEventContent,
     AssistantMessageContent,
@@ -218,7 +219,15 @@ def _body(
         lines.append(
             f"Attached files: {', '.join(file.name for file in content.files)}."
         )
-    return "\n".join([*lines, content.text])
+    body = "\n".join([*lines, content.text])
+    # The projects the user named with @, as the task they start is told them,
+    # and that the chat can open those folders itself.
+    if content.project_refs:
+        body = (
+            f"{body}\n\n{render_project_refs(content.project_refs)}\n"
+            "Your own read tools can open these folders."
+        )
+    return body
 
 
 def _user_item(text: str) -> LlmTurnUserItem:

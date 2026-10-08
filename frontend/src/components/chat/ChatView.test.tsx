@@ -1,6 +1,6 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type {
@@ -14,6 +14,7 @@ import type { OrchestrationStatus } from '../../../electron/src/orchestration/ev
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
+import { ChatSessionProvider } from './ChatSessionProvider';
 
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
 
@@ -21,7 +22,14 @@ function item(sequence: number, content: ChatItem['content']): ChatItem {
   return { sequence, item_id: `item-${sequence}`, created_at: at(sequence), content };
 }
 const userMessage = (sequence: number, text: string, quote: string | null = null) =>
-  item(sequence, { kind: 'user_message', text, quote_item_id: quote, images: [], files: [] });
+  item(sequence, {
+    kind: 'user_message',
+    text,
+    quote_item_id: quote,
+    images: [],
+    files: [],
+    project_refs: [],
+  });
 const reply = (
   sequence: number,
   text: string,
@@ -103,11 +111,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function WorkspaceStub() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate('/history')}>
+      Back to History
+    </button>
+  );
+}
+
 const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
       <UiLanguageProvider initialLanguage="ja">
-        <SuggestionHistoryPage />
+        <ChatSessionProvider>
+          <Routes>
+            <Route path="/history" element={<SuggestionHistoryPage />} />
+            <Route path="/workspace" element={<WorkspaceStub />} />
+          </Routes>
+        </ChatSessionProvider>
       </UiLanguageProvider>
     </MemoryRouter>
   );
@@ -285,6 +307,7 @@ it('sends a quoted reply with a document once, and shows it as the user’s mess
         quote_item_id: request.quote_item_id,
         images: request.images,
         files: request.files,
+        project_refs: request.project_refs,
       },
     },
   }));
@@ -550,4 +573,82 @@ it('reads older pages to find the user message a failed turn’s retry goes unde
     within(message).getByRole('button', { name: '返信できませんでした。もう一度送る' })
   ).toBeInTheDocument();
   expect(listItems).toHaveBeenLastCalledWith({ before: 59, limit: 50 });
+});
+
+it('names a workspace project with @ and sends it the way an Action message names it', async () => {
+  // prettier-ignore
+  const workspace = { read_access_scope: 'workspace', organizations: [], projects: [{ project_id: 'p-1', display_name: 'Aurora Web', sort_order: 0, organization_ids: [] }], folders: [{ folder_id: 'f-1', display_name: 'aurora', real_path: '/Users/me/aurora', canonical_real_path: '/Users/me/aurora', organization_ids: [], project_ids: ['p-1'] }] };
+  (window.electron as unknown as { workspaceSettings: unknown }).workspaceSettings = {
+    get: async () => workspace,
+  };
+  pages = [{ items: [], next_cursor: null }];
+  renderPage();
+  const input = (await screen.findByRole('textbox', { name: 'メッセージ' })) as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '🙂 @Au', selectionStart: 6 } });
+  expect(await screen.findByRole('option', { name: 'Aurora Web' })).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(input.value).toBe('🙂 Aurora Web ');
+  fireEvent.change(input, {
+    target: { value: '🙂 Aurora Web の README を要約して', selectionStart: 28 },
+  });
+
+  sendMessage.mockImplementationOnce(async (request) => ({
+    kind: 'sent',
+    item: {
+      sequence: 1,
+      item_id: 'item-1',
+      created_at: at(1),
+      content: {
+        kind: 'user_message',
+        text: request.text,
+        quote_item_id: null,
+        images: [],
+        files: [],
+        project_refs: request.project_refs,
+      },
+    },
+  }));
+  fireEvent.keyDown(input, { key: 'Enter' });
+
+  // The emoji is one code point: the span counts code points, not UTF-16 units.
+  expect(sendMessage.mock.calls[0][0].project_refs).toEqual([
+    {
+      project_id: 'p-1',
+      display_name: 'Aurora Web',
+      paths: ['/Users/me/aurora'],
+      start: 2,
+      end: 12,
+    },
+  ]);
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  expect(within(mine).getByText('Aurora Web')).toHaveClass('action-conversation__project-ref');
+});
+
+it('keeps the draft and its document through a trip to Workspace to add a project', async () => {
+  (window.electron as unknown as { workspaceSettings: unknown }).workspaceSettings = {
+    get: async () => ({
+      read_access_scope: 'workspace',
+      organizations: [],
+      projects: [],
+      folders: [],
+    }),
+  };
+  pages = [{ items: [], next_cursor: null }];
+  renderPage();
+  const input = (await screen.findByRole('textbox', { name: 'メッセージ' })) as HTMLTextAreaElement;
+  await userEvent.upload(
+    screen
+      .getByRole('form', { name: 'Pantaray へのメッセージ' })
+      .querySelector('input[type="file"]')!,
+    new File(['%PDF-1.4\n'], '議事録.pdf', { type: 'application/pdf' })
+  );
+  await screen.findByRole('button', { name: '議事録.pdf を削除' });
+  fireEvent.change(input, { target: { value: 'これを @', selectionStart: 5 } });
+  await userEvent.click(await screen.findByRole('option', { name: 'プロジェクトを追加' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Back to History' }));
+
+  // The draft, @ included, and the staged file are as they were left.
+  expect(await screen.findByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
+  expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
+  expect(discardAttachment).not.toHaveBeenCalled();
 });

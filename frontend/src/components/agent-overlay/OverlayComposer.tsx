@@ -316,6 +316,7 @@ export function OverlayComposer({
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
+        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
           // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。

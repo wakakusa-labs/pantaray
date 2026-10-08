@@ -75,7 +75,7 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
         sections.append("Suggestion metadata:\n" + "\n".join(metadata_lines))
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
-        sections.append(_render_project_refs(project_refs))
+        sections.append(render_project_refs(project_refs))
     if message.files:
         sections.append(_render_files(message.files))
     return "\n\n".join(sections)
@@ -93,7 +93,7 @@ def _render_suggestion_metadata(approval: SuggestionApprovalInput) -> list[str]:
     return metadata_lines
 
 
-def _render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
+def render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
     first_by_project: dict[str, ActionProjectRef] = {}
     for ref in refs:
         first_by_project.setdefault(ref.project_id, ref)
@@ -125,6 +125,7 @@ def _format_byte_size(byte_size: int) -> str:
 
 __all__ = [
     "parse_action_user_message",
+    "render_project_refs",
     "parse_stored_action_user_message",
     "render_action_user_request_text",
     "render_action_user_visible_text",

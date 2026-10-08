@@ -13,6 +13,7 @@ from pantaray_agents.tools.memory.retrieval import (
     MemoryRetrievalPolicy,
     MemoryRetrievalSession,
 )
+from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.tools.web.session import WebResearchToolSession
 
 from ..action_session_temp_paths import (
@@ -21,7 +22,6 @@ from ..action_session_temp_paths import (
 )
 from ..outside_workspace_grant import app_owned_roots
 from .commands import SuggestionCommandSession
-from .memory_sql import SuggestionMemorySqlSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
 
@@ -94,7 +94,7 @@ class LocalSuggestionResearchTools:
         )
         return (
             *memory_tools.definitions(),
-            SuggestionMemorySqlSession(
+            MemorySqlSession(
                 db_path=self.db_path,
                 busy_timeout_ms=self.busy_timeout_ms,
                 user_id=user_id,

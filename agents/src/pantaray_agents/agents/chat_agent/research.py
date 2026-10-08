@@ -31,9 +31,6 @@ from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     list_workspace_settings,
 )
-from pantaray_agents.local_runtime.tooling.suggestion_research.memory_sql import (
-    SuggestionMemorySqlSession,
-)
 from pantaray_agents.local_runtime.tooling.suggestion_research.zanei import (
     InsightActivityStart,
     SuggestionZaneiSession,
@@ -50,6 +47,7 @@ from pantaray_agents.tools.memory.retrieval import (
     MemoryRetrievalPolicy,
     MemoryRetrievalSession,
 )
+from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.tools.web.session import WebResearchToolSession
 
 CHAT_TOOL_RESULTS_DIRNAME: Final[str] = "chat_tool_results"
@@ -101,7 +99,7 @@ async def chat_research_tools(
     )
     return (
         *memory.definitions(),
-        SuggestionMemorySqlSession(
+        MemorySqlSession(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
         ).definition(),
         *build_read_only_file_tools(

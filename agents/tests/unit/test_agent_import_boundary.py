@@ -1,8 +1,11 @@
-"""The layers below the agents must not load them, nor the tool broker.
+"""Lower layers must not load the layers that use them.
 
 `pantaray_agents.tools` and `pantaray_agents.conversation` are imported by the
-agents and by the broker, never the other way round. The check runs in a fresh
-interpreter because this test process has already imported those modules. Any
+agents and by the broker, never the other way round. The runtime's stop barrier
+stops the chat's turns without loading the chat, and Suggestion's research
+tools share memory_sql with the Action without loading the Action. The check
+runs in a fresh interpreter because this test process has already imported
+those modules. Any
 import path counts, including the package `__init__` modules of lower layers a
 package reaches transitively.
 """
@@ -14,7 +17,7 @@ import sys
 
 import pytest
 
-_FORBIDDEN_PACKAGES = (
+_BELOW_AGENTS_AND_BROKER = (
     "pantaray_agents.agents",
     "pantaray_agents.local_runtime.tooling.brokering",
 )
@@ -42,16 +45,31 @@ print("\\n".join(loaded))
 
 
 @pytest.mark.parametrize(
-    "package", ["pantaray_agents.tools", "pantaray_agents.conversation"]
+    ("package", "forbidden"),
+    [
+        ("pantaray_agents.tools", _BELOW_AGENTS_AND_BROKER),
+        ("pantaray_agents.conversation", _BELOW_AGENTS_AND_BROKER),
+        (
+            "pantaray_agents.local_runtime.runtime",
+            ("pantaray_agents.local_runtime.chat", "pantaray_agents.agents.chat_agent"),
+        ),
+        (
+            "pantaray_agents.local_runtime.tooling.suggestion_research",
+            (
+                "pantaray_agents.agents.action_agent",
+                "pantaray_agents.agents.chat_agent",
+            ),
+        ),
+    ],
 )
-def test_importing_the_package_does_not_load_agent_or_broker_modules(
-    package: str,
+def test_importing_the_package_does_not_load_the_layers_above_it(
+    package: str, forbidden: tuple[str, ...]
 ) -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            _PROBE.format(package=package, forbidden=_FORBIDDEN_PACKAGES),
+            _PROBE.format(package=package, forbidden=forbidden),
         ],
         capture_output=True,
         text=True,

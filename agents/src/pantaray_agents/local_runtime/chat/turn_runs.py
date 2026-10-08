@@ -6,13 +6,13 @@ is awaited on, so a turn on the server's loop would stall every request and
 WebSocket while it works; on its own loop it stalls nothing, and a quitting
 app does not wait for it.
 
-The stop barrier closes admission, then calls ``stop_chat_turns`` before it
-swaps the identity, as it cancels the Action runs. A turn starts only while
-admission is open, checked under the same lock it is registered under, so a
-turn either exists for the barrier to stop or never starts. A stopped turn is
-cancelled where it awaits and counts as stopped only once the work it handed
-to threads (a database write) has finished too; it runs again once the new
-identity is in place.
+The stop barrier closes admission, then calls ``stop_chat_turns`` (registered
+with it below) before it swaps the identity, as it cancels the Action runs. A
+turn starts only while admission is open, checked under the same lock it is
+registered under, so a turn either exists for the barrier to stop or never
+starts. A stopped turn is cancelled where it awaits and counts as stopped only
+once the work it handed to threads (a database write) has finished too; it
+runs again once the new identity is in place.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
+from pantaray_agents.local_runtime.runtime.identity_stops import (
+    stop_on_identity_change,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,9 @@ async def stop_chat_turns(*, owner_id: str) -> None:
         # route and owner it started on.
         logger.warning("A chat turn did not stop within the barrier's wait")
 
+
+# On import: a chat turn starts only through this module.
+stop_on_identity_change(stop_chat_turns)
 
 __all__ = [
     "CHAT_TURN_STOP_WAIT_SECONDS",

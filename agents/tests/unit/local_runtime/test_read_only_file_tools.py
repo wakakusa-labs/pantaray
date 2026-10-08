@@ -172,3 +172,16 @@ async def test_an_image_is_refused_instead_of_reported_as_read(
     assert result.status == "error"
     assert result.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
     assert str(folder / "chart.png") in result.output["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_text_file_that_is_not_utf8_fails_only_its_own_call(
+    tmp_path: Path,
+) -> None:
+    registry, folder, _storage, _spill = _tools(tmp_path)
+    (folder / "sales.csv").write_bytes("顧客,金額\n東京,120\n".encode("cp932"))
+
+    result = await _call(registry, "read", {"path": str(folder / "sales.csv")})
+
+    assert result.status == "error"
+    assert result.output["error_code"] == "READ_FAILED"

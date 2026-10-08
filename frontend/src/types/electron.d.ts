@@ -120,6 +120,11 @@ type ElectronGlobalShortcutChangeResult =
       state: ElectronGlobalShortcutState;
     };
 
+/** Mirrors electron/src/ipc/schemas/overlayPlacement.ts: a cell of the 3 × 5 screen grid. */
+type ElectronOverlayPlacementKind = 'suggestion' | 'started' | 'history';
+type ElectronOverlayCell = { row: number; column: number };
+type ElectronOverlayPlacements = Record<ElectronOverlayPlacementKind, ElectronOverlayCell>;
+
 type ElectronOverlaySnapshot = {
   suggestionId: string;
   commandId: string | null;
@@ -301,6 +306,13 @@ declare global {
       shortcut?: {
         getState: () => Promise<ElectronGlobalShortcutState>;
         setAccelerator: (accelerator: string) => Promise<ElectronGlobalShortcutChangeResult>;
+      };
+      overlayPlacement?: {
+        get: () => Promise<ElectronOverlayPlacements>;
+        set: (update: {
+          kind: ElectronOverlayPlacementKind;
+          cell: ElectronOverlayCell;
+        }) => Promise<ElectronOverlayPlacements>;
       };
       workspaceSettings?: {
         get: () => Promise<ElectronWorkspaceSettings>;

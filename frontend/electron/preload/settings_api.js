@@ -19,6 +19,10 @@ function createSettingsApi({ ipcRenderer }) {
       getState: () => ipcRenderer.invoke('shortcut:getState'),
       setAccelerator: (accelerator) => ipcRenderer.invoke('shortcut:setAccelerator', accelerator),
     },
+    overlayPlacement: {
+      get: () => ipcRenderer.invoke('overlayPlacement:get'),
+      set: (update) => ipcRenderer.invoke('overlayPlacement:set', update),
+    },
     workspaceSettings: {
       get: () => ipcRenderer.invoke('workspaceSettings:get'),
       getReadAccessScope: () => ipcRenderer.invoke('workspaceSettings:getReadAccessScope'),

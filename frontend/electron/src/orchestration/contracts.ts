@@ -1,5 +1,7 @@
 import type { BrowserWindow } from 'electron';
 
+import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
+
 import type {
   ActionDisplayStatus,
   OrchestrationServerEvent,
@@ -152,6 +154,7 @@ export type NotificationWindowApi = {
   dispatchEventToOverlay: (channel: string, payload: unknown) => boolean;
   setActionLiveSnapshotGetter: (getter: (actionId: string) => object | null) => void;
   setUiLanguageGetter?: (getter: () => UiLanguage) => void;
+  setOverlayPlacementGetter: (getter: () => OverlayPlacements) => void;
   configureIpcWindowSecurity: (registration: {
     registerWindow: (role: 'overlay', sender: Readonly<{ id: number }>) => void;
     unregisterWindow: (sender: Readonly<{ id: number }>) => void;

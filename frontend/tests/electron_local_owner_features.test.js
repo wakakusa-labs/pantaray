@@ -65,6 +65,7 @@ test('desktop features bind guest and expired-account requests, preferences, rea
       openStandaloneConversationOverlay: id => { windows.add(id); return 'created'; },
       destroyOverlayWindow: id => windows.delete(id),
       setActionLiveSnapshotGetter: () => {}, sendResetToAllOverlays: () => {}, clearActionAssociations: () => {},
+      setOverlayPlacementGetter: () => {},
     },
     createOrchestrationWS: () => ({ connect: (url, headers) => sockets.push({ url, headers }), disconnect: () => {} }),
     authCoordinator: { startBrowserLogin: async () => ({ ok: true }) },

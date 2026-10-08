@@ -2,11 +2,12 @@ const { BrowserWindow, app, screen } = require('electron');
 const path = require('path');
 const { buildFrontendDevPageUrl } = require('./dev_frontend_env');
 const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap');
+const {
+  OVERLAY_INITIAL_HEIGHT_PX,
+  OVERLAY_WIDTH_PX,
+  resolveOverlayPlacement,
+} = require('./dist/windows/overlayPlacement');
 
-const DEFAULT_OVERLAY_WIDTH_PX = 520;
-const DEFAULT_OVERLAY_HEIGHT_PX = 120;
-const DEFAULT_SCREEN_MARGIN_PX = 20;
-const DEFAULT_OVERLAY_GAP_PX = 12;
 const OVERLAY_ALWAYS_ON_TOP_LEVEL = 'screen-saver';
 
 function isDevRuntime() {
@@ -99,45 +100,51 @@ function hardDisableDevTools(win) {
   }
 }
 
-// A window the user opens is centered and keeps that center while its first
-// content loads in. The user's first key or click returns it to growing downward
-// from its top, so the composer and the text being read stay where they are.
-const overlayCenterYs = new WeakMap();
+// The vertical edge a window keeps while its content grows (see resolveOverlayPlacement):
+// - center: a middle-row window keeps its center while its first content loads in. The user's
+//   first key or click returns it to growing downward from its top, so the composer and the
+//   text being read stay where they are.
+// - bottom: a bottom-row window keeps its current bottom edge, so it grows upward on screen.
+const overlayVerticalAnchors = new WeakMap();
 
-function getOverlayCenterY(win) {
-  return overlayCenterYs.get(win) ?? null;
+function getOverlayVerticalAnchor(win) {
+  return overlayVerticalAnchors.get(win) ?? null;
 }
 
 function releaseOverlayCenter(win) {
-  overlayCenterYs.delete(win);
+  if (overlayVerticalAnchors.get(win)?.kind === 'center') overlayVerticalAnchors.delete(win);
 }
 
-function resolveCenteredOverlayPosition() {
-  const workArea = screen.getPrimaryDisplay().workArea;
-  return {
-    x: Math.round(workArea.x + (workArea.width - DEFAULT_OVERLAY_WIDTH_PX) / 2),
-    y: Math.round(workArea.y + (workArea.height - DEFAULT_OVERLAY_HEIGHT_PX) / 2),
-  };
+function setOverlayVerticalAnchor(win, { y, anchor }) {
+  overlayVerticalAnchors.delete(win);
+  if (anchor === 'center') {
+    overlayVerticalAnchors.set(win, { kind: 'center', y: y + OVERLAY_INITIAL_HEIGHT_PX / 2 });
+    win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
+  } else if (anchor === 'bottom') {
+    overlayVerticalAnchors.set(win, { kind: 'bottom' });
+  }
 }
 
-// Suggestions arrive on their own, so they stack in the top-right corner.
-function resolveSuggestionOverlayPosition(index) {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const bounds = primaryDisplay.bounds;
-  const bx = Number(bounds?.x || 0);
-  const by = Number(bounds?.y || 0);
-  const maxRows = Math.max(
-    1,
-    Math.floor(
-      (bounds.height - DEFAULT_SCREEN_MARGIN_PX * 2) /
-        (DEFAULT_OVERLAY_HEIGHT_PX + DEFAULT_OVERLAY_GAP_PX)
-    )
-  );
-  const row = Math.min(index, maxRows - 1);
-  return {
-    x: bx + bounds.width - DEFAULT_OVERLAY_WIDTH_PX - DEFAULT_SCREEN_MARGIN_PX,
-    y: by + DEFAULT_SCREEN_MARGIN_PX + row * (DEFAULT_OVERLAY_HEIGHT_PX + DEFAULT_OVERLAY_GAP_PX),
-  };
+function resolvePrimaryPlacement(cell, stackIndex) {
+  return resolveOverlayPlacement(screen.getPrimaryDisplay().workArea, cell, stackIndex);
+}
+
+/**
+ * Moves a hidden window that is shown again for another kind (a closed Suggestion reopened
+ * from History) to that kind's cell. It keeps its content's height, placed by the cell's
+ * anchor; the caller clamps it to the screen through the resize path.
+ */
+function moveOverlayWindowToCell(win, cell) {
+  const placement = resolvePrimaryPlacement(cell, 0);
+  const { height } = win.getBounds();
+  const y =
+    placement.anchor === 'top'
+      ? placement.y
+      : placement.anchor === 'center'
+        ? Math.round(placement.y + (OVERLAY_INITIAL_HEIGHT_PX - height) / 2)
+        : placement.y + OVERLAY_INITIAL_HEIGHT_PX - height;
+  win.setBounds({ x: placement.x, y });
+  setOverlayVerticalAnchor(win, placement);
 }
 
 function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
@@ -165,20 +172,20 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
 
   function createConversationOverlayWindow({
     actionId,
+    cell,
     entryMode,
-    index,
+    stackIndex,
     interactive,
     onClosed,
     onDidFinishLoad,
     onReadyToShow,
   }) {
-    const position = interactive
-      ? resolveCenteredOverlayPosition()
-      : resolveSuggestionOverlayPosition(index);
+    const placement = resolvePrimaryPlacement(cell, stackIndex);
     const win = new BrowserWindow({
-      width: DEFAULT_OVERLAY_WIDTH_PX,
-      height: DEFAULT_OVERLAY_HEIGHT_PX,
-      ...position,
+      width: OVERLAY_WIDTH_PX,
+      height: OVERLAY_INITIAL_HEIGHT_PX,
+      x: placement.x,
+      y: placement.y,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
@@ -209,10 +216,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
-    if (interactive) {
-      overlayCenterYs.set(win, position.y + DEFAULT_OVERLAY_HEIGHT_PX / 2);
-      win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
-    }
+    setOverlayVerticalAnchor(win, placement);
     registerWindow(win);
     loadOverlayPage(win, entryMode, actionId);
     win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
@@ -229,7 +233,8 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
 module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
-  getOverlayCenterY,
+  getOverlayVerticalAnchor,
+  moveOverlayWindowToCell,
   releaseOverlayCenter,
   showInteractiveOverlayWindow,
 };

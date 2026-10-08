@@ -37,7 +37,7 @@ test('IPC allowlist: isValidSendChannel / isValidReceiveChannel', () => {
   assert.equal(bridge.isValidReceiveChannel('ws:send'), false);
 });
 
-test('IPC preload exposes workspace and shortcut settings', () => {
+test('IPC preload exposes workspace, shortcut, and overlay placement settings', () => {
   const { createSettingsApi } = require('../electron/preload/settings_api');
   const calls = [];
   const api = createSettingsApi({
@@ -56,6 +56,8 @@ test('IPC preload exposes workspace and shortcut settings', () => {
   void api.workspaceSettings.reorderProjects({ projectIds: ['project-b', 'project-a'] });
   void api.shortcut.getState();
   void api.shortcut.setAccelerator('Option+Space');
+  void api.overlayPlacement.get();
+  void api.overlayPlacement.set({ kind: 'started', cell: { row: 2, column: 4 } });
 
   assert.deepEqual(calls, [
     ['workspaceSettings:getCommandNetwork'],
@@ -65,6 +67,8 @@ test('IPC preload exposes workspace and shortcut settings', () => {
     ['workspaceSettings:reorderProjects', { projectIds: ['project-b', 'project-a'] }],
     ['shortcut:getState'],
     ['shortcut:setAccelerator', 'Option+Space'],
+    ['overlayPlacement:get'],
+    ['overlayPlacement:set', { kind: 'started', cell: { row: 2, column: 4 } }],
   ]);
 });
 

@@ -2,10 +2,14 @@ const { BrowserWindow, screen } = require('electron');
 const { createOverlayActivationTracker } = require('./overlay_activation_tracker');
 const { createOverlayDragController } = require('./overlay_drag_controller');
 const { createAuxiliaryWindowIpcSecurity } = require('./auxiliary_window_ipc_security');
-const { createNotificationIpcHandlerFactory } = require('./notification_window_ipc');
+const {
+  createNotificationIpcHandlerFactory,
+  resizeOverlayWindow,
+} = require('./notification_window_ipc');
 const {
   createOverlayWindowFactory,
   applyOverlayShellMode,
+  moveOverlayWindowToCell,
   showInteractiveOverlayWindow,
 } = require('./overlay_window_factory');
 
@@ -22,6 +26,7 @@ const historyOverlayIds = new Set();
 const conversationOverlayIds = new Set();
 let getMainWindowForOverlayIsolation = null;
 let getUiLanguage = null;
+let getOverlayPlacements = null;
 let getActionLiveSnapshot = null;
 let getLocalOwnerId = null;
 let ownerGeneration = 0;
@@ -45,6 +50,34 @@ function setUiLanguageGetter(getter) {
     throw new Error('setUiLanguageGetter requires a function.');
   }
   getUiLanguage = getter;
+}
+
+function setOverlayPlacementGetter(getter) {
+  if (typeof getter !== 'function') {
+    throw new Error('setOverlayPlacementGetter requires a function.');
+  }
+  getOverlayPlacements = getter;
+}
+
+function overlayCellFor(placementKind) {
+  if (!getOverlayPlacements) {
+    throw new Error('Overlay placement getter is required before creating overlay windows.');
+  }
+  return getOverlayPlacements()[placementKind];
+}
+
+// A conversation with an Action is one reopened from History (its list or its chat); a new
+// one is started by the user.
+function standalonePlacementKind(actionId) {
+  return actionId ? 'history' : 'started';
+}
+
+// A closed Suggestion is hidden, not destroyed, so reopening it from History reuses its window;
+// a hidden window opens where its new kind opens, and a visible one stays where the user sees it.
+function placeHiddenOverlayWindow(win, placementKind) {
+  if (win.isVisible()) return;
+  moveOverlayWindowToCell(win, overlayCellFor(placementKind));
+  resizeOverlayWindow(screen, win, win.getBounds().height);
 }
 
 function setActionLiveSnapshotGetter(getter) {
@@ -288,8 +321,10 @@ function createMappedOverlayWindow(id, options) {
   if (options.conversation) conversationOverlayIds.add(id);
   const win = overlayWindowFactory.createConversationOverlayWindow({
     actionId: options.actionId ?? null,
+    cell: overlayCellFor(options.placementKind),
     entryMode: options.entryMode,
-    index: countVisibleOverlayWindows(),
+    // Only Suggestions arrive while others are showing; a window the user opens takes its cell.
+    stackIndex: options.placementKind === 'suggestion' ? countVisibleOverlayWindows() : 0,
     interactive: options.interactive,
     onDidFinishLoad: () => {
       if (overlayWindows.get(id) !== win || win.isDestroyed()) return;
@@ -329,6 +364,7 @@ function createHistoryOverlayWindow(id) {
   return createMappedOverlayWindow(id, {
     history: true,
     interactive: true,
+    placementKind: 'history',
     onReadyToShow: (win) => showInteractiveOverlayWindow(win, { visibleOnAllWorkspaces: true }),
   });
 }
@@ -342,6 +378,7 @@ function createStandaloneConversationOverlayWindow(id, actionId) {
     conversation: true,
     entryMode: 'standalone',
     interactive: true,
+    placementKind: standalonePlacementKind(actionId),
     onReadyToShow: showInteractiveOverlayWindow,
   });
 }
@@ -356,6 +393,7 @@ function getOrCreateOverlayWindow(id) {
   }
   return createMappedOverlayWindow(id, {
     interactive: false,
+    placementKind: 'suggestion',
     onReadyToShow: (overlay, state) => applyOverlayShellMode(overlay, state.shellMode),
   });
 }
@@ -368,6 +406,7 @@ function getOrCreateHistoryOverlayWindow(id) {
   syncMainWindowFocusableState();
   const win = overlayWindows.get(id);
   if (win && !win.isDestroyed()) {
+    placeHiddenOverlayWindow(win, 'history');
     showInteractiveOverlayWindow(win);
     return win;
   }
@@ -383,6 +422,7 @@ function openStandaloneConversationOverlay(id, actionId = null) {
   const existing = overlayWindows.get(normalizedId);
   if (existing && !existing.isDestroyed()) {
     if (!runtime.ready || !runtime.readyToShow) return 'loading';
+    placeHiddenOverlayWindow(existing, standalonePlacementKind(actionId));
     showInteractiveOverlayWindow(existing, { explicitFocus: true });
     existing.webContents.send('overlay:focusComposer');
     return 'focused';
@@ -531,6 +571,7 @@ module.exports = {
   destroyOverlayWindow,
   dispatchEventToOverlay,
   setActionLiveSnapshotGetter,
+  setOverlayPlacementGetter,
   setUiLanguageGetter,
   configureIpcWindowSecurity: auxiliaryWindowIpcSecurity.configure,
   isVisibleOverlayAtPoint: (point) => overlayActivationTracker.isVisibleOverlayAtPoint(point),

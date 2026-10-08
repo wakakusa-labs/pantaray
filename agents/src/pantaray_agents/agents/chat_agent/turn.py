@@ -241,6 +241,10 @@ class _ChatTurn:
         self, send: ChatSend, tools: tuple[ReactToolDefinition, ...]
     ) -> AssistantMessageContent:
         started = effective_route_identity(read_route_inputs())
+        # The owner may have changed since the plan: nothing of this chat is
+        # read for, or sent on, anyone else's route.
+        if started.owner_id != self.plan.user_id:
+            raise ChatTurnInterrupted("the chat's owner no longer owns the data")
         sink = CountingSink()
 
         async def send_turn(request: ConversationRequest) -> TurnReply:

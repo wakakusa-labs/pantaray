@@ -8,6 +8,7 @@ import os
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tests.unit.local_runtime.action_seed import insert_agent_action
@@ -351,7 +352,11 @@ async def test_a_turn_stops_unanswered_when_the_route_changes_under_it(
     _say("m-1", "Hi")
     accounts = iter(["first", "second"])
     monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: next(accounts))
-    monkeypatch.setattr(chat_turn, "effective_route_identity", lambda inputs: inputs)
+    monkeypatch.setattr(
+        chat_turn,
+        "effective_route_identity",
+        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
+    )
     model = _Model([_reply_call("Hello!")])
 
     with pytest.raises(ChatTurnInterrupted):
@@ -360,3 +365,18 @@ async def test_a_turn_stops_unanswered_when_the_route_changes_under_it(
     # Nothing reached the model under the new route, and the message still waits.
     assert model.requests == []
     assert plan_chat_turn(user_id=USER, retry_of=None) is not None
+
+
+async def test_a_turn_planned_before_the_owner_changed_reads_and_sends_nothing() -> (
+    None
+):
+    _say("m-1", "Hi")
+    plan = plan_chat_turn(user_id=USER, retry_of=None)
+    assert plan is not None
+    register_logged_out_owner("someone-else")
+    model = _Model([_reply_call("Hello!")])
+
+    with pytest.raises(ChatTurnInterrupted):
+        await run_chat_turn(plan, send=model.send, tools=(), window=ChatWindow.fresh())
+
+    assert model.requests == []

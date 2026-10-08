@@ -11,6 +11,7 @@ import type {
 } from '../../../electron/src/chat/chatContracts';
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import type { OrchestrationStatus } from '../../../electron/src/orchestration/eventContracts';
+import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
@@ -120,16 +121,20 @@ function WorkspaceStub() {
   );
 }
 
+const OWNER = { id: 'user-1', kind: 'account' } as const;
+
 const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
       <UiLanguageProvider initialLanguage="ja">
-        <ChatSessionProvider>
-          <Routes>
-            <Route path="/history" element={<SuggestionHistoryPage />} />
-            <Route path="/workspace" element={<WorkspaceStub />} />
-          </Routes>
-        </ChatSessionProvider>
+        <LocalOwnerContext.Provider value={OWNER}>
+          <ChatSessionProvider>
+            <Routes>
+              <Route path="/history" element={<SuggestionHistoryPage />} />
+              <Route path="/workspace" element={<WorkspaceStub />} />
+            </Routes>
+          </ChatSessionProvider>
+        </LocalOwnerContext.Provider>
       </UiLanguageProvider>
     </MemoryRouter>
   );
@@ -652,4 +657,12 @@ it('keeps the draft and its document through a trip to Workspace to add a projec
   expect(await screen.findByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
   expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
   expect(discardAttachment).not.toHaveBeenCalled();
+});
+
+it('a reply that arrives before the chat is drawn is not marked read', async () => {
+  listItems.mockImplementationOnce(() => new Promise(() => {}));
+  renderPage();
+  act(() => appendItem(reply(5, '下書きを直しました。')));
+  expect(screen.queryByText('下書きを直しました。')).not.toBeInTheDocument();
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBeNull();
 });

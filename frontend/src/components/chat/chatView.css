@@ -10,6 +10,9 @@
 }
 
 .chat-scroll {
+  /* Messages that grow after they are drawn must not move the scroll: the chat keeps the reader
+     at the newest message itself (useChatScroll), and its place when older pages land. */
+  overflow-anchor: none;
   flex: 1;
   min-height: 0;
   overflow-y: auto;

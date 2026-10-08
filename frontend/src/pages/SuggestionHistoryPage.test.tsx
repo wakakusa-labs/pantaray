@@ -14,12 +14,15 @@ import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import { t as translate } from '@/i18n/translate';
 import { ChatSessionProvider } from '@/components/chat/ChatSessionProvider';
+import { LocalOwnerContext } from '@/context/localOwnerContext';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
 
 function PageWrapper({ children }: { children: ReactNode }) {
   return (
     <MemoryRouter>
-      <ChatSessionProvider>{children}</ChatSessionProvider>
+      <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
+        <ChatSessionProvider>{children}</ChatSessionProvider>
+      </LocalOwnerContext.Provider>
     </MemoryRouter>
   );
 }
@@ -218,7 +221,9 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
       '9月29日',
     ]);
     // Under today and yesterday a row shows its time; older rows keep the full date.
-    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(/^T108:00$/);
+    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(
+      /^T108:00history.status.suggestion$/
+    );
     expect(screen.getByRole('button', { name: /^O1/ })).toHaveTextContent('2026年9月29日 08:00');
     expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
     expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');

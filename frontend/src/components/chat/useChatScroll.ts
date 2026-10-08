@@ -35,27 +35,42 @@ export function useChatScroll({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const olderTriggerRef = useRef<HTMLButtonElement>(null);
   const followingRef = useRef(true);
+  // Where the last pin to the bottom left the scroll. Its scroll event arrives a frame later,
+  // possibly after the messages grew, and must not read as the reader moving away; a reader's own
+  // scroll moves away from this position. (The chat turns off scroll anchoring, so growth alone
+  // never moves it.)
+  const pinnedTopRef = useRef<number | null>(null);
+  const pinToBottom = useCallback((element: HTMLElement) => {
+    element.scrollTop = element.scrollHeight;
+    pinnedTopRef.current = element.scrollTop;
+  }, []);
   // The distance from the bottom when an older page was asked for, so it can be kept.
   const anchorRef = useRef<number | null>(null);
   const firstItemRef = useRef<string | null>(null);
 
-  // The composer grows with a quote or attachments and shrinks the chat above it; a reader at the
-  // bottom stays at the bottom instead of losing the newest message under it.
-  const attachScrollElement = useCallback((element: HTMLDivElement | null) => {
-    resizeObserverRef.current?.disconnect();
-    resizeObserverRef.current = null;
-    scrollRef.current = element;
-    if (!element) return;
-    const observer = new ResizeObserver(() => {
-      if (followingRef.current) element.scrollTop = element.scrollHeight;
-    });
-    observer.observe(element);
-    resizeObserverRef.current = observer;
-  }, []);
+  // The composer grows with a quote or attachments and shrinks the chat above it, and the messages
+  // grow after they are drawn (a card's work state, an image); a reader at the bottom stays at the
+  // bottom instead of losing the newest message under either.
+  const attachScrollElement = useCallback(
+    (element: HTMLDivElement | null) => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      scrollRef.current = element;
+      if (!element) return;
+      const observer = new ResizeObserver(() => {
+        if (followingRef.current) pinToBottom(element);
+      });
+      observer.observe(element);
+      // The scroll element holds one column with all the messages.
+      if (element.firstElementChild) observer.observe(element.firstElementChild);
+      resizeObserverRef.current = observer;
+    },
+    [pinToBottom]
+  );
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
-    if (!element) return;
+    if (!element || element.scrollTop === pinnedTopRef.current) return;
     followingRef.current =
       element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_SLACK_PX;
   }, []);
@@ -68,10 +83,10 @@ export function useChatScroll({
       element.scrollTop = element.scrollHeight - anchorRef.current;
       anchorRef.current = null;
     } else if (followingRef.current) {
-      element.scrollTop = element.scrollHeight;
+      pinToBottom(element);
     }
     firstItemRef.current = firstItem;
-  }, [items, typing, ready]);
+  }, [items, typing, ready, pinToBottom]);
 
   // A page that brought nothing new leaves the anchor unused; a later reload must not apply it.
   useEffect(() => {
@@ -108,8 +123,12 @@ export function useChatScroll({
     followingRef.current = true;
   }, []);
 
+  /** True while the chat is drawn and the reader is at its newest message, so it is in view. */
+  const isAtNewest = useCallback(() => scrollRef.current !== null && followingRef.current, []);
+
   return {
     scrollRef: attachScrollElement,
+    isAtNewest,
     olderTriggerRef,
     onScroll,
     loadOlderKeepingPlace,

@@ -1,8 +1,13 @@
 import type { MessageKey } from '@/i18n/types';
 
-import type { ConversationHistoryStatus } from '../../../electron/src/history/historyContracts';
+import type {
+  ConversationHistoryListItem,
+  ConversationHistoryStatus,
+} from '../../../electron/src/history/historyContracts';
 
-type BadgeTone = 'warning' | 'info';
+type BadgeTone = 'warning' | 'info' | null;
+
+export const badgeClassName = (tone: BadgeTone) => (tone ? `badge badge--${tone}` : 'badge');
 
 /**
  * 履歴一覧のバッジは「いま注意が必要か」だけを表す。`idle` は会話が走っていない
@@ -20,3 +25,17 @@ export const getConversationHistoryStatusMeta = (
       return null;
   }
 };
+
+/**
+ * A list row's badge. A Suggestion row says it is a suggestion, brighter while it still waits for
+ * the user's answer, so it is not mistaken for an Action waiting for approval.
+ */
+export const getHistoryItemStatusMeta = (
+  item: ConversationHistoryListItem
+): { labelKey: MessageKey; tone: BadgeTone } | null =>
+  item.kind === 'suggestion'
+    ? {
+        labelKey: 'history.status.suggestion',
+        tone: item.status === 'approval_pending' ? 'warning' : null,
+      }
+    : getConversationHistoryStatusMeta(item.status);

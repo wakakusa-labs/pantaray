@@ -26,6 +26,7 @@ WORKSPACE_PATH_ROOT_NOT_PROCESS_READABLE = "WORKSPACE_PATH_ROOT_NOT_PROCESS_READ
 WORKSPACE_PATH_ROOT_NOT_PROCESS_WRITABLE = "WORKSPACE_PATH_ROOT_NOT_PROCESS_WRITABLE"
 WORKSPACE_PATH_ROOT_NOT_READABLE = "WORKSPACE_PATH_ROOT_NOT_READABLE"
 WORKSPACE_ROOT_AUTHORITY_INVALID = "WORKSPACE_ROOT_AUTHORITY_INVALID"
+PATH_NOT_ABSOLUTE = "PATH_NOT_ABSOLUTE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +108,7 @@ def resolve_local_path(
     *,
     roots: tuple[ManifestRoot, ...],
     raw_path: str,
-    cwd_path: Path,
+    cwd_path: Path | None,
     capability: str,
     must_exist: bool,
     must_be_file: bool = False,
@@ -154,14 +155,28 @@ def resolve_process_cwd(
     )
 
 
-def candidate_path(*, raw_path: str, cwd_path: Path) -> Path:
+def candidate_path(*, raw_path: str, cwd_path: Path | None) -> Path:
+    """The path a call names; a caller without a cwd accepts absolute paths only."""
+
     stripped = raw_path.strip()
     if not stripped:
         raise BrokerPolicyError("path must not be empty")
     if stripped.startswith("~"):
         raise BrokerPolicyError("path must not use shell home expansion")
     path = Path(stripped)
-    return path if path.is_absolute() else cwd_path / path
+    if path.is_absolute():
+        return path
+    if cwd_path is None:
+        raise BrokerPolicyError(
+            f"path must be absolute: {stripped}",
+            code=PATH_NOT_ABSOLUTE,
+            fix_hint=(
+                "There is no current directory here. Retry with the absolute "
+                "path, such as a registered folder's path followed by the file's "
+                "path inside it."
+            ),
+        )
+    return cwd_path / path
 
 
 def validate_manifest_root(root: ManifestRoot) -> None:
@@ -253,6 +268,7 @@ def _ensure_inside_root(*, candidate: Path, root: Path) -> None:
 
 
 __all__ = [
+    "PATH_NOT_ABSOLUTE",
     "ManifestRoot",
     "ResolvedManifestPath",
     "ResolvedProcessCwd",

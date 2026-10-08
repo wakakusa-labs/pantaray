@@ -70,6 +70,7 @@ def resolve_read_path(
             raw_path=raw_path.strip(),
             suggestions=suggestions,
             full_access=scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS,
+            has_cwd=scope.cwd_path is not None,
         ) from exc
     if scope.private_storage.hides(resolved.path):
         raise private_app_storage_error(code=READ_PATH_DENIED)
@@ -132,7 +133,7 @@ def _resolve_read_tool_path_unchecked(
 def _resolve_full_access_path(
     *,
     raw_path: str,
-    cwd_path: Path,
+    cwd_path: Path | None,
     manifest_roots: tuple[ManifestRoot, ...],
     must_exist: bool,
     must_be_file: bool,
@@ -287,6 +288,7 @@ def _missing_path_error(
     raw_path: str,
     suggestions: tuple[str, ...],
     full_access: bool,
+    has_cwd: bool,
 ) -> BrokerPolicyError:
     details = f"READ_PATH_NOT_FOUND: path does not exist: {raw_path}"
     if suggestions:
@@ -295,8 +297,12 @@ def _missing_path_error(
         details,
         code=READ_PATH_NOT_FOUND,
         fix_hint=(
-            "Retry with an existing local path. Absolute paths and paths relative to "
-            "the current cwd are valid for read/search."
+            (
+                "Retry with an existing local path. Absolute paths and paths "
+                "relative to the current cwd are valid for read/search."
+                if has_cwd
+                else "Retry with an existing absolute local path."
+            )
             if full_access
             else "Retry with an existing path under workspace roots."
         ),

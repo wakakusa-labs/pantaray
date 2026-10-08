@@ -50,10 +50,6 @@ SHORT_INSIGHT_RETRIEVAL_POLICY = replace(
     default_limit=4,
     search_content_max_chars=1200,
     reference_content_max_chars=4000,
-    # This run registers no read-only file tools, so a truncated preview cannot
-    # be expanded; get_memory_reference follows an explicit [[ref:...]] to
-    # another record and does not return this fragment untruncated.
-    full_read_tools_available=False,
 )
 
 logger = logging.getLogger(__name__)

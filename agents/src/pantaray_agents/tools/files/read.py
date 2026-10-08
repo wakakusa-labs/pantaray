@@ -267,7 +267,11 @@ def _read_bounded_directory_entries(
     skipped_symlinks = 0
     unreadable = 0
     first_error: str | None = None
-    session_temp = scope.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
+    session_temp = (
+        None
+        if scope.scratch_root_path is None
+        else scope.scratch_root_path / SCRATCH_SESSION_TEMP_DIRNAME
+    )
     next_offset: int | None = None
     with os.scandir(descriptor) as iterator:
         for index, child in enumerate(iterator, start=1):

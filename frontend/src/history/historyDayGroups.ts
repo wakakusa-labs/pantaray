@@ -20,6 +20,17 @@ export function groupHistoryByDay<T extends { updated_at: string }>(
   labels: DayLabels,
   locale: string
 ): HistoryDayGroup<T>[] {
+  return groupByLocalDay(items, (item) => item.updated_at, now, labels, locale);
+}
+
+/** The same grouping for rows dated by another field, such as a chat item's `created_at`. */
+export function groupByLocalDay<T>(
+  items: readonly T[],
+  dateOf: (item: T) => string,
+  now: Date,
+  labels: DayLabels,
+  locale: string
+): HistoryDayGroup<T>[] {
   const todayKey = localDayKey(now);
   const yesterdayKey = localDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const sameYear = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
@@ -36,7 +47,7 @@ export function groupHistoryByDay<T extends { updated_at: string }>(
 
   const groups: HistoryDayGroup<T>[] = [];
   for (const item of items) {
-    const date = new Date(item.updated_at);
+    const date = new Date(dateOf(item));
     const key = localDayKey(date);
     const last = groups[groups.length - 1];
     if (last?.key === key) {

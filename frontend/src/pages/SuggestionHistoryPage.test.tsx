@@ -69,6 +69,8 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 
 beforeEach(() => {
+  // These cases cover the list mode; the chat mode has its own tests.
+  localStorage.setItem('pantaray.history-view-mode', 'list');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -96,8 +98,8 @@ it('空状態でも起動ボタンは右上の1つだけで、keyboardから開�
   window.electron = { history: { openNewConversation } } as unknown as Window['electron'];
   const { rerender } = render(<SuggestionHistoryPage />);
 
-  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい会話');
-  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New conversation');
+  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい作業');
+  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New task');
   expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
   const cta = screen.getByRole('button', { name: 'history.newConversation' });
   expect(cta.closest('.history-toolbar')).not.toBeNull();

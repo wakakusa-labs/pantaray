@@ -1,12 +1,14 @@
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useLayoutEffect, useState } from 'react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
 import HistorySearchField from '@/components/history/HistorySearchField';
 import { getConversationHistoryStatusMeta } from '@/components/history/statusTokens';
-import { ariaKeyShortcuts, acceleratorKeycaps } from '@/components/shortcut/acceleratorKeycaps';
+import { ChatView } from '@/components/chat/ChatView';
+import { HistoryModeSwitch } from '@/components/history/HistoryModeSwitch';
+import { NewWorkButton } from '@/components/history/NewWorkButton';
 import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
 import {
   useGlobalShortcutHint,
@@ -14,6 +16,13 @@ import {
 } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
+import { NEW_WORK_BUTTON_ID, openNewWork } from '@/history/newWork';
+import {
+  historyModeButtonId,
+  readHistoryViewMode,
+  saveHistoryViewMode,
+  type HistoryViewMode,
+} from '@/history/historyViewMode';
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, useSuggestionHistory } from '@/hooks/useSuggestionHistory';
@@ -22,8 +31,6 @@ import type { MessageKey } from '@/i18n/types';
 
 import './suggestionHistoryPage.css';
 
-const NEW_CONVERSATION_BUTTON_ID = 'history-new-conversation';
-const SHORTCUT_UNAVAILABLE_ID = 'history-new-conversation-shortcut-unavailable';
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
 
@@ -83,12 +90,6 @@ function liveStageText(
   }
 }
 
-async function openNewConversation(): Promise<void> {
-  const open = window.electron?.history?.openNewConversation;
-  if (!open) throw new Error('New conversation bridge is unavailable.');
-  await open();
-}
-
 /**
  * Points at the header button, naming the shortcut only while it is registered. The sentence stays
  * one translatable string; `{shortcut}` marks where the keycaps replace it.
@@ -112,56 +113,8 @@ function EmptyStateHint({
   );
 }
 
-/**
- * The global shortcut opens the same Overlay, so it sits inside the button the way menus show
- * shortcuts. The keycaps are drawn only; assistive technology gets `aria-keyshortcuts`.
- */
-function NewConversationButton({
-  shortcutHint,
-  t,
-  onClick,
-}: {
-  shortcutHint: ShortcutHintState;
-  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
-  onClick: () => void;
-}) {
-  const isUnavailable = shortcutHint.status === 'unavailable';
-  const accelerator = shortcutHint.status === 'ready' ? shortcutHint.accelerator : null;
-  return (
-    <>
-      <button
-        type="button"
-        id={NEW_CONVERSATION_BUTTON_ID}
-        className="history-new-conversation-button"
-        aria-keyshortcuts={
-          accelerator === null
-            ? undefined
-            : ariaKeyShortcuts(
-                acceleratorKeycaps(accelerator, window.electron?.process.platform === 'darwin')
-              )
-        }
-        title={isUnavailable ? t('shortcut.hint.unavailable') : undefined}
-        aria-describedby={isUnavailable ? SHORTCUT_UNAVAILABLE_ID : undefined}
-        onClick={onClick}
-      >
-        <Plus size={16} aria-hidden="true" />
-        {t('history.newConversation')}
-        {accelerator === null ? null : (
-          <span className="history-new-conversation-keys" aria-hidden="true">
-            <ShortcutKeycaps accelerator={accelerator} t={t} />
-          </span>
-        )}
-      </button>
-      {isUnavailable ? (
-        <span id={SHORTCUT_UNAVAILABLE_ID} hidden>
-          {t('shortcut.hint.unavailable')}
-        </span>
-      ) : null}
-    </>
-  );
-}
-
-const SuggestionHistoryPage = () => {
+/** Today's history list, unchanged apart from the mode switch at the head of its toolbar. */
+function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
   const {
     items,
     loading,
@@ -219,12 +172,12 @@ const SuggestionHistoryPage = () => {
       return;
     }
     removeItem(identity);
-    setFocusTargetId(successor ? openButtonId(successor) : NEW_CONVERSATION_BUTTON_ID);
+    setFocusTargetId(successor ? openButtonId(successor) : NEW_WORK_BUTTON_ID);
   };
   const handleNewConversation = async (): Promise<void> => {
     setNotice(null);
     try {
-      await openNewConversation();
+      await openNewWork();
     } catch {
       setNotice(t('history.openOverlayFailed'));
     }
@@ -369,6 +322,7 @@ const SuggestionHistoryPage = () => {
     <div className="history-container">
       <div className="history-header">
         <div className="history-toolbar">
+          {modeSwitch}
           <HistorySearchField searchText={searchText} onSearch={setSearchText} />
           <button
             type="button"
@@ -379,7 +333,7 @@ const SuggestionHistoryPage = () => {
           >
             <RefreshCw size={16} aria-hidden="true" />
           </button>
-          <NewConversationButton
+          <NewWorkButton
             shortcutHint={shortcutHint}
             t={t}
             onClick={() => void handleNewConversation()}
@@ -397,6 +351,36 @@ const SuggestionHistoryPage = () => {
         <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
       ) : null}
     </div>
+  );
+}
+
+/** History: the single chat by default, or the list; the viewer's choice is remembered. */
+const SuggestionHistoryPage = () => {
+  const { t } = useI18n();
+  const [mode, setMode] = useState<HistoryViewMode>(readHistoryViewMode);
+  const switchedRef = useRef(false);
+  // The switch is redrawn inside the other view's toolbar, so the pressed button gets focus back.
+  useLayoutEffect(() => {
+    if (!switchedRef.current) return;
+    switchedRef.current = false;
+    document.getElementById(historyModeButtonId(mode))?.focus();
+  }, [mode]);
+  const modeSwitch = (
+    <HistoryModeSwitch
+      mode={mode}
+      t={t}
+      onChange={(next) => {
+        saveHistoryViewMode(next);
+        switchedRef.current = true;
+        setMode(next);
+      }}
+    />
+  );
+  return mode === 'list' ? (
+    <HistoryListView modeSwitch={modeSwitch} />
+  ) : (
+    // The chat's turn state and retry are not delivered to the renderer yet (later nodes).
+    <ChatView modeSwitch={modeSwitch} turnInProgress={false} onRetryTurn={null} />
   );
 };
 

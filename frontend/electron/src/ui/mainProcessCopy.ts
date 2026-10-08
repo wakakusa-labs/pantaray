@@ -273,15 +273,13 @@ export function formatMacAccelerator(accelerator: string): string {
 export function getWelcomeSuggestionText(lang: UiLanguage, accelerator: string | null): string {
   const shortcut = accelerator ? formatMacAccelerator(accelerator) : null;
   if (lang === 'ja') {
-    const how = shortcut ? ` ${shortcut} か新しい会話ボタン` : '新しい会話ボタン';
+    const how = shortcut ? ` ${shortcut} か新しい作業ボタン` : '新しい作業ボタン';
     return [
       'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。',
       `それまでも、任せたい仕事があればいつでも${how}で声をかけてください。`,
     ].join('\n\n');
   }
-  const how = shortcut
-    ? `press ${shortcut} or use the New conversation button`
-    : 'use the New conversation button';
+  const how = shortcut ? `press ${shortcut} or use the New task button` : 'use the New task button';
   return [
     "I'll start by getting to know your work. When I find something I can help with, I'll suggest it.",
     `Until then, whenever you have work to hand off, just ${how}.`,

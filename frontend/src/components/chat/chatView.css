@@ -1,0 +1,255 @@
+.chat-scroll {
+  --chat-user-bubble: rgba(45, 80, 140, 0.96);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  /* Messages fade under the toolbar instead of being cut at its edge. */
+  mask-image: linear-gradient(180deg, transparent 0, #000 24px);
+}
+
+.chat-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 0 24px;
+}
+
+.chat-older {
+  align-self: center;
+}
+
+.chat-items {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-day {
+  align-self: center;
+}
+
+.chat-day h2 {
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+}
+
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat-row--mine {
+  flex-direction: row-reverse;
+}
+
+.chat-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 78%;
+  min-width: 0;
+}
+
+.chat-row--mine .chat-stack {
+  align-items: flex-end;
+}
+
+.chat-bubble {
+  padding: 9px 14px;
+  border-radius: 18px;
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+  overflow-wrap: anywhere;
+}
+
+.chat-row--mine .chat-bubble {
+  background: var(--chat-user-bubble);
+  color: #fff;
+}
+
+.chat-bubble__text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-time {
+  flex: none;
+  padding-bottom: 2px;
+  color: var(--fog-text-3);
+  font-size: 11px;
+}
+
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: -2px -6px 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: var(--text-meta-size);
+  line-height: 1.5;
+}
+
+.chat-quote b {
+  color: #cfd8e6;
+  font-weight: var(--weight-semibold);
+}
+
+.chat-quote span {
+  max-width: 420px;
+  overflow: hidden;
+  color: var(--fog-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-row--mine .chat-quote b,
+.chat-row--mine .chat-quote span {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 400px;
+  max-width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #222b35 0%, #26323f 60%, #2d3d4d 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-card:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.chat-card--open {
+  box-shadow: inset 0 0 0 1.5px rgba(125, 171, 220, 0.85);
+}
+
+.chat-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-card__title {
+  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
+}
+
+.chat-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(215, 225, 235, 0.75);
+  font-size: 12.5px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  font-size: var(--text-meta-size);
+}
+
+.chat-card__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #cfe0f7;
+}
+
+.chat-card .badge {
+  white-space: nowrap;
+}
+
+.chat-failure {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 10px;
+  color: var(--fog-text-2);
+  font-size: var(--text-meta-size);
+}
+
+.chat-failure p {
+  margin: 0;
+}
+
+.chat-typing {
+  display: inline-flex;
+  gap: 6px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  background: var(--fog-mist-strong);
+}
+
+.chat-typing i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fog-text-2);
+  animation: chat-typing-dot 1.2s infinite ease-in-out;
+}
+
+.chat-typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing i {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.chat-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

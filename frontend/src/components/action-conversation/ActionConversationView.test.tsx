@@ -1261,7 +1261,10 @@ describe('ActionConversationView', () => {
     const writeText = vi.fn<(text: string) => Promise<void>>();
     beforeEach(() => {
       writeText.mockReset().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      Object.defineProperty(window, 'electron', {
+        configurable: true,
+        value: { clipboard: { writeText } },
+      });
     });
 
     it('copies the Markdown source of that answer only, and only final answers offer it', async () => {
@@ -1285,7 +1288,7 @@ describe('ActionConversationView', () => {
     });
 
     it('reports a clipboard failure instead of looking copied', async () => {
-      writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+      writeText.mockRejectedValue(new Error('IPC sender is not authorized.'));
       renderView(viewWith([answered('run-1', 'First')], 'success'));
 
       await userEvent.click(screen.getByRole('button', { name: 'Copy this answer' }));

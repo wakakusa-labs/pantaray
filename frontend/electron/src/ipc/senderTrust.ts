@@ -41,6 +41,7 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
 ]);
 
 const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
+  'clipboard:writeText',
   'history:markCompletionViewed',
   'action:submitMessage',
   'action:resume',

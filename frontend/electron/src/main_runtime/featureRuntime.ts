@@ -1,4 +1,13 @@
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeImage, shell } from 'electron';
+import {
+  BrowserWindow,
+  app,
+  clipboard,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  nativeImage,
+  shell,
+} from 'electron';
 import path from 'node:path';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
 import type { createLocalBackendAuthContextController } from '../auth/localBackendAuthContextController';
@@ -329,6 +338,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         actionFiles: {
           open: ({ path }) => shell.showItemInFolder(path),
         },
+        clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {
           getReadyNotice: params.updateUi.getReadyNotice,
           restartToUpdate: params.updateUi.restartToUpdate,

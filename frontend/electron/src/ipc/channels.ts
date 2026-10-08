@@ -86,6 +86,8 @@ export const validInvokeChannels = [
   'workspaceSettings:updateReadAccessScope',
   'workspaceSettings:selectFolder',
   'actionFile:open',
+  // Overlay copy buttons: written by main, so a window without focus still copies.
+  'clipboard:writeText',
   'action:submitMessage',
   'action:resume',
   // Composer image attachments (write) and "reveal in Finder" for a stored image

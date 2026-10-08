@@ -250,6 +250,10 @@ declare global {
       actionFiles?: {
         open: (params: { path: string }) => Promise<void>;
       };
+      /** Overlay windows only. */
+      clipboard?: {
+        writeText: (text: string) => Promise<void>;
+      };
       actions?: {
         submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageSubmitResult>;
         resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageSubmitResult>;

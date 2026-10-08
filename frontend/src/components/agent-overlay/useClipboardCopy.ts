@@ -23,7 +23,9 @@ export function useClipboardCopy() {
     try {
       const text = await produce();
       if (text !== null) {
-        await navigator.clipboard.writeText(text);
+        const clipboard = window.electron?.clipboard;
+        if (!clipboard) throw new Error('Clipboard bridge is unavailable.');
+        await clipboard.writeText(text);
         next = 'copied';
       }
     } catch {

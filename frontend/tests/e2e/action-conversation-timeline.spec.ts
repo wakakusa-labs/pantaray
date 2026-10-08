@@ -121,6 +121,11 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
     Object.defineProperty(window, 'electron', {
       value: {
         ipcRenderer: { on: () => noop, send: noop },
+        clipboard: {
+          writeText: async (text: string) => {
+            document.documentElement.dataset.copied = text;
+          },
+        },
         agentOverlay: {
           onSnapshot: (callback: (payload: OverlaySnapshotPayload) => void) => {
             const listener = (event: Event) =>
@@ -685,4 +690,11 @@ test("ja: what the chat wrote shows as Pantaray's note, never as the user's bubb
   await expect(note).toContainText('その履歴の続きで、顧客をリストで教えて。');
   await expect(mine.getByText('その履歴の続きで', { exact: false })).toHaveCount(0);
   await capture(page, info, 'chat-handoff-note');
+
+  // The answer's copy button writes through main, which needs no focus on the Overlay.
+  await page.getByRole('button', { name: 'この回答をコピー' }).click();
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-copied',
+    '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。'
+  );
 });

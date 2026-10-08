@@ -159,6 +159,10 @@ export type MainContext = {
     open: (params: ActionFileOpenInput) => void;
   };
 
+  clipboard: {
+    writeText: (text: string) => void;
+  };
+
   actionImages: {
     /** `LOCAL_ARTIFACT_ROOT`; images live under `{root}/generated/images`. */
     localArtifactRoot: string;

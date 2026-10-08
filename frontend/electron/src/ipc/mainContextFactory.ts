@@ -53,6 +53,7 @@ export function buildMainContext(params: {
   markCompletionViewed: MainContext['history']['markCompletionViewed'];
   historyDeleteItem: MainContext['history']['deleteItem'];
   actionFiles: MainContext['actionFiles'];
+  clipboard: MainContext['clipboard'];
   update: MainContext['update'];
   actions: MainContext['actions'];
   chat: MainContext['chat'];
@@ -242,6 +243,7 @@ export function buildMainContext(params: {
     },
 
     actionFiles: params.actionFiles,
+    clipboard: params.clipboard,
     update: params.update,
 
     actions: params.actions,

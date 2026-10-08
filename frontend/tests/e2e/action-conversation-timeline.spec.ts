@@ -691,10 +691,17 @@ test("ja: what the chat wrote shows as Pantaray's note, never as the user's bubb
   await expect(mine.getByText('その履歴の続きで', { exact: false })).toHaveCount(0);
   await capture(page, info, 'chat-handoff-note');
 
-  // The answer's copy button writes through main, which needs no focus on the Overlay.
-  await page.getByRole('button', { name: 'この回答をコピー' }).click();
-  await expect(page.locator('html')).toHaveAttribute(
-    'data-copied',
-    '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。'
-  );
+  // The answer's copy button writes through main, which needs no focus on the Overlay, and
+  // works in the collapsed preview too.
+  const answer = '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。';
+  const copyAnswer = page.getByRole('button', { name: 'この回答をコピー' });
+  await copyAnswer.click();
+  await expect(page.locator('html')).toHaveAttribute('data-copied', answer);
+  await page.evaluate(() => delete document.documentElement.dataset.copied);
+  await page.getByRole('button', { name: '折りたたむ' }).click();
+  await expect(page.getByRole('button', { name: '展開する' })).toBeVisible();
+  await expect(copyAnswer).toBeInViewport();
+  await copyAnswer.click();
+  await expect(page.locator('html')).toHaveAttribute('data-copied', answer);
+  await capture(page, info, 'collapsed-answer-copy');
 });

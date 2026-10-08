@@ -2,6 +2,11 @@ import { useLayoutEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
 const ACTIONABLE_CONTROL_SELECTOR = 'a, button, input, select, textarea:not([readonly])';
+/**
+ * A control that still works by pointer in the collapsed preview, like a read-only textarea: the
+ * answer's copy button is in view there and changes nothing in the conversation.
+ */
+const COLLAPSED_CLICKABLE_ATTRIBUTE = 'data-collapsed-clickable';
 const COLLAPSED_CONTROL_SELECTOR = `${ACTIONABLE_CONTROL_SELECTOR}, textarea[readonly]`;
 const CONTROL_ATTRIBUTES = ['tabindex', 'aria-disabled', 'disabled', 'href'] as const;
 type ControlAttribute = (typeof CONTROL_ATTRIBUTES)[number];
@@ -45,18 +50,18 @@ export function useCollapsedFocusBoundary(
           }
           control.setAttribute('tabindex', '-1');
           if (control instanceof HTMLTextAreaElement && control.readOnly) return;
+          if (control.hasAttribute(COLLAPSED_CLICKABLE_ATTRIBUTE)) return;
           control.setAttribute('aria-disabled', 'true');
           if (control instanceof HTMLAnchorElement) control.removeAttribute('href');
           else control.setAttribute('disabled', '');
         });
       };
       const preventControlClick = (event: Event) => {
-        if (
-          !(event.target instanceof Element) ||
-          !event.target.closest(ACTIONABLE_CONTROL_SELECTOR)
-        ) {
-          return;
-        }
+        const control =
+          event.target instanceof Element
+            ? event.target.closest(ACTIONABLE_CONTROL_SELECTOR)
+            : null;
+        if (!control || control.hasAttribute(COLLAPSED_CLICKABLE_ATTRIBUTE)) return;
         event.preventDefault();
         event.stopPropagation();
       };

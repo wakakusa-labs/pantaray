@@ -19,6 +19,7 @@ from pantaray_agents.tools.files.read_contract import (
     ReadToolArgs,
 )
 from pantaray_agents.tools.files.read_scope import ReadScope
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -79,7 +80,6 @@ from .broker_protocol import (
     ApplyPatchToolArgs,
     BashToolArgs,
     BrokerToolRequest,
-    RenderPdfPageToolArgs,
     RunPythonToolArgs,
     ValidatedCommandRequest,
     ValidatedGlobRequest,

@@ -67,6 +67,7 @@ async def _run(tmp_path: Path, *, omit_before: int) -> list[ConversationRequest]
     folder.mkdir()
     (folder / "chart.png").write_bytes(PIXEL_PNG)
     tools = build_read_only_file_tools(
+        db_path=tmp_path / "runtime.sqlite3",
         folders=(folder,),
         read_access_scope="workspace",
         app_storage_roots=(),

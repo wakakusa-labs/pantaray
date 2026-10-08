@@ -3,9 +3,9 @@
 Each goes through the Action's single entry (``submit_action_message``, or the
 shared ``accept_suggestion``) under a key built from the turn's key and the
 call's place among the turn's calls of that tool. A turn that runs again after
-a crash calls them again under the same keys, so a task it already started is
-found, not started twice: a message whose wording changed meanwhile is the
-same submission, and the tool answers with the task it went to.
+a crash calls them again under the same keys, so nothing is sent twice: a call
+whose key already went in is told what it sent and where, and the model calls
+again if this is a different request.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from pantaray_agents.local_runtime.chat.store import (
     read_user_message,
 )
 from pantaray_agents.local_runtime.chat.work_list import (
-    read_action_of_message,
     read_latest_run_process,
+    read_submitted_message,
 )
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
@@ -142,6 +142,10 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
         )
         if isinstance(outcome, SuggestionAccepted):
             return _started("accept_suggestion", outcome.action.action_id)
+        # Taken up before a restart, with other words for the supplement.
+        sent = read_submitted_message(user_id=plan.user_id, message_id=key)
+        if sent is not None and sent.suggestion_id == args["suggestion_id"]:
+            return _started("accept_suggestion", sent.action_id)
         return _refused(
             "accept_suggestion",
             f"SUGGESTION_{outcome.reason.upper()}",
@@ -163,8 +167,8 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             plan,
             "send_to_action",
             "Add the user's instruction to one of your tasks in the work list, "
-            "when it is about that task. It is taken in at the task's next step, "
-            "or starts it again if it had stopped.",
+            "when it is about that task. A running task takes it in at its next "
+            "step, and a finished one starts again with it.",
             {
                 "action_id": {"type": "string"},
                 "message": _MESSAGE,
@@ -253,13 +257,20 @@ def _submit(
             tool, "INVALID_MESSAGE", "Not done: the message is empty or too long."
         )
     try:
-        return _started(tool, submit_action_message(command).action_id)
+        result = submit_action_message(command)
     except MessageIdentityConflictError:
-        # The same call of this turn, run again with other words: it went in.
-        action_id = read_action_of_message(user_id=plan.user_id, message_id=key)
-        if action_id is None:
+        # This place in the turn already sent something before a restart, and
+        # the turn, asked again, may have reordered what it sends.
+        sent = read_submitted_message(user_id=plan.user_id, message_id=key)
+        if sent is None:
             raise
-        return _started(tool, action_id)
+        return _refused(
+            tool,
+            "ALREADY_SENT_IN_THIS_TURN",
+            f"Not sent again: before a restart, this turn already gave your task "
+            f'{sent.action_id} this: "{sent.text}". If that is this request, '
+            f"it is in hand; if not, call {tool} again.",
+        )
     except ActionNotFoundError:
         return _refused(tool, "UNKNOWN_TASK", "Not done: no task of yours has that id.")
     except ActionFileAttachmentUnavailableError:
@@ -276,6 +287,14 @@ def _submit(
             "TASK_CONFLICT",
             "Not done: that task cannot take a message right now.",
         )
+    if result.disposition == "not_executed":
+        return _refused(
+            tool,
+            "TASK_STOPPED",
+            "Not done yet: the user stopped this task. The instruction is kept in "
+            "it and runs when they resume the task.",
+        )
+    return _started(tool, result.action_id)
 
 
 def _started(tool: str, action_id: str) -> ReactToolResult:

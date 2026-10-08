@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.agents.chat_agent import tools
 from pantaray_agents.agents.chat_agent.context import turn_context
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
@@ -19,6 +20,7 @@ from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import 
     ActionJobRuntimeRepository,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
+    DeferredActionMessageResult,
     NewActionTarget,
     SubmitActionMessageCommand,
 )
@@ -85,21 +87,50 @@ def _actions(db_path: Path) -> list[tuple[str, str | None]]:
         ]
 
 
-async def test_a_turn_run_again_finds_the_task_it_started(db_path: Path) -> None:
+async def test_a_turn_run_again_never_sends_a_call_twice(db_path: Path) -> None:
     first = await _turn("a0")(
         "start_action", message="Draft the Q3 report", attachments_from=[]
     )
-    # The same turn after a crash: the model words the same request differently.
-    again = await _turn("a0")(
-        "start_action", message="Please draft the Q3 report", attachments_from=[]
+    # The same turn after a crash, sending the same words again ...
+    replayed = await _turn("a0")(
+        "start_action", message="Draft the Q3 report", attachments_from=[]
     )
-    other_turn = await _turn("a5")(
-        "start_action", message="Book a room", attachments_from=[]
+    # ... or, asked again, another request first: it is told what went in.
+    rerun = _turn("a0")
+    reordered = await rerun("start_action", message="Book a room", attachments_from=[])
+    booked = await rerun("start_action", message="Book a room", attachments_from=[])
+
+    assert isinstance(first, dict) and replayed == first
+    assert isinstance(reordered, dict)
+    assert reordered["error_code"] == "ALREADY_SENT_IN_THIS_TURN"
+    assert first["action_id"] in str(reordered["message"])
+    assert "Draft the Q3 report" in str(reordered["message"])
+    assert isinstance(booked, dict) and booked != first
+    assert len(_actions(db_path)) == 2
+
+
+async def test_an_instruction_to_a_stopped_task_is_not_reported_done(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def kept_while_stopped(command: SubmitActionMessageCommand) -> object:
+        return DeferredActionMessageResult(
+            "not_executed",
+            "act-1",
+            command.message.message_id,
+            "step",
+            "canceled",
+            None,
+            None,
+            True,
+        )
+
+    monkeypatch.setattr(tools, "submit_action_message", kept_while_stopped)
+
+    result = await _turn("a0")(
+        "send_to_action", action_id="act-1", message="Go on", attachments_from=[]
     )
 
-    assert isinstance(first, dict) and again == first
-    assert isinstance(other_turn, dict) and other_turn != first
-    assert len(_actions(db_path)) == 2
+    assert isinstance(result, dict) and result["error_code"] == "TASK_STOPPED"
 
 
 async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -> None:
@@ -187,8 +218,9 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     taken = await _turn("a0")(
         "accept_suggestion", suggestion_id="sug-1", supplement=None
     )
+    # The same turn after a crash, with the user's addition worded anew.
     again = await _turn("a0")(
-        "accept_suggestion", suggestion_id="sug-1", supplement=None
+        "accept_suggestion", suggestion_id="sug-1", supplement="with our logo"
     )
     gone = await _turn("a2")(
         "accept_suggestion", suggestion_id="sug-1", supplement=None

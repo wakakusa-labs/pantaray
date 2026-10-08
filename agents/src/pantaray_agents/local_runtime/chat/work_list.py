@@ -108,18 +108,35 @@ def read_chat_work_list(*, user_id: str) -> ChatWorkList:
     )
 
 
-def read_action_of_message(*, user_id: str, message_id: str) -> str | None:
-    """The Action a USER message was submitted to, if it was."""
+@dataclass(frozen=True, slots=True)
+class SubmittedMessage:
+    """A USER message already in an Action: where it went, and what it said."""
 
+    action_id: str
+    suggestion_id: str | None
+    text: str
+
+
+def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage | None:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         row = connection.execute(
-            "SELECT action_id FROM agent_action_steps "
-            "WHERE user_id = ? AND user_message_id = ?",
+            "SELECT steps.action_id, actions.suggestion_id, steps.user_message_json "
+            "FROM agent_action_steps AS steps JOIN agent_actions AS actions "
+            "ON actions.action_id = steps.action_id "
+            "WHERE steps.user_id = ? AND steps.user_message_id = ?",
             (user_id, message_id),
         ).fetchone()
-    return None if row is None else str(row[0])
+    if row is None:
+        return None
+    action_id, suggestion_id, message_json = row
+    text = render_action_user_request_text(parse_action_user_message(str(message_json)))
+    return SubmittedMessage(
+        action_id=str(action_id),
+        suggestion_id=None if suggestion_id is None else str(suggestion_id),
+        text=_line(text) or "",
+    )
 
 
 def read_latest_run_process(*, user_id: str, action_id: str) -> str | None:
@@ -156,7 +173,8 @@ __all__ = [
     "ChatSuggestion",
     "ChatTask",
     "ChatWorkList",
-    "read_action_of_message",
+    "SubmittedMessage",
+    "read_submitted_message",
     "read_chat_work_list",
     "read_latest_run_process",
 ]

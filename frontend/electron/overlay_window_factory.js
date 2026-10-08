@@ -62,14 +62,6 @@ function showInteractiveOverlayWindow(win, options = {}) {
   try {
     if (process.platform === 'darwin') win.moveTop();
   } catch {}
-  try {
-    if (
-      options.visibleOnAllWorkspaces === true &&
-      typeof win.setVisibleOnAllWorkspaces === 'function'
-    ) {
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    }
-  } catch {}
 }
 
 function hardDisableDevTools(win) {

@@ -798,6 +798,10 @@ test('history open keeps interactive overlay always on top', async () => {
   assert.equal(instances[0].focusable, true);
   assert.ok((instances[0].focusCalls || 0) >= 1);
   assert.ok((instances[0].showCalls || 0) >= 1);
+  // Joining every Space over full-screen apps turns the whole app into a UI element on macOS
+  // (Electron hides the Dock icon to do it): the menu bar then never shows Pantaray, even while
+  // its main window is in use.
+  assert.equal(instances[0].visibleOnAllWorkspaces, undefined);
 });
 
 test('visible history overlay also suppresses main restore for activate points inside its bounds', async () => {

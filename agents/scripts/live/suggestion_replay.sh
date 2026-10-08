@@ -25,6 +25,17 @@ work=$(mktemp -d /tmp/suggestion-replay.XXXXXX)
 
 sqlite3 "$app/local-backend.sqlite3" ".backup '$work/local-backend.sqlite3'"
 cp -R "$app/local-backend-artifacts" "$work/artifacts"
+# The bash tool checks its interpreter against the app runtime manifest; the
+# replay's interpreter stands in for the app's.
+"$python" -c 'import hashlib, json, pathlib, platform, sys
+path = pathlib.Path(sys.executable).resolve()
+print(json.dumps({"python_path": str(path), "python_version": platform.python_version(),
+                  "python_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}))' \
+  > "$work/app-runtime-manifest.json"
+export LOCAL_APP_RUNTIME_MANIFEST_PATH="$work/app-runtime-manifest.json"
+# The helper identity the bash tool's sandbox reads; no backend listens there.
+export PANTARAY_LOCAL_BACKEND_BOUND_HOST=127.0.0.1 PANTARAY_LOCAL_BACKEND_BOUND_PORT=49152
+export PANTARAY_HELPER_INSTANCE_ID=suggestion-replay PANTARAY_MAIN_PROCESS_PID=$$
 for side in before after; do
   ref=$([ "$side" = before ] && echo "$before_ref" || echo "$after_ref")
   mkdir "$work/$side"

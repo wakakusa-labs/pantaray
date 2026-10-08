@@ -318,8 +318,10 @@ async def test_a_failed_call_keeps_what_was_said_and_can_run_again() -> None:
 async def test_a_turn_out_of_calls_fails_on_the_step_limit() -> None:
     _say("m-1", "Loop")
     look = LlmToolCall(call_id="c", name="look", arguments={})
+    # More than the turn may send: the loop grants a last turn that reached
+    # for other tools one more try.
     model = _Model(
-        [_turn(look.model_copy(update={"call_id": f"c{n}"})) for n in range(8)]
+        [_turn(look.model_copy(update={"call_id": f"c{n}"})) for n in range(12)]
     )
 
     await _run(model, tools=(_tool("look", lambda: None),))

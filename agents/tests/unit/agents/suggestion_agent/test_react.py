@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -341,6 +342,7 @@ async def test_raw_activity_reaches_the_model_but_no_stored_step() -> None:
     steps: list[ReactLoopStep] = []
     model = _scripted(
         _reply(("activity-1", "zanei_timeline", {})),
+        _reply(text=f"The window said {SCREEN_TEXT}."),
         _submit("submit-1"),
     )
 
@@ -351,7 +353,11 @@ async def test_raw_activity_reaches_the_model_but_no_stored_step() -> None:
     )
 
     assert SCREEN_TEXT in str(_results(model.requests[1])["activity-1"])
-    assert SCREEN_TEXT not in repr(steps)
+    stored = [
+        (step.prompt_text, step.response_text, json.dumps(step.tool_output))
+        for step in steps
+    ]
+    assert SCREEN_TEXT not in json.dumps(stored, ensure_ascii=False)
     (activity_step,) = [step for step in steps if step.tool_name == "zanei_timeline"]
     assert activity_step.tool_output == {
         "has_more": False,

@@ -341,8 +341,15 @@ class _RunSteps:
                 step_kind="llm",
                 status="success",
                 prompt_text=prompt,
-                response_text=turn.entry.item.model_dump_json(
-                    exclude={"provider_turn"}
+                # The calls only: commentary may quote activity text, which
+                # stays within the run like the activity output itself.
+                response_text=json.dumps(
+                    [
+                        {"tool_id": call.name, "args": call.arguments}
+                        for call in turn.reply.response.calls
+                    ],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
                 ),
             )
         )

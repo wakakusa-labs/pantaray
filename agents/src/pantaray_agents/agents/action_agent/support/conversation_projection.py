@@ -200,12 +200,9 @@ def _tool_rows_by_llm_step(
         rows.setdefault(llm_step_id, []).append(
             _ToolRow(entry=entry, call_id=call_id, name=name)
         )
-    # A batch's rows take consecutive step numbers in the order the model
-    # declared the calls, which is the order both providers read them back in.
-    return {
-        step_id: sorted(group, key=lambda row: row.entry["step_number"])
-        for step_id, group in rows.items()
-    }
+    # History keeps a batch's rows in the order the model declared the calls,
+    # which is the order both providers read them back in.
+    return rows
 
 
 def _add_think(

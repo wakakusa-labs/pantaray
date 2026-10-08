@@ -240,7 +240,10 @@ def _success_result(*, step_id: str, tool_id: str) -> ToolExecutionResult:
 async def test_parallel_batch_numbers_and_parents_every_call(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """K=3 の並列バッチは 3 行の TOOL step を連番・別 short id で残す。"""
+    """K=3 の並列バッチは 3 行の TOOL step を連番・別 short id で残す。
+
+    The calls finish in reverse; history still lists them in declared order.
+    """
 
     agent, runtime, state, request = await _build_fixture(
         monkeypatch,
@@ -257,6 +260,21 @@ async def test_parallel_batch_numbers_and_parents_every_call(
     assert batch is not None
     assert batch.mode == "parallel"
     base_step_number = state["step"]
+
+    # Each call runs the real tool, then waits for the call declared after it.
+    # This needs max_parallel_tool_calls >= 3, so all three run at once.
+    real_run_tool = call_execution.run_tool
+    finished = {base_step_number + index: asyncio.Event() for index in range(3)}
+
+    async def _run_tool_finishing_in_reverse(*args, **kwargs):
+        result = await real_run_tool(*args, **kwargs)
+        later = finished.get(kwargs["step_number"] + 1)
+        if later is not None:
+            await later.wait()
+        finished[kwargs["step_number"]].set()
+        return result
+
+    monkeypatch.setattr(call_execution, "run_tool", _run_tool_finishing_in_reverse)
 
     state = await _act(agent, runtime, state)
 

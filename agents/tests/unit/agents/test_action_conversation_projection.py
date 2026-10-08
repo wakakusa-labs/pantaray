@@ -277,15 +277,14 @@ def test_a_commentary_only_turn_sends_text_without_calls() -> None:
     assert assistant.calls == []
 
 
-def test_parallel_calls_share_one_assistant_item_in_declaration_order() -> None:
+def test_parallel_calls_share_one_assistant_item() -> None:
     items = _require(
         [
             _user(1),
             _think(2),
-            # Appended out of order: completion order is not declaration order.
-            _tool(4, think=2, call_id="call_c"),
             _tool(2, think=2, call_id="call_a"),
             _tool(3, think=2, call_id="call_b"),
+            _tool(4, think=2, call_id="call_c"),
         ]
     )
 

@@ -76,7 +76,11 @@ from pantaray_agents.schema.chat import (
     ChatTurnFailureReason,
     TurnFailureContent,
 )
-from pantaray_agents.tools.contract import ReactToolDefinition, ReactToolResult
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+)
 from pantaray_agents.utils.structured_logging import (
     fingerprint_text,
     log_structured_event,
@@ -292,7 +296,7 @@ class _ChatTurn:
             ConversationRun(
                 prompt=CHAT_HEAD,
                 system_instruction=CHAT_SYSTEM_INSTRUCTION,
-                tools=tools,
+                tools=tuple(self.guarded(tool) for tool in tools),
                 ending_tools=(REPLY_TOOL,),
                 history=history,
                 provider_turns=ProviderTurnStore(identity=None),
@@ -324,6 +328,19 @@ class _ChatTurn:
             if item.item.content.kind in CHAT_TRIGGER_KINDS
             for entry in render_item(item)
         ]
+
+    def guarded(self, tool: ReactToolDefinition) -> ReactToolDefinition:
+        """``tool``, refusing to start once the route has changed.
+
+        The loop runs a turn's calls one after another, so a change during one
+        call must stop the next before it starts.
+        """
+
+        async def execute(call: ReactToolCall, step: int) -> ReactToolResult:
+            self.require_route()
+            return await tool.execute(call, step)
+
+        return replace(tool, execute=execute)
 
     def require_route(self) -> None:
         """A turn started for one owner and account never reaches another."""

@@ -358,13 +358,7 @@ async def test_a_turn_stops_unanswered_when_the_route_changes_under_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _say("m-1", "Hi")
-    accounts = iter(["first", "second"])
-    monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: next(accounts))
-    monkeypatch.setattr(
-        chat_turn,
-        "effective_route_identity",
-        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
-    )
+    _switch_routes(monkeypatch, "first", "second")
     model = _Model([_reply_call("Hello!")])
 
     with pytest.raises(ChatTurnInterrupted):
@@ -394,13 +388,7 @@ async def test_calls_that_come_back_after_the_route_changed_do_not_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _say("m-1", "Find the deck")
-    routes = iter(["first", "first", "second"])
-    monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: next(routes))
-    monkeypatch.setattr(
-        chat_turn,
-        "effective_route_identity",
-        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
-    )
+    _switch_routes(monkeypatch, "first", "first", "second")
     ran: list[str] = []
     look = LlmToolCall(call_id="c", name="look", arguments={})
 
@@ -509,3 +497,31 @@ async def test_calls_do_not_run_when_the_route_changes_while_the_turn_speaks(
 
     assert ran == []
     assert plan_chat_turn(user_id=USER, retry_of=None) is not None
+
+
+async def test_a_route_change_during_one_call_stops_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("m-1", "Do both")
+    routes = ["first"]
+    monkeypatch.setattr(chat_turn, "read_route_inputs", lambda: routes[0])
+    monkeypatch.setattr(
+        chat_turn,
+        "effective_route_identity",
+        lambda inputs: SimpleNamespace(owner_id=USER, llm=inputs),
+    )
+    ran: list[str] = []
+
+    def first() -> None:
+        ran.append("one")
+        routes[0] = "second"  # the account changes while this call runs
+
+    calls = [LlmToolCall(call_id=f"c{n}", name=n, arguments={}) for n in ("one", "two")]
+
+    with pytest.raises(ChatTurnInterrupted):
+        await _run(
+            _Model([_turn(*calls)]),
+            tools=(_tool("one", first), _tool("two", lambda: ran.append("two"))),
+        )
+
+    assert ran == ["one"]

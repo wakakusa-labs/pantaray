@@ -12,13 +12,16 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
 )
 from pantaray_agents.agents.suggestion_agent.lenses import (
     EXPLORATION_LENS_WEIGHTS,
+    LENS_STEP_STRIDE,
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
     URGENT_LENSES,
     decide_with_lenses,
     sample_lenses,
 )
-from pantaray_agents.conversation.loop import ConversationRequest
+from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_LLM_TURNS
+from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationRequest
 from pantaray_agents.mock.suggestion_research import (
     build_mock_suggestion_research_tools,
 )
@@ -146,7 +149,14 @@ async def test_the_selector_choice_maps_to_that_candidate() -> None:
     assert "earlier ideas" in selector_prompts[0]
     assert "take_over" not in selector_prompts[0].lower().replace(" ", "_")
     # Each run records in its own step range; the selector after all of them.
-    assert {1, 1001, 2001, 3001} <= set(steps)
+    assert {1, 10_001, 20_001, 30_001} <= set(steps)
+
+
+def test_a_lens_run_cannot_record_into_the_next_runs_step_range() -> None:
+    parallel = load_local_runtime_tunables().action_agent.max_parallel_tool_calls
+    per_turn = 1 + parallel + 2 * REPAIR_MAX_ATTEMPTS
+
+    assert SUGGESTION_MAX_LLM_TURNS * per_turn < LENS_STEP_STRIDE
 
 
 @pytest.mark.asyncio

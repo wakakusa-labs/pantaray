@@ -49,10 +49,12 @@ EXPLORATION_LENS_WEIGHTS = {
     "perspective": 1,
     "new_approach": 1,
 }
-# Lens runs share one Suggestion's step numbers: run i records from i * stride.
-# A run takes at most 300 turns and runs at most 300 calls, one step each; the
-# calls answered without running and the failed sends stay well below the rest.
-LENS_STEP_STRIDE = 1000
+# Lens runs share one Suggestion's step numbers: run i records from i * stride,
+# and a step number taken twice overwrites the other run's step. A turn records
+# itself, an answer to each of its calls (no more than max_parallel_tool_calls
+# come back) and each failed send: two per repair attempt at most, the second
+# a resend without provider turns. 300 turns stay below 300 * 14 steps.
+LENS_STEP_STRIDE = 10_000
 _KIND_LABELS = {"action_offer": "offer", "message_only": "advice"}
 
 

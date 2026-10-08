@@ -137,6 +137,16 @@ class MemoryUpdateActionTerminal(TypedDict):
     suggestion_id: NotRequired[str]
 
 
+class MemoryUpdateChatRange(TypedDict):
+    """The chat items with a sequence in (after, through] handed to one run.
+
+    The run reads the user's and Pantaray's messages among them.
+    """
+
+    after_sequence: int
+    through_sequence: int
+
+
 class MemoryUpdateJobPayload(TypedDict):
     """Payload enqueued when coalesced Memory Agent triggers become due."""
 
@@ -147,6 +157,7 @@ class MemoryUpdateJobPayload(TypedDict):
     short_insight_ids: list[str]
     summary_ids: list[str]
     action_terminals: list[MemoryUpdateActionTerminal]
+    chat: NotRequired[MemoryUpdateChatRange]
 
 
 __all__ = [
@@ -159,6 +170,7 @@ __all__ = [
     "ActionSubagentJobPayload",
     "InsightJobPayload",
     "MemoryUpdateActionTerminal",
+    "MemoryUpdateChatRange",
     "MemoryUpdateJobPayload",
     "SuggestionJobPayload",
     "SuggestionJobRuntimePayload",

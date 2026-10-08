@@ -13,6 +13,7 @@ from pantaray_agents.tasks.types import (
     InsightJobPayload,
     LanguageCode,
     MemoryUpdateActionTerminal,
+    MemoryUpdateChatRange,
     MemoryUpdateJobPayload,
     SuggestionJobRuntimePayload,
 )
@@ -168,6 +169,7 @@ def parse_memory_update_job_payload_json(
             "short_insight_ids",
             "summary_ids",
             "action_terminals",
+            "chat",
         },
         payload_name="Memory update job payload",
     )
@@ -180,13 +182,38 @@ def parse_memory_update_job_payload_json(
         "summary_ids": _require_source_ids(payload, "summary_ids"),
         "action_terminals": _require_action_terminals(payload),
     }
+    if "chat" in payload:
+        parsed["chat"] = _require_chat_range(payload["chat"])
     if not (
         parsed["short_insight_ids"]
         or parsed["summary_ids"]
         or parsed["action_terminals"]
+        or "chat" in parsed
     ):
         raise MigrationError("Memory update job payload has no source")
     return parsed
+
+
+def _require_chat_range(value: object) -> MemoryUpdateChatRange:
+    if not isinstance(value, dict):
+        raise MigrationError("Memory update chat must be an object")
+    item = cast(Mapping[str, object], value)
+    _reject_unexpected_fields(
+        item,
+        expected_fields={"after_sequence", "through_sequence"},
+        payload_name="Memory update chat",
+    )
+    after = item.get("after_sequence")
+    through = item.get("through_sequence")
+    if (
+        not isinstance(after, int)
+        or isinstance(after, bool)
+        or not isinstance(through, int)
+        or isinstance(through, bool)
+        or not 0 <= after < through
+    ):
+        raise MigrationError("Memory update chat must be a non-empty sequence range")
+    return {"after_sequence": after, "through_sequence": through}
 
 
 def _require_source_ids(payload: Mapping[str, object], key: str) -> list[str]:

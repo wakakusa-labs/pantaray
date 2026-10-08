@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from pantaray_agents.tasks.types import (
     MemoryUpdateActionTerminal,
+    MemoryUpdateChatRange,
     MemoryUpdateJobPayload,
 )
 
@@ -66,6 +67,7 @@ def build_coalesced_memory_update_payload(
     user_id: str,
     enqueued_at: str,
     pending: tuple[PendingMemoryTrigger, ...],
+    chat: MemoryUpdateChatRange | None,
 ) -> MemoryUpdateJobPayload:
     short_insight_ids: list[str] = []
     summary_ids: list[str] = []
@@ -86,17 +88,18 @@ def build_coalesced_memory_update_payload(
             raise MemoryAgentTriggerIntegrityError(
                 "unknown unified Memory Agent trigger kind"
             )
-    return build_memory_update_job_payload(
-        {
-            "job_id": str(uuid.uuid4()),
-            "process_id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "enqueued_at": enqueued_at,
-            "short_insight_ids": short_insight_ids,
-            "summary_ids": summary_ids,
-            "action_terminals": action_terminals,
-        }
-    )
+    payload: MemoryUpdateJobPayload = {
+        "job_id": str(uuid.uuid4()),
+        "process_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "enqueued_at": enqueued_at,
+        "short_insight_ids": short_insight_ids,
+        "summary_ids": summary_ids,
+        "action_terminals": action_terminals,
+    }
+    if chat is not None:
+        payload["chat"] = chat
+    return build_memory_update_job_payload(payload)
 
 
 def enqueue_memory_update_job_in_connection(

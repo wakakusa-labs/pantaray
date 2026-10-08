@@ -44,6 +44,10 @@ from pantaray_agents.local_runtime.runtime.fact_identity import (
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
 )
+from pantaray_agents.local_runtime.storage.chat_messages import (
+    ChatMessage,
+    read_chat_messages,
+)
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     ActionTurnWindow,
@@ -115,6 +119,7 @@ class PreparedMemoryUpdateRun:
             self.context.short_term_insights
             or self.context.activity_summaries
             or self.context.action_turns
+            or self.context.chat_messages
         )
 
     def base_draft(self, source: MemorySource) -> MemoryDraftCheckpoint:
@@ -177,6 +182,19 @@ def prepare_memory_update_run(
         )
         session_memories = _render_session_memories(
             connection=connection, user_id=user_id, terminals=terminals
+        )
+        chat = payload.get("chat")
+        chat_messages = (
+            ""
+            if chat is None
+            else _render_chat_messages(
+                read_chat_messages(
+                    connection,
+                    user_id=user_id,
+                    after=chat["after_sequence"],
+                    through=chat["through_sequence"],
+                )
+            )
         )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
@@ -258,6 +276,7 @@ def prepare_memory_update_run(
         memory_requests=_render_memory_requests(memory_requests),
         memory_request_ids=tuple(request.request_id for request in memory_requests),
         session_memories=session_memories,
+        chat_messages=chat_messages,
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
@@ -455,6 +474,25 @@ ORDER BY step_number DESC, local_step_number DESC, created_at DESC
 LIMIT 1
 """
 )
+
+
+def _render_chat_messages(messages: tuple[ChatMessage, ...]) -> str:
+    entries: list[str] = []
+    for message in messages:
+        content = message.content
+        speaker = "user" if content.kind == "user_message" else "Pantaray"
+        notes = [describe_utc_timestamp(message.created_at)]
+        if content.quote_item_id is not None:
+            notes.append(f"quoting {content.quote_item_id}")
+        if content.kind == "user_message" and (content.images or content.files):
+            notes.append(
+                f"with {len(content.images)} image(s) and {len(content.files)} file(s)"
+            )
+        entries.append(
+            f"### chat item {message.item_id}, {speaker} ({', '.join(notes)})\n"
+            f"{content.text}"
+        )
+    return "\n\n".join(entries)
 
 
 def _render_short_insights(

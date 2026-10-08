@@ -25,6 +25,7 @@ from .memory_agent_triggers import (
     MemoryAgentTriggerIntegrityError,
     MemoryAgentTriggerKind,
 )
+from .memory_chat_range import PendingChat, advance_chat_cursor, pending_chat
 from .memory_update_queue import (
     PendingMemoryTrigger,
     build_coalesced_memory_update_payload,
@@ -39,9 +40,9 @@ _JOB_ENQUEUED: Final[str] = "JOB_ENQUEUED"
 MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS: Final[float] = 30.0
 
 MEMORY_UPDATE_MAX_COALESCED_TRIGGERS: Final[int] = MEMORY_UPDATE_SOURCE_MAX_ITEMS
-# Finished Action turns ride along with the next Insight or summary run instead
-# of starting one each. One Insight window bounds the wait, which matters when
-# recording is off and no Insight run comes.
+# Finished Action turns and chat messages ride along with the next Insight or
+# summary run instead of starting one each. One Insight window bounds the wait,
+# which matters when recording is off and no Insight run comes.
 ACTION_TERMINAL_MAX_DEFERRAL: Final[timedelta] = timedelta(
     seconds=SHORT_INSIGHT_WINDOW_SECONDS
 )
@@ -102,31 +103,58 @@ def _dispatch_coalesced_memory_update(
     if _has_active_memory_update_job(connection=connection, user_id=user_id):
         return ()
     pending = _select_pending_unified_triggers(connection=connection, user_id=user_id)
-    if not _is_due(pending, now=now):
+    chat = pending_chat(connection, user_id=user_id)
+    if not _is_due(pending, chat, now=now):
         return ()
     payload = build_coalesced_memory_update_payload(
         user_id=user_id,
         enqueued_at=handled_at,
         pending=pending,
+        chat=None if chat is None else chat.range,
     )
     job_id = enqueue_memory_update_job_in_connection(
         connection=connection, payload=payload
     )
+    if chat is not None:
+        advance_chat_cursor(
+            connection,
+            user_id=user_id,
+            through=chat.range["through_sequence"],
+            at=handled_at,
+        )
+        log_structured_event(
+            logger,
+            level="info",
+            evt="MEMORY_CHAT_RANGE_HANDED",
+            component="local_runtime.memory_agent_dispatcher",
+            user_id=user_id,
+            job_id=job_id,
+            after_sequence=chat.range["after_sequence"],
+            through_sequence=chat.range["through_sequence"],
+        )
     return tuple(
         _mark_dispatched(connection, entry.trigger, job_id, handled_at)
         for entry in pending
     )
 
 
-def _is_due(pending: tuple[PendingMemoryTrigger, ...], *, now: datetime) -> bool:
-    if not pending:
-        return False
+def _is_due(
+    pending: tuple[PendingMemoryTrigger, ...],
+    chat: PendingChat | None,
+    *,
+    now: datetime,
+) -> bool:
     if any(
         entry.trigger.trigger_kind != ACTION_TERMINAL_MEMORY_TRIGGER_KIND
         for entry in pending
     ):
         return True
-    oldest = min(datetime.fromisoformat(entry.created_at) for entry in pending)
+    deferred = [entry.created_at for entry in pending]
+    if chat is not None:
+        deferred.append(chat.oldest_created_at)
+    if not deferred:
+        return False
+    oldest = min(datetime.fromisoformat(created_at) for created_at in deferred)
     return now - oldest >= ACTION_TERMINAL_MAX_DEFERRAL
 
 

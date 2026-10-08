@@ -1169,7 +1169,9 @@ async def test_suggestion_web_tools_reject_a_result_for_another_request(
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
     )
-    registry = ReactToolRegistry(WebResearchToolSession(user_id="user-1").definitions())
+    registry = ReactToolRegistry(
+        WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
+    )
 
     results = [await registry.execute(_tool_call(tool_name, args), n) for n in (1, 2)]
 
@@ -1503,7 +1505,7 @@ async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
 def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:
     from pantaray_agents.conversation.tool_batch import plan_tool_batch
 
-    tools = WebResearchToolSession(user_id="user-1").definitions()
+    tools = WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
     # Run at once, two pages of one query would each fetch and store a snapshot.
     plan = plan_tool_batch(
         [SimpleNamespace(tool_id="web_search")] * 2,

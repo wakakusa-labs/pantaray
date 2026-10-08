@@ -191,11 +191,10 @@ def _web_extract_schema() -> dict[str, JSONValue]:
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["url", "error", "error_truncated"],
+                    "required": ["url", "error"],
                     "properties": {
                         "url": {"type": "string"},
                         "error": {"type": "string"},
-                        "error_truncated": {"type": "boolean"},
                     },
                 },
             },

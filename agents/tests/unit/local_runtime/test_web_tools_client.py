@@ -28,6 +28,12 @@ from pantaray_agents.local_runtime.web_tools.client import (
     WebToolsWrapperResponse,
     invoke_web_tools_wrapper,
 )
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolRegistry,
+    ToolCallEnvelope,
+)
+from pantaray_agents.tools.web.session import WebResearchToolSession
 from pantaray_llm.errors import ProviderError
 from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID, WEB_SEARCH_PROFILE_ID
 from pantaray_llm.web_tools.schemas import WebToolsProxyRequest
@@ -711,6 +717,147 @@ async def test_a_failed_web_tool_tells_the_agent_how_this_connection_recovers(
     assert details["suggested_action"] == expected_action
     assert details["recovery"] == "stop"
     assert details["retryable"] is False
+
+
+def _arrange_rate_limited_tavily(
+    monkeypatch: pytest.MonkeyPatch,
+    _tmp_path: Path,
+) -> None:
+    _configure_tavily_key()
+    _patch_proxy_transport(monkeypatch)
+    _patch_tavily(
+        monkeypatch,
+        _RecordingTavilyClient(failure=UsageLimitExceededError("rate limited")),
+    )
+
+
+_UNAVAILABLE = "Web search is unavailable right now, so nothing was looked up."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arrange", "chat_message", "suggestion_message"),
+    [
+        (
+            _arrange_unconfigured_web_search,
+            "Web search is not set up, so nothing was looked up. Tell the user "
+            "they can turn it on by signing in to Pantaray or by saving a Tavily "
+            "API key in Settings > AI connection > Web search.",
+            "Web search is not set up, so nothing was looked up.",
+        ),
+        (
+            _arrange_rejected_tavily_key,
+            "The Tavily API key saved for web search was rejected, so nothing was "
+            "looked up. Tell the user they can save a working key in Settings > "
+            "AI connection > Web search.",
+            "The Tavily API key saved for web search was rejected, so nothing was "
+            "looked up.",
+        ),
+        (
+            _arrange_expired_cloud_session,
+            "The user's Pantaray sign-in has expired, so nothing was looked up. "
+            "Tell the user web search works again once they sign in.",
+            "The user's Pantaray sign-in has expired, so nothing was looked up.",
+        ),
+        (
+            _arrange_cloud_rejection(_cloud_rejection_body("please_sign_in")),
+            _UNAVAILABLE,
+            _UNAVAILABLE,
+        ),
+        (_arrange_rate_limited_tavily, _UNAVAILABLE, _UNAVAILABLE),
+    ],
+    ids=[
+        "unconfigured",
+        "rejected-tavily-key",
+        "expired-session",
+        "cloud-states-unknown-guidance",
+        "rate-limited",
+    ],
+)
+@pytest.mark.parametrize("speaks_to_user", [True, False], ids=["chat", "suggestion"])
+async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    arrange: _Arrange,
+    chat_message: str,
+    suggestion_message: str,
+    speaks_to_user: bool,
+) -> None:
+    """The chat relays this result, so a system failure carries no code; only
+    the chat, which answers the user, is asked to pass a fix on."""
+
+    arrange(monkeypatch, tmp_path)
+    args: dict[str, object] = {"query": "Pantaray", "offset": 1, "limit": 5}
+    call = ReactToolCall(
+        tool_name="web_search",
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope(
+            tool_id="web_search",
+            reason=None,
+            args=args,  # type: ignore[arg-type]
+        ),
+    )
+    registry = ReactToolRegistry(
+        WebResearchToolSession(
+            user_id=REQUEST_CONTEXT["user_id"], speaks_to_user=speaks_to_user
+        ).definitions()
+    )
+
+    result = await registry.execute(call, 1)
+
+    assert result.status == "error"
+    assert result.output["message"] == (
+        chat_message if speaks_to_user else suggestion_message
+    )
+    assert "PROXY_" not in str(result.output)
+
+
+@pytest.mark.asyncio
+async def test_the_research_web_tool_keeps_a_provider_page_failure_to_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_tavily_key()
+    _patch_proxy_transport(monkeypatch)
+    provider_words = "upstream HTTP 503: service unavailable"
+    _patch_tavily(
+        monkeypatch,
+        _RecordingTavilyClient(
+            result={
+                **TAVILY_EXTRACT_PAYLOAD,
+                "failed_results": [
+                    {"url": "https://example.test/b", "error": provider_words}
+                ],
+            }
+        ),
+    )
+    args: dict[str, object] = {
+        "urls": ["https://example.test/a", "https://example.test/b"],
+        "query": None,
+        "offset": 1,
+        "limit": 100,
+    }
+    call = ReactToolCall(
+        tool_name="web_extract",
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope(
+            tool_id="web_extract",
+            reason=None,
+            args=args,  # type: ignore[arg-type]
+        ),
+    )
+    registry = ReactToolRegistry(
+        WebResearchToolSession(
+            user_id=REQUEST_CONTEXT["user_id"], speaks_to_user=True
+        ).definitions()
+    )
+
+    result = await registry.execute(call, 1)
+
+    assert result.status == "success"
+    assert result.output["failed_results"] == [
+        {"url": "https://example.test/b", "error": "This page could not be read."}
+    ]
+    assert provider_words not in str(result.output)
 
 
 @pytest.mark.asyncio

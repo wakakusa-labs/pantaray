@@ -106,3 +106,25 @@ Action は worker のスレッド、WS は uvicorn のループにいる。こ�
    SIGKILL → 同じ隔離ディレクトリで起動し直す → 同じ接続で `configure` を送る →
    再開待ちの Action が `canceled` にならず（起動復旧がジョブを再投入しただけの
    `processing` のまま）、再開されて終端まで進むこと。
+
+## `suggestion_replay.sh`: Suggestion before/after on the same Insights
+
+Replays a Suggestion for the latest Insights on two git refs and prints the
+comparison. It copies the app's database and artifacts under `/tmp` (the live
+store is never written), decides the way the job does over the direct route,
+and publishes nothing. The copy and outputs hold private data and stay in the
+printed `/tmp` folder.
+
+```sh
+OPENAI_API_KEY="$(your-secret-lookup openai)" \
+  agents/scripts/live/suggestion_replay.sh origin/develop my-branch
+```
+
+Refs default to `origin/develop` and `HEAD`. `LATEST` sets how many Insights
+(5), `PYTHON` the interpreter (`agents/.venv/bin/python`), `SMOKE_MODEL` the
+model (the one Cloud serves Suggestion with), `PANTARAY_APP_DIR` the app's data
+folder, and `TAVILY_API_KEY` enables web search. `REPLAY_PROVIDER=chatgpt`
+sends on the ChatGPT route the app uses, signed in with the Codex CLI's
+`~/.codex/auth.json` (read in-process, never printed), instead of an API key. Raw activity is never read,
+and memory search is lexical unless `LOCAL_EMBEDDING_MODEL_DIR` names the
+bundled model; both sides run under the same conditions.

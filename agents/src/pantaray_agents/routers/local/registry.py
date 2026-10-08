@@ -12,6 +12,7 @@ from pantaray_agents.routers import (
     action_tool_output,
     activity,
     approval_preferences,
+    chat,
     context_source,
     history,
     suggestion,
@@ -33,5 +34,6 @@ def register_local_routers(app: FastAPI) -> None:
     app.include_router(context_source.router)
     app.include_router(activity.router)
     app.include_router(history.router)
+    app.include_router(chat.router)
     app.include_router(history_overlay_router)
     app.include_router(orchestration_ws_router)

@@ -244,6 +244,7 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
         # Suggestion は runtime（worker job）が起動するため、WS は生存中に
         # 進行中の suggestion process を検出して中継するだけの責務を持つ。
         handler.start_suggestion_relay()
+        handler.start_chat_relay()
 
         # WS DoS safety（接続単位の簡易制限。単一プロセスでも最低限は守る）
         ws_cfg = load_local_runtime_tunables().websocket

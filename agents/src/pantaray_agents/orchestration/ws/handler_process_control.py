@@ -233,6 +233,7 @@ class WSHandlerProcessControlMixin:
                 except Exception:
                     pass
         self.stop_suggestion_relay()
+        self.stop_chat_relay()
         await self._task_supervisor.close()
 
     async def handle_ack(self, message: AckEventMessage) -> None:

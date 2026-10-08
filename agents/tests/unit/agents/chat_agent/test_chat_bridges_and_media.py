@@ -143,12 +143,19 @@ async def test_the_chat_hears_when_its_own_task_waits_and_ends(owner: Path) -> N
             (process_id, LATER),
         )
         connection.execute(
-            "UPDATE processes SET status = 'completed' WHERE process_id = ?",
-            (process_id,),
+            "INSERT INTO process_events(process_id, event_seq, event_id, event_name, "
+            "payload_json, created_at) VALUES (?, 101, 'end-1', 'process_completed', "
+            "?, ?)",
+            (process_id, '{"final_output": "Report drafted."}', LATER),
         )
         connection.execute(
-            "UPDATE agent_actions SET final_output = 'Report drafted.' "
-            "WHERE action_id = ?",
+            "UPDATE processes SET status = 'completed', terminal_event_id = 'end-1' "
+            "WHERE process_id = ?",
+            (process_id,),
+        )
+        # A later run has already replaced the Action's current answer.
+        connection.execute(
+            "UPDATE agent_actions SET final_output = '' WHERE action_id = ?",
             (started.output["action_id"],),
         )
 

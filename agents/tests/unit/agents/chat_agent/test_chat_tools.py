@@ -310,3 +310,15 @@ async def test_the_work_list_shows_only_the_tasks_the_chat_works_on(
         (started["action_id"], "Draft the Q3 report", "queued")
     ]
     assert started["action_id"] in shown and "Not mine" not in shown
+
+
+async def test_a_rerun_that_skips_a_refused_call_finds_the_task(db_path: Path) -> None:
+    first_run = _turn("a0")
+    refused = await first_run("start_action", message="   ", attachments_from=[])
+    started = await first_run("start_action", message="Draft it", attachments_from=[])
+    # After a restart the model gets the wording right the first time.
+    rerun = await _turn("a0")("start_action", message="Draft it", attachments_from=[])
+
+    assert isinstance(refused, dict) and refused["error_code"] == "INVALID_MESSAGE"
+    assert isinstance(started, dict) and rerun == started
+    assert len(_actions(db_path)) == 1

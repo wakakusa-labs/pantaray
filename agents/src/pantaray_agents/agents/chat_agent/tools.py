@@ -10,8 +10,7 @@ again if this is a different request.
 
 from __future__ import annotations
 
-import itertools
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable
 
 from pydantic import ValidationError
 
@@ -216,12 +215,17 @@ def _tool(
     properties: dict[str, JSONValue],
     run: _Run,
 ) -> ReactToolDefinition:
-    places: Iterator[int] = itertools.count(1)
+    place = [1]
 
     async def execute(call: ReactToolCall, _step: int) -> ReactToolResult:
         assert isinstance(call.tool_args, dict)
-        key = chat_turn_message_id(plan.key, f"{name}/{next(places)}")
-        return await run(call.tool_args, key)
+        key = chat_turn_message_id(plan.key, f"{name}/{place[0]}")
+        result = await run(call.tool_args, key)
+        # A place is used up only by what went in: a re-run that skips a
+        # refused call then lands on the same keys as the run it repeats.
+        if read_submitted_message(user_id=plan.user_id, message_id=key) is not None:
+            place[0] += 1
+        return result
 
     return ReactToolDefinition(
         name=name,

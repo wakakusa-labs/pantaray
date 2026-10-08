@@ -10,6 +10,7 @@ again appends nothing.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Final
@@ -99,24 +100,32 @@ def _events(connection: sqlite3.Connection, *, user_id: str) -> list[_Event]:
     runs = connection.execute(
         """
         SELECT DISTINCT steps.action_id, runs.process_id, runs.status,
-               runs.updated_at, actions.final_output
+               ends.created_at, ends.payload_json
         FROM agent_action_steps AS steps
         JOIN processes AS runs ON runs.process_id = steps.adopted_process_id
-        JOIN agent_actions AS actions ON actions.action_id = steps.action_id
+        LEFT JOIN process_events AS ends
+          ON ends.process_id = runs.process_id
+         AND ends.event_id = runs.terminal_event_id
         WHERE steps.user_id = ? AND steps.user_message_id GLOB 'chat-turn/*'
         """,
         (user_id,),
     ).fetchall()
-    for action_id, process_id, status, updated_at, final_output in runs:
+    for action_id, process_id, status, ended_at, terminal_json in runs:
         end = _RUN_ENDS.get(str(status))
-        if end is not None:
+        if end is not None and terminal_json is not None:
+            # The run's own answer, as its end recorded it: the Action's
+            # current one may already belong to a later run.
+            terminal = json.loads(terminal_json)
+            answer = terminal.get("final_output") or terminal.get(
+                "failure_message_public"
+            )
             events.append(
                 _action_event(
-                    str(updated_at),
+                    str(ended_at),
                     f"action-run:{process_id}:end",
                     str(action_id),
                     end,
-                    str(final_output),
+                    answer if isinstance(answer, str) else "",
                 )
             )
         events.extend(

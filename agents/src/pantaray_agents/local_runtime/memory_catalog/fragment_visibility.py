@@ -17,6 +17,19 @@ JOIN memory_nodes AS nodes
  AND nodes.node_id = revisions.node_id
 """.strip()
 
+# The same joins, walked from the nodes: a lane that tests every row's content
+# reads only the fragments of visible revisions, not of every past revision,
+# and in the nodes' order. CROSS JOIN fixes that order for SQLite's planner.
+VISIBLE_FRAGMENTS_FROM_NODES = """
+memory_nodes AS nodes
+CROSS JOIN memory_revisions AS revisions
+  ON revisions.user_id = nodes.user_id
+ AND revisions.node_id = nodes.node_id
+CROSS JOIN memory_fragments AS fragments
+  ON fragments.user_id = revisions.user_id
+ AND fragments.revision_id = revisions.revision_id
+""".strip()
+
 MEMORY_FRAGMENT_COLUMNS = """
 nodes.user_id, nodes.node_id, nodes.source_type,
 nodes.source_record_id, nodes.lifecycle, nodes.integrity,

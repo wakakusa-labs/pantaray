@@ -1183,6 +1183,42 @@ def test_semantic_search_rejects_missing_completed_projection(tmp_path: Path) ->
             )
 
 
+def test_semantic_search_rejects_a_projected_entry_without_its_vector(
+    tmp_path: Path,
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="vectorless-projection",
+            content="projected fact",
+        )
+        _index_pending_fragments(connection)
+        generation = _active_generation(connection)
+        connection.execute(
+            f"DELETE FROM memory_embedding_vectors_g{generation.generation_id}"
+        )
+
+        with pytest.raises(
+            MemoryEmbeddingIndexUnavailableError,
+            match="missing or stale projected vectors",
+        ):
+            search_memory_catalog(
+                connection=connection,
+                user_id="user-1",
+                run_id="vectorless-search",
+                query="unrelated",
+                query_embedding=_vector(0),
+                embedding_generation=generation,
+                focus="stable_knowledge",
+                center_time=None,
+                radius_hours=None,
+                limit=8,
+            )
+
+
 def test_semantic_search_accepts_an_unembeddable_chunk(tmp_path: Path) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +12,7 @@ import pytest
 from pantaray_agents.local_runtime.embedding_local import (
     LocalEmbeddingUnavailableError,
 )
+from pantaray_agents.local_runtime.memory_catalog import search_service
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -448,3 +451,41 @@ async def test_execute_memory_search_reports_active_switch_and_runs_local_lanes(
     assert search_kwargs["embedding_generation"] is None
     assert response.semantic_status == "generation_changed"
     assert response.semantic_error_code is None
+
+
+@pytest.mark.asyncio
+async def test_a_search_leaves_the_event_loop_free_while_it_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _initial_building_database(tmp_path)
+    _install_model(monkeypatch, StubEmbeddingModel())
+    reading = threading.Event()
+    release = threading.Event()
+    search = search_service.search_memory_catalog
+
+    def slow_search(**kwargs):  # noqa: ANN003, ANN202
+        reading.set()
+        # A large catalog reads for seconds; the loop must keep serving others.
+        assert release.wait(timeout=5)
+        return search(**kwargs)
+
+    monkeypatch.setattr(SERVICE + "search_memory_catalog", slow_search)
+    running = asyncio.create_task(
+        execute_memory_search(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            request=MemorySearchRequest(
+                user_id="user-1",
+                run_id="off-loop",
+                query="fact-initial-building",
+                focus="stable_knowledge",
+                limit=8,
+            ),
+        )
+    )
+    while not reading.is_set():
+        await asyncio.sleep(0.01)
+    release.set()
+
+    assert (await running).results

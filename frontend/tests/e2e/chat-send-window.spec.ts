@@ -51,11 +51,12 @@ test('the History chat sends to the local backend and reads its messages back', 
     // Both messages are the backend's: a reload reads them back in order, quote and file included.
     await page.reload();
     await expect(chat.getByRole('article', { name: 'あなた' })).toHaveCount(2);
-    const items = await page.evaluate(() =>
+    const page1 = await page.evaluate(() =>
       window.electron!.chat!.listItems({ before: null, limit: 50 })
     );
-    expect(items.items.map((item) => item.content.kind)).toEqual(['user_message', 'user_message']);
-    const [latest, earliest] = items.items;
+    // Each message also starts a turn, whose reply or failure lands between them.
+    const [latest, earliest] = page1.items.filter((item) => item.content.kind === 'user_message');
+    expect(earliest.content).toMatchObject({ kind: 'user_message', text: '最初のメッセージ' });
     expect(latest.content).toMatchObject({
       kind: 'user_message',
       text: 'これを読んでおいて',

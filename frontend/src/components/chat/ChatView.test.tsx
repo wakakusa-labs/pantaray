@@ -48,6 +48,9 @@ const work = (action_id: string, title: string, status: 'running' | 'idle') =>
 let pages: ChatItemPage[];
 let appendItem: (item: ChatItem) => void;
 let publishStatus: (status: OrchestrationStatus) => void;
+let publishTurnState: (state: { running: boolean }) => void;
+const retryTurn =
+  vi.fn<(request: { failure_item_id: string }) => Promise<{ kind: 'started' | 'stale' }>>();
 const listItems = vi.fn(async () => pages.shift() ?? { items: [], next_cursor: null });
 const openConversation = vi.fn(async () => 'focused' as const);
 const sendMessage = vi.fn<(request: ChatMessageRequest) => Promise<ChatMessageSendResult>>();
@@ -71,6 +74,11 @@ beforeEach(() => {
     chat: {
       listItems,
       sendMessage,
+      retryTurn,
+      onTurnState: (callback: (state: { running: boolean }) => void) => {
+        publishTurnState = callback;
+        return () => {};
+      },
       onItemAppended: (callback: (item: ChatItem) => void) => {
         appendItem = callback;
         return () => {};
@@ -142,7 +150,8 @@ it('shows messages and cards, with a work’s status on its latest card only', a
   expect(within(gone).queryByText('実行中')).not.toBeInTheDocument();
 
   expect(screen.getByText('AI に接続できず、返信できませんでした。')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
+  // The newest failure, with nothing after it, can be run again.
+  expect(screen.getByRole('button', { name: 'もう一度' })).toBeInTheDocument();
   expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
 });
 
@@ -402,4 +411,58 @@ it('does not read an older page with the old cursor while the newest page is rea
   await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
   expect(listItems).toHaveBeenLastCalledWith({ before: 9, limit: 50 });
   expect(await screen.findByText('ひとつ前')).toBeInTheDocument();
+});
+
+it('shows the typing bubble while a turn runs, and clears it when a new session starts', async () => {
+  pages = [{ items: [userMessage(1, 'こんにちは')], next_cursor: null }];
+  renderPage();
+  await screen.findByText('こんにちは');
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+
+  act(() => publishTurnState({ running: true }));
+  expect(screen.getByRole('status', { name: '入力中' })).toBeInTheDocument();
+  act(() => publishTurnState({ running: false }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+
+  act(() => publishTurnState({ running: true }));
+  pages = [{ items: [userMessage(1, 'こんにちは')], next_cursor: null }];
+  act(() => publishStatus({ status: 'session_started' }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+});
+
+it('runs the newest failed turn again, and reads the chat again when another turn ended since', async () => {
+  pages = [
+    {
+      items: [
+        item(3, { kind: 'turn_failure', reason: 'llm_request' }),
+        userMessage(2, 'もう一回'),
+        item(1, { kind: 'turn_failure', reason: 'llm_connection' }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+  await screen.findByRole('button', { name: 'もう一度' });
+  // Only the newest failure offers it; the older one was followed by another turn.
+  expect(screen.getAllByRole('button', { name: 'もう一度' })).toHaveLength(1);
+
+  act(() => publishTurnState({ running: true }));
+  expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
+  act(() => publishTurnState({ running: false }));
+
+  retryTurn.mockResolvedValueOnce({ kind: 'started' });
+  await userEvent.click(screen.getByRole('button', { name: 'もう一度' }));
+  expect(retryTurn).toHaveBeenCalledWith({ failure_item_id: 'item-3' });
+  expect(listItems).toHaveBeenCalledTimes(1);
+
+  retryTurn.mockResolvedValueOnce({ kind: 'stale' });
+  pages = [
+    {
+      items: [reply(4, '答えました。'), item(3, { kind: 'turn_failure', reason: 'llm_request' })],
+      next_cursor: null,
+    },
+  ];
+  await userEvent.click(screen.getByRole('button', { name: 'もう一度' }));
+  expect(await screen.findByText('答えました。')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
 });

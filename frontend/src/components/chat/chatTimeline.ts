@@ -77,3 +77,9 @@ export function latestCardPositions(items: readonly ChatItem[]): ReadonlyMap<Wor
 export function isShownInChat(item: ChatItem): boolean {
   return item.content.kind !== 'suggestion_event' && item.content.kind !== 'action_event';
 }
+
+/** The failure a retry can still run again: the newest turn_failure, if nothing came after it. */
+export function retryableFailureId(items: readonly ChatItem[]): string | null {
+  const last = [...items].reverse().find(isShownInChat);
+  return last?.content.kind === 'turn_failure' ? last.item_id : null;
+}

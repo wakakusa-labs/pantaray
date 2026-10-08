@@ -14,6 +14,7 @@ const PRELOAD_MARGIN_PX = 240;
  */
 export function useChatScroll({
   items,
+  typing,
   ready,
   hasOlder,
   failed,
@@ -21,6 +22,8 @@ export function useChatScroll({
   loadOlder,
 }: {
   items: readonly ChatItem[];
+  /** The 「…」 bubble after the last item; it comes into view like a new item. */
+  typing: boolean;
   ready: boolean;
   hasOlder: boolean;
   /** After a failed read, older pages load only when the reader asks again. */
@@ -68,7 +71,7 @@ export function useChatScroll({
       element.scrollTop = element.scrollHeight;
     }
     firstItemRef.current = firstItem;
-  }, [items, ready]);
+  }, [items, typing, ready]);
 
   // A page that brought nothing new leaves the anchor unused; a later reload must not apply it.
   useEffect(() => {

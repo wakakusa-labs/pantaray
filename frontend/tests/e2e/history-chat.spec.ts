@@ -116,7 +116,11 @@ const HISTORY: ConversationHistoryListItem[] = [
   },
 ];
 
-async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
+async function installBridge(
+  page: Page,
+  mode: 'chat' | 'list' | null,
+  chatPage: ChatItemPage = CHAT
+) {
   await page.addInitScript(
     ({ chat, history, storedMode }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
@@ -175,6 +179,20 @@ async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
               };
             },
             onItemAppended: () => noop,
+            onTurnState: (callback: (state: { running: boolean }) => void) => {
+              Object.defineProperty(window, 'e2eTurnState', {
+                value: callback,
+                configurable: true,
+              });
+              return noop;
+            },
+            retryTurn: async ({ failure_item_id }: { failure_item_id: string }) => {
+              Object.defineProperty(window, 'e2eRetried', {
+                value: failure_item_id,
+                configurable: true,
+              });
+              return { kind: 'started' };
+            },
           },
           orchestration: { onStatus: () => noop, onEvent: () => noop },
           history: {
@@ -210,7 +228,7 @@ async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
         },
       });
     },
-    { chat: CHAT, history: HISTORY, storedMode: mode }
+    { chat: chatPage, history: HISTORY, storedMode: mode }
   );
   await page.goto(`${baseUrl}#/history`);
 }
@@ -328,4 +346,38 @@ test('the Overlay’s chat button opens the chat at that Action’s latest card'
   await expect(card).toBeFocused();
   await expect(card).toBeInViewport();
   await expect(card).toHaveAttribute('aria-current', 'true');
+});
+
+test('a running turn shows the typing bubble; a failed turn offers to try again', async ({
+  page,
+}, info) => {
+  await installBridge(page, null, {
+    items: [
+      item(11, 41, { kind: 'turn_failure', reason: 'llm_connection' }),
+      user(10, 41, '登壇資料の構成、もう一度見直して'),
+      ...CHAT.items,
+    ],
+    next_cursor: null,
+  });
+  const retry = page.getByRole('button', { name: 'もう一度' });
+  await expect(retry).toBeVisible();
+  await expect(page.getByText('AI に接続できず、返信できませんでした。')).toBeVisible();
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-turn-failure.png') });
+
+  await retry.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { e2eRetried?: string }).e2eRetried))
+    .toBe('item-11');
+
+  await page.evaluate(() =>
+    (window as unknown as { e2eTurnState: (s: { running: boolean }) => void }).e2eTurnState({
+      running: true,
+    })
+  );
+  await expect(page.getByRole('status', { name: '入力中' })).toBeInViewport({ ratio: 1 });
+  await expect(retry).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-typing.png') });
 });

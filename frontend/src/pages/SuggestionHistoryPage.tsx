@@ -393,15 +393,7 @@ const SuggestionHistoryPage = () => {
   return mode === 'list' ? (
     <HistoryListView modeSwitch={modeSwitch} />
   ) : (
-    // The chat's turn state and retry are not delivered to the renderer yet (later nodes).
-    <ChatView
-      modeSwitch={modeSwitch}
-      chat={chat}
-      composer={composer}
-      reveal={reveal}
-      turnInProgress={false}
-      onRetryTurn={null}
-    />
+    <ChatView modeSwitch={modeSwitch} chat={chat} composer={composer} reveal={reveal} />
   );
 };
 

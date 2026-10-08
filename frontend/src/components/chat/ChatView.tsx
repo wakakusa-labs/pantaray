@@ -18,6 +18,7 @@ import {
   isChatMessage,
   isShownInChat,
   latestCardPositions,
+  retryableFailureId,
   type WorkKey,
 } from './chatTimeline';
 import type { ChatComposerControl } from './useChatComposer';
@@ -51,8 +52,6 @@ export function ChatView({
   chat,
   composer,
   reveal,
-  turnInProgress,
-  onRetryTurn,
 }: {
   modeSwitch: ReactNode;
   /** The chat and its composer outlive this view, so switching to the list loses neither. */
@@ -60,10 +59,6 @@ export function ChatView({
   composer: ChatComposerControl;
   /** The Action whose latest card the Overlay asked to show, or null. */
   reveal: ChatReveal | null;
-  /** True while a chat turn runs; drawn as a 「…」 bubble after the last message. */
-  turnInProgress: boolean;
-  /** Runs the failed turn again; null hides the retry button. */
-  onRetryTurn: ((failureItemId: string) => void) | null;
 }) {
   const { t, language } = useI18n();
   const shortcutHint = useGlobalShortcutHint();
@@ -79,6 +74,7 @@ export function ChatView({
   const ready = !chat.loading;
   const scroll = useChatScroll({
     items: chat.items,
+    typing: chat.turnRunning,
     ready,
     hasOlder: chat.hasOlder,
     failed: chat.failed,
@@ -91,6 +87,9 @@ export function ChatView({
   );
   const latestCards = useMemo(() => latestCardPositions(chat.items), [chat.items]);
   const shown = useMemo(() => chat.items.filter(isShownInChat), [chat.items]);
+  const retryableFailure = useMemo(() => retryableFailureId(chat.items), [chat.items]);
+  const [retrying, setRetrying] = useState(false);
+  const turnInProgress = chat.turnRunning;
   useChatReveal({
     reveal,
     ready,
@@ -109,6 +108,17 @@ export function ChatView({
       await openNewWork();
     } catch {
       setNotice(t('history.openOverlayFailed'));
+    }
+  };
+  const handleRetryTurn = async (failureItemId: string): Promise<void> => {
+    setNotice(null);
+    setRetrying(true);
+    try {
+      await chat.retryTurn(failureItemId);
+    } catch {
+      setNotice(t('history.chat.retryFailed'));
+    } finally {
+      setRetrying(false);
     }
   };
   const handleOpenCard = async (card: ChatCardData): Promise<void> => {
@@ -168,11 +178,12 @@ export function ChatView({
         return (
           <li key={item.item_id} className="chat-failure">
             <p>{t(`history.chat.failure.${item.content.reason}`)}</p>
-            {onRetryTurn ? (
+            {item.item_id === retryableFailure && !turnInProgress ? (
               <button
                 type="button"
                 className="history-filter-button"
-                onClick={() => onRetryTurn(item.item_id)}
+                disabled={retrying}
+                onClick={() => void handleRetryTurn(item.item_id)}
               >
                 {t('history.chat.retry')}
               </button>

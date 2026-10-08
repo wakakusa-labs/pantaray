@@ -18,6 +18,13 @@ export type ChatItemsResult = {
   reload: () => Promise<void>;
   /** Adds an item this window appended itself; the relay's copy of it is the same item. */
   appendItem: (item: ChatItem) => void;
+  /** True while a turn is answering the chat. */
+  turnRunning: boolean;
+  /**
+   * Runs the turn a failure ended again. A later turn has ended since when the backend says
+   * `stale`, so the chat is read again to show what it now holds.
+   */
+  retryTurn: (failureItemId: string) => Promise<void>;
 };
 
 /**
@@ -34,6 +41,7 @@ export function useChatItems(): ChatItemsResult {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [turnRunning, setTurnRunning] = useState(false);
   const generationRef = useRef(0);
   const loadingOlderRef = useRef(false);
   const reloadingRef = useRef(false);
@@ -98,9 +106,28 @@ export function useChatItems(): ChatItemsResult {
     const onStatus = window.electron?.orchestration?.onStatus;
     if (!onStatus) return;
     return onStatus((status) => {
-      if (status.status === 'session_started') void reload();
+      if (status.status !== 'session_started') return;
+      // The new session sends the turn's state once at its start; until then nothing is known.
+      setTurnRunning(false);
+      void reload();
     });
   }, [reload]);
+
+  useEffect(() => {
+    const onTurnState = window.electron?.chat?.onTurnState;
+    if (!onTurnState) return;
+    return onTurnState((state) => setTurnRunning(state.running));
+  }, []);
+
+  const retryTurn = useCallback(
+    async (failureItemId: string) => {
+      const chat = window.electron?.chat;
+      if (!chat) throw new Error('Chat bridge is unavailable.');
+      const result = await chat.retryTurn({ failure_item_id: failureItemId });
+      if (result.kind === 'stale') await reload();
+    },
+    [reload]
+  );
 
   return {
     items,
@@ -111,6 +138,8 @@ export function useChatItems(): ChatItemsResult {
     loadingOlder,
     loadOlder,
     reload,
+    turnRunning,
+    retryTurn,
     appendItem: useCallback(
       (item: ChatItem) => setItems((current) => mergeChatItems(current, [item])),
       []

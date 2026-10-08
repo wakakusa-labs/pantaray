@@ -351,6 +351,8 @@ async def test_a_refused_output_is_resent_as_an_append_and_not_kept() -> None:
     refused, repaired, after = run.requests
     assert repaired.conversation[:-1] == refused.conversation
     assert "commentary character limit" in _text(repaired.conversation[-1])
+    # An answer in plain text is refused too; the notice names the call for it.
+    assert "an answer goes through finish." in _text(repaired.conversation[-1])
     # The notice closes that send alone, and the turn produced behind it was
     # kept with the notice in its prefix, so it never goes back.
     assistant = after.conversation[1]

@@ -193,6 +193,24 @@ async def test_action_turn_rejects_invalid_messages_without_usable_output(
 
 
 @pytest.mark.asyncio
+async def test_an_answer_in_plain_text_is_refused_as_such(monkeypatch) -> None:
+    # The repair has to say what was wrong: the model answered outside a call.
+    output = [_message().model_copy(update={"phase": "final_answer"})]
+    _install(monkeypatch, _FakeResponses(output_text="", output=output))
+
+    result = await execute_openai_request(
+        transport=_TRANSPORT,
+        request=_request().to_request(),
+        profile=get_llm_profile(ACTION_EXECUTING_PROFILE_ID),
+        uploaded_blobs={},
+    )
+
+    assert result.model_error is not None
+    assert result.model_error.recovery == "repair_next_turn"
+    assert "final answer in plain text" in result.model_error.message
+
+
+@pytest.mark.asyncio
 async def test_action_turn_rejects_commentary_together_with_invalid_call(
     monkeypatch,
 ) -> None:

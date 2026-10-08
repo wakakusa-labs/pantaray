@@ -121,10 +121,8 @@ files = [
     "src/pantaray_agents/agents/action_agent/runtime/state/coercion.py",
     "src/pantaray_agents/local_runtime/memory_catalog",
     "src/pantaray_agents/local_runtime/embedding_local",
-    # 文書の読み取り（documents パッケージと、read ツールの文書分岐・ページ封筒）。
+    # 文書の読み取り（documents パッケージ。read ツールの文書分岐は tools にある）。
     "src/pantaray_agents/local_runtime/tooling/documents",
-    "src/pantaray_agents/local_runtime/tooling/brokering/broker_direct_read_document.py",
-    "src/pantaray_agents/local_runtime/tooling/brokering/broker_direct_read_page.py",
 ]
 warn_return_any = true
 warn_unused_configs = true

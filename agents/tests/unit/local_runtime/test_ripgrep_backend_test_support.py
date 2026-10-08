@@ -8,7 +8,7 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
+from pantaray_agents.tools.files import discovery
 
 
 def test_fake_glob_backend_stops_before_next_directory_after_limit(
@@ -26,7 +26,7 @@ def test_fake_glob_backend_stops_before_next_directory_after_limit(
 
     monkeypatch.setattr(ripgrep_backend_test_support.os, "walk", fake_walk)
 
-    result = broker_discovery.run_ripgrep_files(
+    result = discovery.run_ripgrep_files(
         cwd=tmp_path,
         sandbox_profile="",
         glob_pattern="*.txt",
@@ -53,7 +53,7 @@ def test_fake_grep_backend_stops_before_next_directory_after_limit(
 
     monkeypatch.setattr(ripgrep_backend_test_support.os, "walk", fake_walk)
 
-    result = broker_discovery.run_ripgrep_grep(
+    result = discovery.run_ripgrep_grep(
         cwd=tmp_path,
         sandbox_profile="",
         pattern="needle",

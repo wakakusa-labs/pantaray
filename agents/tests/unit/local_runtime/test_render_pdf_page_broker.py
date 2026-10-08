@@ -23,9 +23,6 @@ from pantaray_agents.local_runtime.runtime.local_image_store import (
 )
 from pantaray_agents.local_runtime.tooling.brokering import broker_direct_render_pdf
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_read_document import (
-    READ_DOCUMENT_TOO_LARGE,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RenderPdfPageOutput,
 )
@@ -42,6 +39,7 @@ from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     _CHILD_BROKER_TOOLS,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.read_document import READ_DOCUMENT_TOO_LARGE
 
 from .broker_test_support import BROKER_ACTOR_PROCESS_ID
 from .read_tool_broker_support import ReadRuntimeContext, bootstrap_read_runtime_db

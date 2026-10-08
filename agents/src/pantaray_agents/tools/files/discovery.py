@@ -1,47 +1,49 @@
+"""The list, glob and grep tools over one checked directory."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from pantaray_agents.local_runtime.tooling.sandbox.seatbelt_profiles import (
+    render_ripgrep_seatbelt_profile,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.grep_lines import (
+
+from .discovery_paths import (
+    DiscoveryPath,
+    entry_for_discovery_path,
+    list_discovery_paths,
+)
+from .grep_lines import (
     GREP_MAX_LINE_CHARS,
     GREP_OMITTED_TEXT_MARKER,
     RIPGREP_MAX_COLUMNS,
     RipgrepGrepMatch,
     binary_match_warning,
 )
-from pantaray_agents.tools.files.manifest_paths import (
-    ResolvedManifestPath,
+from .manifest_paths import ResolvedManifestPath
+from .read_contract import (
+    DISCOVERY_RESULT_LIMIT_MAX,
+    LIST_MAX_DEPTH,
+    DiscoveryTruncationReason,
+    GlobToolArgs,
+    GrepToolArgs,
+    ListToolArgs,
+    ReadToolResult,
 )
-from pantaray_agents.tools.files.read_paths import resolve_read_path
-from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.ripgrep import (
+from .read_paths import resolve_read_path
+from .read_scope import ReadScope
+from .ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
     run_ripgrep_files,
     run_ripgrep_grep,
 )
-from pantaray_agents.tools.files.workspace_descriptor_access import scan_skip_notes
-
-from ..sandbox.seatbelt_profiles import render_ripgrep_seatbelt_profile
-from .broker_discovery_paths import (
-    DiscoveryPath,
-    DiscoveryTruncationReason,
-    entry_for_discovery_path,
-    list_discovery_paths,
-)
-from .broker_outcome import UnprojectedBrokerToolOutcome
-from .broker_protocol import (
-    DISCOVERY_RESULT_LIMIT_MAX,
-    LIST_MAX_DEPTH,
-    ValidatedGlobRequest,
-    ValidatedGrepRequest,
-    ValidatedListRequest,
-)
+from .workspace_descriptor_access import scan_skip_notes
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
 TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {
@@ -81,11 +83,7 @@ def _sort_discovery_paths(paths: Iterable[DiscoveryPath]) -> list[DiscoveryPath]
     return sorted(paths, key=lambda path: str(path.path))
 
 
-def run_list_executor(
-    *,
-    scope: ReadScope,
-    request: ValidatedListRequest,
-) -> UnprojectedBrokerToolOutcome:
+def run_list(*, scope: ReadScope, request: ListToolArgs) -> ReadToolResult:
     base = _resolve_directory(scope=scope, raw_path=request.path)
     bounded = list_discovery_paths(
         base=base,
@@ -106,8 +104,7 @@ def run_list_executor(
             f"Raise limit (up to {DISCOVERY_RESULT_LIMIT_MAX}), list a narrower "
             "path, or page through one directory with read and offset."
         )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output={
             "status": "success",
             "entries": entry_values,
@@ -126,11 +123,7 @@ def run_list_executor(
     )
 
 
-def run_glob_executor(
-    *,
-    scope: ReadScope,
-    request: ValidatedGlobRequest,
-) -> UnprojectedBrokerToolOutcome:
+def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
     base = _resolve_directory(scope=scope, raw_path=request.base_path)
     _reject_unsafe_glob_pattern(request.pattern, field_name="pattern")
     search_scope = scope.private_storage.search_scope(base.path)
@@ -159,8 +152,7 @@ def run_glob_executor(
         skipped_files=backend_result.skipped_files,
         first_skip_error=backend_result.first_skip_error,
     )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output={
             "status": "success",
             "matches": match_values,
@@ -242,7 +234,7 @@ def _build_grep_outcome(
     lines_excerpted: bool,
     truncation_reason: DiscoveryTruncationReason | None,
     include_file_references: bool,
-) -> UnprojectedBrokerToolOutcome:
+) -> ReadToolResult:
     sorted_matches = sorted(matches, key=_grep_match_sort_key)
     search_text = "\n".join(
         f"{match['path']}:{match['line_number']}:{match['line']}"
@@ -262,8 +254,7 @@ def _build_grep_outcome(
             for relative_path in backend_result.binary_match_paths
         ),
     )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output={
             "status": "success",
             "matches": match_values,
@@ -293,11 +284,7 @@ def _grep_match_sort_key(match: dict[str, JSONValue]) -> tuple[str, int]:
     )
 
 
-def run_grep_executor(
-    *,
-    scope: ReadScope,
-    request: ValidatedGrepRequest,
-) -> UnprojectedBrokerToolOutcome:
+def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
     base = _resolve_directory(scope=scope, raw_path=request.base_path)
     if request.include_glob is not None:
         _reject_unsafe_glob_pattern(request.include_glob, field_name="include_glob")

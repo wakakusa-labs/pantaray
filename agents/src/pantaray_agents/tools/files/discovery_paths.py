@@ -5,18 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pantaray_agents.tools.files.manifest_paths import ResolvedManifestPath
-from pantaray_agents.tools.files.workspace_descriptor_access import (
-    WorkspaceScanSkips,
-    scan_workspace_entries,
-)
-
-type DiscoveryTruncationReason = Literal[
-    "limit",
-    "timeout",
-    "output_bytes",
-    "line_length",
-]
+from .manifest_paths import ResolvedManifestPath
+from .read_contract import DiscoveryTruncationReason
+from .workspace_descriptor_access import WorkspaceScanSkips, scan_workspace_entries
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import ReadToolArgs
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.tools.contract import ToolConcurrency
+from pantaray_agents.tools.files.read_contract import ReadToolArgs
 from pantaray_agents.tools.files.text_lines import (
     MAX_BYTES,
     MAX_LINE_LENGTH,

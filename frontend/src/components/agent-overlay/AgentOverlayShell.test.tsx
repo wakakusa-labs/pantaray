@@ -32,6 +32,7 @@ describe('AgentOverlayShell', () => {
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
     const onConversationAction = vi.fn();
     const onConversationLink = vi.fn();
+    const onCopyAnswer = vi.fn();
     let revealLateControl = () => {};
     let enableStatefulControl = () => {};
     const LateControl = () => {
@@ -81,6 +82,9 @@ describe('AgentOverlayShell', () => {
                 Conversation link
               </a>
               <textarea aria-label="Tool output" readOnly value="Visible output" />
+              <button type="button" data-collapsed-clickable onClick={onCopyAnswer}>
+                Copy answer
+              </button>
               <LateControl />
             </>
           }
@@ -107,6 +111,13 @@ describe('AgentOverlayShell', () => {
     expect(toolOutput).toBeEnabled();
     expect(toolOutput).toHaveAttribute('tabindex', '-1');
     expect(toolOutput).not.toHaveAttribute('aria-disabled');
+    // The answer's copy button stays out of the tab order but still copies on click.
+    const copyAnswer = screen.getByRole('button', { name: 'Copy answer' });
+    expect(copyAnswer).toHaveAttribute('tabindex', '-1');
+    expect(copyAnswer).toBeEnabled();
+    expect(copyAnswer).not.toHaveAttribute('aria-disabled');
+    fireEvent.click(copyAnswer);
+    expect(onCopyAnswer).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Expand' })).toHaveFocus();
     toolOutput.focus();
     expect(toolOutput).toHaveFocus();

@@ -1,12 +1,8 @@
-"""ActionAgent 用 LangGraph 実装の公開モジュール。
-
-本パッケージでは ActionAgent が利用する LangGraph の状態定義および
-グラフ構築ヘルパーを提供する。"""
+"""ActionAgent runtime: its state and the graph that runs its nodes."""
 
 from .graph import (
     ActionGraphRuntime,
     build_action_agent_graph,
-    clear_cached_action_agent_graph,
 )
 from .state import (
     ActionAgentContext,
@@ -26,5 +22,4 @@ __all__ = [
     "ToolCall",
     "ActionGraphRuntime",
     "build_action_agent_graph",
-    "clear_cached_action_agent_graph",
 ]

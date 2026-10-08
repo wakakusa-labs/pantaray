@@ -93,6 +93,7 @@ def _pause_child(
             payload=payload,
             pause=ActionSubagentApprovalPause(
                 tool_id="apply_patch",
+                call_id="call-1",
                 arguments={"path": name},
                 tool_request_id=request_id,
                 approval_session_id=session_id,

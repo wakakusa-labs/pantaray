@@ -70,18 +70,15 @@ class _TurnRow(BaseModel):
 
 
 class _AnswerRow(BaseModel):
-    """The answer to one call.
+    """The answer to the call ``call_id`` names.
 
-    An answer written outside the loop -- the approval a resumed child settles,
-    the claimed invocation startup recovery writes back -- cannot name its call
-    and leaves ``call_id`` out. It answers the first unanswered call of its
-    tool: calls run in the model's order, so that is the one that was running.
-    Recovery's rows also carry the arguments, which the turn already holds.
+    Startup recovery writes the claimed invocation back with the arguments it
+    read, which the turn already holds.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    call_id: str | None = None
+    call_id: str
     tool_name: str
     status: Literal["completed", "error"]
     output: JSONValue
@@ -200,14 +197,18 @@ class SubagentHistoryWriter:
     async def on_notice(self, item: LlmTurnUserItem) -> None:
         self._append(ACTION_SUBAGENT_NOTICE_EVENT, item)
 
-    def answer_waiting_call(self, tool_name: str, result: ReactToolResult) -> None:
-        """Answer the call of this tool a paused run left waiting on approval.
+    def answer_waiting_call(
+        self, call_id: str, tool_name: str, result: ReactToolResult
+    ) -> None:
+        """Answer the call a paused run left waiting on approval.
 
-        Written before the history is loaded, so the rebuild pairs it with that
-        call and ``answer_unanswered`` never reaches it.
+        Written before the history is loaded, so ``answer_unanswered`` never
+        reaches it.
         """
 
-        self._append(ACTION_SUBAGENT_TOOL_EVENT, _answer_row(tool_name, result))
+        self._append(
+            ACTION_SUBAGENT_TOOL_EVENT, _answer_row(tool_name, result, call_id=call_id)
+        )
 
     async def answer_unanswered(
         self, history: SubagentHistory
@@ -248,9 +249,7 @@ def _interrupted(tool_name: str) -> ReactToolResult:
     )
 
 
-def _answer_row(
-    tool_name: str, result: ReactToolResult, *, call_id: str | None = None
-) -> _AnswerRow:
+def _answer_row(tool_name: str, result: ReactToolResult, *, call_id: str) -> _AnswerRow:
     return _AnswerRow(
         call_id=call_id,
         tool_name=tool_name,
@@ -273,11 +272,7 @@ def _answer_item(call_id: str, answer: _AnswerRow) -> LlmTurnToolResultItem:
 
 def _answered_call(unanswered: list[LlmToolCall], answer: _AnswerRow) -> LlmToolCall:
     for call in unanswered:
-        if (
-            call.call_id == answer.call_id
-            if answer.call_id is not None
-            else call.name == answer.tool_name
-        ):
+        if call.call_id == answer.call_id:
             return call
     raise MigrationError("An Action subagent answer names no call waiting for one")
 

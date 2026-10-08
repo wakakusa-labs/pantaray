@@ -5,19 +5,10 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
-from pantaray_llm.contracts.conversation import (
-    LlmConversation,
-    LlmTurnAssistantItem,
-    LlmTurnItem,
-    LlmTurnToolResultItem,
-    LlmTurnUserItem,
-)
-from pantaray_llm.contracts.input_block import LlmInputTextBlock
-from pantaray_llm.contracts.tool_use import LlmToolCall
 
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
@@ -34,42 +25,6 @@ ACTION_SUBAGENT_TOOL_EVENT = "action_subagent_tool"
 # Every parent message before it went into the child's conversation here.
 ACTION_SUBAGENT_DELIVERED_EVENT = "action_subagent_messages_delivered"
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled"})
-# The heading that tells the child the item under it is feedback on its own
-# last attempt rather than a message from the parent.
-REPAIR_NOTICE_HEADING = "# Previous Error"
-_CALL_ID_PREFIX = "subagent-call-"
-
-
-@dataclass(frozen=True, slots=True)
-class ActionSubagentParentMessage:
-    """One message the parent sent into the running child."""
-
-    event_seq: int
-    content: str
-
-
-@dataclass(frozen=True, slots=True)
-class ActionSubagentToolExchange:
-    """One call the child made, with the result that answered it."""
-
-    event_seq: int
-    tool_name: str
-    status: Literal["completed", "error"]
-    arguments: dict[str, JSONValue]
-    output: JSONValue
-    error_message: str | None
-
-    @property
-    def call_id(self) -> str:
-        """The identity that pairs this call with its result.
-
-        Synthesized rather than recorded: a provider only requires that a result
-        names a call announced before it, and ``event_seq`` is unique within the
-        child's process and survives a restart, so one exchange keeps the same
-        identity on every later turn -- which is what lets the turns append.
-        """
-
-        return f"{_CALL_ID_PREFIX}{self.event_seq}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,13 +33,6 @@ class ActionSubagentEvent:
 
     event_name: str
     payload: dict[str, JSONValue]
-
-
-# What one row of the child's durable transcript means. Both shapes the turn can
-# be sent in are drawn from these, so neither reads ``process_events`` itself.
-type ActionSubagentTranscriptEntry = (
-    ActionSubagentParentMessage | ActionSubagentToolExchange
-)
 
 
 class ActionSubagentMessageAuthorityError(RuntimeError):
@@ -151,46 +99,6 @@ def send_action_subagent_message(
                 )
 
 
-def append_action_subagent_tool_transcript(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    action_id: str,
-    process_id: str,
-    job_id: str,
-    tool_name: str,
-    status: Literal["completed", "error"],
-    arguments: JSONValue,
-    output: JSONValue,
-    error_message: str | None,
-    completed_at: str,
-) -> None:
-    with sqlite3.connect(db_path) as connection:
-        configure_connection(connection, busy_timeout_ms)
-        with immediate_transaction(connection):
-            _require_running_child(
-                connection,
-                process_id=process_id,
-                user_id=user_id,
-                action_id=action_id,
-                job_id=job_id,
-            )
-            append_process_event_in_connection(
-                connection=connection,
-                process_id=process_id,
-                event_name=ACTION_SUBAGENT_TOOL_EVENT,
-                payload={
-                    "tool_name": tool_name,
-                    "status": status,
-                    "arguments": arguments,
-                    "output": output,
-                    "error_message": error_message,
-                },
-                created_at=completed_at,
-            )
-
-
 def append_action_subagent_event(
     *,
     db_path: Path,
@@ -204,7 +112,7 @@ def append_action_subagent_event(
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
-            _require_running_child(connection, **_owner(payload))
+            _require_running_child(connection, payload)
             append_process_event_in_connection(
                 connection=connection,
                 process_id=payload["process_id"],
@@ -227,7 +135,7 @@ def deliver_action_subagent_messages(
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
-            _require_running_child(connection, **_owner(payload))
+            _require_running_child(connection, payload)
             rows = connection.execute(
                 "SELECT payload_json FROM process_events "
                 "WHERE process_id=? AND event_name=? AND event_seq>("
@@ -277,74 +185,6 @@ def action_subagent_message_content(payload: dict[str, JSONValue]) -> str:
     if not isinstance(content, str):
         raise MigrationError("Action subagent message event is malformed")
     return content
-
-
-def load_action_subagent_transcript(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    process_id: str,
-) -> tuple[ActionSubagentTranscriptEntry, ...]:
-    """Read the child's durable transcript, append-only and in order."""
-
-    with sqlite3.connect(db_path) as connection:
-        configure_connection(connection, busy_timeout_ms)
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            "SELECT event_seq,event_name,payload_json FROM process_events "
-            "WHERE process_id=? AND event_name IN (?,?) ORDER BY event_seq",
-            (process_id, ACTION_SUBAGENT_MESSAGE_EVENT, ACTION_SUBAGENT_TOOL_EVENT),
-        ).fetchall()
-    return tuple(_transcript_entry(row) for row in rows)
-
-
-def build_action_subagent_conversation(
-    entries: Sequence[ActionSubagentTranscriptEntry],
-    *,
-    assigned_task: str,
-    repair_notice: str | None,
-) -> LlmConversation:
-    """Lay the same transcript out as provider-neutral conversation items.
-
-    A prompt cache reads only what the previous request already sent as an exact
-    prefix, so the turn the child sends has to grow by appending: the request's
-    own message is the parent's context and never changes, the assigned task is
-    the first item, and the rest are the rows behind it, which are final the
-    moment they are appended.
-
-    ``repair_notice`` is the retry feedback for one attempt. It goes last and is
-    never recorded, so the turn after a repair appends to the request that
-    preceded the notice rather than rewriting it.
-    """
-
-    items: list[LlmTurnItem] = [_text_item(assigned_task)]
-    for entry in entries:
-        if isinstance(entry, ActionSubagentParentMessage):
-            items.append(_text_item(entry.content))
-            continue
-        items.append(
-            LlmTurnAssistantItem(
-                type="assistant",
-                calls=[
-                    LlmToolCall(
-                        call_id=entry.call_id,
-                        name=entry.tool_name,
-                        arguments=entry.arguments,
-                    )
-                ],
-            )
-        )
-        items.append(
-            LlmTurnToolResultItem(
-                type="tool_result",
-                call_id=entry.call_id,
-                name=entry.tool_name,
-                output=_tool_result_body(entry),
-            )
-        )
-    if repair_notice:
-        items.append(_text_item(f"{REPAIR_NOTICE_HEADING}\n{repair_notice}"))
-    return items
 
 
 def _validate_request(request: ActionSubagentMessageRequest) -> None:
@@ -402,22 +242,8 @@ def _require_authority(
     return str(row[0])
 
 
-def _owner(payload: ActionSubagentJobPayload) -> dict[str, str]:
-    return {
-        "process_id": payload["process_id"],
-        "user_id": payload["user_id"],
-        "action_id": payload["action_id"],
-        "job_id": payload["job_id"],
-    }
-
-
 def _require_running_child(
-    connection: sqlite3.Connection,
-    *,
-    process_id: str,
-    user_id: str,
-    action_id: str,
-    job_id: str,
+    connection: sqlite3.Connection, payload: ActionSubagentJobPayload
 ) -> None:
     """Only the worker running the child's own job writes its history."""
 
@@ -431,58 +257,17 @@ def _require_running_child(
           AND job.user_id=process.user_id AND job.job_type='execute_action_subagent'
           AND job.status='running'
         """,
-        (process_id, user_id, action_id, job_id),
+        (
+            payload["process_id"],
+            payload["user_id"],
+            payload["action_id"],
+            payload["job_id"],
+        ),
     ).fetchone()
     if owner is None:
         raise ActionSubagentMessageAuthorityError(
             "Action subagent history authority is not active"
         )
-
-
-def _transcript_entry(row: sqlite3.Row) -> ActionSubagentTranscriptEntry:
-    payload = _object(row["payload_json"])
-    event_seq = int(row["event_seq"])
-    if row["event_name"] == ACTION_SUBAGENT_MESSAGE_EVENT:
-        content = payload.get("content")
-        if isinstance(content, str):
-            return ActionSubagentParentMessage(event_seq=event_seq, content=content)
-    else:
-        name, status, error, arguments = (
-            payload.get("tool_name"),
-            payload.get("status"),
-            payload.get("error_message"),
-            payload.get("arguments"),
-        )
-        if (
-            isinstance(name, str)
-            and status in ("completed", "error")
-            and (error is None or isinstance(error, str))
-            and isinstance(arguments, dict)
-        ):
-            return ActionSubagentToolExchange(
-                event_seq=event_seq,
-                tool_name=name,
-                status=cast(Literal["completed", "error"], status),
-                arguments=cast(dict[str, JSONValue], arguments),
-                output=payload.get("output"),
-                error_message=error,
-            )
-    raise MigrationError("Action subagent private event is malformed")
-
-
-def _tool_result_body(entry: ActionSubagentToolExchange) -> JSONValue:
-    """What the child reads back for one call: status, result, error."""
-
-    body: dict[str, JSONValue] = {"status": entry.status, "result": entry.output}
-    if entry.error_message:
-        body["error"] = entry.error_message
-    return body
-
-
-def _text_item(text: str) -> LlmTurnUserItem:
-    return LlmTurnUserItem(
-        type="user", content=[LlmInputTextBlock(type="input_text", text=text)]
-    )
 
 
 def _object(raw: object) -> dict[str, JSONValue]:

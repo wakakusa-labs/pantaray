@@ -13,8 +13,8 @@ from pantaray_agents.local_runtime.runtime.action_startup_recovery import (
     recover_interrupted_action_runs_for_startup,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
-    ActionSubagentParentMessage,
-    load_action_subagent_transcript,
+    ACTION_SUBAGENT_TOOL_EVENT,
+    load_action_subagent_events,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_queue import (
     enqueue_action_subagent_job_in_connection,
@@ -69,8 +69,9 @@ PARENT_JOB_ID = "job-1"
 CHILD_PROCESS_ID = "child-process-1"
 CHILD_JOB_ID = "child-job-1"
 APPROVAL_SESSION_ID = "approval-child-1"
-# A child Tool request id carries the process event sequence it was claimed at.
-TOOL_REQUEST_ID = f"{CHILD_PROCESS_ID}:1"
+# A child Tool request id carries the process event sequence it was claimed at
+# and the id of the call it runs.
+TOOL_REQUEST_ID = f"{CHILD_PROCESS_ID}:1:call-1"
 INVOCATION_ID = "invocation-apply-patch"
 PAUSE_PAYLOAD: dict[str, object] = {
     "action_id": "action-1",
@@ -428,7 +429,10 @@ def _claim_child_gated_tool(
 
 @pytest.mark.parametrize(
     ("invocation_completed", "expected_transcript"),
-    [(True, "Tool apply_patch completed"), (False, "StartupRecoveryInterrupted")],
+    [
+        (True, "Tool apply_patch completed for call-1"),
+        (False, "StartupRecoveryInterrupted"),
+    ],
 )
 def test_restart_reports_a_claimed_gated_invocation_instead_of_redoing_it(
     tmp_path: Path, invocation_completed: bool, expected_transcript: str
@@ -493,16 +497,20 @@ def _seed_second_child(db_path: Path) -> None:
 
 
 def _transcript(db_path: Path, process_id: str) -> tuple[str, ...]:
-    """The child's durable rows as text, so a row can be matched on its content."""
+    """The child's answer rows as text, so a row can be matched on its content."""
 
     return tuple(
-        f"Parent message: {entry.content}"
-        if isinstance(entry, ActionSubagentParentMessage)
-        else f"Tool {entry.tool_name} {entry.status}: "
-        + json.dumps(entry.output, ensure_ascii=False)
-        + (f" Error: {entry.error_message}" if entry.error_message else "")
-        for entry in load_action_subagent_transcript(
-            db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS, process_id=process_id
+        f"Tool {row['tool_name']} {row['status']} for {row['call_id']}: "
+        + json.dumps(row["output"], ensure_ascii=False)
+        + (f" Error: {row['error_message']}" if row["error_message"] else "")
+        for row in (
+            event.payload
+            for event in load_action_subagent_events(
+                db_path=db_path,
+                busy_timeout_ms=BUSY_TIMEOUT_MS,
+                process_id=process_id,
+                event_names=(ACTION_SUBAGENT_TOOL_EVENT,),
+            )
         )
     )
 
@@ -669,7 +677,9 @@ def test_payload_naming_another_child_never_writes_that_child(tmp_path: Path) ->
 
     db_path, context, _payload = _restart_scenario(tmp_path)
     _seed_second_child(db_path)
-    _claim_child_gated_tool(db_path, context, request_id=f"{SECOND_CHILD_PROCESS_ID}:1")
+    _claim_child_gated_tool(
+        db_path, context, request_id=f"{SECOND_CHILD_PROCESS_ID}:1:call-1"
+    )
     _update(
         db_path,
         "UPDATE jobs SET status='blocked' WHERE job_id=?",

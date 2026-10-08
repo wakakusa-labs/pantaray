@@ -578,6 +578,7 @@ def _react_call(call: LlmToolCall) -> ReactToolCall:
         tool_call_envelope=ToolCallEnvelope(
             tool_id=call.name, reason=None, args=call.arguments
         ),
+        call_id=call.call_id,
     )
 
 

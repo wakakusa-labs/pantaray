@@ -25,8 +25,8 @@ from pantaray_agents.local_runtime.chat.work_list import (
     answered_after_suggestion,
     read_attachment_holder,
     read_latest_run_process,
+    read_relayed_starts,
     read_submitted_message,
-    read_task_started_from,
 )
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
@@ -120,23 +120,25 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
 
     async def start(args: dict[str, JSONValue], key: str) -> ReactToolResult:
         relay = _strings(args["relay"])
-        # The same words already started a task in this turn: a second start
-        # would run the same work twice.
-        started = read_task_started_from(
+        # Every message relayed here already started a task in this turn: a
+        # second start would run the same request twice. A start that brings
+        # a message of its own is another request, whatever context it shares.
+        starts = read_relayed_starts(
             user_id=plan.user_id,
             patterns=[
                 chat_turn_message_id(plan.key, f"{tool}/*")
                 for tool in ("start_action", "accept_suggestion")
             ],
-            item_ids=relay,
             besides=key,
         )
-        if started is not None:
+        if relay and set(relay) <= set().union(*starts.values()):
+            started = sorted(a for a, ids in starts.items() if ids & set(relay))
             return _refused(
                 "start_action",
                 "ALREADY_STARTED",
-                f"Not done: those messages already started your task {started} "
-                "in this turn. To add to it, call send_to_action for it.",
+                f"Not done: those messages already started your task "
+                f"{', '.join(started)} in this turn. To add to it, call "
+                "send_to_action for it.",
             )
         return _submit(
             plan, key, "start_action", NewActionTarget(), relay, _note(args["note"])

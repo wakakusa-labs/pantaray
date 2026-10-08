@@ -588,7 +588,8 @@ async def test_one_yes_starts_one_task_in_a_turn(db_path: Path) -> None:
     # The model then starts the same request as a task of its own.
     again = await turn("start_action", relay=[yes], note="送付メールを作る")
     other = _say_with("m-2", "あと請求書も", ())
-    separate = await turn("start_action", relay=[other], note=None)
+    # Another request that relays the same context with words of its own.
+    separate = await turn("start_action", relay=[yes, other], note=None)
     # A later turn that relays the same words decides for itself.
     later = await _turn("a2")("start_action", relay=[yes], note=None)
 

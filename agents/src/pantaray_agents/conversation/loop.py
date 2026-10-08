@@ -160,7 +160,8 @@ class ConversationRun[T]:
     ``window`` is where the last run left it (``RecordedTurn.window``), and
     ``usage`` reads the run's usage totals, which each send's difference
     calibrates the budget with. A ``ContextCapacityExceeded`` carries the
-    boundary the rebuild reached, which stays moved.
+    boundary the rebuild reached, which stays moved. A boundary a send moved
+    and no turn answered is not reported: no stored turn stands behind it.
     """
 
     prompt: str

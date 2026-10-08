@@ -9,9 +9,10 @@ latest run of results is never omitted, and neither are the head, the system
 instruction and the tools: when what is left still reaches the budget, the run
 cannot go on (``ContextCapacityExceeded``).
 
-The images the window shows have a cap of their own, ``MAX_WINDOW_IMAGE_BYTES``:
-the token budget leaves media out of its measure, so before it runs the
-boundary moves past the oldest runs of results until the images left fit.
+The images the window shows have caps of their own, ``MAX_WINDOW_IMAGE_BYTES``
+and ``MAX_WINDOW_IMAGES``: the token budget leaves media out of its measure, so
+before it runs the boundary moves past the oldest runs of results until the
+images left fit both.
 """
 
 from __future__ import annotations
@@ -38,6 +39,14 @@ OMITTED_OUTPUT_MARK = "…"
 # 21.3 MiB encoded and leaves the text its room. OpenAI and the ChatGPT route
 # take up to 512 MB a request, so this one cap holds for every provider.
 MAX_WINDOW_IMAGE_BYTES: Final[int] = 16 * 1024 * 1024
+# The images one request may show. Above 20, Anthropic refuses every image
+# larger than 2000 px a side, which most screenshots are. It also keeps drawn
+# PDF pages (about 1.74 MP each, 35 MP for 20) well under the 64 MP of decoded
+# pixels the OpenAI route's media projection accepts in one request.
+# Design limit: 20 Retina screenshots (about 5.6 MP each) still pass 64 MP, and
+# the window cannot see dimensions; record them when the shared loop logs a
+# real media_references_too_large or decoded-pixel rejection.
+MAX_WINDOW_IMAGES: Final[int] = 20
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +82,14 @@ class WindowState:
 
         omit_before = resolve_omission(
             history,
-            omit_before=self.omit_before,
-            byte_budget=MAX_WINDOW_IMAGE_BYTES,
-            measure=_image_bytes,
+            omit_before=resolve_omission(
+                history,
+                omit_before=self.omit_before,
+                budget=MAX_WINDOW_IMAGE_BYTES,
+                measure=_image_bytes,
+            ),
+            budget=MAX_WINDOW_IMAGES,
+            measure=_image_count,
         )
         fitted = self.budget.fit(
             lay,
@@ -83,7 +97,7 @@ class WindowState:
             resolve_boundary=lambda byte_budget: resolve_omission(
                 history,
                 omit_before=omit_before,
-                byte_budget=byte_budget,
+                budget=byte_budget,
                 measure=_item_bytes,
             ),
         )
@@ -187,11 +201,11 @@ def resolve_omission(
     history: Sequence[ConversationEntry],
     *,
     omit_before: int,
-    byte_budget: int,
+    budget: int,
     measure: Callable[[LlmTurnItem], int],
 ) -> int:
     """The boundary past the oldest runs of results that brings the history
-    within ``byte_budget``, never into the latest run and never back.
+    within ``budget`` by ``measure``, never into the latest run and never back.
 
     ``measure`` sizes an item as shown. What is left may still exceed the
     budget; ``ContextBudget.fit`` checks the text, and a provider refuses images
@@ -204,7 +218,7 @@ def resolve_omission(
     )
     boundary = omit_before
     for run in _result_runs(history)[:-1]:
-        if remaining <= byte_budget:
+        if remaining <= budget:
             break
         for index in run:
             if index >= boundary:
@@ -241,17 +255,22 @@ def _item_bytes(item: LlmTurnItem) -> int:
 
 
 def _image_bytes(item: LlmTurnItem) -> int:
+    return sum(image.image.byte_size for image in _images(item))
+
+
+def _image_count(item: LlmTurnItem) -> int:
+    return len(_images(item))
+
+
+def _images(item: LlmTurnItem) -> list[LlmInputImageBlock]:
     if isinstance(item, LlmTurnAssistantItem):
-        return 0
-    return sum(
-        block.image.byte_size
-        for block in item.content
-        if isinstance(block, LlmInputImageBlock)
-    )
+        return []
+    return [block for block in item.content if isinstance(block, LlmInputImageBlock)]
 
 
 __all__ = [
     "MAX_WINDOW_IMAGE_BYTES",
+    "MAX_WINDOW_IMAGES",
     "OMITTED_OUTPUT_MARK",
     "ConversationEntry",
     "LaidOutWindow",

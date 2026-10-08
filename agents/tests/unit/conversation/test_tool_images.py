@@ -25,6 +25,7 @@ from pantaray_agents.conversation.loop import (
 from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.conversation.window import (
     MAX_WINDOW_IMAGE_BYTES,
+    MAX_WINDOW_IMAGES,
     WindowState,
     lay_out,
 )
@@ -202,19 +203,23 @@ async def test_an_image_past_the_window_boundary_is_neither_shown_nor_sent(
     assert (second.images, second.media_refs) == ((), ())
 
 
-def _looked(call_id: str, byte_size: int) -> list[ConversationEntry]:
-    """One turn that read an image of ``byte_size`` bytes."""
+def _looked(call_id: str, byte_size: int, pages: int = 1) -> list[ConversationEntry]:
+    """One turn whose answer showed ``pages`` images of ``byte_size`` bytes."""
 
-    image = LlmInputImageBlock(
-        type="input_image",
-        image=LlmImageDescriptor(
-            blob_ref=f"blob-{call_id}",
-            mime_type="image/png",
-            byte_size=byte_size,
-            sha256="0" * 64,
-            application_ref=f"tool_attachment:{call_id}",
-        ),
-    )
+    images = [
+        LlmInputImageBlock(
+            type="input_image",
+            image=LlmImageDescriptor(
+                blob_ref=f"blob-{call_id}-{page}",
+                mime_type="image/png",
+                byte_size=byte_size,
+                sha256="0" * 64,
+                application_ref=f"tool_attachment:{call_id}"
+                + ("" if page == 0 else f"-{page}"),
+            ),
+        )
+        for page in range(pages)
+    ]
     return [
         ConversationEntry(
             LlmTurnAssistantItem(
@@ -228,7 +233,7 @@ def _looked(call_id: str, byte_size: int) -> list[ConversationEntry]:
                 call_id=call_id,
                 name="read",
                 output="ok",
-                content=[image],
+                content=images,
             )
         ),
     ]
@@ -288,3 +293,25 @@ def test_the_oldest_images_drop_once_the_window_shows_more_than_the_cap() -> Non
     state, refs = _fit_images(history, state)
     # The latest run stays whatever it weighs; everything before it goes.
     assert (state.omit_before, refs) == (7, ["tool_attachment:c4"])
+
+
+def test_the_oldest_images_drop_once_the_window_shows_more_than_twenty() -> None:
+    pages = MAX_WINDOW_IMAGES * 2 // 5  # eight drawn pages a call
+    history = [
+        *_looked("c1", 300_000, pages),
+        *_looked("c2", 300_000, pages),
+        *_looked("c3", 300_000, pages),
+    ]
+    state = WindowState(
+        budget=ContextBudget(
+            window_tokens=1_000_000, baseline=None, reset_pending=False
+        ),
+        omit_before=0,
+    )
+
+    state, refs = _fit_images(history, state)
+
+    # 24 pages in 7 MiB: the bytes fit, the count does not.
+    assert state.omit_before == 2
+    assert len(refs) == 2 * pages
+    assert all(not ref.startswith("tool_attachment:c1") for ref in refs)

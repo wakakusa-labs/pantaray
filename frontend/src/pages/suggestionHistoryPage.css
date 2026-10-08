@@ -21,11 +21,6 @@
   gap: 10px;
 }
 
-.history-sync {
-  font-size: var(--text-meta-size);
-  color: var(--fog-text-3);
-}
-
 .history-search {
   position: relative;
   flex: 1;

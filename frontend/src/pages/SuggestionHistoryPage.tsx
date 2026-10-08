@@ -343,7 +343,6 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
             onClick={() => void handleNewConversation()}
           />
         </div>
-        {isRealtimeSyncing ? <div className="history-sync">{t('history.syncing')}</div> : null}
         {notice ? (
           <div className="history-error" role="alert">
             {notice}

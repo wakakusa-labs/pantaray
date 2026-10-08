@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
+import logging
 import os
 import sqlite3
 from collections.abc import Callable, Iterator, Sequence
@@ -23,7 +25,7 @@ from pantaray_agents.agents.chat_agent.turn import (
     run_chat_turn,
 )
 from pantaray_agents.agents.core.mixins.llm_usage import TokenSink
-from pantaray_agents.conversation.loop import ConversationRequest
+from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationRequest
 from pantaray_agents.local_runtime.chat.store import (
     append_chat_item,
     chat_turn_end_message_id,
@@ -60,7 +62,11 @@ from pantaray_llm.contracts.conversation import (
 )
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
-from pantaray_llm.errors import PROXY_UPSTREAM_UNAVAILABLE, LlmProxyExecutionError
+from pantaray_llm.errors import (
+    PROXY_LLM_TOOL_CALL_INVALID,
+    PROXY_UPSTREAM_UNAVAILABLE,
+    LlmProxyExecutionError,
+)
 
 USER = "user-1"
 _CALL_IDS = itertools.count()
@@ -231,6 +237,82 @@ async def test_text_beside_calls_is_shown_before_the_calls_run() -> None:
 
     assert shown == [["Check my calendar", "Checking."]]
     assert [getattr(i.content, "text", None) for i in _items()][-1] == "Free at 3."
+
+
+async def test_a_reply_that_repeats_what_was_shown_is_sent_back_once() -> None:
+    _say("m-1", "Check my calendar")
+    look = LlmToolCall(call_id="c", name="look", arguments={})
+    model = _Model(
+        [
+            _turn(look, text="Checking your calendar."),
+            _reply_call("Checking your calendar."),
+            _reply_call("Free at 3."),
+        ]
+    )
+
+    await _run(model, tools=(_tool("look", lambda: None),))
+
+    # The user reads the line once, then the answer.
+    assert [getattr(i.content, "text", None) for i in _items()] == [
+        "Check my calendar",
+        "Checking your calendar.",
+        "Free at 3.",
+    ]
+    assert "already sees these words" in str(model.requests[2].conversation[-1])
+
+    # Beside a reply alone nothing runs: the reply is all the user reads.
+    _say("m-3", "Thanks")
+    beside = _reply_call("You're welcome.")
+    beside.response.messages.append(
+        LlmCommentary(phase="commentary", source_message_id="m", text="You're welcome.")
+    )
+    await _run(_Model([beside]))
+    assert [getattr(i.content, "text", None) for i in _items()][-2:] == [
+        "Thanks",
+        "You're welcome.",
+    ]
+
+    _say("m-2", "And tomorrow?")
+    again = LlmToolCall(call_id="d", name="look", arguments={})
+    stubborn = _Model(
+        [
+            _turn(again, text="Looking."),
+            _reply_call("Looking."),
+            _reply_call("Looking."),
+        ]
+    )
+    await _run(stubborn, tools=(_tool("look", lambda: None),))
+    # Sent back once only: a turn never fails over it.
+    assert getattr(_items()[-1].content, "text", None) == "Looking."
+    assert plan_chat_turn(user_id=USER, retry_of=None) is None
+
+
+async def test_a_turn_whose_every_output_is_refused_logs_what_broke(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _say("m-1", "Hi")
+    refused = LlmProxyExecutionError(
+        error_code=PROXY_LLM_TOOL_CALL_INVALID,
+        error_message="The output was a final answer in plain text: Hello there.",
+        retryable=False,
+        recovery="repair_next_turn",
+        tool_call_violation_reason="invalid_response",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _run(_Model([refused] * REPAIR_MAX_ATTEMPTS))
+
+    failure = _items()[-1].content
+    assert isinstance(failure, TurnFailureContent) and failure.reason == "llm_request"
+    (logged,) = [
+        json.loads(r.getMessage())
+        for r in caplog.records
+        if "CHAT_TURN_FAILED" in r.getMessage()
+    ]
+    assert logged["error_class"] == "ConversationOutputInvalid"
+    assert logged["violations"] == ["invalid_response"] * REPAIR_MAX_ATTEMPTS
+    # What was refused can quote the model's output: never logged.
+    assert "Hello there" not in caplog.text
 
 
 async def test_an_answer_in_text_alone_is_sent_back_once() -> None:

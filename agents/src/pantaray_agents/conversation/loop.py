@@ -231,6 +231,11 @@ class _Run[T]:
             if ending
             else ("no tool call runs", "Answer without one now.")
         )
+        # An answer written as plain text is refused like any invalid output;
+        # the repair says which call carries it instead.
+        self.repair_ask = "Return commentary and/or tool calls with valid arguments" + (
+            f"; an answer goes through {ending}." if ending else "."
+        )
         self.last_not_run = (
             f"Not run: this call came on the last turn, where {self.what_counts}. "
             + end_now
@@ -312,7 +317,7 @@ class _Run[T]:
             # never goes back, its prefix holding the notice.
             notices = ([last] if final else []) + [
                 f"The previous output could not be processed because: {reason}\n"
-                "Return commentary and/or tool calls with valid arguments."
+                + self.repair_ask
                 for reason in reasons[-1:]
             ]
             identity, connection = read_provider_turn_target(

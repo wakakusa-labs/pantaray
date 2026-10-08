@@ -136,6 +136,10 @@ CHAT_SYSTEM_INSTRUCTION: Final[str] = (
 _NUDGE: Final[str] = (
     "Your answer has not reached the user: only what you send with reply does."
 )
+_REPEATED: Final[str] = (
+    "Not sent: the user already sees these words, which you wrote beside a call "
+    "earlier in this turn. Send with reply only what they have not read yet."
+)
 # Model calls in one turn. A chat turn answers and hands long work to an Action,
 # so a turn that needs more has gone wrong and ends as a `step_limit` failure.
 CHAT_TURN_MAX_MODEL_CALLS: Final[int] = 8
@@ -281,7 +285,15 @@ async def run_chat_turn(
             component="agents.chat_agent",
             exception=exc if reason == "internal" else None,
             reason=reason,
+            error_class=type(exc).__name__,
             error_code=getattr(exc, "error_code", None),
+            # What each refused output broke, without the details, which may
+            # quote the model's output.
+            violations=(
+                [str(cause).partition(":")[0] for cause in exc.args]
+                if isinstance(exc, ConversationOutputInvalid)
+                else None
+            ),
             user_id_fp=fingerprint_text(plan.user_id),
         )
         await turn.end(TurnFailureContent(kind="turn_failure", reason=reason))
@@ -297,6 +309,8 @@ class _ChatTurn:
     seen: int = 0  # the newest item read so far
     checked: dict[str, AssistantMessageContent | str] = field(default_factory=dict)
     nudged: bool = False
+    said: set[str] = field(default_factory=set)  # shown beside calls this turn
+    repeated: bool = False
     route: EffectiveRouteIdentity | None = None  # what the turn started on
     # The user's images the turn has shown, by the ref the items carry.
     user_images: dict[str, LlmFileInput] = field(default_factory=dict)
@@ -411,9 +425,11 @@ class _ChatTurn:
         # A reply that came back after the route changed runs none of its calls.
         self.require_route()
         response = turn.reply.response
-        if response.calls:
-            # Said beside the calls, so the user reads it before they run.
+        # Said beside calls that run, so the user reads it before they do.
+        # Beside a reply alone nothing runs, and the reply says it.
+        if any(call.name != REPLY_TOOL_NAME for call in response.calls):
             for index, message in enumerate(response.messages):
+                self.said.add(message.text.strip())
                 await self.append(
                     chat_turn_message_id(
                         self.plan.item_key, f"say/{turn.entry.turn_id}/{index}"
@@ -436,7 +452,13 @@ class _ChatTurn:
     def decide(self, idle: IdleTurn) -> Finish[AssistantMessageContent] | Continue:
         if idle.ending_call is not None:
             verdict = self.checked[idle.ending_call.call_id]
-            return Continue(verdict) if isinstance(verdict, str) else Finish(verdict)
+            if isinstance(verdict, str):
+                return Continue(verdict)
+            if verdict.text in self.said and not self.repeated and not idle.final:
+                # Appended, it would show the user the same words twice.
+                self.repeated = True
+                return Continue(_REPEATED)
+            return Finish(verdict)
         response = idle.response
         if response.calls:
             # None of them ran, and what was said beside them is already shown.

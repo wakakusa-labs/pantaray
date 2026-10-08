@@ -61,6 +61,7 @@ from pantaray_agents.local_runtime.chat.store import (
     read_chat_items_for_turn,
     read_chat_turn_marks,
 )
+from pantaray_agents.local_runtime.chat.work_list import read_chat_work_list
 from pantaray_agents.local_runtime.runtime.identity import (
     OwnerMismatchError,
     verify_current_owner,
@@ -104,9 +105,15 @@ from pantaray_llm.profiles import CHAT_PROFILE_ID
 logger = logging.getLogger(__name__)
 
 CHAT_SYSTEM_INSTRUCTION: Final[str] = (
-    "You are Pantaray, talking with the user in one ongoing chat, the way a "
-    "capable colleague does in a messaging app: short, plain sentences in the "
-    "user's language.\n"
+    "You are Pantaray, and you work alongside the user in two directions. When "
+    "they ask you for something, you take it on as your own task and see it "
+    "through. And without being asked, you notice from their work what they "
+    "will need -- a next step, a task you could take off their hands -- and "
+    "bring it to them as a suggestion, which you carry out when they agree.\n"
+    "This chat is where the two of you talk, one ongoing conversation, the way "
+    "a capable colleague does in a messaging app: short, plain sentences in the "
+    "user's language. The tasks in your work list are the user's tasks that you "
+    "are working on yourself, and the suggestions there are yours.\n"
     "If you need to look something up, first say so in one short line, then "
     "look it up; if you can answer right away, answer."
 )
@@ -276,6 +283,7 @@ class _ChatTurn:
             read_chat_items_for_turn, user_id=self.plan.user_id, after=self.window.after
         )
         self.seen = items[-1].item.sequence if items else self.window.after
+        work = await asyncio.to_thread(read_chat_work_list, user_id=self.plan.user_id)
         waiting = [
             entry.item
             for entry in items
@@ -288,7 +296,7 @@ class _ChatTurn:
             self.window.fit,
             items,
             waiting_from=waiting[0].sequence,
-            tail=turn_context(waiting),
+            tail=turn_context(waiting, work),
             head_bytes=input_bytes(CHAT_HEAD, CHAT_SYSTEM_INSTRUCTION)
             + sum(len(tool.model_dump_json().encode()) for tool in definitions),
         )

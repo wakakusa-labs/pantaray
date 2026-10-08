@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.chat.store import (
     read_chat_items_for_turn,
     read_chat_turn_marks,
 )
+from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
@@ -44,6 +45,7 @@ from pantaray_llm.contracts.conversation import (
 )
 
 USER = "user-1"
+_NO_WORK = ChatWorkList(tasks=(), suggestions=())
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +101,7 @@ def _fit(window: ChatWindow, waiting: list[ChatItem]) -> tuple[ChatWindow, list[
     fitted, entries = window.fit(
         items,
         waiting_from=waiting[0].sequence,
-        tail=turn_context(waiting),
+        tail=turn_context(waiting, _NO_WORK),
         head_bytes=2_000,
     )
     return fitted, [_shown(entry) for entry in entries]
@@ -167,7 +169,7 @@ def test_a_stored_reply_goes_back_as_the_call_that_sent_it() -> None:
     LlmActionTurnRequest(  # every call shown is answered
         mode="action_turn",
         tools=[REPLY_TOOL],
-        conversation=[said, call, result, aside, turn_context([asked])],
+        conversation=[said, call, result, aside, turn_context([asked], _NO_WORK)],
     )
 
 

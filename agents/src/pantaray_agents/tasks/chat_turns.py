@@ -17,6 +17,7 @@ from typing import Final
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.agents.chat_agent.context import ChatWindow
+from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import (
     ChatModel,
     ChatTurnInterrupted,
@@ -120,7 +121,7 @@ async def _run(plan: ChatTurnPlan) -> ChatWindow | None:
             return await run_chat_turn(
                 plan,
                 send=ChatModel(client=deps.get_llm_client()).send,
-                tools=(),
+                tools=chat_tools(plan),
                 window=_WINDOWS.get(plan.user_id) or ChatWindow.fresh(),
             )
     except ChatTurnInterrupted:

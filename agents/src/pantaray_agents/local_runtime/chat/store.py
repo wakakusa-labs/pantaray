@@ -248,6 +248,22 @@ def read_unavailable_reference(
     return None
 
 
+def read_user_message(*, user_id: str, item_id: str) -> UserMessageContent | None:
+    """The user's message ``item_id``, or None when it is not one of theirs."""
+
+    with _connection() as connection:
+        row = connection.execute(
+            f"SELECT {_ITEM_COLUMNS} FROM chat_items "
+            "WHERE user_id = ? AND item_id = ? AND kind = 'user_message'",
+            (user_id, item_id),
+        ).fetchone()
+    if row is None:
+        return None
+    content = _item(row).content
+    assert isinstance(content, UserMessageContent)
+    return content
+
+
 def read_latest_chat_sequence(*, user_id: str) -> int:
     """The newest item's sequence, or 0 for an empty chat."""
 
@@ -389,4 +405,5 @@ __all__ = [
     "read_chat_turn_marks",
     "read_latest_chat_sequence",
     "read_unavailable_reference",
+    "read_user_message",
 ]

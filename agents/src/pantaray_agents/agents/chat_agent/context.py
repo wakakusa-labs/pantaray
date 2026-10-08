@@ -27,6 +27,8 @@ from pantaray_agents.conversation.window import (
     lay_out,
 )
 from pantaray_agents.local_runtime.chat.store import TurnChatItem
+from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
+from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.schema.chat import (
     ActionEventContent,
     AssistantMessageContent,
@@ -41,6 +43,14 @@ from pantaray_llm.contracts.conversation import (
     LlmTurnUserItem,
 )
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
+
+_TASK_STATES: dict[ActionStatus, str] = {
+    "queued": "starting",
+    "processing": "in progress",
+    "success": "done",
+    "error": "failed",
+    "canceled": "stopped",
+}
 
 CHAT_HEAD = (
     "Your chat with the user follows, oldest first. Every item but yours "
@@ -65,9 +75,26 @@ def render_item(entry: TurnChatItem) -> list[ConversationEntry]:
     return [ConversationEntry(_user_item(f"{_header(item)}\n{_body(content)}"))]
 
 
-def turn_context(waiting: Sequence[ChatItem]) -> LlmTurnUserItem:
+def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUserItem:
+    """The work list and the items waiting for this turn, behind the chat."""
+
+    tasks = [
+        f"- {task.action_id} ({_TASK_STATES[task.status]}): {task.title}"
+        + ("" if task.latest is None else f" / {task.latest}")
+        for task in work.tasks
+    ]
+    suggestions = [
+        f"- {suggestion.suggestion_id}: {suggestion.title}"
+        for suggestion in work.suggestions
+    ]
     ids = ", ".join(item.item_id for item in waiting)
-    return _user_item(f"{TURN_CONTEXT_HEADING}Waiting for your reply: {ids}.")
+    return _user_item(
+        f"{TURN_CONTEXT_HEADING}"
+        + "\n".join(["Your tasks, newest first:", *(tasks or ["(none)"])])
+        + "\n"
+        + "\n".join(["Your open suggestions:", *(suggestions or ["(none)"])])
+        + f"\nWaiting for your reply: {ids}."
+    )
 
 
 # Design limit: nothing past the boundary is summarized. When answers start to
@@ -155,9 +182,9 @@ def _body(
     content: UserMessageContent | SuggestionEventContent | ActionEventContent,
 ) -> str:
     if isinstance(content, SuggestionEventContent):
-        return f"A suggestion arrived: {content.suggestion_id}."
+        return f"You made a suggestion: {content.suggestion_id}."
     if isinstance(content, ActionEventContent):
-        event = f"Action {content.action_id}: {content.event}."
+        event = f"Your task {content.action_id}: {content.event}."
         excerpt = content.final_answer_excerpt
         return event if excerpt is None else f"{event}\n{excerpt}"
     lines = []

@@ -18,6 +18,7 @@ from pantaray_agents.local_runtime.chat.store import append_chat_item
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
     read_chat_work_list,
+    search_tasks,
 )
 from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import (
     ActionJobRuntimeRepository,
@@ -48,6 +49,7 @@ from pantaray_agents.tools.contract import (
     ReactToolRegistry,
     ToolCallEnvelope,
 )
+from pantaray_agents.tools.memory.sql import execute_memory_sql
 
 USER = "user-1"
 NOW = "2026-10-08T09:00:00Z"
@@ -300,30 +302,91 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     assert read_chat_work_list(user_id=USER).suggestions == ()
 
 
-async def test_the_work_list_shows_only_the_tasks_the_chat_works_on(
-    db_path: Path,
-) -> None:
-    submit_action_message(
+def _overlay_task(message_id: str, text: str) -> str:
+    return submit_action_message(
         SubmitActionMessageCommand(
             user_id=USER,
             target=NewActionTarget(),
-            message=ActionUserMessageInput(message_id="overlay-1", content="Not mine"),
+            message=ActionUserMessageInput(message_id=message_id, content=text),
         )
-    )
+    ).action_id
+
+
+def _finish(db_path: Path, action_id: str, updated_at: str, answer: str = "") -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE agent_actions SET status = 'success', updated_at = ?, "
+            "final_output = ? WHERE action_id = ?",
+            (updated_at, answer, action_id),
+        )
+
+
+async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
+    db_path: Path,
+) -> None:
+    for n in range(12):
+        _finish(
+            db_path,
+            _overlay_task(f"old-{n}", f"Finished {n}"),
+            f"2026-10-01T00:00:{n:02d}Z",
+        )
+    waiting = _overlay_task("overlay-1", "Book the room\nfor Friday")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE processes SET status = 'paused' WHERE action_id = ?", (waiting,)
+        )
     started = await _turn("a0")(
-        "start_action",
-        message="Draft the Q3 report\nwith charts",
-        attachments_from=[],
+        "start_action", message="Draft the Q3 report", attachments_from=[]
     )
 
     work = read_chat_work_list(user_id=USER)
     shown = turn_context([], work).model_dump_json()
 
     assert isinstance(started, dict)
-    assert [(t.action_id, t.title, t.status) for t in work.tasks] == [
-        (started["action_id"], "Draft the Q3 report", "queued")
+    # Wherever a task was started, it is Pantaray's own work.
+    in_hand = [(t.title, t.awaiting_approval) for t in work.tasks[:2]]
+    assert sorted(in_hand) == [("Book the room", True), ("Draft the Q3 report", False)]
+    assert [t.title for t in work.tasks[2:]] == [
+        f"Finished {n}" for n in range(11, 3, -1)
     ]
-    assert started["action_id"] in shown and "Not mine" not in shown
+    assert (len(work.tasks), work.more_tasks) == (10, 4)
+    assert "waiting for approval" in shown and "4 older tasks not listed here" in shown
+
+
+async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> None:
+    quote = _overlay_task("old-quote", "A社の見積書を作って")
+    _finish(
+        db_path, quote, "2026-09-30T09:00:00Z", "見積書を作成しました。合計 200 万円。"
+    )
+    other = _overlay_task("old-other", "Book a room")
+    _finish(db_path, other, "2026-10-05T09:00:00Z", "Booked room 3.")
+
+    by_words = search_tasks(
+        user_id=USER, query="見積書", since=None, until=None, limit=5
+    )
+    by_time = search_tasks(
+        user_id=USER, query=None, since="2026-10-01T00:00:00Z", until=None, limit=5
+    )
+    literal = search_tasks(user_id=USER, query="100%", since=None, until=None, limit=5)
+
+    assert [(t.action_id, t.title, t.status) for t in by_words] == [
+        (quote, "A社の見積書を作って", "success")
+    ]
+    assert by_words[0].latest == "見積書を作成しました。合計 200 万円。"
+    assert [t.action_id for t in by_time] == [other]
+    assert literal == ()
+    # The whole answer of a found task, as its description says to read it.
+    answer = execute_memory_sql(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        sql=f"SELECT final_output FROM agent_actions WHERE action_id = '{quote}'",
+        limit=1,
+    )
+    assert answer.data is not None
+    assert answer.data["rows"] == [
+        {"final_output": "見積書を作成しました。合計 200 万円。"}
+    ]
 
 
 async def test_a_rerun_that_skips_a_refused_call_finds_the_task(db_path: Path) -> None:

@@ -1,18 +1,19 @@
-"""The work a chat turn is shown: its own tasks and its open suggestions.
+"""The work a chat turn is shown: its tasks and its open suggestions.
 
-The tasks are the Actions the chat started, sent a message to or took up from
-a suggestion, found by the `chat-turn/` key every such message is submitted
-under. The suggestions are the action offers the user has not reacted to.
-Both lists are bounded and newest first; the ids they show are what a turn
-routes to, after the items that named them have left its window.
+Pantaray is one: every task the user has is its own work, wherever it was
+started -- the chat, the Overlay, a shortcut or a suggestion. The list shows
+every task still in hand and the latest finished ones, newest first; older
+ones are found by searching. The suggestions are the action offers the user
+has not reacted to. The ids shown are what a turn routes to, after the items
+that named them have left its window.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
@@ -26,6 +27,8 @@ from pantaray_agents.tasks.action_user_message import (
     render_action_user_request_text,
 )
 
+# The whole list, however many tasks the user has: those in hand first, then the
+# latest finished. The rest are found with search_tasks.
 CHAT_WORK_LIST_MAX_TASKS: Final[int] = 10
 CHAT_WORK_LIST_MAX_SUGGESTIONS: Final[int] = 5
 # One line each: enough to tell two tasks apart, short enough for every turn.
@@ -36,8 +39,10 @@ _LINE_MAX_CHARS: Final[int] = 120
 class ChatTask:
     action_id: str
     status: ActionStatus
+    awaiting_approval: bool  # running, and paused on the user's approval
     title: str
     latest: str | None  # the first line of its last answer
+    updated_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,30 +54,43 @@ class ChatSuggestion:
 @dataclass(frozen=True, slots=True)
 class ChatWorkList:
     tasks: tuple[ChatTask, ...]
+    more_tasks: int  # past the cap, for search_tasks to find
     suggestions: tuple[ChatSuggestion, ...]
+
+
+_IN_HAND = "actions.status IN ('queued', 'processing')"
+_TASKS_SQL: Final[str] = """
+    SELECT actions.action_id, actions.status,
+           EXISTS (
+               SELECT 1 FROM processes
+               WHERE processes.user_id = actions.user_id
+                 AND processes.action_id = actions.action_id
+                 AND processes.status = 'paused'
+           ),
+           actions.final_output, first.user_message_json, actions.updated_at
+    FROM agent_actions AS actions
+    JOIN agent_action_steps AS first
+      ON first.user_id = actions.user_id
+     AND first.user_message_id = actions.initial_user_message_id
+    WHERE actions.user_id = :user_id AND {where}
+    ORDER BY {order} actions.updated_at DESC, actions.action_id
+    LIMIT :limit
+"""
 
 
 def read_chat_work_list(*, user_id: str) -> ChatWorkList:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
-        task_rows = connection.execute(
-            """
-            SELECT actions.action_id, actions.status, actions.final_output,
-                   first.user_message_json
-            FROM agent_actions AS actions
-            JOIN agent_action_steps AS first
-              ON first.user_id = actions.user_id
-             AND first.user_message_id = actions.initial_user_message_id
-            WHERE actions.user_id = ? AND actions.action_id IN (
-                SELECT action_id FROM agent_action_steps
-                WHERE user_id = ? AND user_message_id GLOB 'chat-turn/*'
+        tasks = _tasks(
+            connection.execute(
+                _TASKS_SQL.format(where="1", order=f"{_IN_HAND} DESC,"),
+                {"user_id": user_id, "limit": CHAT_WORK_LIST_MAX_TASKS},
             )
-            ORDER BY actions.updated_at DESC, actions.action_id
-            LIMIT ?
-            """,
-            (user_id, user_id, CHAT_WORK_LIST_MAX_TASKS),
-        ).fetchall()
+        )
+        (total,) = connection.execute(
+            "SELECT COUNT(*) FROM agent_actions WHERE user_id = ?", (user_id,)
+        ).fetchone()
         suggestion_rows = connection.execute(
             """
             SELECT suggestion_id, COALESCE(suggestion_summary, answer)
@@ -85,20 +103,8 @@ def read_chat_work_list(*, user_id: str) -> ChatWorkList:
             (user_id, CHAT_WORK_LIST_MAX_SUGGESTIONS),
         ).fetchall()
     return ChatWorkList(
-        tasks=tuple(
-            ChatTask(
-                action_id=str(action_id),
-                status=status,
-                title=_line(
-                    render_action_user_request_text(
-                        parse_action_user_message(str(message_json))
-                    )
-                )
-                or "(untitled)",
-                latest=_line(str(final_output)),
-            )
-            for action_id, status, final_output, message_json in task_rows
-        ),
+        tasks=tasks,
+        more_tasks=int(total) - len(tasks),
         suggestions=tuple(
             ChatSuggestion(
                 suggestion_id=str(suggestion_id),
@@ -107,6 +113,69 @@ def read_chat_work_list(*, user_id: str) -> ChatWorkList:
             for suggestion_id, text in suggestion_rows
         ),
     )
+
+
+def search_tasks(
+    *,
+    user_id: str,
+    query: str | None,
+    since: str | None,
+    until: str | None,
+    limit: int,
+) -> tuple[ChatTask, ...]:
+    """Every task of the user's whose request or answer holds ``query``, last
+    updated in [``since``, ``until``), newest first."""
+
+    # Design limit: a scan with LIKE over every task; move to the FTS index when
+    # a user's tasks run into the tens of thousands.
+    pattern = None if query is None else f"%{_escape_like(query)}%"
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        return _tasks(
+            connection.execute(
+                _TASKS_SQL.format(
+                    where=(
+                        "(:pattern IS NULL OR first.user_message_json LIKE :pattern "
+                        "ESCAPE '\\' OR actions.final_output LIKE :pattern "
+                        "ESCAPE '\\') "
+                        "AND (:since IS NULL OR actions.updated_at >= :since) "
+                        "AND (:until IS NULL OR actions.updated_at < :until)"
+                    ),
+                    order="",
+                ),
+                {
+                    "user_id": user_id,
+                    "pattern": pattern,
+                    "since": since,
+                    "until": until,
+                    "limit": limit,
+                },
+            )
+        )
+
+
+def _tasks(rows: Iterable[Sequence[object]]) -> tuple[ChatTask, ...]:
+    return tuple(
+        ChatTask(
+            action_id=str(action_id),
+            status=cast(ActionStatus, status),
+            awaiting_approval=bool(awaiting_approval),
+            title=_line(
+                render_action_user_request_text(
+                    parse_action_user_message(str(message_json))
+                )
+            )
+            or "(untitled)",
+            latest=_line(str(final_output)),
+            updated_at=str(updated_at),
+        )
+        for action_id, status, awaiting_approval, final_output, message_json, updated_at in rows
+    )
+
+
+def _escape_like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +288,7 @@ __all__ = [
     "read_submitted_message",
     "read_attachment_holder",
     "read_chat_work_list",
+    "search_tasks",
     "read_latest_run_process",
     "read_suggestion_texts",
 ]

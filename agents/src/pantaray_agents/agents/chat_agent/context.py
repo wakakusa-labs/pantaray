@@ -97,8 +97,9 @@ def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUser
     """The work list and the items waiting for this turn, behind the chat."""
 
     tasks = [
-        f"- {task.action_id} ({_TASK_STATES[task.status]}): {task.title}"
-        + ("" if task.latest is None else f" / {task.latest}")
+        f"- {task.action_id} "
+        f"({'waiting for approval' if task.awaiting_approval else _TASK_STATES[task.status]})"
+        f": {task.title}" + ("" if task.latest is None else f" / {task.latest}")
         for task in work.tasks
     ]
     suggestions = [
@@ -108,7 +109,21 @@ def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUser
     ids = ", ".join(item.item_id for item in waiting)
     return _user_item(
         f"{TURN_CONTEXT_HEADING}"
-        + "\n".join(["Your tasks, newest first:", *(tasks or ["(none)"])])
+        + "\n".join(
+            [
+                "Your tasks, wherever they were started: all in hand, then the "
+                "latest finished:",
+                *(tasks or ["(none)"]),
+                *(
+                    [
+                        f"...and {work.more_tasks} older tasks not listed here: "
+                        "search_tasks finds them by words or dates."
+                    ]
+                    if work.more_tasks
+                    else []
+                ),
+            ]
+        )
         + "\n"
         + "\n".join(["Your open suggestions:", *(suggestions or ["(none)"])])
         + f"\nWaiting for your reply: {ids}."

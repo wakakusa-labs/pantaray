@@ -46,7 +46,7 @@ from pantaray_llm.contracts.conversation import (
 )
 
 USER = "user-1"
-_NO_WORK = ChatWorkList(tasks=(), suggestions=())
+_NO_WORK = ChatWorkList(tasks=(), more_tasks=0, suggestions=())
 
 
 @pytest.fixture(autouse=True)

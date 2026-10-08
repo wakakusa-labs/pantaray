@@ -102,12 +102,22 @@ export function useChatItems(): ChatItemsResult {
     });
   }, []);
 
+  // Set once anything newer than the mount-time read of the turn's state has been heard.
+  const turnStateHeardRef = useRef(false);
+
   useEffect(() => {
     const onStatus = window.electron?.orchestration?.onStatus;
     if (!onStatus) return;
     return onStatus((status) => {
+      if (status.status === 'closed' || status.status === 'error') {
+        // A closed session says nothing more about the turn; a failure lands as an item.
+        turnStateHeardRef.current = true;
+        setTurnRunning(false);
+        return;
+      }
       if (status.status !== 'session_started') return;
       // The new session sends the turn's state once at its start; until then nothing is known.
+      turnStateHeardRef.current = true;
       setTurnRunning(false);
       void reload();
     });
@@ -116,16 +126,14 @@ export function useChatItems(): ChatItemsResult {
   useEffect(() => {
     const chat = window.electron?.chat;
     if (!chat) return;
-    // Main sends the state only when it changes; a page loaded mid-turn reads it once, and a
-    // change heard meanwhile is newer than that read.
-    let heard = false;
+    // Main sends the state only when it changes; a page loaded mid-turn reads it once.
     const unsubscribe = chat.onTurnState((state) => {
-      heard = true;
+      turnStateHeardRef.current = true;
       setTurnRunning(state.running);
     });
     void chat.getTurnState().then(
       (state) => {
-        if (!heard && state !== null) setTurnRunning(state.running);
+        if (!turnStateHeardRef.current && state !== null) setTurnRunning(state.running);
       },
       () => undefined
     );

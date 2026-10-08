@@ -493,3 +493,34 @@ it('a turn change heard before the read of the state arrives wins over it', asyn
   await act(async () => answer({ running: true }));
   expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
 });
+
+it('a closed session clears the typing bubble, so a failed turn can be retried', async () => {
+  pages = [{ items: [userMessage(1, '調べておいて')], next_cursor: null }];
+  let answer: (state: { running: boolean }) => void = () => {};
+  getTurnState.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+  );
+  renderPage();
+  await screen.findByText('調べておいて');
+  act(() => publishTurnState({ running: true }));
+  act(() => publishStatus({ status: 'closed' }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+  // The read started at mount answers late with what main knew then.
+  await act(async () => answer({ running: true }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+
+  pages = [
+    {
+      items: [
+        item(2, { kind: 'turn_failure', reason: 'llm_connection' }),
+        userMessage(1, '調べておいて'),
+      ],
+      next_cursor: null,
+    },
+  ];
+  await userEvent.click(screen.getByRole('button', { name: '再読み込み' }));
+  expect(await screen.findByRole('button', { name: 'もう一度' })).toBeInTheDocument();
+});

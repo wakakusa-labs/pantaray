@@ -58,9 +58,6 @@ function hideLastWindow(windows) {
 function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, interactions }) {
   return function createNotificationIpcHandlers(options = {}) {
     const { refreshActionConversation, resumeLiveProcess, resolveOverlayBootstrap } = options;
-    windows.setMainWindowGetter(
-      typeof options.getMainWindow === 'function' ? options.getMainWindow : null
-    );
 
     return {
       onResizeNotificationWindow: (event, payload) => {

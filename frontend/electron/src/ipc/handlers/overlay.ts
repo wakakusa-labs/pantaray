@@ -69,7 +69,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     resumeLiveProcess: ctx.overlay.resumeLiveProcess,
     resolveOverlayBootstrap: ctx.overlay.resolveOverlayBootstrap,
     refreshActionConversation: ctx.actions.refreshActionConversation,
-    getMainWindow: ctx.windows.getMainWindow,
   });
 
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);

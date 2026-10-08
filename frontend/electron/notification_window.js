@@ -19,12 +19,10 @@ const overlayState = new Map(); // id -> { ready, queue, shellMode }
 const overlaySnapshotPayloads = new Map(); // id -> latest overlay:snapshot payload
 const processToSuggestion = new Map(); // processId -> suggestionId
 const actionToOverlayId = new Map(); // actionId -> Overlay id
-const historyOverlayIds = new Set();
 // Overlay ids whose window this app opened for one conversation. Their close
 // control destroys the window instead of hiding it, so a session cannot
 // accumulate invisible conversation renderers.
 const conversationOverlayIds = new Set();
-let getMainWindowForOverlayIsolation = null;
 let getUiLanguage = null;
 let getOverlayPlacements = null;
 let getActionLiveSnapshot = null;
@@ -176,10 +174,8 @@ function clearForOwnerChange() {
   overlaySnapshotPayloads.clear();
   processToSuggestion.clear();
   actionToOverlayId.clear();
-  historyOverlayIds.clear();
   conversationOverlayIds.clear();
   lastOverlayId = null;
-  syncMainWindowFocusableState();
 }
 
 function findOverlayIdByWindow(targetWin) {
@@ -198,21 +194,6 @@ function resolveOverlayIdForSender(sender) {
     if (!win.isDestroyed() && win.webContents === sender) return id;
   }
   return null;
-}
-
-function syncMainWindowFocusableState() {
-  const getMainWindow = getMainWindowForOverlayIsolation;
-  if (typeof getMainWindow !== 'function') return;
-  if (process.platform !== 'darwin') return;
-  const shouldAllowFocus = historyOverlayIds.size === 0;
-  try {
-    const mainWindow = getMainWindow();
-    if (!mainWindow || (typeof mainWindow.isDestroyed === 'function' && mainWindow.isDestroyed()))
-      return;
-    if (typeof mainWindow.setFocusable === 'function') {
-      mainWindow.setFocusable(shouldAllowFocus);
-    }
-  } catch {}
 }
 
 function flushOverlayQueue(id) {
@@ -343,7 +324,6 @@ function resolveOverlayId({ suggestionId, processId, actionId }) {
 function createMappedOverlayWindow(id, options) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
-  if (options.history) historyOverlayIds.add(id);
   if (options.conversation) conversationOverlayIds.add(id);
   const placement = stackPlacement(options.placementKind);
   const win = overlayWindowFactory.createConversationOverlayWindow({
@@ -370,17 +350,12 @@ function createMappedOverlayWindow(id, options) {
       overlayState.delete(id);
       conversationOverlayIds.delete(id);
       cleanupMappingsForSuggestion(id);
-      if (options.history) {
-        historyOverlayIds.delete(id);
-        syncMainWindowFocusableState();
-      }
     },
   });
   overlayWindows.set(id, win);
   overlayWindowSlots.set(win, placement);
   overlayActivationTracker.registerOverlayWindow(win);
   lastOverlayId = id;
-  if (options.history) syncMainWindowFocusableState();
   return win;
 }
 
@@ -389,7 +364,6 @@ function createHistoryOverlayWindow(id) {
   if (!runtime) return null;
   runtime.shellMode = INTERACTIVE_SHELL_MODE;
   return createMappedOverlayWindow(id, {
-    history: true,
     interactive: true,
     placementKind: 'history',
     onReadyToShow: (win) => showInteractiveOverlayWindow(win, { visibleOnAllWorkspaces: true }),
@@ -429,8 +403,6 @@ function getOrCreateHistoryOverlayWindow(id) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
   runtime.shellMode = INTERACTIVE_SHELL_MODE;
-  historyOverlayIds.add(id);
-  syncMainWindowFocusableState();
   const win = overlayWindows.get(id);
   if (win && !win.isDestroyed()) {
     placeHiddenOverlayWindow(win, 'history');
@@ -493,10 +465,6 @@ function hideNotification(id) {
     try {
       win.hide();
     } catch {}
-    if (historyOverlayIds.has(id)) {
-      historyOverlayIds.delete(id);
-      syncMainWindowFocusableState();
-    }
   }
 }
 
@@ -563,9 +531,6 @@ const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
     getOverlay: (id) => overlayWindows.get(id) || null,
     hide: hideNotification,
     normalizeId,
-    setMainWindowGetter: (getter) => {
-      getMainWindowForOverlayIsolation = getter;
-    },
     setSnapshot: setOverlaySnapshot,
     showHistory: getOrCreateHistoryOverlayWindow,
   },

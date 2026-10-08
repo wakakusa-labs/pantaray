@@ -49,7 +49,10 @@ type ChatFiles = Annotated[
 type ChatActionEventKind = Literal[
     "completed", "failed", "canceled", "approval_pending"
 ]
-type ChatTurnFailureReason = Literal["llm_connection", "llm_request", "step_limit"]
+# ``internal`` is a failure of Pantaray's own, which the user can still retry.
+type ChatTurnFailureReason = Literal[
+    "llm_connection", "llm_request", "step_limit", "internal"
+]
 
 
 class _ChatModel(BaseModel):

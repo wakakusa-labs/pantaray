@@ -75,7 +75,14 @@ test('sending posts the message to the user chat with the local API token', asyn
 });
 
 test('listing reads one newest-first page by cursor', async () => {
-  const page = { items: [USER_ITEM], next_cursor: 7 };
+  // A failure of Pantaray's own is an item the page must still carry.
+  const failure = {
+    ...USER_ITEM,
+    sequence: 8,
+    item_id: 'item-8',
+    content: { kind: 'turn_failure', reason: 'internal' },
+  };
+  const page = { items: [failure, USER_ITEM], next_cursor: 7 };
   await withChatBackend(
     () => jsonResponse(200, page),
     async (chat, requests) => {

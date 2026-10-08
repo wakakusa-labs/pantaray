@@ -202,6 +202,8 @@ def _tool_rows_by_llm_step(
         )
     # A batch's rows take consecutive step numbers in the order the model
     # declared the calls, which is the order both providers read them back in.
+    # History keeps that order now, but a checkpoint saved before it did may
+    # still hold a batch in finishing order.
     return {
         step_id: sorted(group, key=lambda row: row.entry["step_number"])
         for step_id, group in rows.items()

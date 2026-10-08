@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import codecs
+import os
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files import grep_lines, ripgrep
+
+
+def _open_below(cwd: Path) -> Callable[[str], int]:
+    return lambda relative_path: os.open(cwd / relative_path, os.O_RDONLY)
 
 
 def test_ripgrep_files_uses_fixed_argv(
@@ -108,6 +114,7 @@ def test_ripgrep_grep_uses_fixed_argv(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob="**/*.py",
@@ -181,6 +188,7 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob=None,
@@ -304,6 +312,7 @@ def test_ripgrep_grep_classifies_backend_failures(
     with pytest.raises(BrokerPolicyError) as exc_info:
         ripgrep.run_ripgrep_grep(
             cwd=tmp_path,
+            open_matched_file=_open_below(tmp_path),
             sandbox_profile="",
             pattern="needle",
             include_glob="**/*.py",
@@ -395,6 +404,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob=None,
@@ -462,6 +472,7 @@ _ALLOW_ALL_PROFILE = "(version 1)\n(allow default)"
 def _real_grep(cwd: Path, *, max_matches: int = 100) -> ripgrep.RipgrepGrepResult:
     return ripgrep.run_ripgrep_grep(
         cwd=cwd,
+        open_matched_file=_open_below(cwd),
         sandbox_profile=_ALLOW_ALL_PROFILE,
         pattern="needle",
         include_glob=None,

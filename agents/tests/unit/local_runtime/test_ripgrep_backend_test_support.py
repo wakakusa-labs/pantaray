@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,7 @@ def test_fake_grep_backend_stops_before_next_directory_after_limit(
 
     result = discovery.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=lambda path: os.open(tmp_path / path, os.O_RDONLY),
         sandbox_profile="",
         pattern="needle",
         include_glob="*.txt",

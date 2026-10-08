@@ -73,6 +73,7 @@ def _fake_grep(
     follow_symlinks: bool = False,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
+    open_matched_file: Callable[[str], int],
     include_path: Callable[[Path], bool] | None = None,
 ) -> RipgrepGrepResult:
     try:

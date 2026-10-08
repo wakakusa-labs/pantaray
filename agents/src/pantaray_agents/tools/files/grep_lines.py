@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import re
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .text_encoding import UnmarkedTextEncoding, byte_order_mark, whole_file_encoding
 
@@ -72,19 +74,20 @@ def grep_match(
     )
 
 
-def match_line_codec(path: Path) -> UnmarkedTextEncoding:
+def match_line_codec(open_file: Callable[[], int]) -> UnmarkedTextEncoding:
     """How to decode the lines ripgrep printed for one file, as read decides.
 
     ripgrep prints a file with a byte order mark transcoded to UTF-8 and any
     other file as its own bytes, which are decoded in the encoding read reports
-    for that whole file, so grep and read show one line the same way. A file
-    in neither UTF-8 nor CP932, or one gone since ripgrep read it, is shown as
-    lossy UTF-8.
+    for that whole file, so grep and read show one line the same way.
+    ``open_file`` opens the file the way read would, refusing what read
+    refuses; a file it refuses, one in neither UTF-8 nor CP932, or one gone
+    since ripgrep read it is shown as lossy UTF-8.
     """
 
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError:
+        descriptor = open_file()
+    except (BrokerPolicyError, OSError):
         return "utf-8"
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):

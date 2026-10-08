@@ -26,6 +26,7 @@ from .grep_lines import (
     binary_match_warning,
 )
 from .manifest_paths import ResolvedManifestPath
+from .read import open_read_target
 from .read_contract import (
     DISCOVERY_RESULT_LIMIT_MAX,
     LIST_MAX_DEPTH,
@@ -37,6 +38,7 @@ from .read_contract import (
 )
 from .read_paths import resolve_read_path
 from .read_scope import ReadScope
+from .read_target import resolve_read_target
 from .ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
@@ -298,6 +300,11 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
         follow_symlinks=False,
         pruned_relative_paths=search_scope.pruned,
         extra_search_paths=search_scope.own_roots,
+        open_matched_file=lambda relative_path: open_read_target(
+            resolve_read_target(
+                scope=scope, raw_path=str(_backend_path(base, relative_path))
+            )
+        ),
         include_path=lambda path: not scope.hides(path),
     )
     matches: list[dict[str, JSONValue]] = []

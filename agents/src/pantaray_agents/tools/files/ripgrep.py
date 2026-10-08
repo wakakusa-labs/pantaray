@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import os
 import re
 import shutil
 import subprocess
@@ -9,6 +8,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import IO, Literal
 
@@ -193,11 +193,18 @@ def run_ripgrep_grep(
     follow_symlinks: bool = False,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
+    open_matched_file: Callable[[str], int],
     include_path: Callable[[Path], bool] | None = None,
     sorted_by_path: bool = False,
 ) -> RipgrepGrepResult:
-    # Path bytes, relative path, line number, column and line, as printed.
-    printed: list[tuple[bytes, str, int, int, bytes]] = []
+    """Lines matching pattern below cwd.
+
+    ``open_matched_file`` opens a printed path for deciding the encoding of its
+    lines, outside ripgrep's sandbox, so it applies the read tool's own checks.
+    """
+
+    # Relative path, line number, column and line, as printed.
+    printed: list[tuple[str, int, int, bytes]] = []
     binary_match_paths: list[str] = []
     truncated = False
     # --null ends a path with NUL but keeps a newline inside it, which splits
@@ -233,7 +240,6 @@ def run_ripgrep_grep(
             return False
         printed.append(
             (
-                raw_path,
                 relative_path,
                 int(parsed.group(1)),
                 int(parsed.group(2)),
@@ -274,13 +280,13 @@ def run_ripgrep_grep(
     _raise_if_ripgrep_grep_failed(result=result)
     # Decided once per file and only after ripgrep exits, so the whole-file
     # decode is not charged to ripgrep's timeout.
-    line_codecs: dict[bytes, UnmarkedTextEncoding] = {}
+    line_codecs: dict[str, UnmarkedTextEncoding] = {}
     matches: list[RipgrepGrepMatch] = []
-    for raw_path, relative_path, line_number, column, content in printed:
-        codec = line_codecs.get(raw_path)
+    for relative_path, line_number, column, content in printed:
+        codec = line_codecs.get(relative_path)
         if codec is None:
-            codec = match_line_codec(cwd / os.fsdecode(raw_path))
-            line_codecs[raw_path] = codec
+            codec = match_line_codec(partial(open_matched_file, relative_path))
+            line_codecs[relative_path] = codec
         matches.append(
             grep_match_from_ripgrep(
                 relative_path=relative_path,

@@ -408,3 +408,40 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
 
     assert glob.output["truncation_reason"] is None
     assert sorted(_paths(glob, "matches")) == sorted([public, own, result_file])
+
+
+@pytest.mark.skipif(
+    shutil.which("rg", path=RIPGREP_TRUSTED_PATH) is None,
+    reason="ripgrep is not installed in a trusted location",
+)
+@pytest.mark.asyncio
+async def test_grep_does_not_follow_a_swapped_link_to_decide_an_encoding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path, context, public, _own = _seed_registered_parent(tmp_path)
+    line = "日本語 needle\n".encode("cp932")
+    public.write_bytes(line)
+    hidden = db_path.parent / "secret.txt"
+    # Read whole, this file would decide CP932 and show the line as Japanese.
+    hidden.write_bytes(line)
+    run_ripgrep_lines = ripgrep._run_ripgrep_lines
+
+    def swap_after_search(**kwargs: object) -> ripgrep.RipgrepRunResult:
+        result = run_ripgrep_lines(**kwargs)  # type: ignore[arg-type]
+        public.unlink()
+        public.symlink_to(hidden)
+        return result
+
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", swap_after_search)
+
+    grep = await _run(
+        db_path=db_path,
+        context=context,
+        tool_id="grep",
+        args={"base_path": str(public.parent), "pattern": "needle"},
+    )
+
+    assert [match["line"] for match in grep.output["matches"]] == [
+        line.decode("utf-8", errors="replace").removesuffix("\n")
+    ]

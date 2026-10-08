@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import codecs
+import os
 import shutil
 from pathlib import Path
 
@@ -141,6 +142,7 @@ async def test_grep_shows_a_cp932_line_valid_as_utf8_as_read_shows_it(
 
     grep = ripgrep.run_ripgrep_grep(
         cwd=search_root,
+        open_matched_file=lambda path: os.open(search_root / path, os.O_RDONLY),
         sandbox_profile="(version 1)\n(allow default)",
         pattern="needle",
         include_glob=None,

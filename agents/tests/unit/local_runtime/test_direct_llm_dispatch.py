@@ -43,7 +43,11 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     ChatGptCredential,
     LlmConnection,
 )
-from pantaray_llm.contracts.request import LlmProxyResponse, LlmRequest
+from pantaray_llm.contracts.request import (
+    LlmProxyResponse,
+    LlmRequest,
+    LlmRequestTrace,
+)
 from pantaray_llm.contracts.tool_use import LlmToolUseResponse
 from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import LlmProxyExecutionError, ProviderError
@@ -795,6 +799,42 @@ async def test_a_rejected_tool_call_becomes_the_model_output_error(
     assert exc_info.value.tool_name == "not_declared"
     assert exc_info.value.usage_metadata is not None
     assert exc_info.value.local_job_id == LOCAL_JOB_ID
+
+
+async def test_a_chatgpt_conversation_keeps_one_cache_session_per_job(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """The backend keeps a session's cache together only by its session-id."""
+
+    recorder = boundary()
+
+    def job(job_id: str) -> LlmRequest:
+        return llm_request().model_copy(
+            update={
+                "prompt_cache_key": "owner-key",
+                "trace": LlmRequestTrace(local_job_id=job_id),
+            }
+        )
+
+    for request in (job("job-a"), job("job-a"), job("job-b")):
+        await dispatch(CHATGPT_CONNECTION, request=request)
+    await dispatch(
+        ApiKeyConnection(provider="openai", model=USER_MODEL, api_key=OPENAI_KEY),
+        request=job("job-a"),
+    )
+
+    sent = [
+        (request.headers.get("session-id"), json.loads(request.content))
+        for request in recorder.requests
+        if request.url.path.endswith("/responses")
+    ]
+    sessions = [session for session, _ in sent]
+    # The key and the header name one conversation; the raw job id stays off.
+    assert all(body["prompt_cache_key"] == session for session, body in sent[:3])
+    assert sessions[0] == sessions[1] != sessions[2]
+    assert "job-a" not in str(sessions[0])
+    # Another provider keeps the key it was given and gets no session header.
+    assert sent[3] == (None, {**sent[3][1], "prompt_cache_key": "owner-key"})
 
 
 async def test_a_credential_never_reaches_the_caller_or_the_log(

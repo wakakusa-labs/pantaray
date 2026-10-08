@@ -10,6 +10,7 @@ field by field with the meanings ``client.py`` parses out of the cloud's JSON.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from typing import TypedDict
 
@@ -157,6 +158,16 @@ async def _dispatch(
     # The other three connections speak OpenAI Responses and differ only in
     # endpoint, credential and request policy (design 6.5).
     transport = _openai_transport(connection)
+    headers = dict(transport.extra_headers)
+    if isinstance(connection, ChatGptConnection):
+        # The ChatGPT backend keeps a session's prompt cache together by its
+        # session-id header, which Codex sets, with the prompt_cache_key, to
+        # its conversation. Ours is the job, one Action run or one child's
+        # run: at Action scale a per-job session read 88% of the input from
+        # the cache, the per-owner key 37%.
+        session = _conversation_session(request)
+        request = request.model_copy(update={"prompt_cache_key": session})
+        headers["session-id"] = session
     profile = resolve_direct_profile(
         provider=transport.provider, model=connection.model, request=request
     )
@@ -177,11 +188,17 @@ async def _dispatch(
             client=AsyncOpenAI(
                 api_key=transport.api_key,
                 base_url=transport.base_url,
-                default_headers=dict(transport.extra_headers),
+                default_headers=headers,
                 http_client=http_client,
                 max_retries=OPENAI_SDK_MAX_RETRIES,
             ),
         )
+
+
+def _conversation_session(request: LlmRequest) -> str:
+    """One conversation's key: the job it runs in, digested off the wire."""
+
+    return hashlib.sha256(request.trace.local_job_id.encode()).hexdigest()
 
 
 def _openai_transport(connection: LlmConnection) -> OpenAiResponsesTransport:

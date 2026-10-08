@@ -44,6 +44,7 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     LlmConnection,
 )
 from pantaray_agents.local_runtime.runtime.job_types import (
+    CHAT_TURN_TRACE_TYPE,
     LOCAL_ACTION_JOB_TYPE,
     LOCAL_ACTION_SUBAGENT_JOB_TYPE,
 )
@@ -867,6 +868,36 @@ async def test_an_actions_runs_share_one_session_and_its_children_do_not(
     assert first == follow_up
     assert len({first, child, sibling}) == 3
     assert "action-1" not in str(first)
+
+
+async def test_the_chat_keeps_one_session_per_user_across_its_turns(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """Every chat turn names itself, so the user's chat reads its own cache."""
+
+    recorder = boundary()
+
+    async def turn(user_id: str, key: str) -> str | None:
+        request = llm_request().model_copy(
+            update={"trace": LlmRequestTrace(local_job_id=f"chat:{key}")}
+        )
+        # What tasks/chat_turns.py binds for each turn.
+        chat = {"extra": {"job_type": CHAT_TURN_TRACE_TYPE}}
+        with TraceContextManager(user_id=user_id, local_job_id=f"chat:{key}", **chat):
+            await direct.execute_direct_llm_request(
+                connection=CHATGPT_CONNECTION,
+                request=request,
+                uploaded_blobs={},
+                user_id=user_id,
+                response_schema=None,
+            )
+        return recorder.requests[-1].headers.get("session-id")
+
+    first, next_turn = await turn(OWNER_ID, "a1"), await turn(OWNER_ID, "a7")
+    other_user = await turn("owner-2", "a1")
+
+    assert first == next_turn != other_user
+    assert OWNER_ID not in str(first)
 
 
 async def test_a_credential_never_reaches_the_caller_or_the_log(

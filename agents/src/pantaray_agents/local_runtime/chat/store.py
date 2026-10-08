@@ -269,6 +269,24 @@ def read_user_message(*, user_id: str, item_id: str) -> UserMessageContent | Non
     return content
 
 
+def user_wrote_after_suggestion(
+    *, user_id: str, suggestion_id: str, after: int
+) -> bool:
+    """Whether a message of the user's past ``after`` follows the suggestion's
+    arrival in the chat (any message, when it never arrived here)."""
+
+    with _connection() as connection:
+        row = connection.execute(
+            "SELECT EXISTS (SELECT 1 FROM chat_items WHERE user_id = ? "
+            "AND kind = 'user_message' AND sequence > ? AND sequence > COALESCE("
+            "(SELECT MAX(sequence) FROM chat_items WHERE user_id = ? "
+            "AND kind = 'suggestion_event' "
+            "AND json_extract(payload, '$.suggestion_id') = ?), 0))",
+            (user_id, after, user_id, suggestion_id),
+        ).fetchone()
+    return bool(row[0])
+
+
 def read_latest_chat_sequence(*, user_id: str) -> int:
     """The newest item's sequence, or 0 for an empty chat."""
 

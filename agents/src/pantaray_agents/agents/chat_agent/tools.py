@@ -19,6 +19,7 @@ from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
 from pantaray_agents.local_runtime.chat.store import (
     chat_turn_message_id,
     read_user_message,
+    user_wrote_after_suggestion,
 )
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
@@ -144,6 +145,19 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
         )
 
     async def accept(args: dict[str, JSONValue], key: str) -> ReactToolResult:
+        suggestion_id = str(args["suggestion_id"])
+        # Taking a suggestion up is the user's yes, so it needs a message of
+        # theirs in this turn that came after the suggestion: without one, a
+        # turn that only showed it started the work unasked.
+        if not user_wrote_after_suggestion(
+            user_id=plan.user_id, suggestion_id=suggestion_id, after=plan.cursor
+        ):
+            return _refused(
+                "accept_suggestion",
+                "SUGGESTION_NOT_AGREED",
+                "Not taken up: the user has not answered this suggestion yet. It "
+                "stays open until they agree.",
+            )
         db_path, busy_timeout_ms = read_local_runtime_db_config()
         preference = load_effective_approval_preference(
             db_path=db_path,
@@ -157,7 +171,7 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             return relayed
         outcome = await accept_suggestion(
             user_id=plan.user_id,
-            suggestion_id=str(args["suggestion_id"]),
+            suggestion_id=suggestion_id,
             command_id=key,
             approval_mode=preference.approval_mode,
             language=None,

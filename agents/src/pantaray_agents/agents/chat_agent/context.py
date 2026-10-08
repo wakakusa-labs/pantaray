@@ -228,7 +228,15 @@ def _body(
 ) -> str:
     if isinstance(content, SuggestionEventContent):
         said = media.suggestions.get(content.suggestion_id, "")
-        return f"You made a suggestion: {content.suggestion_id}.\n{said}".rstrip()
+        # Sent in the user's role, so it says plainly whose words these are:
+        # read as the user's, a closing "shall I?" was taken as their yes.
+        return (
+            "Not from the user: your suggestion "
+            f"{content.suggestion_id} just appeared on their screen, in your "
+            "words quoted below. Offer it to them here in your own voice, as a "
+            "question they can answer: what you would do and why now.\n"
+            f"> {said}"
+        ).rstrip()
     if isinstance(content, ActionEventContent):
         event = f"Your task {content.action_id}: {content.event}."
         excerpt = content.final_answer_excerpt

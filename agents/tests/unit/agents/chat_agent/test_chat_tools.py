@@ -55,7 +55,7 @@ from pantaray_agents.schema.agent.action_message_codec import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
-from pantaray_agents.schema.chat import UserMessageContent
+from pantaray_agents.schema.chat import SuggestionEventContent, UserMessageContent
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -529,6 +529,39 @@ async def test_a_yes_carries_what_the_chat_settled_with_the_user(db_path: Path) 
         relayed_item_ids=(yes,), note="社名は匿名化する"
     )
     assert "社名は匿名化する" in render_action_user_request_text(message)
+
+
+async def test_a_suggestion_is_taken_up_only_after_the_user_answers_it(
+    db_path: Path,
+) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "suggestion_summary, interaction_contract, has_suggestion, created_at, "
+            "updated_at) VALUES ('sug-3', ?, 'success', 'Draft the cover email?', "
+            "'Draft the cover email', 'action_offer', 1, ?, ?)",
+            (USER, NOW, NOW),
+        )
+    earlier = _say_with("m-1", "ありがとう", ())
+    append_chat_item(
+        user_id=USER,
+        message_id="suggestion:sug-3",
+        content=SuggestionEventContent(kind="suggestion_event", suggestion_id="sug-3"),
+    )
+
+    # The turn the arrival starts: the user's last words came before it.
+    unasked = await _turn("a0")(
+        "accept_suggestion", suggestion_id="sug-3", relay=[earlier], note=None
+    )
+    yes = _say_with("m-2", "お願い", ())
+    asked = await _turn("a2")(
+        "accept_suggestion", suggestion_id="sug-3", relay=[yes], note=None
+    )
+
+    assert isinstance(unasked, dict)
+    assert unasked["error_code"] == "SUGGESTION_NOT_AGREED"
+    assert isinstance(asked, dict) and "action_id" in asked
+    assert _actions(db_path) == [(asked["action_id"], "sug-3")]
 
 
 async def test_the_history_finds_a_task_by_the_chats_note(db_path: Path) -> None:

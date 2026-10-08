@@ -148,7 +148,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.overlayPosition.kind.suggestion.description': 'Suggestions that arrive on their own.',
     'settings.overlayPosition.kind.started': 'Tasks you start',
     'settings.overlayPosition.kind.started.description':
-      'Opened with New task, the shortcut, or the menu bar.',
+      'Opened with New task or the shortcut.',
     'settings.overlayPosition.kind.history': 'Opened from History',
     'settings.overlayPosition.kind.history.description':
       'Tasks and suggestions you reopen from History.',
@@ -439,7 +439,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.overlayPosition.kind.suggestion.description': '自動で届く提案です。',
     'settings.overlayPosition.kind.started': '始める作業',
     'settings.overlayPosition.kind.started.description':
-      '「新しい作業」ボタン、ショートカット、メニューバーから開く作業です。',
+      '「新しい作業」ボタンやショートカットから開く作業です。',
     'settings.overlayPosition.kind.history': '履歴から開く作業',
     'settings.overlayPosition.kind.history.description': '履歴から開き直す作業と提案です。',
     'settings.overlayPosition.gridLabel': '{kind}の位置',

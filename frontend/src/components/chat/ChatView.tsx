@@ -65,6 +65,7 @@ export function ChatView({
     items: chat.items,
     ready,
     hasOlder: chat.hasOlder,
+    failed: chat.failed,
     loadingOlder: chat.loadingOlder,
     loadOlder: chat.loadOlder,
   });

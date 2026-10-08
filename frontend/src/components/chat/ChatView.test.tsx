@@ -181,3 +181,46 @@ it('remembers the chosen view and keeps focus on the switch', async () => {
   renderPage();
   expect(await screen.findByRole('button', { name: '一覧', pressed: true })).toBeInTheDocument();
 });
+
+it('stops loading older pages on its own after a failure until the reader asks again', async () => {
+  // The older-page button is always in view here, as on a chat shorter than the window.
+  const observed: (() => void)[] = [];
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      private connected = true;
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe() {
+        const fire = () => {
+          if (!this.connected) return;
+          this.callback(
+            [{ isIntersecting: true } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver
+          );
+        };
+        observed.push(fire);
+        fire();
+      }
+      disconnect() {
+        this.connected = false;
+      }
+    }
+  );
+  pages = [{ items: [userMessage(5, '最新')], next_cursor: 5 }];
+  listItems.mockImplementationOnce(async () => pages.shift()!);
+  listItems.mockRejectedValueOnce(new Error('offline'));
+  try {
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent('チャットを読み込めませんでした。');
+    await act(async () => observed.forEach((fire) => fire()));
+    expect(listItems).toHaveBeenCalledTimes(2);
+
+    listItems.mockResolvedValueOnce({ items: [userMessage(4, '以前')], next_cursor: null });
+    await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+    expect(await screen.findByText('以前')).toBeInTheDocument();
+    expect(listItems).toHaveBeenLastCalledWith({ before: 5, limit: 50 });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

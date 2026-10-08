@@ -63,6 +63,7 @@ export function useChatItems(): ChatItemsResult {
       if (generation !== generationRef.current) return;
       setItems((current) => mergeChatItems(current, page.items));
       setOlderCursor(page.next_cursor);
+      setFailed(false);
     } catch {
       if (generation === generationRef.current) setFailed(true);
     } finally {

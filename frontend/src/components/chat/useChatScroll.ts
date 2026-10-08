@@ -16,12 +16,15 @@ export function useChatScroll({
   items,
   ready,
   hasOlder,
+  failed,
   loadingOlder,
   loadOlder,
 }: {
   items: readonly ChatItem[];
   ready: boolean;
   hasOlder: boolean;
+  /** After a failed read, older pages load only when the reader asks again. */
+  failed: boolean;
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
 }) {
@@ -66,7 +69,7 @@ export function useChatScroll({
   useEffect(() => {
     const root = scrollRef.current;
     const trigger = olderTriggerRef.current;
-    if (!ready || !hasOlder || loadingOlder || !root || !trigger) return;
+    if (!ready || !hasOlder || failed || loadingOlder || !root || !trigger) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) loadOlderKeepingPlace();
@@ -75,7 +78,7 @@ export function useChatScroll({
     );
     observer.observe(trigger);
     return () => observer.disconnect();
-  }, [ready, hasOlder, loadingOlder, loadOlderKeepingPlace]);
+  }, [ready, hasOlder, failed, loadingOlder, loadOlderKeepingPlace]);
 
   return { scrollRef, olderTriggerRef, onScroll, loadOlderKeepingPlace };
 }

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_llm.contracts.conversation import (
     LlmConversation,
     LlmTurnAssistantItem,
@@ -27,8 +28,11 @@ from .utc_timestamps import now_utc_iso
 
 ACTION_SUBAGENT_MESSAGE_MAX_CODEPOINTS = 8_000
 ACTION_SUBAGENT_MESSAGE_ID_MAX_CODEPOINTS = 128
-_MESSAGE_EVENT = "action_subagent_message"
+ACTION_SUBAGENT_MESSAGE_EVENT = "action_subagent_message"
+# The answer to one call the child made.
 ACTION_SUBAGENT_TOOL_EVENT = "action_subagent_tool"
+# Every parent message before it went into the child's conversation here.
+ACTION_SUBAGENT_DELIVERED_EVENT = "action_subagent_messages_delivered"
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled"})
 # The heading that tells the child the item under it is feedback on its own
 # last attempt rather than a message from the parent.
@@ -66,6 +70,14 @@ class ActionSubagentToolExchange:
         """
 
         return f"{_CALL_ID_PREFIX}{self.event_seq}"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionSubagentEvent:
+    """One row of the child's private history, in the order it was appended."""
+
+    event_name: str
+    payload: dict[str, JSONValue]
 
 
 # What one row of the child's durable transcript means. Both shapes the turn can
@@ -113,7 +125,8 @@ def send_action_subagent_message(
             ).fetchone()
             if existing is not None:
                 payload = _object(existing["payload_json"])
-                if existing["event_name"] != _MESSAGE_EVENT or payload != {
+                bound_name = existing["event_name"]
+                if bound_name != ACTION_SUBAGENT_MESSAGE_EVENT or payload != {
                     "message_id": request.message_id,
                     "content": request.content,
                 }:
@@ -128,7 +141,7 @@ def send_action_subagent_message(
                 append_process_event_in_connection(
                     connection=connection,
                     process_id=request.child_process_id,
-                    event_name=_MESSAGE_EVENT,
+                    event_name=ACTION_SUBAGENT_MESSAGE_EVENT,
                     event_id=event_id,
                     payload={
                         "message_id": request.message_id,
@@ -156,22 +169,13 @@ def append_action_subagent_tool_transcript(
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
-            owner = connection.execute(
-                """
-                SELECT 1 FROM processes AS process
-                JOIN jobs AS job ON job.job_id=process.current_job_id
-                WHERE process.process_id=? AND process.user_id=? AND process.action_id=?
-                  AND process.kind='action_subagent' AND process.status='running'
-                  AND process.current_job_id=? AND job.process_id=process.process_id
-                  AND job.user_id=process.user_id AND job.job_type='execute_action_subagent'
-                  AND job.status='running'
-                """,
-                (process_id, user_id, action_id, job_id),
-            ).fetchone()
-            if owner is None:
-                raise ActionSubagentMessageAuthorityError(
-                    "Action subagent Tool transcript authority is not active"
-                )
+            _require_running_child(
+                connection,
+                process_id=process_id,
+                user_id=user_id,
+                action_id=action_id,
+                job_id=job_id,
+            )
             append_process_event_in_connection(
                 connection=connection,
                 process_id=process_id,
@@ -185,6 +189,94 @@ def append_action_subagent_tool_transcript(
                 },
                 created_at=completed_at,
             )
+
+
+def append_action_subagent_event(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    event_name: str,
+    event_payload: Mapping[str, object],
+) -> None:
+    """Append one history row for the child whose job this worker is running."""
+
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        with immediate_transaction(connection):
+            _require_running_child(connection, **_owner(payload))
+            append_process_event_in_connection(
+                connection=connection,
+                process_id=payload["process_id"],
+                event_name=event_name,
+                payload=dict(event_payload),
+                created_at=now_utc_iso(),
+            )
+
+
+def deliver_action_subagent_messages(
+    *, db_path: Path, busy_timeout_ms: int, payload: ActionSubagentJobPayload
+) -> tuple[str, ...]:
+    """The parent messages not yet in the child's conversation, marked delivered.
+
+    Read and marked in one transaction, so every message before the marker is
+    one this delivery returned, and a message that lands later is the next's.
+    """
+
+    process_id = payload["process_id"]
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        with immediate_transaction(connection):
+            _require_running_child(connection, **_owner(payload))
+            rows = connection.execute(
+                "SELECT payload_json FROM process_events "
+                "WHERE process_id=? AND event_name=? AND event_seq>("
+                "SELECT COALESCE(MAX(event_seq),0) FROM process_events "
+                "WHERE process_id=? AND event_name=?) ORDER BY event_seq",
+                (
+                    process_id,
+                    ACTION_SUBAGENT_MESSAGE_EVENT,
+                    process_id,
+                    ACTION_SUBAGENT_DELIVERED_EVENT,
+                ),
+            ).fetchall()
+            if rows:
+                append_process_event_in_connection(
+                    connection=connection,
+                    process_id=process_id,
+                    event_name=ACTION_SUBAGENT_DELIVERED_EVENT,
+                    payload={},
+                    created_at=now_utc_iso(),
+                )
+    return tuple(action_subagent_message_content(_object(row[0])) for row in rows)
+
+
+def load_action_subagent_events(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    process_id: str,
+    event_names: Sequence[str],
+) -> tuple[ActionSubagentEvent, ...]:
+    """Read the child's rows of these kinds, append-only and in order."""
+
+    placeholders = ",".join("?" * len(event_names))
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        rows = connection.execute(
+            "SELECT event_name,payload_json FROM process_events "
+            f"WHERE process_id=? AND event_name IN ({placeholders}) "
+            "ORDER BY event_seq",
+            (process_id, *event_names),
+        ).fetchall()
+    return tuple(ActionSubagentEvent(str(row[0]), _object(row[1])) for row in rows)
+
+
+def action_subagent_message_content(payload: dict[str, JSONValue]) -> str:
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise MigrationError("Action subagent message event is malformed")
+    return content
 
 
 def load_action_subagent_transcript(
@@ -201,7 +293,7 @@ def load_action_subagent_transcript(
         rows = connection.execute(
             "SELECT event_seq,event_name,payload_json FROM process_events "
             "WHERE process_id=? AND event_name IN (?,?) ORDER BY event_seq",
-            (process_id, _MESSAGE_EVENT, ACTION_SUBAGENT_TOOL_EVENT),
+            (process_id, ACTION_SUBAGENT_MESSAGE_EVENT, ACTION_SUBAGENT_TOOL_EVENT),
         ).fetchall()
     return tuple(_transcript_entry(row) for row in rows)
 
@@ -310,10 +402,47 @@ def _require_authority(
     return str(row[0])
 
 
+def _owner(payload: ActionSubagentJobPayload) -> dict[str, str]:
+    return {
+        "process_id": payload["process_id"],
+        "user_id": payload["user_id"],
+        "action_id": payload["action_id"],
+        "job_id": payload["job_id"],
+    }
+
+
+def _require_running_child(
+    connection: sqlite3.Connection,
+    *,
+    process_id: str,
+    user_id: str,
+    action_id: str,
+    job_id: str,
+) -> None:
+    """Only the worker running the child's own job writes its history."""
+
+    owner = connection.execute(
+        """
+        SELECT 1 FROM processes AS process
+        JOIN jobs AS job ON job.job_id=process.current_job_id
+        WHERE process.process_id=? AND process.user_id=? AND process.action_id=?
+          AND process.kind='action_subagent' AND process.status='running'
+          AND process.current_job_id=? AND job.process_id=process.process_id
+          AND job.user_id=process.user_id AND job.job_type='execute_action_subagent'
+          AND job.status='running'
+        """,
+        (process_id, user_id, action_id, job_id),
+    ).fetchone()
+    if owner is None:
+        raise ActionSubagentMessageAuthorityError(
+            "Action subagent history authority is not active"
+        )
+
+
 def _transcript_entry(row: sqlite3.Row) -> ActionSubagentTranscriptEntry:
     payload = _object(row["payload_json"])
     event_seq = int(row["event_seq"])
-    if row["event_name"] == _MESSAGE_EVENT:
+    if row["event_name"] == ACTION_SUBAGENT_MESSAGE_EVENT:
         content = payload.get("content")
         if isinstance(content, str):
             return ActionSubagentParentMessage(event_seq=event_seq, content=content)

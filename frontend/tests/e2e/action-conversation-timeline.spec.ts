@@ -7,6 +7,7 @@ import {
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import type { OverlaySnapshotPayload } from '../../src/components/agent-overlay/model/overlayTypes';
 import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
+import { waitForAnimationsToSettle } from './animations';
 
 // Production renderer with deterministic IPC pages, isolated from live accounts and storage.
 let vite: ViteDevServer;
@@ -104,15 +105,7 @@ async function publish(page: Page, version: number, conversationPage: ActionConv
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished)
-    );
-  });
+  await waitForAnimationsToSettle(page);
   await page.locator('[data-overlay-panel]').screenshot({ path: info.outputPath(`${name}.png`) });
 }
 

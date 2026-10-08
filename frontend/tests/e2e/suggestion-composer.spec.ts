@@ -7,6 +7,7 @@ import {
   type ActionMessageRequest,
 } from '../../electron/src/actions/actionContracts';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import { waitForAnimationsToSettle } from './animations';
 
 // Render the production entry with deterministic IPC inputs; no backend, account, or live store.
 let vite: ViteDevServer;
@@ -127,15 +128,7 @@ async function showSuggestion(
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished)
-    );
-  });
+  await waitForAnimationsToSettle(page);
   const panel = page.locator('[data-overlay-panel]');
   await expect
     .poll(async () => Number(await page.locator('html').getAttribute('data-overlay-height')))

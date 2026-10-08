@@ -99,6 +99,7 @@ export function ChatView({
     failed: chat.failed,
     loadingOlder: chat.loadingOlder,
     loadOlder: chat.loadOlder,
+    holdPlace: scroll.holdPlace,
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

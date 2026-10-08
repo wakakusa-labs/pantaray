@@ -107,9 +107,7 @@ it('shows messages and cards, with a work’s status on its latest card only', a
     {
       items: [
         item(7, { kind: 'turn_failure', reason: 'llm_connection' }),
-        reply(6, '見積書のほうに伝えました。', [
-          { action_id: 'A1', summary: '納期を直しています。' },
-        ]),
+        reply(6, '納期を直しますね。', [{ action_id: 'A1', summary: '納期を直しています。' }]),
         item(5, {
           kind: 'action_event',
           action_id: 'A1',
@@ -381,4 +379,27 @@ it('discards a document whose write finishes after the page closed', async () =>
       attachmentId: '00000000-0000-4000-8000-000000000002',
     })
   );
+});
+
+it('does not read an older page with the old cursor while the newest page is read again', async () => {
+  pages = [{ items: [userMessage(5, '最新')], next_cursor: 5 }];
+  renderPage();
+  await screen.findByText('最新');
+  let finishReload: (page: ChatItemPage) => void = () => {};
+  listItems.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishReload = resolve;
+      })
+  );
+  act(() => publishStatus({ status: 'session_started' }));
+  await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+  expect(listItems).not.toHaveBeenCalledWith({ before: 5, limit: 50 });
+
+  await act(async () => finishReload({ items: [userMessage(9, '再接続後')], next_cursor: 9 }));
+  await screen.findByText('再接続後');
+  listItems.mockResolvedValueOnce({ items: [userMessage(8, 'ひとつ前')], next_cursor: null });
+  await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+  expect(listItems).toHaveBeenLastCalledWith({ before: 9, limit: 50 });
+  expect(await screen.findByText('ひとつ前')).toBeInTheDocument();
 });

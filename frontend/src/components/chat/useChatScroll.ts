@@ -95,6 +95,11 @@ export function useChatScroll({
     return () => observer.disconnect();
   }, [ready, hasOlder, failed, loadingOlder, loadOlderKeepingPlace]);
 
+  /** The reader was taken elsewhere in the chat; a resize or a new item must not pull it back. */
+  const holdPlace = useCallback(() => {
+    followingRef.current = false;
+  }, []);
+
   /** The next items scroll into view, as after the reader sends a message. */
   const followNewest = useCallback(() => {
     followingRef.current = true;
@@ -106,5 +111,6 @@ export function useChatScroll({
     onScroll,
     loadOlderKeepingPlace,
     followNewest,
+    holdPlace,
   };
 }

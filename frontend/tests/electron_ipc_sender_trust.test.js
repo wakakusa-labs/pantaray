@@ -91,17 +91,16 @@ test('Conversation submission and read receipts belong to Overlay; History opens
   security.registerWindow('overlay', overlayEvent.sender);
 
   assert.equal(security.authorize('action:submitMessage', overlayEvent), 'overlay');
-  // The main window's chat composer attaches too; revealing a stored image stays Overlay-only.
-  for (const channel of ['action:attachImage', 'action:attachFile', 'action:discardAttachment']) {
+  // The main window's chat attaches and shows attached images too.
+  for (const channel of [
+    'action:attachImage',
+    'action:attachFile',
+    'action:discardAttachment',
+    'actionImage:reveal',
+  ]) {
     assert.equal(security.authorize(channel, overlayEvent), 'overlay');
     assert.equal(security.authorize(channel, mainEvent), 'main');
   }
-  assert.equal(security.authorize('actionImage:reveal', overlayEvent), 'overlay');
-  assert.throws(
-    () => security.authorize('actionImage:reveal', mainEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
   assert.throws(
     () => security.authorize('action:submitMessage', mainEvent),
     (error) =>

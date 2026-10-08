@@ -17,7 +17,6 @@ import { writeFileAtomic } from '../../atomicFile';
 
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
-import { IpcSenderRejectedError } from '../senderTrust';
 import { requireComposerUser } from './composerSender';
 import { parseInput } from '../schemas/error';
 import {
@@ -97,10 +96,9 @@ export function registerActionImageHandlers(ctx: MainContext, registrar: IpcRegi
     } satisfies ActionImageAttachResult;
   });
 
+  // The chat in the main window shows the same attached images as the Overlay does.
   registrar.handle('actionImage:reveal', async (event, request) => {
-    if (ctx.actions.resolveOverlayIdForSender(event.sender) === null) {
-      throw new IpcSenderRejectedError('overlay_window_not_registered');
-    }
+    requireComposerUser(ctx, event.sender);
     const parsed = parseInput(ActionImageRevealInputSchema, 'actionImage:reveal', request);
     const image = readVerifiedStoredImage(
       {

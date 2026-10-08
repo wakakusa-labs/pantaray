@@ -17,6 +17,7 @@ export function useChatReveal({
   failed,
   loadingOlder,
   loadOlder,
+  holdPlace,
 }: {
   reveal: ChatReveal | null;
   ready: boolean;
@@ -25,6 +26,8 @@ export function useChatReveal({
   failed: boolean;
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
+  /** Stops the chat from following the newest message once the card is shown. */
+  holdPlace: () => void;
 }): void {
   const doneRef = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -32,6 +35,7 @@ export function useChatReveal({
     const position = latestCards.get(`action:${reveal.actionId}`);
     if (position !== undefined) {
       const card = document.getElementById(cardElementId(position));
+      holdPlace();
       card?.scrollIntoView({ block: 'center' });
       card?.focus({ preventScroll: true });
       doneRef.current = reveal.key;
@@ -40,5 +44,5 @@ export function useChatReveal({
     } else {
       doneRef.current = reveal.key;
     }
-  }, [reveal, ready, latestCards, hasOlder, failed, loadingOlder, loadOlder]);
+  }, [reveal, ready, latestCards, hasOlder, failed, loadingOlder, loadOlder, holdPlace]);
 }

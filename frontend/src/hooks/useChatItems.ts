@@ -36,9 +36,11 @@ export function useChatItems(): ChatItemsResult {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const generationRef = useRef(0);
   const loadingOlderRef = useRef(false);
+  const reloadingRef = useRef(false);
 
   const reload = useCallback(async () => {
     const generation = ++generationRef.current;
+    reloadingRef.current = true;
     try {
       const chat = window.electron?.chat;
       if (!chat) throw new Error('Chat bridge is unavailable.');
@@ -50,13 +52,18 @@ export function useChatItems(): ChatItemsResult {
     } catch {
       if (generation === generationRef.current) setFailed(true);
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === generationRef.current) {
+        reloadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
   const loadOlder = useCallback(async () => {
     const chat = window.electron?.chat;
-    if (olderCursor === null || loadingOlderRef.current || !chat) return;
+    // While the newest page is read again, the cursor in hand belongs to the chat as it was: an
+    // older page read with it could land after the new page and leave a gap above it.
+    if (olderCursor === null || loadingOlderRef.current || reloadingRef.current || !chat) return;
     const generation = generationRef.current;
     loadingOlderRef.current = true;
     setLoadingOlder(true);

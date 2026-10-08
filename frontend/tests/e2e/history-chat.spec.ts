@@ -44,7 +44,7 @@ const reply = (
 
 const CHAT: ChatItemPage = {
   items: [
-    reply(9, 33, '見積書のほうに伝えました。', [
+    reply(9, 33, '納期を直しますね。', [
       {
         kind: 'action',
         action_id: 'estimate',
@@ -236,7 +236,7 @@ test('chat mode is the default: bubbles, cards with latest-only status, no event
   await expect(estimate.nth(1).getByText('実行中')).toHaveCount(0);
 
   // The newest message is in view without scrolling.
-  await expect(chat.getByText('見積書のほうに伝えました。')).toBeInViewport();
+  await expect(chat.getByText('納期を直しますね。')).toBeInViewport();
 
   await estimate.nth(1).focus();
   await page.keyboard.press('Enter');
@@ -305,7 +305,7 @@ test('composer: quote a message, attach a document, send with Enter', async ({ p
   await input.press('Enter');
   const sent = chat.getByRole('article', { name: 'あなた' }).last();
   await expect(sent).toContainText('納期は 2 週間うしろで。単価はそのまま');
-  await expect(sent).toContainText('見積書のほうに伝えました。');
+  await expect(sent).toContainText('納期を直しますね。');
   await expect(sent.getByRole('list', { name: '添付ファイル 1 件' })).toContainText('見積書.pdf');
   await expect(sent).toBeInViewport();
   await expect(input).toHaveValue('');

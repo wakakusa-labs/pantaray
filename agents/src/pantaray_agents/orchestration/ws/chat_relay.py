@@ -5,6 +5,9 @@ session follows the table from the newest item it saw when it started. A client
 reads the chat over HTTP once `session_started` arrives; an item it also gets
 from the relay is the same item, by `item_id`.
 
+Every few ticks it also tells the chat what happened to its work
+(``bridge_chat_events``) and starts the turn that reports it.
+
 Each tick also sends `chat_turn_state` when a turn starts or ends, and once at
 the start. It is sampled before the items are read and sent after them, so a
 turn's end follows its reply; a failed read holds both back.
@@ -17,6 +20,7 @@ import logging
 from typing import Final
 
 import pantaray_agents.dependencies as deps
+from pantaray_agents.local_runtime.chat.bridges import bridge_chat_events
 from pantaray_agents.local_runtime.chat.store import (
     read_chat_items_after,
     read_latest_chat_sequence,
@@ -27,6 +31,7 @@ from pantaray_agents.orchestration.ws.base import BaseWSHandler
 from pantaray_agents.orchestration.ws.task_supervisor import WsTaskSupervisor
 from pantaray_agents.schema.chat import ChatItemAppendedMessage, ChatTurnStateMessage
 from pantaray_agents.schema.events import OutboundEvent
+from pantaray_agents.tasks.chat_turns import request_chat_turn
 from pantaray_agents.utils.ws_observability import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -36,6 +41,9 @@ CHAT_RELAY_TASK_KEY: Final[str] = "chat_relay_tick"
 # tick per live session is cheap next to that.
 CHAT_RELAY_TICK_SECONDS: Final[float] = 0.25
 _RELAY_FAILURE_LOG_INTERVAL_SECONDS: Final[float] = 60.0
+# How often a live session tells the chat about new suggestions and its runs'
+# ends: every 2 s, which is soon enough for news nobody is waiting on.
+CHAT_BRIDGE_EVERY_TICKS: Final[int] = 8
 
 
 class ChatRelayMixin(BaseWSHandler):
@@ -70,12 +78,19 @@ class ChatRelayMixin(BaseWSHandler):
     async def _chat_relay_loop(self, after: int) -> None:
         user_id = str(self.user_id)
         sent_running: bool | None = None
+        ticks = 0
         try:
             while not self._is_closed:
                 # Sampled before the read and sent after it: a turn appends its
                 # end before it stops running, so its reply goes out first.
                 running = chat_turn_running(user_id)
                 try:
+                    if ticks % CHAT_BRIDGE_EVERY_TICKS == 0:
+                        told = await asyncio.to_thread(
+                            bridge_chat_events, user_id=user_id
+                        )
+                        if told:
+                            request_chat_turn(user_id)
                     for item in await asyncio.to_thread(
                         read_chat_items_after, user_id=user_id, after=after
                     ):
@@ -109,6 +124,7 @@ class ChatRelayMixin(BaseWSHandler):
                             exc,
                             exc_info=True,
                         )
+                ticks += 1
                 await asyncio.sleep(CHAT_RELAY_TICK_SECONDS)
         except asyncio.CancelledError:
             return

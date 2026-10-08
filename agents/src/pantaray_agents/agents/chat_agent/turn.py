@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final
 
@@ -27,10 +27,15 @@ from pantaray_agents.agents.chat_agent.context import (
     render_item,
     turn_context,
 )
+from pantaray_agents.agents.chat_agent.media import ItemMedia, load_item_media
 from pantaray_agents.agents.chat_agent.reply import (
     REPLY_TOOL,
     REPLY_TOOL_NAME,
     check_reply,
+)
+from pantaray_agents.agents.core.llm_file_inputs import (
+    LlmFileInput,
+    tool_image_file_input,
 )
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
@@ -55,12 +60,14 @@ from pantaray_agents.conversation.window import WindowState
 from pantaray_agents.local_runtime.chat.store import (
     CHAT_TRIGGER_KINDS,
     ChatTurnEnd,
+    TurnChatItem,
     append_chat_item,
     chat_turn_end_message_id,
     chat_turn_message_id,
     read_chat_items_for_turn,
     read_chat_turn_marks,
 )
+from pantaray_agents.local_runtime.chat.work_list import read_chat_work_list
 from pantaray_agents.local_runtime.runtime.identity import (
     OwnerMismatchError,
     verify_current_owner,
@@ -104,9 +111,15 @@ from pantaray_llm.profiles import CHAT_PROFILE_ID
 logger = logging.getLogger(__name__)
 
 CHAT_SYSTEM_INSTRUCTION: Final[str] = (
-    "You are Pantaray, talking with the user in one ongoing chat, the way a "
-    "capable colleague does in a messaging app: short, plain sentences in the "
-    "user's language.\n"
+    "You are Pantaray, and you work alongside the user in two directions. When "
+    "they ask you for something, you take it on as your own task and see it "
+    "through. And without being asked, you notice from their work what they "
+    "will need -- a next step, a task you could take off their hands -- and "
+    "bring it to them as a suggestion, which you carry out when they agree.\n"
+    "This chat is where the two of you talk, one ongoing conversation, the way "
+    "a capable colleague does in a messaging app: short, plain sentences in the "
+    "user's language. The tasks in your work list are the user's tasks that you "
+    "are working on yourself, and the suggestions there are yours.\n"
     "If you need to look something up, first say so in one short line, then "
     "look it up; if you can answer right away, answer."
 )
@@ -131,8 +144,12 @@ _CONNECTION_ERROR_CODES: Final = frozenset(
 
 # Sends one request; ``before_attempt`` runs before every attempt, a transport
 # retry included, and raises to stop it.
+# Sends one request; ``before_attempt`` runs before every attempt, a transport
+# retry included, and raises to stop it. The user's images the request shows
+# are handed in by their ref.
 type ChatSend = Callable[
-    [ConversationRequest, TokenSink, Callable[[], None]], Awaitable[TurnReply]
+    [ConversationRequest, TokenSink, Callable[[], None], Mapping[str, LlmFileInput]],
+    Awaitable[TurnReply],
 ]
 
 
@@ -140,13 +157,20 @@ type ChatSend = Callable[
 class ChatTurnPlan:
     """One turn to run.
 
-    ``key`` is the same each time this turn runs again, so what it appends and
-    does is keyed by it. Trigger items after ``cursor`` wait for this turn.
+    ``key`` is the same each time this turn runs again -- after a crash, or as
+    a retry of its failure -- so what it does is keyed by it, and a task it
+    started is never started twice. ``attempt`` tells a retry's own items
+    apart from the failed run's. Trigger items after ``cursor`` wait for it.
     """
 
     user_id: str
     key: str
     cursor: int
+    attempt: str = ""
+
+    @property
+    def item_key(self) -> str:
+        return self.key if not self.attempt else f"{self.key}.{self.attempt}"
 
 
 class ChatTurnInterrupted(RuntimeError):
@@ -168,10 +192,17 @@ class ChatModel(LlmToolUseMixin):
         request: ConversationRequest,
         sink: TokenSink,
         before_attempt: Callable[[], None],
+        user_images: Mapping[str, LlmFileInput],
     ) -> ActionTurnReply:
+        tool_images = {
+            image.ref: tool_image_file_input(image) for image in request.images
+        }
+        files = {**user_images, **tool_images}
         return await self._generate_llm_action_turn(
             sink=sink,
             before_attempt=before_attempt,
+            # The items place each image; the request uploads what they show.
+            file_inputs=[files[ref] for ref in request.media_refs if ref in files],
             prompt=request.prompt,
             tools=request.tools,
             max_parallel_tool_calls=request.max_parallel_tool_calls,
@@ -193,8 +224,12 @@ def plan_chat_turn(*, user_id: str, retry_of: str | None) -> ChatTurnPlan | None
     marks = read_chat_turn_marks(user_id=user_id)
     failure = marks.last_failure
     if failure is not None and failure.item_id == retry_of:
+        assert marks.failed_turn_key is not None  # a failure names its turn
         return ChatTurnPlan(
-            user_id=user_id, key=f"r{failure.sequence}", cursor=marks.replied_through
+            user_id=user_id,
+            key=marks.failed_turn_key,
+            cursor=marks.replied_through,
+            attempt=f"r{failure.sequence}",
         )
     if not marks.waiting:
         return None
@@ -253,6 +288,8 @@ class _ChatTurn:
     checked: dict[str, AssistantMessageContent | str] = field(default_factory=dict)
     nudged: bool = False
     route: EffectiveRouteIdentity | None = None  # what the turn started on
+    # The user's images the turn has shown, by the ref the items carry.
+    user_images: dict[str, LlmFileInput] = field(default_factory=dict)
 
     async def run(
         self, send: ChatSend, tools: tuple[ReactToolDefinition, ...]
@@ -265,7 +302,7 @@ class _ChatTurn:
         sink = CountingSink()
 
         async def send_turn(request: ConversationRequest) -> TurnReply:
-            return await send(request, sink, self.require_route)
+            return await send(request, sink, self.require_route, self.user_images)
 
         # A retry answers items from before the window's boundary too, and a
         # waiting item is never left out of the turn that answers it.
@@ -276,6 +313,8 @@ class _ChatTurn:
             read_chat_items_for_turn, user_id=self.plan.user_id, after=self.window.after
         )
         self.seen = items[-1].item.sequence if items else self.window.after
+        work = await asyncio.to_thread(read_chat_work_list, user_id=self.plan.user_id)
+        media = await self.load_media(items)
         waiting = [
             entry.item
             for entry in items
@@ -288,9 +327,10 @@ class _ChatTurn:
             self.window.fit,
             items,
             waiting_from=waiting[0].sequence,
-            tail=turn_context(waiting),
+            tail=turn_context(waiting, work),
             head_bytes=input_bytes(CHAT_HEAD, CHAT_SYSTEM_INSTRUCTION)
             + sum(len(tool.model_dump_json().encode()) for tool in definitions),
+            media=media,
         )
         return await run_conversation(
             ConversationRun(
@@ -322,12 +362,20 @@ class _ChatTurn:
         if arrived:
             self.seen = arrived[-1].item.sequence
         # What else arrives is this turn's own: it appends one turn at a time.
-        return [
-            entry.item
-            for item in arrived
-            if item.item.content.kind in CHAT_TRIGGER_KINDS
-            for entry in render_item(item)
+        triggers = [
+            item for item in arrived if item.item.content.kind in CHAT_TRIGGER_KINDS
         ]
+        media = await self.load_media(triggers)
+        return [entry.item for item in triggers for entry in render_item(item, media)]
+
+    async def load_media(self, items: Sequence[TurnChatItem]) -> ItemMedia:
+        media = await asyncio.to_thread(
+            load_item_media, user_id=self.plan.user_id, items=items
+        )
+        self.user_images.update(
+            (file_input["ref"], file_input) for _, file_input in media.images.values()
+        )
+        return media
 
     def guarded(self, tool: ReactToolDefinition) -> ReactToolDefinition:
         """``tool``, refusing to start once the route has changed.
@@ -358,7 +406,7 @@ class _ChatTurn:
             for index, message in enumerate(response.messages):
                 await self.append(
                     chat_turn_message_id(
-                        self.plan.key, f"say/{turn.entry.turn_id}/{index}"
+                        self.plan.item_key, f"say/{turn.entry.turn_id}/{index}"
                     ),
                     AssistantMessageContent(
                         kind="assistant_message",
@@ -399,7 +447,7 @@ class _ChatTurn:
     async def end(self, content: ChatItemContent) -> None:
         end: ChatTurnEnd = "failure" if content.kind == "turn_failure" else "reply"
         await self.append(
-            chat_turn_end_message_id(self.plan.key, end, self.seen), content
+            chat_turn_end_message_id(self.plan.item_key, end, self.seen), content
         )
 
     async def append(self, message_id: str, content: ChatItemContent) -> None:

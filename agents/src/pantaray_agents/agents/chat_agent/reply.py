@@ -75,7 +75,7 @@ REPLY_TOOL = LlmToolDefinition(
                     "anyOf": [_card_schema("action"), _card_schema("suggestion")]
                 },
                 "description": (
-                    "The Actions and Suggestions your answer is about; the user "
+                    "Your tasks and suggestions this answer is about; the user "
                     "opens each from its card."
                 ),
             },

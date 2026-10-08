@@ -24,6 +24,14 @@ from pantaray_agents.tasks import chat_turns
 from pantaray_agents.utils.trace_context import get_trace_context
 
 
+async def _no_research(**_: object) -> tuple[()]:
+    return ()
+
+
+def _discard(**_: object) -> None:
+    return None
+
+
 class _Chat:
     """Turns wait while ``waiting`` is positive; each finished run answers one."""
 
@@ -37,6 +45,11 @@ class _Chat:
         self.interrupt_once = False
         self.hang_once = False
         monkeypatch.setattr(chat_turns.deps, "get_llm_client", object)
+        monkeypatch.setattr(chat_turns, "chat_research_tools", _no_research)
+        monkeypatch.setattr(chat_turns, "discard_chat_tool_results", _discard)
+        monkeypatch.setattr(
+            chat_turns, "read_local_runtime_db_config", lambda: ("runtime.db", 1)
+        )
         monkeypatch.setattr(chat_turns, "plan_chat_turn", self.plan)
         monkeypatch.setattr(chat_turns, "run_chat_turn", self.run)
 

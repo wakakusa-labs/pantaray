@@ -219,7 +219,10 @@ async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
 
     turn = _turn("a0")
     handed = await turn("start_action", relay=[asked.item_id], note="Summarize it")
-    twice = await turn("start_action", relay=[asked.item_id], note="Translate it")
+    # A later turn starting another task from the same message: the file stays.
+    twice = await _turn("a1")(
+        "start_action", relay=[asked.item_id], note="Translate it"
+    )
 
     assert isinstance(handed, dict) and "action_id" in handed
     assert not staged.exists()  # moved into the first task
@@ -565,6 +568,36 @@ async def test_a_suggestion_is_taken_up_only_with_the_users_answer_to_it(
     assert unasked["error_code"] == "SUGGESTION_NOT_AGREED"
     assert isinstance(asked, dict) and "action_id" in asked
     assert _actions(db_path) == [(asked["action_id"], "sug-3")]
+
+
+async def test_one_yes_starts_one_task_in_a_turn(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "suggestion_summary, interaction_contract, has_suggestion, created_at, "
+            "updated_at) VALUES ('sug-4', ?, 'success', 'Draft the cover email?', "
+            "'Draft the cover email', 'action_offer', 1, ?, ?)",
+            (USER, NOW, NOW),
+        )
+    yes = _say_with("m-1", "お願い", ())
+    turn = _turn("a0")
+
+    taken = await turn(
+        "accept_suggestion", suggestion_id="sug-4", relay=[yes], note=None
+    )
+    # The model then starts the same request as a task of its own.
+    again = await turn("start_action", relay=[yes], note="送付メールを作る")
+    other = _say_with("m-2", "あと請求書も", ())
+    separate = await turn("start_action", relay=[other], note=None)
+    # A later turn that relays the same words decides for itself.
+    later = await _turn("a2")("start_action", relay=[yes], note=None)
+
+    assert isinstance(taken, dict) and "action_id" in taken
+    assert isinstance(again, dict) and again["error_code"] == "ALREADY_STARTED"
+    assert str(taken["action_id"]) in str(again["message"])
+    assert isinstance(separate, dict) and "action_id" in separate
+    assert isinstance(later, dict) and "action_id" in later
+    assert len(_actions(db_path)) == 3
 
 
 async def test_the_history_finds_a_task_by_the_chats_note(db_path: Path) -> None:

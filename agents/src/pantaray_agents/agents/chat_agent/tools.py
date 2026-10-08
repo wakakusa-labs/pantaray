@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.chat.work_list import (
     read_attachment_holder,
     read_latest_run_process,
     read_submitted_message,
+    read_task_started_from,
 )
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
@@ -118,13 +119,27 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
     """The routing tools of one turn, keyed by that turn."""
 
     async def start(args: dict[str, JSONValue], key: str) -> ReactToolResult:
+        relay = _strings(args["relay"])
+        # The same words already started a task in this turn: a second start
+        # would run the same work twice.
+        started = read_task_started_from(
+            user_id=plan.user_id,
+            patterns=[
+                chat_turn_message_id(plan.key, f"{tool}/*")
+                for tool in ("start_action", "accept_suggestion")
+            ],
+            item_ids=relay,
+            besides=key,
+        )
+        if started is not None:
+            return _refused(
+                "start_action",
+                "ALREADY_STARTED",
+                f"Not done: those messages already started your task {started} "
+                "in this turn. To add to it, call send_to_action for it.",
+            )
         return _submit(
-            plan,
-            key,
-            "start_action",
-            NewActionTarget(),
-            _strings(args["relay"]),
-            _note(args["note"]),
+            plan, key, "start_action", NewActionTarget(), relay, _note(args["note"])
         )
 
     async def send(args: dict[str, JSONValue], key: str) -> ReactToolResult:

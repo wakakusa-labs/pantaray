@@ -27,12 +27,12 @@ function openStore(dir) {
 
 const settingsFile = (dir) => path.join(dir, 'overlay-placement.json');
 
-test('a missing settings file gives today’s placement for every kind', (t) => {
+test('a missing settings file gives the default placement for every kind', (t) => {
   const { store, reports } = openStore(tempDir(t));
   assert.deepEqual(store.get(), {
     suggestion: { row: 0, column: 4 },
     started: { row: 1, column: 2 },
-    history: { row: 1, column: 2 },
+    history: { row: 0, column: 4 },
   });
   assert.deepEqual(reports, []);
 });
@@ -57,6 +57,11 @@ test('a saved cell is kept for its kind only and read back after a restart', (t)
     fs.readdirSync(dir).filter((name) => name.includes('.tmp-')),
     []
   );
+  // Only the moved kinds are written, so the others keep following the default.
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile(dir), 'utf8')), {
+    started: { row: 2, column: 0 },
+    history: { row: 0, column: 1 },
+  });
 });
 
 test('an unreadable stored value is reported and that kind falls back to its default', (t) => {
@@ -74,7 +79,7 @@ test('an unreadable stored value is reported and that kind falls back to its def
   assert.deepEqual(store.get(), {
     suggestion: { row: 0, column: 4 },
     started: { row: 2, column: 4 },
-    history: { row: 1, column: 2 },
+    history: { row: 0, column: 4 },
   });
   assert.deepEqual(reports, ['invalid_suggestion', 'invalid_history']);
 
@@ -109,18 +114,15 @@ test('a failed save keeps the previous placement', (t) => {
 // A macOS work area: below a 33 px menu bar, above a 70 px Dock.
 const MAC_WORK_AREA = { x: 0, y: 33, width: 1512, height: 879 };
 
-test('the default cells reproduce the placement before this setting existed', () => {
-  // Before: centered on the work area, and top-right at a 20 px margin stacking by 132 px.
-  const centered = {
+test('the default cells reproduce the earlier placements: centered tasks, a top-right stack', () => {
+  // Earlier: tasks centered on the work area, Suggestions top-right at a 20 px margin stacking
+  // by 132 px. Windows reopened from History now default to that same top-right stack.
+  assert.deepEqual(resolveOverlayPlacement(MAC_WORK_AREA, DEFAULT_OVERLAY_PLACEMENTS.started, 0), {
     x: Math.round(MAC_WORK_AREA.x + (MAC_WORK_AREA.width - 520) / 2),
     y: Math.round(MAC_WORK_AREA.y + (MAC_WORK_AREA.height - 120) / 2),
-  };
-  for (const kind of ['started', 'history']) {
-    assert.deepEqual(resolveOverlayPlacement(MAC_WORK_AREA, DEFAULT_OVERLAY_PLACEMENTS[kind], 0), {
-      ...centered,
-      anchor: 'center',
-    });
-  }
+    anchor: 'center',
+  });
+  assert.deepEqual(DEFAULT_OVERLAY_PLACEMENTS.history, DEFAULT_OVERLAY_PLACEMENTS.suggestion);
   const workArea = { x: 0, y: 0, width: 1440, height: 900 };
   const maxRows = Math.floor((900 - 40) / 132);
   for (const index of [0, 1, 2, maxRows - 1, maxRows, 40]) {

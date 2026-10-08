@@ -496,4 +496,5 @@ def _file_output(
         "truncated": True,
         "truncation_reason": "line_count_budget",
         "retry_hint": "Continue at line 5.",
+        "encoding": "utf-8",
     }

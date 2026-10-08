@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_agents.tools.files.read_contract import ReadToolArgs
+from pantaray_agents.tools.files.text_encoding import TextEncoding
 from pantaray_agents.tools.files.text_lines import (
     MAX_BYTES,
     MAX_LINE_LENGTH,
@@ -110,7 +113,9 @@ READ_TOOL = ToolDefinition.from_spec(
                 "result with its metadata; follow the returned cursor for the "
                 "rest. Every line of a text file of any size is reachable by "
                 f"offset, and a line longer than {MAX_LINE_LENGTH} characters "
-                "continues with next_column. A directory read pages through "
+                "continues with next_column. A text file in CP932 (Shift_JIS) "
+                "or with a UTF-16 byte order mark is decoded too, and encoding "
+                "says which encoding was used. A directory read pages through "
                 "every entry in the directory's own order, and offset counts the "
                 "entries it skips too: symlinks without full read access, "
                 "Pantaray's private app storage, and its .runtime-temp folder in "
@@ -177,6 +182,11 @@ READ_TOOL = ToolDefinition.from_spec(
                         "Use with next_offset to continue within a long line. "
                         "Null means there is no next text page."
                     ),
+                },
+                "encoding": {
+                    "type": "string",
+                    "enum": list(get_args(TextEncoding.__value__)),
+                    "description": "The encoding a text file was decoded in.",
                 },
                 "entries": {
                     "type": "array",

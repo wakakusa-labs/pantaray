@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import codecs
+import os
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files import grep_lines, ripgrep
+
+
+def _open_below(cwd: Path) -> Callable[[str], int]:
+    return lambda relative_path: os.open(cwd / relative_path, os.O_RDONLY)
 
 
 def test_ripgrep_files_uses_fixed_argv(
@@ -107,6 +114,7 @@ def test_ripgrep_grep_uses_fixed_argv(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob="**/*.py",
@@ -180,6 +188,7 @@ def test_ripgrep_grep_timeout_truncates_without_pattern_error(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob=None,
@@ -303,6 +312,7 @@ def test_ripgrep_grep_classifies_backend_failures(
     with pytest.raises(BrokerPolicyError) as exc_info:
         ripgrep.run_ripgrep_grep(
             cwd=tmp_path,
+            open_matched_file=_open_below(tmp_path),
             sandbox_profile="",
             pattern="needle",
             include_glob="**/*.py",
@@ -344,6 +354,8 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A file's lines are decoded in the encoding decided for the whole file.
+    (tmp_path / "sjis.txt").write_bytes("日本語 needle\n".encode("cp932"))
     monkeypatch.setattr(
         ripgrep,
         "_resolve_ripgrep_executable",
@@ -373,7 +385,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         assert handle_line(
             b'name.bin: binary file matches (found "\\0" byte around offset 3)'
         )
-        # Shift_JIS text is shown lossily rather than dropped.
+        # A line that is not UTF-8 is decoded as CP932.
         assert handle_line(b"./sjis.txt\x001:8:\x93\xfa\x96\x7b\x8c\xea needle")
         assert handle_line(
             b'./db.sqlite: binary file matches (found "\\0" byte around offset 9)'
@@ -392,6 +404,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
 
     result = ripgrep.run_ripgrep_grep(
         cwd=tmp_path,
+        open_matched_file=_open_below(tmp_path),
         sandbox_profile="",
         pattern="needle",
         include_glob=None,
@@ -403,7 +416,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         (7, "a" * limit + "…"),
         (9, "…" + "a" * limit + "…"),
         (2, "needle in odd"),
-        (1, b"\x93\xfa\x96\x7b\x8c\xea needle".decode("utf-8", errors="replace")),
+        (1, "日本語 needle"),
     ]
     assert [match.line_truncated for match in result.matches] == [
         True,
@@ -459,6 +472,7 @@ _ALLOW_ALL_PROFILE = "(version 1)\n(allow default)"
 def _real_grep(cwd: Path, *, max_matches: int = 100) -> ripgrep.RipgrepGrepResult:
     return ripgrep.run_ripgrep_grep(
         cwd=cwd,
+        open_matched_file=_open_below(cwd),
         sandbox_profile=_ALLOW_ALL_PROFILE,
         pattern="needle",
         include_glob=None,
@@ -483,6 +497,30 @@ def test_real_ripgrep_finds_matches_in_files_over_one_megabyte(tmp_path: Path) -
     ]
     assert result.truncation_reason is None
     assert result.skipped_files == 0
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_shows_cp932_and_utf16_lines_as_their_text(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "module.bas").write_bytes(
+        "' 合計①髙 needle\r\n".encode("cp932")
+        # A long line is centred on its match by characters, not bytes.
+        + ("表" * 1_000 + "needle" + "い" * 1_000 + "\r\n").encode("cp932")
+    )
+    (tmp_path / "notes.txt").write_bytes(
+        codecs.BOM_UTF16_LE + "メモ needle\r\n".encode("utf-16-le")
+    )
+
+    result = _real_grep(tmp_path)
+
+    assert sorted(
+        (match.relative_path, match.line_number, match.line) for match in result.matches
+    ) == [
+        ("./module.bas", 1, "' 合計①髙 needle"),
+        ("./module.bas", 2, "…" + "表" * 250 + "needle" + "い" * 244 + "…"),
+        ("./notes.txt", 1, "メモ needle"),
+    ]
 
 
 @_REAL_RIPGREP

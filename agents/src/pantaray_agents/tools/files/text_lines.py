@@ -10,6 +10,8 @@ from typing import TextIO
 
 from pantaray_agents.tools.contract import BrokerPolicyError
 
+from .text_encoding import UnmarkedTextEncoding
+
 MAX_BYTES = 50 * 1024
 MAX_LINE_LENGTH = 2_000
 MAX_TOTAL_LINE_COUNT_BYTES = 512 * 1024
@@ -57,12 +59,19 @@ def read_text_descriptor_lines(
     limit: int,
     column: int = 1,
     max_bytes: int | None = None,
+    encoding: UnmarkedTextEncoding = "utf-8",
 ) -> ReadLinesResult:
+    """One page of the file from the descriptor's current position.
+
+    Lines are skipped by their line-end bytes, which UTF-8 and CP932 never use
+    inside a character; a UTF-16 file is decoded whole and paged as a value.
+    """
+
     file_stat = os.fstat(descriptor)
     if not stat.S_ISREG(file_stat.st_mode):
         raise OSError(errno.EINVAL, "text descriptor is not a regular file")
     skipped_lines = _skip_lines(descriptor, offset - 1)
-    with open(descriptor, encoding="utf-8", newline="", closefd=False) as handle:
+    with open(descriptor, encoding=encoding, newline="", closefd=False) as handle:
         return _read_text_lines(
             handle=handle,
             text_size_bytes=file_stat.st_size,

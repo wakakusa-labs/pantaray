@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, RootModel
 
+from .text_encoding import TextEncoding
+
 
 class ReadTextPageOutput(BaseModel):
     """One page of text on the read tool's cursor envelope.
@@ -38,6 +40,7 @@ class ReadTextPageOutput(BaseModel):
 class ReadFileOutput(ReadTextPageOutput):
     kind: Literal["file"]
     truncation_reason: Literal["line_count_budget", "page_limit"] | None = None
+    encoding: TextEncoding
 
 
 class ReadDocumentImage(BaseModel):

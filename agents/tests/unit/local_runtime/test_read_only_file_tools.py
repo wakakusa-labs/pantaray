@@ -12,6 +12,7 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     ToolCallEnvelope,
 )
+from pantaray_agents.tools.files import ripgrep
 from pantaray_agents.tools.files.read_only_tools import (
     READ_IMAGE_NOT_SUPPORTED,
     build_read_only_file_tools,
@@ -166,16 +167,50 @@ async def test_an_image_is_refused_instead_of_reported_as_read(
 
 
 @pytest.mark.asyncio
-async def test_a_text_file_that_is_not_utf8_fails_only_its_own_call(
+async def test_a_text_file_in_an_unknown_encoding_fails_only_its_own_call(
     tmp_path: Path,
 ) -> None:
     registry, folder, _storage, _spill = _tools(tmp_path)
-    (folder / "sales.csv").write_bytes("顧客,金額\n東京,120\n".encode("cp932"))
+    (folder / "sales.csv").write_bytes(b"region,total\n\x81 east,120\n")
 
     result = await _call(registry, "read", {"path": str(folder / "sales.csv")})
 
     assert result.status == "error"
-    assert result.output["error_code"] == "READ_FAILED"
+    assert result.output["error_code"] == "READ_TEXT_ENCODING_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+    reason="grep runs ripgrep under sandbox-exec",
+)
+async def test_grep_does_not_follow_a_swapped_link_out_of_scope_for_an_encoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, folder, _storage, _spill = _tools(tmp_path)
+    line = "日本語 needle\n".encode("cp932")
+    matched = folder / "notes.txt"
+    matched.write_bytes(line)
+    outside = tmp_path / "outside.txt"
+    # Read whole, this file would decide CP932 and show the line as Japanese.
+    outside.write_bytes(line)
+    run_ripgrep_lines = ripgrep._run_ripgrep_lines
+
+    def swap_after_search(**kwargs: object) -> ripgrep.RipgrepRunResult:
+        result = run_ripgrep_lines(**kwargs)  # type: ignore[arg-type]
+        matched.unlink()
+        matched.symlink_to(outside)
+        return result
+
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", swap_after_search)
+
+    result = await _call(
+        registry, "grep", {"base_path": str(folder), "pattern": "needle"}
+    )
+
+    assert [match["line"] for match in result.output["matches"]] == [
+        line.decode("utf-8", errors="replace").removesuffix("\n")
+    ]
 
 
 @pytest.mark.asyncio

@@ -265,6 +265,28 @@ def read_suggestion_texts(*, user_id: str, ids: Sequence[str]) -> dict[str, str]
     return {str(row[0]): str(row[1] or "") for row in rows}
 
 
+def answered_after_suggestion(
+    *, user_id: str, suggestion_id: str, item_ids: Sequence[str]
+) -> bool:
+    """Whether one of the user's messages ``item_ids`` was written after the
+    suggestion was made, so it can be their answer to it."""
+
+    if not item_ids:
+        return False
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        row = connection.execute(
+            "SELECT EXISTS (SELECT 1 FROM chat_items WHERE user_id = ? "
+            "AND kind = 'user_message' "
+            f"AND item_id IN ({', '.join('?' * len(item_ids))}) "
+            "AND created_at > COALESCE((SELECT created_at FROM agent_suggestions "
+            "WHERE user_id = ? AND suggestion_id = ?), ''))",
+            (user_id, *item_ids, user_id, suggestion_id),
+        ).fetchone()
+    return bool(row[0])
+
+
 def read_latest_run_process(*, user_id: str, action_id: str) -> str | None:
     """The process of the Action's latest run, which a message to it names.
 

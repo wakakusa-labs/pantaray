@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -11,6 +12,7 @@ import pytest
 from starlette.websockets import WebSocketState
 from tests.unit.local_runtime.migrated_db import prepare_test_database
 
+import pantaray_agents.dependencies as deps
 from pantaray_agents.local_runtime.chat.store import append_chat_item
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
@@ -34,6 +36,7 @@ def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
     monkeypatch.setattr(chat_relay, "CHAT_RELAY_TICK_SECONDS", 0.01)
+    monkeypatch.setattr(deps, "is_mock_mode", lambda: False)
     register_logged_out_owner(USER)
     yield
     reset_logged_out_owner()
@@ -63,9 +66,7 @@ async def _wait_for_events(websocket: MagicMock, count: int) -> None:
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.asyncio
-async def test_items_appended_after_the_session_starts_are_relayed_in_order() -> None:
-    _append("before", "already on screen")
+def _handler() -> tuple[WSOrchestrationHandler, MagicMock]:
     websocket = MagicMock()
     websocket.client_state = WebSocketState.CONNECTED
     websocket.send_json = AsyncMock()
@@ -75,6 +76,13 @@ async def test_items_appended_after_the_session_starts_are_relayed_in_order() ->
         session_id="sess-1",
         user_id=USER,
     )
+    return handler, websocket
+
+
+@pytest.mark.asyncio
+async def test_items_appended_after_the_session_starts_are_relayed_in_order() -> None:
+    _append("before", "already on screen")
+    handler, websocket = _handler()
     handler.start_chat_relay()
     try:
         _append("m-1", "first")
@@ -95,3 +103,20 @@ async def test_items_appended_after_the_session_starts_are_relayed_in_order() ->
         "suggestion_event",
     ]
     assert relayed[0]["content"]["text"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_start_read_ends_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Starting from a later read would skip what was appended in between; the
+    # client reconnects and reads the chat again instead.
+    def fail(**_kwargs: object) -> int:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(chat_relay, "read_latest_chat_sequence", fail)
+    handler, _ = _handler()
+
+    with pytest.raises(sqlite3.OperationalError):
+        handler.start_chat_relay()
+    await handler.close()

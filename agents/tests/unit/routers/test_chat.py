@@ -63,13 +63,6 @@ def _pdf(byte_size: int = len(PAYLOAD)) -> dict[str, object]:
     return {"attachment_id": FILE_ID, "name": "Q3.pdf", "byte_size": byte_size}
 
 
-def _stage(tmp_path: Path) -> Path:
-    staged = tmp_path / f"artifacts/generated/attachments/{USER}/{FILE_ID}.pdf"
-    staged.parent.mkdir(parents=True)
-    staged.write_bytes(PAYLOAD)
-    return staged
-
-
 def _row_count(db_path: Path) -> int:
     with closing(sqlite3.connect(db_path)) as connection:
         return int(connection.execute("SELECT COUNT(*) FROM chat_items").fetchone()[0])
@@ -152,7 +145,9 @@ def test_attachments_and_text_follow_the_action_message_contract(
 def test_a_staged_file_is_checked_and_left_in_place(
     client: TestClient, tmp_path: Path
 ) -> None:
-    staged = _stage(tmp_path)
+    staged = tmp_path / f"artifacts/generated/attachments/{USER}/{FILE_ID}.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(PAYLOAD)
 
     wrong_size = client.post(MESSAGES, json=_message("m-1", files=[_pdf(1)]))
     accepted = client.post(MESSAGES, json=_message("m-2", files=[_pdf()]))
@@ -160,7 +155,6 @@ def test_a_staged_file_is_checked_and_left_in_place(
     assert wrong_size.status_code == 400
     assert accepted.status_code == 200
     assert accepted.json()["content"]["files"] == [_pdf()]
-    # Handing the file to an Action, later, is what moves it.
     assert staged.read_bytes() == PAYLOAD
 
 

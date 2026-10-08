@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import Final
 
+import pantaray_agents.dependencies as deps
 from pantaray_agents.local_runtime.chat.store import (
     read_chat_items_after,
     read_latest_chat_sequence,
@@ -41,15 +42,15 @@ class ChatRelayMixin(BaseWSHandler):
 
         Called synchronously right after `session_started` is sent: no request
         is served before this read, so a client that reads the chat after
-        `session_started` has every item the relay will not send.
+        `session_started` has every item the relay will not send. A failed
+        read ends the session instead: the client reconnects and reads again,
+        where starting later would skip the items appended in between.
         """
 
-        after: int | None = None
-        try:
-            after = read_latest_chat_sequence(user_id=str(self.user_id))
-        except Exception as exc:  # noqa: BLE001
-            # The loop reads it again, as it retries any failed tick.
-            logger.warning("Chat relay start read failed: error=%s", exc)
+        if deps.is_mock_mode():
+            # Mock mode runs without the runtime database.
+            return
+        after = read_latest_chat_sequence(user_id=str(self.user_id))
         spawn_ws_background_task(
             owner=self,
             task_key=CHAT_RELAY_TASK_KEY,
@@ -61,15 +62,11 @@ class ChatRelayMixin(BaseWSHandler):
 
         self._task_supervisor.cancel(CHAT_RELAY_TASK_KEY)
 
-    async def _chat_relay_loop(self, after: int | None) -> None:
+    async def _chat_relay_loop(self, after: int) -> None:
         user_id = str(self.user_id)
         try:
             while not self._is_closed:
                 try:
-                    if after is None:
-                        after = await asyncio.to_thread(
-                            read_latest_chat_sequence, user_id=user_id
-                        )
                     for item in await asyncio.to_thread(
                         read_chat_items_after, user_id=user_id, after=after
                     ):

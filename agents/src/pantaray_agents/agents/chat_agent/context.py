@@ -188,7 +188,12 @@ class ChatWindow:
                 boundary = sequence
             return boundary
 
-        fitted = self.budget.fit(lay, omit_before=self.after, resolve_boundary=resolve)
+        budget = self.budget
+        if budget.reaches_arm(rendered_bytes=lay(self.after).rendered_bytes):
+            # Within a turn only its own older tool results can be left out, so
+            # a turn that starts this full would fail on its first tool call.
+            budget = replace(budget, reset_pending=True)
+        fitted = budget.fit(lay, omit_before=self.after, resolve_boundary=resolve)
         if fitted.rebuilt_at is None:
             return self, entries(self.after)
         window = ChatWindow(

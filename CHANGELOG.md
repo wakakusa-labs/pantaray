@@ -19,7 +19,7 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - A task window you open now appears at the center of the screen.
 - Subagents keep their own notes and follow the AGENTS.md files of the folders they work in.
 - Suggestions can look at images and PDF pages, and look into several things at once.
-- Your AGENTS.md can now change how Pantaray works, not only add to it.
+- Your AGENTS.md can now override how Pantaray works by default.
 - Pantaray reads text files saved as Shift_JIS or UTF-16.
 - With an Anthropic API key, long tasks cost less, and you can choose Claude Opus 5.5, Sonnet 5.5,
   Haiku 5.5 and Fable 5.1.
@@ -46,7 +46,7 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - 自分で開いた作業のウィンドウが、画面の中央に出るようになりました。
 - サブエージェントが自分用のメモを持ち、作業するフォルダの AGENTS.md に従うようになりました。
 - 提案のための調べものが、画像や PDF のページを見たり、いくつかのことを同時に調べたりできるようになりました。
-- 自分の AGENTS.md で、Pantaray の働き方を書き足すだけでなく変えられるようになりました。
+- 仕事の進め方について Pantaray が既定で持っている方針を、自分の AGENTS.md で上書きできるようになりました。
 - Shift_JIS や UTF-16 で保存されたテキストファイルを読めるようになりました。
 - Anthropic の API キーで使うとき、長い作業の費用が下がり、Claude Opus 5.5・Sonnet 5.5・Haiku 5.5・Fable 5.1 を選べるようになりました。
 - ChatGPT で接続しているとき、長い作業の応答が速くなりました。

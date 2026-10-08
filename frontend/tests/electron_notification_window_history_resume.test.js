@@ -811,11 +811,14 @@ test('visible history overlay also suppresses main restore for activate points i
   assert.equal(instances.length, 1);
   instances[0].windowEvents.emit('ready-to-show');
 
-  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 720, y: 450 }), true);
+  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1000, y: 60 }), true);
 });
 
-test('overlays the user opens are centered and keep that center until the user acts in them; suggestions stay top-right', async () => {
-  const { notificationWindow, instances } = loadNotificationWindowModule();
+test('middle-row overlays are centered and keep that center until the user acts in them; top-row ones grow downward', async () => {
+  // History windows default to the top-right now; this covers the middle row a user can choose.
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({ ...DEFAULT_OVERLAY_PLACEMENTS, history: { row: 1, column: 2 } }),
+  });
   const handlers = notificationWindow.createNotificationIpcHandlers({
     resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
@@ -825,11 +828,12 @@ test('overlays the user opens are centered and keep that center until the user a
     handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
 
   notificationWindow.showNotification('S1');
-  notificationWindow.openStandaloneConversationOverlay('standalone:1');
-  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
   await new Promise((resolve) => setImmediate(resolve));
-  const [suggestion, typed, clicked, history] = instances;
+  // Tasks the user starts never stack, even over a window already in their cell.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.openStandaloneConversationOverlay('standalone:2');
+  const [suggestion, history, typed, clicked] = instances;
 
   assert.deepEqual(suggestion.getBounds(), { x: 900, y: 20, width: 520, height: 120 });
   for (const win of [typed, clicked, history]) {
@@ -1199,15 +1203,16 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
     { x: 20, y: 772 },
     { x: 972, y: 53 },
     { x: 798, y: 772 },
-    { x: 798, y: 772 },
+    // The second History window stacks upward over the first, which is still loading.
+    { x: 798, y: 772 - 132 },
   ]);
 
-  // A Suggestion arriving over the four shown windows stacks upward from the bottom row; a
-  // moved setting applies to the next window only.
+  // A Suggestion arriving stacks upward over the one shown in its cell only; a moved setting
+  // applies to the next window only.
   for (const win of instances) win.windowEvents.emit('ready-to-show');
   assert.equal(instances.filter((win) => win.isVisible()).length, 4);
   notificationWindow.showNotification('S3');
-  assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 4 * 132 });
+  assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 132 });
   placements = { ...placements, started: { row: 1, column: 0 } };
   notificationWindow.openStandaloneConversationOverlay('standalone:2');
   assert.deepEqual(position(instances[5]), { x: 20, y: 413 });
@@ -1294,4 +1299,41 @@ test('a closed Suggestion reopened from History opens in the History cell; a vis
   suggestion.webContentsEvents.emit('did-finish-load');
   assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
   assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 520, height: 400 });
+});
+
+test('by default Suggestions and History windows share the top-right stack without covering each other', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const openFromHistory = async (suggestionId) => {
+    handlers.onHistoryOpenOverlay({}, { suggestionId });
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+
+  notificationWindow.showNotification('S1');
+  // A task the user starts opens centered and is not part of the corner's stack.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  await openFromHistory('S2');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [suggestion, started, history, conversation] = instances;
+  assert.deepEqual(position(suggestion), { x: 900, y: 20 });
+  assert.deepEqual(position(started), { x: 460, y: 390 });
+  assert.deepEqual(position(history), { x: 900, y: 152 });
+
+  // A window still loading already holds its slot, so the next one takes the following slot.
+  assert.deepEqual(position(conversation), { x: 900, y: 284 });
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  notificationWindow.showNotification('S3');
+  assert.deepEqual(position(instances[4]), { x: 900, y: 20 + 3 * 132 });
+  instances[4].windowEvents.emit('ready-to-show');
+
+  // A closed Suggestion reopened from History also takes the next free slot of the corner.
+  notificationWindow.hideOverlay('S1');
+  notificationWindow.hideOverlay('S3');
+  await openFromHistory('S1');
+  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 2 * 132 });
 });

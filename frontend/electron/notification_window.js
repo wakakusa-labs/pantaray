@@ -72,11 +72,37 @@ function standalonePlacementKind(actionId) {
   return actionId ? 'history' : 'started';
 }
 
+// The cell each window was last placed in, so a stack counts only the windows in its own cell.
+const overlayWindowCells = new WeakMap();
+
+function isInCell(win, cell) {
+  const placed = overlayWindowCells.get(win);
+  return placed?.row === cell.row && placed?.column === cell.column;
+}
+
+// Suggestions and History windows take the next slot of their cell's stack, so the two never
+// open exactly on top of each other when they share a cell (by default, the top-right). A
+// window counts while it is shown or still loading to be shown; a closed (hidden) one does not.
+// A task the user starts always opens in its cell itself.
+function stackPlacement(placementKind) {
+  const cell = overlayCellFor(placementKind);
+  if (placementKind === 'started') return { cell, stackIndex: 0 };
+  const stackIndex = [...overlayWindows.entries()].filter(
+    ([id, win]) =>
+      !win.isDestroyed() &&
+      isInCell(win, cell) &&
+      (win.isVisible() || overlayState.get(id)?.readyToShow === false)
+  ).length;
+  return { cell, stackIndex };
+}
+
 // A closed Suggestion is hidden, not destroyed, so reopening it from History reuses its window;
 // a hidden window opens where its new kind opens, and a visible one stays where the user sees it.
 function placeHiddenOverlayWindow(win, placementKind) {
   if (win.isVisible()) return;
-  moveOverlayWindowToCell(win, overlayCellFor(placementKind));
+  const { cell, stackIndex } = stackPlacement(placementKind);
+  moveOverlayWindowToCell(win, cell, stackIndex);
+  overlayWindowCells.set(win, cell);
   resizeOverlayWindow(screen, win, win.getBounds().height);
 }
 
@@ -150,10 +176,6 @@ function clearForOwnerChange() {
   conversationOverlayIds.clear();
   lastOverlayId = null;
   syncMainWindowFocusableState();
-}
-
-function countVisibleOverlayWindows() {
-  return [...overlayWindows.values()].filter((win) => !win.isDestroyed() && win.isVisible()).length;
 }
 
 function findOverlayIdByWindow(targetWin) {
@@ -319,12 +341,12 @@ function createMappedOverlayWindow(id, options) {
   if (!runtime) return null;
   if (options.history) historyOverlayIds.add(id);
   if (options.conversation) conversationOverlayIds.add(id);
+  const { cell, stackIndex } = stackPlacement(options.placementKind);
   const win = overlayWindowFactory.createConversationOverlayWindow({
     actionId: options.actionId ?? null,
-    cell: overlayCellFor(options.placementKind),
+    cell,
     entryMode: options.entryMode,
-    // Only Suggestions arrive while others are showing; a window the user opens takes its cell.
-    stackIndex: options.placementKind === 'suggestion' ? countVisibleOverlayWindows() : 0,
+    stackIndex,
     interactive: options.interactive,
     onDidFinishLoad: () => {
       if (overlayWindows.get(id) !== win || win.isDestroyed()) return;
@@ -351,6 +373,7 @@ function createMappedOverlayWindow(id, options) {
     },
   });
   overlayWindows.set(id, win);
+  overlayWindowCells.set(win, cell);
   overlayActivationTracker.registerOverlayWindow(win);
   lastOverlayId = id;
   if (options.history) syncMainWindowFocusableState();

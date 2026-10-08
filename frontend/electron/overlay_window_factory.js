@@ -134,8 +134,8 @@ function resolvePrimaryPlacement(cell, stackIndex) {
  * from History) to that kind's cell. It keeps its content's height, placed by the cell's
  * anchor; the caller clamps it to the screen through the resize path.
  */
-function moveOverlayWindowToCell(win, cell) {
-  const placement = resolvePrimaryPlacement(cell, 0);
+function moveOverlayWindowToCell(win, cell, stackIndex) {
+  const placement = resolvePrimaryPlacement(cell, stackIndex);
   const { height } = win.getBounds();
   const y =
     placement.anchor === 'top'

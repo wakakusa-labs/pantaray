@@ -5,23 +5,31 @@ import path from 'node:path';
 import {
   OVERLAY_PLACEMENT_KINDS,
   OverlayCellSchema,
+  type OverlayCell,
+  type OverlayPlacementKind,
   type OverlayPlacements,
   type OverlayPlacementUpdate,
 } from '../ipc/schemas/overlayPlacement';
 
 const SETTINGS_FILE_NAME = 'overlay-placement.json';
 
-/** Today's placement: Suggestions stack from the top-right, tasks open centered. */
+/**
+ * Suggestions and windows reopened from History share the top-right, where they stack; a task
+ * the user starts opens centered.
+ */
 export const DEFAULT_OVERLAY_PLACEMENTS: OverlayPlacements = {
   suggestion: { row: 0, column: 4 },
   started: { row: 1, column: 2 },
-  history: { row: 1, column: 2 },
+  history: { row: 0, column: 4 },
 };
 
 export type OverlayPlacementStore = {
   get: () => OverlayPlacements;
   set: (update: OverlayPlacementUpdate) => OverlayPlacements;
 };
+
+/** Only the kinds the user moved are stored, so the others follow later changes of default. */
+type ChosenPlacements = Partial<Record<OverlayPlacementKind, OverlayCell>>;
 
 /**
  * Each kind is read on its own: a missing kind keeps its default, and an unreadable file or
@@ -30,40 +38,40 @@ export type OverlayPlacementStore = {
 function parseStoredPlacements(
   raw: string,
   reportInvalid: (reason: string) => void
-): OverlayPlacements {
+): ChosenPlacements {
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
     reportInvalid('malformed_json');
-    return DEFAULT_OVERLAY_PLACEMENTS;
+    return {};
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     reportInvalid('not_an_object');
-    return DEFAULT_OVERLAY_PLACEMENTS;
+    return {};
   }
   const stored = value as Partial<Record<string, unknown>>;
-  const placements = { ...DEFAULT_OVERLAY_PLACEMENTS };
+  const chosen: ChosenPlacements = {};
   for (const kind of OVERLAY_PLACEMENT_KINDS) {
     if (stored[kind] === undefined) continue;
     const cell = OverlayCellSchema.safeParse(stored[kind]);
-    if (cell.success) placements[kind] = cell.data;
+    if (cell.success) chosen[kind] = cell.data;
     else reportInvalid(`invalid_${kind}`);
   }
-  return placements;
+  return chosen;
 }
 
 // Created while the app starts, so a file it cannot read must not stop the app.
 function readStoredPlacements(
   settingsPath: string,
   reportInvalid: (reason: string) => void
-): OverlayPlacements {
+): ChosenPlacements {
   let raw: string;
   try {
     raw = fs.readFileSync(settingsPath, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') reportInvalid('unreadable_file');
-    return DEFAULT_OVERLAY_PLACEMENTS;
+    return {};
   }
   return parseStoredPlacements(raw, reportInvalid);
 }
@@ -73,9 +81,10 @@ export function createOverlayPlacementStore(params: {
   reportInvalid: (reason: string) => void;
 }): OverlayPlacementStore {
   const settingsPath = path.join(params.userDataDir, SETTINGS_FILE_NAME);
-  let current = readStoredPlacements(settingsPath, params.reportInvalid);
+  let chosen = readStoredPlacements(settingsPath, params.reportInvalid);
+  let current: OverlayPlacements = { ...DEFAULT_OVERLAY_PLACEMENTS, ...chosen };
 
-  const save = (next: OverlayPlacements): void => {
+  const save = (next: ChosenPlacements): void => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     const temporaryPath = `${settingsPath}.tmp-${randomUUID()}`;
     try {
@@ -93,9 +102,10 @@ export function createOverlayPlacementStore(params: {
   return {
     get: () => current,
     set: (update) => {
-      const next = { ...current, [update.kind]: update.cell };
+      const next = { ...chosen, [update.kind]: update.cell };
       save(next);
-      current = next;
+      chosen = next;
+      current = { ...DEFAULT_OVERLAY_PLACEMENTS, ...chosen };
       return current;
     },
   };

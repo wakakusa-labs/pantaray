@@ -257,6 +257,43 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * Light sweeping across the running work's text. With the header's busy dots gone, this is
+ * the on-screen sign that the Action is still running; reduced motion keeps the plain text.
+ * The gradient moves by exactly one tile per cycle, so the loop has no visible jump.
+ */
+.action-conversation__shimmer {
+  background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-secondary) 70%, transparent) 35%,
+      var(--text-primary) 50%,
+      color-mix(in srgb, var(--text-secondary) 70%, transparent) 65%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: action-conversation-shimmer 2.2s linear infinite;
+}
+
+@keyframes action-conversation-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-conversation__shimmer {
+    background: none;
+    color: inherit;
+    animation: none;
+  }
+}
+
 /* コマンドそのものを見せる行。文ではないので等幅で置く。 */
 .action-conversation__tool-text--mono {
   font-family: var(--font-mono);

@@ -81,19 +81,22 @@ _RELAY: dict[str, JSONValue] = {
     "items": {"type": "string"},
     "description": (
         "Ids of the user's chat messages to pass to the task as they wrote them, "
-        "with the files they attached and the projects they named with @. When "
-        "the user's own words already say what to do, relay them and write no "
-        "note. [] when none of their messages is the instruction."
+        "with the files they attached and the projects they named with @. The "
+        "task sees nothing of this chat but these messages and your note, so "
+        "relay every message of theirs it needs, the earlier ones that set the "
+        "context too. [] when none of their messages is the instruction."
     ),
 }
 _NOTE: dict[str, JSONValue] = {
     "type": ["string", "null"],
     "description": (
-        "Your own instruction to the task, shown as yours, not the user's. Write "
-        "one only when their words need context to be understood -- what "
-        '"that" points at, what you and they settled earlier -- or when no '
-        "message of theirs says what to do. null otherwise. What you want to ask "
-        "the user goes in your reply to them, not here."
+        "Your own instruction to the task, shown to the user beside their words "
+        "as yours, so in the language they use with you. Write "
+        'one only for what the relayed words leave out -- what "that" points '
+        "at, what you and they settled earlier -- or when no message of theirs "
+        "says what to do. The task reads their words already, so a note that "
+        "says them again is null. What you want to ask the user goes in your "
+        "reply to them, not here."
     ),
 }
 # A file goes to one task only: handing it over moves it there.

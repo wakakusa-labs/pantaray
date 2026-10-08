@@ -148,4 +148,4 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
   };
 }
 
-module.exports = { createNotificationIpcHandlerFactory };
+module.exports = { createNotificationIpcHandlerFactory, resizeOverlayWindow: resizeWindow };

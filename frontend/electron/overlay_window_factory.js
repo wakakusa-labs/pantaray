@@ -115,6 +115,38 @@ function releaseOverlayCenter(win) {
   if (overlayVerticalAnchors.get(win)?.kind === 'center') overlayVerticalAnchors.delete(win);
 }
 
+function setOverlayVerticalAnchor(win, { y, anchor }) {
+  overlayVerticalAnchors.delete(win);
+  if (anchor === 'center') {
+    overlayVerticalAnchors.set(win, { kind: 'center', y: y + OVERLAY_INITIAL_HEIGHT_PX / 2 });
+    win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
+  } else if (anchor === 'bottom') {
+    overlayVerticalAnchors.set(win, { kind: 'bottom' });
+  }
+}
+
+function resolvePrimaryPlacement(cell, stackIndex) {
+  return resolveOverlayPlacement(screen.getPrimaryDisplay().workArea, cell, stackIndex);
+}
+
+/**
+ * Moves a hidden window that is shown again for another kind (a closed Suggestion reopened
+ * from History) to that kind's cell. It keeps its content's height, placed by the cell's
+ * anchor; the caller clamps it to the screen through the resize path.
+ */
+function moveOverlayWindowToCell(win, cell) {
+  const placement = resolvePrimaryPlacement(cell, 0);
+  const { height } = win.getBounds();
+  const y =
+    placement.anchor === 'top'
+      ? placement.y
+      : placement.anchor === 'center'
+        ? Math.round(placement.y + (OVERLAY_INITIAL_HEIGHT_PX - height) / 2)
+        : placement.y + OVERLAY_INITIAL_HEIGHT_PX - height;
+  win.setBounds({ x: placement.x, y });
+  setOverlayVerticalAnchor(win, placement);
+}
+
 function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
   if (typeof getUiLanguage !== 'function') {
     throw new TypeError('Overlay window factory requires getUiLanguage.');
@@ -148,16 +180,12 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     onDidFinishLoad,
     onReadyToShow,
   }) {
-    const { x, y, anchor } = resolveOverlayPlacement(
-      screen.getPrimaryDisplay().workArea,
-      cell,
-      stackIndex
-    );
+    const placement = resolvePrimaryPlacement(cell, stackIndex);
     const win = new BrowserWindow({
       width: OVERLAY_WIDTH_PX,
       height: OVERLAY_INITIAL_HEIGHT_PX,
-      x,
-      y,
+      x: placement.x,
+      y: placement.y,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
@@ -188,12 +216,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
-    if (anchor === 'center') {
-      overlayVerticalAnchors.set(win, { kind: 'center', y: y + OVERLAY_INITIAL_HEIGHT_PX / 2 });
-      win.webContents.once('before-input-event', () => releaseOverlayCenter(win));
-    } else if (anchor === 'bottom') {
-      overlayVerticalAnchors.set(win, { kind: 'bottom' });
-    }
+    setOverlayVerticalAnchor(win, placement);
     registerWindow(win);
     loadOverlayPage(win, entryMode, actionId);
     win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
@@ -211,6 +234,7 @@ module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
   getOverlayVerticalAnchor,
+  moveOverlayWindowToCell,
   releaseOverlayCenter,
   showInteractiveOverlayWindow,
 };

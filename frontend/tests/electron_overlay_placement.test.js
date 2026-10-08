@@ -90,6 +90,14 @@ test('an unreadable stored value is reported and that kind falls back to its def
   }
 });
 
+test('a settings file that cannot be read is reported and does not stop the app', (t) => {
+  const dir = tempDir(t);
+  fs.mkdirSync(settingsFile(dir));
+  const { store, reports } = openStore(dir);
+  assert.deepEqual(store.get(), DEFAULT_OVERLAY_PLACEMENTS);
+  assert.deepEqual(reports, ['unreadable_file']);
+});
+
 test('a failed save keeps the previous placement', (t) => {
   const dir = tempDir(t);
   const { store } = openStore(dir);

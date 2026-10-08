@@ -1250,3 +1250,48 @@ test('a bottom-row overlay grows upward from where it is and stays on screen', (
   assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
   assert.ok(suggestion.getBounds().y + 500 <= workAreaBottom);
 });
+
+test('a closed Suggestion reopened from History opens in the History cell; a visible one stays put', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({
+      suggestion: { row: 0, column: 4 },
+      started: { row: 1, column: 2 },
+      history: { row: 2, column: 0 },
+    }),
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+
+  notificationWindow.showNotification('S1');
+  const [suggestion] = instances;
+  suggestion.windowEvents.emit('ready-to-show');
+  resize(suggestion, 300);
+  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+
+  // Visible: History brings it forward where the user already sees it.
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+
+  // Closed, then reopened from History: bottom-left, keeping its height, growing upward.
+  notificationWindow.hideOverlay('S1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(instances.length, 1);
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 300, width: 520, height: 300 });
+  resize(suggestion, 400);
+  assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
+
+  // The same through an Action of that Suggestion opened from the History list or chat.
+  notificationWindow.hideOverlay('S1');
+  suggestion.setBounds({ x: 972, y: 53 });
+  suggestion.webContentsEvents.emit('did-finish-load');
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 520, height: 400 });
+});

@@ -53,14 +53,27 @@ function parseStoredPlacements(
   return placements;
 }
 
+// Created while the app starts, so a file it cannot read must not stop the app.
+function readStoredPlacements(
+  settingsPath: string,
+  reportInvalid: (reason: string) => void
+): OverlayPlacements {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') reportInvalid('unreadable_file');
+    return DEFAULT_OVERLAY_PLACEMENTS;
+  }
+  return parseStoredPlacements(raw, reportInvalid);
+}
+
 export function createOverlayPlacementStore(params: {
   userDataDir: string;
   reportInvalid: (reason: string) => void;
 }): OverlayPlacementStore {
   const settingsPath = path.join(params.userDataDir, SETTINGS_FILE_NAME);
-  let current: OverlayPlacements = fs.existsSync(settingsPath)
-    ? parseStoredPlacements(fs.readFileSync(settingsPath, 'utf8'), params.reportInvalid)
-    : DEFAULT_OVERLAY_PLACEMENTS;
+  let current = readStoredPlacements(settingsPath, params.reportInvalid);
 
   const save = (next: OverlayPlacements): void => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });

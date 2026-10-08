@@ -3,6 +3,60 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.4.0
+
+- History now opens on a chat with Pantaray; switch between Chat and Tasks at the top.
+- In the chat, send text with images and files, and quote an earlier message to reply to it.
+- The chat shows when Pantaray is typing, and a button to try again when it could not reply.
+- A task the chat starts shows as a card you can open from the chat.
+- Reply to a suggestion in the chat, for example with "please", and Pantaray takes it on.
+- The chat tells you when one of its tasks is waiting for you or has finished.
+- The chat can look things up in your files, memory, recent activity and the web before it
+  answers.
+- "New conversation" is now "New task".
+- A task window has a button that shows the task in the chat, and a light sweeps across the work
+  while it runs.
+- A task window you open now appears at the center of the screen.
+- Subagents keep their own notes and follow the AGENTS.md files of the folders they work in.
+- Suggestions can look at images and PDF pages, and look into several things at once.
+- Your AGENTS.md can now change how Pantaray works, not only add to it.
+- Pantaray reads text files saved as Shift_JIS or UTF-16.
+- With an Anthropic API key, long tasks cost less, and you can choose Claude Opus 5.5, Sonnet 5.5,
+  Haiku 5.5 and Fable 5.1.
+- Long tasks connected with ChatGPT respond faster.
+- Searching memory is faster.
+- Fixed editing a file with Windows line endings changing every line of it.
+- Fixed recording sometimes staying off after you resumed it.
+- Fixed hiding a suggestion bringing the main window in front of the app you were using.
+- Fixed a command sometimes never finishing when it created and deleted temporary files.
+- Fixed the chat, Suggestions and subagents sometimes stopping with an error after reading many
+  images.
+
+---
+
+- 履歴が Pantaray とのチャットから開くようになり、上部で「チャット」と「作業」を切り替えられるようになりました。
+- チャットで、文章に画像やファイルを添えて送ったり、前のメッセージを引用して返信したりできるようになりました。
+- チャットで、Pantaray が入力中であることと、返信できなかったときにもう一度試すボタンが出るようになりました。
+- チャットが始めた作業は、チャットの中にカードで表示され、そこから開けるようになりました。
+- チャットで提案に「お願い」などと返すと、Pantaray が引き受けるようになりました。
+- チャットが始めた作業があなたの確認を待っているときや終わったときに、チャットで知らせるようになりました。
+- チャットが、ファイル・記憶・最近の作業・Web を調べてから答えられるようになりました。
+- 「新しい会話」を「新しい作業」に改めました。
+- 作業のウィンドウに、その作業をチャットで表示するボタンができ、実行中は作業の表示に光が流れるようになりました。
+- 自分で開いた作業のウィンドウが、画面の中央に出るようになりました。
+- サブエージェントが自分用のメモを持ち、作業するフォルダの AGENTS.md に従うようになりました。
+- 提案のための調べものが、画像や PDF のページを見たり、いくつかのことを同時に調べたりできるようになりました。
+- 自分の AGENTS.md で、Pantaray の働き方を書き足すだけでなく変えられるようになりました。
+- Shift_JIS や UTF-16 で保存されたテキストファイルを読めるようになりました。
+- Anthropic の API キーで使うとき、長い作業の費用が下がり、Claude Opus 5.5・Sonnet 5.5・Haiku 5.5・Fable 5.1 を選べるようになりました。
+- ChatGPT で接続しているとき、長い作業の応答が速くなりました。
+- 記憶の検索が速くなりました。
+- Windows 形式の改行のファイルを編集すると、すべての行が書き換わってしまう問題を直しました。
+- 記録を再開しても、記録が止まったままになることがある問題を直しました。
+- 提案を隠すと、使っていたアプリの手前にメインのウィンドウが出てくる問題を直しました。
+- 一時ファイルを作っては消すコマンドが、終わらなくなることがある問題を直しました。
+- チャット・提案・サブエージェントが、画像をたくさん読んだあとにエラーで止まることがある問題を直しました。
+
 ## 0.3.3
 
 - Fixed Suggestions not appearing when connected with ChatGPT.

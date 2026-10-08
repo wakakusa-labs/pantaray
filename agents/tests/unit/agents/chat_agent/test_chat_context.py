@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from tests.unit.local_runtime.action_seed import insert_agent_action
@@ -49,6 +51,7 @@ from pantaray_llm.contracts.conversation import (
 
 USER = "user-1"
 _NO_WORK = ChatWorkList(tasks=(), more_tasks=0, suggestions=())
+_NOW = "2026-10-09T00:49+09:00 (Asia/Tokyo)"
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +107,7 @@ def _fit(window: ChatWindow, waiting: list[ChatItem]) -> tuple[ChatWindow, list[
     fitted, entries = window.fit(
         items,
         waiting_from=waiting[0].sequence,
-        tail=turn_context(waiting, _NO_WORK),
+        tail=turn_context(waiting, _NO_WORK, now=_NOW),
         head_bytes=2_000,
         media=NO_MEDIA,
     )
@@ -173,7 +176,13 @@ def test_a_stored_reply_goes_back_as_the_call_that_sent_it() -> None:
     LlmActionTurnRequest(  # every call shown is answered
         mode="action_turn",
         tools=[REPLY_TOOL],
-        conversation=[said, call, result, aside, turn_context([asked], _NO_WORK)],
+        conversation=[
+            said,
+            call,
+            result,
+            aside,
+            turn_context([asked], _NO_WORK, now=_NOW),
+        ],
     )
 
 
@@ -237,7 +246,7 @@ def test_a_turn_that_would_start_past_the_arm_line_starts_rebuilt() -> None:
     _, whole = _window().fit(
         read_chat_items_for_turn(user_id=USER, after=0),
         waiting_from=waiting[0].sequence,
-        tail=turn_context(waiting, _NO_WORK),
+        tail=turn_context(waiting, _NO_WORK, now=_NOW),
         head_bytes=2_000,
         media=NO_MEDIA,
     )
@@ -250,6 +259,22 @@ def test_a_turn_that_would_start_past_the_arm_line_starts_rebuilt() -> None:
 
     assert window.after > 0
     assert len(sent) < len(whole)
+
+
+@pytest.mark.usefixtures("tokyo_local_zone")
+def test_the_chat_reads_each_item_on_the_users_clock() -> None:
+    # Stored in UTC: shown raw, 00:49 in Tokyo read as the day before.
+    asked = _say("m-1")
+    local = (
+        datetime.fromisoformat(asked.created_at)
+        .astimezone(ZoneInfo("Asia/Tokyo"))
+        .isoformat(timespec="minutes")
+    )
+
+    _, sent = _fit(_window(), [asked])
+
+    assert any(f"[{asked.item_id} {local}]" in text for text in sent)
+    assert any(f"Now: {_NOW}." in text for text in sent)
 
 
 def test_waiting_items_are_never_dropped_to_fit() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -33,7 +34,10 @@ from pantaray_agents.tools.contract import (
     ReactToolRegistry,
     ToolCallEnvelope,
 )
-from pantaray_agents.tools.web.session import WebResearchToolSession
+from pantaray_agents.tools.web.session import (
+    _WEB_SEARCH_KEY_PLACE,
+    WebResearchToolSession,
+)
 from pantaray_llm.errors import ProviderError
 from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID, WEB_SEARCH_PROFILE_ID
 from pantaray_llm.web_tools.schemas import WebToolsProxyRequest
@@ -741,15 +745,17 @@ _UNAVAILABLE = "Web search is unavailable right now, so nothing was looked up."
         (
             _arrange_unconfigured_web_search,
             "Web search is not set up, so nothing was looked up. Tell the user "
-            "they can turn it on by signing in to Pantaray or by saving a Tavily "
-            "API key in Settings > AI connection > Web search.",
+            "they can turn it on by signing in to Pantaray or by saving the Tavily "
+            "API key in Settings > AI connection > Web search (in Japanese: "
+            '"Tavily API キー" in 設定 > AI 接続 > Web 検索).',
             "Web search is not set up, so nothing was looked up.",
         ),
         (
             _arrange_rejected_tavily_key,
             "The Tavily API key saved for web search was rejected, so nothing was "
-            "looked up. Tell the user they can save a working key in Settings > "
-            "AI connection > Web search.",
+            "looked up. Tell the user they can save a working key as the Tavily "
+            "API key in Settings > AI connection > Web search (in Japanese: "
+            '"Tavily API キー" in 設定 > AI 接続 > Web 検索).',
             "The Tavily API key saved for web search was rejected, so nothing was "
             "looked up.",
         ),
@@ -810,6 +816,36 @@ async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
         chat_message if speaks_to_user else suggestion_message
     )
     assert "PROXY_" not in str(result.output)
+
+
+_UI_CATALOG = Path(__file__).resolve().parents[4] / "frontend/src/i18n/messageCatalog"
+
+
+def _ui_labels(key: str) -> list[str]:
+    """``key``'s label in every language the UI catalog defines it in."""
+
+    pattern = re.compile(rf"'{re.escape(key)}': '([^']+)'")
+    return [
+        label
+        for path in ("common.ts", "settings.ts")
+        for label in pattern.findall((_UI_CATALOG / path).read_text(encoding="utf-8"))
+    ]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "nav.settings",
+        "settings.aiConnection.title",
+        "settings.aiConnection.webSearch.title",
+        "settings.aiConnection.webSearch.keyLabel",
+    ],
+)
+def test_the_fix_text_names_the_web_search_key_as_the_app_labels_it(key: str) -> None:
+    labels = _ui_labels(key)
+
+    assert len(labels) == 2  # English and Japanese
+    assert all(label in _WEB_SEARCH_KEY_PLACE for label in labels)
 
 
 @pytest.mark.asyncio

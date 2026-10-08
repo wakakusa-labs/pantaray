@@ -340,7 +340,9 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
     )
 
     work = read_chat_work_list(user_id=USER)
-    shown = turn_context([], work).model_dump_json()
+    shown = turn_context(
+        [], work, now="2026-10-09T00:49+09:00 (Asia/Tokyo)"
+    ).model_dump_json()
 
     assert isinstance(started, dict)
     # Wherever a task was started, it is Pantaray's own work.
@@ -353,6 +355,7 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
     assert "waiting for approval" in shown and "4 older tasks not listed here" in shown
 
 
+@pytest.mark.usefixtures("tokyo_local_zone")
 async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> None:
     quote = _overlay_task("old-quote", 'A社の見積書を作って。件名は "Q3 report"')
     _finish(
@@ -395,6 +398,9 @@ async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> N
     assert other in found(None, "2026-10-01T00:00:00Z")
     assert other in found(None, "2026-10-01T09:00:00+09:00")
     assert quote not in found(None, "2026-10-01T00:00:00Z")
+    # Without an offset a time is the user's own (Asia/Tokyo here), as shown.
+    assert other in found(None, "2026-10-01T09:00:00")
+    assert other not in found(None, "2026-10-01T09:00:01")
     by_words = search_tasks(
         user_id=USER, query="見積書", since=None, until=None, limit=5
     )

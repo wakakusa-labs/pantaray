@@ -59,6 +59,7 @@ _FINISH = LlmToolDefinition(
     name="finish", description="End.", parameters={"type": "object"}
 )
 type _Step = _Reply | BaseException
+type _Tools = Sequence[tuple[str, ToolTurnPlacement]]
 
 
 @pytest.fixture(autouse=True)
@@ -171,8 +172,11 @@ class _Run:
 
     script: Sequence[_Step]
     decide: Callable[[IdleTurn], Finish[str] | Continue] = _answer_on_end
-    tools: Sequence[tuple[str, ToolTurnPlacement]] = (("a", "parallel"),)
+    tools: _Tools = (("a", "parallel"),)
     log: list[str] = field(default_factory=list)
+    history: list[ConversationEntry] = field(
+        default_factory=lambda: [ConversationEntry(_user("Do the task."))]
+    )
     arriving: list[list[LlmTurnItem] | BaseException] = field(default_factory=list)
     store: ProviderTurnStore = field(default_factory=lambda: ProviderTurnStore(None))
     requests: list[ConversationRequest] = field(default_factory=list)
@@ -207,12 +211,8 @@ class _Run:
     async def on_result(
         self, call: LlmToolCall, result: ReactToolResult
     ) -> LlmTurnToolResultItem:
-        item = LlmTurnToolResultItem(
-            type="tool_result",
-            call_id=call.call_id,
-            name=call.name,
-            output=result.output,
-        )
+        ids = call.model_dump(include={"call_id", "name"})
+        item = LlmTurnToolResultItem(type="tool_result", output=result.output, **ids)
         self.results[call.call_id] = item
         return item
 
@@ -232,7 +232,7 @@ class _Run:
                 system_instruction="system",
                 tools=tuple(_tool(name, kind, self.log) for name, kind in self.tools),
                 ending_tools=(_FINISH,),
-                history=[ConversationEntry(_user("Do the task."))],
+                history=self.history,
                 provider_turns=self.store,
                 inference_profile="profile-a",
                 max_turns=max_turns,
@@ -272,21 +272,6 @@ async def test_a_turn_without_calls_carries_on_or_ends_as_the_caller_says() -> N
     assert _text(run.requests[1].conversation[-1]) == run.notices[0]
 
 
-async def test_a_refused_ending_is_answered_as_its_result_and_the_run_goes_on() -> None:
-    def decide(turn: IdleTurn) -> Finish[str] | Continue:
-        assert turn.ending_call is not None
-        if turn.ending_call.arguments["answer"] == "draft":
-            return Continue("Not yet.")
-        return Finish("final")
-
-    run = _Run([_reply(_end("c1", "draft")), _reply(_end("c2"))], decide=decide)
-
-    assert await run() == "final"
-    assert run.code("c1") == ENDING_REJECTED_ERROR_CODE
-    assert run.requests[1].conversation[-1] == run.results["c1"]
-    assert "Not yet." in str(run.results["c1"].output)
-
-
 @pytest.mark.parametrize(
     ("placement", "expected"),
     [
@@ -310,10 +295,7 @@ async def test_a_batch_runs_at_once_only_when_every_call_may(
 
 
 async def test_calls_the_plan_holds_back_are_answered_as_not_run() -> None:
-    tools: list[tuple[str, ToolTurnPlacement]] = [
-        ("solo", "solo_turn"),
-        ("a", "parallel"),
-    ]
+    tools: _Tools = [("solo", "solo_turn"), ("a", "parallel")]
     # A solo call runs alone, and an ending call among others never ends.
     first = _reply(_call("c1", "solo"), _call("c2", "a"), _end("c3"), dropped=["b"])
     run = _Run([first, _reply(_end("c4"))], tools=tools)
@@ -371,9 +353,22 @@ async def test_the_last_turn_keeps_the_tools_and_runs_only_the_end() -> None:
     assert run.idle[0].final
 
 
-async def test_a_last_turn_without_an_accepted_end_fails_the_run() -> None:
+async def test_a_refusal_on_the_last_turn_is_answered_before_the_run_fails() -> None:
+    first = _Run([_reply(_end("c1", "draft"))], decide=lambda _: Continue("Not yet."))
+
     with pytest.raises(ConversationTurnsExhausted):
-        await _Run([_reply(text="Still working.")])(max_turns=1)
+        await first(max_turns=1)
+
+    assert first.code("c1") == ENDING_REJECTED_ERROR_CODE
+    # What the hooks were given rebuilds the history, and a next run sends it.
+    stored = [
+        *first.history,
+        first.turns[0].entry,
+        ConversationEntry(first.results["c1"]),
+    ]
+    resumed = _Run([_reply(_end("c2"))], history=stored, store=first.store)
+    assert await resumed() == "done"
+    assert resumed.requests[0].conversation == [entry.item for entry in stored]
 
 
 async def test_items_that_arrive_mid_run_go_before_the_next_send() -> None:
@@ -441,11 +436,7 @@ async def test_a_stop_from_before_send_or_the_model_propagates_as_raised() -> No
 
 
 async def test_an_interrupt_answers_the_calls_left_behind_it_then_propagates() -> None:
-    tools: list[tuple[str, ToolTurnPlacement]] = [
-        ("a", "sequential"),
-        ("gate", "sequential"),
-        ("b", "sequential"),
-    ]
+    tools: _Tools = [("a", "sequential"), ("gate", "sequential"), ("b", "sequential")]
     run = _Run(
         [_reply(_call("c1", "a"), _call("c2", "gate"), _call("c3", "b"))], tools=tools
     )
@@ -459,15 +450,15 @@ async def test_an_interrupt_answers_the_calls_left_behind_it_then_propagates() -
     assert "start b" not in run.log
 
 
-async def test_a_failing_parallel_call_propagates_without_any_result() -> None:
-    tools: list[tuple[str, ToolTurnPlacement]] = [
-        ("a", "parallel"),
-        ("boom", "parallel"),
-    ]
-    run = _Run([_reply(_call("c1", "a"), _call("c2", "boom"))], tools=tools)
+async def test_a_failing_parallel_call_propagates_after_the_rest_is_answered() -> None:
+    tools: _Tools = [("a", "parallel"), ("boom", "parallel")]
+    calls = (_call("c1", "a"), _call("c2", "boom"), _end("c3"))
+    run = _Run([_reply(*calls)], tools=tools)
 
     with pytest.raises(_Pause):
         await run()
 
-    assert run.results == {}
-    assert "end a" in run.log
+    # What ran and what was held back are answered; the failed call is not.
+    assert list(run.results) == ["c1", "c3"]
+    assert run.results["c1"].output == {"ran": "a"}
+    assert run.code("c3") == NOT_RUN_ERROR_CODE

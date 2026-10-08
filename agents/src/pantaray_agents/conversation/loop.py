@@ -125,7 +125,8 @@ class IdleTurn:
     """A turn that ran no tool, for the caller to end or carry on.
 
     ``ending_call`` is the ending call the turn made alone, or as the only one
-    on its last turn. On a ``final`` turn anything but ``Finish`` fails the run.
+    on its last turn. On a ``final`` turn a ``Continue`` is answered as usual
+    and then fails the run.
     """
 
     response: LlmActionTurnResponse
@@ -293,16 +294,16 @@ class _Run[T]:
             )
             if isinstance(decision, Finish):
                 return decision.value
-            if final:
-                raise ConversationTurnsExhausted(
-                    "the last turn ended without an accepted end"
-                )
             if ending_call is not None:
                 await self._answer(
                     ending_call, decision.notice, ENDING_REJECTED_ERROR_CODE
                 )
             else:
                 await self._notice(decision.notice)
+            if final:
+                raise ConversationTurnsExhausted(
+                    "the last turn ended without an accepted end"
+                )
         raise ConversationTurnsExhausted("the run has no turn to send")
 
     async def _send(self, *, final: bool) -> tuple[TurnReply, ConversationRequest]:
@@ -408,10 +409,9 @@ class _Run[T]:
                 (runnable.pop(), _not_run(EXCLUSION_NOTICES["run_ending_tool"]))
             ]
         if plan.mode == "parallel":
-            await self._run_at_once(runnable)
+            await self._run_at_once(runnable, excluded)
         else:
             await self._run_in_order(runnable, excluded)
-        await self._answer_all(excluded)
         return bool(runnable), None
 
     async def _run_in_order(
@@ -429,12 +429,18 @@ class _Run[T]:
                 await self._answer_all([*left, *excluded])
                 raise
             await self._append_result(call, result)
+        await self._answer_all(excluded)
 
-    async def _run_at_once(self, calls: Sequence[LlmToolCall]) -> None:
+    async def _run_at_once(
+        self,
+        calls: Sequence[LlmToolCall],
+        excluded: Sequence[tuple[LlmToolCall, str]],
+    ) -> None:
         first = self.tool_calls + 1
         self.tool_calls += len(calls)
-        # Waits for every call, so none is left running behind a failure, and
-        # raises the first failure in the model's order.
+        # Waits for every call, so none is left running behind a failure; what
+        # came back and what was held back are answered before the first
+        # failure, in the model's order, is raised.
         outcomes = await asyncio.gather(
             *(
                 self.registry.execute(_react_call(call), first + index)
@@ -442,13 +448,15 @@ class _Run[T]:
             ),
             return_exceptions=True,
         )
-        results: list[ReactToolResult] = []
-        for outcome in outcomes:
+        failure: BaseException | None = None
+        for call, outcome in zip(calls, outcomes, strict=True):
             if isinstance(outcome, BaseException):
-                raise outcome
-            results.append(outcome)
-        for call, result in zip(calls, results, strict=True):
-            await self._append_result(call, result)
+                failure = failure or outcome
+            else:
+                await self._append_result(call, outcome)
+        await self._answer_all(excluded)
+        if failure is not None:
+            raise failure
 
     async def _close_last_turn(
         self, calls: Sequence[LlmToolCall]

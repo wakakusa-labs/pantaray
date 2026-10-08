@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -52,6 +53,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.schema.context_source import SourceBinding
 from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.trace_context import TraceContextManager
+from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles import OPENAI_GPT_6_LUNA_MODEL
 
 AGENTS_DIR = Path(__file__).resolve().parents[2]
@@ -222,18 +224,26 @@ class _CountingModels:
             mark in sent for mark in ("This is the last turn", "tool budget is spent")
         )
         self.extra_last_turn |= "came on the last turn" in sent
-        response = await self.models.generate_content(**kwargs)
+        try:
+            response = await self.models.generate_content(**kwargs)
+        except LlmProxyExecutionError as error:
+            # A refused output was paid for too; the loop repairs and resends it.
+            self._count(error.usage_metadata)
+            raise
+        self._count(response.usage_metadata)
         turn = getattr(response, "action_turn", None)
         calls = turn.calls if turn is not None else response.tool_calls
         self.calls += len(calls)
-        usage = response.usage_metadata or {}
-        for key, value in usage.items():
+        return response
+
+    def _count(self, usage: Mapping[str, int | None] | None) -> None:
+        for key, value in (usage or {}).items():
             if value is not None:
                 self.usage[key] = self.usage.get(key, 0) + value
+        usage = usage or {}
         self.per_request.append(
             (usage.get("prompt_tokens") or 0, usage.get("cached_prompt_tokens") or 0)
         )
-        return response
 
 
 async def _run(fixture: dict[str, Any], db_path: Path, index: int) -> dict[str, Any]:

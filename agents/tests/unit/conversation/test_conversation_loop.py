@@ -146,7 +146,7 @@ def _tool(
     async def execute(_call: ReactToolCall, _step: int) -> ReactToolResult:
         log.append(f"start {name}")
         await asyncio.sleep(0)
-        if name in {"gate", "boom"}:
+        if name == "boom":
             raise _Pause
         log.append(f"end {name}")
         return ReactToolResult(tool_name=name, status="success", output={"ran": name})
@@ -223,9 +223,7 @@ class _Run:
         self.idle.append(turn)
         return self.decide(turn)
 
-    async def __call__(
-        self, *, max_turns: int = 8, interrupts: tuple[type[BaseException], ...] = ()
-    ) -> str:
+    async def __call__(self, *, max_turns: int = 8) -> str:
         return await run_conversation(
             ConversationRun(
                 prompt="head",
@@ -244,14 +242,13 @@ class _Run:
                 on_result=self.on_result,
                 on_notice=self.on_notice,
                 decide=self.judge,
-                interrupts=interrupts,
             )
         )
 
-    def code(self, call_id: str) -> str:
+    def code(self, call_id: str) -> JSONValue:
         output = self.results[call_id].output
         assert isinstance(output, dict)
-        return str(output.get("error_code"))
+        return output.get("error_code")
 
 
 async def test_a_turn_without_calls_carries_on_or_ends_as_the_caller_says() -> None:
@@ -435,30 +432,25 @@ async def test_a_stop_from_before_send_or_the_model_propagates_as_raised() -> No
     assert len(run.requests) == 1
 
 
-async def test_an_interrupt_answers_the_calls_left_behind_it_then_propagates() -> None:
-    tools: _Tools = [("a", "sequential"), ("gate", "sequential"), ("b", "sequential")]
-    run = _Run(
-        [_reply(_call("c1", "a"), _call("c2", "gate"), _call("c3", "b"))], tools=tools
-    )
-
-    with pytest.raises(_Pause):
-        await run(interrupts=(_Pause,))
-
-    # The paused call is the resumed run's to settle; the one after never ran.
-    assert list(run.results) == ["c1", "c3"]
-    assert run.code("c3") == NOT_RUN_ERROR_CODE
-    assert "start b" not in run.log
-
-
-async def test_a_failing_parallel_call_propagates_after_the_rest_is_answered() -> None:
-    tools: _Tools = [("a", "parallel"), ("boom", "parallel")]
-    calls = (_call("c1", "a"), _call("c2", "boom"), _end("c3"))
+@pytest.mark.parametrize(
+    ("kind", "after_failure"),
+    [("parallel", None), ("sequential", NOT_RUN_ERROR_CODE)],
+)
+async def test_a_failing_call_propagates_after_the_rest_is_answered(
+    kind: ToolTurnPlacement, after_failure: str | None
+) -> None:
+    tools: _Tools = [("a", kind), ("boom", kind), ("b", kind)]
+    calls = (_call("c1", "a"), _call("c2", "boom"), _call("c3", "b"), _end("c4"))
     run = _Run([_reply(*calls)], tools=tools)
 
     with pytest.raises(_Pause):
         await run()
 
-    # What ran and what was held back are answered; the failed call is not.
-    assert list(run.results) == ["c1", "c3"]
+    # What ran, what never ran and what was held back are answered; the
+    # failed call is not, as a paused one is the resumed run's to settle.
+    assert {call_id: run.code(call_id) for call_id in run.results} == {
+        "c1": None,
+        "c3": after_failure,
+        "c4": NOT_RUN_ERROR_CODE,
+    }
     assert run.results["c1"].output == {"ran": "a"}
-    assert run.code("c3") == NOT_RUN_ERROR_CODE

@@ -25,7 +25,7 @@ import functools
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from pantaray_agents.conversation.prefix import (
     ConversationLayout,
@@ -161,9 +161,9 @@ class ConversationRun[T]:
     for ``decide``. ``max_turns`` counts answered turns, not repaired sends;
     ``max_tool_calls`` the calls run. ``before_send`` raises to stop, or returns
     the items that arrived. ``on_result`` stores, redacts or spills a result and
-    returns what is sent. A tool raising one of ``interrupts`` pauses the run:
-    the turn's later calls are answered as not run, and the call that raised is
-    the resumed run's to settle.
+    returns what is sent. When a tool raises -- a pause for approval included --
+    the turn's calls that did not run are answered as not run, the one that
+    raised gets no result, and the exception propagates.
     """
 
     prompt: str
@@ -184,7 +184,6 @@ class ConversationRun[T]:
     ]
     on_notice: Callable[[LlmTurnUserItem], Awaitable[None]]
     decide: Callable[[IdleTurn], Finish[T] | Continue]
-    interrupts: tuple[type[BaseException], ...] = ()
 
 
 class ConversationOutputInvalid(RuntimeError):
@@ -199,8 +198,8 @@ async def run_conversation[T](run: ConversationRun[T]) -> T:
     """Run the conversation until ``run.decide`` returns ``Finish``.
 
     Every exception ``send``, a hook or a tool raises propagates as it was,
-    apart from a refused output, which is repaired, and an ``interrupts``
-    exception, which first answers the calls left behind it.
+    apart from a refused output, which is repaired; a tool's first answers
+    the calls of its turn that did not run.
     """
 
     return await _Run(run).run()
@@ -423,11 +422,8 @@ class _Run[T]:
             self.tool_calls += 1
             try:
                 result = await self.registry.execute(_react_call(call), self.tool_calls)
-            except self.spec.interrupts:
-                notice = _not_run("came after a call that paused the run")
-                left = [(later, notice) for later in calls[index + 1 :]]
-                await self._answer_all([*left, *excluded])
-                raise
+            except BaseException as failure:
+                await self._fail(failure, calls[index + 1 :], excluded)
             await self._append_result(call, result)
         await self._answer_all(excluded)
 
@@ -438,9 +434,8 @@ class _Run[T]:
     ) -> None:
         first = self.tool_calls + 1
         self.tool_calls += len(calls)
-        # Waits for every call, so none is left running behind a failure; what
-        # came back and what was held back are answered before the first
-        # failure, in the model's order, is raised.
+        # Waits for every call, so none is left running behind a failure, and
+        # answers what came back before the first failure in the model's order.
         outcomes = await asyncio.gather(
             *(
                 self.registry.execute(_react_call(call), first + index)
@@ -454,9 +449,25 @@ class _Run[T]:
                 failure = failure or outcome
             else:
                 await self._append_result(call, outcome)
-        await self._answer_all(excluded)
         if failure is not None:
-            raise failure
+            await self._fail(failure, (), excluded)
+        await self._answer_all(excluded)
+
+    async def _fail(
+        self,
+        failure: BaseException,
+        after: Sequence[LlmToolCall],
+        excluded: Sequence[tuple[LlmToolCall, str]],
+    ) -> NoReturn:
+        """Answer the calls that did not run, then raise ``failure`` as it was.
+
+        The call that failed gets no result: a pause leaves it to the resumed
+        run, and any other failure ends the run.
+        """
+
+        notice = _not_run("came after a call that stopped the run")
+        await self._answer_all([*((later, notice) for later in after), *excluded])
+        raise failure
 
     async def _close_last_turn(
         self, calls: Sequence[LlmToolCall]

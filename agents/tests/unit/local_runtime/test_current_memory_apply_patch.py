@@ -215,6 +215,24 @@ async def test_external_crlf_change_invalidates_the_read_snapshot(memory_runtime
 
 
 @pytest.mark.asyncio
+async def test_bom_memory_file_edits_from_the_returned_first_line(memory_runtime):
+    _, _, root = memory_runtime
+    target = root / "agent_experience/project.md"
+    target.write_bytes(b"\xef\xbb\xbfold\r\nkeep\r\n")
+    first = await _execute(memory_runtime, _change(target), "bom-read")
+    assert first.output["status"] == "needs_read"
+    returned_first_line = first.output["text"].split("\r\n")[0]
+    change = {
+        "op": "update",
+        "path": str(target),
+        "edits": [{"old_lines": [returned_first_line], "new_lines": ["new"]}],
+    }
+    saved = await _execute(memory_runtime, change, "bom-save")
+    assert saved.output["status"] == "success"
+    assert target.read_bytes() == b"\xef\xbb\xbfnew\r\nkeep\r\n"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "relative",
     ["facts/new.md", "insights/new.md", "../../other/files/agent_experience/new.md"],

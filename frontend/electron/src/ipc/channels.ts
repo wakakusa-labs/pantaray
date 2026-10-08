@@ -35,6 +35,9 @@ export const validReceiveChannels = [
   'overlay:snapshot',
   'overlay:focusComposer',
   'action:conversationUpdated',
+  // Main window only: an item appended to the user's chat, and the overlay's "show in chat"
+  'chat:itemAppended',
+  'history:showChat',
   // Screenshot status change notification
   'screenshot:statusChanged',
   // Capture allowlist settings update
@@ -90,6 +93,9 @@ export const validInvokeChannels = [
   'action:discardAttachment',
   'action:readConversationPage',
   'action:readToolOutputPage',
+  // The single chat (main window only)
+  'chat:sendMessage',
+  'chat:listItems',
   // Suggestion history (main SSOT)
   'history:fetch',
   'history:markCompletionViewed',
@@ -124,6 +130,8 @@ export const validInvokeChannels = [
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
+  // Overlay → main window: show this Action's latest card in the chat
+  'overlay:showChat',
 ] as const;
 
 export type ValidSendChannel = (typeof validSendChannels)[number];

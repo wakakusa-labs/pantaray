@@ -67,6 +67,8 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/messages$/,
     methods: new Set(['POST']),
   },
+  { path: /^\/v1\/agents\/users\/[^/]+\/chat\/messages$/, methods: new Set(['POST']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/chat\/items$/, methods: new Set(['GET']) },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/state$/,
     methods: new Set(['GET']),
@@ -108,12 +110,20 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
 export class LocalBackendRequestError extends Error {
   readonly status: number | null;
   readonly errorCode: string | null;
+  /** The error response's JSON body, for a caller whose contract puts more than a code in it. */
+  readonly payload: unknown;
 
-  constructor(message: string, status: number | null = null, errorCode: string | null = null) {
+  constructor(
+    message: string,
+    status: number | null = null,
+    errorCode: string | null = null,
+    payload: unknown = null
+  ) {
     super(message);
     this.name = 'LocalBackendRequestError';
     this.status = status;
     this.errorCode = errorCode;
+    this.payload = payload;
   }
 }
 
@@ -267,7 +277,12 @@ export function createLocalBackendClient(params: {
         }
         const fallback = 'Local backend request failed.';
         const detail = extractErrorDetail(errorPayload, fallback);
-        throw new LocalBackendRequestError(detail.message, response.status, detail.errorCode);
+        throw new LocalBackendRequestError(
+          detail.message,
+          response.status,
+          detail.errorCode,
+          errorPayload
+        );
       }
       // 204 carries no body; its callers type the result as `void`.
       if (response.status === 204) return undefined as T;

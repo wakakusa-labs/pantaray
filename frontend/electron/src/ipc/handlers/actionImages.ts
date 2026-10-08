@@ -18,6 +18,7 @@ import { writeFileAtomic } from '../../atomicFile';
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import { IpcSenderRejectedError } from '../senderTrust';
+import { requireComposerUser } from './composerSender';
 import { parseInput } from '../schemas/error';
 import {
   ACTION_IMAGE_MAX_BYTES,
@@ -41,11 +42,7 @@ function attachmentTempDirectory(localArtifactRoot: string): string {
 
 export function registerActionImageHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   registrar.handle('action:attachImage', async (event, request) => {
-    if (ctx.actions.resolveOverlayIdForSender(event.sender) === null) {
-      throw new IpcSenderRejectedError('overlay_window_not_registered');
-    }
-    const userId = ctx.actions.getCurrentSubjectId();
-    if (userId === null) throw new Error('Missing authenticated user id.');
+    const userId = requireComposerUser(ctx, event.sender);
 
     const input = parseInput(ActionImageAttachInputSchema, 'action:attachImage', request);
     if (input.bytes.byteLength > ACTION_IMAGE_MAX_BYTES) {

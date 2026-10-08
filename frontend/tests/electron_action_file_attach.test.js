@@ -21,6 +21,7 @@ function harness(overrides = {}) {
   const localArtifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-attach-file-'));
   const handlers = new Map();
   const ctx = {
+    windows: { getMainWindow: () => overrides.mainWindow ?? null },
     actions: {
       getCurrentSubjectId: () => 'user-1',
       resolveOverlayIdForSender: () => 'overlay-1',
@@ -38,7 +39,7 @@ function harness(overrides = {}) {
     stagingDirectory,
     staged: (userId) =>
       fs.existsSync(stagingDirectory(userId)) ? fs.readdirSync(stagingDirectory(userId)) : [],
-    invoke: (channel, payload) => handlers.get(channel)({ sender: { id: 1 } }, payload),
+    invoke: (channel, payload, sender = { id: 1 }) => handlers.get(channel)({ sender }, payload),
   };
 }
 
@@ -150,6 +151,36 @@ test('attaching and discarding refuse senders that are not a registered overlay 
     await assert.rejects(signedOut.invoke(channel, payload), /Missing authenticated user id/);
   }
   assert.equal(fs.existsSync(path.join(foreignSender.localArtifactRoot, 'generated')), false);
+});
+
+test('the main window chat composer stages and discards files under the same rules', async () => {
+  const mainWindow = { isDestroyed: () => false, webContents: { id: 9 } };
+  const app = harness({ mainWindow, actions: { resolveOverlayIdForSender: () => null } });
+  const bytes = toArrayBuffer(Buffer.from('%PDF-1.7 body'));
+
+  const { attachmentId } = await app.invoke(
+    'action:attachFile',
+    { bytes, name: 'chat.pdf' },
+    mainWindow.webContents
+  );
+  assert.deepEqual(app.staged(), [`${attachmentId}.pdf`]);
+  await assert.rejects(
+    app.invoke('action:attachFile', { bytes, name: 'chat.txt' }, mainWindow.webContents),
+    (error) => error instanceof IpcValidationError
+  );
+  // Another WebContents is not the main window just because no Overlay claims it.
+  await assert.rejects(
+    app.invoke('action:discardAttachment', { attachmentId }, { id: 9 }),
+    (error) => error instanceof IpcSenderRejectedError
+  );
+  await app.invoke('action:discardAttachment', { attachmentId }, mainWindow.webContents);
+  assert.deepEqual(app.staged(), []);
+
+  mainWindow.isDestroyed = () => true;
+  await assert.rejects(
+    app.invoke('action:attachFile', { bytes, name: 'late.pdf' }, mainWindow.webContents),
+    (error) => error instanceof IpcSenderRejectedError
+  );
 });
 
 test('attaching refuses a session user id that is not one plain path segment', async () => {

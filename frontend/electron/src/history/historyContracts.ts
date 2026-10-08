@@ -7,7 +7,7 @@ const canonicalIdentitySchema = z
   .string()
   .refine((value) => value.length > 0 && value === value.trim(), 'Invalid identity.');
 const nonBlankTextSchema = z.string().refine((value) => value.trim().length > 0, 'Blank text.');
-const canonicalTimestampSchema = z
+export const canonicalTimestampSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
   .refine((value) => {

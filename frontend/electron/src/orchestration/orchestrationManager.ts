@@ -11,6 +11,7 @@
 import type { BrowserWindow } from 'electron';
 
 import type { ActionConversationPage } from '../actions/actionContracts';
+import { parseChatItem } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
 import type {
@@ -22,7 +23,7 @@ import type {
   OrchestrationStatusPayload,
   ResumeProcessRequest,
 } from './contracts';
-import { isScreenCaptureRequestedEvent } from './eventContracts';
+import { isChatItemAppendedEvent, isScreenCaptureRequestedEvent } from './eventContracts';
 import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
@@ -357,6 +358,15 @@ export function createOrchestrationManager(params: {
         toolRequestId: message.data.tool_request_id,
         appName: message.data.app_name,
       });
+      return;
+    }
+    if (isChatItemAppendedEvent(message)) {
+      // An item off the wire contract throws to the WS message handler, which logs it.
+      const item = parseChatItem(message.data.item);
+      const mainWindow = params.getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('chat:itemAppended', item);
+      }
       return;
     }
     rendererBridge.forwardEventToRenderers(message);

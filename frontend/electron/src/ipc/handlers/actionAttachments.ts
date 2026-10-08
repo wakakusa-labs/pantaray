@@ -17,7 +17,7 @@ import { writeFileAtomic } from '../../atomicFile';
 
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
-import { IpcSenderRejectedError, type IpcSenderIdentity } from '../senderTrust';
+import { requireComposerUser } from './composerSender';
 import { parseInput } from '../schemas/error';
 import {
   ACTION_DOCUMENT_EXTENSIONS,
@@ -46,17 +46,8 @@ function stagedAttachmentsDirectory(localArtifactRoot: string, userId: string): 
 }
 
 export function registerActionAttachmentHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
-  function requireOverlayUser(sender: IpcSenderIdentity): string {
-    if (ctx.actions.resolveOverlayIdForSender(sender) === null) {
-      throw new IpcSenderRejectedError('overlay_window_not_registered');
-    }
-    const userId = ctx.actions.getCurrentSubjectId();
-    if (userId === null) throw new Error('Missing authenticated user id.');
-    return userId;
-  }
-
   registrar.handle('action:attachFile', async (event, request) => {
-    const userId = requireOverlayUser(event.sender);
+    const userId = requireComposerUser(ctx, event.sender);
     const { bytes: payload, name: file } = parseInput(
       ActionAttachFileInputSchema,
       'action:attachFile',
@@ -83,7 +74,7 @@ export function registerActionAttachmentHandlers(ctx: MainContext, registrar: Ip
   });
 
   registrar.handle('action:discardAttachment', async (event, request) => {
-    const userId = requireOverlayUser(event.sender);
+    const userId = requireComposerUser(ctx, event.sender);
     const { attachmentId } = parseInput(
       ActionDiscardAttachmentInputSchema,
       'action:discardAttachment',

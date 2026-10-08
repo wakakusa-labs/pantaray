@@ -210,3 +210,20 @@ async def test_a_stop_that_races_the_turns_own_end_still_returns() -> None:
         outcome = run_chat_turn_in_thread("racer", turn)
         await stop_chat_turns(owner_id="racer")  # must never raise
         assert outcome.result(timeout=5) in ("answered", "stopped")
+
+
+async def test_a_retry_asked_for_while_a_turn_ends_is_not_lost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chat = _Chat(monkeypatch)
+    chat.waiting = 1
+    drain = chat_turns.request_chat_turn("asker")
+    await asyncio.to_thread(chat.started.wait, 5)
+
+    # The turn has recorded its failure; the user retries it before it returns.
+    chat.waiting += 1
+    chat_turns.request_chat_turn("asker", retry_of="failure-2")
+    chat.gate.set()
+    await drain
+
+    assert chat.retries == [None, "failure-2"]

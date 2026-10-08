@@ -65,14 +65,17 @@ async def _drain(user_id: str) -> None:
     try:
         while user_id in _WOKEN:
             _WOKEN.discard(user_id)
-            while plan := await _next_plan(user_id):
+            while planned := await _next_plan(user_id):
+                plan, retry_of = planned
                 outcome = await asyncio.wrap_future(
                     run_chat_turn_in_thread(user_id, functools.partial(_run, plan))
                 )
                 if isinstance(outcome, ChatWindow):
                     _WINDOWS[user_id] = outcome
-                    # Answered or failed again; a stopped retry is kept.
-                    _RETRIES.pop(user_id, None)
+                    # The retry this turn answered is spent; one asked for
+                    # meanwhile, or one a stopped turn left, is kept.
+                    if _RETRIES.get(user_id) == retry_of:
+                        _RETRIES.pop(user_id, None)
     except OwnerMismatchError:
         return
     except Exception as exc:  # noqa: BLE001
@@ -88,14 +91,16 @@ async def _drain(user_id: str) -> None:
         )
 
 
-async def _next_plan(user_id: str) -> ChatTurnPlan | None:
+async def _next_plan(user_id: str) -> tuple[ChatTurnPlan, str | None] | None:
+    """The turn to run, and the retry it was planned with."""
+
     # A stop barrier holds admission closed until the new identity is in
     # place; a turn planned before then would start on the old one.
     while not admission_is_open():
         await asyncio.sleep(_ADMISSION_POLL_SECONDS)
-    return await asyncio.to_thread(
-        plan_chat_turn, user_id=user_id, retry_of=_RETRIES.get(user_id)
-    )
+    retry_of = _RETRIES.get(user_id)
+    plan = await asyncio.to_thread(plan_chat_turn, user_id=user_id, retry_of=retry_of)
+    return None if plan is None else (plan, retry_of)
 
 
 async def _run(plan: ChatTurnPlan) -> ChatWindow | None:

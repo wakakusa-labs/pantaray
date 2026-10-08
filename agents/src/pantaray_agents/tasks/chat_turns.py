@@ -71,6 +71,8 @@ async def _drain(user_id: str) -> None:
                 )
                 if isinstance(outcome, ChatWindow):
                     _WINDOWS[user_id] = outcome
+                    # Answered or failed again; a stopped retry is kept.
+                    _RETRIES.pop(user_id, None)
     except OwnerMismatchError:
         return
     except Exception as exc:  # noqa: BLE001
@@ -92,7 +94,7 @@ async def _next_plan(user_id: str) -> ChatTurnPlan | None:
     while not admission_is_open():
         await asyncio.sleep(_ADMISSION_POLL_SECONDS)
     return await asyncio.to_thread(
-        plan_chat_turn, user_id=user_id, retry_of=_RETRIES.pop(user_id, None)
+        plan_chat_turn, user_id=user_id, retry_of=_RETRIES.get(user_id)
     )
 
 

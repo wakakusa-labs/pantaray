@@ -131,12 +131,16 @@ async def test_the_session_hears_when_a_turn_starts_and_ends(
         await _wait_for_states(websocket, 1)
         running = True
         await _wait_for_states(websocket, 2)
+        # A turn appends its reply, then stops running, between two ticks.
+        _append("reply", "Done.")
         running = False
         await _wait_for_states(websocket, 3)
     finally:
         await handler.close()
 
     assert _turn_states(websocket) == [False, True, False]
+    events = [call.args[0]["event"] for call in websocket.send_json.call_args_list]
+    assert events[-2:] == ["chat_item_appended", "chat_turn_state"]
 
 
 @pytest.mark.asyncio

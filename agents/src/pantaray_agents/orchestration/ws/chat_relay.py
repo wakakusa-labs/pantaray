@@ -6,7 +6,8 @@ reads the chat over HTTP once `session_started` arrives; an item it also gets
 from the relay is the same item, by `item_id`.
 
 Each tick also sends `chat_turn_state` when a turn starts or ends, and once at
-the start. It is read before the items, so a turn's end follows its reply.
+the start. It is sampled before the items are read and sent after them, so a
+turn's end follows its reply; a failed read holds both back.
 """
 
 from __future__ import annotations
@@ -71,16 +72,9 @@ class ChatRelayMixin(BaseWSHandler):
         sent_running: bool | None = None
         try:
             while not self._is_closed:
+                # Sampled before the read and sent after it: a turn appends its
+                # end before it stops running, so its reply goes out first.
                 running = chat_turn_running(user_id)
-                if running != sent_running:
-                    if not await self._send(
-                        OutboundEvent.CHAT_TURN_STATE.value,
-                        ChatTurnStateMessage(running=running),
-                        store_in_session_store=False,
-                        persist_public_event=False,
-                    ):
-                        return
-                    sent_running = running
                 try:
                     for item in await asyncio.to_thread(
                         read_chat_items_after, user_id=user_id, after=after
@@ -93,6 +87,15 @@ class ChatRelayMixin(BaseWSHandler):
                         ):
                             return
                         after = item.sequence
+                    if running != sent_running:
+                        if not await self._send(
+                            OutboundEvent.CHAT_TURN_STATE.value,
+                            ChatTurnStateMessage(running=running),
+                            store_in_session_store=False,
+                            persist_public_event=False,
+                        ):
+                            return
+                        sent_running = running
                 except Exception as exc:  # noqa: BLE001
                     # A failed read must not end the session; the next tick
                     # resumes from the last item delivered.

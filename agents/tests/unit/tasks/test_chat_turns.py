@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 
 import pytest
 
@@ -11,6 +12,7 @@ from pantaray_agents.agents.chat_agent.context import ChatWindow
 from pantaray_agents.agents.chat_agent.turn import ChatTurnInterrupted, ChatTurnPlan
 from pantaray_agents.local_runtime.chat.turn_runs import (
     chat_turn_running,
+    run_chat_turn_in_thread,
     stop_chat_turns,
 )
 from pantaray_agents.local_runtime.runtime.admission import admission_closed
@@ -25,6 +27,7 @@ class _Chat:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.waiting = 0
         self.runs: list[str] = []
+        self.retries: list[str | None] = []
         self.loops: set[int] = set()
         self.gate = threading.Event()
         self.started = threading.Event()
@@ -39,6 +42,7 @@ class _Chat:
             raise OwnerMismatchError("owner changed")
         if self.waiting == 0:
             return None
+        self.retries.append(retry_of)
         return ChatTurnPlan(user_id=user_id, key=f"a{len(self.runs)}", cursor=0)
 
     async def run(
@@ -112,3 +116,55 @@ async def test_a_stopped_turn_runs_again_only_once_admission_reopens(
     await drain
 
     assert (chat.runs, chat.waiting) == (["u", "u"], 0)
+
+
+async def test_a_stopped_retry_is_still_a_retry_when_planned_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chat = _Chat(monkeypatch)
+    chat.waiting = 1
+    chat.hang_once = True
+    chat.gate.set()
+    drain = chat_turns.request_chat_turn("r", retry_of="failure-1")
+    await asyncio.to_thread(chat.started.wait, 5)
+
+    await stop_chat_turns(owner_id="r")
+    await drain
+
+    assert chat.retries == ["failure-1", "failure-1"]
+
+
+async def test_no_turn_starts_while_admission_is_closed() -> None:
+    started: list[str] = []
+
+    async def turn() -> str:
+        started.append("turn")
+        return "answered"
+
+    with admission_closed():
+        outcome = run_chat_turn_in_thread("u", turn)
+
+    assert outcome.result(timeout=5) == "stopped"
+    assert started == []
+    assert not chat_turn_running("u")
+
+
+async def test_a_stopped_turn_has_stopped_once_its_threaded_write_is_done() -> None:
+    writes: list[str] = []
+    entered = threading.Event()
+
+    def write() -> None:
+        entered.set()
+        time.sleep(0.3)
+        writes.append("reply")
+
+    async def turn() -> str:
+        await asyncio.to_thread(write)
+        return "answered"
+
+    outcome = run_chat_turn_in_thread("w", turn)
+    await asyncio.to_thread(entered.wait, 5)
+    await stop_chat_turns(owner_id="w")
+
+    assert writes == ["reply"]
+    assert outcome.result(timeout=5) == "stopped"

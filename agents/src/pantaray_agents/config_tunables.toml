@@ -24,7 +24,10 @@ cancel_check_failure_grace_seconds = 60
 # The chat's input budget in tokens. Under the Action's 272,000 a long chat sent
 # over 200,000 input tokens on every turn; at this size older items are left
 # behind once the input nears it (the shared 85% / 95% / 50% budget rules).
-context_window_tokens = 64000
+# What a turn cannot leave out must still fit: the messages waiting for it and
+# its latest run of tool results (up to 4 parallel reads of 50 KB each). At
+# 64,000 a long chat failed turns that read two or three files.
+context_window_tokens = 128000
 
 [artifact_paths]
 # artifact root からの相対 storage path template。衝突回避のため {user_id} を必ず含む。

@@ -813,6 +813,54 @@ async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
 
 
 @pytest.mark.asyncio
+async def test_the_research_web_tool_keeps_a_provider_page_failure_to_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_tavily_key()
+    _patch_proxy_transport(monkeypatch)
+    provider_words = "upstream HTTP 503: service unavailable"
+    _patch_tavily(
+        monkeypatch,
+        _RecordingTavilyClient(
+            result={
+                **TAVILY_EXTRACT_PAYLOAD,
+                "failed_results": [
+                    {"url": "https://example.test/b", "error": provider_words}
+                ],
+            }
+        ),
+    )
+    args: dict[str, object] = {
+        "urls": ["https://example.test/a", "https://example.test/b"],
+        "query": None,
+        "offset": 1,
+        "limit": 100,
+    }
+    call = ReactToolCall(
+        tool_name="web_extract",
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope(
+            tool_id="web_extract",
+            reason=None,
+            args=args,  # type: ignore[arg-type]
+        ),
+    )
+    registry = ReactToolRegistry(
+        WebResearchToolSession(
+            user_id=REQUEST_CONTEXT["user_id"], speaks_to_user=True
+        ).definitions()
+    )
+
+    result = await registry.execute(call, 1)
+
+    assert result.status == "success"
+    assert result.output["failed_results"] == [
+        {"url": "https://example.test/b", "error": "This page could not be read."}
+    ]
+    assert provider_words not in str(result.output)
+
+
+@pytest.mark.asyncio
 async def test_the_tavily_key_stays_out_of_errors_and_logs(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

@@ -7,7 +7,6 @@ from pantaray_agents.schema.agent.base import JSONValue
 from .definitions import WEB_SEARCH_RESULT_CONTENT_MAX_CHARS
 from .fetch import WebExtractFailure, WebSearchResponse
 
-WEB_EXTRACT_FAILED_RESULT_MAX_CHARS = 300
 WEB_EXTRACT_QUERY_EXCERPTS_HINT = (
     "Only excerpts relevant to query were returned, not the full page; call "
     "web_extract with query=null to read the full page."
@@ -72,26 +71,33 @@ def web_extract_pages(
     failures: tuple[WebExtractFailure, ...],
 ) -> dict[str, JSONValue]:
     _validate_page(offset=offset, limit=limit)
-    failures_by_url = {failure.url: failure for failure in failures}
+    failed_urls = {failure.url for failure in failures}
     results: list[JSONValue] = []
     failed_results: list[JSONValue] = []
     for url in urls:
         content = snapshots.get((url, query))
         if content is None:
-            failure = failures_by_url.get(url)
-            error = failure.error if failure is not None else "No content was returned."
-            failed_results.append(_bounded_failure(url=url, error=error))
+            # The provider's own words for a page it could not read are not
+            # passed on: the user is told only that the page was not read.
+            failed_results.append(
+                {
+                    "url": url,
+                    "error": "This page could not be read."
+                    if url in failed_urls
+                    else "No content was returned.",
+                }
+            )
             continue
         start = offset - 1
         if start >= len(content) and not (start == 0 and not content):
             failed_results.append(
-                _bounded_failure(
-                    url=url,
-                    error=(
+                {
+                    "url": url,
+                    "error": (
                         f"Offset {offset} is out of range for this page "
                         f"({len(content)} characters)."
                     ),
-                )
+                }
             )
             continue
         page = content[start : start + limit]
@@ -126,15 +132,6 @@ def web_extract_pages(
         "status": "success",
         "results": results,
         "failed_results": failed_results,
-    }
-
-
-def _bounded_failure(*, url: str, error: str) -> dict[str, JSONValue]:
-    bounded = error[:WEB_EXTRACT_FAILED_RESULT_MAX_CHARS]
-    return {
-        "url": url,
-        "error": bounded,
-        "error_truncated": len(bounded) < len(error),
     }
 
 

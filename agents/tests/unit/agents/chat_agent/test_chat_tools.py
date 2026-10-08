@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 
@@ -254,12 +255,13 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
         "sug-1"
     ]
 
+    yes = _say_with("m-0", "Yes", ())
     pictured = append_chat_item(
         user_id=USER,
         message_id="m-1",
         content=UserMessageContent(
             kind="user_message",
-            text="Yes, with this logo",
+            text="with this logo",
             quote_item_id=None,
             images=(ImageInput.model_validate(IMAGE),),
             files=(),
@@ -268,24 +270,24 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     taken = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        relay=[pictured.item_id],
+        relay=[yes, pictured.item_id],
         note=None,
     )
     # The same turn after a crash, as it was, and with the addition left out.
     replayed = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        relay=[pictured.item_id],
+        relay=[yes, pictured.item_id],
         note=None,
     )
     again = await _turn("a0")(
         "accept_suggestion",
         suggestion_id="sug-1",
-        relay=[],
+        relay=[yes],
         note=None,
     )
     gone = await _turn("a2")(
-        "accept_suggestion", suggestion_id="sug-1", relay=[], note=None
+        "accept_suggestion", suggestion_id="sug-1", relay=[yes], note=None
     )
 
     assert isinstance(taken, dict) and replayed == taken
@@ -529,6 +531,40 @@ async def test_a_yes_carries_what_the_chat_settled_with_the_user(db_path: Path) 
         relayed_item_ids=(yes,), note="社名は匿名化する"
     )
     assert "社名は匿名化する" in render_action_user_request_text(message)
+
+
+async def test_a_suggestion_is_taken_up_only_with_the_users_answer_to_it(
+    db_path: Path,
+) -> None:
+    earlier = _say_with("m-1", "ありがとう", ())
+    with sqlite3.connect(db_path) as connection:
+        # Made the same millisecond as the user's last words, so those are not
+        # an answer to it.
+        (made,) = connection.execute(
+            "SELECT created_at FROM chat_items WHERE item_id = ?", (earlier,)
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "suggestion_summary, interaction_contract, has_suggestion, created_at, "
+            "updated_at) VALUES ('sug-3', ?, 'success', 'Draft the cover email?', "
+            "'Draft the cover email', 'action_offer', 1, ?, ?)",
+            (USER, made, made),
+        )
+    time.sleep(0.01)  # the user's answer comes later
+    yes = _say_with("m-2", "お願い", ())
+
+    # Only what the user wrote before the suggestion existed: not an answer.
+    unasked = await _turn("a0")(
+        "accept_suggestion", suggestion_id="sug-3", relay=[earlier], note=None
+    )
+    asked = await _turn("a2")(
+        "accept_suggestion", suggestion_id="sug-3", relay=[yes], note=None
+    )
+
+    assert isinstance(unasked, dict)
+    assert unasked["error_code"] == "SUGGESTION_NOT_AGREED"
+    assert isinstance(asked, dict) and "action_id" in asked
+    assert _actions(db_path) == [(asked["action_id"], "sug-3")]
 
 
 async def test_the_history_finds_a_task_by_the_chats_note(db_path: Path) -> None:

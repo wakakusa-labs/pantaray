@@ -22,6 +22,7 @@ from pantaray_agents.local_runtime.chat.store import (
 )
 from pantaray_agents.local_runtime.chat.work_list import (
     SubmittedMessage,
+    answered_after_suggestion,
     read_attachment_holder,
     read_latest_run_process,
     read_submitted_message,
@@ -144,6 +145,21 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
         )
 
     async def accept(args: dict[str, JSONValue], key: str) -> ReactToolResult:
+        suggestion_id = str(args["suggestion_id"])
+        relay = _strings(args["relay"])
+        # Taking a suggestion up is the user's yes: the relayed messages, which
+        # the model can only name once it has read them, include one written
+        # after the suggestion was made. Without this, a turn that only showed
+        # the suggestion started its work unasked.
+        if not answered_after_suggestion(
+            user_id=plan.user_id, suggestion_id=suggestion_id, item_ids=relay
+        ):
+            return _refused(
+                "accept_suggestion",
+                "SUGGESTION_NOT_AGREED",
+                "Not taken up: the user has not answered this suggestion yet. It "
+                "stays open until they agree.",
+            )
         db_path, busy_timeout_ms = read_local_runtime_db_config()
         preference = load_effective_approval_preference(
             db_path=db_path,
@@ -151,13 +167,12 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             user_id=plan.user_id,
             applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
         )
-        relay = _strings(args["relay"])
         relayed = _relayed(plan, "accept_suggestion", relay)
         if isinstance(relayed, ReactToolResult):
             return relayed
         outcome = await accept_suggestion(
             user_id=plan.user_id,
-            suggestion_id=str(args["suggestion_id"]),
+            suggestion_id=suggestion_id,
             command_id=key,
             approval_mode=preference.approval_mode,
             language=None,
@@ -220,10 +235,11 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
                 "relay": {
                     **_RELAY,
                     "description": (
-                        "Ids of the user's chat messages that add to their yes "
-                        "(a condition, a file), passed on as they wrote them; [] "
-                        "when they only agreed."
+                        "Ids of the user's chat messages that say yes to it, and "
+                        "of any that add to their yes (a condition, a file), "
+                        "passed on as they wrote them."
                     ),
+                    "minItems": 1,
                 },
                 "note": {
                     **_NOTE,

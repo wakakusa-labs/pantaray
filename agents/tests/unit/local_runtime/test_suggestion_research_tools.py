@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,9 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
 )
+from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
+    READ_IMAGE_NOT_SUPPORTED,
+)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -87,6 +91,7 @@ from .test_memory_artifact_publication import (
     _publication,
     _runtime,
 )
+from .test_read_document_broker import PIXEL_PNG
 from .test_workspace_settings_repository import TIMESTAMP
 from .test_workspace_settings_repository import _bootstrap_db as _bootstrap_app_db
 
@@ -1461,3 +1466,36 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     listing, page = tool_outputs[:2]
     assert listing["storage"] == "action_file"
     assert "meeting-notes-with-a-long-name-0000.md" in page["content"]
+
+
+@pytest.mark.asyncio
+async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    folder = (tmp_path / "home").resolve()
+    folder.mkdir()
+    (folder / "chart.png").write_bytes(PIXEL_PNG)
+    (folder / "notes.md").write_text("plan\n", encoding="utf-8")
+    snapshot = dataclasses.replace(_snapshot(db_path=db_path), folders=(folder,))
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=snapshot,
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    image = await registry.execute(
+        _tool_call("read", {"path": str(folder / "chart.png")}), 1
+    )
+    text = await registry.execute(
+        _tool_call("read", {"path": str(folder / "notes.md")}), 2
+    )
+
+    # The shared read returns the image; Suggestion sends no files, so it refuses.
+    assert image.status == "error"
+    assert image.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
+    assert image.images == ()
+    assert text.status == "success"

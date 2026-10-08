@@ -9,6 +9,11 @@ from typing import Literal
 from jsonschema import Draft7Validator, ValidationError  # type: ignore[import-untyped]
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_llm.contracts.input_block import (
+    LlmImageDescriptor,
+    LlmInputImageBlock,
+)
+from pantaray_llm.contracts.tool_use import LlmToolCall
 
 type ReactToolResultStatus = Literal["success", "error"]
 
@@ -48,6 +53,48 @@ class ReactToolCall:
         if self.tool_call_envelope.tool_id != self.tool_name:
             raise ValueError("tool_call_envelope.tool_id must match tool_name")
 
+    @classmethod
+    def from_llm_call(cls, call: LlmToolCall) -> ReactToolCall:
+        return cls(
+            tool_name=call.name,
+            tool_args=call.arguments,
+            tool_call_envelope=ToolCallEnvelope(
+                tool_id=call.name, reason=None, args=call.arguments
+            ),
+            call_id=call.call_id,
+        )
+
+
+@dataclass(frozen=True)
+class ToolImage:
+    """An image a tool hands the model, as the file it was read from.
+
+    The request reads the bytes from that file again when it is sent and checks
+    them against ``byte_size`` and ``sha256``; ``ref`` names the image in the
+    conversation, which the request matches it to.
+    """
+
+    ref: str
+    blob_ref: str
+    display_path: str
+    mime_type: str
+    byte_size: int
+    sha256: str
+    workspace_root_path: str
+    workspace_relative_path: str
+
+    def input_block(self) -> LlmInputImageBlock:
+        return LlmInputImageBlock(
+            type="input_image",
+            image=LlmImageDescriptor(
+                blob_ref=self.blob_ref,
+                mime_type=self.mime_type,
+                byte_size=self.byte_size,
+                sha256=self.sha256,
+                application_ref=self.ref,
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class ReactToolResult:
@@ -56,6 +103,8 @@ class ReactToolResult:
     output: JSONValue
     error_message: str | None = None
     final_step_recorded: bool = False
+    # Images for the model, sent beside the JSON output, never inside it.
+    images: tuple[ToolImage, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.tool_name.strip():

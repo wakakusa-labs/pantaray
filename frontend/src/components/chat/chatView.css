@@ -62,6 +62,7 @@
 }
 
 .chat-stack {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -229,7 +230,17 @@
   white-space: nowrap;
 }
 
+/* The retry sits on its own row under the bubble, out of the row's flow, so the time stays beside
+   the bubble's bottom like every other message. */
+/* The room is the row's own margin: one on the stack would count in the row's bottom alignment. */
+.chat-row:has(.chat-retry) {
+  margin-bottom: 34px;
+}
+
 .chat-retry {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;

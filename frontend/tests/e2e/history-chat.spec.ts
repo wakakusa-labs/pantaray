@@ -373,6 +373,13 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
     'title',
     'AI に接続できず、返信できませんでした。もう一度送る'
   );
+  // The time stays beside the bubble's bottom; the icon has its own row under the bubble.
+  const bubble = await lastMessage.locator('.chat-bubble').boundingBox();
+  const time = await lastMessage.locator('time').boundingBox();
+  const icon = await retry.boundingBox();
+  expect(Math.abs(bubble!.y + bubble!.height - (time!.y + time!.height))).toBeLessThan(8);
+  expect(icon!.y).toBeGreaterThanOrEqual(bubble!.y + bubble!.height);
+  expect(Math.abs(icon!.x + icon!.width - (bubble!.x + bubble!.width))).toBeLessThan(2);
   // No notice text: the icon under the message is all there is.
   await expect(page.getByText('AI に接続できず、返信できませんでした。')).toHaveCount(0);
   await retry.focus();

@@ -5,8 +5,7 @@ does -- the same prompt, lenses, research tools, selector and writer -- over the
 direct route with the OpenAI key in OPENAI_API_KEY (and TAVILY_API_KEY for web
 search when set), and writes one JSON line per Insight. Nothing is published:
 the run's steps land in the copy only. `compare` pairs two such files by
-Insight. Run the same files against two code trees by pointing PYTHONPATH at
-each tree's `agents/src` and `agents/packages/pantaray-llm/src`.
+Insight. `suggestion_replay.sh` runs both sides on two git refs and compares.
 
 The copy and the output hold private data: keep both outside the repository.
 The key is read from the environment and never printed.
@@ -26,7 +25,10 @@ import uuid
 from collections import Counter
 from pathlib import Path
 
-MODEL = os.environ.get("SMOKE_MODEL", "gpt-5.6-luna")
+from pantaray_llm.profiles import OPENAI_GPT_6_LUNA_MODEL
+
+# The model Pantaray Cloud serves the regular purposes, `suggestion` included, with.
+MODEL = os.environ.get("SMOKE_MODEL", OPENAI_GPT_6_LUNA_MODEL)
 BUSY_TIMEOUT_MS = 5000
 # The live store; a replay writes steps and rows, so it only runs on a copy.
 LIVE_STORE_MARKER = "Application Support"

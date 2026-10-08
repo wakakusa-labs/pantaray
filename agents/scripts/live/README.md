@@ -107,38 +107,22 @@ Action は worker のスレッド、WS は uvicorn のループにいる。こ�
    再開待ちの Action が `canceled` にならず（起動復旧がジョブを再投入しただけの
    `processing` のまま）、再開されて終端まで進むこと。
 
-## `suggestion_replay.py`: Suggestion before/after on the same Insights
+## `suggestion_replay.sh`: Suggestion before/after on the same Insights
 
-Decides a Suggestion for recent Insights of a **copy** of the local database the
-way the job does (prompt, lenses, research tools, selector, writer), over the
-direct route, and writes one JSON line per Insight. Nothing is published or
-delivered. It refuses a path under `Application Support`, so it never writes to
-the live store. The copy and the output files hold private data: keep them
-outside the repository.
-
-Run the same Insights against two code trees by pointing `PYTHONPATH` at each
-tree's `agents/src` and `agents/packages/pantaray-llm/src`, then `compare`:
+Replays a Suggestion for the latest Insights on two git refs and prints the
+comparison. It copies the app's database and artifacts under `/tmp` (the live
+store is never written), decides the way the job does over the direct route,
+and publishes nothing. The copy and outputs hold private data and stay in the
+printed `/tmp` folder.
 
 ```sh
-APP="$HOME/Library/Application Support/Pantaray"   # Electron userData
-WORK=/tmp/suggestion-replay && mkdir -p "$WORK/before"
-sqlite3 "$APP/local-backend.sqlite3" ".backup '$WORK/local-backend.sqlite3'"
-cp -R "$APP/local-backend-artifacts" "$WORK/artifacts"
-git archive origin/develop agents/src agents/packages | tar -x -C "$WORK/before"
-
-for side in before after; do
-  TREE=$([ $side = before ] && echo "$WORK/before/agents" || echo "$PWD")   # run from agents/
-  OPENAI_API_KEY="$(your-secret-lookup openai)" \
-  PYTHONPATH="$TREE/src:$TREE/packages/pantaray-llm/src" \
-    .venv/bin/python scripts/live/suggestion_replay.py run \
-      --db "$WORK/local-backend.sqlite3" --artifact-root "$WORK/artifacts" \
-      --label $side --out "$WORK/$side.jsonl" --latest 5
-done
-.venv/bin/python scripts/live/suggestion_replay.py compare "$WORK/before.jsonl" "$WORK/after.jsonl"
+OPENAI_API_KEY="$(your-secret-lookup openai)" \
+  agents/scripts/live/suggestion_replay.sh origin/develop my-branch
 ```
 
-The model is `gpt-5.6-luna` unless `SMOKE_MODEL` says otherwise. `TAVILY_API_KEY`
-enables web search. Raw activity is never read (a replay holds no capture
-permit), and memory search is lexical unless `LOCAL_EMBEDDING_MODEL_DIR` names
-the bundled model; both sides run under the same conditions. Each replay calls
-the model a few dozen times.
+Refs default to `origin/develop` and `HEAD`. `LATEST` sets how many Insights
+(5), `PYTHON` the interpreter (`agents/.venv/bin/python`), `SMOKE_MODEL` the
+model (the one Cloud serves Suggestion with), `PANTARAY_APP_DIR` the app's data
+folder, and `TAVILY_API_KEY` enables web search. Raw activity is never read,
+and memory search is lexical unless `LOCAL_EMBEDDING_MODEL_DIR` names the
+bundled model; both sides run under the same conditions.

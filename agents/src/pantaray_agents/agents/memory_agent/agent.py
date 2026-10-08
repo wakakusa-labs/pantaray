@@ -113,6 +113,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             action_turns=context.action_turns or "- none",
             memory_requests=context.memory_requests or "- none",
             session_memories=context.session_memories or "- none",
+            chat_messages=context.chat_messages or "- none",
             local_time_note=context.local_time_note,
             memory_file_manifest=context.memory_file_manifest,
             workspace_context_prompt=context.workspace_context_prompt or "- none",

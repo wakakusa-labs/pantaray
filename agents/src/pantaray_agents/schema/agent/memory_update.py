@@ -20,6 +20,7 @@ class MemoryUpdateContext(BaseModel):
     memory_requests: str
     memory_request_ids: tuple[str, ...]
     session_memories: str
+    chat_messages: str
     local_time_note: str = Field(min_length=1)
     memory_file_manifest: str = Field(min_length=1)
     workspace_context_prompt: str

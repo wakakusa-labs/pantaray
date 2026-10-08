@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.read_scope import ReadScope
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -24,6 +25,7 @@ from ..tool_result_finalization import (
     finalize_local_tool_result,
 )
 from ..tool_result_validation import ToolOutputValidationError
+from .action_path_policy import read_scope
 from .broker_command_validation import (
     build_validated_command_request,
     build_validated_python_request,
@@ -91,8 +93,6 @@ from .broker_protocol import (
 from .broker_registry import BROKER_TOOL_REGISTRY, validate_broker_registry
 from .broker_structured_patch import extract_structured_patch_paths
 from .execution_start import claim_broker_execution_start
-from .read_scope import ReadScope
-from .tool_path_policy import read_scope
 
 
 class BrokerCompletionPersistenceError(RuntimeError):

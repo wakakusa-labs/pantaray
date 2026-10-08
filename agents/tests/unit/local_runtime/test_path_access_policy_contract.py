@@ -8,6 +8,16 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
+from pantaray_agents.local_runtime.tooling.brokering.action_path_policy import (
+    EXEC_CWD_DENIED,
+    EXEC_CWD_NOT_FOUND,
+    WRITE_PATH_DENIED,
+    WRITE_PATH_NOT_FOUND,
+    resolve_exec_sandbox_roots,
+    resolve_exec_tool_cwd,
+    resolve_read_tool_path,
+    resolve_write_tool_path,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     BrokerApprovalRequiredError,
@@ -16,19 +26,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_registry import (
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
-)
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    EXEC_CWD_DENIED,
-    EXEC_CWD_NOT_FOUND,
-    READ_PATH_NOT_FOUND,
-    READ_SCOPE_DENIED,
-    SUGGESTION_SCAN_LIMIT,
-    WRITE_PATH_DENIED,
-    WRITE_PATH_NOT_FOUND,
-    resolve_exec_sandbox_roots,
-    resolve_exec_tool_cwd,
-    resolve_read_tool_path,
-    resolve_write_tool_path,
 )
 from pantaray_agents.local_runtime.tooling.models import ToolDefinitionSeed
 from pantaray_agents.local_runtime.tooling.repository.tool_definitions import (
@@ -40,6 +37,11 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
     update_read_access_scope,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.read_paths import (
+    READ_PATH_NOT_FOUND,
+    READ_SCOPE_DENIED,
+    SUGGESTION_SCAN_LIMIT,
+)
 
 from .broker_test_support import BROKER_ACTOR_PROCESS_ID
 from .path_access_policy_support import (

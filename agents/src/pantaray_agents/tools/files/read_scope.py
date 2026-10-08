@@ -1,7 +1,8 @@
 """What a read/list/glob/grep call may see, independent of who makes it.
 
-The broker builds one from an Action's execution session after its own checks;
-the read and search code works from this value and the call's arguments alone.
+A caller builds one after its own checks (the broker, from an Action's
+execution session); the read and search code works from this value and the
+call's arguments alone.
 """
 
 from __future__ import annotations

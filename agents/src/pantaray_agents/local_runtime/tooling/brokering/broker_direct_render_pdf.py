@@ -56,7 +56,13 @@ from pantaray_agents.local_runtime.tooling.documents.office_convert import (
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.read_target import (
+    ReadTarget,
+    action_reference_paths,
+    resolve_read_target,
+)
 
+from .action_path_policy import read_scope
 from .attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
     ATTACHMENT_ID_HEX_LENGTH,
@@ -75,8 +81,6 @@ from .broker_direct_read_document import (
 )
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedRenderPdfPageRequest
-from .read_path_resolver import ReadTarget, action_reference_paths, resolve_read_target
-from .tool_path_policy import read_scope
 
 RENDER_CONVERTER_UNAVAILABLE = "RENDER_CONVERTER_UNAVAILABLE"
 RENDER_DOCUMENT_ENCRYPTED = "RENDER_DOCUMENT_ENCRYPTED"

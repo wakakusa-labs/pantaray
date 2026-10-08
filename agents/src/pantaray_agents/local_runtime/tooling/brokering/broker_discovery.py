@@ -17,6 +17,8 @@ from pantaray_agents.tools.files.grep_lines import (
 from pantaray_agents.tools.files.manifest_paths import (
     ResolvedManifestPath,
 )
+from pantaray_agents.tools.files.read_paths import resolve_read_path
+from pantaray_agents.tools.files.read_scope import ReadScope
 from pantaray_agents.tools.files.ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
@@ -40,8 +42,6 @@ from .broker_protocol import (
     ValidatedGrepRequest,
     ValidatedListRequest,
 )
-from .read_scope import ReadScope
-from .tool_path_policy import resolve_read_path
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
 TRUNCATION_REASON_PRIORITY: dict[DiscoveryTruncationReason, int] = {

@@ -115,7 +115,7 @@ def resolve_local_path(
 ) -> ResolvedManifestPath:
     for root in roots:
         validate_manifest_root(root)
-    candidate = _candidate_path(raw_path=raw_path, cwd_path=cwd_path)
+    candidate = candidate_path(raw_path=raw_path, cwd_path=cwd_path)
     resolved = _resolve_candidate(candidate=candidate, must_exist=must_exist)
     root = _find_root_for_path(roots=roots, path=resolved, capability=capability)
     _ensure_inside_root(candidate=resolved, root=root.canonical_real_path)
@@ -154,7 +154,7 @@ def resolve_process_cwd(
     )
 
 
-def _candidate_path(*, raw_path: str, cwd_path: Path) -> Path:
+def candidate_path(*, raw_path: str, cwd_path: Path) -> Path:
     stripped = raw_path.strip()
     if not stripped:
         raise BrokerPolicyError("path must not be empty")
@@ -256,6 +256,7 @@ __all__ = [
     "ManifestRoot",
     "ResolvedManifestPath",
     "ResolvedProcessCwd",
+    "candidate_path",
     "load_manifest_roots",
     "load_tool_results_root",
     "resolve_local_path",

@@ -1,18 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopPolicy,
-    ReactLoopResult,
-    ReactLoopStep,
-)
-from pantaray_agents.agents.artifact_react.transcript import (
-    build_prompt_with_transcript,
-)
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
-    LlmToolCallTurn,
+    ActionTurnReply,
     LlmToolUseMixin,
 )
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
@@ -31,6 +22,7 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     UNLINK_MEMORY_TOOL_NAME,
     WRITE_FILE_TOOL_NAME,
 )
+from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
@@ -52,14 +44,7 @@ from pantaray_agents.utils.profile_brief import (
     generate_profile_brief_with_retry,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig, prompt_loader
-from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
-    LlmToolDefinition,
-    LlmToolResult,
-)
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
-
-type MemoryUpdateStepRecorder = Callable[[ReactLoopStep], Awaitable[None]]
 
 # One run may touch three memory categories, and each edit costs a read of the
 # target file first. The Agent Experience run needed 10 turns / 16 tool calls for
@@ -72,7 +57,6 @@ MEMORY_UPDATE_MAX_TOOL_CALLS = 96
 
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
-    loop_result: ReactLoopResult
     applied_memory_request_ids: tuple[str, ...]
 
 
@@ -118,7 +102,6 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
         tool_result_directory_fd: int,
-        record_step: MemoryUpdateStepRecorder | None = None,
     ) -> MemoryUpdateAgentResult:
         selected_tools = resolve_react_tool_definitions(
             definitions=tool_definitions,
@@ -139,59 +122,38 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             or "- none",
             draft_revision=context.draft_revision,
         )
+        # The prompt's last paragraph leads the conversation, which a request
+        # needs at least one item of; the rest is the request's own message.
+        head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
 
-        async def call_llm(
-            prompt: str,
-            tools: tuple[LlmToolDefinition, ...],
-            continuation: LlmToolContinuation | None,
-            tool_result: LlmToolResult | None,
-        ) -> LlmToolCallTurn:
-            return await self._generate_llm_tool_call(
+        async def send(request: ConversationRequest) -> ActionTurnReply:
+            return await self._generate_llm_action_turn(
                 sink=sink,
-                prompt=prompt,
-                tools=tools,
-                continuation_mode="stateless",
-                continuation=continuation,
-                tool_result=tool_result,
-                system_instruction=self._prompt_config.system_instruction,
+                prompt=request.prompt,
+                tools=request.tools,
+                max_parallel_tool_calls=request.max_parallel_tool_calls,
+                system_instruction=request.system_instruction,
+                conversation=request.conversation,
                 stage="memory_update",
             )
 
-        async def persist_step(step: ReactLoopStep) -> None:
-            if record_step is not None:
-                await record_step(step)
-
-        result = await run_memory_file_editor(
+        applied = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
                 tool_result_directory_fd=tool_result_directory_fd,
                 tool_definitions=selected_tools,
-                build_prompt=lambda tool_results, last_error: (
-                    build_prompt_with_transcript(
-                        initial_prompt=initial_prompt,
-                        tool_results=tool_results,
-                        last_error=last_error,
-                    )
-                ),
-                call_llm=call_llm,
-                record_step=persist_step,
-                policy=ReactLoopPolicy(
-                    max_llm_turns=MEMORY_UPDATE_MAX_LLM_TURNS,
-                    max_tool_calls=MEMORY_UPDATE_MAX_TOOL_CALLS,
-                ),
-                consume_llm_thoughts=self._consume_llm_thoughts,
+                prompt=head,
+                task=task,
+                system_instruction=self._prompt_config.system_instruction or "",
+                send=send,
+                usage=lambda: sink.delta,
+                max_turns=MEMORY_UPDATE_MAX_LLM_TURNS,
+                max_tool_calls=MEMORY_UPDATE_MAX_TOOL_CALLS,
                 memory_request_ids=context.memory_request_ids,
             )
         )
-        if result.loop_result.status != "success":
-            raise RuntimeError(
-                result.loop_result.last_error or "Memory update ReAct loop failed"
-            )
-        return MemoryUpdateAgentResult(
-            loop_result=result.loop_result,
-            applied_memory_request_ids=result.applied_memory_request_ids,
-        )
+        return MemoryUpdateAgentResult(applied_memory_request_ids=applied)
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str

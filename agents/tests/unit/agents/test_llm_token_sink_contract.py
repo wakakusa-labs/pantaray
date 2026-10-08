@@ -311,7 +311,6 @@ async def test_tool_call_records_once_for_repair_next_turn() -> None:
             sink=sink,
             prompt="test",
             tools=(_tool_definition(),),
-            continuation_mode="disabled",
         )
 
     assert sink.record_count == 1
@@ -331,7 +330,6 @@ async def test_tool_call_records_once_for_response_validation_failure() -> None:
             sink=sink,
             prompt="test",
             tools=(_tool_definition(),),
-            continuation_mode="disabled",
         )
 
     assert sink.record_count == 1
@@ -369,7 +367,6 @@ async def test_state_sink_sticky_guard_blocks_next_client_call() -> None:
                 sink=sink,
                 prompt="test",
                 tools=(_tool_definition(),),
-                continuation_mode="disabled",
             )
         except LlmProxyExecutionError:
             continue

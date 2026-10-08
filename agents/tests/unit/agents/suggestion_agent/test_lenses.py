@@ -73,16 +73,15 @@ def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
             provider_turn=None,
         )
 
-    async def generate(*, prompt, tools, continuation_mode, **_kwargs):
+    async def generate(*, prompt, tools, **_kwargs):
         assert tools[0].name == "select_suggestion"
-        assert continuation_mode == "disabled"
         selector_prompts.append(prompt)
         call = LlmToolCall(
             call_id="c",
             name="select_suggestion",
             arguments={"choice": choice, "reason": "why"},
         )
-        return LlmToolCallTurn(calls=(call,), continuation=None)
+        return LlmToolCallTurn(calls=(call,))
 
     return (send, generate), selector_prompts
 

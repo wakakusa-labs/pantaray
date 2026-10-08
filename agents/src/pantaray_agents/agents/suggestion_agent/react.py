@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Protocol
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.core import CountingSink
@@ -53,9 +53,7 @@ from pantaray_llm.contracts.conversation import (
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
-    LlmToolContinuation,
     LlmToolDefinition,
-    LlmToolResult,
 )
 from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles import SUGGESTION_PROFILE_ID
@@ -120,9 +118,6 @@ class SuggestionToolCallGenerator(Protocol):
         *,
         prompt: str,
         tools: tuple[LlmToolDefinition, ...],
-        continuation_mode: Literal["disabled", "stateless"],
-        continuation: LlmToolContinuation | None,
-        tool_result: LlmToolResult | None,
         system_instruction: str,
         stage: str,
     ) -> LlmToolCallTurn: ...

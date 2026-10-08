@@ -92,9 +92,6 @@ const ChatItemContentSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z
-    .object({ kind: z.literal('suggestion_event'), suggestion_id: CanonicalIdentitySchema })
-    .strict(),
-  z
     .object({
       kind: z.literal('action_event'),
       action_id: CanonicalIdentitySchema,

@@ -22,7 +22,7 @@ from pantaray_agents.local_runtime.storage.migrations import load_default_migrat
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws import chat_relay
 from pantaray_agents.orchestration.ws.handler import WSOrchestrationHandler
-from pantaray_agents.schema.chat import SuggestionEventContent, UserMessageContent
+from pantaray_agents.schema.chat import UserMessageContent
 
 USER = "user-1"
 
@@ -100,23 +100,13 @@ async def test_items_appended_after_the_session_starts_are_relayed_in_order() ->
     handler.start_chat_relay()
     try:
         _append("m-1", "first")
-        append_chat_item(
-            user_id=USER,
-            message_id="suggestion:s-1",
-            content=SuggestionEventContent(
-                kind="suggestion_event", suggestion_id="s-1"
-            ),
-        )
+        _append("m-2", "second")
         await _wait_for_events(websocket, 2)
     finally:
         await handler.close()
 
     relayed = _chat_events(websocket)
-    assert [item["content"]["kind"] for item in relayed] == [
-        "user_message",
-        "suggestion_event",
-    ]
-    assert relayed[0]["content"]["text"] == "first"
+    assert [item["content"]["text"] for item in relayed] == ["first", "second"]
 
 
 @pytest.mark.asyncio

@@ -118,11 +118,6 @@ class AssistantMessageContent(_ChatModel):
     cards: tuple[ChatCard, ...]
 
 
-class SuggestionEventContent(_ChatModel):
-    kind: Literal["suggestion_event"]
-    suggestion_id: ActionMessageId
-
-
 class ActionEventContent(_ChatModel):
     kind: Literal["action_event"]
     action_id: ActionMessageId
@@ -139,7 +134,6 @@ class TurnFailureContent(_ChatModel):
 type ChatItemContent = Annotated[
     UserMessageContent
     | AssistantMessageContent
-    | SuggestionEventContent
     | ActionEventContent
     | TurnFailureContent,
     Field(discriminator="kind"),
@@ -239,7 +233,6 @@ __all__ = [
     "ChatTurnRetryHttpRequest",
     "ChatTurnRetryStale",
     "ChatTurnStateMessage",
-    "SuggestionEventContent",
     "TurnFailureContent",
     "UserMessageContent",
 ]

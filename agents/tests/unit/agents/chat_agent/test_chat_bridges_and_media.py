@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.agents.chat_agent.context import ChatWindow
-from pantaray_agents.agents.chat_agent.media import load_item_media
 from pantaray_agents.agents.chat_agent.research import (
     chat_research_tools,
     chat_tool_results_root,
@@ -29,6 +28,8 @@ from pantaray_agents.local_runtime.chat.store import (
     append_chat_item,
     read_chat_items_after,
     read_chat_items_for_turn,
+    read_chat_page,
+    read_chat_turn_marks,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     NewActionTarget,
@@ -88,25 +89,23 @@ def _suggestion(db: Path, suggestion_id: str, created_at: str) -> None:
         )
 
 
-async def test_a_new_suggestion_is_told_once_and_one_before_the_chat_never(
+async def test_a_suggestion_stays_out_of_the_chat_and_an_old_arrival_is_skipped(
     owner: Path,
 ) -> None:
-    _suggestion(owner, "before", "2000-01-01T00:00:00Z")
-    assert bridge_chat_events(user_id=USER) == 0  # no chat yet
-    _say("Hi")
-    _suggestion(owner, "after", LATER)
-
-    assert bridge_chat_events(user_id=USER) == 1
+    _suggestion(owner, "new", LATER)
     assert bridge_chat_events(user_id=USER) == 0
-    told = read_chat_items_after(user_id=USER, after=0)[-1]
-    assert told.content.model_dump() == {
-        "kind": "suggestion_event",
-        "suggestion_id": "after",
-    }
-    shown = load_item_media(
-        user_id=USER, items=read_chat_items_for_turn(user_id=USER, after=0)
-    )
-    assert shown.suggestions == {"after": "Tidy the invoices."}
+    with sqlite3.connect(owner) as connection:  # written before arrivals stopped
+        connection.execute(
+            "INSERT INTO chat_items(item_id, user_id, message_id, kind, payload, "
+            "created_at) VALUES ('old', ?, 'suggestion:old', 'suggestion_event', "
+            '\'{"kind": "suggestion_event", "suggestion_id": "old"}\', ?)',
+            (USER, LATER),
+        )
+
+    assert read_chat_items_after(user_id=USER, after=0) == ()
+    assert read_chat_items_for_turn(user_id=USER, after=0) == ()
+    assert read_chat_page(user_id=USER, before=None, limit=10).items == ()
+    assert read_chat_turn_marks(user_id=USER).waiting is False
 
 
 async def test_the_chat_hears_when_its_own_task_waits_and_ends(owner: Path) -> None:

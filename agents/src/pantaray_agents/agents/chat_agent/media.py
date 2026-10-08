@@ -1,10 +1,9 @@
-"""What chat items show the model beyond their own fields: images and suggestions.
+"""What chat items show the model beyond their own fields: the user's images.
 
 A user's attached image goes to the model as the image itself, read from the
-local image store with the digest its request is checked against. A suggestion
-event shows what the suggestion says. Both are read once per turn, off the
-loop, for the items the turn sends; an image no longer in the store is said in
-words instead.
+local image store with the digest its request is checked against. They are read
+once per turn, off the loop, for the items the turn sends; an image no longer in
+the store is said in words instead.
 """
 
 from __future__ import annotations
@@ -18,11 +17,10 @@ from pantaray_agents.agents.core.llm_file_inputs import (
     LocalImageLlmFileInput,
 )
 from pantaray_agents.local_runtime.chat.store import TurnChatItem
-from pantaray_agents.local_runtime.chat.work_list import read_suggestion_texts
 from pantaray_agents.local_runtime.runtime.local_image_store import (
     read_local_image_blob,
 )
-from pantaray_agents.schema.chat import SuggestionEventContent, UserMessageContent
+from pantaray_agents.schema.chat import UserMessageContent
 from pantaray_agents.tools.files.attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
     ATTACHMENT_ID_HEX_LENGTH,
@@ -34,21 +32,17 @@ from pantaray_llm.contracts.input_block import LlmImageDescriptor, LlmInputImage
 class ItemMedia:
     # By storage_path; an image the store no longer has is absent.
     images: Mapping[str, tuple[LlmInputImageBlock, LocalImageLlmFileInput]]
-    suggestions: Mapping[str, str]  # suggestion_id -> what it says
 
 
-NO_MEDIA = ItemMedia(images={}, suggestions={})
+NO_MEDIA = ItemMedia(images={})
 
 
 def load_item_media(*, user_id: str, items: Sequence[TurnChatItem]) -> ItemMedia:
     """Read what ``items`` show; it reads files and the database."""
 
     images: dict[str, tuple[LlmInputImageBlock, LocalImageLlmFileInput]] = {}
-    suggestion_ids: list[str] = []
     for entry in items:
         content = entry.item.content
-        if isinstance(content, SuggestionEventContent):
-            suggestion_ids.append(content.suggestion_id)
         if not isinstance(content, UserMessageContent):
             continue
         for image in content.images:
@@ -79,10 +73,7 @@ def load_item_media(*, user_id: str, items: Sequence[TurnChatItem]) -> ItemMedia
                 ),
             )
             images[image.storage_path] = (block, file_input)
-    return ItemMedia(
-        images=images,
-        suggestions=read_suggestion_texts(user_id=user_id, ids=suggestion_ids),
-    )
+    return ItemMedia(images=images)
 
 
 __all__ = ["NO_MEDIA", "ItemMedia", "load_item_media"]

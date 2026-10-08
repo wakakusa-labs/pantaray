@@ -341,6 +341,10 @@ function createMainWindow(options = {}) {
     hasShadow: true,
     resizable: true,
     fullscreenable: true,
+    // An overlay the user opens takes keyboard focus, so the next click on this window would
+    // otherwise only bring it back to the front; the click acts right away instead, as it
+    // already does on the overlays (macOS only).
+    acceptFirstMouse: true,
     webPreferences: {
       preload: path.join(__dirname, 'dist', 'preload.js'),
       contextIsolation: true,

@@ -193,7 +193,8 @@ async def test_suggestion_memory_search_returns_only_the_users_evidence(
         db_path=db_path,
         busy_timeout_ms=1000,
         snapshot=SuggestionResearchSnapshot(
-            roots=(),
+            folders=(),
+            memory_revisions={},
             stable_memory=SuggestionStableMemoryContext("", False, False),
             commands_allowed=False,
             read_access_scope="workspace",

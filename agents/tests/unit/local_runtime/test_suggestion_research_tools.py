@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -9,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
-import pantaray_agents.tools.files.access as file_access_module
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -76,19 +74,9 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     build_suggestion_research_snapshot,
 )
 from pantaray_agents.tools.contract import (
-    BrokerPolicyError,
     ReactToolCall,
     ReactToolRegistry,
     ToolCallEnvelope,
-)
-from pantaray_agents.tools.files import (
-    workspace_descriptor_access as descriptor_access,
-)
-from pantaray_agents.tools.files.access import ReadOnlyFileAccess
-from pantaray_agents.tools.files.roots import (
-    MemoryReadRoot,
-    WorkspaceReadRoot,
-    memory_revision_by_source,
 )
 from pantaray_agents.tools.web.session import WebResearchToolSession
 
@@ -188,263 +176,6 @@ def _snapshot(*, db_path: Path, artifact_root: Path | None = None):
     )
 
 
-def test_read_only_file_access_reads_only_registered_roots(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    root = tmp_path / "repo"
-    root.mkdir()
-    source = root / "design.md"
-    source.write_text("first\nshared contract\nthird\n", encoding="utf-8")
-    outside = tmp_path / "outside.md"
-    outside.write_text("private", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=root)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[0].root_id
-
-    read_result = reader.read(
-        root_id=root_id,
-        path="design.md",
-        offset=2,
-        column=1,
-        limit=1,
-    )
-    assert read_result["content"] == "shared contract\n"
-    assert read_result["next_offset"] == 3
-    assert read_result["truncated"] is True
-    assert read_result["truncation_reason"] == "page_limit"
-    assert read_result["retry_hint"] == (
-        "Continue with offset=next_offset and column=next_column."
-    )
-    with pytest.raises(BrokerPolicyError, match="root-relative"):
-        reader.read(
-            root_id=root_id,
-            path=str(outside),
-            offset=1,
-            column=1,
-            limit=1,
-        )
-    symlink = root / "outside-link"
-    symlink.symlink_to(outside)
-    with pytest.raises(BrokerPolicyError, match="symlink"):
-        reader.read(
-            root_id=root_id,
-            path="outside-link",
-            offset=1,
-            column=1,
-            limit=1,
-        )
-
-
-def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    storage = db_path.parent
-    (storage / "notes.txt").write_text("needle secret\n", encoding="utf-8")
-    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=tmp_path)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[-1].root_id
-
-    listed = reader.list(root_id=root_id, path=".", max_depth=3, offset=1, limit=50)
-    globbed = reader.glob(
-        root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
-    )
-
-    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
-    assert globbed["matches"] == ["sibling.txt"]
-    alias = storage.with_name(storage.name.upper())
-    private_paths = [f"{storage.name}/notes.txt", f"{storage.name}/{db_path.name}"]
-    if alias.exists() and alias.samefile(storage):
-        private_paths.append(f"{alias.name}/notes.txt")
-    for path in private_paths:
-        with pytest.raises(BrokerPolicyError) as caught:
-            reader.read(root_id=root_id, path=path, offset=1, column=1, limit=10)
-        assert "private app storage" in str(caught.value), path
-        assert "memory_search" in str(caught.value), path
-        assert "memory_sql" not in str(caught.value), path
-    for search in (
-        lambda: reader.list(
-            root_id=root_id, path=storage.name, max_depth=1, offset=1, limit=10
-        ),
-        lambda: reader.glob(
-            root_id=root_id, base_path=storage.name, pattern="*", offset=1, limit=10
-        ),
-    ):
-        with pytest.raises(BrokerPolicyError, match="private app storage"):
-            search()
-
-
-def test_read_only_file_access_never_walks_into_private_app_storage(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    storage = db_path.parent
-    records = storage / "records"
-    records.mkdir()
-    for index in range(60):
-        (records / f"{index}.txt").write_text("needle secret\n", encoding="utf-8")
-    # Opening this would fail the whole scan, so the scan must not reach it.
-    unreadable = storage / "unreadable.txt"
-    unreadable.write_text("needle secret\n", encoding="utf-8")
-    unreadable.chmod(0)
-    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=tmp_path)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[-1].root_id
-
-    try:
-        results = (
-            reader.list(root_id=root_id, path=".", max_depth=4, offset=1, limit=50),
-            reader.glob(
-                root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
-            ),
-        )
-    finally:
-        unreadable.chmod(0o600)
-
-    listed, globbed = results
-    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
-    assert globbed["matches"] == ["sibling.txt"]
-    for result in results:
-        assert result["truncated"] is False
-        assert result["warning"] is None
-
-
-def test_workspace_read_remains_pinned_after_parent_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    parent = root / "parent"
-    parent.mkdir(parents=True)
-    (parent / "document.txt").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "document.txt").write_text("outside secret\n", encoding="utf-8")
-    real_open = os.open
-    swapped = False
-
-    def racing_open(
-        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-        flags: int,
-        mode: int = 0o777,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        nonlocal swapped
-        if path == "document.txt" and dir_fd is not None and not swapped:
-            swapped = True
-            parent.rename(root / "original-parent")
-            parent.symlink_to(outside, target_is_directory=True)
-        return real_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(descriptor_access.os, "open", racing_open)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.read(
-        root_id="workspace",
-        path="parent/document.txt",
-        offset=1,
-        column=1,
-        limit=10,
-    )
-
-    assert result["content"] == "inside\n"
-    assert "outside secret" not in str(result)
-
-
-def test_workspace_list_remains_pinned_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "inside.txt").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    for index in range(30):
-        (outside / f"outside-{index}.txt").write_text("secret\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.list(
-        root_id="workspace",
-        path="base",
-        max_depth=1,
-        offset=1,
-        limit=100,
-    )
-
-    assert result["entries"] == [
-        {"path": "base/inside.txt", "kind": "file", "name": "inside.txt"}
-    ]
-    assert result["truncation_reason"] is None
-
-
-def test_workspace_glob_remains_pinned_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "inside.py").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "outside.py").write_text("secret\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.glob(
-        root_id="workspace",
-        base_path="base",
-        pattern="**/*.py",
-        offset=1,
-        limit=100,
-    )
-
-    assert result["matches"] == ["base/inside.py"]
-    assert "outside.py" not in str(result)
-
-
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     tmp_path: Path,
 ) -> None:
@@ -465,8 +196,8 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     )
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
+    assert snapshot.memory_revisions["fact"] == revision.revision_id
     assert (
         "### Structured Facts\nEntry: facts/index.md" in snapshot.stable_memory.prompt
     )
@@ -476,35 +207,6 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     )
     assert "[Project](project.md)" in snapshot.stable_memory.prompt
     assert "Leaf-only detail" not in snapshot.stable_memory.prompt
-    assert reader.list(root_id="facts", path="facts", max_depth=2, offset=1, limit=10)[
-        "entries"
-    ]
-    assert reader.glob(
-        root_id="facts", base_path="facts", pattern="*.md", offset=1, limit=10
-    )["matches"] == ["facts/index.md", "facts/project.md"]
-    assert reader.grep(
-        root_id="facts",
-        base_path="facts",
-        pattern="Leaf-only",
-        include_glob="*.md",
-        offset=1,
-        max_matches=10,
-    )["matches"] == [
-        {"path": "facts/project.md", "line_number": 2, "line": "Leaf-only detail"}
-    ]
-    artifact_leaf = (
-        artifact_root / str(revision.artifact_root_path) / "facts/project.md"
-    )
-    artifact_leaf.write_text("# Project\nChanged after snapshot\n", encoding="utf-8")
-
-    result = reader.read(
-        root_id="facts",
-        path="facts/project.md",
-        offset=1,
-        column=1,
-        limit=20,
-    )
-    assert result["content"] == "# Project\nLeaf-only detail\n"
 
 
 def test_published_insight_snapshot_seeds_index_and_reads_leaf(
@@ -520,7 +222,6 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
     _publish_insight_tree(db_path=db_path, artifact_root=artifact_root)
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
     assert "### Long-term Insights\nEntry: insights/index.md" in (
         snapshot.stable_memory.prompt
@@ -531,57 +232,6 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
     )
     assert "Insight leaf detail" not in snapshot.stable_memory.prompt
     assert len(snapshot.stable_memory.prompt) <= 4_500
-    assert (
-        reader.read(
-            root_id="insights",
-            path="insights/topic.md",
-            offset=1,
-            column=1,
-            limit=20,
-        )["content"]
-        == "# Topic\nInsight leaf detail\n"
-    )
-
-
-def test_memory_grep_stops_a_backtracking_pattern_at_the_search_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A plain backtracking engine needs ~0.3 s here and the timed engine ~0.7 s,
-    # so the shortened deadline must cut the search off instead of finishing it.
-    monkeypatch.setattr(file_access_module, "SEARCH_TIMEOUT_SECONDS", 0.05)
-    backtracking_line = ("来週の定例で見積もりの件を先方に確認" * 2)[:24]
-    reader = ReadOnlyFileAccess(
-        roots=(
-            MemoryReadRoot(
-                root_id="facts",
-                display_name="Facts",
-                revision_id="revision-1",
-                node_id="node-1",
-                entry_path="facts/index.md",
-                documents=(
-                    MemoryDocument(
-                        "facts/notes.md",
-                        f"release 2\n{backtracking_line}\nrelease 3\n",
-                    ),
-                ),
-            ),
-        )
-    )
-
-    result = reader.grep(
-        root_id="facts",
-        base_path=".",
-        pattern=r"(?:\w|\w\w|\w\w\w)*[0-9]$",
-        include_glob=None,
-        offset=1,
-        max_matches=10,
-    )
-
-    assert result["matches"] == [
-        {"path": "facts/notes.md", "line_number": 1, "line": "release 2"}
-    ]
-    assert result["truncated"] is True
-    assert result["truncation_reason"] == "timeout"
 
 
 def test_stable_memory_bounds_include_truncation_markers() -> None:
@@ -599,7 +249,7 @@ def test_stable_memory_bounds_include_truncation_markers() -> None:
     assert tree.endswith("[truncated]")
 
 
-def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
+def test_snapshot_search_remains_pinned_after_fact_head_update(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -621,14 +271,6 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
     second_revision = _publish_second_fact_revision(
         db_path=db_path,
         artifact_root=artifact_root,
-    )
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    read_result = reader.read(
-        root_id="facts",
-        path="facts/old.md",
-        offset=1,
-        column=1,
-        limit=20,
     )
     ensure_user_embedding_generation(
         db_path=db_path,
@@ -692,7 +334,7 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
             center_time=None,
             radius_hours=None,
             limit=8,
-            pinned_revisions=memory_revision_by_source(snapshot.roots),
+            pinned_revisions=snapshot.memory_revisions,
         )
         current, _ = search_memory_catalog(
             connection=connection,
@@ -708,14 +350,13 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
         )
 
     assert first_revision.revision_id != second_revision.revision_id
-    assert read_result["content"] == "# Old\nDurableobsolete marker\n"
     assert "Durableobsolete marker" in [row["content"] for row in pinned]
     assert {item.revision_id for item in epoch.items} == {first_revision.revision_id}
     assert current
     assert all(row["match_kind"] == "semantic" for row in current)
 
 
-def test_snapshot_omits_root_for_preparing_node(
+def test_snapshot_pins_nothing_for_a_preparing_node(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -723,7 +364,8 @@ def test_snapshot_omits_root_for_preparing_node(
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
-    assert all(root.root_id != "facts" for root in snapshot.roots)
+    assert snapshot.memory_revisions["fact"] is None
+    assert "Structured Facts" not in snapshot.stable_memory.prompt
 
 
 def test_revision_integrity_rollback_restores_revision_owned_brief(
@@ -848,14 +490,8 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
         connection.execute("DELETE FROM agent_long_term_insight_state")
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
-    assert [root.root_id for root in snapshot.roots] == [
-        "facts",
-        "insights",
-        "agent_experience",
-    ]
-    assert memory_revision_by_source(snapshot.roots) == {
+    assert snapshot.memory_revisions == {
         "fact": fact_revision.revision_id,
         "long_term_insight": insight_revision.revision_id,
         "agent_experience": experience_revision.revision_id,
@@ -868,16 +504,6 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
     )
     assert "Experience leaf detail" not in snapshot.stable_memory.prompt
     assert len(snapshot.stable_memory.prompt) <= 4_500
-    assert (
-        reader.read(
-            root_id="agent_experience",
-            path="agent_experience/entries/exp-1.md",
-            offset=1,
-            column=1,
-            limit=20,
-        )["content"]
-        == "# Experience\nExperience leaf detail\n"
-    )
 
 
 def test_snapshot_without_experience_head_excludes_later_experience_revision(
@@ -891,7 +517,7 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
         publication=_publication(_fact_draft(db_path)),
     )
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    pinned_revisions = memory_revision_by_source(snapshot.roots)
+    pinned_revisions = snapshot.memory_revisions
     _publish_experience_tree(db_path=db_path, artifact_root=artifact_root)
 
     with open_memory_catalog_connection(
@@ -924,7 +550,6 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             limit=8,
         )
 
-    assert all(root.root_id != "agent_experience" for root in snapshot.roots)
     assert pinned_revisions["agent_experience"] is None
     assert pinned == []
     assert [row["source"] for row in current] == ["agent_experience"]
@@ -1683,7 +1308,7 @@ def _publish_second_fact_revision(
 
 
 @pytest.mark.parametrize("has_direction", [False, True])
-def test_todo_file_and_full_read_do_not_invent_long_term_context(
+def test_todo_file_does_not_invent_long_term_context(
     tmp_path: Path,
     has_direction: bool,
 ) -> None:
@@ -1708,21 +1333,6 @@ def test_todo_file_and_full_read_do_not_invent_long_term_context(
     assert snapshot.stable_memory.has_insights is has_direction
     # A file within the bound reaches the prompt whole.
     assert snapshot.stable_memory.pending_work == todo.strip()
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    full = reader.read(
-        root_id="insights", path="insights/todos.md", offset=1, column=1, limit=200
-    )
-    assert full["truncated"] is True
-    remainder = reader.read(
-        root_id="insights",
-        path="insights/todos.md",
-        offset=full["next_offset"],
-        column=full["next_column"],
-        limit=200,
-    )
-    assert remainder["truncated"] is False
-    assert full["content"] + remainder["content"] == todo
-    assert "Other project: submit the estimate." in remainder["content"]
 
 
 def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(

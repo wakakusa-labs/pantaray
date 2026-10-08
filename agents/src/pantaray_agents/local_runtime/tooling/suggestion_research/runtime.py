@@ -8,10 +8,6 @@ from pantaray_agents.local_runtime.context.source_control import context_source_
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.tools.contract import ReactToolDefinition
 from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
-from pantaray_agents.tools.files.roots import (
-    WorkspaceReadRoot,
-    memory_revision_by_source,
-)
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
@@ -90,16 +86,11 @@ class LocalSuggestionResearchTools:
                 max_results=MEMORY_SEARCH_MAX_RESULTS,
                 default_limit=None,
                 call_limit=None,
-                pinned_revisions=memory_revision_by_source(self.snapshot.roots),
+                pinned_revisions=self.snapshot.memory_revisions,
                 search_content_max_chars=MEMORY_SEARCH_CONTENT_MAX_CHARS,
                 reference_content_max_chars=MEMORY_REFERENCE_CONTENT_MAX_CHARS,
                 enqueue_repair_on_reference_failure=False,
             ),
-        )
-        workspace_roots = tuple(
-            root.canonical_path
-            for root in self.snapshot.roots
-            if isinstance(root, WorkspaceReadRoot)
         )
         return (
             *memory_tools.definitions(),
@@ -109,7 +100,7 @@ class LocalSuggestionResearchTools:
                 user_id=user_id,
             ).definition(),
             *build_read_only_file_tools(
-                folders=workspace_roots,
+                folders=self.snapshot.folders,
                 read_access_scope=self.snapshot.read_access_scope,
                 app_storage_roots=app_owned_roots(self.db_path),
                 spill_root=suggestion_tool_results_root(
@@ -126,7 +117,7 @@ class LocalSuggestionResearchTools:
                     db_path=self.db_path,
                     busy_timeout_ms=self.busy_timeout_ms,
                     user_id=user_id,
-                    workspace_roots=workspace_roots,
+                    workspace_roots=self.snapshot.folders,
                     read_access_scope=self.snapshot.read_access_scope,
                 ).definitions()
                 if self.snapshot.commands_allowed

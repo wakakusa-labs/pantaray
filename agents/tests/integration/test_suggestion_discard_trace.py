@@ -124,7 +124,8 @@ def _prepare_job(
         ),
         "build_suggestion_research_snapshot": lambda **_kwargs: (
             SuggestionResearchSnapshot(
-                roots=(),
+                folders=(),
+                memory_revisions={},
                 stable_memory=_STABLE_MEMORY,
                 commands_allowed=False,
                 read_access_scope="workspace",

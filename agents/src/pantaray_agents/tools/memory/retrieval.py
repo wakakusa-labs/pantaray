@@ -49,7 +49,6 @@ from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 MEMORY_SEARCH_TOOL_NAME = "memory_search"
 GET_MEMORY_REFERENCE_TOOL_NAME = "get_memory_reference"
-CONTEXT_ROOT_ID = "context"
 
 
 @dataclass(slots=True)
@@ -531,7 +530,6 @@ def _reference_success_schema() -> dict[str, JSONValue]:
 
 
 __all__ = [
-    "CONTEXT_ROOT_ID",
     "GET_MEMORY_REFERENCE_TOOL_NAME",
     "MEMORY_EDITOR_RETRIEVAL_POLICY",
     "MEMORY_SEARCH_TOOL_NAME",

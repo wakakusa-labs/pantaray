@@ -80,7 +80,8 @@ from pantaray_agents.tasks.internal_jobs.suggestion import _run_suggestion_job
 from pantaray_agents.tasks.types import SuggestionJobPayload
 
 _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
-    roots=(),
+    folders=(),
+    memory_revisions={},
     stable_memory=SuggestionStableMemoryContext(
         prompt="No stable memory roots are available.",
         has_facts=False,

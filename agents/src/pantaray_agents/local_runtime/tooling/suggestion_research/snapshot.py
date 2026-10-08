@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,17 +37,11 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models 
     WorkspaceSettings,
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
-from pantaray_agents.tools.files.roots import (
-    MemoryReadRoot,
-    ReadOnlyRoot,
-    WorkspaceReadRoot,
-)
 
-from ..outside_workspace_grant import app_owned_roots
 from .commands import commands_run_without_asking
 
 # The prompt carries insights/todos.md up to this size (production peaked at 41k
-# characters); a larger file is cut with a marker and the run reads the rest.
+# characters); a larger file is cut with a marker pointing to memory_search.
 PENDING_WORK_MAX_CHARS = 60_000
 STABLE_MEMORY_CONTEXT_MAX_CHARS = 4_500
 STABLE_MEMORY_ITEM_MAX_CHARS = 650
@@ -56,7 +51,10 @@ STABLE_MEMORY_TREE_MAX_PATHS = 30
 
 @dataclass(frozen=True, slots=True)
 class SuggestionResearchSnapshot:
-    roots: tuple[ReadOnlyRoot, ...]
+    # The registered folders' canonical paths, which the file tools may read.
+    folders: tuple[Path, ...]
+    # The memory revisions the run's memory_search stays on.
+    memory_revisions: Mapping[MemorySource, str | None]
     stable_memory: SuggestionStableMemoryContext
     # Whether the run offers commands at all; each command checks again.
     commands_allowed: bool
@@ -64,8 +62,12 @@ class SuggestionResearchSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class _LoadedMemoryRoot:
-    root: MemoryReadRoot
+class _LoadedMemory:
+    source: MemorySource
+    display_name: str
+    revision_id: str
+    entry_path: str
+    documents: tuple[MemoryDocument, ...]
     profile_brief: str
 
 
@@ -84,7 +86,6 @@ def build_suggestion_research_snapshot(
     user_id: str,
     workspace_settings: WorkspaceSettings,
 ) -> SuggestionResearchSnapshot:
-    workspace_roots = _workspace_roots(workspace_settings, db_path=db_path)
     try:
         loaded_memory = _load_memory_roots(
             db_path=db_path,
@@ -101,30 +102,27 @@ def build_suggestion_research_snapshot(
         )
         raise MemoryCatalogIntegrityError(str(exc)) from exc
 
-    memory_roots = tuple(item.root for item in loaded_memory)
-    roots: tuple[ReadOnlyRoot, ...] = (*memory_roots, *workspace_roots)
     stable_memory = SuggestionStableMemoryContext(
         prompt=_render_stable_memory_prompt(loaded_memory),
         has_facts=any(
-            root.root_id == "facts"
-            and any(doc.content.strip() for doc in root.documents)
-            for root in memory_roots
+            item.source == "fact" and any(doc.content.strip() for doc in item.documents)
+            for item in loaded_memory
         ),
         has_insights=any(
-            root.root_id == "insights"
+            item.source == "long_term_insight"
             and any(
                 doc.source_path != TODO_DOCUMENT_PATH and doc.content.strip()
-                for doc in root.documents
+                for doc in item.documents
             )
-            for root in memory_roots
+            for item in loaded_memory
         ),
         pending_work=_bounded(
             next(
                 (
                     doc.content
-                    for root in memory_roots
-                    if root.root_id == "insights"
-                    for doc in root.documents
+                    for item in loaded_memory
+                    if item.source == "long_term_insight"
+                    for doc in item.documents
                     if doc.source_path == TODO_DOCUMENT_PATH
                 ),
                 "",
@@ -132,8 +130,19 @@ def build_suggestion_research_snapshot(
             limit=PENDING_WORK_MAX_CHARS,
         ),
     )
+    # A source without a published head is pinned to None, which hides any
+    # revision published during the run; a missing key would show it.
+    memory_revisions: dict[MemorySource, str | None] = {
+        "fact": None,
+        "long_term_insight": None,
+        "agent_experience": None,
+    }
+    memory_revisions.update((item.source, item.revision_id) for item in loaded_memory)
     return SuggestionResearchSnapshot(
-        roots=roots,
+        folders=tuple(
+            Path(folder.canonical_real_path) for folder in workspace_settings.folders
+        ),
+        memory_revisions=memory_revisions,
         stable_memory=stable_memory,
         commands_allowed=commands_run_without_asking(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
@@ -142,32 +151,13 @@ def build_suggestion_research_snapshot(
     )
 
 
-def _workspace_roots(
-    settings: WorkspaceSettings, *, db_path: Path
-) -> tuple[WorkspaceReadRoot, ...]:
-    private_app_storage = app_owned_roots(db_path)
-    roots = tuple(
-        WorkspaceReadRoot(
-            root_id=f"workspace:{folder.folder_id}",
-            display_name=folder.display_name,
-            canonical_path=Path(folder.canonical_real_path),
-            private_app_storage=private_app_storage,
-        )
-        for folder in settings.folders
-    )
-    root_ids = [root.root_id for root in roots]
-    if len(root_ids) != len(set(root_ids)):
-        raise ValueError("Suggestion readable root ids must be unique")
-    return roots
-
-
 def _load_memory_roots(
     *,
     db_path: Path,
     busy_timeout_ms: int,
     artifact_root: Path,
     user_id: str,
-) -> tuple[_LoadedMemoryRoot, ...]:
+) -> tuple[_LoadedMemory, ...]:
     # Design limit: eager document copies avoid a cross-run revision lease. Introduce
     # lease-backed reads if snapshot p95 exceeds 1 s or copied content exceeds 32 MiB/run.
     with open_memory_catalog_connection(
@@ -184,7 +174,6 @@ def _load_memory_roots(
                         artifact_root=artifact_root,
                         user_id=user_id,
                         source="fact",
-                        root_id="facts",
                         display_name="Structured Facts",
                         entry_path="facts/index.md",
                     ),
@@ -193,7 +182,6 @@ def _load_memory_roots(
                         artifact_root=artifact_root,
                         user_id=user_id,
                         source="long_term_insight",
-                        root_id="insights",
                         display_name="Long-term Insights",
                         entry_path="insights/index.md",
                     ),
@@ -202,7 +190,6 @@ def _load_memory_roots(
                         artifact_root=artifact_root,
                         user_id=user_id,
                         source="agent_experience",
-                        root_id="agent_experience",
                         display_name="Agent Experience",
                         entry_path=AGENT_EXPERIENCE_INDEX_PATH,
                     ),
@@ -222,10 +209,9 @@ def _load_memory_root(
     artifact_root: Path,
     user_id: str,
     source: MemorySource,
-    root_id: str,
     display_name: str,
     entry_path: str,
-) -> _LoadedMemoryRoot | None:
+) -> _LoadedMemory | None:
     node = load_latest_active_node_by_source(
         connection=connection,
         user_id=user_id,
@@ -261,15 +247,12 @@ def _load_memory_root(
             revision_id=revision.revision_id,
             message=f"{source} memory entry document is absent",
         )
-    return _LoadedMemoryRoot(
-        root=MemoryReadRoot(
-            root_id=root_id,
-            display_name=display_name,
-            revision_id=revision.revision_id,
-            node_id=node.node_id,
-            entry_path=entry_path,
-            documents=documents,
-        ),
+    return _LoadedMemory(
+        source=source,
+        display_name=display_name,
+        revision_id=revision.revision_id,
+        entry_path=entry_path,
+        documents=documents,
         profile_brief=(revision.profile_brief or "").strip(),
     )
 
@@ -295,18 +278,18 @@ def _enqueue_snapshot_repair(
             )
 
 
-def _render_stable_memory_prompt(loaded_memory: tuple[_LoadedMemoryRoot, ...]) -> str:
+def _render_stable_memory_prompt(loaded_memory: tuple[_LoadedMemory, ...]) -> str:
     sections = [
         "Stable memory is a run-start snapshot. Read more of it with "
         "memory_search and get_memory_reference.",
     ]
     for item in loaded_memory:
-        index = _document_content(item.root.documents, item.root.entry_path)
+        index = _document_content(item.documents, item.entry_path)
         sections.extend(
             (
-                f"\n### {item.root.display_name}",
-                f"Entry: {item.root.entry_path}",
-                "Documents:\n" + _render_document_tree(item.root.documents),
+                f"\n### {item.display_name}",
+                f"Entry: {item.entry_path}",
+                "Documents:\n" + _render_document_tree(item.documents),
             )
         )
         if item.profile_brief:

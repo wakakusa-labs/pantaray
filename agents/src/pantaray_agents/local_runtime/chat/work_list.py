@@ -233,6 +233,28 @@ def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage
     )
 
 
+def read_relayed_starts(
+    *, user_id: str, patterns: Sequence[str], besides: str
+) -> dict[str, frozenset[str]]:
+    """The user's messages each task started under ``patterns`` (GLOB over
+    message ids), other than ``besides``, relayed, by task."""
+
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        rows = connection.execute(
+            "SELECT steps.action_id, relayed.value FROM agent_action_steps AS steps, "
+            "json_each(steps.user_message_json, '$.chat_handoff.relayed_item_ids') "
+            "AS relayed WHERE steps.user_id = ? AND steps.user_message_id != ? "
+            f"AND ({' OR '.join(['steps.user_message_id GLOB ?'] * len(patterns))})",
+            (user_id, besides, *patterns),
+        ).fetchall()
+    starts: dict[str, set[str]] = {}
+    for action_id, item_id in rows:
+        starts.setdefault(str(action_id), set()).add(str(item_id))
+    return {action_id: frozenset(ids) for action_id, ids in starts.items()}
+
+
 def read_attachment_holder(*, user_id: str, attachment_id: str) -> str | None:
     """The Action a staged file was handed to; handing it over moved it there."""
 

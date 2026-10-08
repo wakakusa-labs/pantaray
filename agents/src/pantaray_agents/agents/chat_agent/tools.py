@@ -25,6 +25,7 @@ from pantaray_agents.local_runtime.chat.work_list import (
     answered_after_suggestion,
     read_attachment_holder,
     read_latest_run_process,
+    read_relayed_starts,
     read_submitted_message,
 )
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
@@ -118,13 +119,29 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
     """The routing tools of one turn, keyed by that turn."""
 
     async def start(args: dict[str, JSONValue], key: str) -> ReactToolResult:
+        relay = _strings(args["relay"])
+        # Every message relayed here already started a task in this turn: a
+        # second start would run the same request twice. A start that brings
+        # a message of its own is another request, whatever context it shares.
+        starts = read_relayed_starts(
+            user_id=plan.user_id,
+            patterns=[
+                chat_turn_message_id(plan.key, f"{tool}/*")
+                for tool in ("start_action", "accept_suggestion")
+            ],
+            besides=key,
+        )
+        if relay and set(relay) <= set().union(*starts.values()):
+            started = sorted(a for a, ids in starts.items() if ids & set(relay))
+            return _refused(
+                "start_action",
+                "ALREADY_STARTED",
+                f"Not done: those messages already started your task "
+                f"{', '.join(started)} in this turn. To add to it, call "
+                "send_to_action for it.",
+            )
         return _submit(
-            plan,
-            key,
-            "start_action",
-            NewActionTarget(),
-            _strings(args["relay"]),
-            _note(args["note"]),
+            plan, key, "start_action", NewActionTarget(), relay, _note(args["note"])
         )
 
     async def send(args: dict[str, JSONValue], key: str) -> ReactToolResult:

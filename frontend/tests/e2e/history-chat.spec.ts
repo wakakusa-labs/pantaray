@@ -273,8 +273,10 @@ test('chat mode is the default: bubbles, cards with latest-only status, no event
 
 test('the chosen view is remembered, and the list stays as it was', async ({ page }, info) => {
   await installBridge(page, 'chat');
-  await page.getByRole('button', { name: '一覧', pressed: false }).click();
-  await expect(page.getByRole('button', { name: '一覧', pressed: true })).toBeFocused();
+  await page.getByRole('button', { name: '作業', exact: true, pressed: false }).click();
+  await expect(
+    page.getByRole('button', { name: '作業', exact: true, pressed: true })
+  ).toBeFocused();
 
   // Today's list: search, day heading, rows with a delete button and a muted status badge.
   await expect(page.getByRole('searchbox')).toBeVisible();
@@ -287,7 +289,9 @@ test('the chosen view is remembered, and the list stays as it was', async ({ pag
   await page.screenshot({ path: info.outputPath('list.png') });
 
   await page.reload();
-  await expect(page.getByRole('button', { name: '一覧', pressed: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '作業', exact: true, pressed: true })
+  ).toBeVisible();
   await expect(page.getByRole('searchbox')).toBeVisible();
 });
 

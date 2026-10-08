@@ -81,17 +81,17 @@ type TurnFailureReason = Extract<ChatItem['content'], { kind: 'turn_failure' }>[
  */
 export function retryableFailure(
   items: readonly ChatItem[]
-): { failureItemId: string; reason: TurnFailureReason; messageItemId: string } | null {
+): { failureItemId: string; reason: TurnFailureReason; messageItemId: string | null } | null {
   const newestFirst = [...items].reverse();
   const last = newestFirst.find(
     (item) => item.content.kind !== 'suggestion_event' && item.content.kind !== 'action_event'
   );
   if (last?.content.kind !== 'turn_failure') return null;
+  // Null while that message is on a page not read yet; the chat reads older pages to find it.
   const message = newestFirst.find((item) => item.content.kind === 'user_message');
-  if (!message) return null;
   return {
     failureItemId: last.item_id,
     reason: last.content.reason,
-    messageItemId: message.item_id,
+    messageItemId: message?.item_id ?? null,
   };
 }

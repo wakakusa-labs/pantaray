@@ -1,5 +1,5 @@
 import { RefreshCw } from 'lucide-react';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
 import { NewWorkButton } from '@/components/history/NewWorkButton';
@@ -88,6 +88,18 @@ export function ChatView({
   // Bridge events and turn failures feed the chat's model; the user sees the messages.
   const shown = useMemo(() => chat.items.filter(isChatMessage), [chat.items]);
   const failure = useMemo(() => retryableFailure(chat.items), [chat.items]);
+  // The retry sits under the user's last message, so that message has to be on a page read.
+  const { hasOlder, failed: readFailed, loadingOlder, loadOlder } = chat;
+  useEffect(() => {
+    if (
+      failure !== null &&
+      failure.messageItemId === null &&
+      hasOlder &&
+      !readFailed &&
+      !loadingOlder
+    )
+      void loadOlder();
+  }, [failure, hasOlder, readFailed, loadingOlder, loadOlder]);
   const [retrying, setRetrying] = useState(false);
   const turnInProgress = chat.turnRunning;
   useChatReveal({

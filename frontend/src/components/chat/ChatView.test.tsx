@@ -200,8 +200,8 @@ it('remembers the chosen view and keeps focus on the switch', async () => {
   const chatMode = await screen.findByRole('button', { name: 'チャット', pressed: true });
   expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '一覧', pressed: false }));
-  const listMode = screen.getByRole('button', { name: '一覧', pressed: true });
+  await userEvent.click(screen.getByRole('button', { name: '作業', pressed: false }));
+  const listMode = screen.getByRole('button', { name: '作業', pressed: true });
   expect(listMode).toHaveFocus();
   expect(screen.getByRole('searchbox')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
@@ -209,7 +209,7 @@ it('remembers the chosen view and keeps focus on the switch', async () => {
 
   unmount();
   renderPage();
-  expect(await screen.findByRole('button', { name: '一覧', pressed: true })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: '作業', pressed: true })).toBeInTheDocument();
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
@@ -360,7 +360,7 @@ it('keeps the draft and a failed request across a switch to the list', async () 
   await userEvent.type(input, '届いたかわからない{Enter}');
   await screen.findByRole('button', { name: '同じメッセージを再送' });
 
-  await userEvent.click(screen.getByRole('button', { name: '一覧' }));
+  await userEvent.click(screen.getByRole('button', { name: '作業' }));
   await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
   expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('届いたかわからない');
 
@@ -534,4 +534,20 @@ it('a closed session clears the typing bubble, so a failed turn can be retried',
       name: 'AI に接続できず、返信できませんでした。もう一度送る',
     })
   ).toBeInTheDocument();
+});
+
+it('reads older pages to find the user message a failed turn’s retry goes under', async () => {
+  pages = [
+    {
+      items: [item(60, { kind: 'turn_failure', reason: 'internal' }), reply(59, '途中経過です。')],
+      next_cursor: 59,
+    },
+    { items: [userMessage(10, '資料をまとめて')], next_cursor: null },
+  ];
+  renderPage();
+  const message = await screen.findByRole('article', { name: 'あなた' });
+  expect(
+    within(message).getByRole('button', { name: '返信できませんでした。もう一度送る' })
+  ).toBeInTheDocument();
+  expect(listItems).toHaveBeenLastCalledWith({ before: 59, limit: 50 });
 });

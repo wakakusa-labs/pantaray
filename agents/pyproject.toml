@@ -96,6 +96,7 @@ files = [
     "src/pantaray_agents/schema/chat.py",
     "src/pantaray_agents/local_runtime/chat",
     "src/pantaray_agents/routers/chat.py",
+    "src/pantaray_agents/agents/chat_agent",
     # NOTE: 実装（agents/repositories/utils 等）は段階導入。まずは API 契約（schema）を0件にする。
     #
     # 慎重な拡張:

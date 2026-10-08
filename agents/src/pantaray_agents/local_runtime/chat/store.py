@@ -3,6 +3,12 @@
 Every item is appended under an idempotency key (`message_id`): appending the
 same key again returns the item already stored, and reusing it for different
 content is refused. Nothing here updates or deletes an item.
+
+A chat turn keys what it appends under `chat-turn/{turn_key}/...`, and the item
+that ends a turn -- its reply, or its failure -- names in its key the newest
+item the turn read (`.../reply/{read_through}`, `.../failure/{read_through}`).
+That is the only record of what the turns have answered: a trigger item past
+the last end's `read_through` still waits for a turn.
 """
 
 from __future__ import annotations
@@ -13,6 +19,8 @@ import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
+from typing import Literal
 
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
@@ -34,6 +42,7 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.chat import (
     AssistantMessageContent,
+    ChatActionCard,
     ChatItem,
     ChatItemContent,
     ChatItemPage,
@@ -43,6 +52,19 @@ from pantaray_agents.schema.chat import (
 from pantaray_agents.security.storage_paths import validate_image_storage_path
 
 _ITEM_COLUMNS = "sequence, item_id, created_at, payload"
+_TURN_MESSAGE_PREFIX = "chat-turn/"
+# The kinds a turn answers; the others are what a turn itself appends.
+CHAT_TRIGGER_KINDS = ("user_message", "suggestion_event", "action_event")
+_TRIGGER_KINDS_SQL = ", ".join(f"'{kind}'" for kind in CHAT_TRIGGER_KINDS)
+# A turn's ends, as their keys spell them. Only a turn appends these kinds, so
+# a user message whose client chose a key of the same shape is never one.
+_REPLY_END_SQL = (
+    "(kind = 'assistant_message' "
+    f"AND message_id GLOB '{_TURN_MESSAGE_PREFIX}*/reply/*')"
+)
+_END_SQL = f"(kind = 'turn_failure' OR {_REPLY_END_SQL})"
+
+type ChatTurnEnd = Literal["reply", "failure"]
 
 
 class ChatItemReferenceError(ValueError):
@@ -134,6 +156,98 @@ def read_chat_items_after(*, user_id: str, after: int) -> tuple[ChatItem, ...]:
     return tuple(_item(row) for row in rows)
 
 
+@dataclass(frozen=True, slots=True)
+class TurnChatItem:
+    """An item as a turn reads it: ``is_reply`` marks an end a turn replied with."""
+
+    item: ChatItem
+    is_reply: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ChatTurnMarks:
+    """What the turns have answered, read back from their last ends.
+
+    ``answered_through`` is the ``read_through`` of the last end, a reply or a
+    failure, and ``replied_through`` that of the last reply. ``last_failure``
+    is the last end when it is a failure, which a retry runs again; ``waiting``
+    says a trigger item past ``answered_through`` waits for a turn.
+    """
+
+    answered_through: int
+    replied_through: int
+    last_failure: ChatItem | None
+    waiting: bool
+
+
+def chat_turn_message_id(turn_key: str, part: str) -> str:
+    return f"{_TURN_MESSAGE_PREFIX}{turn_key}/{part}"
+
+
+def chat_turn_end_message_id(turn_key: str, end: ChatTurnEnd, read_through: int) -> str:
+    return chat_turn_message_id(turn_key, f"{end}/{read_through}")
+
+
+def read_chat_items_for_turn(*, user_id: str, after: int) -> tuple[TurnChatItem, ...]:
+    """Read every item appended after `after`, oldest first, as a turn reads it."""
+
+    with _connection() as connection:
+        rows = connection.execute(
+            f"SELECT {_ITEM_COLUMNS}, {_REPLY_END_SQL} AS is_reply "
+            "FROM chat_items WHERE user_id = ? AND sequence > ? ORDER BY sequence",
+            (user_id, after),
+        ).fetchall()
+    return tuple(
+        TurnChatItem(item=_item(row), is_reply=bool(row["is_reply"])) for row in rows
+    )
+
+
+def read_chat_turn_marks(*, user_id: str) -> ChatTurnMarks:
+    """Read where the turns stand; an empty chat has answered through 0."""
+
+    with _connection() as connection:
+        last_end = _read_last(connection, user_id=user_id, end_sql=_END_SQL)
+        failed = last_end is not None and last_end["kind"] == "turn_failure"
+        last_reply = (
+            _read_last(connection, user_id=user_id, end_sql=_REPLY_END_SQL)
+            if failed
+            else last_end
+        )
+        answered_through = _read_through(last_end)
+        waiting = connection.execute(
+            "SELECT 1 FROM chat_items WHERE user_id = ? AND sequence > ? "
+            f"AND kind IN ({_TRIGGER_KINDS_SQL}) LIMIT 1",
+            (user_id, answered_through),
+        ).fetchone()
+    return ChatTurnMarks(
+        answered_through=answered_through,
+        replied_through=_read_through(last_reply),
+        last_failure=_item(last_end) if failed and last_end is not None else None,
+        waiting=waiting is not None,
+    )
+
+
+def read_unavailable_reference(
+    *, user_id: str, content: AssistantMessageContent
+) -> Literal["quote_item_id", "cards"] | None:
+    """Name what a reply refers to that the user does not have, if anything.
+
+    Cards are checked here rather than on append: a turn checks its reply
+    before it ends on it, and nothing else appends a card.
+    """
+
+    with _connection() as connection:
+        try:
+            _require_references(connection=connection, user_id=user_id, content=content)
+        except ChatItemReferenceError:
+            return "quote_item_id"
+        if not _card_targets_exist(
+            connection=connection, user_id=user_id, content=content
+        ):
+            return "cards"
+    return None
+
+
 def read_latest_chat_sequence(*, user_id: str) -> int:
     """The newest item's sequence, or 0 for an empty chat."""
 
@@ -143,6 +257,21 @@ def read_latest_chat_sequence(*, user_id: str) -> int:
             (user_id,),
         ).fetchone()
     return int(row[0])
+
+
+def _read_last(
+    connection: sqlite3.Connection, *, user_id: str, end_sql: str
+) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = connection.execute(
+        f"SELECT {_ITEM_COLUMNS}, kind, message_id FROM chat_items "
+        f"WHERE user_id = ? AND {end_sql} ORDER BY sequence DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    return row
+
+
+def _read_through(end: sqlite3.Row | None) -> int:
+    return 0 if end is None else int(str(end["message_id"]).rsplit("/", 1)[1])
 
 
 @contextmanager
@@ -188,6 +317,26 @@ def _require_references(
     return quote_item_id
 
 
+def _card_targets_exist(
+    *, connection: sqlite3.Connection, user_id: str, content: AssistantMessageContent
+) -> bool:
+    for card in content.cards:
+        table, column, target = (
+            ("agent_actions", "action_id", card.action_id)
+            if isinstance(card, ChatActionCard)
+            else ("agent_suggestions", "suggestion_id", card.suggestion_id)
+        )
+        if (
+            connection.execute(
+                f"SELECT 1 FROM {table} WHERE user_id = ? AND {column} = ?",
+                (user_id, target),
+            ).fetchone()
+            is None
+        ):
+            return False
+    return True
+
+
 def _require_attachments(*, user_id: str, content: UserMessageContent) -> None:
     """Hold attachments to the checks an Action submission applies to them.
 
@@ -225,10 +374,19 @@ def _require_attachments(*, user_id: str, content: UserMessageContent) -> None:
 
 
 __all__ = [
+    "CHAT_TRIGGER_KINDS",
     "ChatItemReferenceError",
     "ChatMessageIdentityConflictError",
+    "ChatTurnEnd",
+    "ChatTurnMarks",
+    "TurnChatItem",
     "append_chat_item",
+    "chat_turn_end_message_id",
+    "chat_turn_message_id",
     "read_chat_items_after",
+    "read_chat_items_for_turn",
     "read_chat_page",
+    "read_chat_turn_marks",
     "read_latest_chat_sequence",
+    "read_unavailable_reference",
 ]

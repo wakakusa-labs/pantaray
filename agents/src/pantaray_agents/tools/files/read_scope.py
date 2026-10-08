@@ -1,8 +1,8 @@
 """What a read/list/glob/grep call may see, independent of who makes it.
 
 A caller builds one after its own checks (the broker, from an Action's
-execution session); the read and search code works from this value and the
-call's arguments alone.
+execution session; ``read_only_tools`` for an agent without a broker); the read
+and search code works from this value and the call's arguments alone.
 """
 
 from __future__ import annotations
@@ -18,9 +18,11 @@ from pantaray_agents.tools.files.private_storage import PrivateAppStorage
 @dataclass(frozen=True, slots=True)
 class ReadScope:
     manifest_roots: tuple[ManifestRoot, ...]
-    cwd_path: Path
+    # None: the caller has no current directory and names absolute paths only.
+    cwd_path: Path | None
     read_access_scope: ReadAccessScope
-    scratch_root_path: Path
+    # The Action's scratch workspace, whose session temp folder stays unlisted.
+    scratch_root_path: Path | None
     private_storage: PrivateAppStorage
 
     def hides(self, path: Path) -> bool:

@@ -85,10 +85,6 @@ class MemoryRetrievalPolicy:
     search_content_max_chars: int | None
     reference_content_max_chars: int | None
     enqueue_repair_on_reference_failure: bool
-    # Whether the caller also registers the read-only file tools. Only that tool
-    # set can expand a truncated preview through the result's read_root and
-    # read_path, so a caller that omits it must not be told to try.
-    full_read_tools_available: bool
 
     def __post_init__(self) -> None:
         if not self.allowed_focuses or len(set(self.allowed_focuses)) != len(
@@ -129,7 +125,6 @@ MEMORY_EDITOR_RETRIEVAL_POLICY = MemoryRetrievalPolicy(
     search_content_max_chars=None,
     reference_content_max_chars=None,
     enqueue_repair_on_reference_failure=True,
-    full_read_tools_available=True,
 )
 
 
@@ -151,16 +146,10 @@ class MemoryRetrievalSession:
             "matched and say when the result list was full."
         )
         if self.policy.search_content_max_chars is not None:
-            if self.policy.full_read_tools_available:
-                search_description += (
-                    " Use read_root and read_path to read an untruncated fragment "
-                    "when the returned preview is truncated."
-                )
-            else:
-                search_description += (
-                    " A truncated preview cannot be expanded in this run; it is "
-                    "all of the fragment that is available."
-                )
+            search_description += (
+                " A truncated preview cannot be expanded in this run; it is "
+                "all of the fragment that is available."
+            )
         return (
             ReactToolDefinition(
                 name=MEMORY_SEARCH_TOOL_NAME,
@@ -354,8 +343,6 @@ class MemoryRetrievalSession:
         return {
             "source": source,
             "root": _memory_root(source),
-            "read_root": CONTEXT_ROOT_ID,
-            "read_path": context_handle,
             "record_id": str(row.get("record_id") or ""),
             "content": content,
             "content_truncated": len(content) < len(raw_content),
@@ -374,8 +361,6 @@ class MemoryRetrievalSession:
         reference = dict(resolved)
         reference["target_content"] = content
         reference["target_content_truncated"] = len(content) < len(raw_content)
-        reference["read_root"] = CONTEXT_ROOT_ID
-        reference["read_path"] = _required_string(resolved, "target_context_handle")
         reference["target_root"] = _memory_root(
             _required_string(resolved, "target_source")
         )
@@ -465,8 +450,6 @@ def _search_success_schema() -> dict[str, JSONValue]:
                     "required": [
                         "source",
                         "root",
-                        "read_root",
-                        "read_path",
                         "record_id",
                         "content",
                         "content_truncated",
@@ -479,8 +462,6 @@ def _search_success_schema() -> dict[str, JSONValue]:
                     "properties": {
                         "source": {"type": "string"},
                         "root": nullable_string,
-                        "read_root": {"const": CONTEXT_ROOT_ID},
-                        "read_path": {"type": "string", "minLength": 1},
                         "record_id": {"type": "string"},
                         "content": {"type": "string"},
                         "content_truncated": {"type": "boolean"},
@@ -530,8 +511,6 @@ def _reference_success_schema() -> dict[str, JSONValue]:
         "target_integrity": {"type": "string"},
         "current_target_revision_id": {"type": "string"},
         "target_context_handle": {"type": "string", "minLength": 1},
-        "read_root": {"const": CONTEXT_ROOT_ID},
-        "read_path": {"type": "string", "minLength": 1},
         "target_root": nullable_string,
     }
     return {

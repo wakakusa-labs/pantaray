@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -467,10 +468,10 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
     assert (
-        "facts: Structured Facts; entry=facts/index.md" in snapshot.stable_memory.prompt
+        "### Structured Facts\nEntry: facts/index.md" in snapshot.stable_memory.prompt
     )
     assert "Profile brief:\nbrief" in snapshot.stable_memory.prompt
-    assert "File tree:\n- facts/index.md\n- facts/project.md" in (
+    assert "Documents:\n- facts/index.md\n- facts/project.md" in (
         snapshot.stable_memory.prompt
     )
     assert "[Project](project.md)" in snapshot.stable_memory.prompt
@@ -521,11 +522,11 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
     reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
-    assert "insights: Long-term Insights; entry=insights/index.md" in (
+    assert "### Long-term Insights\nEntry: insights/index.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Profile brief:\ninsight brief" in snapshot.stable_memory.prompt
-    assert "File tree:\n- insights/index.md\n- insights/topic.md" in (
+    assert "Documents:\n- insights/index.md\n- insights/topic.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Insight leaf detail" not in snapshot.stable_memory.prompt
@@ -593,9 +594,9 @@ def test_stable_memory_bounds_include_truncation_markers() -> None:
     )
 
     assert len(bounded) <= 650
-    assert bounded.endswith("[truncated; continue with read]")
+    assert bounded.endswith("[truncated; find the rest with memory_search]")
     assert len(tree) <= 450
-    assert tree.endswith("[truncated; continue with list]")
+    assert tree.endswith("[truncated]")
 
 
 def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
@@ -859,10 +860,10 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
         "long_term_insight": insight_revision.revision_id,
         "agent_experience": experience_revision.revision_id,
     }
-    assert "agent_experience: Agent Experience; entry=agent_experience/index.md" in (
+    assert "### Agent Experience\nEntry: agent_experience/index.md" in (
         snapshot.stable_memory.prompt
     )
-    assert "File tree:\n- agent_experience/entries/exp-1.md" in (
+    assert "Documents:\n- agent_experience/entries/exp-1.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Experience leaf detail" not in snapshot.stable_memory.prompt
@@ -1159,7 +1160,7 @@ async def test_suggestion_memory_search_uses_snapshot_revision(
 
 
 @pytest.mark.asyncio
-async def test_suggestion_memory_search_content_can_be_read_to_completion(
+async def test_suggestion_reads_memory_through_memory_search_not_read(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1219,39 +1220,20 @@ async def test_suggestion_memory_search_content_can_be_read_to_completion(
         1,
     )
     search_row = search_result.output["results"][0]
-    first = await registry.execute(
-        _tool_call(
-            "read",
-            {
-                "root": search_row["read_root"],
-                "path": search_row["read_path"],
-                "offset": 1,
-                "column": 1,
-                "limit": 1,
-            },
-        ),
-        2,
+    by_handle = await registry.execute(
+        _tool_call("read", {"path": search_row["context_handle"]}), 2
     )
-    second = await registry.execute(
-        _tool_call(
-            "read",
-            {
-                "root": search_row["read_root"],
-                "path": search_row["read_path"],
-                "offset": first.output["next_offset"],
-                "column": first.output["next_column"],
-                "limit": 1,
-            },
-        ),
-        3,
+    by_memory_path = await registry.execute(
+        _tool_call("read", {"path": "insights/todos.md"}), 3
     )
 
-    assert search_row["content_truncated"] is True
-    assert first.output["next_offset"] == 1
-    assert first.output["next_column"] == 1_601
-    assert first.output["content"] + second.output["content"] == full_content
-    assert second.output["next_offset"] is None
-    assert second.output["next_column"] is None
+    # memory_search is where memory is read: the passage comes back whole.
+    assert search_row["content"] == full_content
+    assert search_row["content_truncated"] is False
+    for refused in (by_handle, by_memory_path):
+        assert refused.status == "error"
+        assert refused.output["error_code"] == "PATH_NOT_ABSOLUTE"
+        assert "memory_search" in refused.output["details"]["fix_hint"]
 
 
 @pytest.mark.asyncio
@@ -1771,7 +1753,7 @@ def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
     pending = snapshot.stable_memory.pending_work
     assert len(pending) <= snapshot_module.PENDING_WORK_MAX_CHARS < len(todo)
-    assert pending.endswith("[truncated; continue with read]")
+    assert pending.endswith("[truncated; find the rest with memory_search]")
 
     agent = SuggestionAgent(
         config={"llm_client": MockLLMClient()},
@@ -1795,4 +1777,77 @@ def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
         }
     )
     assert len(prompt) <= SUGGESTION_INITIAL_PROMPT_MAX_CHARS
-    assert "[truncated; continue with read]" in prompt
+    assert "[truncated; find the rest with memory_search]" in prompt
+
+
+_NO_SUGGESTION = {
+    "has_suggestion": False,
+    "interaction_contract": None,
+    "key_point": "",
+    "suggestion_summary": None,
+    "target_context": None,
+    "candidates": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
+    tmp_path: Path,
+) -> None:
+    from pantaray_agents.agents.artifact_react import ReactLoopStep
+    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+    from pantaray_agents.agents.suggestion_agent.output import (
+        parse_suggestion_output,
+    )
+    from pantaray_agents.agents.suggestion_agent.react import (
+        SUBMIT_SUGGESTION_TOOL_NAME,
+        run_suggestion_react,
+    )
+    from pantaray_llm.contracts.tool_use import LlmToolCall
+
+    db_path = _bootstrap_db(tmp_path)
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    for index in range(400):
+        (root / f"meeting-notes-with-a-long-name-{index:04}.md").write_text("x")
+    _register_workspace(db_path=db_path, root=root)
+    tool_outputs: list[Any] = []
+    turns = iter(
+        (
+            ("list", lambda: {"path": str(root), "limit": 500}),
+            ("read", lambda: {"path": tool_outputs[0]["path"], "offset": 2}),
+            (SUBMIT_SUGGESTION_TOOL_NAME, lambda: _NO_SUGGESTION),
+        )
+    )
+
+    async def generate_tool_call(**_kwargs) -> LlmToolCallTurn:  # noqa: ANN003
+        name, arguments = next(turns)
+        call = LlmToolCall(call_id=name, name=name, arguments=arguments())
+        return LlmToolCallTurn(calls=(call,), continuation=None)
+
+    async def record_step(step: ReactLoopStep) -> None:
+        if step.step_kind == "tool" and step.status == "success":
+            tool_outputs.append(step.tool_output)
+
+    result = await run_suggestion_react(
+        user_id="user-1",
+        suggestion_id="suggestion-1",
+        initial_prompt="context",
+        system_instruction="system",
+        research_tools=LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=_snapshot(db_path=db_path),
+            activity_start=None,
+        ),
+        generate_tool_call=generate_tool_call,
+        parse_output=parse_suggestion_output,
+        record_step=record_step,
+        discard_llm_thoughts=lambda: None,
+    )
+
+    assert result["has_suggestion"] is False
+
+    listing, page = tool_outputs[:2]
+    assert listing["storage"] == "action_file"
+    assert "meeting-notes-with-a-long-name-0000.md" in page["content"]

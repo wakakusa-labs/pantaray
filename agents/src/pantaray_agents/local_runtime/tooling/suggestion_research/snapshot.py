@@ -104,10 +104,7 @@ def build_suggestion_research_snapshot(
     memory_roots = tuple(item.root for item in loaded_memory)
     roots: tuple[ReadOnlyRoot, ...] = (*memory_roots, *workspace_roots)
     stable_memory = SuggestionStableMemoryContext(
-        prompt=_render_stable_memory_prompt(
-            loaded_memory=loaded_memory,
-            roots=roots,
-        ),
+        prompt=_render_stable_memory_prompt(loaded_memory),
         has_facts=any(
             root.root_id == "facts"
             and any(doc.content.strip() for doc in root.documents)
@@ -298,31 +295,18 @@ def _enqueue_snapshot_repair(
             )
 
 
-def _render_stable_memory_prompt(
-    *,
-    loaded_memory: tuple[_LoadedMemoryRoot, ...],
-    roots: tuple[ReadOnlyRoot, ...],
-) -> str:
+def _render_stable_memory_prompt(loaded_memory: tuple[_LoadedMemoryRoot, ...]) -> str:
     sections = [
-        "Stable memory is a run-start snapshot. Use read/list/glob/grep for details.",
-        "\n### Readable roots",
+        "Stable memory is a run-start snapshot. Read more of it with "
+        "memory_search and get_memory_reference.",
     ]
-    if not roots:
-        sections.append("- None")
-    for root in roots:
-        if isinstance(root, MemoryReadRoot):
-            sections.append(
-                f"- {root.root_id}: {root.display_name}; entry={root.entry_path}"
-            )
-        else:
-            sections.append(f"- {root.root_id}: {root.display_name}")
     for item in loaded_memory:
         index = _document_content(item.root.documents, item.root.entry_path)
         sections.extend(
             (
                 f"\n### {item.root.display_name}",
-                f"Root: {item.root.root_id}; entry: {item.root.entry_path}",
-                "File tree:\n" + _render_document_tree(item.root.documents),
+                f"Entry: {item.root.entry_path}",
+                "Documents:\n" + _render_document_tree(item.root.documents),
             )
         )
         if item.profile_brief:
@@ -338,7 +322,7 @@ def _document_content(documents: tuple[MemoryDocument, ...], path: str) -> str:
 
 
 def _render_document_tree(documents: tuple[MemoryDocument, ...]) -> str:
-    marker = "- [truncated; continue with list]"
+    marker = "- [truncated]"
     ordered = sorted(documents, key=lambda item: item.source_path)
     selected = [
         f"- {document.source_path}"
@@ -361,7 +345,7 @@ def _bounded(value: str, *, limit: int = STABLE_MEMORY_ITEM_MAX_CHARS) -> str:
     stripped = value.strip()
     if len(stripped) <= limit:
         return stripped
-    marker = "\n[truncated; continue with read]"
+    marker = "\n[truncated; find the rest with memory_search]"
     if limit <= len(marker):
         return marker[:limit]
     content_limit = limit - len(marker)

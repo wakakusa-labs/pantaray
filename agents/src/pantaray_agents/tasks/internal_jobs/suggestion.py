@@ -33,6 +33,7 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     InsightActivityStart,
     build_suggestion_research_snapshot,
+    discard_suggestion_tool_results,
 )
 from pantaray_agents.orchestration.ws.deliverable_sessions import (
     owner_has_deliverable_session,
@@ -332,9 +333,14 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
                 busy_timeout_ms=timeout_ms,
                 scheduled_at=format_utc_iso(decision),
             )
-        response = await _process_while_readable(
-            agent=agent, request=request, activity_start=activity_start
-        )
+        try:
+            response = await _process_while_readable(
+                agent=agent, request=request, activity_start=activity_start
+            )
+        finally:
+            discard_suggestion_tool_results(
+                db_path=db_path, run_id=payload["suggestion_id"]
+            )
     except DeferredLocalJob:
         # A model call saw the route change and put the job back in the queue.
         # A requeue restores neither a switched owner nor a revoked permit, so

@@ -364,7 +364,7 @@ async def test_memory_reference_commits_epoch_only_after_result_presentation(
     )
     tools = _retrieval_tools(tmp_path, session)
 
-    with pytest.raises(ValueError, match="target_context_handle"):
+    with pytest.raises(ValueError, match="target_source"):
         await tools.follow_reference(
             _tool_call(
                 "get_memory_reference",
@@ -525,7 +525,6 @@ def _retrieval_tools(
             search_content_max_chars=None,
             reference_content_max_chars=None,
             enqueue_repair_on_reference_failure=True,
-            full_read_tools_available=True,
         ),
     )
 

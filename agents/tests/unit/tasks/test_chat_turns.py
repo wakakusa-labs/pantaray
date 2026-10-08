@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import threading
 import time
 
@@ -227,3 +228,28 @@ async def test_a_retry_asked_for_while_a_turn_ends_is_not_lost(
     await drain
 
     assert chat.retries == [None, "failure-2"]
+
+
+async def test_a_request_made_while_planning_fails_still_gets_a_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planning = threading.Event()
+    release = threading.Event()
+    plans: list[str] = []
+
+    def plan(*, user_id: str, retry_of: str | None) -> None:
+        plans.append(user_id)
+        if len(plans) == 1:
+            planning.set()
+            release.wait(5)
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(chat_turns, "plan_chat_turn", plan)
+    drain = chat_turns.request_chat_turn("busy")
+    await asyncio.to_thread(planning.wait, 5)
+    chat_turns.request_chat_turn("busy")  # the user sends again meanwhile
+    release.set()
+    await drain
+    await chat_turns._DRAINS["busy"]
+
+    assert plans == ["busy", "busy"]

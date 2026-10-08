@@ -79,7 +79,7 @@ async def _drain(user_id: str) -> None:
     except OwnerMismatchError:
         return
     except Exception as exc:  # noqa: BLE001
-        # A turn that could not even record its failure stops here; the next
+        # A turn that could not even record its failure stops here, and a later
         # request for this user starts over from the chat.
         log_structured_event(
             logger,
@@ -89,6 +89,9 @@ async def _drain(user_id: str) -> None:
             exception=exc,
             user_id_fp=fingerprint_text(user_id),
         )
+        if user_id in _WOKEN:
+            # Asked for after this attempt began: that request gets its own.
+            _DRAINS[user_id] = asyncio.get_running_loop().create_task(_drain(user_id))
 
 
 async def _next_plan(user_id: str) -> tuple[ChatTurnPlan, str | None] | None:

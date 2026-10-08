@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass
 from difflib import unified_diff
@@ -47,7 +48,11 @@ PATCH_ERROR_LINE_PATTERN_INVALID = "PATCH_LINE_PATTERN_INVALID"
 PATCH_ERROR_DELETE_REQUIRES_FULL_FILE_READ = "PATCH_DELETE_REQUIRES_FULL_FILE_READ"
 PATCH_ERROR_READ_WINDOW_TOO_LARGE = "PATCH_READ_WINDOW_TOO_LARGE"
 PATCH_ERROR_READ_FAILED = "PATCH_READ_FAILED"
+PATCH_ERROR_ENCODING_UNSUPPORTED = "PATCH_ENCODING_UNSUPPORTED"
 PATCH_ERROR_WRITE_FAILED = "PATCH_WRITE_FAILED"
+
+_UTF8_BOM = "\ufeff"
+_LINE_ENDING = re.compile(r"(\r\n|\r|\n)")
 
 
 class StructuredPatchError(RuntimeError):
@@ -162,6 +167,12 @@ def structured_patch_llm_feedback(code: str) -> str:
         return "PATCH_TARGET_NOT_FILE: apply_patch can only update or delete files."
     if code == PATCH_ERROR_READ_FAILED:
         return "PATCH_READ_FAILED: re-read the target paths after they are readable."
+    if code == PATCH_ERROR_ENCODING_UNSUPPORTED:
+        return (
+            "PATCH_ENCODING_UNSUPPORTED: apply_patch cannot edit this file without "
+            "changing its encoding. Do not rewrite or re-encode it another way "
+            "unless the user agrees."
+        )
     if code == PATCH_ERROR_WRITE_FAILED:
         return "PATCH_WRITE_FAILED: read the target file to confirm its current content before retrying."
     return "Regenerate the apply_patch request using the current file content."
@@ -311,8 +322,9 @@ def _read_existing_file(
             root_path=patch_root,
             relative_path=path_rewrites[path],
         )
-        with open(descriptor, encoding="utf-8", closefd=False) as handle:
-            return handle.read()
+        # Bytes, not text mode: universal newlines would turn CRLF into LF.
+        with open(descriptor, "rb", closefd=False) as handle:
+            data = handle.read()
     except WorkspacePathMissingError as exc:
         raise StructuredPatchError(
             f"{PATCH_ERROR_TARGET_MISSING}: target file does not exist: {path}",
@@ -323,7 +335,7 @@ def _read_existing_file(
             f"{PATCH_ERROR_TARGET_NOT_FILE}: target is not a file: {path}",
             code=PATCH_ERROR_TARGET_NOT_FILE,
         ) from exc
-    except (OSError, UnicodeDecodeError) as exc:
+    except OSError as exc:
         raise StructuredPatchError(
             f"{PATCH_ERROR_READ_FAILED}: failed to read target {path}: {exc}",
             code=PATCH_ERROR_READ_FAILED,
@@ -331,36 +343,73 @@ def _read_existing_file(
     finally:
         if descriptor is not None:
             os.close(descriptor)
+    try:
+        # A UTF-8 BOM decodes to U+FEFF and is written back unchanged.
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # Legacy encodings are refused, not re-encoded: CP932 round trips are
+        # not byte-stable (for example 0x8790 comes back as 0x81E0).
+        raise StructuredPatchError(
+            f"{PATCH_ERROR_ENCODING_UNSUPPORTED}: {path} is not UTF-8"
+            f"{_non_utf8_encoding_hint(data)}; apply_patch edits only UTF-8 files",
+            code=PATCH_ERROR_ENCODING_UNSUPPORTED,
+        ) from exc
+
+
+def _non_utf8_encoding_hint(data: bytes) -> str:
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return " (it appears to be UTF-16)"
+    if b"\x00" in data:
+        return ""
+    try:
+        data.decode("cp932")
+    except UnicodeDecodeError:
+        return ""
+    return " (it appears to be CP932/Shift_JIS)"
 
 
 def apply_patch_edits(*, old_text: str, edits: list[ApplyPatchEdit]) -> str:
-    current_lines, trailing_newline = _split_text(old_text)
+    """Apply edits while keeping the file's BOM and untouched line endings.
+
+    New and replaced lines take the file's first line ending (LF when it has
+    none), so a pure CRLF file stays CRLF. The final-newline state is kept.
+    """
+    bom = _UTF8_BOM if old_text.startswith(_UTF8_BOM) else ""
+    lines = _split_lines(old_text.removeprefix(bom))
+    trailing_newline = bool(lines) and lines[-1][1] != ""
+    ending = next((line_ending for _text, line_ending in lines if line_ending), "\n")
     cursor = 0
     for edit in edits:
-        match = _find_edit_match(current_lines=current_lines, edit=edit, cursor=cursor)
-        current_lines = (
-            current_lines[: match.old_start]
-            + edit.new_lines
-            + current_lines[match.old_end :]
+        match = _find_edit_match(
+            current_lines=[text for text, _ending in lines], edit=edit, cursor=cursor
         )
+        lines[match.old_start : match.old_end] = [
+            (line, ending) for line in edit.new_lines
+        ]
         cursor = match.old_start + len(edit.new_lines)
-    return _join_existing_file_text(current_lines, trailing_newline=trailing_newline)
-
-
-def _split_text(text: str) -> tuple[list[str], bool]:
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if normalized == "":
-        return [], False
-    trailing_newline = normalized.endswith("\n")
-    if trailing_newline:
-        normalized = normalized[:-1]
-    return normalized.split("\n") if normalized else [], trailing_newline
-
-
-def _join_existing_file_text(lines: list[str], *, trailing_newline: bool) -> str:
     if not lines:
-        return ""
-    return "\n".join(lines) + ("\n" if trailing_newline else "")
+        return bom
+    *body, (last_text, last_ending) = lines
+    return (
+        bom
+        + "".join(text + (line_ending or ending) for text, line_ending in body)
+        + last_text
+        + ((last_ending or ending) if trailing_newline else "")
+    )
+
+
+def patch_line_texts(text: str) -> tuple[str, ...]:
+    """Return the lines patch edits match against, without BOM or endings."""
+    return tuple(line for line, _ending in _split_lines(text.removeprefix(_UTF8_BOM)))
+
+
+def _split_lines(text: str) -> list[tuple[str, str]]:
+    # (text, ending) pairs; only an unterminated last line has an empty ending.
+    parts = _LINE_ENDING.split(text)
+    lines = list(zip(parts[0::2], [*parts[1::2], ""], strict=True))
+    if lines[-1] == ("", ""):
+        lines.pop()
+    return lines
 
 
 def join_patch_new_file_text(*, lines: list[str], trailing_newline: bool) -> str:

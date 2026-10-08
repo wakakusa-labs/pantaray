@@ -9,6 +9,12 @@ import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker_structured_patch
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    ApplyPatchEdit,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    apply_patch_edits,
+)
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -456,3 +462,83 @@ async def test_apply_patch_update_rejects_invalid_omitted_pattern(
     assert isinstance(error, dict)
     assert error["code"] == "PATCH_LINE_PATTERN_INVALID"
     assert workspace_file.read_text(encoding="utf-8") == "value = old\n"
+
+
+def _diff_body_lines(diff: str) -> list[str]:
+    return [
+        line
+        for line in diff.splitlines()
+        if line.startswith(("-", "+")) and not line.startswith(("---", "+++"))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_update_keeps_crlf_and_utf8_bom(tmp_path: Path) -> None:
+    db_path, context = _bootstrap_typed_runtime_db(tmp_path)
+    _grant_workspace_full_access(
+        db_path=db_path,
+        manifest_id=context.manifest_id,
+        capability="scoped_write",
+    )
+    target = context.workspace_path / "Module1.vb"
+    target.write_bytes(
+        b"\xef\xbb\xbfImports System\r\n"
+        b"Module Module1\r\n"
+        b"    Sub One()\r\n"
+        b"    End Sub\r\n"
+        b"End Module\r\n"
+    )
+
+    outcome = await _execute_apply_patch_after_needs_read(
+        db_path=db_path,
+        context=context,
+        invocation_id="invocation-apply-patch-crlf",
+        tool_request_id="request-apply-patch-crlf",
+        args={
+            "changes": [
+                _update_change(
+                    path="Module1.vb",
+                    old_lines=["Imports System", "Module Module1", "    Sub One()"],
+                    new_lines=[
+                        "Imports System",
+                        "Module Module1",
+                        "    Sub Two()",
+                        "    ' added",
+                    ],
+                )
+            ]
+        },
+    )
+
+    assert outcome.status == "success"
+    assert target.read_bytes() == (
+        b"\xef\xbb\xbfImports System\r\n"
+        b"Module Module1\r\n"
+        b"    Sub Two()\r\n"
+        b"    ' added\r\n"
+        b"    End Sub\r\n"
+        b"End Module\r\n"
+    )
+    assert _diff_body_lines(str(outcome.output["diff"])) == [
+        "-    Sub One()",
+        "+    Sub Two()",
+        "+    ' added",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("old_text", "old_lines", "new_lines", "expected"),
+    [
+        ("a\nb\n", ["b"], ["B", "C"], "a\nB\nC\n"),
+        ("a\r\nb", ["b"], ["B"], "a\r\nB"),
+        ("a\r\nb", ["b"], ["b", "c"], "a\r\nb\r\nc"),
+        ("a\r\nb\nc\r\n", ["c"], ["C"], "a\r\nb\nC\r\n"),
+    ],
+    ids=["lf", "crlf-no-final-newline", "append-after-unterminated", "mixed"],
+)
+def test_apply_patch_edits_keep_line_endings(
+    old_text: str, old_lines: list[str], new_lines: list[str], expected: str
+) -> None:
+    edit = ApplyPatchEdit(old_lines=old_lines, new_lines=new_lines)
+
+    assert apply_patch_edits(old_text=old_text, edits=[edit]) == expected

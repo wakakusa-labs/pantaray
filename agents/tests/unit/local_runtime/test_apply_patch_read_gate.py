@@ -59,6 +59,11 @@ TARGET_NOT_FILE_FEEDBACK = (
 READ_FAILED_FEEDBACK = (
     "PATCH_READ_FAILED: re-read the target paths after they are readable."
 )
+ENCODING_UNSUPPORTED_FEEDBACK = (
+    "PATCH_ENCODING_UNSUPPORTED: apply_patch cannot edit this file without "
+    "changing its encoding. Do not rewrite or re-encode it another way unless "
+    "the user agrees."
+)
 
 
 def _bootstrap_typed_runtime_db(tmp_path: Path) -> tuple[Path, ActionExecutionContext]:
@@ -314,23 +319,38 @@ async def test_apply_patch_symlink_target_reports_target_not_file(
 
 
 @pytest.mark.asyncio
-async def test_apply_patch_decode_failure_reports_read_failed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("data", "encoding_hint"),
+    [
+        ("old\r\n\u65e5\u672c\u8a9e\r\n".encode("cp932"), "CP932/Shift_JIS"),
+        ("old\r\n".encode("utf-16"), "UTF-16"),
+    ],
+    ids=["cp932", "utf-16-bom"],
+)
+async def test_apply_patch_refuses_non_utf8_file_unchanged(
+    tmp_path: Path, data: bytes, encoding_hint: str
+) -> None:
     db_path, context = _bootstrap_workspace_write_context(tmp_path)
-    target = context.workspace_path / "invalid-utf8.txt"
-    target.write_bytes(b"\xff")
+    target = context.workspace_path / "legacy.txt"
+    target.write_bytes(data)
 
     outcome = await _execute_initial_update(
         db_path=db_path,
         context=context,
         path=target.name,
-        invocation_suffix="apply-patch-decode-failure",
+        invocation_suffix="apply-patch-non-utf8",
     )
 
     _assert_patch_error(
         outcome,
-        code="PATCH_READ_FAILED",
-        llm_feedback=READ_FAILED_FEEDBACK,
+        code="PATCH_ENCODING_UNSUPPORTED",
+        llm_feedback=ENCODING_UNSUPPORTED_FEEDBACK,
     )
+    assert isinstance(outcome.output, dict)
+    error = outcome.output["error"]
+    assert isinstance(error, dict)
+    assert encoding_hint in str(error["message"])
+    assert target.read_bytes() == data
 
 
 @pytest.mark.asyncio
@@ -1086,6 +1106,24 @@ def test_apply_patch_visible_check_accepts_same_window_sequence() -> None:
         file_sha256=text_sha256(""),
         full_file=False,
         visible_texts=("section A\ncontext\nold 1\nold 2\nmore context\nsection B\n",),
+    )
+
+    assert change_uses_visible_lines(change=change, snapshot=snapshot)
+
+
+def test_apply_patch_visible_check_matches_first_line_of_bom_crlf_window() -> None:
+    change = ApplyPatchUpdateChange.model_validate(
+        {
+            "op": "update",
+            "path": "Module1.vb",
+            "edits": [{"old_lines": ["Imports System"], "new_lines": ["Imports IO"]}],
+        }
+    )
+    snapshot = PatchReadSnapshot(
+        path="Module1.vb",
+        file_sha256=text_sha256(""),
+        full_file=False,
+        visible_texts=("\ufeffImports System\r\nModule Module1\r\n",),
     )
 
     assert change_uses_visible_lines(change=change, snapshot=snapshot)

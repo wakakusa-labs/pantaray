@@ -41,6 +41,7 @@ from .broker_structured_patch import (
     PATCH_ERROR_DELETE_REQUIRES_FULL_FILE_READ,
     PATCH_ERROR_READ_WINDOW_TOO_LARGE,
     StructuredPatchError,
+    patch_line_texts,
 )
 
 FULL_READ_MAX_LINES = 800
@@ -284,12 +285,12 @@ def _visible_texts_from_output(output: dict[str, JSONValue]) -> tuple[str, ...]:
 def fits_full_file_read(text: str) -> bool:
     return (
         len(text.encode("utf-8")) <= READ_WINDOW_MAX_BYTES
-        and len(_line_texts(text)) <= FULL_READ_MAX_LINES
+        and len(patch_line_texts(text)) <= FULL_READ_MAX_LINES
     )
 
 
 def _target_windows(*, text: str, change: ApplyPatchChange) -> tuple[ReadWindow, ...]:
-    line_texts = _line_texts(text)
+    line_texts = patch_line_texts(text)
     if not line_texts:
         return (ReadWindow(1, 1, "empty_file", ""),)
     start, end, reason = _target_candidate(line_texts=line_texts, change=change)
@@ -352,7 +353,7 @@ def _edit_visible_in_any_text(
     visible_texts: tuple[str, ...],
 ) -> bool:
     return any(
-        _edit_visible_in_text(edit=edit, line_texts=_line_texts(visible_text))
+        _edit_visible_in_text(edit=edit, line_texts=patch_line_texts(visible_text))
         for visible_text in visible_texts
     )
 
@@ -373,18 +374,3 @@ def _edit_visible_in_text(
     except PatchMatchFailure:
         return False
     return True
-
-
-def _line_texts(text: str) -> tuple[str, ...]:
-    return tuple(
-        segment.removesuffix("\n").removesuffix("\r")
-        for segment in _line_segments(text)
-    )
-
-
-def _line_segments(text: str) -> tuple[str, ...]:
-    if text == "":
-        return ()
-    return tuple(
-        text.replace("\r\n", "\n").replace("\r", "\n").splitlines(keepends=True)
-    )

@@ -120,6 +120,10 @@ def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence()
     shared = _shared_system_instruction()
     assert "inspect the resulting current state" in shared
     assert "mutation tool's success" in shared
+    assert "or a subagent's report) instead of claiming full completion" in shared
+    # What a deliverable contains is the user's to set, so it lives only in the
+    # default AGENTS.md, which their own AGENTS.md overrides.
+    assert "deliverable" not in shared
 
 
 def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> None:

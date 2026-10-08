@@ -1966,16 +1966,15 @@ def test_repository_agents_md_reaches_the_child_once_across_a_resume(
         claim_workspace=True,
     )
     _agents_md_workspace(db_path)
-    client = _Client(calls=(_read("r1", "sub/notes.txt"), _APPLY_PATCH_CALL))
+    # The read claims the files; the edit of the same turn then waits for
+    # approval, so no send carries them before the pause.
+    client = _Client(calls=((_read("r1", "sub/notes.txt"), _APPLY_PATCH_CALL),))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
     ):
         subagent_job.run_action_subagent_job(payload)
-    # Both files went in before the send after the read, root first.
-    attached = _items(client, 1)
-    assert attached.count("ROOT_RULES") == attached.count("SUB_RULES") == 1
-    assert attached.index("ROOT_RULES") < attached.index("SUB_RULES")
+    assert len(client.tool_uses) == 1
     with sqlite3.connect(db_path) as connection:
         session = connection.execute(
             "SELECT approval_session_id,tool_request_id FROM approval_sessions"
@@ -1986,6 +1985,12 @@ def test_repository_agents_md_reaches_the_child_once_across_a_resume(
         monkeypatch, db_path, payload, calls=(_read("r2", "sub/notes.txt"),)
     )
 
+    # The resumed run's first send carries them, root first, after the
+    # turn's answers; a later read in the same directory adds nothing.
+    first = _items(resumed, 0)
+    assert first.count("ROOT_RULES") == first.count("SUB_RULES") == 1
+    assert first.index("ROOT_RULES") < first.index("SUB_RULES")
+    assert first.rindex('"type":"tool_result"') < first.index("ROOT_RULES")
     last = _items(resumed, len(resumed.tool_uses) - 1)
     assert last.count("ROOT_RULES") == last.count("SUB_RULES") == 1
 

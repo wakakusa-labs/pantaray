@@ -153,7 +153,10 @@ async def execute_action_subagent_job(
         window_tokens=tunables.context_window_tokens,
     )
     history = load_history()
-    agents_md = AgentsMdClaims(attached=list(history.agents_md_paths))
+    agents_md = AgentsMdClaims(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload
+    )
+    agents_md.restore(history)
     writer = SubagentHistoryWriter(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -184,6 +187,7 @@ async def execute_action_subagent_job(
         )
         writer.answer_waiting_call(resumed.call_id, resumed.tool_id, settled)
         history = load_history()
+        agents_md.restore(history)
     entries = await writer.answer_unanswered(history)
     identity, _ = provider_turns.read_provider_turn_target(
         inference_profile=payload["inference_profile_id"]

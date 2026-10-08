@@ -213,7 +213,9 @@ async def test_a_run_resumed_from_its_rows_sends_the_same_request_and_goes_on(
         db_path=db_path,
         busy_timeout_ms=1_000,
         payload=payload,
-        agents_md=AgentsMdClaims(attached=[]),
+        agents_md=AgentsMdClaims(
+            db_path=db_path, busy_timeout_ms=1_000, payload=payload
+        ),
     )
     _message(db_path, "m0", "Before the first turn")
     look = [
@@ -281,7 +283,9 @@ async def test_calls_a_stopped_turn_left_are_answered_before_the_run_goes_on(
         db_path=db_path,
         busy_timeout_ms=1_000,
         payload=payload,
-        agents_md=AgentsMdClaims(attached=[]),
+        agents_md=AgentsMdClaims(
+            db_path=db_path, busy_timeout_ms=1_000, payload=payload
+        ),
     )
     calls = [
         LlmToolCall(call_id="a1", name="look", arguments={"path": "a"}),

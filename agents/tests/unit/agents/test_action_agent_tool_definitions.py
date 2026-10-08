@@ -46,7 +46,11 @@ def _model_facing_parameters() -> dict[str, dict[str, JSONValue]]:
             busy_timeout_ms=0,
             payload=cast(ActionSubagentJobPayload, {}),
             authority=cast(ActionSubagentBrokerAuthority, None),
-            agents_md=AgentsMdClaims(attached=[]),
+            agents_md=AgentsMdClaims(
+                db_path=Path("unused.sqlite3"),
+                busy_timeout_ms=0,
+                payload=cast(ActionSubagentJobPayload, {}),
+            ),
         )
     }
     return {**action, **subagent}

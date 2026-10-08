@@ -355,6 +355,8 @@ class _ChatTurn:
                 self.checked[call.call_id] = await asyncio.to_thread(
                     check_reply, user_id=self.plan.user_id, arguments=call.arguments
                 )
+        # Checked again once its own awaits are done: the calls run right after.
+        self.require_route()
 
     def decide(self, idle: IdleTurn) -> Finish[AssistantMessageContent] | Continue:
         if idle.ending_call is not None:

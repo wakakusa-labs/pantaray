@@ -490,3 +490,22 @@ async def test_a_send_that_fails_after_the_route_changed_leaves_no_failure(
 
     assert [i.content.kind for i in _items()] == ["user_message"]
     assert plan_chat_turn(user_id=USER, retry_of=None) is not None
+
+
+async def test_calls_do_not_run_when_the_route_changes_while_the_turn_speaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _say("m-1", "Find the deck")
+    # Started, sent, and the reply landed on the first route; then it changed.
+    _switch_routes(monkeypatch, "first", "first", "first", "second")
+    ran: list[str] = []
+    look = LlmToolCall(call_id="c", name="look", arguments={})
+
+    with pytest.raises(ChatTurnInterrupted):
+        await _run(
+            _Model([_turn(look, text="Looking.")]),
+            tools=(_tool("look", lambda: ran.append("look")),),
+        )
+
+    assert ran == []
+    assert plan_chat_turn(user_id=USER, retry_of=None) is not None

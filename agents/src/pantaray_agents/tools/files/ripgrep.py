@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path, PurePosixPath
+from time import monotonic
 from typing import IO, Literal
 
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -203,6 +204,8 @@ def run_ripgrep_grep(
     lines, outside ripgrep's sandbox, so it applies the read tool's own checks.
     """
 
+    # The search and the encoding decisions after it share one time budget.
+    deadline = monotonic() + RIPGREP_TIMEOUT_SECONDS
     # Relative path, line number, column and line, as printed.
     printed: list[tuple[str, int, int, bytes]] = []
     binary_match_paths: list[str] = []
@@ -278,14 +281,18 @@ def run_ripgrep_grep(
         handle_line=handle_line,
     )
     _raise_if_ripgrep_grep_failed(result=result)
-    # Decided once per file and only after ripgrep exits, so the whole-file
-    # decode is not charged to ripgrep's timeout.
+    # Decided once per file after ripgrep exits, each from a bounded prefix,
+    # while the budget lasts; later files show their lines as lossy UTF-8.
     line_codecs: dict[str, UnmarkedTextEncoding] = {}
     matches: list[RipgrepGrepMatch] = []
     for relative_path, line_number, column, content in printed:
         codec = line_codecs.get(relative_path)
         if codec is None:
-            codec = match_line_codec(partial(open_matched_file, relative_path))
+            codec = (
+                match_line_codec(partial(open_matched_file, relative_path))
+                if monotonic() < deadline
+                else "utf-8"
+            )
             line_codecs[relative_path] = codec
         matches.append(
             grep_match_from_ripgrep(

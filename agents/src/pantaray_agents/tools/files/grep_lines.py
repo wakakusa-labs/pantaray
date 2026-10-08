@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .text_encoding import UnmarkedTextEncoding, byte_order_mark, whole_file_encoding
+from .text_encoding import UnmarkedTextEncoding, byte_order_mark, decided_encoding
 
 # ripgrep prints a line longer than this many bytes as a preview of its first
 # this many graphemes, so no file size cap is needed to bound one match.
@@ -78,8 +78,8 @@ def match_line_codec(open_file: Callable[[], int]) -> UnmarkedTextEncoding:
     """How to decode the lines ripgrep printed for one file, as read decides.
 
     ripgrep prints a file with a byte order mark transcoded to UTF-8 and any
-    other file as its own bytes, which are decoded in the encoding read reports
-    for that whole file, so grep and read show one line the same way.
+    other file as its own bytes, which are decoded in the encoding read decides
+    for that file, so grep and read show one line the same way.
     ``open_file`` opens the file the way read would, refusing what read
     refuses; a file it refuses, one in neither UTF-8 nor CP932, or one gone
     since ripgrep read it is shown as lossy UTF-8.
@@ -94,7 +94,7 @@ def match_line_codec(open_file: Callable[[], int]) -> UnmarkedTextEncoding:
             return "utf-8"
         if byte_order_mark(os.pread(descriptor, _MARK_SAMPLE_BYTES, 0)) is not None:
             return "utf-8"
-        return whole_file_encoding(descriptor) or "utf-8"
+        return decided_encoding(descriptor) or "utf-8"
     finally:
         os.close(descriptor)
 

@@ -27,8 +27,8 @@ from .text_encoding import (
     ByteOrderMark,
     TextEncoding,
     byte_order_mark,
+    decided_encoding,
     text_encoding_unsupported,
-    whole_file_encoding,
 )
 from .text_lines import (
     ReadLinesResult,
@@ -237,9 +237,10 @@ def _read_text_page(
     column: int,
     limit: int,
 ) -> tuple[ReadLinesResult, TextEncoding]:
+    encoding: TextEncoding | None = None if mark is None else mark.encoding
     try:
         if mark is None:
-            encoding = whole_file_encoding(descriptor)
+            encoding = decided_encoding(descriptor)
             if encoding is None:
                 raise text_encoding_unsupported(
                     display_path=target.display_path, encoding=None
@@ -268,11 +269,10 @@ def _read_text_page(
             limit=limit,
         ), mark.encoding
     except UnicodeDecodeError as exc:
-        # A marked file is decoded only as far as its page, and any file can
-        # change between the check of its encoding and the read of its page.
+        # A page past the prefix that decided an unmarked file's encoding, or
+        # any page of a marked file, can hold bytes that encoding refuses.
         raise text_encoding_unsupported(
-            display_path=target.display_path,
-            encoding=None if mark is None else mark.encoding,
+            display_path=target.display_path, encoding=encoding
         ) from exc
 
 

@@ -41,6 +41,7 @@ from .broker_structured_patch import (
     PATCH_ERROR_DELETE_REQUIRES_FULL_FILE_READ,
     PATCH_ERROR_READ_WINDOW_TOO_LARGE,
     StructuredPatchError,
+    patch_line_segments,
     patch_line_texts,
 )
 
@@ -84,7 +85,7 @@ def build_needs_read_output(
             "patch_applied": False,
             "read_scope": "full_file",
             "file_truncated": False,
-            "text": text,
+            "text": "".join(patch_line_segments(text)),
             "windows": [],
             "file_sha256": file_sha256,
             "llm_feedback": (
@@ -295,7 +296,7 @@ def _target_windows(*, text: str, change: ApplyPatchChange) -> tuple[ReadWindow,
         return (ReadWindow(1, 1, "empty_file", ""),)
     start, end, reason = _target_candidate(line_texts=line_texts, change=change)
     return build_bounded_read_windows(
-        text=text,
+        segments=patch_line_segments(text),
         candidates=(ReadWindowCandidate(start, end, reason),),
         margin_lines=WINDOW_MARGIN_LINES,
     )

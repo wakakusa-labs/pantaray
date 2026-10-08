@@ -398,6 +398,17 @@ def apply_patch_edits(*, old_text: str, edits: list[ApplyPatchEdit]) -> str:
     )
 
 
+def patch_line_segments(text: str) -> tuple[str, ...]:
+    """Return lines as the model sees and edits them: no BOM, endings kept.
+
+    Only CR, LF and CRLF end a line (not U+2028 or form feed), matching the
+    read tool's line numbers.
+    """
+    return tuple(
+        line + ending for line, ending in _split_lines(text.removeprefix(_UTF8_BOM))
+    )
+
+
 def patch_line_texts(text: str) -> tuple[str, ...]:
     """Return the lines patch edits match against, without BOM or endings."""
     return tuple(line for line, _ending in _split_lines(text.removeprefix(_UTF8_BOM)))
@@ -492,8 +503,8 @@ def _apply_file_changes(
 def create_patch_diff(change: StructuredPatchFileChange) -> str:
     return "".join(
         unified_diff(
-            change.old_text.splitlines(keepends=True),
-            change.new_text.splitlines(keepends=True),
+            patch_line_segments(change.old_text),
+            patch_line_segments(change.new_text),
             fromfile=change.path,
             tofile=change.path,
         )

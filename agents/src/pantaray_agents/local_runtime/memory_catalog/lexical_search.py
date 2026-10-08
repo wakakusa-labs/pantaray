@@ -222,12 +222,15 @@ def _scanned_lexical_rows(
     term_predicate = " OR ".join(
         (
             *("fragments.content_text LIKE '%' || ? || '%'" for _ in substrings),
-            # LIKE finds the word cheaply in any case; the padded GLOB, which
-            # copies the text, then runs only on what it found.
+            # LIKE finds an ASCII word cheaply in any case; the padded GLOB,
+            # which copies the text, then runs only on what it found. LIKE folds
+            # ASCII only, so a word like the Kelvin sign's "K2" keeps GLOB alone.
             *(
                 "(fragments.content_text LIKE '%' || ? || '%' "
                 "AND (' ' || fragments.content_text || ' ') GLOB ?)"
-                for _ in whole_words
+                if word.isascii()
+                else "(' ' || fragments.content_text || ' ') GLOB ?"
+                for word in whole_words
             ),
         )
     )
@@ -246,7 +249,11 @@ def _scanned_lexical_rows(
                 *(
                     part
                     for word in whole_words
-                    for part in (word, _whole_word_glob(word))
+                    for part in (
+                        (word, _whole_word_glob(word))
+                        if word.isascii()
+                        else (_whole_word_glob(word),)
+                    )
                 ),
                 *visibility_parameters,
                 candidate_limit,

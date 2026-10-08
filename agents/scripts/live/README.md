@@ -11,6 +11,7 @@
 | `direct_llm_smoke.py` | `LocalLlmProxyClient.generate_content` を direct 経路で実 OpenAI へ | `OPENAI_API_KEY` |
 | `direct_web_tools_smoke.py` | `invoke_web_tools_wrapper` を実 Tavily へ | `TAVILY_API_KEY` |
 | `direct_action_e2e.py` | 本物の helper プロセス + 制御ソケット + ローカル API / WS で Action を端から端まで | 両方 |
+| `insight_replay.py` | 固定の Zanei 時系列で short Insight を 1 回ずつ実行し、出力を保存・比較 | `OPENAI_API_KEY` |
 
 ## 鍵の渡し方
 
@@ -34,6 +35,24 @@ PYTHONPATH=src:packages/pantaray-llm/src .venv/bin/python scripts/live/direct_ac
 `direct_action_e2e.py --barrier` は、既定の 9 項目の代わりに**停止バリア**のシナリオを流す
 （下の「`--barrier` が確認していること」）。所要 15 分前後、OpenAI は 70 回前後。
 切り替え先のモデルは既定で `gpt-5.6-terra`、`SMOKE_ALTERNATE_MODEL` で変えられる。
+
+## `insight_replay.py` で変更前後を比べる
+
+`InsightAgent.generate` は、`PYTHONPATH` が指すツリーのものが動く。比べたい 2 つのツリーに
+同じ入力（既定は架空の 1 時間分の作業。`--fixture` で同じ形の JSON を渡せる）を与えて実行し、
+`--compare` で並べて読む。memory の検索先は空の新しい DB。
+
+```sh
+cd agents
+git -C .. worktree add --detach /tmp/insight-before <変更前のコミット>
+KEY="$(your-secret-lookup openai)"
+OPENAI_API_KEY="$KEY" PYTHONPATH=/tmp/insight-before/agents/src:/tmp/insight-before/agents/packages/pantaray-llm/src \
+  .venv/bin/python scripts/live/insight_replay.py --runs 3 --out /tmp/insight-replay/before
+OPENAI_API_KEY="$KEY" PYTHONPATH=src:packages/pantaray-llm/src \
+  .venv/bin/python scripts/live/insight_replay.py --runs 3 --out /tmp/insight-replay/after
+.venv/bin/python scripts/live/insight_replay.py --compare /tmp/insight-replay/before /tmp/insight-replay/after
+git -C .. worktree remove /tmp/insight-before
+```
 
 ## `direct_action_e2e.py` が確認していること
 

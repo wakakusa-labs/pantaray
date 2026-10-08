@@ -6,22 +6,29 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from pantaray_agents.agents.artifact_react import ReactLoopPolicy, ReactLoopStep
-from pantaray_agents.agents.artifact_react.native_runner import (
-    NativeReactCompletion,
-    NativeReactRunInput,
-    run_native_react,
-)
-from pantaray_agents.agents.artifact_react.transcript import (
-    build_prompt_with_transcript,
-)
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
-    LlmToolCallTurn,
+    ActionTurnReply,
     LlmToolUseMixin,
 )
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
-from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.config_tunables import (
+    ActionAgentTunables,
+    load_local_runtime_tunables,
+)
+from pantaray_agents.conversation import provider_turns
+from pantaray_agents.conversation.budget import ContextBudget
+from pantaray_agents.conversation.loop import (
+    Continue,
+    ConversationEntry,
+    ConversationRequest,
+    ConversationRun,
+    Finish,
+    IdleTurn,
+    RecordedTurn,
+    run_conversation,
+)
+from pantaray_agents.conversation.window import WindowState
 from pantaray_agents.tools.contract import ReactToolResult
 from pantaray_agents.tools.memory.retrieval import (
     MEMORY_EDITOR_RETRIEVAL_POLICY,
@@ -30,11 +37,13 @@ from pantaray_agents.tools.memory.retrieval import (
 )
 from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.prompt_loader import prompt_loader
-from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
-    LlmToolDefinition,
-    LlmToolResult,
+from pantaray_llm.contracts.conversation import (
+    LlmTurnItem,
+    LlmTurnToolResultItem,
+    LlmTurnUserItem,
 )
+from pantaray_llm.contracts.input_block import LlmInputTextBlock
+from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 from pantaray_llm.profiles import INSIGHT_PROFILE_ID
 
 from .record_verification import SourceRecordClaim
@@ -53,6 +62,19 @@ SHORT_INSIGHT_RETRIEVAL_POLICY = replace(
 )
 
 logger = logging.getLogger(__name__)
+
+# The bounds the run had on the generic ReAct loop.
+_MAX_TURNS = 40
+_MAX_TOOL_CALLS = 36
+_COMPLETED_TOOL_NAME = "completed"
+_COMPLETE_REQUIRED = (
+    "Respond with tool calls. Read the Zanei range with zanei_timeline, then "
+    f"save this run's outputs with {_COMPLETED_TOOL_NAME}."
+)
+_INVALID_COMPLETION = (
+    "Provide nonempty activity and insight Markdown and a nullable "
+    "reconsideration_reason."
+)
 
 
 class ShortInsightOutput(BaseModel):
@@ -129,7 +151,11 @@ class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
         db_path: Path,
         busy_timeout_ms: int,
     ) -> ShortInsightOutput:
-        prompt = self._prompt_config.prompt.format(
+        # The prompt's last paragraph asks for this run's outputs. It leads the
+        # conversation, which a request needs at least one item of; the rest,
+        # the context it is read against, is the request's own message.
+        head, _, ask = self._prompt_config.prompt.rstrip().rpartition("\n\n")
+        prompt = head.format(
             workspace_context=workspace_context,
             previous_insight=previous_insight,
         )
@@ -140,86 +166,112 @@ class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
             policy=SHORT_INSIGHT_RETRIEVAL_POLICY,
         )
         sink = CountingSink()
+        identity, _ = provider_turns.read_provider_turn_target(
+            inference_profile=INSIGHT_PROFILE_ID
+        )
+        system_instruction = self._prompt_config.system_instruction or ""
 
-        async def call_llm(
-            current_prompt: str,
-            tools: tuple[LlmToolDefinition, ...],
-            continuation: LlmToolContinuation | None,
-            tool_result: LlmToolResult | None,
-        ) -> LlmToolCallTurn:
-            return await self._generate_llm_tool_call(
+        async def send(request: ConversationRequest) -> ActionTurnReply:
+            return await self._generate_llm_action_turn(
                 sink=sink,
-                prompt=current_prompt,
-                tools=tools,
-                continuation_mode="stateless",
-                continuation=continuation,
-                tool_result=tool_result,
-                system_instruction=self._prompt_config.system_instruction,
+                prompt=request.prompt,
+                tools=request.tools,
+                max_parallel_tool_calls=request.max_parallel_tool_calls,
+                system_instruction=request.system_instruction,
+                conversation=request.conversation,
                 stage="insight_generation",
             )
 
-        def complete(
-            arguments: dict[str, JSONValue],
-            final_turn: bool,
-        ) -> NativeReactCompletion[ShortInsightOutput]:
-            rejection = _completion_rejection(zanei=zanei, final_turn=final_turn)
+        def decide(turn: IdleTurn) -> Finish[ShortInsightOutput] | Continue:
+            if turn.ending_call is None:
+                return Continue(_COMPLETE_REQUIRED)
+            rejection = _completion_rejection(zanei=zanei, final_turn=turn.final)
             if rejection is not None:
-                return NativeReactCompletion(
-                    value=None, final_text="", error_message=rejection
-                )
+                return Continue(rejection)
             try:
-                output = ShortInsightOutput.model_validate(arguments)
+                output = ShortInsightOutput.model_validate(turn.ending_call.arguments)
             except ValidationError:
-                return NativeReactCompletion(
-                    value=None,
-                    final_text="",
-                    error_message="Provide nonempty activity and insight Markdown and a nullable reconsideration_reason.",
-                )
+                return Continue(_INVALID_COMPLETION)
             _warn_if_range_unread(run_id=run_id, zanei=zanei)
-            return NativeReactCompletion(value=output, final_text="")
+            return Finish(output)
 
-        async def record_step(step: ReactLoopStep) -> None:
+        async def on_result(
+            call: LlmToolCall, result: ReactToolResult
+        ) -> LlmTurnToolResultItem:
             # Raw evidence and transcripts live only in this run, not the audit log.
             logger.info(
                 "Short Insight step",
                 extra={
                     "run_id": run_id,
-                    "step_number": step.step_number,
-                    "step_kind": step.step_kind,
-                    "tool_name": step.tool_name,
-                    "status": step.status,
+                    "tool_name": call.name,
+                    "status": result.status,
                 },
             )
+            return LlmTurnToolResultItem(
+                type="tool_result",
+                call_id=call.call_id,
+                name=call.name,
+                output=result.output,
+            )
 
-        async def project_result(result: ReactToolResult) -> ReactToolResult:
-            return result
-
-        result = await run_native_react(
-            NativeReactRunInput(
-                run_id=run_id,
-                tool_definitions=(*zanei.definitions(), *memory.definitions()),
-                terminal_tool=LlmToolDefinition(
-                    name="completed",
-                    description="Save the objective activity and short Insight from this run.",
-                    parameters=ShortInsightOutput.model_json_schema(),
+        # The history lives only in this run: a stopped run is never resumed, its
+        # job starts over from the committed cursor, so nothing is stored.
+        return await run_conversation(
+            ConversationRun(
+                prompt=prompt,
+                system_instruction=system_instruction,
+                tools=(*zanei.definitions(), *memory.definitions()),
+                ending_tools=(
+                    LlmToolDefinition(
+                        name=_COMPLETED_TOOL_NAME,
+                        description="Save the objective activity and short Insight from this run.",
+                        parameters=ShortInsightOutput.model_json_schema(),
+                    ),
                 ),
-                complete=complete,
-                build_prompt=lambda results, error: build_prompt_with_transcript(
-                    initial_prompt=prompt, tool_results=results, last_error=error
+                history=(
+                    ConversationEntry(
+                        LlmTurnUserItem(
+                            type="user",
+                            content=[LlmInputTextBlock(type="input_text", text=ask)],
+                        )
+                    ),
                 ),
-                call_llm=call_llm,
-                record_step=record_step,
-                project_tool_result=project_result,
-                policy=ReactLoopPolicy(max_llm_turns=40, max_tool_calls=36),
-                final_turn_prompt="This run's tool budget is spent. Finish using the events already read.",
-                consume_llm_thoughts=self._consume_llm_thoughts,
+                provider_turns=provider_turns.ProviderTurnStore(identity),
+                inference_profile=INSIGHT_PROFILE_ID,
+                max_turns=_MAX_TURNS,
+                max_tool_calls=_MAX_TOOL_CALLS,
+                max_parallel_tool_calls=_tunables().max_parallel_tool_calls,
+                window=WindowState(
+                    budget=ContextBudget(
+                        window_tokens=_tunables().context_window_tokens,
+                        baseline=None,
+                        reset_pending=False,
+                    ),
+                    omit_before=0,
+                ),
+                usage=lambda: sink.delta,
+                send=send,
+                before_send=_nothing_arrives,
+                on_turn=_keep_nothing,
+                on_result=on_result,
+                on_notice=_keep_nothing,
+                decide=decide,
             )
         )
-        if result.value is None:
-            raise RuntimeError(
-                result.loop_result.last_error or "Short Insight generation failed"
-            )
-        return result.value
+
+
+def _tunables() -> ActionAgentTunables:
+    # The Action's model and window: Insight runs on the same model family, and
+    # its own Zanei and memory budgets keep a run far below the window.
+    return load_local_runtime_tunables().action_agent
+
+
+async def _nothing_arrives() -> list[LlmTurnItem]:
+    return []
+
+
+async def _keep_nothing(_item: RecordedTurn | LlmTurnUserItem) -> None:
+    return None
 
 
 def _completion_rejection(*, zanei: ZaneiTools, final_turn: bool) -> str | None:

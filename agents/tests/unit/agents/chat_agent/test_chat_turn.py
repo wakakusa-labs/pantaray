@@ -149,6 +149,7 @@ class _Model:
         request: ConversationRequest,
         _sink: TokenSink,
         before_attempt: Callable[[], None],
+        _user_images: object,
     ) -> _Reply:
         before_attempt()
         # What the real client builds: an unanswered or doubled call fails here.

@@ -10,6 +10,7 @@ routes to, after the items that named them have left its window.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -148,6 +149,22 @@ def read_submitted_message(*, user_id: str, message_id: str) -> SubmittedMessage
     )
 
 
+def read_suggestion_texts(*, user_id: str, ids: Sequence[str]) -> dict[str, str]:
+    """What each suggestion says to the user, by id."""
+
+    if not ids:
+        return {}
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        rows = connection.execute(
+            "SELECT suggestion_id, answer FROM agent_suggestions "
+            f"WHERE user_id = ? AND suggestion_id IN ({', '.join('?' * len(ids))})",
+            (user_id, *ids),
+        ).fetchall()
+    return {str(row[0]): str(row[1] or "") for row in rows}
+
+
 def read_latest_run_process(*, user_id: str, action_id: str) -> str | None:
     """The process of the Action's latest run, which a message to it names.
 
@@ -186,4 +203,5 @@ __all__ = [
     "read_submitted_message",
     "read_chat_work_list",
     "read_latest_run_process",
+    "read_suggestion_texts",
 ]

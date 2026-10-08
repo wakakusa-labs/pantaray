@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
+from pantaray_agents.agents.chat_agent.media import ItemMedia
 from pantaray_agents.agents.chat_agent.reply import render_reply
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.budget import ContextBudget
@@ -58,7 +59,7 @@ CHAT_HEAD = (
 )
 
 
-def render_item(entry: TurnChatItem) -> list[ConversationEntry]:
+def render_item(entry: TurnChatItem, media: ItemMedia) -> list[ConversationEntry]:
     """One item as the model reads it; a failure notice is not part of it."""
 
     item, content = entry.item, entry.item.content
@@ -72,7 +73,24 @@ def render_item(entry: TurnChatItem) -> list[ConversationEntry]:
         ]
     if isinstance(content, TurnFailureContent):
         return []
-    return [ConversationEntry(_user_item(f"{_header(item)}\n{_body(content)}"))]
+    text = f"{_header(item)}\n{_body(content, media)}"
+    images = (
+        [
+            media.images[i.storage_path][0]
+            for i in content.images
+            if i.storage_path in media.images
+        ]
+        if isinstance(content, UserMessageContent)
+        else []
+    )
+    return [
+        ConversationEntry(
+            LlmTurnUserItem(
+                type="user",
+                content=[LlmInputTextBlock(type="input_text", text=text), *images],
+            )
+        )
+    ]
 
 
 def turn_context(waiting: Sequence[ChatItem], work: ChatWorkList) -> LlmTurnUserItem:
@@ -125,6 +143,7 @@ class ChatWindow:
         waiting_from: int,
         tail: LlmTurnItem,
         head_bytes: int,
+        media: ItemMedia,
     ) -> tuple[ChatWindow, list[ConversationEntry]]:
         """The history to send, past a later boundary when the budget says so.
 
@@ -133,7 +152,7 @@ class ChatWindow:
         still does not fit.
         """
 
-        rendered = [(entry.item.sequence, render_item(entry)) for entry in items]
+        rendered = [(entry.item.sequence, render_item(entry, media)) for entry in items]
 
         def entries(after: int) -> list[ConversationEntry]:
             kept = [
@@ -180,9 +199,11 @@ def _header(item: ChatItem) -> str:
 
 def _body(
     content: UserMessageContent | SuggestionEventContent | ActionEventContent,
+    media: ItemMedia,
 ) -> str:
     if isinstance(content, SuggestionEventContent):
-        return f"You made a suggestion: {content.suggestion_id}."
+        said = media.suggestions.get(content.suggestion_id, "")
+        return f"You made a suggestion: {content.suggestion_id}.\n{said}".rstrip()
     if isinstance(content, ActionEventContent):
         event = f"Your task {content.action_id}: {content.event}."
         excerpt = content.final_answer_excerpt
@@ -190,8 +211,9 @@ def _body(
     lines = []
     if content.quote_item_id is not None:
         lines.append(f"Quoting {content.quote_item_id}.")
-    if content.images:
-        lines.append(f"Attached images: {len(content.images)}.")
+    gone = sum(image.storage_path not in media.images for image in content.images)
+    if gone:
+        lines.append(f"Attached images no longer available: {gone}.")
     if content.files:
         lines.append(
             f"Attached files: {', '.join(file.name for file in content.files)}."

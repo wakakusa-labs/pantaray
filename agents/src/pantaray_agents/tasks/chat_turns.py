@@ -17,6 +17,10 @@ from typing import Final
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.agents.chat_agent.context import ChatWindow
+from pantaray_agents.agents.chat_agent.research import (
+    chat_research_tools,
+    discard_chat_tool_results,
+)
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import (
     ChatModel,
@@ -29,6 +33,9 @@ from pantaray_agents.local_runtime.chat.turn_runs import run_chat_turn_in_thread
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
 from pantaray_agents.local_runtime.runtime.identity import OwnerMismatchError
 from pantaray_agents.local_runtime.runtime.job_types import CHAT_TURN_TRACE_TYPE
+from pantaray_agents.local_runtime.runtime.runtime_env import (
+    read_local_runtime_db_config,
+)
 from pantaray_agents.utils.structured_logging import (
     fingerprint_text,
     log_structured_event,
@@ -111,6 +118,7 @@ async def _next_plan(user_id: str) -> tuple[ChatTurnPlan, str | None] | None:
 async def _run(plan: ChatTurnPlan) -> ChatWindow | None:
     """One turn on its own loop; None when the route changed under it."""
 
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
     try:
         # The model client names every request after the work that sends it.
         with TraceContextManager(
@@ -118,16 +126,24 @@ async def _run(plan: ChatTurnPlan) -> ChatWindow | None:
             local_job_id=f"chat:{plan.item_key}",
             extra={"job_type": CHAT_TURN_TRACE_TYPE},
         ):
+            research = await chat_research_tools(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=plan.user_id,
+                run_id=plan.item_key,
+            )
             return await run_chat_turn(
                 plan,
                 send=ChatModel(client=deps.get_llm_client()).send,
-                tools=chat_tools(plan),
+                tools=(*chat_tools(plan), *research),
                 window=_WINDOWS.get(plan.user_id) or ChatWindow.fresh(),
             )
     except ChatTurnInterrupted:
         # Planned again: under the new route it runs again, and for an owner
         # who left, the plan refuses.
         return None
+    finally:
+        discard_chat_tool_results(db_path=db_path, run_id=plan.item_key)
 
 
 __all__ = ["request_chat_turn"]

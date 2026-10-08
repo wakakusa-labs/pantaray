@@ -129,8 +129,8 @@ it('offers only selectable Codex models for ChatGPT and keeps API key custom inp
     'gpt-5.6-luna',
     'gpt-5.5',
   ]);
+  expect(screen.queryByRole('button', { name: /model/ })).toBeNull();
   fireEvent.change(picker, { target: { value: 'gpt-6-sol' } });
-  fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
   expect(actions.saveModel).toHaveBeenCalledWith('gpt-6-sol');
 
   cleanup();
@@ -147,9 +147,8 @@ it('requires a new choice when the stored ChatGPT model is no longer offered', (
   const actions = renderSection({ method: 'chatgpt', model: 'retired-model' });
   const picker = screen.getByRole('combobox', { name: 'settings.aiConnection.modelLabel' });
   expect(picker).toHaveValue('');
-  expect(screen.getByText('settings.aiConnection.model.save')).toBeDisabled();
+  expect(actions.saveModel).not.toHaveBeenCalled();
   fireEvent.change(picker, { target: { value: 'gpt-6-luna' } });
-  fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
   expect(actions.saveModel).toHaveBeenCalledWith('gpt-6-luna');
 });
 
@@ -159,11 +158,14 @@ it('keeps the chosen Codex model available for retry after apply fails', async (
   save.mockRejectedValueOnce(new Error('runtime unavailable'));
   const picker = screen.getByRole('combobox', { name: 'settings.aiConnection.modelLabel' });
   fireEvent.change(picker, { target: { value: 'gpt-6-sol' } });
-  fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
+  expect(picker).toBeDisabled();
   expect(await screen.findByText('settings.aiConnection.model.saveFailed')).toBeInTheDocument();
   expect(picker).toHaveValue('gpt-6-sol');
   expect(picker).toHaveFocus();
-  expect(screen.getByText('settings.aiConnection.model.save')).toBeEnabled();
+  fireEvent.click(screen.getByText('settings.aiConnection.model.retry'));
+  expect(save).toHaveBeenLastCalledWith('gpt-6-sol');
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+  expect(screen.queryByText('settings.aiConnection.model.retry')).toBeNull();
 });
 
 it('explains that a saved search key applies while signed out of the cloud', () => {
@@ -410,6 +412,25 @@ it('focuses Replace after a newly saved key hides the input', async () => {
   expect(screen.queryByDisplayValue('secret')).toBeNull();
 });
 
+it('saves a typed model when the field is committed and never saves a blank name', async () => {
+  const actions = renderSection({ model: 'saved-model', runtime: runtime({ llmRoute: 'direct' }) });
+  const save = actions.saveModel as ReturnType<typeof vi.fn>;
+  const input = screen.getByLabelText('settings.aiConnection.modelLabel');
+  fireEvent.change(input, { target: { value: '  ' } });
+  fireEvent.blur(input);
+  // Clearing the model would disconnect the route and stop running work.
+  expect(save).not.toHaveBeenCalled();
+  expect(input).toHaveValue('saved-model');
+  fireEvent.change(input, { target: { value: 'saved-model ' } });
+  fireEvent.blur(input);
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: 'typed-model' } });
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.submit(input);
+  expect(save).toHaveBeenCalledWith('typed-model');
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+});
+
 it('edits a model as a draft and preserves it when applying fails', async () => {
   const actions = renderSection({ model: 'saved-model', runtime: runtime({ llmRoute: 'direct' }) });
   const save = actions.saveModel as ReturnType<typeof vi.fn>;
@@ -417,7 +438,7 @@ it('edits a model as a draft and preserves it when applying fails', async () => 
   const input = screen.getByLabelText('settings.aiConnection.modelLabel');
   fireEvent.change(input, { target: { value: ' new-model ' } });
   expect(save).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
+  fireEvent.blur(input);
   expect(save).toHaveBeenCalledWith('new-model');
   expect(await screen.findByText('settings.aiConnection.model.saveFailed')).toBeInTheDocument();
   expect(input).toHaveValue(' new-model ');
@@ -498,15 +519,12 @@ it('can reapply the same model after persistence succeeds but runtime synchroniz
   render(<Fixture />);
   const input = screen.getByLabelText('settings.aiConnection.modelLabel');
   fireEvent.change(input, { target: { value: 'new-model' } });
-  fireEvent.click(screen.getByText('settings.aiConnection.model.save'));
+  fireEvent.blur(input);
   expect(await screen.findByText('settings.aiConnection.model.saveFailed')).toBeInTheDocument();
   expect(input).toHaveValue('new-model');
-  fireEvent.change(input, { target: { value: 'new-model ' } });
-  const saveButton = screen.getByText('settings.aiConnection.model.save');
-  expect(saveButton).toBeEnabled();
-  fireEvent.click(saveButton);
+  fireEvent.click(screen.getByText('settings.aiConnection.model.retry'));
   await waitFor(() => expect(appliedModels).toEqual(['new-model', 'new-model']));
-  await waitFor(() => expect(saveButton).toBeDisabled());
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
   expect(screen.queryByText('settings.aiConnection.model.saveFailed')).toBeNull();
 });
 

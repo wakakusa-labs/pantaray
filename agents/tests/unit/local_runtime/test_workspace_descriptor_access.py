@@ -14,7 +14,6 @@ from pantaray_agents.tools.files import (
 )
 from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
 from pantaray_agents.tools.files.workspace_descriptor_access import (
-    glob_workspace_files,
     open_workspace_file_descriptor,
     scan_workspace_entries,
 )
@@ -308,82 +307,6 @@ def test_scandir_error_closes_all_descriptors(
         assert exc_info.value.errno == errno.EIO
 
     _assert_no_descriptor_leak(monkeypatch, scan)
-
-
-def test_glob_preserves_star_recursive_hidden_and_double_star_rules(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "workspace"
-    nested = root / "nested"
-    nested.mkdir(parents=True)
-    (root / "top.py").write_text("top\n", encoding="utf-8")
-    (root / ".hidden").write_text("hidden\n", encoding="utf-8")
-    (nested / "app.py").write_text("app\n", encoding="utf-8")
-    (nested / "note.txt").write_text("note\n", encoding="utf-8")
-
-    star = glob_workspace_files(
-        root_path=root,
-        base_path=".",
-        pattern="*",
-        limit=20,
-    )
-    python = glob_workspace_files(
-        root_path=root,
-        base_path=".",
-        pattern="**/*.py",
-        limit=20,
-    )
-
-    assert [entry.root_relative_path for entry in star.entries] == [
-        ".hidden",
-        "nested/app.py",
-        "nested/note.txt",
-        "top.py",
-    ]
-    assert [entry.root_relative_path for entry in python.entries] == [
-        "nested/app.py",
-        "top.py",
-    ]
-
-
-def test_glob_remains_on_base_descriptor_after_directory_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "inside.py").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "outside.py").write_text("secret\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            _replace_with_outside_symlink(
-                path=base,
-                outside=outside,
-                renamed=root / "original-base",
-            )
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-
-    result = glob_workspace_files(
-        root_path=root,
-        base_path="base",
-        pattern="**/*.py",
-        limit=20,
-    )
-
-    assert [entry.root_relative_path for entry in result.entries] == ["base/inside.py"]
-    assert "outside.py" not in str(result)
 
 
 def test_missing_and_symlink_paths_close_all_descriptors(

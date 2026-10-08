@@ -4,7 +4,7 @@ The command sandbox denies these roots to processes; Action read/search/write
 paths and command cwds are refused here with the same exceptions. The roots the
 app itself places in storage for this Action (its workspace, published tool
 results, and agent experience) stay usable with the access their manifest root
-grants. Suggestion file tools have no such roots and see none of the storage.
+grants. Suggestion's file tools see only their run's folder of large results.
 """
 
 from __future__ import annotations

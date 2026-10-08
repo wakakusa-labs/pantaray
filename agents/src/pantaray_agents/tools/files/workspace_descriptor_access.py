@@ -3,10 +3,8 @@ from __future__ import annotations
 import errno
 import os
 import stat
-import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Literal, NamedTuple
 
@@ -24,9 +22,7 @@ _FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 _WORKSPACE_FILE_POLICY_ERROR = (
     "workspace path is missing, not a regular file, or uses a symlink"
 )
-SEARCH_TIMEOUT_SECONDS = 5.0
-
-type DescriptorTruncationReason = Literal["limit", "timeout"]
+type DescriptorTruncationReason = Literal["limit"]
 
 
 class WorkspaceDescriptorEntry(NamedTuple):
@@ -94,8 +90,6 @@ def scan_workspace_entries(
     limit: int,
     include_path: Callable[[Path], bool] | None = None,
     exclude_subtree: Callable[[Path], bool] | None = None,
-    file_pattern: str | None = None,
-    deadline: float | None = None,
 ) -> WorkspaceDescriptorScan:
     """Scan entries under base_path in path order, up to limit selected entries.
 
@@ -111,7 +105,6 @@ def scan_workspace_entries(
         root_path=root_path,
         base_path=base_path,
         max_depth=max_depth,
-        deadline=deadline,
         exclude_subtree=exclude_subtree,
         skips=skips,
     )
@@ -123,47 +116,15 @@ def scan_workspace_entries(
             path = root_path.joinpath(*entry.root_relative_path.split("/"))
             if include_path is not None and not include_path(path):
                 continue
-            if file_pattern is not None and (
-                entry.kind != "file"
-                or not matches_workspace_glob(relative, file_pattern)
-            ):
-                continue
             if len(selected) >= limit:
                 reason = "limit"
                 break
             selected.append(entry)
             if entry.kind == "directory" and relative.count("/") + 1 == max_depth:
                 skips.unexpanded_directories += 1
-    except TimeoutError:
-        reason = "timeout"
     finally:
         iterator.close()
     return WorkspaceDescriptorScan(tuple(selected), reason, skips)
-
-
-def glob_workspace_files(
-    *,
-    root_path: Path,
-    base_path: str,
-    pattern: str,
-    limit: int,
-    exclude_subtree: Callable[[Path], bool] | None = None,
-) -> WorkspaceDescriptorScan:
-    return scan_workspace_entries(
-        root_path=root_path,
-        base_path=base_path,
-        max_depth=None,
-        limit=limit,
-        exclude_subtree=exclude_subtree,
-        file_pattern=pattern,
-        deadline=time.monotonic() + SEARCH_TIMEOUT_SECONDS,
-    )
-
-
-def matches_workspace_glob(path: str, pattern: str) -> bool:
-    return fnmatch(path, pattern) or (
-        pattern.startswith("**/") and fnmatch(path, pattern.removeprefix("**/"))
-    )
 
 
 def _entries(
@@ -171,7 +132,6 @@ def _entries(
     root_path: Path,
     base_path: str,
     max_depth: int | None,
-    deadline: float | None,
     exclude_subtree: Callable[[Path], bool] | None,
     skips: WorkspaceScanSkips,
 ) -> Generator[WorkspaceDescriptorEntry, None, None]:
@@ -185,7 +145,7 @@ def _entries(
         else lambda child: exclude_subtree(root_path.joinpath(*child.split("/")))
     )
     try:
-        yield from _walk(base, relative, 0, max_depth, deadline, excluded, skips)
+        yield from _walk(base, relative, 0, max_depth, excluded, skips)
     finally:
         os.close(base)
 
@@ -195,7 +155,6 @@ def _walk(
     relative: str,
     depth: int,
     max_depth: int | None,
-    deadline: float | None,
     excluded: Callable[[str], bool] | None,
     skips: WorkspaceScanSkips,
 ) -> Generator[WorkspaceDescriptorEntry, None, None]:
@@ -210,9 +169,7 @@ def _walk(
     with context as iterator:
         # Design limit: a directory's names are held while it is walked, so the
         # order is the same on every call; fine below 10^6 entries a directory.
-        listed = (entry for entry in iterator if _within(deadline))
-        for item in sorted(listed, key=lambda entry: entry.name):
-            _within(deadline)
+        for item in sorted(iterator, key=lambda entry: entry.name):
             child_relative = item.name if relative == "." else f"{relative}/{item.name}"
             if excluded is not None and excluded(child_relative):
                 continue
@@ -241,7 +198,6 @@ def _walk(
                             child_relative,
                             child_depth,
                             max_depth,
-                            deadline,
                             excluded,
                             skips,
                         )
@@ -276,12 +232,6 @@ def scan_skip_notes(
             f"anything under them. First error: {skips.first_unreadable_error}."
         )
     return warnings, hints
-
-
-def _within(deadline: float | None) -> bool:
-    if deadline is not None and time.monotonic() >= deadline:
-        raise TimeoutError
-    return True
 
 
 def _skip_unreadable(skips: WorkspaceScanSkips, relative: str, exc: OSError) -> None:

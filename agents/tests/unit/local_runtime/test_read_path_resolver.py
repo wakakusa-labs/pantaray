@@ -6,23 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery import (
-    run_list_executor,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
-    ValidatedListRequest,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.discovery import run_list
 from pantaray_agents.tools.files.manifest_paths import ManifestRoot
 from pantaray_agents.tools.files.private_storage import (
     PRIVATE_APP_STORAGE_MESSAGE,
     PrivateAppStorage,
 )
+from pantaray_agents.tools.files.read_contract import ListToolArgs
 from pantaray_agents.tools.files.read_paths import (
     READ_PATH_DENIED,
     READ_PATH_NOT_FOUND,
@@ -230,22 +226,11 @@ def test_list_from_a_parent_leaves_out_private_app_storage(tmp_path: Path) -> No
         private_storage_roots=(storage,),
     )
 
-    outcome = run_list_executor(
-        scope=scope,
-        request=ValidatedListRequest(
-            manifest_id="manifest-1",
-            execution_session_id="session-1",
-            action_id="action-1",
-            tool_request_id="request-1",
-            requested_at="2026-10-08T00:00:00Z",
-            path=str(tmp_path),
-            max_depth=3,
-            limit=50,
-        ),
+    result = run_list(
+        scope=scope, request=ListToolArgs(path=str(tmp_path), max_depth=3, limit=50)
     )
 
-    assert isinstance(outcome.output, dict)
-    listed = str(outcome.output["entries"])
+    listed = str(result.output["entries"])
     assert "notes.txt" in listed
     assert "app-data" not in listed
     assert "runtime.db" not in listed

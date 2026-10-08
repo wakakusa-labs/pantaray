@@ -281,7 +281,7 @@ async def test_read_rejects_attachment_over_size_limit(
 ) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker_direct_read.MAX_ATTACHMENT_BYTES",
+        "pantaray_agents.tools.files.read.MAX_ATTACHMENT_BYTES",
         16,
     )
     (context.workspace_path / "huge.png").write_bytes(

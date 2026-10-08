@@ -7,6 +7,7 @@ from typing import Literal
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import UnprojectedToolOutput
+from pantaray_agents.tools.files.read_contract import ReadToolResult
 
 from ..models import ToolOutputStorageKind
 
@@ -22,6 +23,19 @@ class UnprojectedBrokerToolOutcome:
     file_paths: tuple[str, ...] = ()
     file_reference_paths: tuple[str, ...] = ()
     attachments: tuple[dict[str, JSONValue], ...] = ()
+
+
+def read_tool_outcome(result: ReadToolResult) -> UnprojectedBrokerToolOutcome:
+    """A read/list/glob/grep result as the outcome the Action stores."""
+
+    return UnprojectedBrokerToolOutcome(
+        status="success",
+        output=result.output,
+        search_text=result.search_text,
+        file_paths=result.file_paths,
+        file_reference_paths=result.file_reference_paths,
+        attachments=result.attachments,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,4 +127,5 @@ __all__ = [
     "BrokerToolOutcome",
     "UnprojectedBrokerToolOutcome",
     "project_broker_tool_outcome",
+    "read_tool_outcome",
 ]

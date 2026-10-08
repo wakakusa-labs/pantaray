@@ -25,16 +25,11 @@ from pantaray_agents.local_runtime.tooling.documents import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.read_target import ReadTarget, action_reference_paths
-from pantaray_agents.tools.files.text_lines import read_text_value_lines
 
-from .broker_direct_read_page import (
-    DEFAULT_READ_LIMIT,
-    bound_text_page,
-    text_page_output,
-)
-from .broker_outcome import UnprojectedBrokerToolOutcome
-from .broker_protocol import ValidatedReadRequest
+from .read_contract import ReadToolArgs, ReadToolResult
+from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
+from .read_target import ReadTarget, action_reference_paths
+from .text_lines import read_text_value_lines
 
 _PDF_MAGIC = b"%PDF-"
 READ_DOCUMENT_ENCRYPTED = "READ_DOCUMENT_ENCRYPTED"
@@ -99,10 +94,10 @@ def reject_legacy_document(target: ReadTarget) -> None:
 def read_document(
     *,
     target: ReadTarget,
-    request: ValidatedReadRequest,
+    request: ReadToolArgs,
     document_format: DocumentFormat,
     descriptor: int,
-) -> UnprojectedBrokerToolOutcome:
+) -> ReadToolResult:
     document = _extract(
         target=target,
         descriptor=descriptor,
@@ -140,8 +135,7 @@ def read_document(
         offset=offset,
         column=column,
     )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output=output,
         search_text=cast(str, output["content"]),
         file_paths=(target.display_path,),

@@ -1,3 +1,5 @@
+"""The read tool: a text page, an extracted document, an image or a directory."""
+
 from __future__ import annotations
 
 import mimetypes
@@ -7,34 +9,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    SCRATCH_SESSION_TEMP_DIRNAME,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.read_target import (
-    ReadTarget,
-    action_reference_paths,
-    resolve_read_target,
-)
-from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
-from pantaray_agents.tools.files.workspace_descriptor_access import (
-    open_workspace_entry_descriptor,
-)
 
-from ..action_session_temp_paths import SCRATCH_SESSION_TEMP_DIRNAME
 from .attachment_reference import build_workspace_file_attachment
-from .broker_direct_read_document import (
-    document_format,
-    read_document,
-    reject_legacy_document,
-)
-from .broker_direct_read_page import (
-    DEFAULT_READ_LIMIT,
-    bound_text_page,
-    text_page_output,
-)
-from .broker_outcome import UnprojectedBrokerToolOutcome
-from .broker_protocol import ValidatedReadRequest
+from .read_contract import ReadToolArgs, ReadToolResult
+from .read_document import document_format, read_document, reject_legacy_document
+from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
+from .read_scope import ReadScope
+from .read_target import ReadTarget, action_reference_paths, resolve_read_target
+from .text_lines import read_text_descriptor_lines
+from .workspace_descriptor_access import open_workspace_entry_descriptor
 
 SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -79,11 +68,7 @@ class DirectoryReadResult:
     warning: str | None
 
 
-def run_read_executor(
-    *,
-    scope: ReadScope,
-    request: ValidatedReadRequest,
-) -> UnprojectedBrokerToolOutcome:
+def run_read(*, scope: ReadScope, request: ReadToolArgs) -> ReadToolResult:
     target = resolve_read_target(scope=scope, raw_path=request.path)
     descriptor = open_read_target(target)
     try:
@@ -116,9 +101,9 @@ def open_read_target(target: ReadTarget) -> int:
 def _read_file(
     *,
     target: ReadTarget,
-    request: ValidatedReadRequest,
+    request: ReadToolArgs,
     descriptor: int,
-) -> UnprojectedBrokerToolOutcome:
+) -> ReadToolResult:
     sample = read_leading_bytes(descriptor, target=target, limit=SAMPLE_BYTES)
     mime_type = _sniff_image_mime(filepath=target.real_path, sample=sample)
     if mime_type is not None:
@@ -140,8 +125,7 @@ def _read_file(
             mime_type=mime_type,
             payload=payload,
         )
-        return UnprojectedBrokerToolOutcome(
-            status="success",
+        return ReadToolResult(
             output={
                 "kind": "attachment",
                 "path": target.display_path,
@@ -216,8 +200,7 @@ def _read_file(
         offset=offset,
         column=column,
     )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output=output,
         search_text=cast(str, output["content"]),
         file_paths=(target.display_path,),
@@ -229,9 +212,9 @@ def _read_directory(
     *,
     scope: ReadScope,
     target: ReadTarget,
-    request: ValidatedReadRequest,
+    request: ReadToolArgs,
     descriptor: int,
-) -> UnprojectedBrokerToolOutcome:
+) -> ReadToolResult:
     if request.column not in {None, 1}:
         raise BrokerPolicyError("read.column is valid only for text files")
     _reject_start_unit(request)
@@ -248,8 +231,7 @@ def _read_directory(
         f"{entry['name']}/" if entry["kind"] == "directory" else str(entry["name"])
         for entry in result.entries
     )
-    return UnprojectedBrokerToolOutcome(
-        status="success",
+    return ReadToolResult(
         output={
             "kind": "directory",
             "path": target.display_path,
@@ -328,7 +310,7 @@ def _read_bounded_directory_entries(
     )
 
 
-def _reject_start_unit(request: ValidatedReadRequest) -> None:
+def _reject_start_unit(request: ReadToolArgs) -> None:
     """Refuse a unit cursor on a target that has no units to count.
 
     Only an extracted document numbers what it returns in pages, sheets, slides
@@ -420,5 +402,5 @@ __all__ = [
     "SAMPLE_BYTES",
     "open_read_target",
     "read_leading_bytes",
-    "run_read_executor",
+    "run_read",
 ]

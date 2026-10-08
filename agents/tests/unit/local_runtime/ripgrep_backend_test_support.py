@@ -20,10 +20,10 @@ from pantaray_agents.tools.files.ripgrep import (
 
 
 def install_fake_ripgrep_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
+    from pantaray_agents.tools.files import discovery
 
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_files", _fake_files)
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", _fake_grep)
+    monkeypatch.setattr(discovery, "run_ripgrep_files", _fake_files)
+    monkeypatch.setattr(discovery, "run_ripgrep_grep", _fake_grep)
 
 
 def _fake_files(

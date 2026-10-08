@@ -15,6 +15,13 @@ from pantaray_agents.local_runtime.tooling.documents.page_render import (
     MAX_RENDERED_PAGES,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files.read_contract import (
+    DiscoveryTruncationReason,
+    GlobToolArgs,
+    GrepToolArgs,
+    ListToolArgs,
+    ReadToolArgs,
+)
 
 from ..models import BrokerNetworkPolicy
 
@@ -37,24 +44,6 @@ BrokerExecutableSourceKind = Literal[
     "app_runtime_python",
     "trusted_system_executable",
 ]
-DiscoveryTruncationReason = Literal[
-    "limit",
-    "timeout",
-    "output_bytes",
-    "line_length",
-]
-DISCOVERY_RESULT_LIMIT_MAX = 500
-LIST_MAX_DEPTH = 6
-
-
-class ReadToolArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    path: str = Field(min_length=1, pattern=r"\S")
-    offset: int | None = Field(default=None, ge=1)
-    column: int | None = Field(default=None, ge=1)
-    limit: int | None = Field(default=None, ge=1)
-    start_unit: int | None = Field(default=None, ge=1)
 
 
 class RenderPdfPageToolArgs(BaseModel):
@@ -73,31 +62,6 @@ class RenderPdfPageToolArgs(BaseModel):
         if len(set(pages)) != len(pages):
             raise ValueError("pages must not name the same page twice")
         return pages
-
-
-class ListToolArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    path: str = Field(min_length=1, pattern=r"\S")
-    max_depth: int = Field(default=2, ge=1, le=LIST_MAX_DEPTH)
-    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
-
-
-class GlobToolArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    base_path: str = Field(min_length=1, pattern=r"\S")
-    pattern: str = Field(min_length=1, pattern=r"\S")
-    limit: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
-
-
-class GrepToolArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    base_path: str = Field(min_length=1, pattern=r"\S")
-    pattern: str = Field(min_length=1, pattern=r"\S")
-    include_glob: str | None = Field(default=None, min_length=1, pattern=r"\S")
-    max_matches: int = Field(default=100, ge=1, le=DISCOVERY_RESULT_LIMIT_MAX)
 
 
 class ApplyPatchEdit(BaseModel):
@@ -410,11 +374,7 @@ class ValidatedReadRequest(BaseModel):
     action_id: str
     tool_request_id: str
     requested_at: str
-    path: str
-    offset: int | None = None
-    column: int | None = None
-    limit: int | None = None
-    start_unit: int | None = None
+    args: ReadToolArgs
 
 
 class ValidatedRenderPdfPageRequest(BaseModel):
@@ -439,9 +399,7 @@ class ValidatedListRequest(BaseModel):
     action_id: str
     tool_request_id: str
     requested_at: str
-    path: str
-    max_depth: int
-    limit: int
+    args: ListToolArgs
 
 
 class ValidatedGlobRequest(BaseModel):
@@ -453,9 +411,7 @@ class ValidatedGlobRequest(BaseModel):
     action_id: str
     tool_request_id: str
     requested_at: str
-    base_path: str
-    pattern: str
-    limit: int
+    args: GlobToolArgs
 
 
 class ValidatedGrepRequest(BaseModel):
@@ -467,10 +423,7 @@ class ValidatedGrepRequest(BaseModel):
     action_id: str
     tool_request_id: str
     requested_at: str
-    base_path: str
-    pattern: str
-    include_glob: str | None = None
-    max_matches: int
+    args: GrepToolArgs
 
 
 class ValidatedPatchRequest(BaseModel):

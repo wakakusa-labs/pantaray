@@ -141,7 +141,7 @@ async def test_grep_reports_skipped_files_as_warning(
     db_path, context = _bootstrap_runtime_db(tmp_path)
     (context.workspace_path / "notes.txt").write_text("needle\n", encoding="utf-8")
 
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
+    from pantaray_agents.tools.files import discovery
     from pantaray_agents.tools.files.grep_lines import RipgrepGrepMatch
     from pantaray_agents.tools.files.ripgrep import RipgrepGrepResult
 
@@ -163,7 +163,7 @@ async def test_grep_reports_skipped_files_as_warning(
             binary_match_paths=tuple(f"blob-{index}.bin" for index in range(12)),
         )
 
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", fake_grep)
+    monkeypatch.setattr(discovery, "run_ripgrep_grep", fake_grep)
 
     outcome = await execute_broker_tool(
         db_path=db_path,

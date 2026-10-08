@@ -56,6 +56,22 @@ from pantaray_agents.local_runtime.tooling.documents.office_convert import (
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.attachment_reference import (
+    ATTACHMENT_BLOB_REF_PREFIX,
+    ATTACHMENT_ID_HEX_LENGTH,
+    TOOL_ATTACHMENT_REF_PREFIX,
+)
+from pantaray_agents.tools.files.read import (
+    SAMPLE_BYTES,
+    open_read_target,
+    read_leading_bytes,
+)
+from pantaray_agents.tools.files.read_document import (
+    READ_DOCUMENT_TOO_LARGE,
+    READ_DOCUMENT_TOO_LARGE_FIX_HINT,
+    READ_DOCUMENT_UNREADABLE_FIX_HINT,
+    document_format,
+)
 from pantaray_agents.tools.files.read_target import (
     ReadTarget,
     action_reference_paths,
@@ -63,21 +79,9 @@ from pantaray_agents.tools.files.read_target import (
 )
 
 from .action_path_policy import read_scope
-from .attachment_reference import (
-    ATTACHMENT_BLOB_REF_PREFIX,
-    ATTACHMENT_ID_HEX_LENGTH,
-    TOOL_ATTACHMENT_REF_PREFIX,
-)
 from .broker_common import (
     BrokerContext,
     ensure_session_capabilities,
-)
-from .broker_direct_read import SAMPLE_BYTES, open_read_target, read_leading_bytes
-from .broker_direct_read_document import (
-    READ_DOCUMENT_TOO_LARGE,
-    READ_DOCUMENT_TOO_LARGE_FIX_HINT,
-    READ_DOCUMENT_UNREADABLE_FIX_HINT,
-    document_format,
 )
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedRenderPdfPageRequest

@@ -14,14 +14,12 @@ from typing import Any
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering import (
-    broker_direct_read,
-    broker_direct_render_pdf,
-)
+from pantaray_agents.local_runtime.tooling.brokering import broker_direct_render_pdf
 from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
     app_owned_roots,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import read
 
 from .read_tool_broker_support import bootstrap_read_runtime_db, execute_read_tool
 from .test_read_document_broker import write_sample_docx, write_sample_pptx
@@ -84,7 +82,7 @@ async def test_workspace_read_does_not_follow_a_swapped_ancestor(
     _write_tree(outside, text=_SENTINEL)
     swaps = _swap_after_check(
         monkeypatch,
-        broker_direct_read,
+        read,
         swapped=context.workspace_path / "sub",
         outside=outside,
     )
@@ -108,7 +106,7 @@ async def test_full_access_read_cannot_reach_app_storage_through_a_swap(
     _write_tree(private, text=_SENTINEL)
     swaps = _swap_after_check(
         monkeypatch,
-        broker_direct_read,
+        read,
         swapped=user_folder / "sub",
         outside=private,
     )

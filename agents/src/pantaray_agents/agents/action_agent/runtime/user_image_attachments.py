@@ -13,11 +13,11 @@ from pantaray_agents.local_runtime.runtime.local_image_store import (
     read_local_image_blob,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.tooling.brokering.attachment_reference import (
+from pantaray_agents.schema.agent.image import ImageInput
+from pantaray_agents.tools.files.attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
     ATTACHMENT_ID_HEX_LENGTH,
 )
-from pantaray_agents.schema.agent.image import ImageInput
 
 
 def build_user_image_attachments(

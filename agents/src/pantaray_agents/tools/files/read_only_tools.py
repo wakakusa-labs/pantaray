@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -32,6 +33,7 @@ from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolExecutor,
     ReactToolResult,
+    ToolImage,
     react_tool_response_schema,
     tool_error_response,
 )
@@ -53,7 +55,6 @@ from .read_contract import (
 from .read_scope import ReadScope
 from .ripgrep import RIPGREP_TIMEOUT_SECONDS
 
-READ_IMAGE_NOT_SUPPORTED = "READ_IMAGE_NOT_SUPPORTED"
 _SPILL_ROOT_MODE = 0o700
 _MEMORY_NOTE = (
     "Pantaray's memory (facts, insights and their TODOs, agent experience, "
@@ -145,7 +146,8 @@ class _ReadOnlyFileTools:
                     "kind=document: extracted text on the same cursor, with an "
                     "outline and notes on what extraction left out; on "
                     "truncation_reason=document_budget continue with "
-                    "start_unit=next_start_unit. Images cannot be viewed here. " + notes
+                    "start_unit=next_start_unit. An image file comes back as the "
+                    "image to look at, where this run can show images. " + notes
                 ),
                 properties={
                     "path": _PATH,
@@ -267,17 +269,6 @@ class _ReadOnlyFileTools:
         self, call: ReactToolCall, body: _Body, request: BaseModel
     ) -> ReactToolResult:
         result = body(scope=self.scope, request=request)
-        if result.attachments:
-            # The model here receives JSON only, so an image's bytes never reach it.
-            return tool_error_response(
-                tool_name=call.tool_name,
-                error_code=READ_IMAGE_NOT_SUPPORTED,
-                message=(
-                    f"{result.output.get('path')} is an image "
-                    f"({result.output.get('mime_type')}); this run reads text "
-                    "only and cannot view it."
-                ),
-            )
         stored = store_tool_result(
             action_tool_results_path=self.spill_root,
             invocation_id=uuid.uuid4().hex,
@@ -287,7 +278,10 @@ class _ReadOnlyFileTools:
         if release_error is not None:
             raise release_error
         return ReactToolResult(
-            tool_name=call.tool_name, status="success", output=stored.output_json
+            tool_name=call.tool_name,
+            status="success",
+            output=stored.output_json,
+            images=tuple(_image(attachment) for attachment in result.attachments),
         )
 
 
@@ -324,4 +318,19 @@ def _definition(
     )
 
 
-__all__ = ["READ_IMAGE_NOT_SUPPORTED", "build_read_only_file_tools"]
+def _image(attachment: Mapping[str, JSONValue]) -> ToolImage:
+    """An image ``read`` attached, as the workspace file it read."""
+
+    return ToolImage(
+        ref=str(attachment["ref"]),
+        blob_ref=str(attachment["blob_ref"]),
+        display_path=str(attachment["display_path"]),
+        mime_type=str(attachment["mime_type"]),
+        byte_size=cast(int, attachment["byte_size"]),
+        sha256=str(attachment["sha256"]),
+        workspace_root_path=str(attachment["workspace_root_path"]),
+        workspace_relative_path=str(attachment["workspace_relative_path"]),
+    )
+
+
+__all__ = ["build_read_only_file_tools"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -13,12 +14,15 @@ from pantaray_agents.tools.contract import (
     ToolCallEnvelope,
 )
 from pantaray_agents.tools.files import ripgrep
-from pantaray_agents.tools.files.read_only_tools import (
-    READ_IMAGE_NOT_SUPPORTED,
-    build_read_only_file_tools,
-)
+from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
 
-from .test_read_document_broker import PIXEL_PNG, write_sample_docx
+from .test_read_document_broker import (
+    PIXEL_PNG,
+    write_sample_docx,
+    write_sample_pdf,
+    write_sample_pptx,
+    write_sample_xlsx,
+)
 
 
 def _tools(
@@ -137,33 +141,56 @@ async def test_a_large_result_is_spilled_to_a_file_the_tools_can_read(
     assert "document-with-a-long-name-0000.md" in read.output["content"]
 
 
+def _write_text(text: str) -> Callable[[Path], None]:
+    return lambda path: path.write_text(text, encoding="utf-8")
+
+
 @pytest.mark.asyncio
-async def test_a_document_in_a_registered_folder_is_read_as_text(
+@pytest.mark.parametrize(
+    ("name", "write", "kind", "expected"),
+    [
+        ("review.docx", write_sample_docx, "document", "| Region | Revenue |"),
+        ("sales.xlsx", write_sample_xlsx, "document", "Region"),
+        ("deck.pptx", write_sample_pptx, "document", "Supply lead times"),
+        ("review.pdf", write_sample_pdf, "document", "Revenue held steady."),
+        ("notes.md", _write_text("# Plan\n- ship it\n"), "file", "- ship it"),
+        ("notes.txt", _write_text("plain words\n"), "file", "plain words"),
+    ],
+)
+async def test_documents_and_text_files_are_read_as_text(
     tmp_path: Path,
+    name: str,
+    write: Callable[[Path], None],
+    kind: str,
+    expected: str,
 ) -> None:
     registry, folder, _storage, _spill = _tools(tmp_path)
-    write_sample_docx(folder / "review.docx")
+    write(folder / name)
 
-    result = await _call(registry, "read", {"path": str(folder / "review.docx")})
+    result = await _call(registry, "read", {"path": str(folder / name)})
 
     assert result.status == "success"
-    assert result.output["kind"] == "document"
-    assert "# Quarterly review" in result.output["content"]
-    assert "| Region | Revenue |" in result.output["content"]
+    assert result.output["kind"] == kind
+    assert expected in result.output["content"]
+    assert result.images == ()
 
 
 @pytest.mark.asyncio
-async def test_an_image_is_refused_instead_of_reported_as_read(
-    tmp_path: Path,
-) -> None:
+async def test_an_image_comes_back_as_an_image_to_look_at(tmp_path: Path) -> None:
     registry, folder, _storage, _spill = _tools(tmp_path)
     (folder / "chart.png").write_bytes(PIXEL_PNG)
 
     result = await _call(registry, "read", {"path": str(folder / "chart.png")})
 
-    assert result.status == "error"
-    assert result.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
-    assert str(folder / "chart.png") in result.output["message"]
+    assert result.status == "success"
+    (image,) = result.images
+    assert (image.mime_type, image.byte_size) == ("image/png", len(PIXEL_PNG))
+    # The file the request reads the bytes from again, and the ref it names.
+    assert Path(image.workspace_root_path, image.workspace_relative_path) == (
+        folder / "chart.png"
+    )
+    assert result.output["attachments"][0]["ref"] == image.ref
+    assert "data:" not in str(result.output)
 
 
 @pytest.mark.asyncio

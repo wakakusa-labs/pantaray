@@ -52,8 +52,8 @@ from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolRegistry,
     ReactToolResult,
-    ToolCallEnvelope,
     ToolConcurrency,
+    ToolImage,
 )
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.conversation import (
@@ -91,7 +91,8 @@ class TurnReply(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ConversationRequest:
-    """One send, for ``send`` to pass on; ``media_refs`` in item order."""
+    """One send for ``send`` to pass on: ``media_refs`` in item order, and the
+    tools' ``images`` among them, which it hands the request as files."""
 
     prompt: str
     system_instruction: str
@@ -99,6 +100,7 @@ class ConversationRequest:
     max_parallel_tool_calls: int
     conversation: list[LlmTurnItem]
     media_refs: tuple[str, ...]
+    images: tuple[ToolImage, ...]
     fingerprint: str
 
 
@@ -251,6 +253,7 @@ class _Run[T]:
         }
         self.tool_calls = 0
         self.turn = _Turn(calls=())
+        self.images: dict[str, ToolImage] = {}  # by ref, as tools returned them
         self.sent = 0
         self.turns_allowed = run.max_turns
         self.extra_last_turn = True
@@ -372,6 +375,7 @@ class _Run[T]:
             ),
         )
         layout = window.layout
+        refs = tuple(layout.media_refs())
         return _Prepared(
             request=ConversationRequest(
                 prompt=self.spec.prompt,
@@ -379,7 +383,8 @@ class _Run[T]:
                 tools=self.tools,
                 max_parallel_tool_calls=max_parallel,
                 conversation=layout.items,
-                media_refs=tuple(layout.media_refs()),
+                media_refs=refs,
+                images=tuple(self.images[ref] for ref in refs if ref in self.images),
                 fingerprint=layout.fingerprint,
             ),
             rendered_bytes=window.rendered_bytes,
@@ -468,7 +473,7 @@ class _Run[T]:
     def _start(self, call: LlmToolCall) -> asyncio.Future[ReactToolResult]:
         self.tool_calls += 1
         task = asyncio.ensure_future(
-            self.registry.execute(_react_call(call), self.tool_calls)
+            self.registry.execute(ReactToolCall.from_llm_call(call), self.tool_calls)
         )
         self.turn.tasks[call.call_id] = task
         return task
@@ -516,6 +521,11 @@ class _Run[T]:
 
     async def _record(self, call: LlmToolCall, result: ReactToolResult) -> None:
         item, stop = await _to_the_end(self.spec.on_result(call, result))
+        # A tool's images ride its answer, as the Action's do; past the window's
+        # boundary they go with the output.
+        self.images |= {image.ref: image for image in result.images}
+        blocks = [image.input_block() for image in result.images]
+        item = item.model_copy(update={"content": [*item.content, *blocks]})
         self.history.append(ConversationEntry(item))
         self.turn.answered.add(call.call_id)
         if stop is not None:
@@ -579,17 +589,6 @@ class _Planned:
     @property
     def tool_id(self) -> str:
         return self.call.name
-
-
-def _react_call(call: LlmToolCall) -> ReactToolCall:
-    return ReactToolCall(
-        tool_name=call.name,
-        tool_args=call.arguments,
-        tool_call_envelope=ToolCallEnvelope(
-            tool_id=call.name, reason=None, args=call.arguments
-        ),
-        call_id=call.call_id,
-    )
 
 
 def _not_run(notice: str) -> str:

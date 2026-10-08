@@ -5,7 +5,8 @@ in English and Japanese: one short sentence per change, saying what changed for 
 
 ## 0.4.0
 
-- History now opens on a chat with Pantaray; switch between Chat and Tasks at the top.
+- You can now chat with Pantaray: one ongoing conversation where you ask questions, hand over
+  tasks and get suggestions. History opens on the chat; switch to your tasks at the top.
 - In the chat, send text with images and files, and quote an earlier message to reply to it.
 - The chat shows when Pantaray is typing, and a button to try again when it could not reply.
 - A task the chat starts shows as a card you can open from the chat.
@@ -34,7 +35,7 @@ in English and Japanese: one short sentence per change, saying what changed for 
 
 ---
 
-- 履歴が Pantaray とのチャットから開くようになり、上部で「チャット」と「作業」を切り替えられるようになりました。
+- Pantaray とチャットできるようになりました。ひと続きの会話の中で、質問したり、作業を頼んだり、提案を受け取ったりできます。履歴を開くと最初にチャットが出て、上部の切り替えで作業の一覧に移れます。
 - チャットで、文章に画像やファイルを添えて送ったり、前のメッセージを引用して返信したりできるようになりました。
 - チャットで、Pantaray が入力中であることと、返信できなかったときにもう一度試すボタンが出るようになりました。
 - チャットが始めた作業は、チャットの中にカードで表示され、そこから開けるようになりました。

@@ -7,6 +7,7 @@ import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createActionFetcher } from '../actions/actionFetch';
+import { createChatFetcher } from '../chat/chatFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
 import { createActionApprovalDecisionFetcher } from '../actions/actionApprovalDecisionFetch';
 import { createActionApprovalModeFetcher } from '../actions/actionApprovalModeFetch';
@@ -337,6 +338,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
         },
+        chat: createChatFetcher({ requestJson, getUserId }),
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,
           decodeImageDimensions: (bytes) => {

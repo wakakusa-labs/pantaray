@@ -33,6 +33,13 @@ import type {
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type {
+  ChatItem,
+  ChatItemPage,
+  ChatItemPageRequest,
+  ChatMessageRequest,
+  ChatMessageSendResult,
+} from '../../electron/src/chat/chatContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
@@ -216,6 +223,15 @@ declare global {
           'created' | 'loading' | 'focused' | 'initializing' | 'login' | 'recording_intro'
         >;
         onChanged?: (cb: (payload: unknown) => void) => () => void;
+        /** The Overlay asked to show this Action's latest card in the chat. */
+        onShowChat?: (cb: (payload: { actionId: string }) => void) => () => void;
+      };
+      /** The single chat; main accepts these from the main window only. */
+      chat?: {
+        sendMessage: (request: ChatMessageRequest) => Promise<ChatMessageSendResult>;
+        /** Newest first; pass the page's `next_cursor` as `before` for older items. */
+        listItems: (request: ChatItemPageRequest) => Promise<ChatItemPage>;
+        onItemAppended: (callback: (item: ChatItem) => void) => () => void;
       };
       actionFiles?: {
         open: (params: { path: string }) => Promise<void>;
@@ -359,6 +375,8 @@ declare global {
         dragEnd?: () => void;
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
+        /** Brings the main window forward on this Action's latest chat card. */
+        showChat?: (request: { actionId: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
         rejectAction: (data: unknown) => void;
         hide: () => void;

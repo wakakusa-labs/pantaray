@@ -21,11 +21,14 @@ function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
+const MAIN_WINDOW = { isDestroyed: () => false, webContents: { id: 9 } };
+
 function harness(overrides = {}) {
   const localArtifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-attach-'));
   const revealed = [];
   const handlers = new Map();
   const ctx = {
+    windows: { getMainWindow: () => MAIN_WINDOW },
     actions: {
       getCurrentSubjectId: () => 'user-1',
       resolveOverlayIdForSender: () => 'overlay-1',
@@ -158,6 +161,23 @@ test('attaching rejects malformed payloads and senders that are not a registered
   await assert.rejects(
     foreignSender.invoke('action:attachImage', { bytes, declaredMimeType: 'image/png' }),
     (error) => error instanceof IpcSenderRejectedError
+  );
+
+  // The main window's chat composer attaches too, through the same validation.
+  const mainWindowOnly = harness({ actions: { resolveOverlayIdForSender: () => null } });
+  const fromMain = await mainWindowOnly.invoke(
+    'action:attachImage',
+    { bytes, declaredMimeType: 'image/png' },
+    MAIN_WINDOW.webContents
+  );
+  assert.equal(fromMain.kind, 'attached');
+  await assert.rejects(
+    mainWindowOnly.invoke(
+      'action:attachImage',
+      { bytes, declaredMimeType: 'image/svg+xml' },
+      MAIN_WINDOW.webContents
+    ),
+    (error) => error instanceof IpcValidationError
   );
 
   const signedOut = harness({ actions: { getCurrentSubjectId: () => null } });

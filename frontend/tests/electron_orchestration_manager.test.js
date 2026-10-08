@@ -1194,3 +1194,29 @@ test('OrchestrationManager: owner loss during an asynchronous refresh abandons i
     kind: 'action', actionId: 'action-a', processId: 'run-1',
   }), /Local owner is unavailable/);
 });
+
+test('OrchestrationManager: a chat item reaches only the main window, parsed', () => {
+  const harness = createManagerHarness({ resolveOverlayId: () => 'sug-1' });
+  harness.manager.ensureConnected();
+  const hooks = harness.getWsHooks();
+  const item = {
+    sequence: 3,
+    item_id: 'item-3',
+    created_at: '2026-10-08T01:02:03.456Z',
+    content: { kind: 'action_event', action_id: 'act-1', event: 'completed', final_answer_excerpt: 'Done.' },
+  };
+
+  hooks.forwardEventToRenderers({ event: 'chat_item_appended', data: { item }, event_id: 'evt-1' });
+
+  assert.deepEqual(harness.mainWindowMessages, [{ channel: 'chat:itemAppended', payload: item }]);
+  assert.deepEqual(harness.overlayWindowMessages, []);
+  assert.throws(
+    () =>
+      hooks.forwardEventToRenderers({
+        event: 'chat_item_appended',
+        data: { item: { ...item, content: { kind: 'unknown' } } },
+      }),
+    /chat item response is invalid/
+  );
+  assert.equal(harness.mainWindowMessages.length, 1);
+});

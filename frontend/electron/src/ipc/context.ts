@@ -54,6 +54,7 @@ import type {
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { createActionFetcher } from '../actions/actionFetch';
+import type { createChatFetcher } from '../chat/chatFetch';
 import type {
   CreateNotificationIpcHandlers,
   AcceptActionRequest,
@@ -125,6 +126,8 @@ export type MainContext = {
     showMainRoute: (route: MainWindowRoute) => void;
     openNewConversationOverlay: () => void;
     openActionConversationOverlay: (actionId: string) => void;
+    /** Brings the main window forward and asks it to show this Action's latest chat card. */
+    showChat: (actionId: string) => void;
   };
 
   auth: {
@@ -161,6 +164,8 @@ export type MainContext = {
     decodeImageDimensions: (bytes: Buffer) => { widthPx: number; heightPx: number } | null;
     revealInFolder: (absolutePath: string) => void;
   };
+
+  chat: ReturnType<typeof createChatFetcher>;
 
   actions: ReturnType<typeof createActionFetcher> & {
     getCurrentSubjectId: () => string | null;

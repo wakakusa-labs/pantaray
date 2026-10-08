@@ -29,6 +29,10 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'workspaceSettings:get',
   'action:readConversationPage',
   'action:readToolOutputPage',
+  // Both composers attach: the Overlay's and the main window's chat.
+  'action:attachImage',
+  'action:attachFile',
+  'action:discardAttachment',
   'ui:getLanguage',
   'ws:send',
   'ws:acceptAction',
@@ -39,9 +43,6 @@ const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'history:markCompletionViewed',
   'action:submitMessage',
   'action:resume',
-  'action:attachImage',
-  'action:attachFile',
-  'action:discardAttachment',
   'actionImage:reveal',
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
@@ -56,6 +57,7 @@ const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'overlay:dragMove',
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
+  'overlay:showChat',
 ]);
 
 export class IpcSenderRejectedError extends Error {

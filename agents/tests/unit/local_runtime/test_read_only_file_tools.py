@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ def _tools(
     folder = tmp_path / "home"
     storage = folder / "app-data"
     storage.mkdir(parents=True)
-    (storage / "pantaray.db").write_text("private", encoding="utf-8")
+    (storage / "pantaray.db").write_text("app-storage-secret", encoding="utf-8")
     spill_root = storage / "suggestion_tool_results" / "run-1"
     definitions = build_read_only_file_tools(
         folders=(folder.resolve(),),
@@ -79,7 +80,6 @@ async def test_app_storage_inside_a_registered_folder_stays_hidden(
 
     read = await _call(registry, "read", {"path": str(storage / "pantaray.db")})
     listed = await _call(registry, "list", {"path": str(folder), "max_depth": 3})
-    grep = await _call(registry, "grep", {"base_path": str(folder), "pattern": "."})
 
     assert read.status == "error"
     assert read.output["error_code"] == "READ_PATH_DENIED"
@@ -87,9 +87,6 @@ async def test_app_storage_inside_a_registered_folder_stays_hidden(
     assert sorted(entry["name"] for entry in listed.output["entries"]) == [
         "notes.md",
         "run-1",
-    ]
-    assert [match["path"] for match in grep.output["matches"]] == [
-        str(folder / "notes.md")
     ]
 
 
@@ -137,12 +134,6 @@ async def test_a_large_result_is_spilled_to_a_file_the_tools_can_read(
     read = await _call(registry, "read", {"path": str(spill_path), "offset": 2})
     assert read.status == "success"
     assert "document-with-a-long-name-0000.md" in read.output["content"]
-    grep = await _call(
-        registry,
-        "grep",
-        {"base_path": str(spill_path.parent), "pattern": "name-0399"},
-    )
-    assert len(grep.output["matches"]) == 2
 
 
 @pytest.mark.asyncio
@@ -185,3 +176,28 @@ async def test_a_text_file_that_is_not_utf8_fails_only_its_own_call(
 
     assert result.status == "error"
     assert result.output["error_code"] == "READ_FAILED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+    reason="grep runs ripgrep under sandbox-exec",
+)
+async def test_grep_skips_app_storage_but_searches_a_spilled_result(
+    tmp_path: Path,
+) -> None:
+    registry, folder, _storage, _spill = _tools(tmp_path)
+    for index in range(400):
+        (folder / f"document-with-a-long-name-{index:04}.md").write_text("x")
+    listed = await _call(registry, "list", {"path": str(folder), "limit": 500})
+    spill_dir = str(Path(listed.output["path"]).parent)
+
+    in_folder = await _call(
+        registry, "grep", {"base_path": str(folder), "pattern": "app-storage-secret"}
+    )
+    in_spill = await _call(
+        registry, "grep", {"base_path": spill_dir, "pattern": "name-0399"}
+    )
+
+    assert in_folder.output["matches"] == []
+    assert len(in_spill.output["matches"]) == 2

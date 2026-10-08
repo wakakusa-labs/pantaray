@@ -57,6 +57,12 @@ class ActionAgentTunables(_TunableSection):
     cancel_check_failure_grace_seconds: PositiveInt
 
 
+class ChatTunables(_TunableSection):
+    """The chat's input budget per request."""
+
+    context_window_tokens: PositiveInt
+
+
 class ArtifactPathTunables(_TunableSection):
     """artifact root からの相対 storage path template。"""
 
@@ -94,6 +100,7 @@ class LocalRuntimeTunables(_TunableSection):
     """``config_tunables.toml`` 全体の schema。"""
 
     action_agent: ActionAgentTunables
+    chat: ChatTunables
     artifact_paths: ArtifactPathTunables
     websocket: WebSocketTunables
     websocket_capacity: WebSocketCapacityTunables
@@ -136,6 +143,7 @@ __all__ = [
     "LOCAL_RUNTIME_TUNABLES_PATH",
     "ActionAgentTunables",
     "ArtifactPathTunables",
+    "ChatTunables",
     "LocalRuntimeTunables",
     "WebSocketCapacityTunables",
     "WebSocketSessionTunables",

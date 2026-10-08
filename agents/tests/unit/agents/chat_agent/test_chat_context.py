@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,7 +18,7 @@ from pantaray_agents.agents.chat_agent.context import (
 from pantaray_agents.agents.chat_agent.media import NO_MEDIA
 from pantaray_agents.agents.chat_agent.reply import REPLY_TOOL, check_reply
 from pantaray_agents.conversation.budget import ContextBudget, ContextCapacityExceeded
-from pantaray_agents.conversation.window import ConversationEntry
+from pantaray_agents.conversation.window import ConversationEntry, lay_out
 from pantaray_agents.local_runtime.chat.store import (
     ChatTurnEnd,
     TurnChatItem,
@@ -224,6 +225,31 @@ def test_the_window_drops_the_oldest_answered_items_and_keeps_the_rows() -> None
     assert not any("Question 0:" in text for text in sent)
     assert all(any(item.item_id in text for text in sent) for item in waiting)
     assert len(read_chat_items_after(user_id=USER, after=0)) == 22
+
+
+def test_a_turn_that_would_start_past_the_arm_line_starts_rebuilt() -> None:
+    # Once a turn runs, only its own older tool results can be left out, so one
+    # that started at 90% would fail on its first tool call.
+    for n in range(10):
+        asked = _say(f"m-{n}", f"Question {n}: " + "x" * 400)
+        _end(f"a{n}", "reply", asked.sequence)
+    waiting = [_say("m-new", "Newest")]
+    _, whole = _window().fit(
+        read_chat_items_for_turn(user_id=USER, after=0),
+        waiting_from=waiting[0].sequence,
+        tail=turn_context(waiting, _NO_WORK),
+        head_bytes=2_000,
+        media=NO_MEDIA,
+    )
+    rendered = lay_out(
+        whole, omit_before=0, fingerprint="", turns={}, notices=(), head_bytes=2_000
+    ).rendered_bytes
+    at_ninety_percent = math.ceil(math.ceil(rendered / 4) / 0.9)
+
+    window, sent = _fit(_window(window_tokens=at_ninety_percent), waiting)
+
+    assert window.after > 0
+    assert len(sent) < len(whole)
 
 
 def test_waiting_items_are_never_dropped_to_fit() -> None:

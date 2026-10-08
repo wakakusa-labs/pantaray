@@ -139,6 +139,13 @@ class ContextBudget:
         )
         return max(byte_estimate, calibrated)
 
+    def reaches_arm(self, *, rendered_bytes: int) -> bool:
+        """Whether this input fills the share of the window that reserves a rebuild."""
+
+        return self.estimate(rendered_bytes=rendered_bytes) >= int(
+            self.window_tokens * _RESET_ARM_RATIO
+        )
+
     def must_rebuild(self, *, rendered_bytes: int) -> bool:
         """Whether the turn about to be sent is rebuilt first."""
 

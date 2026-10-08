@@ -143,8 +143,7 @@ class ChatWindow:
 
     @classmethod
     def fresh(cls) -> ChatWindow:
-        # The chat runs on the models an Action does, under the same input cap.
-        window_tokens = load_local_runtime_tunables().action_agent.context_window_tokens
+        window_tokens = load_local_runtime_tunables().chat.context_window_tokens
         return cls(
             budget=ContextBudget(
                 window_tokens=window_tokens, baseline=None, reset_pending=False
@@ -189,7 +188,12 @@ class ChatWindow:
                 boundary = sequence
             return boundary
 
-        fitted = self.budget.fit(lay, omit_before=self.after, resolve_boundary=resolve)
+        budget = self.budget
+        if budget.reaches_arm(rendered_bytes=lay(self.after).rendered_bytes):
+            # Within a turn only its own older tool results can be left out, so
+            # a turn that starts this full would fail on its first tool call.
+            budget = replace(budget, reset_pending=True)
+        fitted = budget.fit(lay, omit_before=self.after, resolve_boundary=resolve)
         if fitted.rebuilt_at is None:
             return self, entries(self.after)
         window = ChatWindow(

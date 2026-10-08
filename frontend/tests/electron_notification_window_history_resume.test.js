@@ -1331,9 +1331,46 @@ test('by default Suggestions and History windows share the top-right stack witho
   assert.deepEqual(position(instances[4]), { x: 900, y: 20 + 3 * 132 });
   instances[4].windowEvents.emit('ready-to-show');
 
-  // A closed Suggestion reopened from History also takes the next free slot of the corner.
+  // A closed Suggestion reopened from History takes the lowest free slot of the corner.
   notificationWindow.hideOverlay('S1');
   notificationWindow.hideOverlay('S3');
+  notificationWindow.showNotification('S4');
+  assert.deepEqual(position(instances[5]), { x: 900, y: 20 });
   await openFromHistory('S1');
-  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 2 * 132 });
+  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 3 * 132 });
+});
+
+test('a window opening in a shared cell takes the slot a closed one freed, not one still in use', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+
+  notificationWindow.showNotification('S1');
+  notificationWindow.showNotification('S2');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S3' });
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  const [first, middle, last] = instances;
+  assert.deepEqual([first, middle, last].map(position), [
+    { x: 900, y: 20 },
+    { x: 900, y: 152 },
+    { x: 900, y: 284 },
+  ]);
+
+  // Closing the middle one frees its slot; the closed first one reopened from History takes
+  // the lowest free slot, and the next Suggestion the one after, never one in use.
+  notificationWindow.hideOverlay('S1');
+  notificationWindow.hideOverlay('S2');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(position(first), { x: 900, y: 20 });
+  notificationWindow.showNotification('S4');
+  assert.deepEqual(position(instances[3]), { x: 900, y: 152 });
+  // A window still loading holds its slot too.
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  assert.deepEqual(position(instances[4]), { x: 900, y: 416 });
 });

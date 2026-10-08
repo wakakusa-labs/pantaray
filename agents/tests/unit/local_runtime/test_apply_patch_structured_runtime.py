@@ -14,6 +14,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     apply_patch_edits,
+    patch_line_texts,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
@@ -533,8 +534,17 @@ async def test_apply_patch_update_keeps_crlf_and_utf8_bom(tmp_path: Path) -> Non
         ("a\r\nb", ["b"], ["B"], "a\r\nB"),
         ("a\r\nb", ["b"], ["b", "c"], "a\r\nb\r\nc"),
         ("a\r\nb\nc\r\n", ["c"], ["C"], "a\r\nb\nC\r\n"),
+        ("a\rb\n\nc\n", ["b"], ["B"], "a\rB\n\nc\n"),
+        ("a\rb\n\nc\n", ["b"], [], "a\n\nc\n"),
     ],
-    ids=["lf", "crlf-no-final-newline", "append-after-unterminated", "mixed"],
+    ids=[
+        "lf",
+        "crlf-no-final-newline",
+        "append-after-unterminated",
+        "mixed",
+        "cr-replace-before-empty-lf-line",
+        "cr-delete-before-empty-lf-line",
+    ],
 )
 def test_apply_patch_edits_keep_line_endings(
     old_text: str, old_lines: list[str], new_lines: list[str], expected: str
@@ -542,3 +552,26 @@ def test_apply_patch_edits_keep_line_endings(
     edit = ApplyPatchEdit(old_lines=old_lines, new_lines=new_lines)
 
     assert apply_patch_edits(old_text=old_text, edits=[edit]) == expected
+
+
+@pytest.mark.parametrize(
+    "old_text",
+    [
+        "a\rb\n\nc\n",
+        "a\r\n\rb\r\n\nc",
+        "\ra\n\rb\r\n\n",
+        "a\rb\rc\n\n\r",
+    ],
+)
+def test_apply_patch_edits_never_merge_or_split_untouched_lines(old_text: str) -> None:
+    old_lines = list(patch_line_texts(old_text))
+    for index, line in enumerate(old_lines):
+        if not line:
+            continue
+        for new_lines in (["R"], [], [line, ""], ["", line]):
+            edit = ApplyPatchEdit(old_lines=[line], new_lines=new_lines)
+            expected = old_lines[:index] + new_lines + old_lines[index + 1 :]
+
+            new_text = apply_patch_edits(old_text=old_text, edits=[edit])
+
+            assert list(patch_line_texts(new_text)) == expected, (line, new_lines)

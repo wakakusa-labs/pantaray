@@ -373,11 +373,17 @@ def apply_patch_edits(*, old_text: str, edits: list[ApplyPatchEdit]) -> str:
 
     New and replaced lines take the file's first line ending (LF when it has
     none), so a pure CRLF file stays CRLF. The final-newline state is kept.
+    A bare CR followed by an empty LF line would re-read as one CRLF and drop
+    that line, so such a CR becomes the file's first LF-ending one (or LF).
     """
     bom = _UTF8_BOM if old_text.startswith(_UTF8_BOM) else ""
     lines = _split_lines(old_text.removeprefix(bom))
     trailing_newline = bool(lines) and lines[-1][1] != ""
     ending = next((line_ending for _text, line_ending in lines if line_ending), "\n")
+    lf_ending = next(
+        (line_ending for _text, line_ending in lines if line_ending.endswith("\n")),
+        "\n",
+    )
     cursor = 0
     for edit in edits:
         match = _find_edit_match(
@@ -389,12 +395,17 @@ def apply_patch_edits(*, old_text: str, edits: list[ApplyPatchEdit]) -> str:
         cursor = match.old_start + len(edit.new_lines)
     if not lines:
         return bom
-    *body, (last_text, last_ending) = lines
-    return (
-        bom
-        + "".join(text + (line_ending or ending) for text, line_ending in body)
-        + last_text
-        + ((last_ending or ending) if trailing_newline else "")
+    endings = [line_ending or ending for _text, line_ending in lines]
+    # An empty last line exists only through its ending, so it keeps one.
+    if not trailing_newline and lines[-1][0]:
+        endings[-1] = ""
+    # Right to left: a changed ending can form a new CR+LF pair on its left.
+    for index in reversed(range(len(lines) - 1)):
+        if endings[index] == "\r" and lines[index + 1][0] + endings[index + 1] == "\n":
+            endings[index] = lf_ending
+    return bom + "".join(
+        text + line_ending
+        for (text, _ending), line_ending in zip(lines, endings, strict=True)
     )
 
 

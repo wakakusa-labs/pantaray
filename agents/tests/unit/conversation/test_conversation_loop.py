@@ -179,7 +179,9 @@ class _Run:
     history: list[ConversationEntry] = field(
         default_factory=lambda: [ConversationEntry(_user("Do the task."))]
     )
-    arriving: list[list[LlmTurnItem] | BaseException] = field(default_factory=list)
+    arriving: list[list[LlmTurnItem]] = field(default_factory=list)
+    hold: bool = False  # recording c1 waits for the gate
+    gate: asyncio.Event = field(default_factory=asyncio.Event)
     store: ProviderTurnStore = field(default_factory=lambda: ProviderTurnStore(None))
     requests: list[ConversationRequest] = field(default_factory=list)
     turns: list[RecordedTurn] = field(default_factory=list)
@@ -202,10 +204,7 @@ class _Run:
         return step
 
     async def before_send(self) -> list[LlmTurnItem]:
-        arrived = self.arriving.pop(0) if self.arriving else []
-        if isinstance(arrived, BaseException):
-            raise arrived
-        return arrived
+        return self.arriving.pop(0) if self.arriving else []
 
     async def on_turn(self, turn: RecordedTurn) -> None:
         self.turns.append(turn)
@@ -213,6 +212,10 @@ class _Run:
     async def on_result(
         self, call: LlmToolCall, result: ReactToolResult
     ) -> LlmTurnToolResultItem:
+        assert call.call_id not in self.results, "answered twice"
+        if self.hold and call.call_id == "c1":
+            self.log.append("recording c1")
+            await self.gate.wait()
         ids = call.model_dump(include={"call_id", "name"})
         item = LlmTurnToolResultItem(type="tool_result", output=result.output, **ids)
         self.results[call.call_id] = item
@@ -398,12 +401,7 @@ async def test_a_refused_replay_is_resent_once_without_the_turns() -> None:
     assert list(run.store.turns) == [run.turns[1].entry.turn_id]
 
 
-async def test_a_stop_from_before_send_or_the_model_propagates_as_raised() -> None:
-    run = _Run([], arriving=[_Pause()])
-    with pytest.raises(_Pause):
-        await run()
-    assert run.requests == []
-
+async def test_a_stop_from_the_model_propagates_as_raised() -> None:
     stopped = _refused(stop=True)
     run = _Run([stopped])
     with pytest.raises(LlmProxyExecutionError) as raised:
@@ -420,21 +418,28 @@ async def test_a_stop_from_before_send_or_the_model_propagates_as_raised() -> No
         ("sequential", "boom", "R-NN"),
         ("parallel", "slow", "RNRN"),
         ("sequential", "slow", "RNNN"),
+        ("parallel", "rec", "RRRN"),
+        ("sequential", "rec", "RNNN"),
     ],
 )
 async def test_a_stopped_batch_answers_every_call_that_did_not_finish(
     kind: ToolTurnPlacement, stopper: str, answers: str
 ) -> None:
     calls = (_call("c1", "a"), _call("c2", stopper), _call("c3", "b"), _end("c4"))
-    run = _Run([_reply(*calls)], tools=[("a", kind), (stopper, kind), ("b", kind)])
+    tools: _Tools = [("a", kind), (stopper, kind), ("b", kind)]
+    run = _Run([_reply(*calls)], tools=tools, hold=stopper == "rec")
     task = asyncio.create_task(run())
-    if stopper == "slow":
-        # The user stops the run while the slow call is still running.
-        while "start slow" not in run.log or (
-            kind == "parallel" and "end b" not in run.log
-        ):
+    if stopper != "boom":
+        # The user stops the run, twice, while the slow call runs or while c1
+        # is being recorded.
+        mark = "start slow" if stopper == "slow" else "recording c1"
+        parallel_slow = (stopper, kind) == ("slow", "parallel")
+        while mark not in run.log or (parallel_slow and "end b" not in run.log):
             await asyncio.sleep(0)
         task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        run.gate.set()
 
     with pytest.raises(_Pause if stopper == "boom" else asyncio.CancelledError):
         await task

@@ -1,21 +1,14 @@
 """One model conversation, run turn by turn until its caller accepts an end.
 
-Every agent that talks to a model through ``LlmActionTurnRequest`` needs this
-loop around it. It owns the history, laid out with ``ConversationLayout`` and
-only ever appended to, so each request extends the last and a provider turn
-goes back on the item it was produced for (``prefix.py``); one send per turn
-through ``send_dropping_refused_turns``; repairing an output the model contract
-refused (a schema, the commentary limit, a reused call id) by resending with
-the reason appended; which calls run now and how (``plan_tool_batch``), every
-call not run answered as such; and the last turn, told in words with the tool
-list unchanged -- a changed list voids the replayed reasoning.
-
-Storage, prompts, approvals, what reaches the user and the budget stay with
-the caller, as does how a run ends: by an ending tool, or by a turn that calls
-nothing. Every item the loop appends, apart from ``before_send``'s own, reaches
-the caller through exactly one of ``on_turn``, ``on_result`` and ``on_notice``,
-in history order, so storing those rebuilds the same history after a restart.
-A repair or last-turn notice closes only its own request and is never kept.
+The loop every agent on ``LlmActionTurnRequest`` shares. It owns an append-only
+history (``prefix.py``), so each request extends the last and a provider turn
+goes back where it was produced; one send per turn through
+``send_dropping_refused_turns``; repairing refused output; running calls as
+``plan_tool_batch`` says; and the last turn, told in words with the tools
+unchanged. Storage, prompts, approvals, the user's view, the budget and how a
+run ends stay with the caller. Every item the loop appends, but
+``before_send``'s, reaches exactly one of ``on_turn``, ``on_result`` and
+``on_notice``, in order, so what they stored rebuilds the history.
 """
 
 from __future__ import annotations
@@ -24,8 +17,8 @@ import asyncio
 import functools
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
-from typing import NoReturn, Protocol
+from dataclasses import dataclass, field
+from typing import Protocol
 
 from pantaray_agents.conversation.prefix import (
     ConversationLayout,
@@ -154,9 +147,9 @@ class ConversationRun[T]:
     for ``decide``. ``max_turns`` counts answered turns, not repaired sends;
     ``max_tool_calls`` the calls run. ``before_send`` raises to stop, or returns
     the items that arrived. ``on_result`` stores, redacts or spills a result and
-    returns what is sent. When a tool raises or the run is cancelled, the
-    turn's calls that did not finish are answered as not run before the
-    exception propagates; a tool that raised by itself gets no result.
+    returns what is sent. Once ``on_turn`` returns, whatever is raised -- a
+    stop included -- leaves only after every call of the turn is answered,
+    but for one whose own exception it is. The hooks are awaited to their end.
     """
 
     prompt: str
@@ -191,8 +184,7 @@ async def run_conversation[T](run: ConversationRun[T]) -> T:
     """Run the conversation until ``run.decide`` returns ``Finish``.
 
     Every exception ``send``, a hook or a tool raises propagates as it was,
-    apart from a refused output, which is repaired; a tool's first answers
-    the calls of its turn that did not run.
+    apart from a refused output, which is repaired.
     """
 
     return await _Run(run).run()
@@ -234,12 +226,13 @@ class _Run[T]:
             for call in entry.item.calls
         }
         self.tool_calls = 0
+        self.turn = _Turn(calls=())
 
     async def run(self) -> T:
         for turn_index in range(self.spec.max_turns):
+            last_index = self.spec.max_turns - 1
             final = (
-                turn_index == self.spec.max_turns - 1
-                or self.tool_calls >= self.spec.max_tool_calls
+                turn_index == last_index or self.tool_calls >= self.spec.max_tool_calls
             )
             self.history.extend(
                 ConversationEntry(item) for item in await self.spec.before_send()
@@ -257,45 +250,23 @@ class _Run[T]:
             )
             self.history.append(entry)
             self.call_ids.update(call.call_id for call in response.calls)
-            await self.spec.on_turn(
-                RecordedTurn(
-                    entry=entry,
-                    reply=reply,
-                    provider_turn=self.store.accept(
-                        step_id=turn_id,
-                        turn=reply.provider_turn,
-                        fingerprint=sent.fingerprint,
-                    ),
-                )
+            self.turn = _Turn(calls=response.calls)
+            record = self.store.accept(
+                step_id=turn_id, turn=reply.provider_turn, fingerprint=sent.fingerprint
             )
-            if final:
-                ran, ending_call = False, await self._close_last_turn(response.calls)
-            else:
-                ran, ending_call = await self._run_calls(response)
-            if response.dropped_call_names:
-                # Such a call has no id to answer, so a message names it.
-                await self._notice(
-                    "# System Notice\nNot run this turn: "
-                    f"{', '.join(response.dropped_call_names)} "
-                    f"({PROVIDER_DROPPED_NOTICE})."
-                )
-            if ran:
-                continue
-            decision = self.spec.decide(
-                IdleTurn(response=response, ending_call=ending_call, final=final)
-            )
-            if isinstance(decision, Finish):
-                return decision.value
-            if ending_call is not None:
-                await self._answer(
-                    ending_call, decision.notice, ENDING_REJECTED_ERROR_CODE
-                )
-            else:
-                await self._notice(decision.notice)
-            if final:
-                raise ConversationTurnsExhausted(
-                    "the last turn ended without an accepted end"
-                )
+            recorded = RecordedTurn(entry=entry, reply=reply, provider_turn=record)
+            _, stop = await _to_the_end(self.spec.on_turn(recorded))
+            # The caller now holds the turn, so whatever is raised from here on,
+            # a stop included, leaves only once every call of it is answered.
+            try:
+                if stop is not None:
+                    raise stop
+                finished = await self._finish_turn(response, final=final)
+            except BaseException as failure:
+                await _to_the_end(self._settle(failure))
+                raise
+            if finished is not None:
+                return finished.value
         raise ConversationTurnsExhausted("the run has no turn to send")
 
     async def _send(self, *, final: bool) -> tuple[TurnReply, ConversationRequest]:
@@ -377,130 +348,124 @@ class _Run[T]:
             fingerprint=layout.fingerprint,
         )
 
-    async def _run_calls(
-        self, response: LlmActionTurnResponse
-    ) -> tuple[bool, LlmToolCall | None]:
-        """Run what the plan lets run now; say whether a tool ran, or the end."""
+    async def _finish_turn(
+        self, response: LlmActionTurnResponse, *, final: bool
+    ) -> Finish[T] | None:
+        ran = await self._run_calls(response, final=final)
+        if response.dropped_call_names:
+            # Such a call has no id to answer, so a message names it.
+            await self._notice(
+                "# System Notice\nNot run this turn: "
+                f"{', '.join(response.dropped_call_names)} "
+                f"({PROVIDER_DROPPED_NOTICE})."
+            )
+        if ran:
+            return None
+        ending = self.turn.ending
+        decision = self.spec.decide(
+            IdleTurn(response=response, ending_call=ending, final=final)
+        )
+        if isinstance(decision, Finish):
+            return decision
+        if ending is not None:
+            await self._answer(ending, decision.notice, ENDING_REJECTED_ERROR_CODE)
+        else:
+            await self._notice(decision.notice)
+        if final:
+            raise ConversationTurnsExhausted(
+                "the last turn ended without an accepted end"
+            )
+        return None
 
+    async def _run_calls(self, response: LlmActionTurnResponse, *, final: bool) -> bool:
+        """Run what may run now, answer the rest; say whether a tool ran."""
+
+        turn = self.turn
+        if final:
+            ending = [call for call in response.calls if call.name in self.ending_names]
+            turn.ending = ending[0] if len(ending) == 1 else None
+            last = (
+                f"Not run: this call came on the last turn, where {self.what_counts}."
+            )
+            turn.held = {
+                call.call_id: _not_run(EXCLUSION_NOTICES["run_ending_tool"])
+                if call.name in self.ending_names
+                else last
+                for call in response.calls
+            }
+            await self._settle()
+            return False
         plan = plan_tool_batch(
             [_Planned(call) for call in response.calls],
             concurrency=self.concurrency,
             max_parallel=self.spec.max_parallel_tool_calls,
             remaining_tool_steps=self.spec.max_tool_calls - self.tool_calls,
         )
-        excluded = [
-            (entry.call.call, _not_run(EXCLUSION_NOTICES[entry.reason]))
+        turn.held = {
+            entry.call.call.call_id: _not_run(EXCLUSION_NOTICES[entry.reason])
             for entry in (*plan.deferred, *plan.dropped)
-        ]
+        }
         runnable = [planned.call for planned in plan.calls]
         if len(runnable) == 1 and runnable[0].name in self.ending_names:
             # Calls the provider dropped were siblings the end would lose.
             if not response.dropped_call_names:
-                return False, runnable[0]
-            excluded = [
-                (runnable.pop(), _not_run(EXCLUSION_NOTICES["run_ending_tool"]))
-            ]
+                turn.ending = runnable[0]
+                return False
+            turn.held[runnable.pop().call_id] = _not_run(
+                EXCLUSION_NOTICES["run_ending_tool"]
+            )
         if plan.mode == "parallel":
-            await self._run_at_once(runnable, excluded)
+            for call in runnable:
+                self._start(call)
+            await asyncio.wait(turn.tasks.values())
+            for call in runnable:
+                turn.tasks[call.call_id].result()  # the first failure, in order
         else:
-            await self._run_in_order(runnable, excluded)
-        return bool(runnable), None
+            for call in runnable:
+                await self._record(call, await self._start(call))
+        await self._settle()
+        return bool(runnable)
 
-    async def _run_in_order(
-        self,
-        calls: Sequence[LlmToolCall],
-        excluded: Sequence[tuple[LlmToolCall, str]],
-    ) -> None:
-        for index, call in enumerate(calls):
-            self.tool_calls += 1
-            try:
-                result = await self.registry.execute(_react_call(call), self.tool_calls)
-            except BaseException as failure:
-                # A call the run's cancellation stopped did not finish, so it
-                # is answered; one that raised by itself gets no result.
-                stopped = isinstance(failure, asyncio.CancelledError)
-                await self._fail(
-                    failure, calls[index + (0 if stopped else 1) :], excluded
-                )
-            await self._append_result(call, result)
-        await self._answer_all(excluded)
+    def _start(self, call: LlmToolCall) -> asyncio.Future[ReactToolResult]:
+        self.tool_calls += 1
+        task = asyncio.ensure_future(
+            self.registry.execute(_react_call(call), self.tool_calls)
+        )
+        self.turn.tasks[call.call_id] = task
+        return task
 
-    async def _run_at_once(
-        self,
-        calls: Sequence[LlmToolCall],
-        excluded: Sequence[tuple[LlmToolCall, str]],
-    ) -> None:
-        first = self.tool_calls + 1
-        self.tool_calls += len(calls)
-        tasks = [
-            asyncio.ensure_future(self.registry.execute(_react_call(call), first + n))
-            for n, call in enumerate(calls)
-        ]
-        failure: BaseException | None = None
-        try:
-            # Waits for every call, so none is left running behind a failure.
-            await asyncio.wait(tasks)
-        except asyncio.CancelledError as cancelled:
-            # The run was stopped: stop what still runs, keep what finished.
-            for task in tasks:
-                task.cancel()
-            await asyncio.wait(tasks)
-            failure = cancelled
-        stopped: list[LlmToolCall] = []
-        for call, task in zip(calls, tasks, strict=True):
-            if task.cancelled():
-                stopped.append(call)
-            elif (error := task.exception()) is not None:
-                failure = failure or error
-            else:
-                await self._append_result(call, task.result())
-        if failure is not None:
-            await self._fail(failure, stopped, excluded)
-        await self._answer_all(excluded)
+    async def _settle(self, failure: BaseException | None = None) -> None:
+        """Answer each call not answered yet, once, in the model's order.
 
-    async def _fail(
-        self,
-        failure: BaseException,
-        stopped: Sequence[LlmToolCall],
-        excluded: Sequence[tuple[LlmToolCall, str]],
-    ) -> NoReturn:
-        """Answer ``stopped`` and ``excluded`` as not run, then raise ``failure``.
-
-        A call that raised by itself gets no result: a pause leaves it to the
-        resumed run, and any other failure ends the run.
+        A finished call gets its result, the one whose own exception is
+        ``failure`` none (a pause is the resumed run's), any other a not-run
+        answer. Without a failure the ending call stays for ``decide``.
         """
 
-        notice = _not_run("did not run to the end because the run stopped")
-        await self._answer_all([*((call, notice) for call in stopped), *excluded])
-        raise failure
-
-    async def _close_last_turn(
-        self, calls: Sequence[LlmToolCall]
-    ) -> LlmToolCall | None:
-        """Answer every call of the last turn but a single ending one as not run."""
-
-        ending = [call for call in calls if call.name in self.ending_names]
-        ending_call = ending[0] if len(ending) == 1 else None
-        last = f"Not run: this call came on the last turn, where {self.what_counts}."
-        await self._answer_all(
-            [
-                (call, _not_run(EXCLUSION_NOTICES["run_ending_tool"]))
-                if call.name in self.ending_names
-                else (call, last)
-                for call in calls
-                if call is not ending_call
-            ]
-        )
-        return ending_call
-
-    async def _answer_all(self, calls: Sequence[tuple[LlmToolCall, str]]) -> None:
-        for call, message in calls:
-            await self._answer(call, message)
+        turn = self.turn
+        for running in turn.tasks.values():
+            running.cancel()
+        if turn.tasks:
+            await asyncio.wait(turn.tasks.values())
+        stopped = _not_run("did not run to the end because the run stopped")
+        for call in turn.calls:
+            if call.call_id in turn.answered or (
+                failure is None and call is turn.ending
+            ):
+                continue
+            task = turn.tasks.get(call.call_id)
+            if task is not None and not task.cancelled():
+                if task.exception() is None:
+                    await self._record(call, task.result())
+                    continue
+                if task.exception() is failure:
+                    continue
+            await self._answer(call, turn.held.get(call.call_id, stopped))
 
     async def _answer(
         self, call: LlmToolCall, message: str, code: str = NOT_RUN_ERROR_CODE
     ) -> None:
-        await self._append_result(
+        await self._record(
             call,
             ReactToolResult(
                 tool_name=call.name,
@@ -510,16 +475,49 @@ class _Run[T]:
             ),
         )
 
-    async def _append_result(self, call: LlmToolCall, result: ReactToolResult) -> None:
-        item = await self.spec.on_result(call, result)
+    async def _record(self, call: LlmToolCall, result: ReactToolResult) -> None:
+        item, stop = await _to_the_end(self.spec.on_result(call, result))
         self.history.append(ConversationEntry(item))
+        self.turn.answered.add(call.call_id)
+        if stop is not None:
+            raise stop
 
     async def _notice(self, text: str) -> None:
         item = LlmTurnUserItem(
             type="user", content=[LlmInputTextBlock(type="input_text", text=text)]
         )
+        _, stop = await _to_the_end(self.spec.on_notice(item))
         self.history.append(ConversationEntry(item))
-        await self.spec.on_notice(item)
+        if stop is not None:
+            raise stop
+
+
+@dataclass(slots=True)
+class _Turn:
+    """What one recorded turn's calls have been answered with so far."""
+
+    calls: Sequence[LlmToolCall]
+    answered: set[str] = field(default_factory=set)
+    held: dict[str, str] = field(default_factory=dict)  # not-run answers
+    tasks: dict[str, asyncio.Future[ReactToolResult]] = field(default_factory=dict)
+    ending: LlmToolCall | None = None
+
+
+async def _to_the_end[R](work: Awaitable[R]) -> tuple[R, asyncio.CancelledError | None]:
+    """Await ``work`` to its end through any stop, and return the stop.
+
+    Its own task behind ``asyncio.shield`` keeps a stop out of a hook half-way
+    through storing, which ``Task.uncancel`` clears only after it has landed.
+    """
+
+    task = asyncio.ensure_future(work)
+    stop: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            stop = stop or exc
+    return task.result(), stop
 
 
 @dataclass(frozen=True, slots=True)

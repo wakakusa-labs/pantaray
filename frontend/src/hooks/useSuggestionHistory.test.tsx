@@ -130,7 +130,7 @@ describe('useSuggestionHistory', () => {
     const { result } = renderHook(() => useSuggestionHistory(), { wrapper: Wrapper });
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     await act(async () => pending[0].resolve(historyResult([CURRENT_ITEM], 'next')));
-    act(() => void result.current.refresh());
+    act(() => onChanged.mock.calls[0][0]({}));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await act(async () => pending[1].resolve({ ...historyResult([], null), error: 'timeout' }));
     expect(result.current.items).toEqual([CURRENT_ITEM]);

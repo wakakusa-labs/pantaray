@@ -69,7 +69,6 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
     isRealtimeSyncing: false,
     searchText: '',
     setSearchText: mocks.setSearchText,
-    refresh: vi.fn(),
     loadMore: mocks.loadMore,
     hasMore: true,
     isUnread: (item: { action_id?: string }) => item.action_id === mocks.unreadActionId,

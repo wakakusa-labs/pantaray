@@ -15,10 +15,7 @@ const HISTORY_CHANGED_REFRESH_DELAY_MS = 150;
  * The current title and status of the works the chat's cards point at, read from the same
  * history list the list mode shows. A deleted work is simply absent, so its cards show no status.
  */
-export function useChatWorkStates(): {
-  states: ReadonlyMap<WorkKey, ChatWorkState>;
-  reload: () => Promise<void>;
-} {
+export function useChatWorkStates(): ReadonlyMap<WorkKey, ChatWorkState> {
   const [states, setStates] = useState<ReadonlyMap<WorkKey, ChatWorkState>>(new Map());
   const generationRef = useRef(0);
 
@@ -69,5 +66,5 @@ export function useChatWorkStates(): {
     };
   }, [reload]);
 
-  return { states, reload };
+  return states;
 }

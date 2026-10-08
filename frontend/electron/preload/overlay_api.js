@@ -53,6 +53,12 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
   const snapshotChannel = createSnapshotChannel({ ipcRenderer, logError });
 
   return {
+    clipboard: {
+      writeText: (text) => {
+        assertValidInvokeChannel('clipboard:writeText');
+        return ipcRenderer.invoke('clipboard:writeText', { text });
+      },
+    },
     agentOverlay: {
       showHistory: (payload) => {
         if (isValidSendChannel('history:openOverlay')) {

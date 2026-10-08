@@ -327,7 +327,6 @@ describe('AgentOverlay broader E2E', () => {
     focusComposerListener = null;
     readConversationPage.mockResolvedValue(olderPage);
     Element.prototype.scrollIntoView = vi.fn();
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -340,6 +339,7 @@ describe('AgentOverlay broader E2E', () => {
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: {
+        clipboard: { writeText },
         ipcRenderer: {
           on: (channel: string, callback: () => void) => {
             if (channel === 'overlay:focusComposer') focusComposerListener = callback;

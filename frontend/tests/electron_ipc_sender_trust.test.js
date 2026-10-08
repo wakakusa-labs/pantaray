@@ -40,6 +40,7 @@ test('IPC sender guard allows overlay capabilities but rejects privacy operation
   security.registerWindow('overlay', overlayEvent.sender);
 
   assert.equal(security.authorize('actionFile:open', overlayEvent), 'overlay');
+  assert.equal(security.authorize('clipboard:writeText', overlayEvent), 'overlay');
   assert.throws(
     () => security.authorize('privacy:updateCaptureSettings', overlayEvent),
     (error) =>

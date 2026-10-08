@@ -416,3 +416,57 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('chat-typing.png') });
 });
+
+/** Drags the mouse across the element's text, first character to last, as a reader selects it. */
+async function dragAcross(page: Page, selector: string) {
+  const [start, end] = await page.locator(selector).evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0);
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    return [
+      [first.left + 1, first.top + first.height / 2],
+      [last.right - 1, last.top + last.height / 2],
+    ];
+  });
+  await page.mouse.move(start[0], start[1]);
+  await page.mouse.down();
+  await page.mouse.move(end[0], end[1], { steps: 8 });
+  await page.mouse.up();
+}
+
+test('text in either side’s bubbles, with its quote and link, copies with the keyboard', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await installBridge(page, null, {
+    items: [
+      reply(
+        3,
+        5,
+        '直しました。[見積書](https://example.com/estimate) を見てください。',
+        [],
+        'item-2'
+      ),
+      user(2, 4, '納期を 2 週間うしろに'),
+      reply(1, 0, 'おはようございます。'),
+    ],
+    next_cursor: null,
+  });
+  const chat = page.getByRole('list', { name: 'Pantaray とのチャット' });
+  await expect(chat.getByRole('link', { name: '見積書' })).toBeVisible();
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await dragAcross(page, '.chat-row--mine .chat-bubble__text');
+  await page.keyboard.press('ControlOrMeta+c');
+  await expect.poll(clipboard).toBe('納期を 2 週間うしろに');
+
+  // Pantaray's reply: the quote it answers, then its text with the link's words.
+  await dragAcross(page, '.chat-row:not(.chat-row--mine):has(.chat-quote) .chat-bubble');
+  await page.keyboard.press('ControlOrMeta+c');
+  await expect
+    .poll(clipboard)
+    .toMatch(/納期を 2 週間うしろに[\s\S]*直しました。見積書 を見てください。/);
+});

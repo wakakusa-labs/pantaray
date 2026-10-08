@@ -7,7 +7,6 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.empty.startWithButton': 'Start one with New task at the top right.',
     'history.empty.startWithShortcut':
       'Start one with New task at the top right, or press {shortcut}.',
-    'history.syncing': 'Syncing',
     'history.newConversation': 'New task',
     'history.openOverlayFailed': 'Failed to open overlay.',
     'history.delete.confirmTitle': 'Delete this conversation?',
@@ -103,7 +102,6 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.empty': 'まだ会話・提案履歴がありません。',
     'history.empty.startWithButton': '右上の「新しい作業」から始められます。',
     'history.empty.startWithShortcut': '右上の「新しい作業」か {shortcut} で始められます。',
-    'history.syncing': '同期中',
     'history.newConversation': '新しい作業',
     'history.openOverlayFailed': 'オーバーレイを開けませんでした。',
     'history.delete.confirmTitle': 'この会話を削除しますか？',

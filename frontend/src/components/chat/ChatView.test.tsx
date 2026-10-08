@@ -52,6 +52,7 @@ let publishTurnState: (state: { running: boolean }) => void;
 const retryTurn =
   vi.fn<(request: { failure_item_id: string }) => Promise<{ kind: 'started' | 'stale' }>>();
 const listItems = vi.fn(async () => pages.shift() ?? { items: [], next_cursor: null });
+const getTurnState = vi.fn(async (): Promise<{ running: boolean } | null> => null);
 const openConversation = vi.fn(async () => 'focused' as const);
 const sendMessage = vi.fn<(request: ChatMessageRequest) => Promise<ChatMessageSendResult>>();
 const attachFile = vi.fn(async ({ name }: { name: string }) => ({
@@ -75,6 +76,7 @@ beforeEach(() => {
       listItems,
       sendMessage,
       retryTurn,
+      getTurnState,
       onTurnState: (callback: (state: { running: boolean }) => void) => {
         publishTurnState = callback;
         return () => {};
@@ -465,4 +467,29 @@ it('runs the newest failed turn again, and reads the chat again when another tur
   await userEvent.click(screen.getByRole('button', { name: 'もう一度' }));
   expect(await screen.findByText('答えました。')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'もう一度' })).not.toBeInTheDocument();
+});
+
+it('a page loaded mid-turn shows the typing bubble from the state main last heard', async () => {
+  pages = [{ items: [userMessage(1, '調べておいて')], next_cursor: null }];
+  getTurnState.mockResolvedValueOnce({ running: true });
+  renderPage();
+  expect(await screen.findByRole('status', { name: '入力中' })).toBeInTheDocument();
+  act(() => publishTurnState({ running: false }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+});
+
+it('a turn change heard before the read of the state arrives wins over it', async () => {
+  pages = [{ items: [userMessage(1, '調べておいて')], next_cursor: null }];
+  let answer: (state: { running: boolean }) => void = () => {};
+  getTurnState.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+  );
+  renderPage();
+  await screen.findByText('調べておいて');
+  act(() => publishTurnState({ running: false }));
+  await act(async () => answer({ running: true }));
+  expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
 });

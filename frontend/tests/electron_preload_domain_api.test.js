@@ -5,7 +5,6 @@ const { createOrchestrationApi } = require('../electron/preload/orchestration_ap
 const { createOverlayApi } = require('../electron/preload/overlay_api');
 const { createPreloadApi } = require('../electron/preload/create_preload_api');
 const { createActionsApi } = require('../electron/preload/actions_api');
-const { createChatApi } = require('../electron/preload/chat_api');
 
 function createIpcRenderer() {
   const listeners = new Map();
@@ -232,20 +231,4 @@ test('notification orchestration consumes buffered events across StrictMode resu
   assert.deepEqual(firstSetup, [{ event_id: 'before-first-subscribe' }]);
   assert.deepEqual(secondSetup, [{ event_id: 'during-second-setup' }]);
   assert.deepEqual(thirdSetup, [{ event_id: 'between-setups' }]);
-});
-
-test('a History page mounted mid-turn gets the chat turn state main last sent', () => {
-  const ipcRenderer = createIpcRenderer();
-  const { chat } = createChatApi({ ipcRenderer });
-  const before = [];
-  chat.onTurnState((state) => before.push(state))();
-  assert.deepEqual(before, []);
-
-  ipcRenderer.emit('chat:turnState', { running: true });
-  const remounted = [];
-  const unsubscribe = chat.onTurnState((state) => remounted.push(state));
-  ipcRenderer.emit('chat:turnState', { running: false });
-  unsubscribe();
-  ipcRenderer.emit('chat:turnState', { running: true });
-  assert.deepEqual(remounted, [{ running: true }, { running: false }]);
 });

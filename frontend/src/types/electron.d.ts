@@ -237,6 +237,8 @@ declare global {
         onItemAppended: (callback: (item: ChatItem) => void) => () => void;
         /** Runs the turn that ended in this failure again (the chat's 「もう一度」). */
         retryTurn: (request: ChatTurnRetryRequest) => Promise<ChatTurnRetryResult>;
+        /** The turn's state as main last heard it; null before the live session has said. */
+        getTurnState: () => Promise<ChatTurnState | null>;
         /** Whether a turn is answering: the typing bubble. */
         onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };

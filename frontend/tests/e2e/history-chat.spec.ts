@@ -186,6 +186,7 @@ async function installBridge(
               });
               return noop;
             },
+            getTurnState: async () => null,
             retryTurn: async ({ failure_item_id }: { failure_item_id: string }) => {
               Object.defineProperty(window, 'e2eRetried', {
                 value: failure_item_id,

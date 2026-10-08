@@ -1285,3 +1285,23 @@ test('OrchestrationManager: a chat item reaches only the main window, parsed', (
   );
   assert.deepEqual(harness.overlayWindowMessages, []);
 });
+
+test('main keeps the chat turn state for a main window that loads again mid-turn', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  const hooks = harness.getWsHooks();
+  assert.equal(harness.manager.getChatTurnState(), null);
+
+  hooks.forwardEventToRenderers({ event: 'chat_turn_state', data: { running: true } });
+  assert.deepEqual(harness.manager.getChatTurnState(), { running: true });
+  hooks.forwardStatusToRenderers({ status: 'session_resumed' });
+  assert.deepEqual(harness.manager.getChatTurnState(), { running: true });
+
+  // A new session sends the state again; until then nothing is known.
+  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 's-2' });
+  assert.equal(harness.manager.getChatTurnState(), null);
+  hooks.forwardEventToRenderers({ event: 'chat_turn_state', data: { running: false } });
+  assert.deepEqual(harness.manager.getChatTurnState(), { running: false });
+  hooks.forwardStatusToRenderers({ status: 'closed' });
+  assert.equal(harness.manager.getChatTurnState(), null);
+});

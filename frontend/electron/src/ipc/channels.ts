@@ -98,6 +98,7 @@ export const validInvokeChannels = [
   'chat:sendMessage',
   'chat:listItems',
   'chat:retryTurn',
+  'chat:getTurnState',
   // Suggestion history (main SSOT)
   'history:fetch',
   'history:markCompletionViewed',

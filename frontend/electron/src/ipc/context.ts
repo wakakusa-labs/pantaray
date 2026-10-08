@@ -54,6 +54,7 @@ import type {
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { createActionFetcher } from '../actions/actionFetch';
+import type { ChatTurnState } from '../chat/chatContracts';
 import type { createChatFetcher } from '../chat/chatFetch';
 import type {
   CreateNotificationIpcHandlers,
@@ -165,7 +166,10 @@ export type MainContext = {
     revealInFolder: (absolutePath: string) => void;
   };
 
-  chat: ReturnType<typeof createChatFetcher>;
+  chat: ReturnType<typeof createChatFetcher> & {
+    /** The chat turn's state as the live session last sent it, for a window that loads mid-turn. */
+    getTurnState: () => ChatTurnState | null;
+  };
 
   actions: ReturnType<typeof createActionFetcher> & {
     getCurrentSubjectId: () => string | null;

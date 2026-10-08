@@ -146,7 +146,12 @@ test('Only the main window uses the chat, and only the Overlay asks to show it',
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
   security.registerWindow('overlay', overlayEvent.sender);
 
-  for (const channel of ['chat:sendMessage', 'chat:listItems', 'chat:retryTurn']) {
+  for (const channel of [
+    'chat:sendMessage',
+    'chat:listItems',
+    'chat:retryTurn',
+    'chat:getTurnState',
+  ]) {
     assert.equal(security.authorize(channel, mainEvent), 'main');
     assert.throws(
       () => security.authorize(channel, overlayEvent),

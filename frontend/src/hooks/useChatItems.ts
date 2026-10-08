@@ -114,9 +114,22 @@ export function useChatItems(): ChatItemsResult {
   }, [reload]);
 
   useEffect(() => {
-    const onTurnState = window.electron?.chat?.onTurnState;
-    if (!onTurnState) return;
-    return onTurnState((state) => setTurnRunning(state.running));
+    const chat = window.electron?.chat;
+    if (!chat) return;
+    // Main sends the state only when it changes; a page loaded mid-turn reads it once, and a
+    // change heard meanwhile is newer than that read.
+    let heard = false;
+    const unsubscribe = chat.onTurnState((state) => {
+      heard = true;
+      setTurnRunning(state.running);
+    });
+    void chat.getTurnState().then(
+      (state) => {
+        if (!heard && state !== null) setTurnRunning(state.running);
+      },
+      () => undefined
+    );
+    return unsubscribe;
   }, []);
 
   const retryTurn = useCallback(

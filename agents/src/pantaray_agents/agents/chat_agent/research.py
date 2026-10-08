@@ -9,11 +9,13 @@ work that changes things is a task the chat starts.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
+from pantaray_agents.local_runtime.chat.work_list import search_tasks
 from pantaray_agents.local_runtime.context import store as context_store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_gate import SourceInvalidated
@@ -35,10 +37,13 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.zanei import (
     InsightActivityStart,
     SuggestionZaneiSession,
 )
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
+    ToolConcurrency,
+    react_tool_response_schema,
     tool_error_response,
 )
 from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
@@ -55,6 +60,7 @@ CHAT_TOOL_RESULTS_DIRNAME: Final[str] = "chat_tool_results"
 _MEMORY_SEARCH_MAX_RESULTS: Final[int] = 8
 _MEMORY_SEARCH_CONTENT_MAX_CHARS: Final[int] = 6_000
 _MEMORY_REFERENCE_CONTENT_MAX_CHARS: Final[int] = 4_000
+_SEARCH_TASKS_DEFAULT: Final[int] = 10
 
 
 def chat_tool_results_root(*, db_path: Path, run_id: str) -> Path:
@@ -98,6 +104,7 @@ async def chat_research_tools(
         ),
     )
     return (
+        _search_tasks_tool(user_id),
         *memory.definitions(),
         MemorySqlSession(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
@@ -139,6 +146,79 @@ async def _recent_activity(
     return (
         None if cursor is None else InsightActivityStart(source=source, cursor=cursor)
     )
+
+
+def _search_tasks_tool(user_id: str) -> ReactToolDefinition:
+    """Every task of the user's, past the work list, by words and by time."""
+
+    async def execute(call: ReactToolCall, _step: int) -> ReactToolResult:
+        args = call.tool_args
+        assert isinstance(args, dict)  # the registry checked the schema
+        try:
+            found = await asyncio.to_thread(
+                search_tasks,
+                user_id=user_id,
+                query=_text_or_none(args.get("query")),
+                since=_text_or_none(args.get("since")),
+                until=_text_or_none(args.get("until")),
+                limit=int(cast(int, args.get("limit") or _SEARCH_TASKS_DEFAULT)),
+            )
+        except ValueError:
+            return tool_error_response(
+                tool_name=call.tool_name,
+                error_code="INVALID_TIME",
+                message="since and until must be ISO 8601 times.",
+            )
+        return ReactToolResult(
+            tool_name=call.tool_name,
+            status="success",
+            output={
+                "tasks": [
+                    {
+                        "action_id": task.action_id,
+                        "title": task.title,
+                        "status": task.status,
+                        "updated_at": task.updated_at,
+                        "latest": task.latest,
+                    }
+                    for task in found
+                ]
+            },
+        )
+
+    nullable_text: dict[str, JSONValue] = {"type": ["string", "null"]}
+    return ReactToolDefinition(
+        name="search_tasks",
+        description=(
+            "Search all of your tasks -- what you have been asked to do and "
+            "done, wherever it was started -- beyond the ones your work list "
+            "shows. Use this, not memory_search, for a task: by words in what you were asked or what "
+            "you answered (query), and by when they were last updated (since, "
+            "until: ISO 8601 UTC). Newest first, each with its id, title, status "
+            "and the first line of its answer; memory_sql reads a task's whole "
+            "answer from agent_actions.final_output."
+        ),
+        request_schema={
+            "type": "object",
+            "properties": {
+                "query": nullable_text,
+                "since": nullable_text,
+                "until": nullable_text,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["query", "since", "until"],
+            "additionalProperties": False,
+        },
+        response_schema=react_tool_response_schema(
+            success_schema={"type": "object", "required": ["tasks"]}
+        ),
+        execute=execute,
+        concurrency=ToolConcurrency("parallel"),
+    )
+
+
+def _text_or_none(value: JSONValue | None) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
 
 
 def _recording_may_stop(tool: ReactToolDefinition) -> ReactToolDefinition:

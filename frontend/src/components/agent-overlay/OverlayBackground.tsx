@@ -27,10 +27,11 @@ const EDGE_FADE_PX = 22;
 const EDGE_FADE_ALPHA = 0.58;
 
 /**
- * 明るいティントの上に一様に重ねる暗さ。白い本文の読みやすさのために面全体を少しだけ沈める。
+ * 明るいティントの上に一様に重ねる紺。面全体を黒寄りの紺に沈め、白い本文を読みやすくする。
  * 縁の透け方（`EDGE_FADE_ALPHA`）は変えない。
  */
-const SHADE_ALPHA = 0.12;
+const SHADE_RGB = '8, 16, 40';
+const SHADE_ALPHA = 0.45;
 
 /** 帯を折れ線で近似するときの分割数。曲線の折れ目が見えない程度に細かくする。 */
 const EDGE_FADE_SEGMENTS = 8;
@@ -118,7 +119,7 @@ export const PopupContainer = styled.div<{
     mask-image: ${edgeFadeMask(TINT_BLEED_PX)};
     mask-composite: intersect;
     background-image: ${(props) =>
-      `linear-gradient(rgba(6, 10, 18, ${SHADE_ALPHA}), rgba(6, 10, 18, ${SHADE_ALPHA})),
+      `linear-gradient(rgba(${SHADE_RGB}, ${SHADE_ALPHA}), rgba(${SHADE_RGB}, ${SHADE_ALPHA})),
         linear-gradient(135deg,
           rgba(228, 240, 255, 0.20),
           rgba(170, 205, 245, 0.10),

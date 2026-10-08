@@ -88,6 +88,7 @@ export function ToolRow({
   runLabel,
   status,
   announceStatus,
+  shimmer,
   images,
   imagesCopy,
   outputKey,
@@ -101,6 +102,8 @@ export function ToolRow({
   runLabel: string;
   status: ToolRowStatus | null;
   announceStatus: boolean;
+  /** Set while this Tool is running, so its line shows the progress shimmer. */
+  shimmer: boolean;
   images: readonly ActionImageReference[];
   imagesCopy: ImageGridCopy;
   outputKey: ActionToolOutputKey | null;
@@ -154,11 +157,13 @@ export function ToolRow({
     <>
       <Icon className="action-conversation__tool-icon" size={14} aria-hidden />
       <span
-        className={
-          line.mono
-            ? 'action-conversation__tool-text action-conversation__tool-text--mono'
-            : 'action-conversation__tool-text'
-        }
+        className={[
+          'action-conversation__tool-text',
+          line.mono && 'action-conversation__tool-text--mono',
+          shimmer && 'action-conversation__shimmer',
+        ]
+          .filter(Boolean)
+          .join(' ')}
       >
         {line.text}
       </span>

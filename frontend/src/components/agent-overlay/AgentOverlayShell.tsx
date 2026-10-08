@@ -17,7 +17,15 @@ import {
 } from './ContentLayout';
 import { MarkdownBlock } from './MarkdownRenderer';
 import { HeaderIconButton } from './IconButton';
-import { Check, ChevronDown, ChevronUp, CircleAlert, Clipboard, Minus } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CircleAlert,
+  Clipboard,
+  MessageCircle,
+  Minus,
+} from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
@@ -37,37 +45,9 @@ const SuggestionAcceptedStatus = styled.span`
 
 const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
 
-const busyPulse = keyframes`
-  0%, 80%, 100% { opacity: 0.25; }
-  40% { opacity: 1; }
-`;
-
-/**
- * 停止がまだ出せない間（採用直後、run が始まるまで）の進行表示。
- *
- * この局面では会話も本文もまだ無いので、何も出さないとパネルは止まって見える。
- * 停止と場所も幅も共有し、どちらか一方だけが出る。文字は読み上げにだけ残す。
- */
-const BusyIndicator = styled.span`
+/** The chat button holds the header's left end; the other buttons stay right. */
+const ShowChatButton = styled(HeaderIconButton)`
   margin-right: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 10px;
-`;
-
-const BusyDot = styled.span`
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
-  animation: ${busyPulse} 1.2s ease-in-out infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-    opacity: 0.7;
-  }
 `;
 
 const VisuallyHidden = styled.span`
@@ -78,8 +58,6 @@ const VisuallyHidden = styled.span`
   clip-path: inset(50%);
   white-space: nowrap;
 `;
-
-const BUSY_DOT_DELAYS_S = [0, 0.15, 0.3];
 
 /**
  * Pending approvals sit above the composer, outside the scrolling conversation: the
@@ -136,8 +114,15 @@ type AgentOverlayShellProps = {
   approvalBlockers?: readonly ActionApprovalBlocker[];
   isSubmittingApproval?: boolean;
   approvalErrorMessage?: string | null;
+  /**
+   * Only announces that the Action is running; on screen the conversation's shimmer and
+   * the thinking line show it.
+   */
   showBusyIndicator: boolean;
   showThinking?: boolean;
+  /** The Action the main window's chat can show; null until one exists. */
+  chatActionId?: string | null;
+  onShowChat?: (request: { actionId: string }) => Promise<void>;
   showFooterActions?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
@@ -181,6 +166,8 @@ const AgentOverlayShell = ({
   approvalErrorMessage = null,
   showBusyIndicator,
   showThinking = false,
+  chatActionId = null,
+  onShowChat,
   showFooterActions = true,
   fadeDurationMs = 600,
   onToggleExpand,
@@ -271,12 +258,17 @@ const AgentOverlayShell = ({
         onPointerCancel={onHeaderPointerCancel}
       >
         {showBusyIndicator && (
-          <BusyIndicator role="status">
-            <VisuallyHidden>{t('overlay.actioning')}</VisuallyHidden>
-            {BUSY_DOT_DELAYS_S.map((delay) => (
-              <BusyDot key={delay} style={{ animationDelay: `${delay}s` }} aria-hidden />
-            ))}
-          </BusyIndicator>
+          <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>
+        )}
+        {chatActionId !== null && onShowChat && (
+          <ShowChatButton
+            $visible={isVisible}
+            onClick={() => void onShowChat({ actionId: chatActionId })}
+            aria-label={t('overlay.showInChat')}
+            title={t('overlay.showInChat')}
+          >
+            <MessageCircle strokeWidth={1.75} aria-hidden />
+          </ShowChatButton>
         )}
         <HeaderButtonGroup>
           {conversationCopy && (

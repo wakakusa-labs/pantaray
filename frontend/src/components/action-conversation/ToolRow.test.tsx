@@ -66,6 +66,7 @@ function row(
         runLabel={language === 'ja' ? '実行 1: 2026/8/30' : 'Run 1: 8/30/2026'}
         status={null}
         announceStatus={false}
+        shimmer={false}
         images={[]}
         imagesCopy={TOOL_IMAGES_COPY}
         outputKey={OUTPUT_KEY}

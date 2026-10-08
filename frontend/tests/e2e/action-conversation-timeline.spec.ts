@@ -130,6 +130,9 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           },
           resize: noop,
           getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
+          showChat: async (request: { actionId: string }) => {
+            document.documentElement.dataset.showChat = JSON.stringify(request);
+          },
         },
         orchestration: {
           onEvent: () => noop,
@@ -190,7 +193,24 @@ for (const language of ['ja', 'en'] as const) {
     await expect(run).toContainText(
       /設定ファイルを確認して[\s\S]*読み込み順[\s\S]*notes-a.md[\s\S]*関連資料[\s\S]*notes-b.md[\s\S]*変更の影響[\s\S]*影響する箇所[\s\S]*notes-c.md/
     );
+    // Only the live work sweeps, and reduced motion (the English run) keeps it still.
+    const shimmer = page.locator('.action-conversation__shimmer');
+    await expect(shimmer).toHaveCount(1);
+    await expect(shimmer).toHaveText(language === 'ja' ? 'Pantarayの作業' : "Pantaray's work");
+    expect(await work.nth(2).locator('.action-conversation__shimmer').count()).toBe(1);
+    expect(await shimmer.evaluate((element) => getComputedStyle(element).animationName)).toBe(
+      language === 'ja' ? 'action-conversation-shimmer' : 'none'
+    );
     await capture(page, info, 'running');
+    const showChat = page.getByRole('button', {
+      name: language === 'ja' ? 'チャットで見る' : 'Show in chat',
+    });
+    await showChat.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-show-chat',
+      JSON.stringify({ actionId: 'action-1' })
+    );
     if (language === 'ja') {
       const outputButton = page.getByRole('button', { name: /notes-b.md/ });
       await outputButton.click();
@@ -201,6 +221,7 @@ for (const language of ['ja', 'en'] as const) {
     }
     await publish(page, 3, conversation(true));
     await expect(work).toHaveCount(2);
+    await expect(shimmer).toHaveCount(0);
     await expect(work.nth(0)).toBeFocused();
     await expect(work.nth(0)).toHaveAttribute('aria-expanded', 'false');
     await expect(work.nth(1)).toHaveAttribute('aria-expanded', 'false');

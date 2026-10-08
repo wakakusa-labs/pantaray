@@ -354,27 +354,52 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
 
 
 async def test_search_tasks_finds_any_task_by_words_and_time(db_path: Path) -> None:
-    quote = _overlay_task("old-quote", "A社の見積書を作って")
+    quote = _overlay_task("old-quote", 'A社の見積書を作って。件名は "Q3 report"')
     _finish(
-        db_path, quote, "2026-09-30T09:00:00Z", "見積書を作成しました。合計 200 万円。"
+        db_path,
+        quote,
+        "2026-09-30T09:00:00.000Z",
+        "見積書を作成しました。合計 200 万円。",
     )
     other = _overlay_task("old-other", "Book a room")
-    _finish(db_path, other, "2026-10-05T09:00:00Z", "Booked room 3.")
+    _finish(db_path, other, "2026-10-01T00:00:00.500Z", "Booked room 3.")
+    running = await _turn("a0")(
+        "start_action", message="Draft the plan", attachments_from=[]
+    )
+    assert isinstance(running, dict)
+    payload = claim_next_pending_action_job(
+        db_path=db_path, busy_timeout_ms=1_000, owner_user_id=USER, claimed_by="w"
+    )
+    ActionJobRuntimeRepository(
+        db_path=db_path, busy_timeout_ms=1_000
+    ).prepare_execution(payload=payload, started_at=NOW)
+    await _turn("a1")(
+        "send_to_action",
+        action_id=running["action_id"],
+        message="Add the budget table",
+        attachments_from=[],
+    )
 
+    def found(query: str | None, since: str | None = None) -> list[str]:
+        tasks = search_tasks(
+            user_id=USER, query=query, since=since, until=None, limit=5
+        )
+        return [task.action_id for task in tasks]
+
+    assert found("見積書") == [quote]
+    assert found('"Q3 report"') == [quote]  # quotes as typed, not as stored JSON
+    assert found("content") == []  # never a key of how the request is stored
+    assert found("budget table") == [running["action_id"]]  # a later instruction
+    assert found("100%") == []
+    # Since the start of Oct 1, in any offset, holds the one updated at 00:00:00.5.
+    assert other in found(None, "2026-10-01T00:00:00Z")
+    assert other in found(None, "2026-10-01T09:00:00+09:00")
+    assert quote not in found(None, "2026-10-01T00:00:00Z")
     by_words = search_tasks(
         user_id=USER, query="見積書", since=None, until=None, limit=5
     )
-    by_time = search_tasks(
-        user_id=USER, query=None, since="2026-10-01T00:00:00Z", until=None, limit=5
-    )
-    literal = search_tasks(user_id=USER, query="100%", since=None, until=None, limit=5)
-
-    assert [(t.action_id, t.title, t.status) for t in by_words] == [
-        (quote, "A社の見積書を作って", "success")
-    ]
     assert by_words[0].latest == "見積書を作成しました。合計 200 万円。"
-    assert [t.action_id for t in by_time] == [other]
-    assert literal == ()
+
     # The whole answer of a found task, as its description says to read it.
     answer = execute_memory_sql(
         db_path=str(db_path),

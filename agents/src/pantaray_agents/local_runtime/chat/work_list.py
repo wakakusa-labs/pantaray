@@ -13,11 +13,13 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Final, cast
 
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
@@ -123,8 +125,11 @@ def search_tasks(
     until: str | None,
     limit: int,
 ) -> tuple[ChatTask, ...]:
-    """Every task of the user's whose request or answer holds ``query``, last
-    updated in [``since``, ``until``), newest first."""
+    """Every task of the user's whose requests or answer hold ``query``, last
+    updated in [``since``, ``until``), newest first.
+
+    Raises ``ValueError`` for a time that is not ISO 8601.
+    """
 
     # Design limit: a scan with LIKE over every task; move to the FTS index when
     # a user's tasks run into the tens of thousands.
@@ -136,9 +141,12 @@ def search_tasks(
             connection.execute(
                 _TASKS_SQL.format(
                     where=(
-                        "(:pattern IS NULL OR first.user_message_json LIKE :pattern "
-                        "ESCAPE '\\' OR actions.final_output LIKE :pattern "
-                        "ESCAPE '\\') "
+                        "(:pattern IS NULL OR actions.final_output LIKE :pattern "
+                        "ESCAPE '\\' OR EXISTS (SELECT 1 FROM agent_action_steps "
+                        "AS asked WHERE asked.user_id = actions.user_id "
+                        "AND asked.action_id = actions.action_id "
+                        "AND asked.step_type = 'user_request' "
+                        "AND asked.user_request_text LIKE :pattern ESCAPE '\\')) "
                         "AND (:since IS NULL OR actions.updated_at >= :since) "
                         "AND (:until IS NULL OR actions.updated_at < :until)"
                     ),
@@ -147,8 +155,8 @@ def search_tasks(
                 {
                     "user_id": user_id,
                     "pattern": pattern,
-                    "since": since,
-                    "until": until,
+                    "since": None if since is None else _stored_time(since),
+                    "until": None if until is None else _stored_time(until),
                     "limit": limit,
                 },
             )
@@ -172,6 +180,15 @@ def _tasks(rows: Iterable[Sequence[object]]) -> tuple[ChatTask, ...]:
         )
         for action_id, status, awaiting_approval, final_output, message_json, updated_at in rows
     )
+
+
+def _stored_time(value: str) -> str:
+    """``value`` as the timestamps are stored, so they compare as strings."""
+
+    moment = datetime.fromisoformat(value)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return format_utc_iso(moment.astimezone(UTC))
 
 
 def _escape_like(text: str) -> str:

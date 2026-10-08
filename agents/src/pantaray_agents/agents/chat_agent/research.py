@@ -154,14 +154,21 @@ def _search_tasks_tool(user_id: str) -> ReactToolDefinition:
     async def execute(call: ReactToolCall, _step: int) -> ReactToolResult:
         args = call.tool_args
         assert isinstance(args, dict)  # the registry checked the schema
-        found = await asyncio.to_thread(
-            search_tasks,
-            user_id=user_id,
-            query=_text_or_none(args.get("query")),
-            since=_text_or_none(args.get("since")),
-            until=_text_or_none(args.get("until")),
-            limit=int(cast(int, args.get("limit") or _SEARCH_TASKS_DEFAULT)),
-        )
+        try:
+            found = await asyncio.to_thread(
+                search_tasks,
+                user_id=user_id,
+                query=_text_or_none(args.get("query")),
+                since=_text_or_none(args.get("since")),
+                until=_text_or_none(args.get("until")),
+                limit=int(cast(int, args.get("limit") or _SEARCH_TASKS_DEFAULT)),
+            )
+        except ValueError:
+            return tool_error_response(
+                tool_name=call.tool_name,
+                error_code="INVALID_TIME",
+                message="since and until must be ISO 8601 times.",
+            )
         return ReactToolResult(
             tool_name=call.tool_name,
             status="success",

@@ -21,8 +21,8 @@ function status(overrides) {
 }
 
 test('tray copy labels the new conversation action in each language', () => {
-  assert.equal(getTrayMenuCopy('ja').newConversation, '新しい会話');
-  assert.equal(getTrayMenuCopy('en').newConversation, 'New conversation');
+  assert.equal(getTrayMenuCopy('ja').newConversation, '新しい作業');
+  assert.equal(getTrayMenuCopy('en').newConversation, 'New task');
 });
 
 test('tray copy explains recording statuses that pause or block activity recording', () => {

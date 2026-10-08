@@ -127,6 +127,7 @@ async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
       const noop = () => {};
       const opened: string[] = [];
       Object.defineProperty(window, 'e2eOpened', { value: opened });
+      let sequence = 100;
       Object.defineProperty(window, 'electron', {
         value: {
           ipcRenderer: { on: () => noop, send: noop },
@@ -149,8 +150,29 @@ async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
           shortcut: { getState: async () => ({ accelerator: 'Alt+Space', failure: null }) },
           chat: {
             listItems: async () => chat,
-            sendMessage: async () => {
-              throw new Error('not in this test');
+            // Answers as the backend does: the appended item, with the request's content.
+            sendMessage: async (request: {
+              text: string;
+              quote_item_id: string | null;
+              images: unknown[];
+              files: unknown[];
+            }) => {
+              sequence += 1;
+              return {
+                kind: 'sent',
+                item: {
+                  sequence,
+                  item_id: `sent-${sequence}`,
+                  created_at: new Date().toISOString(),
+                  content: {
+                    kind: 'user_message',
+                    text: request.text.trim(),
+                    quote_item_id: request.quote_item_id,
+                    images: request.images,
+                    files: request.files,
+                  },
+                },
+              };
             },
             onItemAppended: () => noop,
           },
@@ -170,6 +192,20 @@ async function installBridge(page: Page, mode: 'chat' | 'list' | null) {
               return 'focused';
             },
             deleteItem: async () => ({ ok: true }),
+            onShowChat: (callback: (payload: { actionId: string }) => void) => {
+              Object.defineProperty(window, 'e2eShowChat', { value: callback, configurable: true });
+              return noop;
+            },
+          },
+          actions: {
+            attachFile: async ({ name, bytes }: { name: string; bytes: ArrayBuffer }) => ({
+              attachmentId: '00000000-0000-4000-8000-000000000001',
+              name,
+              byteSize: bytes.byteLength,
+            }),
+            attachImage: async () => ({ kind: 'rejected', reason: 'failed' }),
+            discardAttachment: async () => undefined,
+            onConversationUpdated: () => noop,
           },
         },
       });
@@ -212,7 +248,7 @@ test('chat mode is the default: bubbles, cards with latest-only status, no event
   for (const scheme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await waitForAnimationsToSettle(page);
-    await page.screenshot({ path: info.outputPath(`history-chat-${scheme}.png`) });
+    await page.screenshot({ path: info.outputPath(`chat-${scheme}.png`) });
   }
 });
 
@@ -229,9 +265,67 @@ test('the chosen view is remembered, and the list stays as it was', async ({ pag
   await expect(page.getByRole('button', { name: '削除 見積書のたたき台を作る' })).toBeVisible();
   await expect(page.getByRole('button', { name: '新しい作業' })).toBeVisible();
   await waitForAnimationsToSettle(page);
-  await page.screenshot({ path: info.outputPath('history-list.png') });
+  await page.screenshot({ path: info.outputPath('list.png') });
 
   await page.reload();
   await expect(page.getByRole('button', { name: '一覧', pressed: true })).toBeVisible();
   await expect(page.getByRole('searchbox')).toBeVisible();
+});
+
+test('composer: quote a message, attach a document, send with Enter', async ({ page }, info) => {
+  await installBridge(page, null);
+  const chat = page.getByRole('list', { name: 'Pantaray とのチャット' });
+  const input = page.getByRole('textbox', { name: 'メッセージ' });
+  await expect(input).toBeVisible();
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-composer-empty.png') });
+
+  // The quote button appears on hover and is reachable by keyboard.
+  const reply = chat.getByRole('article', { name: 'Pantaray' }).last();
+  await reply.hover();
+  await reply.getByRole('button', { name: '引用して返信' }).click();
+  await expect(input).toBeFocused();
+  await expect(page.getByRole('button', { name: '引用をやめる' })).toBeVisible();
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-composer-quote.png') });
+
+  await page
+    .getByRole('form', { name: 'Pantaray へのメッセージ' })
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: '見積書.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
+    });
+  await expect(page.getByRole('button', { name: '見積書.pdf を削除' })).toBeVisible();
+  await input.fill('納期は 2 週間うしろで。単価はそのまま');
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-composer-attachment.png') });
+
+  await input.press('Enter');
+  const sent = chat.getByRole('article', { name: 'あなた' }).last();
+  await expect(sent).toContainText('納期は 2 週間うしろで。単価はそのまま');
+  await expect(sent).toContainText('見積書のほうに伝えました。');
+  await expect(sent.getByRole('list', { name: '添付ファイル 1 件' })).toContainText('見積書.pdf');
+  await expect(sent).toBeInViewport();
+  await expect(input).toHaveValue('');
+  await expect(page.getByRole('button', { name: '引用をやめる' })).toHaveCount(0);
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('chat-after-send.png') });
+});
+
+test('the Overlay’s chat button opens the chat at that Action’s latest card', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 520 });
+  await installBridge(page, 'list');
+  await expect(page.getByRole('searchbox')).toBeVisible();
+  await page.evaluate(() =>
+    (window as unknown as { e2eShowChat: (p: { actionId: string }) => void }).e2eShowChat({
+      actionId: 'slides',
+    })
+  );
+  const card = page.getByRole('button', { name: '登壇資料のスライドを下書きする を開く' });
+  await expect(page.getByRole('button', { name: 'チャット', pressed: true })).toBeVisible();
+  await expect(card).toBeFocused();
+  await expect(card).toBeInViewport();
+  await expect(card).toHaveAttribute('aria-current', 'true');
 });

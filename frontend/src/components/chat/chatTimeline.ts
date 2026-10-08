@@ -8,6 +8,16 @@ export function isChatMessage(item: ChatItem): item is ChatMessageItem {
   return item.content.kind === 'user_message' || item.content.kind === 'assistant_message';
 }
 
+/** Who wrote a message, as the catalog names them. */
+export function speakerKey(item: ChatMessageItem): 'history.chat.you' | 'history.chat.pantaray' {
+  return item.content.kind === 'user_message' ? 'history.chat.you' : 'history.chat.pantaray';
+}
+
+/** Where a card is in the page, so a request to show a work can scroll to it. */
+export function cardElementId(position: string): string {
+  return `chat-card:${position}`;
+}
+
 /** One Action or Suggestion, named the way the history list names its rows. */
 export type WorkKey = `action:${string}` | `suggestion:${string}`;
 

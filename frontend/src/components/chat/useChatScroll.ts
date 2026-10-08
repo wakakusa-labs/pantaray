@@ -28,12 +28,27 @@ export function useChatScroll({
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const olderTriggerRef = useRef<HTMLButtonElement>(null);
   const followingRef = useRef(true);
   // The distance from the bottom when an older page was asked for, so it can be kept.
   const anchorRef = useRef<number | null>(null);
   const firstItemRef = useRef<string | null>(null);
+
+  // The composer grows with a quote or attachments and shrinks the chat above it; a reader at the
+  // bottom stays at the bottom instead of losing the newest message under it.
+  const attachScrollElement = useCallback((element: HTMLDivElement | null) => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    scrollRef.current = element;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      if (followingRef.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element);
+    resizeObserverRef.current = observer;
+  }, []);
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -80,5 +95,16 @@ export function useChatScroll({
     return () => observer.disconnect();
   }, [ready, hasOlder, failed, loadingOlder, loadOlderKeepingPlace]);
 
-  return { scrollRef, olderTriggerRef, onScroll, loadOlderKeepingPlace };
+  /** The next items scroll into view, as after the reader sends a message. */
+  const followNewest = useCallback(() => {
+    followingRef.current = true;
+  }, []);
+
+  return {
+    scrollRef: attachScrollElement,
+    olderTriggerRef,
+    onScroll,
+    loadOlderKeepingPlace,
+    followNewest,
+  };
 }

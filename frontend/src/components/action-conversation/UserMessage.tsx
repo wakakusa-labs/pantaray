@@ -3,64 +3,8 @@ import type { ReactNode } from 'react';
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
-import { AttachedImages, type ImageGridCopy } from './AttachedImages';
-
-type Copy = {
-  you: string;
-  userImages: ImageGridCopy;
-  userFiles: (count: number) => string;
-  userStatus: Record<
-    'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
-    string
-  >;
-};
-const COPY: Record<'en' | 'ja', Copy> = {
-  en: {
-    you: 'You',
-    userImages: {
-      list: (count) => `${count} attached image${count === 1 ? '' : 's'}`,
-      // The image content is unknown here, so the text describes the attachment, never its subject.
-      imageAlt: (position, count) => `Attached image ${position} of ${count}`,
-      open: (position, count) => `Open attached image ${position} of ${count}`,
-      missing: 'Image unavailable',
-      lightbox: {
-        dialogLabel: 'Attached image',
-        close: 'Close',
-        reveal: 'Show in Finder',
-      },
-    },
-    userFiles: (count) => `${count} attached file${count === 1 ? '' : 's'}`,
-    userStatus: {
-      pending: 'Pending',
-      not_executed: 'Not executed',
-      submitting: 'Sending',
-      awaiting_refresh: 'Sent, updating',
-      failed: 'Send failed',
-    },
-  },
-  ja: {
-    you: 'あなた',
-    userImages: {
-      list: (count) => `添付画像 ${count} 件`,
-      imageAlt: (position, count) => `添付画像 ${position} / ${count}`,
-      open: (position, count) => `添付画像 ${position} / ${count} を開く`,
-      missing: '画像を表示できません',
-      lightbox: {
-        dialogLabel: '添付画像',
-        close: '閉じる',
-        reveal: 'Finder で表示',
-      },
-    },
-    userFiles: (count) => `添付ファイル ${count} 件`,
-    userStatus: {
-      pending: '保留',
-      not_executed: '未実行',
-      submitting: '送信中',
-      awaiting_refresh: '送信済み・更新中',
-      failed: '送信失敗',
-    },
-  },
-};
+import { AttachedImages } from './AttachedImages';
+import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
 type ProjectRefSpan = Readonly<{ start: number; end: number }>;
 

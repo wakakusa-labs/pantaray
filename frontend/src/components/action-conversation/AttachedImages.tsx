@@ -5,6 +5,8 @@ import { buildActionImageUrl } from '../../../electron/src/protocol/imageStorage
 
 import { ImageLightbox } from './ImageLightbox';
 
+import './attachedImages.css';
+
 /** The thumbnail's intrinsic box, mirrored in CSS so a late decode cannot shift the layout. */
 const THUMBNAIL_SIZE_PX = 96;
 

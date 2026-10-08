@@ -1,5 +1,5 @@
 import { RefreshCw } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
 import { NewWorkButton } from '@/components/history/NewWorkButton';
@@ -11,6 +11,7 @@ import { useChatItems } from '@/hooks/useChatItems';
 import { useChatWorkStates } from '@/hooks/useChatWorkStates';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
 
+import { ChatComposer } from './ChatComposer';
 import { ChatMessage } from './ChatMessage';
 import {
   cardWorkKey,
@@ -19,6 +20,8 @@ import {
   latestCardPositions,
   type WorkKey,
 } from './chatTimeline';
+import { useChatComposer } from './useChatComposer';
+import { useChatReveal, type ChatReveal } from './useChatReveal';
 import { useChatScroll } from './useChatScroll';
 
 import './chatView.css';
@@ -45,10 +48,13 @@ async function openCard(card: ChatCardData): Promise<void> {
  */
 export function ChatView({
   modeSwitch,
+  reveal,
   turnInProgress,
   onRetryTurn,
 }: {
   modeSwitch: ReactNode;
+  /** The Action whose latest card the Overlay asked to show, or null. */
+  reveal: ChatReveal | null;
   /** True while a chat turn runs; drawn as a 「…」 bubble after the last message. */
   turnInProgress: boolean;
   /** Runs the failed turn again; null hides the retry button. */
@@ -60,6 +66,12 @@ export function ChatView({
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
   const [openWork, setOpenWork] = useState<WorkKey | null>(null);
+  // The Overlay that asked to show its Action is the one open now.
+  const [revealSeen, setRevealSeen] = useState<string | null>(null);
+  if (reveal && reveal.key !== revealSeen) {
+    setRevealSeen(reveal.key);
+    setOpenWork(`action:${reveal.actionId}`);
+  }
   const ready = !chat.loading;
   const scroll = useChatScroll({
     items: chat.items,
@@ -75,6 +87,22 @@ export function ChatView({
   );
   const latestCards = useMemo(() => latestCardPositions(chat.items), [chat.items]);
   const shown = useMemo(() => chat.items.filter(isShownInChat), [chat.items]);
+  useChatReveal({
+    reveal,
+    ready,
+    latestCards,
+    hasOlder: chat.hasOlder,
+    failed: chat.failed,
+    loadingOlder: chat.loadingOlder,
+    loadOlder: chat.loadOlder,
+  });
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composer = useChatComposer({
+    onSent: (item) => {
+      scroll.followNewest();
+      chat.appendItem(item);
+    },
+  });
 
   const handleNewWork = async (): Promise<void> => {
     setNotice(null);
@@ -125,6 +153,14 @@ export function ChatView({
                 openWork={openWork}
                 t={t}
                 onOpenCard={(card) => void handleOpenCard(card)}
+                onQuote={
+                  composer.state.pending === null
+                    ? () => {
+                        composer.setQuote(item);
+                        textareaRef.current?.focus();
+                      }
+                    : null
+                }
               />
             </li>
           );
@@ -194,7 +230,7 @@ export function ChatView({
   };
 
   return (
-    <div className="history-container">
+    <div className="history-container chat-view">
       <div className="history-header">
         <div className="history-toolbar">
           {modeSwitch}
@@ -220,6 +256,7 @@ export function ChatView({
         ) : null}
       </div>
       {renderBody()}
+      <ChatComposer composer={composer} textareaRef={textareaRef} t={t} />
       <div className="chat-announcer" role="status">
         {chat.arrived?.content.kind === 'assistant_message'
           ? t('history.chat.announce', {

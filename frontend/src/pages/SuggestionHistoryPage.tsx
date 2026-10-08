@@ -1,5 +1,6 @@
 import { RefreshCw, Trash2 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
@@ -20,6 +21,7 @@ import { NEW_WORK_BUTTON_ID, openNewWork } from '@/history/newWork';
 import {
   historyModeButtonId,
   readHistoryViewMode,
+  readShowChatState,
   saveHistoryViewMode,
   type HistoryViewMode,
 } from '@/history/historyViewMode';
@@ -358,6 +360,14 @@ function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
 const SuggestionHistoryPage = () => {
   const { t } = useI18n();
   const [mode, setMode] = useState<HistoryViewMode>(readHistoryViewMode);
+  // `Layout` brings the page here with the Action the Overlay asked to show in the chat.
+  const location = useLocation();
+  const reveal = readShowChatState(location.state, location.key);
+  const [revealSeen, setRevealSeen] = useState<string | null>(null);
+  if (reveal && reveal.key !== revealSeen) {
+    setRevealSeen(reveal.key);
+    setMode('chat');
+  }
   const switchedRef = useRef(false);
   // The switch is redrawn inside the other view's toolbar, so the pressed button gets focus back.
   useLayoutEffect(() => {
@@ -380,7 +390,7 @@ const SuggestionHistoryPage = () => {
     <HistoryListView modeSwitch={modeSwitch} />
   ) : (
     // The chat's turn state and retry are not delivered to the renderer yet (later nodes).
-    <ChatView modeSwitch={modeSwitch} turnInProgress={false} onRetryTurn={null} />
+    <ChatView modeSwitch={modeSwitch} reveal={reveal} turnInProgress={false} onRetryTurn={null} />
   );
 };
 

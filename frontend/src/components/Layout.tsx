@@ -9,6 +9,7 @@ import { AiConnectionNotice } from './AiConnectionNotice';
 import { LocalOwnerBoundary } from './LocalOwnerBoundary';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
+import { saveHistoryViewMode, showChatState } from '@/history/historyViewMode';
 import './Layout.css';
 
 /**
@@ -24,6 +25,16 @@ const Layout: React.FC = () => {
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // The Overlay's chat button: from any page, open History's chat on that Action's latest card.
+  useEffect(() => {
+    const onShowChat = window.electron?.history?.onShowChat;
+    if (!onShowChat) return;
+    return onShowChat(({ actionId }) => {
+      saveHistoryViewMode('chat');
+      navigate('/history', { state: showChatState(actionId) });
+    });
+  }, [navigate]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -82,6 +82,14 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.failure.llm_request': 'The request to the AI failed, so there’s no reply.',
     'history.chat.failure.step_limit': 'Stopped at the step limit before replying.',
     'history.chat.retry': 'Try again',
+    'history.chat.quote.reply': 'Reply with a quote',
+    'history.chat.quote.clear': 'Remove the quote',
+    'history.chat.composer.label': 'Message to Pantaray',
+    'history.chat.composer.failed': 'Couldn’t send the message.',
+    'history.chat.composer.quoteRejected':
+      'The quoted message can’t be used. Remove the quote and send again.',
+    'history.chat.composer.attachmentsRejected':
+      'An attachment can’t be sent. Remove it and send again.',
   },
   ja: {
     'history.loading': '履歴を読み込み中…',
@@ -164,5 +172,13 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.failure.llm_request': 'AI への依頼が失敗し、返信できませんでした。',
     'history.chat.failure.step_limit': '手順の上限に達し、返信できませんでした。',
     'history.chat.retry': 'もう一度',
+    'history.chat.quote.reply': '引用して返信',
+    'history.chat.quote.clear': '引用をやめる',
+    'history.chat.composer.label': 'Pantaray へのメッセージ',
+    'history.chat.composer.failed': 'メッセージを送れませんでした。',
+    'history.chat.composer.quoteRejected':
+      '引用したメッセージを使えません。引用を外して送り直してください。',
+    'history.chat.composer.attachmentsRejected':
+      '送れない添付があります。外してから送り直してください。',
   },
 });

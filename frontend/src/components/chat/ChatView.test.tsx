@@ -1,11 +1,18 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import type { ChatItem, ChatItemPage } from '../../../electron/src/chat/chatContracts';
+import type {
+  ChatItem,
+  ChatItemPage,
+  ChatMessageRequest,
+  ChatMessageSendResult,
+} from '../../../electron/src/chat/chatContracts';
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import type { OrchestrationStatus } from '../../../electron/src/orchestration/eventContracts';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
@@ -43,6 +50,13 @@ let appendItem: (item: ChatItem) => void;
 let publishStatus: (status: OrchestrationStatus) => void;
 const listItems = vi.fn(async () => pages.shift() ?? { items: [], next_cursor: null });
 const openConversation = vi.fn(async () => 'focused' as const);
+const sendMessage = vi.fn<(request: ChatMessageRequest) => Promise<ChatMessageSendResult>>();
+const attachFile = vi.fn(async ({ name }: { name: string }) => ({
+  attachmentId: '00000000-0000-4000-8000-000000000001',
+  name,
+  byteSize: 15,
+}));
+const discardAttachment = vi.fn(async () => undefined);
 const historyFetch = vi.fn(async () => ({
   data: [work('A1', '見積書のたたき台を作る', 'running')],
   nextCursor: null,
@@ -56,7 +70,7 @@ beforeEach(() => {
   window.electron = {
     chat: {
       listItems,
-      sendMessage: vi.fn(),
+      sendMessage,
       onItemAppended: (callback: (item: ChatItem) => void) => {
         appendItem = callback;
         return () => {};
@@ -69,6 +83,7 @@ beforeEach(() => {
       },
     },
     history: { fetch: historyFetch, openConversation, openNewConversation: vi.fn() },
+    actions: { attachFile, attachImage: vi.fn(), discardAttachment },
     process: { platform: 'darwin', env: { NODE_ENV: 'test' } },
   } as unknown as Window['electron'];
 });
@@ -78,11 +93,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const renderPage = () =>
+const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
   render(
-    <UiLanguageProvider initialLanguage="ja">
-      <SuggestionHistoryPage />
-    </UiLanguageProvider>
+    <MemoryRouter initialEntries={[entry]}>
+      <UiLanguageProvider initialLanguage="ja">
+        <SuggestionHistoryPage />
+      </UiLanguageProvider>
+    </MemoryRouter>
   );
 
 it('shows messages and cards, with a work’s status on its latest card only', async () => {
@@ -223,4 +240,101 @@ it('stops loading older pages on its own after a failure until the reader asks a
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('sends a quoted reply with a document once, and shows it as the user’s message', async () => {
+  pages = [{ items: [reply(1, '資料を作りましょうか？')], next_cursor: null }];
+  renderPage();
+  const pantaray = await screen.findByRole('article', { name: 'Pantaray' });
+  await userEvent.click(within(pantaray).getByRole('button', { name: '引用して返信' }));
+  const input = screen.getByRole('textbox', { name: 'メッセージ' });
+  expect(input).toHaveFocus();
+  expect(screen.getByRole('button', { name: '引用をやめる' })).toBeInTheDocument();
+
+  const file = new File(['%PDF-1.4\n%%EOF\n'], '議事録.pdf', { type: 'application/pdf' });
+  await userEvent.upload(
+    screen
+      .getByRole('form', { name: 'Pantaray へのメッセージ' })
+      .querySelector('input[type="file"]')!,
+    file
+  );
+  expect(await screen.findByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
+
+  sendMessage.mockImplementationOnce(async (request) => ({
+    kind: 'sent',
+    item: {
+      sequence: 2,
+      item_id: 'item-2',
+      created_at: at(2),
+      content: {
+        kind: 'user_message',
+        text: request.text,
+        quote_item_id: request.quote_item_id,
+        images: request.images,
+        files: request.files,
+      },
+    },
+  }));
+  // IME composition: Enter confirms the conversion and must not send.
+  await userEvent.type(input, 'お願い');
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })
+  );
+  expect(sendMessage).not.toHaveBeenCalled();
+  await userEvent.keyboard('{Enter}');
+
+  expect(sendMessage).toHaveBeenCalledOnce();
+  const [request] = sendMessage.mock.calls[0];
+  expect(request).toMatchObject({
+    text: 'お願い',
+    quote_item_id: 'item-1',
+    images: [],
+    files: [{ name: '議事録.pdf', byte_size: 15 }],
+  });
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  expect(within(mine).getByText('資料を作りましょうか？')).toBeInTheDocument();
+  expect(within(mine).getByRole('list', { name: '添付ファイル 1 件' })).toHaveTextContent(
+    '議事録.pdf'
+  );
+  expect(input).toHaveValue('');
+  expect(screen.queryByRole('button', { name: '引用をやめる' })).not.toBeInTheDocument();
+  // A sent document is the backend's now; only unsent ones are discarded.
+  expect(discardAttachment).not.toHaveBeenCalled();
+});
+
+it('resends a failed message with the same message_id and points at a refused field', async () => {
+  pages = [{ items: [], next_cursor: null }];
+  renderPage();
+  const input = await screen.findByRole('textbox', { name: 'メッセージ' });
+  sendMessage.mockRejectedValueOnce(new Error('offline'));
+  await userEvent.type(input, 'こんにちは{Enter}');
+  expect(await screen.findByRole('alert')).toHaveTextContent('メッセージを送れませんでした。');
+  expect(input).toHaveAttribute('readonly');
+
+  sendMessage.mockResolvedValueOnce({ kind: 'rejected', field: 'text' });
+  await userEvent.click(screen.getByRole('button', { name: '同じメッセージを再送' }));
+  expect(sendMessage).toHaveBeenCalledTimes(2);
+  expect(sendMessage.mock.calls[1][0].message_id).toBe(sendMessage.mock.calls[0][0].message_id);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '有効なメッセージを入力してください。'
+  );
+  expect(input).not.toHaveAttribute('readonly');
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+});
+
+it('opens on the chat at the Action’s latest card when the Overlay asks, reading older pages', async () => {
+  localStorage.setItem('pantaray.history-view-mode', 'list');
+  pages = [
+    { items: [userMessage(3, 'ほかの話'), userMessage(2, 'まだほかの話')], next_cursor: 2 },
+    {
+      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
+      next_cursor: null,
+    },
+  ];
+  renderPage({ pathname: '/history', state: showChatState('A1') });
+  const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
+  await waitFor(() => expect(card).toHaveFocus());
+  expect(card).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('button', { name: 'チャット', pressed: true })).toBeInTheDocument();
+  expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
 });

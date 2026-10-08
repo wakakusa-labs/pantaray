@@ -16,6 +16,8 @@ export type ChatItemsResult = {
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
   reload: () => Promise<void>;
+  /** Adds an item this window appended itself; the relay's copy of it is the same item. */
+  appendItem: (item: ChatItem) => void;
 };
 
 /**
@@ -102,5 +104,9 @@ export function useChatItems(): ChatItemsResult {
     loadingOlder,
     loadOlder,
     reload,
+    appendItem: useCallback(
+      (item: ChatItem) => setItems((current) => mergeChatItems(current, [item])),
+      []
+    ),
   };
 }

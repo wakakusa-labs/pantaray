@@ -6,7 +6,10 @@ import random
 import pytest
 from tests.unit.agents.suggestion_agent.prompt_support import NO_SUGGESTION
 
-from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
+    ActionTurnReply,
+    LlmToolCallTurn,
+)
 from pantaray_agents.agents.suggestion_agent.lenses import (
     EXPLORATION_LENS_WEIGHTS,
     SUGGESTION_LENS_PROMPT_NAME,
@@ -15,10 +18,14 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     decide_with_lenses,
     sample_lenses,
 )
+from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.mock.suggestion_research import (
     build_mock_suggestion_research_tools,
 )
 from pantaray_agents.utils.prompt_loader import PromptLoader
+from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
+from pantaray_llm.contracts.conversation import LlmTurnUserItem
+from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
 LENSES = ("take_over", "likely_forgotten", "perspective")
@@ -35,26 +42,50 @@ def _suggestion(point: str) -> dict[str, object]:
     }
 
 
+def _lens_of(request: ConversationRequest) -> str:
+    # Each run's lens leads its history.
+    lens_text = request.conversation[0]
+    assert isinstance(lens_text, LlmTurnUserItem)
+    block = lens_text.content[0]
+    assert isinstance(block, LlmInputTextBlock)
+    return block.text
+
+
 def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
     selector_prompts: list[str] = []
 
+    async def send(request: ConversationRequest, _sink: object) -> ActionTurnReply:
+        lens = next(
+            lens for lens in LENSES if f"### {lens.title()}" in _lens_of(request)
+        )
+        call = LlmToolCall(
+            call_id="c",
+            name="submit_suggestion",
+            arguments=submissions.get(lens, NO_SUGGESTION),
+        )
+        return ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn", messages=[], calls=[call]
+            ),
+            provider_turn=None,
+        )
+
     async def generate(*, prompt, tools, continuation_mode, **_kwargs):
-        if tools[0].name == "select_suggestion":
-            assert continuation_mode == "disabled"
-            selector_prompts.append(prompt)
-            arguments: dict[str, object] = {"choice": choice, "reason": "why"}
-            name = "select_suggestion"
-        else:
-            lens = next(lens for lens in LENSES if f"### {lens.title()}" in prompt)
-            arguments = submissions.get(lens, NO_SUGGESTION)
-            name = "submit_suggestion"
-        call = LlmToolCall(call_id="c", name=name, arguments=arguments)
+        assert tools[0].name == "select_suggestion"
+        assert continuation_mode == "disabled"
+        selector_prompts.append(prompt)
+        call = LlmToolCall(
+            call_id="c",
+            name="select_suggestion",
+            arguments={"choice": choice, "reason": "why"},
+        )
         return LlmToolCallTurn(calls=(call,), continuation=None)
 
-    return generate, selector_prompts
+    return (send, generate), selector_prompts
 
 
-async def _decide(generate, steps: list[int]):
+async def _decide(model, steps: list[int]):
+    send, generate = model
     loader = PromptLoader()
     lens_config = loader.load_config(SUGGESTION_LENS_PROMPT_NAME)
     # Title each lens by its key so the fake model can tell the runs apart.
@@ -74,9 +105,9 @@ async def _decide(generate, steps: list[int]):
         lens_config=lens_config,
         selector_config=loader.load_config(SUGGESTION_SELECTOR_PROMPT_NAME),
         research_tools=build_mock_suggestion_research_tools(),
+        send_turn=send,
         generate_tool_call=generate,
         record_step=record,
-        discard_llm_thoughts=lambda: None,
     )
 
 
@@ -143,17 +174,21 @@ async def test_no_candidate_skips_the_selector() -> None:
 async def test_a_failed_lens_run_stops_the_other_runs() -> None:
     stopped: list[str] = []
 
-    async def generate(*, prompt, **_kwargs):
-        if "### Take_Over" in prompt:
+    async def send(request: ConversationRequest, _sink: object) -> ActionTurnReply:
+        lens = _lens_of(request)
+        if "### Take_Over" in lens:
             raise RuntimeError("model unavailable")
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            stopped.append(prompt)
+            stopped.append(lens)
             raise
         raise AssertionError("unreachable")
 
+    async def generate(**_kwargs):
+        raise AssertionError("no selector after a failed run")
+
     with pytest.raises(RuntimeError, match="model unavailable"):
-        await _decide(generate, [])
+        await _decide((send, generate), [])
 
     assert len(stopped) == 2

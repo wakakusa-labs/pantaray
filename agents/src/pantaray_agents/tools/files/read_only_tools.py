@@ -39,6 +39,7 @@ from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     ReactToolExecutor,
     ReactToolResult,
+    ToolConcurrency,
     ToolImage,
     react_tool_response_schema,
     tool_error_response,
@@ -441,6 +442,8 @@ def _definition(
             success_schema={"type": "object", **success}
         ),
         execute=execute,
+        # Each only reads, and a spill goes to a file of its own.
+        concurrency=ToolConcurrency("parallel"),
     )
 
 

@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_INPUT_BYTES
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
 )
 from pantaray_agents.tools.contract import ReactToolRegistry
-from pantaray_agents.tools.memory.sql import (
-    MAX_MEMORY_SQL_LIMIT,
-    MAX_MEMORY_SQL_OUTPUT_CHARS,
-)
 
 from .test_suggestion_research_tools import (
     BUSY_TIMEOUT_MS,
@@ -94,20 +88,3 @@ async def test_suggestion_memory_sql_rejects_a_write_as_a_tool_error(
     assert result.status == "error"
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == 1
-
-
-def test_the_largest_memory_sql_result_fits_half_the_suggestion_input_limit() -> None:
-    """Trimming compacts the resent conversation to half the limit and always keeps
-    the newest result, so one result above that half would defeat the bound."""
-    cell = "あ" * (MAX_MEMORY_SQL_OUTPUT_CHARS // MAX_MEMORY_SQL_LIMIT)
-    payload = {
-        "columns": ["description"],
-        "rows": [{"description": cell} for _ in range(MAX_MEMORY_SQL_LIMIT)],
-        "row_count": MAX_MEMORY_SQL_LIMIT,
-        "truncated": True,
-        "notes": ["memory_sql output was truncated by total character limit."],
-    }
-
-    size = len(json.dumps(payload, ensure_ascii=False).encode())
-
-    assert size < SUGGESTION_MAX_INPUT_BYTES // 2

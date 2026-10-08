@@ -1410,7 +1410,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     tmp_path: Path,
 ) -> None:
     from pantaray_agents.agents.artifact_react import ReactLoopStep
-    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
     from pantaray_agents.agents.suggestion_agent.output import (
         parse_suggestion_output,
     )
@@ -1418,6 +1418,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         SUBMIT_SUGGESTION_TOOL_NAME,
         run_suggestion_react,
     )
+    from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
     from pantaray_llm.contracts.tool_use import LlmToolCall
 
     db_path = _bootstrap_db(tmp_path)
@@ -1435,10 +1436,15 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         )
     )
 
-    async def generate_tool_call(**_kwargs) -> LlmToolCallTurn:  # noqa: ANN003
+    async def send_turn(_request: object, _sink: object) -> ActionTurnReply:
         name, arguments = next(turns)
         call = LlmToolCall(call_id=name, name=name, arguments=arguments())
-        return LlmToolCallTurn(calls=(call,), continuation=None)
+        return ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn", messages=[], calls=[call]
+            ),
+            provider_turn=None,
+        )
 
     async def record_step(step: ReactLoopStep) -> None:
         if step.step_kind == "tool" and step.status == "success":
@@ -1447,7 +1453,8 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     result = await run_suggestion_react(
         user_id="user-1",
         suggestion_id="suggestion-1",
-        initial_prompt="context",
+        context="context",
+        lens="lens",
         system_instruction="system",
         research_tools=LocalSuggestionResearchTools(
             db_path=db_path,
@@ -1455,10 +1462,9 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
             snapshot=_snapshot(db_path=db_path),
             activity_start=None,
         ),
-        generate_tool_call=generate_tool_call,
+        send_turn=send_turn,
         parse_output=parse_suggestion_output,
         record_step=record_step,
-        discard_llm_thoughts=lambda: None,
     )
 
     assert result["has_suggestion"] is False

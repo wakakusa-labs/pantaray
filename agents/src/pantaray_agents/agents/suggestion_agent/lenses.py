@@ -21,8 +21,8 @@ from pantaray_llm.contracts.tool_use import LlmToolDefinition
 from .output import parse_suggestion_output
 from .react import (
     SuggestionStepRecorder,
-    SuggestionThoughtDiscarder,
     SuggestionToolCallGenerator,
+    SuggestionTurnSender,
     run_suggestion_react,
 )
 from .research import SuggestionResearchTools
@@ -50,7 +50,8 @@ EXPLORATION_LENS_WEIGHTS = {
     "new_approach": 1,
 }
 # Lens runs share one Suggestion's step numbers: run i records from i * stride.
-# A run takes at most 300 LLM turns and 300 tool calls, one step each.
+# A run takes at most 300 turns and runs at most 300 calls, one step each; the
+# calls answered without running and the failed sends stay well below the rest.
 LENS_STEP_STRIDE = 1000
 _KIND_LABELS = {"action_offer": "offer", "message_only": "advice"}
 
@@ -77,9 +78,8 @@ def sample_lenses(rng: random.Random) -> tuple[str, ...]:
     return (*urgent, exploration)
 
 
-def _lens_prompt(initial_prompt: str, lens_config: PromptConfig, lens: str) -> str:
-    section = lens_config.prompt.format(lens=lens_config.require_role_rule(lens))
-    return f"{initial_prompt.rstrip()}\n\n{section}"
+def _lens_section(lens_config: PromptConfig, lens: str) -> str:
+    return lens_config.prompt.format(lens=lens_config.require_role_rule(lens))
 
 
 def _selector_tool(count: int) -> LlmToolDefinition:
@@ -125,9 +125,9 @@ async def decide_with_lenses(
     lens_config: PromptConfig,
     selector_config: PromptConfig,
     research_tools: SuggestionResearchTools,
+    send_turn: SuggestionTurnSender,
     generate_tool_call: SuggestionToolCallGenerator,
     record_step: SuggestionStepRecorder,
-    discard_llm_thoughts: SuggestionThoughtDiscarder,
 ) -> LensDecision:
     """Run one decision run per lens in parallel and select among their candidates.
 
@@ -144,13 +144,13 @@ async def decide_with_lenses(
         return await run_suggestion_react(
             user_id=user_id,
             suggestion_id=suggestion_id,
-            initial_prompt=_lens_prompt(initial_prompt, lens_config, lens),
+            context=initial_prompt,
+            lens=_lens_section(lens_config, lens),
             system_instruction=system_instruction,
             research_tools=research_tools,
-            generate_tool_call=generate_tool_call,
+            send_turn=send_turn,
             parse_output=parse_suggestion_output,
             record_step=record,
-            discard_llm_thoughts=discard_llm_thoughts,
         )
 
     tasks = [

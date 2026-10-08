@@ -42,6 +42,7 @@ class _ProjectedEmbedding:
     embedding_id: int
     fragment_id: str
     content_sha256: str
+    revision_id: str
 
 
 def search_semantic_fragments(
@@ -82,7 +83,6 @@ def search_semantic_fragments(
             projected = _verify_projected_chunk(
                 connection,
                 entries=entries,
-                vectors=vectors,
                 user_id=user_id,
                 generation_id=embedding_generation.generation_id,
                 revision_ids=revision_chunk,
@@ -119,7 +119,6 @@ def _verify_projected_chunk(
     connection: sqlite3.Connection,
     *,
     entries: str,
-    vectors: str,
     user_id: str,
     generation_id: int,
     revision_ids: Sequence[str],
@@ -133,7 +132,7 @@ def _verify_projected_chunk(
                entries.fragment_content_sha256,
                entries.chunk_content_sha256,
                fragments.content_text, fragments.content_sha256,
-               entries.embedding_id
+               entries.embedding_id, entries.revision_id
         FROM {entries} AS entries
         LEFT JOIN memory_fragments AS fragments
           ON fragments.user_id = entries.user_id
@@ -164,7 +163,6 @@ def _verify_projected_chunk(
             raise MemoryEmbeddingIndexUnavailableError(
                 "memory embedding index has invalid chunk projection"
             ) from exc
-    entry_total = len(entry_rows)
     entry_keys = {(str(row[0]), int(row[1])) for row in entry_rows}
     expected_keys = _expected_visible_chunk_keys(
         connection,
@@ -197,40 +195,12 @@ def _verify_projected_chunk(
         raise MemoryEmbeddingIndexUnavailableError(
             "memory embedding index has missing or duplicate chunk projections"
         )
-    linked_vectors = int(
-        connection.execute(
-            f"""
-            SELECT COUNT(*)
-            FROM {vectors} AS vectors
-            JOIN {entries} AS entries
-              ON entries.embedding_id = vectors.embedding_id
-             AND entries.user_id = vectors.user_id
-             AND entries.revision_id = vectors.revision_id
-            WHERE vectors.user_id = ?
-              AND vectors.revision_id IN ({placeholders})
-            """,
-            parameters,
-        ).fetchone()[0]
-    )
-    vector_total = int(
-        connection.execute(
-            f"""
-            SELECT COUNT(*)
-            FROM {vectors}
-            WHERE user_id = ? AND revision_id IN ({placeholders})
-            """,
-            parameters,
-        ).fetchone()[0]
-    )
-    if not entry_total == linked_vectors == vector_total:
-        raise MemoryEmbeddingIndexUnavailableError(
-            "memory embedding index has stale or orphan projected rows"
-        )
     return tuple(
         _ProjectedEmbedding(
             embedding_id=int(row[6]),
             fragment_id=str(row[0]),
             content_sha256=str(row[2]),
+            revision_id=str(row[7]),
         )
         for row in entry_rows
     )
@@ -279,7 +249,7 @@ def _search_embedding_batch(
     # which sqlite-vec applies after KNN limiting instead of before it.
     vector_rows = connection.execute(
         f"""
-        SELECT embedding_id, distance
+        SELECT embedding_id, distance, revision_id
         FROM {vectors}
         WHERE embedding MATCH ?
           AND k = ?
@@ -294,6 +264,16 @@ def _search_embedding_batch(
             json.dumps(list(fragments)),
         ),
     ).fetchall()
+    # k is every projected entry, so each comes back once with the revision it
+    # was projected from, or its vector is missing or stale. Counting vectors
+    # by revision instead reads every row of the vec0 table, which filters a
+    # metadata column row by row: about a second per call at 90k vectors.
+    if len(vector_rows) != len(fragments) or any(
+        fragments[int(row[0])].revision_id != str(row[2]) for row in vector_rows
+    ):
+        raise MemoryEmbeddingIndexUnavailableError(
+            "memory embedding index has missing or stale projected vectors"
+        )
     return tuple(
         SemanticFragmentMatch(
             fragment_id=fragments[int(row[0])].fragment_id,

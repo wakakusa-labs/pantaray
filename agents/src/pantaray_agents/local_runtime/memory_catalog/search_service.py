@@ -80,6 +80,19 @@ async def execute_memory_search(
     busy_timeout_ms: int,
     request: MemorySearchRequest,
 ) -> MemorySearchResponse:
+    # Reading the catalog and embedding the query take seconds on a large
+    # store; on the event loop they would stall every other run in the process.
+    return await asyncio.to_thread(
+        _search, db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=request
+    )
+
+
+def _search(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    request: MemorySearchRequest,
+) -> MemorySearchResponse:
     selected_generation = _load_selected_active_generation(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -101,7 +114,7 @@ async def execute_memory_search(
             current_embedding_specification(model.manifest)
         ):
             try:
-                query_vector = await asyncio.to_thread(model.embed_query, request.query)
+                query_vector = model.embed_query(request.query)
             # The model is installed but could not embed this query. Reporting
             # it keeps the lexical and exact lanes answering instead of failing
             # the whole search.

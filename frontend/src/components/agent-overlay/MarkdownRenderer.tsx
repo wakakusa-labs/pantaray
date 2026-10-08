@@ -128,6 +128,59 @@ function localPathFromPantarayFileHref(href: string): string | null {
   }
 }
 
+// A reply often names a file as a bare pantaray-file:/// URL rather than a Markdown
+// link, and GFM links only http(s) and www on its own. Japanese prose runs on with
+// no space, so the URL also ends at a full stop, comma or quote bracket, and loses
+// the punctuation and unmatched closing bracket that end the sentence around it.
+const BARE_FILE_URL = /pantaray-file:\/\/\/[^\s<>。、「」『』]+/gu;
+const TRAILING_PUNCTUATION = /[.,:;!?'"]$/u;
+const CLOSING_BRACKETS: Record<string, string> = { ')': '(', '）': '（', ']': '[', '】': '【' };
+
+function trimSentenceEnd(url: string): string {
+  let trimmed = url;
+  for (;;) {
+    const last = trimmed.slice(-1);
+    const opening = CLOSING_BRACKETS[last];
+    const unmatched =
+      opening !== undefined && trimmed.split(opening).length < trimmed.split(last).length;
+    if (!TRAILING_PUNCTUATION.test(last) && !unmatched) return trimmed;
+    trimmed = trimmed.slice(0, -1);
+  }
+}
+
+// The few mdast fields this pass reads and writes.
+type MarkdownNode = { type: string; value?: string; url?: string; children?: MarkdownNode[] };
+
+function linkBareFileUrls(text: string): MarkdownNode[] | null {
+  const nodes: MarkdownNode[] = [];
+  let end = 0;
+  for (const match of text.matchAll(BARE_FILE_URL)) {
+    const url = trimSentenceEnd(match[0]);
+    const localPath = localPathFromPantarayFileHref(url);
+    if (!localPath) continue;
+    if (match.index > end) nodes.push({ type: 'text', value: text.slice(end, match.index) });
+    const name = localPath.split('/').filter(Boolean).pop() ?? localPath;
+    nodes.push({ type: 'link', url, children: [{ type: 'text', value: name }] });
+    end = match.index + url.length;
+  }
+  if (nodes.length === 0) return null;
+  if (end < text.length) nodes.push({ type: 'text', value: text.slice(end) });
+  return nodes;
+}
+
+/** Links bare file URLs in prose; code and existing links hold no text node it reads. */
+function remarkBareFileLinks() {
+  const visit = (node: MarkdownNode): void => {
+    if (!node.children || node.type === 'link' || node.type === 'linkReference') return;
+    node.children = node.children.flatMap((child) => {
+      if (child.type === 'text' && child.value) return linkBareFileUrls(child.value) ?? [child];
+      visit(child);
+      return [child];
+    });
+  };
+  return visit;
+}
+
 function markdownUrlTransform(url: string): string {
   if (url.startsWith('pantaray-file:///')) return url;
   return defaultUrlTransform(url);
@@ -167,7 +220,7 @@ export const MarkdownBlock: React.FC<{
   const markdownFallbackBlock: LLMOutputFallbackBlock = {
     component: ({ blockMatch }: { blockMatch: BlockMatch }) => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBareFileLinks]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

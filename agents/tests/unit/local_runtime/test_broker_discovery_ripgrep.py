@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import shutil
 import sys
 from pathlib import Path
@@ -373,7 +374,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         assert handle_line(
             b'name.bin: binary file matches (found "\\0" byte around offset 3)'
         )
-        # Shift_JIS text is shown lossily rather than dropped.
+        # A line that is not UTF-8 is decoded as CP932.
         assert handle_line(b"./sjis.txt\x001:8:\x93\xfa\x96\x7b\x8c\xea needle")
         assert handle_line(
             b'./db.sqlite: binary file matches (found "\\0" byte around offset 9)'
@@ -403,7 +404,7 @@ def test_ripgrep_grep_excerpts_long_lines_and_reports_unreadable_paths(
         (7, "a" * limit + "…"),
         (9, "…" + "a" * limit + "…"),
         (2, "needle in odd"),
-        (1, b"\x93\xfa\x96\x7b\x8c\xea needle".decode("utf-8", errors="replace")),
+        (1, "日本語 needle"),
     ]
     assert [match.line_truncated for match in result.matches] == [
         True,
@@ -483,6 +484,30 @@ def test_real_ripgrep_finds_matches_in_files_over_one_megabyte(tmp_path: Path) -
     ]
     assert result.truncation_reason is None
     assert result.skipped_files == 0
+
+
+@_REAL_RIPGREP
+def test_real_ripgrep_shows_cp932_and_utf16_lines_as_their_text(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "module.bas").write_bytes(
+        "' 合計①髙 needle\r\n".encode("cp932")
+        # A long line is centred on its match by characters, not bytes.
+        + ("表" * 1_000 + "needle" + "い" * 1_000 + "\r\n").encode("cp932")
+    )
+    (tmp_path / "notes.txt").write_bytes(
+        codecs.BOM_UTF16_LE + "メモ needle\r\n".encode("utf-16-le")
+    )
+
+    result = _real_grep(tmp_path)
+
+    assert sorted(
+        (match.relative_path, match.line_number, match.line) for match in result.matches
+    ) == [
+        ("./module.bas", 1, "' 合計①髙 needle"),
+        ("./module.bas", 2, "…" + "表" * 250 + "needle" + "い" * 244 + "…"),
+        ("./notes.txt", 1, "メモ needle"),
+    ]
 
 
 @_REAL_RIPGREP

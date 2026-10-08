@@ -166,16 +166,16 @@ async def test_an_image_is_refused_instead_of_reported_as_read(
 
 
 @pytest.mark.asyncio
-async def test_a_text_file_that_is_not_utf8_fails_only_its_own_call(
+async def test_a_text_file_in_an_unknown_encoding_fails_only_its_own_call(
     tmp_path: Path,
 ) -> None:
     registry, folder, _storage, _spill = _tools(tmp_path)
-    (folder / "sales.csv").write_bytes("顧客,金額\n東京,120\n".encode("cp932"))
+    (folder / "sales.csv").write_bytes(b"region,total\n\x81 east,120\n")
 
     result = await _call(registry, "read", {"path": str(folder / "sales.csv")})
 
     assert result.status == "error"
-    assert result.output["error_code"] == "READ_FAILED"
+    assert result.output["error_code"] == "READ_TEXT_ENCODING_UNSUPPORTED"
 
 
 @pytest.mark.asyncio

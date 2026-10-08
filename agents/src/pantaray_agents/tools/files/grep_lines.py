@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .text_encoding import decode_unmarked_text
+
 # ripgrep prints a line longer than this many bytes as a preview of its first
 # this many graphemes, so no file size cap is needed to bound one match.
 # Like Codex CLI and Pi, there is no file size cap: ripgrep itself still holds
@@ -79,11 +81,20 @@ def grep_match_from_ripgrep(
         content = _RIPGREP_PREVIEW_SUFFIX_PATTERN.sub(b"", content)
     # ripgrep's column is the 1-based byte offset of the line's first match.
     match_offset = column - 1
+    # ripgrep prints a file with a byte order mark as UTF-8 and any other file
+    # as its own bytes, so a match line is decoded like a read of an unmarked
+    # file. Design limit: ripgrep matches those bytes, so a non-ASCII pattern
+    # cannot match CP932 text. Upgrade trigger: replay evidence of Japanese
+    # patterns searched in CP932 projects; then add a second ripgrep pass with
+    # -E shift_jis for non-ASCII patterns only, since a global -E misreads
+    # UTF-8 files that have a byte order mark.
+    text, encoding = decode_unmarked_text(content)
     return grep_match(
         relative_path=relative_path,
         line_number=line_number,
-        text=content.decode("utf-8", errors="replace"),
-        match_start=len(content[:match_offset].decode("utf-8", errors="replace"))
+        text=text,
+        # A match can start on the second byte of a CP932 character.
+        match_start=len(content[:match_offset].decode(encoding, errors="replace"))
         if match_offset < len(content)
         else None,
         cut=cut,

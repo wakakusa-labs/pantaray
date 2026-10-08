@@ -12,6 +12,7 @@ from typing import cast
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     SCRATCH_SESSION_TEMP_DIRNAME,
 )
+from pantaray_agents.local_runtime.tooling.documents import MAX_DOCUMENT_BYTES
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -22,7 +23,18 @@ from .read_document import document_format, read_document, reject_legacy_documen
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
 from .read_scope import ReadScope
 from .read_target import ReadTarget, action_reference_paths, resolve_read_target
-from .text_lines import read_text_descriptor_lines
+from .text_encoding import (
+    ByteOrderMark,
+    TextEncoding,
+    byte_order_mark,
+    text_encoding_unsupported,
+    unmarked_text_encoding,
+)
+from .text_lines import (
+    ReadLinesResult,
+    read_text_descriptor_lines,
+    read_text_value_lines,
+)
 from .workspace_descriptor_access import open_workspace_entry_descriptor
 
 SAMPLE_BYTES = 4_096
@@ -31,6 +43,7 @@ READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
 READ_ATTACHMENT_TOO_LARGE = "READ_ATTACHMENT_TOO_LARGE"
 READ_START_UNIT_UNSUPPORTED = "READ_START_UNIT_UNSUPPORTED"
+READ_TEXT_FILE_TOO_LARGE = "READ_TEXT_FILE_TOO_LARGE"
 READ_DIRECTORY_PAGE_LIMIT_RETRY_HINT = "Continue with offset=next_offset."
 
 _BINARY_EXTENSIONS = frozenset(
@@ -172,7 +185,9 @@ def _read_file(
             document_format=extracted_format,
             descriptor=descriptor,
         )
-    if _is_binary_file(filepath=target.real_path, sample=sample):
+    # UTF-16 text carries NUL bytes, so its mark is looked for before them.
+    mark = byte_order_mark(sample)
+    if mark is None and _is_binary_file(filepath=target.real_path, sample=sample):
         raise BrokerPolicyError(
             f"Cannot read binary file: {target.display_path}",
             code=READ_BINARY_FILE_UNSUPPORTED,
@@ -182,20 +197,25 @@ def _read_file(
     offset = request.offset or 1
     column = request.column or 1
     limit = request.limit or DEFAULT_READ_LIMIT
-    result = read_text_descriptor_lines(
+    result, encoding = _read_text_page(
+        target=target,
         descriptor=descriptor,
+        mark=mark,
         offset=offset,
         column=column,
         limit=limit,
     )
     output = bound_text_page(
-        text_page_output(
-            kind="file",
-            path=target.display_path,
-            offset=offset,
-            column=column,
-            result=result,
-        ),
+        {
+            **text_page_output(
+                kind="file",
+                path=target.display_path,
+                offset=offset,
+                column=column,
+                result=result,
+            ),
+            "encoding": encoding,
+        },
         content=result.content,
         offset=offset,
         column=column,
@@ -206,6 +226,75 @@ def _read_file(
         file_paths=(target.display_path,),
         file_reference_paths=action_reference_paths(target),
     )
+
+
+def _read_text_page(
+    *,
+    target: ReadTarget,
+    descriptor: int,
+    mark: ByteOrderMark | None,
+    offset: int,
+    column: int,
+    limit: int,
+) -> tuple[ReadLinesResult, TextEncoding]:
+    try:
+        if mark is None:
+            encoding = unmarked_text_encoding(
+                descriptor, display_path=target.display_path
+            )
+            return read_text_descriptor_lines(
+                descriptor=descriptor,
+                offset=offset,
+                column=column,
+                limit=limit,
+                encoding=encoding,
+            ), encoding
+        if mark.codec == "utf-8":
+            os.lseek(descriptor, mark.length, os.SEEK_SET)
+            return read_text_descriptor_lines(
+                descriptor=descriptor,
+                offset=offset,
+                column=column,
+                limit=limit,
+            ), mark.encoding
+        # Line ends are two bytes in UTF-16, which the byte-counting skip of a
+        # streamed page cannot find, so the file is decoded whole instead.
+        return read_text_value_lines(
+            text=_read_utf16_text(target=target, descriptor=descriptor, mark=mark),
+            offset=offset,
+            column=column,
+            limit=limit,
+        ), mark.encoding
+    except UnicodeDecodeError as exc:
+        # A marked file is decoded only as far as its page, and any file can
+        # change between the check of its encoding and the read of its page.
+        raise text_encoding_unsupported(
+            display_path=target.display_path,
+            encoding=None if mark is None else mark.encoding,
+        ) from exc
+
+
+def _read_utf16_text(
+    *, target: ReadTarget, descriptor: int, mark: ByteOrderMark
+) -> str:
+    # Held whole in memory and paged like extracted document text, so the same
+    # size cap applies.
+    payload = read_leading_bytes(
+        descriptor, target=target, limit=MAX_DOCUMENT_BYTES + 1
+    )
+    if len(payload) > MAX_DOCUMENT_BYTES:
+        raise BrokerPolicyError(
+            (
+                f"UTF-16 text file is too large to read: {target.display_path} "
+                f"(> {MAX_DOCUMENT_BYTES} bytes)"
+            ),
+            code=READ_TEXT_FILE_TOO_LARGE,
+            fix_hint=(
+                "Convert a copy to UTF-8 (for example with iconv -f UTF-16 -t "
+                "UTF-8) and read that copy, which has no size limit."
+            ),
+        )
+    return payload[mark.length :].decode(mark.codec)
 
 
 def _read_directory(

@@ -252,9 +252,9 @@ class _ReadOnlyFileTools:
                     message=str(exc),
                     details=details or None,
                 )
-            # A text file that is not UTF-8 fails to decode; the Action reports
-            # that as a failed call too, and the run goes on with other sources.
-            except (OSError, UnicodeDecodeError) as exc:
+            # A file that cannot be read fails only its own call, as it does in
+            # the Action, and the run goes on with other sources.
+            except OSError as exc:
                 return tool_error_response(
                     tool_name=call.tool_name,
                     error_code=f"{call.tool_name.upper()}_FAILED",

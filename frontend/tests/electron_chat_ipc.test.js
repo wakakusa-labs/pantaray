@@ -168,6 +168,7 @@ function chatHandlers() {
           calls.push(['retry', request]);
           return { kind: 'started' };
         },
+        getTurnState: () => ({ running: true }),
       },
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
@@ -217,6 +218,7 @@ test('chat IPC validates the renderer payload before anything reaches the backen
   }
   assert.deepEqual(ipc.calls.at(-1), ['retry', { failure_item_id: 'item-8' }]);
   assert.equal(ipc.calls.length, 3);
+  assert.deepEqual(await ipc.invoke('chat:getTurnState'), { running: true });
 });
 
 test('overlay:showChat validates the Action id and asks main to show it', async () => {

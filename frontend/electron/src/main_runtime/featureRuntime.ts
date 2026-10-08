@@ -338,7 +338,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
         },
-        chat: createChatFetcher({ requestJson, getUserId }),
+        chat: {
+          ...createChatFetcher({ requestJson, getUserId }),
+          getTurnState: orchestration.getChatTurnState,
+        },
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,
           decodeImageDimensions: (bytes) => {

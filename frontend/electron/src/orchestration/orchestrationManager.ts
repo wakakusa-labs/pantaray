@@ -11,7 +11,7 @@
 import type { BrowserWindow } from 'electron';
 
 import type { ActionConversationPage } from '../actions/actionContracts';
-import { parseChatItem, parseChatTurnState } from '../chat/chatContracts';
+import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
 import type {
@@ -76,6 +76,8 @@ export type OrchestrationManager = {
     toolRequestId: string;
   }) => string | null;
   resetActionLive: () => void;
+  /** What the live session last said about the chat's turn; null until it says, or after it ends. */
+  getChatTurnState: () => ChatTurnState | null;
 };
 
 function normalizeLocalhost(urlObj: URL): URL {
@@ -353,6 +355,10 @@ export function createOrchestrationManager(params: {
    * carries no conversation content and the answer goes back over HTTP, so it is
    * handled here and never reaches a renderer.
    */
+  // The relay sends the turn's state only when it changes, so a main window that loads again
+  // mid-turn reads it from here. A new or closed session has not said yet.
+  let chatTurnState: ChatTurnState | null = null;
+
   function sendToMainWindow(
     channel: 'chat:itemAppended' | 'chat:turnState',
     payload: unknown
@@ -381,7 +387,8 @@ export function createOrchestrationManager(params: {
       return;
     }
     if (isChatTurnStateEvent(message)) {
-      sendToMainWindow('chat:turnState', parseChatTurnState(message.data));
+      chatTurnState = parseChatTurnState(message.data);
+      sendToMainWindow('chat:turnState', chatTurnState);
       return;
     }
     rendererBridge.forwardEventToRenderers(message);
@@ -392,7 +399,11 @@ export function createOrchestrationManager(params: {
     orchestrator = params.createOrchestrationWS({
       showNotification: notificationWindow.showNotification,
       forwardEventToRenderers,
-      forwardStatusToRenderers: rendererBridge.forwardStatusToRenderers,
+      forwardStatusToRenderers: (payload) => {
+        // A new session sends the state again; a closed one says nothing more.
+        if (['session_started', 'closed', 'error'].includes(payload.status)) chatTurnState = null;
+        rendererBridge.forwardStatusToRenderers(payload);
+      },
     });
   }
 
@@ -516,5 +527,6 @@ export function createOrchestrationManager(params: {
       pendingResumeRequests = [];
       rendererBridge.resetActionLive();
     },
+    getChatTurnState: () => chatTurnState,
   };
 }

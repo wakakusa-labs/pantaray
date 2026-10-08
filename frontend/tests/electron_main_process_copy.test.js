@@ -21,8 +21,8 @@ function status(overrides) {
 }
 
 test('tray copy labels the new conversation action in each language', () => {
-  assert.equal(getTrayMenuCopy('ja').newConversation, '新しい会話');
-  assert.equal(getTrayMenuCopy('en').newConversation, 'New conversation');
+  assert.equal(getTrayMenuCopy('ja').newConversation, '新しい作業');
+  assert.equal(getTrayMenuCopy('en').newConversation, 'New task');
 });
 
 test('tray copy explains recording statuses that pause or block activity recording', () => {
@@ -100,12 +100,12 @@ test('the welcome names the shortcut the user has, or only the button', () => {
   assert.equal(
     getWelcomeSuggestionText('ja', 'Option+Space'),
     'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。\n\n' +
-      'それまでも、任せたい仕事があればいつでも ⌥Space か新しい会話ボタンで声をかけてください。'
+      'それまでも、任せたい仕事があればいつでも ⌥Space か新しい作業ボタンで声をかけてください。'
   );
-  assert.match(getWelcomeSuggestionText('ja', null), /いつでも新しい会話ボタンで声をかけてください。$/);
+  assert.match(getWelcomeSuggestionText('ja', null), /いつでも新しい作業ボタンで声をかけてください。$/);
   assert.match(
     getWelcomeSuggestionText('en', 'Option+Space'),
-    /just press ⌥Space or use the New conversation button\.$/
+    /just press ⌥Space or use the New task button\.$/
   );
-  assert.match(getWelcomeSuggestionText('en', null), /just use the New conversation button\.$/);
+  assert.match(getWelcomeSuggestionText('en', null), /just use the New task button\.$/);
 });

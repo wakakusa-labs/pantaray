@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ACTION_MESSAGE_MAX_FILES,
   ActionMessageRequestSchema,
   codePointSpanInTrimmedText,
-  type ActionFileAttachment,
   type ActionConversationPage,
   type ActionMessageRequest,
   type ActionProjectRef,
@@ -12,92 +10,23 @@ import type {
   ActionConversationPageChain,
   OptimisticSubmission,
 } from '../../../electron/src/actions/actionConversationModel';
-import {
-  ACTION_IMAGE_MAX_BYTES,
-  ACTION_IMAGE_MAX_PER_MESSAGE,
-  type ActionImageAttachRejectionReason,
-} from '../../../electron/src/ipc/schemas/actionImages';
-import {
-  ACTION_DOCUMENT_MAX_BYTES,
-  actionDocumentExtension,
-} from '../../../electron/src/ipc/schemas/actionAttachments';
-import {
-  ACTION_IMAGE_MIME_TYPES,
-  type ActionImageMimeType,
-} from '../../../electron/src/protocol/imageStoragePath';
 import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
 import type { ActionApprovalMode } from './useActionApprovalMode';
 import type { ComposerMention } from './composerMentions';
 
-/**
- * Why the composer refused a file. Image reasons come from the image limits, `file_*` from the
- * document limits; `failed` covers a broken IPC round trip.
- */
-export type AttachmentFailure =
-  | ActionImageAttachRejectionReason
-  | 'too_many'
-  | 'file_too_large'
-  | 'too_many_files'
-  | 'failed';
-
-/** An image written to the artifact root, or a document staged for the next message. */
-export type ComposerAttachment =
-  | { kind: 'image'; storagePath: string }
-  | { kind: 'file'; attachmentId: string; name: string; byteSize: number };
-
-export function attachmentKey(attachment: ComposerAttachment): string {
-  return attachment.kind === 'image' ? attachment.storagePath : attachment.attachmentId;
-}
-
-function isActionImageMimeType(value: string): value is ActionImageMimeType {
-  return (ACTION_IMAGE_MIME_TYPES as readonly string[]).includes(value);
-}
-
-/** Per-message limits, and the refusal each one produces when reached. */
-const ATTACHMENT_LIMITS = {
-  image: { max: ACTION_IMAGE_MAX_PER_MESSAGE, failure: 'too_many' },
-  file: { max: ACTION_MESSAGE_MAX_FILES, failure: 'too_many_files' },
-} as const;
-
-function countAttachments(
-  attachments: readonly ComposerAttachment[],
-  kind: ComposerAttachment['kind']
-): number {
-  return attachments.filter((attachment) => attachment.kind === kind).length;
-}
+import {
+  addStagedAttachments,
+  attachmentKey,
+  attachmentPayload,
+  canAttachMore,
+  discardDocuments,
+  stageFiles,
+  type AttachmentFailure,
+  type ComposerAttachment,
+} from './attachmentStaging';
 
 type ComposerActions = NonNullable<NonNullable<typeof window.electron>['actions']>;
-
-/**
- * Removes staged documents that will never be sent. A staged file left behind only takes disk
- * space until the planned sweep, so a failed discard is not reported to the user.
- */
-function discardDocuments(
-  actions: ComposerActions | undefined,
-  attachments: readonly ComposerAttachment[]
-): void {
-  for (const attachment of attachments) {
-    if (attachment.kind !== 'file') continue;
-    actions?.discardAttachment({ attachmentId: attachment.attachmentId }).catch(() => undefined);
-  }
-}
-
-/** Writes one file through Electron main; an image the main process declines yields its reason. */
-async function writeAttachment(
-  actions: ComposerActions,
-  file: File
-): Promise<ComposerAttachment | ActionImageAttachRejectionReason> {
-  const bytes = await file.arrayBuffer();
-  if (isActionImageMimeType(file.type)) {
-    const result = await actions.attachImage({ bytes, declaredMimeType: file.type });
-    return result.kind === 'rejected'
-      ? result.reason
-      : { kind: 'image', storagePath: result.storagePath };
-  }
-  const { attachmentId, name, byteSize } = await actions.attachFile({ bytes, name: file.name });
-  return { kind: 'file', attachmentId, name, byteSize };
-}
 
 export type ComposerState = {
   draft: string;
@@ -311,22 +240,7 @@ export function useOverlayComposerController({
       .then((result) => settle(result.kind === 'submitted' ? 'awaiting_refresh' : 'failed'))
       .catch(() => settle('failed'));
   };
-  const images = composer.attachments.flatMap((attachment) =>
-    attachment.kind === 'image'
-      ? [{ kind: 'image' as const, storage_path: attachment.storagePath }]
-      : []
-  );
-  const files: ActionFileAttachment[] = composer.attachments.flatMap((attachment) =>
-    attachment.kind === 'file'
-      ? [
-          {
-            attachment_id: attachment.attachmentId,
-            name: attachment.name,
-            byte_size: attachment.byteSize,
-          },
-        ]
-      : []
-  );
+  const { images, files } = attachmentPayload(composer.attachments);
   // The same draft is either the message content or the approval supplement; both are trimmed
   // before sending, so one conversion serves both.
   const projectRefs: ActionProjectRef[] = composer.mentions.map((mention) => ({
@@ -335,9 +249,7 @@ export function useOverlayComposerController({
     paths: [...mention.paths],
     ...codePointSpanInTrimmedText(composer.draft, mention.start, mention.end),
   }));
-  const canAttach = (['image', 'file'] as const).some(
-    (kind) => countAttachments(composer.attachments, kind) < ATTACHMENT_LIMITS[kind].max
-  );
+  const canAttach = canAttachMore(composer.attachments);
   const supplement = normalizeActionSupplement(composer.draft);
   const supplementInvalid = supplement !== null && !isActionSupplementWithinLimit(supplement);
   const submitDraft = (
@@ -399,10 +311,6 @@ export function useOverlayComposerController({
     }));
     sendRequest(request);
   };
-  // Files are written by Electron main one at a time and the first refusal stops the batch, so
-  // the user is told exactly which file was the problem instead of getting a partial result with
-  // no explanation. Type, size and count are checked here first: all are known from the File, and
-  // sending megabytes across IPC only to have them refused is pure waste.
   const attachFiles = async (picked: readonly File[]) => {
     if (!actions || composer.submission || picked.length === 0) return;
     // The write outlives the composer it started in. A conversation reset — an account switch,
@@ -416,41 +324,7 @@ export function useOverlayComposerController({
       ...current,
       attachmentsInFlight: current.attachmentsInFlight + 1,
     }));
-    const accepted: ComposerAttachment[] = [];
-    let failure: AttachmentFailure | null = null;
-    for (const file of picked) {
-      // Documents go by extension: Chromium leaves `type` empty for a notebook.
-      const kind = isActionImageMimeType(file.type)
-        ? 'image'
-        : actionDocumentExtension(file.name) !== null
-          ? 'file'
-          : null;
-      if (kind === null) {
-        failure = 'unsupported_media_type';
-      } else if (
-        countAttachments([...composer.attachments, ...accepted], kind) >=
-        ATTACHMENT_LIMITS[kind].max
-      ) {
-        failure = ATTACHMENT_LIMITS[kind].failure;
-      } else if (kind === 'image' && file.size > ACTION_IMAGE_MAX_BYTES) {
-        failure = 'too_large';
-      } else if (kind === 'file' && file.size > ACTION_DOCUMENT_MAX_BYTES) {
-        failure = 'file_too_large';
-      }
-      if (failure) break;
-      let result;
-      try {
-        result = await writeAttachment(actions, file);
-      } catch {
-        failure = 'failed';
-        break;
-      }
-      if (typeof result === 'string') {
-        failure = result;
-        break;
-      }
-      accepted.push(result);
-    }
+    const { accepted, failure } = await stageFiles(actions, picked, composer.attachments);
     if (generation !== composerGenerationRef.current) {
       // A replaced composer already starts at zero attachments in flight, so the result is
       // dropped rather than decrementing a counter it never incremented. Its staged documents
@@ -459,24 +333,12 @@ export function useOverlayComposerController({
       return;
     }
     setComposer((current) => {
-      // Another batch may have landed while this one was writing.
-      let attachments = current.attachments;
-      let attachmentFailure = failure;
-      for (const attachment of accepted) {
-        const limit = ATTACHMENT_LIMITS[attachment.kind];
-        if (countAttachments(attachments, attachment.kind) < limit.max) {
-          attachments = [...attachments, attachment];
-        } else {
-          attachmentFailure = limit.failure;
-          // Discarding by id is idempotent, so a repeated updater call does no harm.
-          discardDocuments(actions, [attachment]);
-        }
-      }
+      const added = addStagedAttachments(actions, current.attachments, accepted, failure);
       return {
         ...current,
-        attachments,
+        attachments: added.attachments,
         attachmentsInFlight: current.attachmentsInFlight - 1,
-        attachmentFailure,
+        attachmentFailure: added.failure,
       };
     });
   };

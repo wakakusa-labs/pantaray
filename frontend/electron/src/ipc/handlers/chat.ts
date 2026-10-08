@@ -21,6 +21,7 @@ export function registerChatHandlers(ctx: MainContext, registrar: IpcRegistrar):
   registrar.handle('chat:listItems', async (_event, request) =>
     ctx.chat.listItems(parseInput(ChatItemPageRequestSchema, 'chat:listItems', request))
   );
+  registrar.handle('chat:getTurnState', () => ctx.chat.getTurnState());
   registrar.handle('chat:retryTurn', async (_event, request) =>
     ctx.chat.retryTurn(parseInput(ChatTurnRetryRequestSchema, 'chat:retryTurn', request))
   );

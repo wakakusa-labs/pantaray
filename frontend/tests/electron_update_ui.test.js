@@ -57,7 +57,7 @@ test('tray new conversation action delegates to the overlay owner', () => {
   });
 
   updateUi.rebuildTrayMenu();
-  const newConversationItem = trayMenu.template.find((item) => item.label === 'New conversation');
+  const newConversationItem = trayMenu.template.find((item) => item.label === 'New task');
   newConversationItem.click();
 
   assert.equal(openCalls, 1);
@@ -91,7 +91,7 @@ test('tray new conversation entry omits the shortcut while none is active', () =
   });
 
   updateUi.rebuildTrayMenu();
-  const newConversationItem = trayMenu.template.find((item) => item.label === 'New conversation');
+  const newConversationItem = trayMenu.template.find((item) => item.label === 'New task');
 
   assert.ok(!('accelerator' in newConversationItem));
 });

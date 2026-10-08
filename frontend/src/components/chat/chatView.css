@@ -1,0 +1,459 @@
+.chat-view {
+  --chat-user-bubble: rgba(45, 80, 140, 0.96);
+}
+
+/* The composer stays docked at the bottom while the chat is loading or empty. */
+.chat-view > .history-loading,
+.chat-view > .history-empty,
+.chat-view > .history-error {
+  flex: 1;
+}
+
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  /* Messages fade under the toolbar instead of being cut at its edge. */
+  mask-image: linear-gradient(180deg, transparent 0, #000 24px);
+}
+
+.chat-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 0 24px;
+}
+
+.chat-older {
+  align-self: center;
+}
+
+.chat-items {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-day {
+  align-self: center;
+}
+
+.chat-day h2 {
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+}
+
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat-row--mine {
+  flex-direction: row-reverse;
+}
+
+.chat-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 78%;
+  min-width: 0;
+}
+
+.chat-row--mine .chat-stack {
+  align-items: flex-end;
+}
+
+.chat-bubble {
+  padding: 9px 14px;
+  border-radius: 18px;
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+  overflow-wrap: anywhere;
+}
+
+.chat-row--mine .chat-bubble {
+  background: var(--chat-user-bubble);
+  color: #fff;
+}
+
+.chat-bubble__text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-time {
+  flex: none;
+  padding-bottom: 2px;
+  color: var(--fog-text-3);
+  font-size: 11px;
+}
+
+.chat-reply {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.chat-row:hover .chat-reply,
+.chat-reply:focus-visible {
+  opacity: 1;
+}
+
+.chat-reply:hover {
+  background: var(--fog-mist-strong);
+  color: #fff;
+}
+
+.chat-reply:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: -2px -6px 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: var(--text-meta-size);
+  line-height: 1.5;
+}
+
+.chat-quote b {
+  color: #cfd8e6;
+  font-weight: var(--weight-semibold);
+}
+
+.chat-quote span {
+  max-width: 420px;
+  overflow: hidden;
+  color: var(--fog-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-row--mine .chat-quote b,
+.chat-row--mine .chat-quote span {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 400px;
+  max-width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #222b35 0%, #26323f 60%, #2d3d4d 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-card:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.chat-card--open {
+  box-shadow: inset 0 0 0 1.5px rgba(125, 171, 220, 0.85);
+}
+
+.chat-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-card__title {
+  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
+}
+
+.chat-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(215, 225, 235, 0.75);
+  font-size: 12.5px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  font-size: var(--text-meta-size);
+}
+
+.chat-card__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #cfe0f7;
+}
+
+.chat-card .badge {
+  white-space: nowrap;
+}
+
+/* The retry sits on its own row under the bubble, out of the row's flow, so the time stays beside
+   the bubble's bottom like every other message. */
+/* The room is the row's own margin: one on the stack would count in the row's bottom alignment. */
+.chat-row:has(.chat-retry) {
+  margin-bottom: 28px;
+}
+
+/* Quiet like the time: a glyph in its muted color, with a 24px hit area around it. */
+.chat-retry {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-3);
+  cursor: pointer;
+}
+
+.chat-retry:hover:not(:disabled) {
+  color: var(--fog-text-2);
+}
+
+.chat-retry:focus {
+  outline: none;
+}
+
+.chat-retry:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.chat-retry:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.chat-typing {
+  display: inline-flex;
+  gap: 6px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  background: var(--fog-mist-strong);
+}
+
+.chat-typing i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fog-text-2);
+  animation: chat-typing-dot 1.2s infinite ease-in-out;
+}
+
+.chat-typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing i {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.chat-dock {
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 10px 0 22px;
+}
+
+.chat-quote-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: var(--fog-mist);
+  font-size: var(--text-meta-size);
+}
+
+.chat-quote-chip span {
+  overflow: hidden;
+  color: var(--fog-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-quote-chip b {
+  margin-right: 1em;
+  color: #cfd8e6;
+  font-weight: var(--weight-semibold);
+}
+
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(214, 226, 248, 0.1);
+  border-radius: 22px;
+  background: var(--fog-mist);
+}
+
+.chat-composer:has(textarea:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+
+.chat-composer__input {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(8lh + 12px);
+  padding: 6px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  field-sizing: content;
+  resize: none;
+}
+
+.chat-composer__input::placeholder {
+  color: var(--fog-text-3);
+}
+
+.chat-icon-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.chat-quote-chip .chat-icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.chat-icon-button:hover:not(:disabled) {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.chat-icon-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.chat-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--chat-user-bubble);
+  color: #fff;
+  cursor: pointer;
+}
+
+.chat-send:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.chat-icon-button:focus-visible,
+.chat-send:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-composer__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fog-text-2);
+  font-size: var(--text-meta-size);
+}
+
+.chat-sr-only,
+.chat-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

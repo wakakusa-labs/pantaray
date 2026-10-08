@@ -5,6 +5,7 @@ function createChatApi({ ipcRenderer }) {
       sendMessage: (request) => ipcRenderer.invoke('chat:sendMessage', request),
       listItems: (request) => ipcRenderer.invoke('chat:listItems', request),
       retryTurn: (request) => ipcRenderer.invoke('chat:retryTurn', request),
+      getTurnState: () => ipcRenderer.invoke('chat:getTurnState'),
       onItemAppended: (callback) => {
         const listener = (_event, item) => callback(item);
         ipcRenderer.on('chat:itemAppended', listener);

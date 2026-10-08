@@ -212,4 +212,25 @@ test('revealing an image resolves it through the same validation as the image pr
     { revealed: false }
   );
   assert.equal(app.revealed.length, 1);
+
+  // The main window's chat reveals through the same check; any other unregistered window cannot.
+  const mainWindowOnly = harness({ actions: { resolveOverlayIdForSender: () => null } });
+  const fromMain = await mainWindowOnly.invoke(
+    'action:attachImage',
+    { bytes: toArrayBuffer(pngBytes()), declaredMimeType: 'image/png' },
+    MAIN_WINDOW.webContents
+  );
+  assert.deepEqual(
+    await mainWindowOnly.invoke(
+      'actionImage:reveal',
+      { storagePath: fromMain.storagePath },
+      MAIN_WINDOW.webContents
+    ),
+    { revealed: true }
+  );
+  await assert.rejects(
+    mainWindowOnly.invoke('actionImage:reveal', { storagePath: fromMain.storagePath }),
+    (error) => error instanceof IpcSenderRejectedError
+  );
+  assert.equal(mainWindowOnly.revealed.length, 1);
 });

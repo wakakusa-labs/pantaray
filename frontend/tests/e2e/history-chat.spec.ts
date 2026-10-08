@@ -529,12 +529,21 @@ test('unread Pantaray messages mark the rail and the chat switch until the chat 
   ).toBeVisible();
   await expect(history).not.toHaveAccessibleDescription(/未読/);
 
+  // A reader who scrolled up to older messages has not seen a reply that lands below.
+  const chatList = page.getByRole('list', { name: 'Pantaray とのチャット' });
+  await chatList.hover();
+  await page.mouse.wheel(0, -400);
+  await expect(page.getByText('じゃあスライドの下書きから始めますね。')).toBeInViewport();
+  await appendLive(page, reply(11, 41, '表紙も作りました。'));
+  await expect(history).toHaveAccessibleDescription('未読 1 件');
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
+
   // On the task list, Pantaray's replies count and the user's own messages never do.
   await page.getByRole('button', { name: '作業', exact: true }).click();
-  await appendLive(page, user(11, 41, 'ありがとう'));
-  await appendLive(page, reply(12, 42, 'ほかに直すところがあれば言ってください。'));
-  await expect(history).toHaveAccessibleDescription('未読 1 件');
-  await expect(page.getByRole('button', { name: 'チャット', exact: true })).toHaveText('チャット1');
+  await appendLive(page, user(12, 42, 'ありがとう'));
+  await appendLive(page, reply(13, 43, 'ほかに直すところがあれば言ってください。'));
+  await expect(history).toHaveAccessibleDescription('未読 2 件');
+  await expect(page.getByRole('button', { name: 'チャット', exact: true })).toHaveText('チャット2');
 
   // A restart reads the stored position, so what was read stays read.
   await page.reload();

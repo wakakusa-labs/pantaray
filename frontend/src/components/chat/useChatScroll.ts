@@ -35,13 +35,14 @@ export function useChatScroll({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const olderTriggerRef = useRef<HTMLButtonElement>(null);
   const followingRef = useRef(true);
-  // The content height at the last pin to the bottom. A scroll event that finds a different height
-  // was caused by the messages growing (and the browser's scroll anchoring), not by the reader,
-  // and arrives before the ResizeObserver hears of the growth.
-  const pinnedHeightRef = useRef<number | null>(null);
+  // Where the last pin to the bottom left the scroll. Its scroll event arrives a frame later,
+  // possibly after the messages grew, and must not read as the reader moving away; a reader's own
+  // scroll moves away from this position. (The chat turns off scroll anchoring, so growth alone
+  // never moves it.)
+  const pinnedTopRef = useRef<number | null>(null);
   const pinToBottom = useCallback((element: HTMLElement) => {
     element.scrollTop = element.scrollHeight;
-    pinnedHeightRef.current = element.scrollHeight;
+    pinnedTopRef.current = element.scrollTop;
   }, []);
   // The distance from the bottom when an older page was asked for, so it can be kept.
   const anchorRef = useRef<number | null>(null);
@@ -69,14 +70,10 @@ export function useChatScroll({
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
-    if (!element) return;
-    if (followingRef.current && element.scrollHeight !== pinnedHeightRef.current) {
-      pinToBottom(element);
-      return;
-    }
+    if (!element || element.scrollTop === pinnedTopRef.current) return;
     followingRef.current =
       element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_SLACK_PX;
-  }, [pinToBottom]);
+  }, []);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -126,12 +123,12 @@ export function useChatScroll({
     followingRef.current = true;
   }, []);
 
-  /** True while the reader is at the newest message, so it is in view. */
-  const isFollowing = useCallback(() => followingRef.current, []);
+  /** True while the chat is drawn and the reader is at its newest message, so it is in view. */
+  const isAtNewest = useCallback(() => scrollRef.current !== null && followingRef.current, []);
 
   return {
     scrollRef: attachScrollElement,
-    isFollowing,
+    isAtNewest,
     olderTriggerRef,
     onScroll,
     loadOlderKeepingPlace,

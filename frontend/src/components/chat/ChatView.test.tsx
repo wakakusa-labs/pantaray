@@ -658,3 +658,11 @@ it('keeps the draft and its document through a trip to Workspace to add a projec
   expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
   expect(discardAttachment).not.toHaveBeenCalled();
 });
+
+it('a reply that arrives before the chat is drawn is not marked read', async () => {
+  listItems.mockImplementationOnce(() => new Promise(() => {}));
+  renderPage();
+  act(() => appendItem(reply(5, '下書きを直しました。')));
+  expect(screen.queryByText('下書きを直しました。')).not.toBeInTheDocument();
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBeNull();
+});

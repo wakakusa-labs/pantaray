@@ -37,9 +37,8 @@ export function ChatUnreadTracker({ onCount }: { onCount: (count: number) => voi
     if (!chat) return;
     chat.listItems({ before: null, limit: UNREAD_PAGE_SIZE }).then(
       (page) => {
-        const newest = page.items[0];
-        if (newest && readChatReadSequence(owner) === null) {
-          saveChatReadSequence(owner, newest.sequence);
+        if (readChatReadSequence(owner) === null) {
+          saveChatReadSequence(owner, page.items[0]?.sequence ?? 0);
         }
         setSequences((current) => [
           ...new Set([...current, ...pantarayMessageSequences(page.items)]),
@@ -72,7 +71,9 @@ export function ChatUnreadTracker({ onCount }: { onCount: (count: number) => voi
   }, [readNewestPage]);
 
   const count = sequences.filter((sequence) => sequence > (readSequence ?? 0)).length;
-  useEffect(() => onCount(count), [count, onCount]);
+  useEffect(() => {
+    onCount(count);
+  }, [count, onCount]);
   useEffect(() => () => onCount(0), [onCount]);
   return null;
 }

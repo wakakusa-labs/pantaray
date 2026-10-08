@@ -80,7 +80,7 @@ export function ChatView({
     loadingOlder: chat.loadingOlder,
     loadOlder: chat.loadOlder,
   });
-  const markRead = useChatReadMark(chat.items, scroll.isFollowing);
+  const markRead = useChatReadMark(chat.items, scroll.isAtNewest);
   const itemsById = useMemo(
     () => new Map(chat.items.map((item) => [item.item_id, item])),
     [chat.items]

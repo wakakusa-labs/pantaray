@@ -9,13 +9,13 @@ import { saveChatReadSequence } from './chatUnread';
  * Marks the chat read up to its newest item while the reader can see that item: the window is
  * visible and the chat is scrolled to the bottom. Returns the check for the scroll handler.
  */
-export function useChatReadMark(items: readonly ChatItem[], isFollowing: () => boolean) {
+export function useChatReadMark(items: readonly ChatItem[], isAtNewest: () => boolean) {
   const owner = useLocalOwner();
   const markRead = useCallback(() => {
     const newest = items[items.length - 1];
-    if (!newest || document.visibilityState !== 'visible' || !isFollowing()) return;
+    if (!newest || document.visibilityState !== 'visible' || !isAtNewest()) return;
     saveChatReadSequence(owner, newest.sequence);
-  }, [items, isFollowing, owner]);
+  }, [items, isAtNewest, owner]);
 
   useEffect(() => {
     markRead();

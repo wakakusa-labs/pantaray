@@ -9,14 +9,15 @@ const listeners = new Set<() => void>();
 const storageKey = (owner: LocalOwner) => `${STORAGE_PREFIX}${owner.kind}:${owner.id}`;
 
 /**
- * The sequence of the newest chat item this viewer has seen, or null before the first read.
+ * The sequence of the newest chat item this viewer has seen (0 for a chat that was empty), or null
+ * before the first read.
  * A per-viewer position, so it lives in this window's storage like the History view mode.
  */
 export function readChatReadSequence(owner: LocalOwner): number | null {
   try {
     const raw = localStorage.getItem(storageKey(owner));
     const sequence = raw === null ? NaN : Number(raw);
-    return Number.isSafeInteger(sequence) && sequence > 0 ? sequence : null;
+    return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : null;
   } catch (error) {
     if (!(error instanceof DOMException)) throw error;
     console.warn('Chat read position could not be read.');

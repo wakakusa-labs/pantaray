@@ -256,7 +256,11 @@ async def _run(fixture: dict[str, Any], db_path: Path, index: int) -> dict[str, 
     }
 
 
-def _compare(before: Path, after: Path) -> None:
+def _compare(before: Path, after: Path) -> int:
+    runs = [sorted(path.name for path in d.glob("run-*.json")) for d in (before, after)]
+    if not runs[0] or runs[0] != runs[1]:
+        print(f"The two directories do not hold the same runs: {runs}")
+        return 1
     for label, directory in (("before", before), ("after", after)):
         for path in sorted(directory.glob("run-*.json")):
             run = json.loads(path.read_text("utf-8"))
@@ -270,6 +274,7 @@ def _compare(before: Path, after: Path) -> None:
             print(
                 f"-- reconsideration_reason: {run['output']['reconsideration_reason']}"
             )
+    return 0
 
 
 async def main() -> int:
@@ -280,8 +285,7 @@ async def main() -> int:
     parser.add_argument("--compare", nargs=2, type=Path)
     args = parser.parse_args()
     if args.compare:
-        _compare(*args.compare)
-        return 0
+        return _compare(*args.compare)
     key = os.environ.get("OPENAI_API_KEY", "").strip().strip("'\"")
     if not key or args.out is None:
         print("Set OPENAI_API_KEY and pass --out DIR")
@@ -294,7 +298,8 @@ async def main() -> int:
     register_logged_out_owner(OWNER)
     mark_configured()
     set_llm_connection(ApiKeyConnection(provider="openai", model=MODEL, api_key=key))
-    args.out.mkdir(parents=True, exist_ok=True)
+    # A fresh directory per replay, so no older result stands in for a run.
+    args.out.mkdir(parents=True, exist_ok=False)
     failures = 0
     with tempfile.TemporaryDirectory() as raw_tmp:
         db_path = Path(raw_tmp) / "runtime.sqlite3"
@@ -310,6 +315,10 @@ async def main() -> int:
                 json.dumps(run, ensure_ascii=False, indent=2), "utf-8"
             )
             print(f"PASS run-{index}: requests={run['requests']} usage={run['usage']}")
+    if failures:
+        # Half a replay cannot be compared run for run.
+        for path in args.out.glob("run-*.json"):
+            path.unlink()
     print(f"model={MODEL} failures={failures}")
     return 1 if failures else 0
 

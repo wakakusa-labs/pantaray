@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
@@ -75,8 +76,25 @@ WRITE_SESSION_MEMORY_TOOL = ToolDefinition.from_spec(
     )
 )
 
+
+def write_session_memory(content: str) -> dict[str, JSONValue]:
+    """The result of writing ``content``, which nothing stores: the conversation
+    keeps the call. ``ValueError`` with the model-facing message when too large.
+    """
+
+    size = len(content.encode("utf-8"))
+    if size > SESSION_MEMORY_MAX_BYTES:
+        raise ValueError(
+            f"Session memory is {size:,} UTF-8 bytes, over the limit of "
+            f"{SESSION_MEMORY_MAX_BYTES:,} bytes. Nothing was written; the "
+            "previous session memory is still current. Shorten it and write again."
+        )
+    return {"status": "written", "bytes": size, "limit_bytes": SESSION_MEMORY_MAX_BYTES}
+
+
 __all__ = [
     "SESSION_MEMORY_MAX_BYTES",
     "WRITE_SESSION_MEMORY_TOOL",
     "WRITE_SESSION_MEMORY_TOOL_ID",
+    "write_session_memory",
 ]

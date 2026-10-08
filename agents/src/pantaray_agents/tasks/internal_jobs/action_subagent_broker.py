@@ -4,6 +4,9 @@ import uuid
 from pathlib import Path
 from typing import cast
 
+from pantaray_agents.agents.action_agent.runtime.agents_md import (
+    attach_repository_agents_md,
+)
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.bash_tool import (
@@ -31,6 +34,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerToolOutcome,
     execute_broker_tool,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    READ_TOOL_ID,
+    load_broker_context,
+)
 from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
 )
@@ -38,6 +45,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
+    AgentsMdClaims,
+)
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.tools.contract import (
     BrokerPolicyError,
@@ -103,6 +113,7 @@ def build_action_subagent_broker_tools(
     busy_timeout_ms: int,
     payload: ActionSubagentJobPayload,
     authority: ActionSubagentBrokerAuthority,
+    agents_md: AgentsMdClaims,
 ) -> tuple[ReactToolDefinition, ...]:
     return tuple(
         _build_tool(
@@ -111,6 +122,7 @@ def build_action_subagent_broker_tools(
             busy_timeout_ms=busy_timeout_ms,
             payload=payload,
             authority=authority,
+            agents_md=agents_md,
         )
         for definition in _CHILD_BROKER_TOOLS
     )
@@ -126,6 +138,7 @@ async def execute_action_subagent_broker_tool(
     args: dict[str, JSONValue],
     tool_request_id: str,
     call_id: str,
+    agents_md: AgentsMdClaims,
 ) -> ReactToolResult:
     """Run one child broker call, turning approval control into a typed pause."""
 
@@ -191,10 +204,53 @@ async def execute_action_subagent_broker_tool(
             ),
             message=_bounded_failure_message(outcome),
         )
+    if isinstance(outcome, BrokerToolOutcome) and outcome.failure is None:
+        _claim_agents_md(
+            agents_md,
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            payload=payload,
+            authority=authority,
+            tool_id=tool_id,
+            args=args,
+        )
     return ReactToolResult(
         tool_name=tool_id,
         status="success",
         output=outcome.output,
+    )
+
+
+def _claim_agents_md(
+    agents_md: AgentsMdClaims,
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    authority: ActionSubagentBrokerAuthority,
+    tool_id: str,
+    args: dict[str, JSONValue],
+) -> None:
+    """Claim the repository AGENTS.md files this call is the first to reach."""
+
+    try:
+        read_context = load_broker_context(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            tool_id=READ_TOOL_ID,
+            path_access_kind="read",
+            user_id=payload["user_id"],
+            actor_process_id=payload["process_id"],
+            manifest_id=authority.manifest_id,
+            execution_session_id=authority.execution_session_id,
+        )
+    except BrokerPolicyError:
+        # A child that may not read files gets no AGENTS.md either.
+        return
+    agents_md.claim(
+        lambda attached: attach_repository_agents_md(
+            attached, tool_id=tool_id, args=args, read_context=read_context
+        )
     )
 
 
@@ -252,6 +308,7 @@ def _build_tool(
     busy_timeout_ms: int,
     payload: ActionSubagentJobPayload,
     authority: ActionSubagentBrokerAuthority,
+    agents_md: AgentsMdClaims,
 ) -> ReactToolDefinition:
     async def execute(call: ReactToolCall, _step_number: int) -> ReactToolResult:
         if call.call_id is None:
@@ -279,6 +336,7 @@ def _build_tool(
             args=cast(dict[str, JSONValue], call.tool_args),
             tool_request_id=tool_request_id,
             call_id=call.call_id,
+            agents_md=agents_md,
         )
 
     return ReactToolDefinition(

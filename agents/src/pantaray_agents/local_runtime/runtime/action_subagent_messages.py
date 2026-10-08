@@ -123,12 +123,17 @@ def append_action_subagent_event(
 
 
 def deliver_action_subagent_messages(
-    *, db_path: Path, busy_timeout_ms: int, payload: ActionSubagentJobPayload
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    mark: bool,
 ) -> tuple[str, ...]:
     """The parent messages not yet in the child's conversation, marked delivered.
 
     Read and marked in one transaction, so every message before the marker is
     one this delivery returned, and a message that lands later is the next's.
+    ``mark`` sets the marker without a message, for another row it delivers.
     """
 
     process_id = payload["process_id"]
@@ -148,7 +153,7 @@ def deliver_action_subagent_messages(
                     ACTION_SUBAGENT_DELIVERED_EVENT,
                 ),
             ).fetchall()
-            if rows:
+            if rows or mark:
                 append_process_event_in_connection(
                     connection=connection,
                     process_id=process_id,

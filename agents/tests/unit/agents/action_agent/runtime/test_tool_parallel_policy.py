@@ -47,6 +47,9 @@ from pantaray_agents.local_runtime.runtime.job_payload_models import (
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     build_action_subagent_broker_tools,
 )
+from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
+    AgentsMdClaims,
+)
 from pantaray_agents.tools.contract import ToolConcurrency, ToolTurnPlacement
 
 _EPOCH = "memory_context_epoch"
@@ -105,6 +108,11 @@ SUBAGENT_CONCURRENCY: dict[str, ToolConcurrency] = {
             busy_timeout_ms=0,
             payload=cast(ActionSubagentJobPayload, {}),
             authority=cast(ActionSubagentBrokerAuthority, None),
+            agents_md=AgentsMdClaims(
+                db_path=Path("unused.sqlite3"),
+                busy_timeout_ms=0,
+                payload=cast(ActionSubagentJobPayload, {}),
+            ),
         )
     },
     SUBMIT_SUBAGENT_REPORT_TOOL_ID: ToolConcurrency("run_ending"),

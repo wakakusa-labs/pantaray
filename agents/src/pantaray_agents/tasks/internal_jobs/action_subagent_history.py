@@ -9,7 +9,8 @@ task leads the history and is the job payload's, never a row.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
@@ -43,12 +44,14 @@ from pantaray_llm.contracts.tool_use import LlmToolCall
 
 ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
 ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
+ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
 _HISTORY_EVENTS = (
     ACTION_SUBAGENT_MESSAGE_EVENT,
     ACTION_SUBAGENT_DELIVERED_EVENT,
     ACTION_SUBAGENT_TURN_EVENT,
     ACTION_SUBAGENT_TOOL_EVENT,
     ACTION_SUBAGENT_NOTICE_EVENT,
+    ACTION_SUBAGENT_AGENTS_MD_EVENT,
 )
 _INTERRUPTED = (
     "Not run: this call was interrupted before it was answered. "
@@ -85,6 +88,53 @@ class _AnswerRow(BaseModel):
     error_message: str | None
 
 
+class _AgentsMdRow(BaseModel):
+    """Repository AGENTS.md files the child's calls first reached, as sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paths: list[str]
+    text: str
+
+
+@dataclass(slots=True)
+class AgentsMdClaims:
+    """The AGENTS.md files this child has attached, and those not sent yet.
+
+    A claim is stored the moment the call makes it, beside that call's answer,
+    and goes in before the next send, as a message of its own the window never
+    omits. A run that stops first -- a pause, a crash -- leaves it to the
+    resumed run's first send.
+    """
+
+    db_path: Path
+    busy_timeout_ms: int
+    payload: ActionSubagentJobPayload
+    attached: list[str] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+
+    def restore(self, history: SubagentHistory) -> None:
+        self.attached = list(history.agents_md_paths)
+        self.pending = list(history.pending_agents_md)
+
+    def claim(self, attach: Callable[[list[str]], str | None]) -> None:
+        """``attach`` appends what it attaches to the set and renders it."""
+
+        before = len(self.attached)
+        text = attach(self.attached)
+        if text is None:
+            return
+        row = _AgentsMdRow(paths=self.attached[before:], text=text)
+        append_action_subagent_event(
+            db_path=self.db_path,
+            busy_timeout_ms=self.busy_timeout_ms,
+            payload=self.payload,
+            event_name=ACTION_SUBAGENT_AGENTS_MD_EVENT,
+            event_payload=row.model_dump(mode="json"),
+        )
+        self.pending.append(text)
+
+
 @dataclass(frozen=True, slots=True)
 class SubagentHistory:
     """What the rows rebuild, and the calls a stopped run left unanswered."""
@@ -93,6 +143,9 @@ class SubagentHistory:
     turns: dict[str, ActionProviderTurnRecord]
     window: WindowState
     unanswered: tuple[LlmToolCall, ...]
+    agents_md_paths: tuple[str, ...]
+    # Claimed AGENTS.md text no send has carried yet.
+    pending_agents_md: tuple[str, ...]
 
 
 def load_subagent_history(
@@ -113,6 +166,8 @@ def load_subagent_history(
     )
     waiting: list[str] = []
     unanswered: list[LlmToolCall] = []
+    agents_md_paths: list[str] = []
+    claimed: list[str] = []
     for event in load_action_subagent_events(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -123,7 +178,11 @@ def load_subagent_history(
         if name == ACTION_SUBAGENT_MESSAGE_EVENT:
             waiting.append(action_subagent_message_content(payload))
         elif name == ACTION_SUBAGENT_DELIVERED_EVENT:
-            entries.extend(ConversationEntry(_text_item(text)) for text in waiting)
+            # The order the send put them in: the files, then the messages.
+            entries.extend(
+                ConversationEntry(_text_item(text)) for text in (*claimed, *waiting)
+            )
+            claimed.clear()
             waiting.clear()
         elif name == ACTION_SUBAGENT_TURN_EVENT:
             turn = _TurnRow.model_validate(payload)
@@ -144,6 +203,10 @@ def load_subagent_history(
             call = _answered_call(unanswered, answer)
             unanswered.remove(call)
             entries.append(ConversationEntry(_answer_item(call.call_id, answer)))
+        elif name == ACTION_SUBAGENT_AGENTS_MD_EVENT:
+            agents_md = _AgentsMdRow.model_validate(payload)
+            agents_md_paths.extend(agents_md.paths)
+            claimed.append(agents_md.text)
         else:
             entries.append(ConversationEntry(LlmTurnUserItem.model_validate(payload)))
     return SubagentHistory(
@@ -151,6 +214,8 @@ def load_subagent_history(
         turns=turns,
         window=window,
         unanswered=tuple(unanswered),
+        agents_md_paths=tuple(agents_md_paths),
+        pending_agents_md=tuple(claimed),
     )
 
 
@@ -161,16 +226,17 @@ class SubagentHistoryWriter:
     db_path: Path
     busy_timeout_ms: int
     payload: ActionSubagentJobPayload
+    agents_md: AgentsMdClaims
 
     async def before_send(self) -> list[LlmTurnItem]:
-        return [
-            _text_item(text)
-            for text in deliver_action_subagent_messages(
-                db_path=self.db_path,
-                busy_timeout_ms=self.busy_timeout_ms,
-                payload=self.payload,
-            )
-        ]
+        files, self.agents_md.pending = self.agents_md.pending, []
+        messages = deliver_action_subagent_messages(
+            db_path=self.db_path,
+            busy_timeout_ms=self.busy_timeout_ms,
+            payload=self.payload,
+            mark=bool(files),
+        )
+        return [_text_item(text) for text in (*files, *messages)]
 
     async def on_turn(self, turn: RecordedTurn) -> None:
         # The loop records every turn as an assistant item under its turn id.

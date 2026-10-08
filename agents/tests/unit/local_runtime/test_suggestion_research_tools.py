@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -1505,3 +1506,18 @@ async def test_suggestion_refuses_an_image_its_model_call_cannot_carry(
     assert image.output["error_code"] == READ_IMAGE_NOT_SUPPORTED
     assert image.images == ()
     assert text.status == "success"
+
+
+def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:
+    from pantaray_agents.conversation.tool_batch import plan_tool_batch
+
+    tools = WebResearchToolSession(user_id="user-1").definitions()
+    # Run at once, two pages of one query would each fetch and store a snapshot.
+    plan = plan_tool_batch(
+        [SimpleNamespace(tool_id="web_search")] * 2,
+        concurrency={tool.name: tool.concurrency for tool in tools},
+        max_parallel=3,
+        remaining_tool_steps=3,
+    )
+
+    assert plan.mode == "sequential"

@@ -54,7 +54,8 @@ def _definition(
         },
         response_schema=react_tool_response_schema(success_schema=success_schema),
         execute=execute,
-        concurrency=ToolConcurrency("parallel"),
+        # The session fetches a query or page once and pages over that snapshot.
+        concurrency=ToolConcurrency("parallel", shared_state="web_snapshots"),
     )
 
 

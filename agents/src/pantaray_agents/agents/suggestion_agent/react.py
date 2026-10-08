@@ -241,11 +241,7 @@ async def run_suggestion_react(
     parse_output: SuggestionOutputParser,
     record_step: SuggestionStepRecorder,
 ) -> SuggestionExtraction:
-    """Research behind ``context`` for ``lens`` until a submission is accepted.
-
-    Raises what the loop raises: a send, tool or step failure, a cancel, or no
-    accepted submission by the last turn.
-    """
+    """Research behind ``context`` for ``lens`` until a submission is accepted."""
 
     definitions = research_tools.build_tool_definitions(
         user_id=user_id,

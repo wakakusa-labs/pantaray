@@ -20,7 +20,14 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input i
     SUBAGENT_ROLE,
     role_system_instruction,
 )
-from pantaray_agents.agents.action_agent.tools import SUBMIT_SUBAGENT_REPORT_TOOL_ID
+from pantaray_agents.agents.action_agent.tools import (
+    SUBMIT_SUBAGENT_REPORT_TOOL_ID,
+    WRITE_SESSION_MEMORY_TOOL,
+    WRITE_SESSION_MEMORY_TOOL_ID,
+)
+from pantaray_agents.agents.action_agent.tools.session_memory_tool import (
+    write_session_memory,
+)
 from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
@@ -73,6 +80,8 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
+    react_tool_response_schema,
+    tool_error_response,
 )
 from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
@@ -83,7 +92,11 @@ from .action_subagent_broker import (
     build_action_subagent_broker_tools,
     execute_action_subagent_broker_tool,
 )
-from .action_subagent_history import SubagentHistoryWriter, load_subagent_history
+from .action_subagent_history import (
+    AgentsMdClaims,
+    SubagentHistoryWriter,
+    load_subagent_history,
+)
 
 ACTION_SUBAGENT_PROFILE_UNAVAILABLE = "ACTION_SUBAGENT_PROFILE_UNAVAILABLE"
 ACTION_SUBAGENT_EXECUTION_FAILED = "ACTION_SUBAGENT_EXECUTION_FAILED"
@@ -131,8 +144,21 @@ async def execute_action_subagent_job(
         busy_timeout_ms=busy_timeout_ms,
         payload=payload,
     )
+    load_history = functools.partial(
+        load_subagent_history,
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        process_id=payload["process_id"],
+        assigned_task=_assigned_task_message(payload),
+        window_tokens=tunables.context_window_tokens,
+    )
+    history = load_history()
+    agents_md = AgentsMdClaims(attached=list(history.agents_md_paths))
     writer = SubagentHistoryWriter(
-        db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        payload=payload,
+        agents_md=agents_md,
     )
     rejected_reports = 0
 
@@ -154,15 +180,10 @@ async def execute_action_subagent_job(
             args=resumed.arguments,
             tool_request_id=resumed.tool_request_id,
             call_id=resumed.call_id,
+            agents_md=agents_md,
         )
         writer.answer_waiting_call(resumed.call_id, resumed.tool_id, settled)
-    history = load_subagent_history(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        process_id=payload["process_id"],
-        assigned_task=_assigned_task_message(payload),
-        window_tokens=tunables.context_window_tokens,
-    )
+        history = load_history()
     entries = await writer.answer_unanswered(history)
     identity, _ = provider_turns.read_provider_turn_target(
         inference_profile=payload["inference_profile_id"]
@@ -211,6 +232,7 @@ async def execute_action_subagent_job(
         busy_timeout_ms=busy_timeout_ms,
         payload=payload,
         authority=broker_authority,
+        agents_md=agents_md,
     )
     return await run_conversation(
         ConversationRun(
@@ -219,7 +241,9 @@ async def execute_action_subagent_job(
             # grow behind.
             prompt=payload["action_context"],
             system_instruction=_subagent_system_instruction(),
-            tools=tuple(_checked(tool, check_cancel) for tool in tools),
+            tools=tuple(
+                _checked(tool, check_cancel) for tool in (*tools, _SESSION_MEMORY_TOOL)
+            ),
             ending_tools=(_report_tool_definition(),),
             history=entries,
             provider_turns=store,
@@ -387,6 +411,35 @@ def _report_tool_definition() -> LlmToolDefinition:
             "required": ["report"],
         },
     )
+
+
+async def _write_session_memory(call: ReactToolCall, _step: int) -> ReactToolResult:
+    # The child's own notes, which only its conversation keeps: the parent's
+    # tool writes a step of the Action, which this never does.
+    try:
+        output = write_session_memory(str(call.tool_call_envelope.args["content"]))
+    except ValueError as exc:
+        return tool_error_response(
+            tool_name=WRITE_SESSION_MEMORY_TOOL_ID,
+            error_code="SESSION_MEMORY_TOO_LARGE",
+            message=str(exc),
+        )
+    return ReactToolResult(
+        tool_name=WRITE_SESSION_MEMORY_TOOL_ID, status="success", output=output
+    )
+
+
+_SESSION_MEMORY_TOOL = ReactToolDefinition(
+    name=WRITE_SESSION_MEMORY_TOOL_ID,
+    description=WRITE_SESSION_MEMORY_TOOL.prompt_contract.description
+    or WRITE_SESSION_MEMORY_TOOL.description,
+    request_schema=WRITE_SESSION_MEMORY_TOOL.build_validation_input_schema(),
+    response_schema=react_tool_response_schema(
+        success_schema=dict(WRITE_SESSION_MEMORY_TOOL.output_schema)
+    ),
+    execute=_write_session_memory,
+    concurrency=WRITE_SESSION_MEMORY_TOOL.concurrency,
+)
 
 
 def _checked(

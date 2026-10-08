@@ -843,10 +843,13 @@ def _decide(db_path: Path, session_id: str, request_id: str, decision: str) -> N
 
 
 def _resume_child(
-    monkeypatch: pytest.MonkeyPatch, db_path: Path, payload: ActionSubagentJobPayload
+    monkeypatch: pytest.MonkeyPatch,
+    db_path: Path,
+    payload: ActionSubagentJobPayload,
+    calls: tuple[LlmToolCall, ...] = (),
 ) -> _Client:
     _claim_child(db_path)
-    client = _Client(calls=(_REPORT_CALL,))
+    client = _Client(calls=(*calls, _REPORT_CALL))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
@@ -1888,3 +1891,131 @@ def test_a_call_a_crash_left_unanswered_is_answered_as_not_run_on_resume(
         "action_subagent_turn",
         "stream_end",
     ]
+
+
+def test_the_childs_session_memory_stays_in_its_own_conversation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """子の write_session_memory は子の会話にだけ残り、親や記憶更新からは見えない。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    note = "CHILD_SESSION_NOTE: module a uses tabs"
+    client = _Client(
+        calls=(
+            LlmToolCall(
+                call_id="memo", name="write_session_memory", arguments={"content": note}
+            ),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert any(
+        tool.name == "write_session_memory" for tool in client.tool_uses[0].tools
+    )
+    assert _results(client, 1) == [("write_session_memory", "completed")]
+    # Only the child's private rows hold it: no Action step, no public event,
+    # nothing the memory update reads from the parent.
+    with sqlite3.connect(db_path) as connection:
+        holders = {
+            table
+            for (table,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND sql NOT LIKE 'CREATE VIRTUAL%'"
+            ).fetchall()
+            for column in connection.execute(f"PRAGMA table_info('{table}')")
+            if connection.execute(
+                f"SELECT 1 FROM '{table}' WHERE instr(\"{column[1]}\", ?) > 0",
+                (note,),
+            ).fetchone()
+        }
+        private = connection.execute(
+            "SELECT DISTINCT process_id FROM process_events WHERE instr(payload_json, ?)",
+            (note,),
+        ).fetchall()
+    assert (holders, private) == ({"process_events"}, [("child-process",)])
+
+
+def _agents_md_workspace(db_path: Path) -> Path:
+    workspace = _workspace(db_path)
+    (workspace / "AGENTS.md").write_text("ROOT_RULES", "utf-8")
+    (workspace / "sub").mkdir()
+    (workspace / "sub" / "AGENTS.md").write_text("SUB_RULES", "utf-8")
+    (workspace / "sub" / "notes.txt").write_text("notes", "utf-8")
+    return workspace
+
+
+def _read(call_id: str, path: str) -> LlmToolCall:
+    return LlmToolCall(call_id=call_id, name="read", arguments={"path": path})
+
+
+def test_repository_agents_md_reaches_the_child_once_across_a_resume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """子が初めて触れたディレクトリの AGENTS.md は一度だけ届き、再開後も二度は届かない。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _agents_md_workspace(db_path)
+    client = _Client(calls=(_read("r1", "sub/notes.txt"), _APPLY_PATCH_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+    # Both files went in before the send after the read, root first.
+    attached = _items(client, 1)
+    assert attached.count("ROOT_RULES") == attached.count("SUB_RULES") == 1
+    assert attached.index("ROOT_RULES") < attached.index("SUB_RULES")
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT approval_session_id,tool_request_id FROM approval_sessions"
+        ).fetchone()
+    _decide(db_path, str(session[0]), str(session[1]), "approved_once")
+
+    resumed = _resume_child(
+        monkeypatch, db_path, payload, calls=(_read("r2", "sub/notes.txt"),)
+    )
+
+    last = _items(resumed, len(resumed.tool_uses) - 1)
+    assert last.count("ROOT_RULES") == last.count("SUB_RULES") == 1
+
+
+def test_a_child_that_may_not_read_files_gets_no_agents_md(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ファイルを読めない子には AGENTS.md を添えない。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    _agents_md_workspace(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE execution_sessions SET tool_allowlist_json=? "
+            "WHERE action_id='action-1'",
+            (json.dumps(["list", "glob", "grep", "apply_patch", "bash"]),),
+        )
+    client = _Client(
+        calls=(
+            LlmToolCall(call_id="l1", name="list", arguments={"path": "sub"}),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert _results(client, 1) == [("list", "completed")]
+    assert "RULES" not in _items(client, 1)

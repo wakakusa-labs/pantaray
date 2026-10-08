@@ -9,7 +9,8 @@ task leads the history and is the job payload's, never a row.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
@@ -43,12 +44,14 @@ from pantaray_llm.contracts.tool_use import LlmToolCall
 
 ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
 ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
+ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
 _HISTORY_EVENTS = (
     ACTION_SUBAGENT_MESSAGE_EVENT,
     ACTION_SUBAGENT_DELIVERED_EVENT,
     ACTION_SUBAGENT_TURN_EVENT,
     ACTION_SUBAGENT_TOOL_EVENT,
     ACTION_SUBAGENT_NOTICE_EVENT,
+    ACTION_SUBAGENT_AGENTS_MD_EVENT,
 )
 _INTERRUPTED = (
     "Not run: this call was interrupted before it was answered. "
@@ -85,6 +88,36 @@ class _AnswerRow(BaseModel):
     error_message: str | None
 
 
+class _AgentsMdRow(BaseModel):
+    """Repository AGENTS.md files the child's calls first reached, as sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paths: list[str]
+    text: str
+
+
+@dataclass(slots=True)
+class AgentsMdClaims:
+    """The AGENTS.md files this child has attached, and those claimed since.
+
+    A claimed file goes in before the next send, as a message of its own the
+    window never omits; one claimed by a run that stops first was never sent,
+    so a later call attaches it again.
+    """
+
+    attached: list[str]
+    pending: list[_AgentsMdRow] = field(default_factory=list)
+
+    def claim(self, attach: Callable[[list[str]], str | None]) -> None:
+        """``attach`` appends what it attaches to the set and renders it."""
+
+        before = len(self.attached)
+        text = attach(self.attached)
+        if text is not None:
+            self.pending.append(_AgentsMdRow(paths=self.attached[before:], text=text))
+
+
 @dataclass(frozen=True, slots=True)
 class SubagentHistory:
     """What the rows rebuild, and the calls a stopped run left unanswered."""
@@ -93,6 +126,7 @@ class SubagentHistory:
     turns: dict[str, ActionProviderTurnRecord]
     window: WindowState
     unanswered: tuple[LlmToolCall, ...]
+    agents_md_paths: tuple[str, ...]
 
 
 def load_subagent_history(
@@ -113,6 +147,7 @@ def load_subagent_history(
     )
     waiting: list[str] = []
     unanswered: list[LlmToolCall] = []
+    agents_md_paths: list[str] = []
     for event in load_action_subagent_events(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -144,6 +179,10 @@ def load_subagent_history(
             call = _answered_call(unanswered, answer)
             unanswered.remove(call)
             entries.append(ConversationEntry(_answer_item(call.call_id, answer)))
+        elif name == ACTION_SUBAGENT_AGENTS_MD_EVENT:
+            agents_md = _AgentsMdRow.model_validate(payload)
+            agents_md_paths.extend(agents_md.paths)
+            entries.append(ConversationEntry(_text_item(agents_md.text)))
         else:
             entries.append(ConversationEntry(LlmTurnUserItem.model_validate(payload)))
     return SubagentHistory(
@@ -151,6 +190,7 @@ def load_subagent_history(
         turns=turns,
         window=window,
         unanswered=tuple(unanswered),
+        agents_md_paths=tuple(agents_md_paths),
     )
 
 
@@ -161,15 +201,24 @@ class SubagentHistoryWriter:
     db_path: Path
     busy_timeout_ms: int
     payload: ActionSubagentJobPayload
+    agents_md: AgentsMdClaims
 
     async def before_send(self) -> list[LlmTurnItem]:
+        items: list[LlmTurnItem] = []
+        while self.agents_md.pending:
+            row = self.agents_md.pending.pop(0)
+            self._append(ACTION_SUBAGENT_AGENTS_MD_EVENT, row)
+            items.append(_text_item(row.text))
         return [
-            _text_item(text)
-            for text in deliver_action_subagent_messages(
-                db_path=self.db_path,
-                busy_timeout_ms=self.busy_timeout_ms,
-                payload=self.payload,
-            )
+            *items,
+            *(
+                _text_item(text)
+                for text in deliver_action_subagent_messages(
+                    db_path=self.db_path,
+                    busy_timeout_ms=self.busy_timeout_ms,
+                    payload=self.payload,
+                )
+            ),
         ]
 
     async def on_turn(self, turn: RecordedTurn) -> None:

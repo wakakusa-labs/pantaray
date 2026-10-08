@@ -1188,11 +1188,11 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
     ):
         assert rule in shared
     assert "submit_subagent_report" in child
-    assert "Only when you will change files in a repository" in child
+    assert "attached after your tool results" in child
+    assert "your own `write_session_memory`" in child
     for supervisor_only in (
         "draft_final_answer",
         "submit_final_answer",
-        "write_session_memory",
         "spawn_subagent",
         "wait_subagents",
         "step_note",

@@ -28,6 +28,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
     send_action_subagent_message,
 )
 from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
+    AgentsMdClaims,
     SubagentHistory,
     SubagentHistoryWriter,
     load_subagent_history,
@@ -209,7 +210,10 @@ async def test_a_run_resumed_from_its_rows_sends_the_same_request_and_goes_on(
 ) -> None:
     db_path, payload = child
     writer = SubagentHistoryWriter(
-        db_path=db_path, busy_timeout_ms=1_000, payload=payload
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        payload=payload,
+        agents_md=AgentsMdClaims(attached=[]),
     )
     _message(db_path, "m0", "Before the first turn")
     look = [
@@ -274,7 +278,10 @@ async def test_calls_a_stopped_turn_left_are_answered_before_the_run_goes_on(
 ) -> None:
     db_path, payload = child
     writer = SubagentHistoryWriter(
-        db_path=db_path, busy_timeout_ms=1_000, payload=payload
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        payload=payload,
+        agents_md=AgentsMdClaims(attached=[]),
     )
     calls = [
         LlmToolCall(call_id="a1", name="look", arguments={"path": "a"}),

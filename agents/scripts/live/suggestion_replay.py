@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import os
+import random
 import sqlite3
 import sys
 import time
@@ -115,6 +116,97 @@ def _step_summary(db: Path, suggestion_id: str) -> dict[str, object]:
     }
 
 
+USAGE_FIELDS = (
+    "prompt_tokens",
+    "cached_prompt_tokens",
+    "completion_tokens",
+    "reasoning_tokens",
+)
+
+
+class _UsageRecorder:
+    """Usage and wall time per call site: each lens run, the selector, the writer.
+
+    It wraps the agent's model client, so it reads what the provider reported
+    whichever loop the tree under test runs.
+    """
+
+    def __init__(self, models: object, lens_headings: dict[str, str]) -> None:
+        self._models = models
+        self._headings = lens_headings
+        self.sites: dict[str, dict[str, float]] = {}
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._models, name)
+
+    async def generate_content(self, **kwargs: object) -> object:
+        started = time.monotonic()
+        try:
+            response = await self._models.generate_content(**kwargs)  # type: ignore[attr-defined]
+        except Exception as error:
+            self._add(kwargs, getattr(error, "usage_metadata", None), started, True)
+            raise
+        self._add(kwargs, getattr(response, "usage_metadata", None), started, False)
+        return response
+
+    def _add(
+        self, kwargs: dict[str, object], usage: object, started: float, failed: bool
+    ) -> None:
+        site = self.sites.setdefault(
+            self._site(kwargs),
+            {"requests": 0, "failed": 0, **dict.fromkeys(USAGE_FIELDS, 0)},
+        )
+        site["requests"] += 1
+        site["failed"] += failed
+        for field in USAGE_FIELDS:
+            site[field] += int((usage or {}).get(field) or 0)  # type: ignore[attr-defined]
+        site["first"] = min(site.get("first", started), started)
+        site["last"] = max(site.get("last", 0.0), time.monotonic())
+
+    def _site(self, kwargs: dict[str, object]) -> str:
+        tool_use = getattr(kwargs.get("config"), "tool_use", None)
+        if tool_use is None:
+            return "writer"
+        if any(tool.name == "select_suggestion" for tool in tool_use.tools):
+            return "selector"
+        # The lens text leads the history on the shared loop and follows the
+        # shared prompt on the native one; tool output after it may quote others.
+        conversation = getattr(tool_use, "conversation", None)
+        text = (
+            conversation[0].model_dump_json()
+            if conversation
+            else str(kwargs.get("contents"))
+        )
+        found = {
+            lens: text.find(heading)
+            for lens, heading in self._headings.items()
+            if heading in text
+        }
+        return f"lens:{min(found, key=found.__getitem__)}" if found else "unknown"
+
+    def report(self) -> dict[str, dict[str, float]]:
+        return {
+            site: {
+                **{
+                    key: value
+                    for key, value in usage.items()
+                    if key not in ("first", "last")
+                },
+                "elapsed_s": round(usage["last"] - usage["first"], 1),
+            }
+            for site, usage in sorted(self.sites.items())
+        }
+
+
+class _RecordingClient:
+    def __init__(self, client: object, recorder: _UsageRecorder) -> None:
+        self._client = client
+        self.aio = type("Aio", (), {"models": recorder})()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._client, name)
+
+
 async def _replay_one(
     *, db: Path, artifact_root: Path, user_id: str, insight_id: str, label: str
 ) -> dict[str, object]:
@@ -163,6 +255,19 @@ async def _replay_one(
     agent = await deps.get_suggestion_agent(
         research_snapshot=snapshot, activity_start=None
     )
+    from pantaray_agents.agents.suggestion_agent.lenses import (
+        SUGGESTION_LENS_PROMPT_NAME,
+    )
+    from pantaray_agents.utils.prompt_loader import PromptLoader
+
+    lenses = PromptLoader().load_config(SUGGESTION_LENS_PROMPT_NAME).role_rules
+    recorder = _UsageRecorder(
+        agent.client.aio.models,
+        {lens: text.strip().splitlines()[0] for lens, text in lenses.items()},
+    )
+    agent.client = _RecordingClient(agent.client, recorder)
+    # Both sides look through the same lenses for one Insight.
+    agent._lens_rng = random.Random(insight_id)
     languages = await deps.get_user_settings_repository()
     request = SuggestionAgentRequest(
         user_id=user_id,
@@ -189,6 +294,7 @@ async def _replay_one(
         "error": None
         if error is None
         else f"{error.error_code}: {error.error_message}",
+        "usage": recorder.report(),
         "has_suggestion": response.has_suggestion,
         "interaction_contract": response.interaction_contract,
         "answer": response.answer,
@@ -316,6 +422,7 @@ def _compare(args: argparse.Namespace) -> int:
         }
 
     before, after = load(args.before), load(args.after)
+    totals = {label: Counter() for label in ("before", "after")}
     for insight_id in [i for i in before if i in after]:
         print(f"## Insight {insight_id}\n")
         for record in (before[insight_id], after[insight_id]):
@@ -325,15 +432,32 @@ def _compare(args: argparse.Namespace) -> int:
                 for run in runs  # type: ignore[union-attr]
             )
             print(f"### {record['label']} ({record.get('elapsed_s')}s; {shape})")
+            total = totals.setdefault(str(record["label"]), Counter())
+            total["elapsed_s"] += float(record.get("elapsed_s") or 0)  # type: ignore[arg-type]
+            for site, usage in (record.get("usage") or {}).items():  # type: ignore[union-attr]
+                print(
+                    f"- {site}: {usage['requests']} requests, "
+                    f"input {usage['prompt_tokens']} "
+                    f"(cached {usage['cached_prompt_tokens']}), "
+                    f"output {usage['completion_tokens']} "
+                    f"(reasoning {usage['reasoning_tokens']}), {usage['elapsed_s']}s"
+                )
+                for field in ("requests", *USAGE_FIELDS):
+                    total[field] += usage[field]
             if record.get("error"):
                 print(f"error: {record['error']}\n")
                 continue
             print(
-                f"has_suggestion={record['has_suggestion']} "
+                f"\nhas_suggestion={record['has_suggestion']} "
                 f"kind={record['interaction_contract']} "
                 f"selector={record.get('selector')}\n"
             )
             print(f"{record['answer'] or '(no suggestion)'}\n")
+    print("## Totals\n")
+    for label, total in totals.items():
+        print(
+            f"- {label}: " + ", ".join(f"{k} {round(v, 1)}" for k, v in total.items())
+        )
     return 0
 
 

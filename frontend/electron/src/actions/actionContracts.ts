@@ -243,9 +243,10 @@ const ToolEntrySchema = z
     // while recording is off are successful steps that never ran, and a call a Stop
     // reached before it was issued is an error step that never ran, so the status alone
     // cannot say. A page render whose renderer is still being set up succeeds without
-    // drawing anything. A tool step recorded before the outcome existed did run.
+    // drawing anything, and a patch held until its file is read changes nothing. A tool
+    // step recorded before the outcome existed did run.
     outcome: z
-      .enum(['completed', 'denied', 'unavailable', 'not_executed', 'preparing'])
+      .enum(['completed', 'denied', 'unavailable', 'not_executed', 'preparing', 'needs_read'])
       .default('completed'),
     // The one argument the step acted on, and the head of its result when it has none.
     // A tool step recorded before the row said what it did carries neither.
@@ -254,6 +255,17 @@ const ToolEntrySchema = z
     output_available: z.boolean(),
     // A tool step recorded before capture_screen existed carries no image list.
     images: z.array(ImageReferenceSchema).default([]),
+    // Line counts of an applied patch whose diff the row holds inline; counts only. Any
+    // other step, a spilled diff included, carries none.
+    file_edit: z
+      .object({
+        operation: z.enum(['add', 'update', 'delete']),
+        added_lines: z.number().int().nonnegative(),
+        removed_lines: z.number().int().nonnegative(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
   })
   .strict()
   .superRefine((entry, context) => {

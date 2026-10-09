@@ -25,7 +25,10 @@ from pantaray_agents.schema.agent.base import JSONValue
         ),
         (
             "apply_patch",
-            {"applied_paths": ["a.py"], "diff": "--- a\n+++ b\n+one\n+two\n-old\n"},
+            {
+                "applied_paths": ["a.py"],
+                "diff": "--- a.py\n+++ a.py\n@@ -1 +1,2 @@\n+one\n+two\n-old\n",
+            },
             "apply_patch: ok, 1 file, +2 -1",
         ),
         (

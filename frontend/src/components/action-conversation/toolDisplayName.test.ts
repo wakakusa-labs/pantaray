@@ -223,4 +223,36 @@ describe('resolveToolLine', () => {
       ).toEqual({ text: expected, mono: false });
     }
   );
+
+  // パッチを当てずに中身だけを返した呼び出しも success として残る。「編集しました」は嘘になる。
+  it.each([
+    ['ja', 'page.html を編集する前に読み取りました'],
+    ['en', 'Read page.html before editing'],
+  ] as const)('says in %s that a patch held for a read edited nothing', (language, expected) => {
+    expect(
+      resolveToolLine('apply_patch', language, {
+        subject: 'page.html',
+        running: false,
+        outcome: 'needs_read',
+      })
+    ).toEqual({ text: expected, mono: false });
+  });
+
+  it.each([
+    ['ja', 'add', 'page.html を作成しました'],
+    ['ja', 'update', 'page.html を編集しました'],
+    ['ja', 'delete', 'page.html を削除しました'],
+    ['en', 'add', 'Created page.html'],
+    ['en', 'update', 'Edited page.html'],
+    ['en', 'delete', 'Deleted page.html'],
+  ] as const)('says in %s what a patch did to its file (%s)', (language, operation, expected) => {
+    expect(
+      resolveToolLine('apply_patch', language, {
+        subject: 'page.html',
+        running: false,
+        outcome: 'completed',
+        fileOperation: operation,
+      })
+    ).toEqual({ text: expected, mono: false });
+  });
 });

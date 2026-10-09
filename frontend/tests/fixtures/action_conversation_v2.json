@@ -25,7 +25,8 @@
           "subject": "src/",
           "output_preview": "src/app.py, src/main.py",
           "output_available": true,
-          "images": []
+          "images": [],
+          "file_edit": null
         },
         {
           "step_kind": "user",

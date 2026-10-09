@@ -370,6 +370,97 @@
   outline-offset: 2px;
 }
 
+/* 当てたパッチの行数。文の後ろに、足した行は緑、消した行は赤で添える。 */
+.action-conversation__diff-stat {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-xs);
+  font: var(--text-meta-size) var(--font-mono);
+}
+
+.action-conversation__diff-stat-added,
+.action-conversation__diff-line--added .action-conversation__diff-sign {
+  color: rgba(187, 247, 208, 0.95);
+}
+
+.action-conversation__diff-stat-removed,
+.action-conversation__diff-line--removed .action-conversation__diff-sign {
+  color: var(--danger-color);
+}
+
+/* 差分は出力の箱と同じ枠と高さ上限を持ち、はみ出した分だけ箱の中で縦にスクロールする。 */
+.action-conversation__diff {
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-bg);
+  font: var(--text-meta-size) var(--font-mono);
+}
+
+.action-conversation__diff-path {
+  padding: var(--space-xs) var(--space-sm);
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.action-conversation__diff-body {
+  max-height: 16em;
+  overflow: auto;
+}
+
+.action-conversation__diff-body:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: -2px;
+}
+
+.action-conversation__diff-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.action-conversation__diff-table td {
+  padding: 0 var(--space-xs);
+  vertical-align: top;
+}
+
+.action-conversation__diff-number {
+  width: 1%;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.action-conversation__diff-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.action-conversation__diff-sign {
+  display: inline-block;
+  width: 1.5ch;
+  user-select: none;
+}
+
+.action-conversation__diff-line--added {
+  background: rgba(74, 222, 128, 0.14);
+}
+
+.action-conversation__diff-line--removed {
+  background: rgba(248, 113, 113, 0.16);
+}
+
+.action-conversation__diff-no-newline {
+  margin-left: var(--space-sm);
+  color: var(--text-secondary);
+}
+
+.action-conversation__diff-gap td {
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .action-conversation__tool-output-failure {
   display: flex;
   align-items: center;

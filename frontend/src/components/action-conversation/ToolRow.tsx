@@ -1,5 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import type { ActionConversationToolItem } from '../../../electron/src/actions/actionConversationModel';
 import type { ActionImageReference } from '../../../electron/src/actions/actionContracts';
 import type {
   ActionToolOutputKey,
@@ -10,8 +11,12 @@ import type {
 import { useI18n } from '@/context/useI18n';
 
 import { AttachedImages, type ImageGridCopy } from './AttachedImages';
+import { ToolDiffView } from './ToolDiffView';
 import { ToolOutputText } from './ToolOutputText';
+import { parseToolDiff } from './toolDiff';
 import type { ToolDisplay, ToolLine } from './toolDisplayName';
+
+type FileEdit = NonNullable<ActionConversationToolItem['entry']['file_edit']>;
 
 type LoadState =
   | Readonly<{ kind: 'idle' }>
@@ -27,6 +32,8 @@ const COPY = {
     failed: 'Could not load tool output.',
     retry: 'Retry',
     step: (number: number) => `Step ${number}`,
+    added: (count: number) => `${count} line${count === 1 ? '' : 's'} added`,
+    removed: (count: number) => `${count} line${count === 1 ? '' : 's'} removed`,
     truncated: 'Output is truncated.',
     unavailable: {
       no_output: 'No output is available.',
@@ -40,6 +47,8 @@ const COPY = {
     failed: 'ツール出力を読み込めませんでした。',
     retry: '再試行',
     step: (number: number) => `ステップ ${number}`,
+    added: (count: number) => `${count} 行追加`,
+    removed: (count: number) => `${count} 行削除`,
     truncated: '出力は途中まで表示されています。',
     unavailable: {
       no_output: '表示できる出力はありません。',
@@ -84,6 +93,7 @@ export function ToolRow({
   Icon,
   line,
   preview,
+  fileEdit,
   stepNumber,
   runLabel,
   status,
@@ -98,6 +108,8 @@ export function ToolRow({
   Icon: ToolDisplay['Icon'];
   line: ToolLine;
   preview: string | null;
+  /** 当てたパッチの行数。見出しの文の後ろに +N −M で添える。 */
+  fileEdit: FileEdit | null;
   stepNumber: number;
   runLabel: string;
   status: ToolRowStatus | null;
@@ -119,12 +131,37 @@ export function ToolRow({
   // 同じ 1 文の行が 1 回の実行に複数並びうるので、読み上げ名は歩数で見分けられるようにする。
   const rowLabel = `${line.text}, ${copy.step(stepNumber)}, ${runLabel}`;
   const outputLabel = `${copy.output}, ${rowLabel}`;
+  // 行数は 0 でない方だけを言う。作ったファイルに「0 行削除」は要らない。
+  const counts =
+    fileEdit === null
+      ? []
+      : [
+          { kind: 'added', sign: '+', count: fileEdit.added_lines, text: copy.added },
+          { kind: 'removed', sign: '−', count: fileEdit.removed_lines, text: copy.removed },
+        ].filter((part) => part.count > 0);
+  const countsLabel =
+    counts.length > 0 ? counts.map((part) => part.text(part.count)).join(', ') : null;
   // 開閉ボタンの読み上げ名は子孫の文字を覆い隠すので、目に見えている結果の頭と状態語も名前に
   // 含める。含めないと、焦点を当てた利用者だけが失敗にも結果にも気づけない。
-  const disclosureLabel = [line.text, preview, status?.label, copy.step(stepNumber), runLabel]
+  const disclosureLabel = [
+    line.text,
+    countsLabel,
+    preview,
+    status?.label,
+    copy.step(stepNumber),
+    runLabel,
+  ]
     .filter((part) => part !== null && part !== undefined)
     .join(', ');
   const expandable = outputKey !== null || images.length > 0;
+  // 途中で切れた出力は JSON として読めないので、diff を探さずにそのまま見せる。
+  const diff = useMemo(
+    () =>
+      state.kind === 'loaded' && state.output.kind === 'text' && !state.output.truncated
+        ? parseToolDiff(state.output.content)
+        : null,
+    [state]
+  );
 
   useLayoutEffect(
     () => () => {
@@ -167,6 +204,21 @@ export function ToolRow({
       >
         {line.text}
       </span>
+      {countsLabel !== null ? (
+        <span className="action-conversation__diff-stat">
+          {counts.map((part) => (
+            <span
+              key={part.kind}
+              className={`action-conversation__diff-stat-${part.kind}`}
+              aria-hidden
+            >
+              {part.sign}
+              {part.count}
+            </span>
+          ))}
+          <span className="action-conversation__sr-only">{countsLabel}</span>
+        </span>
+      ) : null}
       {preview !== null ? (
         <span className="action-conversation__tool-preview">{preview}</span>
       ) : null}
@@ -221,7 +273,11 @@ export function ToolRow({
               <span className="action-conversation__sr-only" role="status">
                 {state.output.truncated ? `${copy.loaded} ${copy.truncated}` : copy.loaded}
               </span>
-              <ToolOutputText content={state.output.content} label={outputLabel} />
+              {diff !== null ? (
+                <ToolDiffView diff={diff} label={outputLabel} />
+              ) : (
+                <ToolOutputText content={state.output.content} label={outputLabel} />
+              )}
               {state.output.truncated ? (
                 <span className="action-conversation__state">{copy.truncated}</span>
               ) : null}

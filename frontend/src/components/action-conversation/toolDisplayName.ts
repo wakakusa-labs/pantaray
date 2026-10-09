@@ -369,6 +369,7 @@ export type ToolDisplay = Readonly<{
 export type ToolLine = Readonly<{ text: string; mono: boolean }>;
 
 type ToolOutcome = ActionConversationToolItem['entry']['outcome'];
+type FileOperation = NonNullable<ActionConversationToolItem['entry']['file_edit']>['operation'];
 
 const SUBJECT_SLOT = '{subject}';
 
@@ -405,6 +406,21 @@ const PREPARING_LINES = {
   en: 'Preparing to show {subject}',
 } as const;
 
+/** 編集の前にファイルを読ませるため、パッチを当てずに中身だけを返した。 */
+const NEEDS_READ_LINES = {
+  ja: {
+    subject: '{subject} を編集する前に読み取りました',
+    bare: '編集する前にファイルを読み取りました',
+  },
+  en: { subject: 'Read {subject} before editing', bare: 'Read the file before editing' },
+} as const;
+
+/** apply_patch が作った・消したファイル。書き換えは apply_patch の文のまま。 */
+const FILE_OPERATION_LINES = {
+  ja: { add: '{subject} を作成しました', delete: '{subject} を削除しました' },
+  en: { add: 'Created {subject}', delete: 'Deleted {subject}' },
+} as const;
+
 /** 未登録のツールでも生の snake_case は出さず、読める語に均す。 */
 function humanizeToolLabel(label: string): string {
   const spaced = label.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -431,17 +447,37 @@ export function resolveToolDisplay(label: string, language: 'en' | 'ja'): ToolDi
 export function resolveToolLine(
   label: string,
   language: 'en' | 'ja',
-  { subject, running, outcome }: { subject: string | null; running: boolean; outcome: ToolOutcome }
+  {
+    subject,
+    running,
+    outcome,
+    fileOperation = null,
+  }: {
+    subject: string | null;
+    running: boolean;
+    outcome: ToolOutcome;
+    /** 当てたパッチがファイルをどうしたか。行数を持つ行だけが渡す。 */
+    fileOperation?: FileOperation | null;
+  }
 ): ToolLine {
   if (outcome === 'unavailable') return { text: UNAVAILABLE_LINES[language], mono: false };
-  if (outcome === 'denied' || outcome === 'not_executed') {
-    const lines = outcome === 'denied' ? DENIED_LINES[language] : NOT_EXECUTED_LINES[language];
+  if (outcome === 'denied' || outcome === 'not_executed' || outcome === 'needs_read') {
+    const lines =
+      outcome === 'denied'
+        ? DENIED_LINES[language]
+        : outcome === 'not_executed'
+          ? NOT_EXECUTED_LINES[language]
+          : NEEDS_READ_LINES[language];
     if (subject === null) return { text: lines.bare, mono: false };
     // subject は記録されたままの文字列。置換文字列として解釈させない。
     return { text: lines.subject.replace(SUBJECT_SLOT, () => subject), mono: false };
   }
   if (outcome === 'preparing' && subject !== null) {
     return { text: PREPARING_LINES[language].replace(SUBJECT_SLOT, () => subject), mono: false };
+  }
+  if ((fileOperation === 'add' || fileOperation === 'delete') && subject !== null) {
+    const template = FILE_OPERATION_LINES[language][fileOperation];
+    return { text: template.replace(SUBJECT_SLOT, () => subject), mono: false };
   }
   const entry = lookup(label);
   if (entry === undefined) return { text: humanizeToolLabel(label), mono: false };

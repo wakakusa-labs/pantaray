@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
+from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    count_patch_diff_lines,
+)
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -150,11 +153,9 @@ def _command_detail(body: Mapping[str, JSONValue]) -> list[str]:
 def _apply_patch_detail(body: Mapping[str, JSONValue]) -> list[str]:
     details = [_count(body, "applied_paths", "file", "files")]
     diff = body.get("diff")
-    if isinstance(diff, str) and diff:
-        lines = diff.splitlines()
-        added = sum(1 for line in lines if line[:1] == "+" and line[:3] != "+++")
-        removed = sum(1 for line in lines if line[:1] == "-" and line[:3] != "---")
-        details.append(f"+{added} -{removed}")
+    counts = count_patch_diff_lines(diff) if isinstance(diff, str) and diff else None
+    if counts is not None:
+        details.append(f"+{counts[0]} -{counts[1]}")
     return details
 
 

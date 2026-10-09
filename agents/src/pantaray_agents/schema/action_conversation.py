@@ -25,8 +25,9 @@ type RunStatus = Literal["running", "approval_pending", "success", "error", "can
 type UserEntryStatus = Literal["adopted", "pending", "not_executed"]
 type ActionStepStatus = Literal["processing", "success", "error", "timeout"]
 type ToolEntryOutcome = Literal[
-    "completed", "denied", "unavailable", "not_executed", "preparing"
+    "completed", "denied", "unavailable", "not_executed", "preparing", "needs_read"
 ]
+type ToolEntryFileOperation = Literal["add", "update", "delete"]
 # The body kind a successful page render returns while the renderer it needs is still
 # being set up; the row says the pages will be shown once it is ready, not that it failed.
 RENDERER_PREPARING_OUTPUT_KIND = "renderer_preparing"
@@ -253,6 +254,14 @@ class AssistantEntry(_ActionConversationModel):
     content: NonBlankText
 
 
+class ToolEntryFileEdit(_ActionConversationModel):
+    """How one applied file patch changed its file: counts only, never content."""
+
+    operation: ToolEntryFileOperation
+    added_lines: NonNegativeInt
+    removed_lines: NonNegativeInt
+
+
 class ToolEntry(_ActionConversationModel):
     step_kind: Literal["tool"]
     step_id: ActionConversationIdentity
@@ -269,6 +278,8 @@ class ToolEntry(_ActionConversationModel):
     output_preview: NonBlankText | None
     output_available: bool
     images: tuple[ImageInput, ...]
+    # Set only for an applied patch whose diff the durable row holds inline.
+    file_edit: ToolEntryFileEdit | None
 
     @model_validator(mode="after")
     def validate_output_availability(self) -> Self:
@@ -506,6 +517,8 @@ __all__ = [
     "RENDERER_PREPARING_OUTPUT_KIND",
     "RunStatus",
     "ToolEntry",
+    "ToolEntryFileEdit",
+    "ToolEntryFileOperation",
     "ToolEntryOutcome",
     "UserEntry",
     "UserEntryStatus",

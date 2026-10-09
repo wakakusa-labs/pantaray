@@ -49,6 +49,9 @@ from .broker_structured_patch import (
 FULL_READ_MAX_LINES = 800
 WINDOW_MARGIN_LINES = 40
 MUTATING_TOOL_IDS = ("apply_patch", "bash", "run_python")
+# A successful apply_patch body with this status applied nothing: it returned the
+# file text the model must read before the patch can be rebuilt.
+PATCH_NEEDS_READ_STATUS = "needs_read"
 JSON_CONTROL_ESCAPE_MAX_EXPANSION = 6
 PATCH_READ_SNAPSHOT_ENVELOPE_MAX_BYTES = 16 * 1024
 # Design limit: needs_read text is capped at 40 KB. Allow worst-case JSON control
@@ -80,7 +83,7 @@ def build_needs_read_output(
     file_sha256 = text_sha256(text)
     if fits_full_file_read(text):
         return {
-            "status": "needs_read",
+            "status": PATCH_NEEDS_READ_STATUS,
             "applied_paths": [],
             "path": path,
             "patch_applied": False,
@@ -97,7 +100,7 @@ def build_needs_read_output(
 
     windows = _target_windows(text=text, change=change)
     return {
-        "status": "needs_read",
+        "status": PATCH_NEEDS_READ_STATUS,
         "applied_paths": [],
         "path": path,
         "patch_applied": False,
@@ -165,7 +168,7 @@ def latest_valid_patch_snapshot(
     tool_id, output = latest
     if tool_id != "apply_patch":
         return None
-    if output.get("status") != "needs_read":
+    if output.get("status") != PATCH_NEEDS_READ_STATUS:
         return None
     if output.get("path") != path:
         return None

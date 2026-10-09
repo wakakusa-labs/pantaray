@@ -66,6 +66,7 @@ const tool = (
     output_preview: outputPreview,
     output_available: status !== 'processing',
     images,
+    file_edit: null,
   },
 });
 

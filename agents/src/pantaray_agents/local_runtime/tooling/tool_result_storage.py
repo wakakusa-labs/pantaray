@@ -44,6 +44,7 @@ class ActionFileToolResultMetadata(TypedDict):
     line_count: int
     preview: NotRequired[str]
     retry_hint: NotRequired[str]
+    status: NotRequired[str]
 
 
 class ActionBinaryToolResultMetadata(TypedDict):
@@ -151,6 +152,11 @@ def store_tool_result(
         "preview": preview,
         "retry_hint": retry_hint,
     }
+    # A result's status says how the call ended, not what it returned. Keeping it beside
+    # the reference lets a reader tell, say, a patch that applied nothing from one that
+    # did without opening the file.
+    if isinstance(output, dict) and isinstance(status := output.get("status"), str):
+        metadata["status"] = status
     return ToolResultStorageResult(
         output_json=cast(dict[str, JSONValue], metadata),
         storage_kind="action_file",
@@ -327,6 +333,7 @@ def _validate_json_metadata(metadata: JSONValue) -> ActionFileToolResultMetadata
         or not isinstance(metadata.get("path"), str)
         or not isinstance(metadata.get("preview", ""), str)
         or not isinstance(metadata.get("retry_hint", ""), str)
+        or not isinstance(metadata.get("status", ""), str)
         or any(
             not isinstance(metadata.get(field), int)
             or isinstance(metadata.get(field), bool)

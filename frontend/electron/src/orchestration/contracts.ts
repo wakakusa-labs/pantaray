@@ -1,3 +1,5 @@
+import type { BrowserWindow } from 'electron';
+
 import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
 
 import type {
@@ -66,19 +68,10 @@ export type OverlaySnapshotPayload = {
   initialUiState?: OverlayInitialUiState | null;
 };
 
-export type OverlayLiveResume = {
-  kind: 'none' | 'suggestion' | 'action';
-  processId: string | null;
-  actionId: string | null;
-  commandId: string | null;
-  acceptedAt: string | null;
-};
-
 export type OverlayBootstrapResponse = {
   suggestionId: string;
   snapshot: OverlaySnapshot;
   lastSequence: number;
-  liveResume: OverlayLiveResume;
 };
 
 export type ResumeProcessRequest = {
@@ -112,9 +105,9 @@ export type NotificationIpcHandlers = {
 };
 
 export type CreateNotificationIpcHandlers = (options: {
-  resumeLiveProcess: (payload: ResumeProcessRequest) => void;
   resolveOverlayBootstrap: (suggestionId: string) => Promise<OverlayBootstrapResponse | null>;
-  refreshActionConversation: (actionId: string) => void;
+  /** Opens a Suggestion's Action, as the History list does, when the Suggestion has one. */
+  openActionConversationOverlay: (actionId: string) => void;
 }) => NotificationIpcHandlers;
 
 export type NotificationWindowApi = {
@@ -152,6 +145,8 @@ export type NotificationWindowApi = {
   setActionLiveSnapshotGetter: (getter: (actionId: string) => object | null) => void;
   setUiLanguageGetter?: (getter: () => UiLanguage) => void;
   setOverlayPlacementGetter: (getter: () => OverlayPlacements) => void;
+  // Conversation windows take the main window's size and display.
+  setMainWindowGetter: (getter: () => BrowserWindow | null) => void;
   configureIpcWindowSecurity: (registration: {
     registerWindow: (role: 'overlay', sender: Readonly<{ id: number }>) => void;
     unregisterWindow: (sender: Readonly<{ id: number }>) => void;

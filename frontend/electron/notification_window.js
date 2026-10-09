@@ -9,21 +9,25 @@ const {
 const {
   createOverlayWindowFactory,
   applyOverlayShellMode,
+  isConversationWindow,
   moveOverlayWindowToCell,
+  resolveConversationWindowPlacement,
   showInteractiveOverlayWindow,
 } = require('./overlay_window_factory');
 const { normalizeId, createOverlayAssociations } = require('./overlay_associations');
+const { restoreAndFocusWindow } = require('./dist/windows/windowVisibility');
 
 const overlayWindows = new Map(); // key: suggestionId, value: BrowserWindow
 let lastOverlayId = null;
 const overlayState = new Map(); // id -> { ready, queue, shellMode }
 const overlaySnapshotPayloads = new Map(); // id -> latest overlay:snapshot payload
-// Overlay ids whose window this app opened for one conversation. Their close
-// control destroys the window instead of hiding it, so a session cannot
-// accumulate invisible conversation renderers.
+// Overlay ids whose window this app opened for one conversation (a New-task panel or an
+// ordinary conversation window). Their close control destroys the window instead of hiding it,
+// so a session cannot accumulate invisible conversation renderers.
 const conversationOverlayIds = new Set();
 let getUiLanguage = null;
 let getOverlayPlacements = null;
+let getMainWindow = null;
 let getActionLiveSnapshot = null;
 let getLocalOwnerId = null;
 let ownerGeneration = 0;
@@ -68,17 +72,25 @@ function setOverlayPlacementGetter(getter) {
   getOverlayPlacements = getter;
 }
 
+function setMainWindowGetter(getter) {
+  if (typeof getter !== 'function') {
+    throw new Error('setMainWindowGetter requires a function.');
+  }
+  getMainWindow = getter;
+}
+
+function currentMainWindow() {
+  if (!getMainWindow) {
+    throw new Error('Main window getter is required before creating conversation windows.');
+  }
+  return getMainWindow();
+}
+
 function overlayCellFor(placementKind) {
   if (!getOverlayPlacements) {
     throw new Error('Overlay placement getter is required before creating overlay windows.');
   }
   return getOverlayPlacements()[placementKind];
-}
-
-// A conversation with an Action is one reopened from History (its list or its chat); a new
-// one is started by the user.
-function standalonePlacementKind(actionId) {
-  return actionId ? 'history' : 'started';
 }
 
 // The cell and stack slot each window was last placed in.
@@ -247,27 +259,22 @@ function enqueueOverlayMessage(id, channel, payload) {
   runtime.queue.push({ channel, payload });
 }
 
-function createMappedOverlayWindow(id, options) {
-  const runtime = getOverlayRuntimeState(id);
-  if (!runtime) return null;
-  if (options.conversation) conversationOverlayIds.add(id);
-  const placement = stackPlacement(options.placementKind);
-  const win = overlayWindowFactory.createConversationOverlayWindow({
-    actionId: options.actionId ?? null,
-    cell: placement.cell,
-    entryMode: options.entryMode,
-    stackIndex: placement.stackIndex,
-    interactive: options.interactive,
-    onDidFinishLoad: () => {
+// The registry's side of a window's lifecycle. Every callback first checks that the window is
+// still the one registered for its id: a window replaced under the same id (a panel swapped for
+// an ordinary window, or a window recreated after an owner change) must neither deliver state
+// nor release the associations its successor now holds.
+function overlayWindowEvents(id, runtime, onReadyToShow) {
+  return {
+    onDidFinishLoad: (win) => {
       if (overlayWindows.get(id) !== win || win.isDestroyed()) return;
       deliverOverlayState(id, win, runtime);
     },
-    onReadyToShow: () => {
+    onReadyToShow: (win) => {
       if (overlayWindows.get(id) !== win || win.isDestroyed()) return;
       runtime.readyToShow = true;
-      options.onReadyToShow(win, runtime);
+      onReadyToShow(win, runtime);
     },
-    onClosed: () => {
+    onClosed: (win) => {
       overlayDragController.clearForWindow(win);
       overlayActivationTracker.unregisterOverlayWindow(win);
       if (overlayWindows.get(id) !== win) return;
@@ -277,10 +284,42 @@ function createMappedOverlayWindow(id, options) {
       conversationOverlayIds.delete(id);
       cleanupMappingsForSuggestion(id);
     },
+  };
+}
+
+function createMappedOverlayWindow(id, options) {
+  const runtime = getOverlayRuntimeState(id);
+  if (!runtime) return null;
+  if (options.conversation) conversationOverlayIds.add(id);
+  const placement = stackPlacement(options.placementKind);
+  const win = overlayWindowFactory.createConversationOverlayWindow({
+    cell: placement.cell,
+    entryMode: options.entryMode,
+    stackIndex: placement.stackIndex,
+    interactive: options.interactive,
+    ...overlayWindowEvents(id, runtime, options.onReadyToShow),
   });
   overlayWindows.set(id, win);
   overlayWindowSlots.set(win, placement);
   overlayActivationTracker.registerOverlayWindow(win);
+  lastOverlayId = id;
+  return win;
+}
+
+// An ordinary window for an Action's conversation. It takes the id's registry entry, so the
+// Action's associations and any queued state now reach it; it is not registered with the panels'
+// activation tracker, whose pointer drag and click-through rules are a panel's.
+function createConversationWindow(id, actionId) {
+  const runtime = getOverlayRuntimeState(id);
+  runtime.ready = false;
+  runtime.readyToShow = false;
+  conversationOverlayIds.add(id);
+  const win = overlayWindowFactory.createConversationWindow({
+    actionId,
+    bounds: resolveConversationWindowPlacement(currentMainWindow()),
+    ...overlayWindowEvents(id, runtime, (shown) => shown.show()),
+  });
+  overlayWindows.set(id, win);
   lastOverlayId = id;
   return win;
 }
@@ -296,16 +335,15 @@ function createHistoryOverlayWindow(id) {
   });
 }
 
-function createStandaloneConversationOverlayWindow(id, actionId) {
+function createStandaloneConversationOverlayWindow(id) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
   runtime.shellMode = INTERACTIVE_SHELL_MODE;
   return createMappedOverlayWindow(id, {
-    actionId,
     conversation: true,
     entryMode: 'standalone',
     interactive: true,
-    placementKind: standalonePlacementKind(actionId),
+    placementKind: 'started',
     onReadyToShow: showInteractiveOverlayWindow,
   });
 }
@@ -338,21 +376,38 @@ function getOrCreateHistoryOverlayWindow(id) {
   return createHistoryOverlayWindow(id);
 }
 
+/**
+ * Opens a conversation the user asked for. One with work (an Action) is an ordinary window; a
+ * New task starts as a panel. An Action has at most one surface: its window is focused again,
+ * and a panel showing it (a Suggestion accepted elsewhere, or a New task that started work) is
+ * replaced by a window under the same id, keeping the Action's associations.
+ */
 function openStandaloneConversationOverlay(id, actionId = null) {
   readOwnerScope();
   const normalizedId = normalizeId(id);
   if (!normalizedId) throw new Error('Standalone Overlay ID is required.');
+  const normalizedActionId = normalizeId(actionId);
   const runtime = getOverlayRuntimeState(normalizedId);
   if (!runtime) throw new Error('Standalone Overlay state is unavailable.');
-  const existing = overlayWindows.get(normalizedId);
-  if (existing && !existing.isDestroyed()) {
+  const current = overlayWindows.get(normalizedId);
+  const existing = current && !current.isDestroyed() ? current : null;
+  if (normalizedActionId && !isConversationWindow(existing)) {
+    createConversationWindow(normalizedId, normalizedActionId);
+    existing?.destroy();
+    return 'created';
+  }
+  if (existing) {
     if (!runtime.ready || !runtime.readyToShow) return 'loading';
-    placeHiddenOverlayWindow(existing, standalonePlacementKind(actionId));
-    showInteractiveOverlayWindow(existing, { explicitFocus: true });
+    if (isConversationWindow(existing)) {
+      restoreAndFocusWindow(existing);
+    } else {
+      placeHiddenOverlayWindow(existing, 'started');
+      showInteractiveOverlayWindow(existing, { explicitFocus: true });
+    }
     existing.webContents.send('overlay:focusComposer');
     return 'focused';
   }
-  createStandaloneConversationOverlayWindow(normalizedId, normalizeId(actionId));
+  createStandaloneConversationOverlayWindow(normalizedId);
   return 'created';
 }
 
@@ -475,6 +530,7 @@ module.exports = {
   destroyOverlayWindow,
   dispatchEventToOverlay,
   setActionLiveSnapshotGetter,
+  setMainWindowGetter,
   setOverlayPlacementGetter,
   setUiLanguageGetter,
   configureIpcWindowSecurity: auxiliaryWindowIpcSecurity.configure,

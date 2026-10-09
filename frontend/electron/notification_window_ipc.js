@@ -1,4 +1,8 @@
-const { getOverlayVerticalAnchor, releaseOverlayCenter } = require('./overlay_window_factory');
+const {
+  getOverlayVerticalAnchor,
+  isOverlayPanel,
+  releaseOverlayCenter,
+} = require('./overlay_window_factory');
 
 const OVERLAY_RESIZE_TOP_MARGIN_PX = 8;
 const OVERLAY_RESIZE_BOTTOM_MARGIN_PX = 8;
@@ -28,7 +32,9 @@ function clampOverlayBounds(screen, win, requestedHeight) {
   return { height, y };
 }
 
+// Only a panel follows its content's height; the user sizes an ordinary window.
 function resizeWindow(screen, win, requestedHeight) {
+  if (!isOverlayPanel(win)) return;
   const nextBounds = clampOverlayBounds(screen, win, requestedHeight);
   if (nextBounds) win.setBounds({ y: nextBounds.y, height: nextBounds.height });
 }
@@ -57,7 +63,7 @@ function hideLastWindow(windows) {
 
 function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, interactions }) {
   return function createNotificationIpcHandlers(options = {}) {
-    const { refreshActionConversation, resumeLiveProcess, resolveOverlayBootstrap } = options;
+    const { openActionConversationOverlay, resolveOverlayBootstrap } = options;
 
     return {
       onResizeNotificationWindow: (event, payload) => {
@@ -105,6 +111,16 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
           const bootstrap = await resolveOverlayBootstrap(suggestionId);
           if (!windows.isOwnerScopeCurrent(ownerScope) || !bootstrap) return;
 
+          // A Suggestion with work opens its Action's conversation as an ordinary window, which
+          // reads and resumes the Action itself; one that was only shown stays a panel.
+          const actionId = windows.normalizeId(bootstrap.snapshot.actionId);
+          if (actionId) {
+            if (typeof openActionConversationOverlay !== 'function') {
+              throw new Error('openActionConversationOverlay is unavailable');
+            }
+            openActionConversationOverlay(actionId);
+            return;
+          }
           windows.setSnapshot(suggestionId, {
             snapshot: bootstrap.snapshot,
             initialUiState:
@@ -113,30 +129,6 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
                 : null,
           });
           windows.showHistory(suggestionId);
-
-          const actionId = windows.normalizeId(bootstrap.snapshot.actionId);
-          if (actionId) {
-            if (typeof refreshActionConversation !== 'function') {
-              throw new Error('refreshActionConversation is unavailable');
-            }
-            refreshActionConversation(actionId);
-          }
-
-          const liveResume = bootstrap.liveResume;
-          if (
-            liveResume.kind !== 'none' &&
-            liveResume.processId &&
-            typeof resumeLiveProcess === 'function'
-          ) {
-            resumeLiveProcess({
-              kind: liveResume.kind,
-              suggestionId,
-              actionId: liveResume.actionId,
-              commandId: liveResume.commandId,
-              processId: liveResume.processId,
-              fromStart: payload.fromStart !== false,
-            });
-          }
         })().catch((error) => {
           console.error('history:openOverlay failed:', error);
         });

@@ -199,6 +199,7 @@ const { createClient } = require('@supabase/supabase-js') as {
 
 // ---- Main state (SSOT) ----
 let mainWindow: BrowserWindow | null = null;
+notificationWindow.setMainWindowGetter(() => mainWindow);
 
 const overlayAwareActivateHandler = createOverlayAwareActivateHandler({
   overlay: notificationWindow,

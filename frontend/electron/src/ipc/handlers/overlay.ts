@@ -66,9 +66,8 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
   if (typeof factory !== 'function') throw new Error('createNotificationIpcHandlers is missing');
 
   const handlers = factory({
-    resumeLiveProcess: ctx.overlay.resumeLiveProcess,
     resolveOverlayBootstrap: ctx.overlay.resolveOverlayBootstrap,
-    refreshActionConversation: ctx.actions.refreshActionConversation,
+    openActionConversationOverlay: ctx.windows.openActionConversationOverlay,
   });
 
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);

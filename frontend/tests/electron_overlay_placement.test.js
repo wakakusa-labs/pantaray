@@ -8,7 +8,10 @@ const {
   DEFAULT_OVERLAY_PLACEMENTS,
   createOverlayPlacementStore,
 } = require('../electron/dist/settings/overlayPlacement.js');
-const { resolveOverlayPlacement } = require('../electron/dist/windows/overlayPlacement.js');
+const {
+  resolveConversationWindowBounds,
+  resolveOverlayPlacement,
+} = require('../electron/dist/windows/overlayPlacement.js');
 
 function tempDir(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-overlay-placement-'));
@@ -166,4 +169,33 @@ test('a narrow work area keeps the inner columns inside its margins', () => {
     const { x } = resolveOverlayPlacement(narrow, { row: 1, column }, 0);
     assert.ok(x >= 120 && x + 520 <= 780, `column ${column} at ${x}`);
   }
+});
+
+test('a conversation window opens centered, 30 px right and down, and inside the work area', () => {
+  const macWorkArea = { x: 0, y: 33, width: 1512, height: 879 };
+  assert.deepEqual(resolveConversationWindowBounds(macWorkArea, { width: 1000, height: 700 }), {
+    x: 256 + 30,
+    y: 123 + 30,
+    width: 1000,
+    height: 700,
+  });
+  // The offset stops at the work area's right and bottom edges.
+  assert.deepEqual(resolveConversationWindowBounds(macWorkArea, { width: 1500, height: 860 }), {
+    x: 12,
+    y: 33 + 879 - 860,
+    width: 1500,
+    height: 860,
+  });
+  // A main window larger than this work area is cut to it.
+  assert.deepEqual(resolveConversationWindowBounds(macWorkArea, { width: 2000, height: 1000 }), {
+    ...macWorkArea,
+  });
+  // A display left of the primary one.
+  assert.deepEqual(
+    resolveConversationWindowBounds(
+      { x: -1920, y: 0, width: 1920, height: 1080 },
+      { width: 1000, height: 700 }
+    ),
+    { x: -1920 + 460 + 30, y: 190 + 30, width: 1000, height: 700 }
+  );
 });

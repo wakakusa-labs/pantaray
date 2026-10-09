@@ -1,37 +1,17 @@
-import type { OverlayBootstrapResponse, OverlayLiveResume } from '../orchestration/contracts';
+import type { OverlayBootstrapResponse } from '../orchestration/contracts';
 import type { createLocalBackendClient } from '../localBackend/client';
-
-type RawOverlayLiveResume = {
-  kind: 'none' | 'suggestion' | 'action';
-  process_id: string | null;
-  action_id: string | null;
-  command_id: string | null;
-  accepted_at: string | null;
-};
 
 type RawOverlayBootstrapResponse = {
   suggestion_id: string;
   snapshot: OverlayBootstrapResponse['snapshot'];
   last_sequence: number;
-  live_resume: RawOverlayLiveResume;
 };
-
-function normalizeLiveResume(raw: RawOverlayLiveResume): OverlayLiveResume {
-  return {
-    kind: raw.kind,
-    processId: raw.process_id,
-    actionId: raw.action_id,
-    commandId: raw.command_id,
-    acceptedAt: raw.accepted_at,
-  };
-}
 
 function normalizeBootstrapResponse(raw: RawOverlayBootstrapResponse): OverlayBootstrapResponse {
   return {
     suggestionId: raw.suggestion_id,
     snapshot: raw.snapshot,
     lastSequence: raw.last_sequence,
-    liveResume: normalizeLiveResume(raw.live_resume),
   };
 }
 

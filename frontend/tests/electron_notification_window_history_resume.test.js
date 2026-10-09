@@ -59,13 +59,6 @@ function createBootstrapResponse(overrides = {}) {
     suggestionId: 'S1',
     snapshot,
     lastSequence: snapshot.lastSequence,
-    liveResume: {
-      kind: 'none',
-      processId: null,
-      actionId: null,
-      commandId: null,
-      acceptedAt: null,
-    },
     ...overrides,
   };
 }
@@ -77,6 +70,7 @@ function loadNotificationWindowModule(
   {
     getPlacements = () => DEFAULT_OVERLAY_PLACEMENTS,
     workArea = { x: 0, y: 0, width: 1440, height: 900 },
+    displays = [],
   } = {}
 ) {
   const originalLoad = Module._load;
@@ -94,15 +88,33 @@ function loadNotificationWindowModule(
   const mainWindow = {
     id: 'main-window',
     focusableChanges: [],
+    bounds: { x: 100, y: 80, width: 1000, height: 700 },
+    normalBounds: { x: 100, y: 80, width: 1000, height: 700 },
     setFocusable(value) {
       this.focusableChanges.push(value);
     },
+    getBounds() {
+      return { ...this.bounds };
+    },
+    getNormalBounds() {
+      return { ...this.normalBounds };
+    },
     isDestroyed: () => false,
   };
+  let currentMainWindow = mainWindow;
   const display = {
     bounds: { x: 0, y: 0, width: 1440, height: 900 },
     workArea,
   };
+  // A display other than the primary one holds every window whose bounds start inside it.
+  const displayMatching = (bounds) =>
+    displays.find(
+      ({ bounds: area }) =>
+        bounds.x >= area.x &&
+        bounds.x < area.x + area.width &&
+        bounds.y >= area.y &&
+        bounds.y < area.y + area.height
+    ) ?? display;
 
   class FakeBrowserWindow {
     constructor(options = {}) {
@@ -155,6 +167,13 @@ function loadNotificationWindowModule(
     focus() {
       this.focusCalls = (this.focusCalls || 0) + 1;
     }
+    isMinimized() {
+      return Boolean(this.minimized);
+    }
+    restore() {
+      this.restoreCalls = (this.restoreCalls || 0) + 1;
+      this.minimized = false;
+    }
     hide() {
       this.hideCalls = (this.hideCalls || 0) + 1;
       this.visible = false;
@@ -206,7 +225,7 @@ function loadNotificationWindowModule(
     },
     screen: {
       getPrimaryDisplay: () => display,
-      getDisplayMatching: () => display,
+      getDisplayMatching: displayMatching,
     },
   };
 
@@ -220,6 +239,7 @@ function loadNotificationWindowModule(
     notificationWindow.setUiLanguageGetter(() => 'en');
     notificationWindow.setOverlayPlacementGetter(getPlacements);
     notificationWindow.setLocalOwnerIdGetter(getOwnerId);
+    notificationWindow.setMainWindowGetter(() => currentMainWindow);
     notificationWindow.configureIpcWindowSecurity({
       registerWindow: (role, sender) => {
         assert.equal(role, 'overlay');
@@ -232,6 +252,9 @@ function loadNotificationWindowModule(
       instances,
       registeredIpcSenders,
       mainWindow,
+      setMainWindow: (win) => {
+        currentMainWindow = win;
+      },
       setAppActive: (active) => {
         appActive = active;
       },
@@ -301,12 +324,10 @@ test('history requests started before an owner switch cannot reopen or resume af
   let owner = 'owner-a';
   const { notificationWindow: windows, instances } = loadNotificationWindowModule(() => owner);
   let complete;
-  const resumed = [];
-  const refreshed = [];
+  const opened = [];
   const handlers = windows.createNotificationIpcHandlers({
     resolveOverlayBootstrap: () => new Promise(resolve => { complete = resolve; }),
-    refreshActionConversation: id => refreshed.push(id),
-    resumeLiveProcess: request => resumed.push(request),
+    openActionConversationOverlay: (id) => opened.push(id),
   });
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   owner = null;
@@ -314,14 +335,14 @@ test('history requests started before an owner switch cannot reopen or resume af
   owner = 'owner-b';
   windows.clearForOwnerChange();
   owner = 'owner-a';
-  complete(createBootstrapResponse({
-    snapshot: createSnapshot({ actionId: 'old-action' }),
-    liveResume: { kind: 'action', processId: 'old-process', actionId: 'old-action', commandId: 'old-command' },
-  }));
+  complete(
+    createBootstrapResponse({
+      snapshot: createSnapshot({ actionId: 'old-action' }),
+    })
+  );
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(instances.length, 0);
-  assert.deepEqual(refreshed, []);
-  assert.deepEqual(resumed, []);
+  assert.deepEqual(opened, []);
   windows.showNotification('S1');
   instances[0].webContentsEvents.emit('did-finish-load');
   assert.deepEqual(instances[0].sent, []);
@@ -358,7 +379,6 @@ test('unavailable owners cannot open windows or fetch history while same-owner r
 test('standalone conversation reuses the canonical ready Overlay registry and cleans it on destroy', () => {
   const { notificationWindow, instances, registeredIpcSenders } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async () => null,
   });
 
@@ -437,7 +457,7 @@ test('a delayed history lookup does not focus its existing panel over another ap
   assert.equal(panel.focusCalls || 0, 0);
 });
 
-test('history overlay restores canonical Action live state after reload and reopen', async () => {
+test('an overlay restores its Action live state each time its page loads', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const actionLiveSnapshot = {
     actionId: 'A1',
@@ -448,190 +468,75 @@ test('history overlay restores canonical Action live state after reload and reop
   notificationWindow.setActionLiveSnapshotGetter((actionId) =>
     actionId === 'A1' ? actionLiveSnapshot : null
   );
-  const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
-    refreshActionConversation: () => {},
-    resolveOverlayBootstrap: async (suggestionId) =>
-      createBootstrapResponse({
-        suggestionId,
-        snapshot: createSnapshot({ suggestionId, actionId: 'A1', isLive: true }),
-      }),
-  });
-
-  handlers.onHistoryOpenOverlay(
-    {},
-    {
-      suggestionId: 'S1',
-      initialUiState: { expand: true },
-    }
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(instances.length, 1);
-  assert.equal(instances[0].options.frame, false);
-  assert.equal(instances[0].options.transparent, true);
-  assert.equal(instances[0].options.resizable, false);
-  assert.deepEqual(instances[0].options.webPreferences.additionalArguments, [
-    '--pantaray-ui-language=en',
-  ]);
-  instances[0].webContentsEvents.emit('did-finish-load');
-  instances[0].windowEvents.emit('ready-to-show');
-
-  const channels = instances[0].sent.map((entry) => entry.channel);
-  assert.deepEqual(channels, ['overlay:snapshot', 'action:conversationUpdated']);
-  assert.deepEqual(instances[0].sent[0].payload, {
+  notificationWindow.showNotification('S1');
+  const snapshotPayload = {
     snapshot: createSnapshot({ suggestionId: 'S1', actionId: 'A1', isLive: true }),
     initialUiState: { expand: true },
-  });
-  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
-  instances[0].webContentsEvents.emit('did-finish-load');
-  assert.equal(instances[0].sent.at(-1).payload.snapshot, actionLiveSnapshot);
-
-  instances[0].destroy();
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
-  await new Promise((resolve) => setImmediate(resolve));
-  instances[1].webContentsEvents.emit('did-finish-load');
-  assert.equal(instances[1].sent.at(-1).payload.snapshot, actionLiveSnapshot);
-  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
-  assert.equal(instances[0].alwaysOnTop, true);
-  assert.equal(instances[0].alwaysOnTopLevel, 'screen-saver');
-});
-
-test('terminal history refreshes the exact Action after mapping and queues canonical state until load', async () => {
-  const { notificationWindow, instances } = loadNotificationWindowModule();
-  notificationWindow.setActionLiveSnapshotGetter(() => null);
-  const refreshCalls = [];
-  const canonicalUpdate = {
-    kind: 'action_updated',
-    snapshot: {
-      actionId: 'A1',
-      page: { action: { action_id: 'A1', status: 'success' } },
-      transientToolSteps: [],
-      approvalBlockers: [],
-    },
   };
-  const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
-    resolveOverlayBootstrap: async (suggestionId) =>
-      createBootstrapResponse({
-        suggestionId,
-        snapshot: createSnapshot({
-          suggestionId,
-          actionPhase: 'terminal',
-          actionStatus: 'success',
-          actionId: 'A1',
-          isLive: false,
-        }),
-      }),
-    refreshActionConversation: (actionId) => {
-      refreshCalls.push(actionId);
-      const overlayId = notificationWindow.resolveOverlayId({ actionId });
-      assert.equal(overlayId, 'S1');
-      notificationWindow.sendToOverlay(overlayId, 'action:conversationUpdated', canonicalUpdate);
-      notificationWindow.cleanupMappingsForAction(actionId);
-    },
-  });
-
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(refreshCalls, ['A1']);
-  assert.equal(instances.length, 1);
-  assert.deepEqual(instances[0].sent, []);
-  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
+  notificationWindow.setOverlaySnapshot('S1', snapshotPayload);
 
   instances[0].webContentsEvents.emit('did-finish-load');
-
   assert.deepEqual(
-    instances[0].sent.map(({ channel }) => channel),
+    instances[0].sent.map((entry) => entry.channel),
     ['overlay:snapshot', 'action:conversationUpdated']
   );
-  assert.equal(instances[0].sent[1].payload, canonicalUpdate);
+  assert.deepEqual(instances[0].sent[0].payload, snapshotPayload);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+
+  // A reload reads it again.
+  instances[0].webContentsEvents.emit('did-finish-load');
+  assert.equal(instances[0].sent.at(-1).payload.snapshot, actionLiveSnapshot);
 });
 
-test('history open resumes live action using backend live resume hint', async () => {
-  const { notificationWindow } = loadNotificationWindowModule();
-  const resumeCalls = [];
+test('a Suggestion with an Action opened from History or its chat card opens the Action, not a panel', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const opened = [];
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    refreshActionConversation: () => {},
-    resumeLiveProcess: (payload) => {
-      resumeCalls.push(payload);
-    },
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({
         suggestionId,
-        snapshot: createSnapshot({
-          suggestionId,
-          actionPhase: 'processing',
-          actionStatus: 'processing',
-          processId: 'P1',
-          actionId: 'A1',
-          isLive: true,
-        }),
-        liveResume: {
-          kind: 'action',
-          processId: 'P1',
-          actionId: 'A1',
-          commandId: 'CMD1',
-          acceptedAt: '2026-03-13T00:00:00Z',
-        },
+        snapshot: createSnapshot({ suggestionId, actionId: 'A1', reactionState: 'accepted' }),
       }),
+    // As conversationOverlay.openActionConversationOverlay does.
+    openActionConversationOverlay: (actionId) => {
+      opened.push(actionId);
+      notificationWindow.registerActionAssociation(actionId, `conversation:${actionId}`);
+      notificationWindow.openStandaloneConversationOverlay(`conversation:${actionId}`, actionId);
+    },
   });
 
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1', fromStart: false });
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1', initialUiState: { expand: true } });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(resumeCalls, [
-    {
-      kind: 'action',
-      suggestionId: 'S1',
-      actionId: 'A1',
-      commandId: 'CMD1',
-      processId: 'P1',
-      fromStart: false,
-    },
-  ]);
+  assert.deepEqual(opened, ['A1']);
+  assert.equal(instances.length, 1);
+  assert.equal(new URL(instances[0].loadedUrl).searchParams.get('surface'), 'window');
+  assert.equal(notificationWindow.hasOverlayWindow('S1'), false);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
+  // The Suggestion's snapshot is not kept for a window that does not exist.
+  notificationWindow.showNotification('S1');
+  instances[1].webContentsEvents.emit('did-finish-load');
+  assert.deepEqual(instances[1].sent, []);
 });
 
-test('history open resumes live suggestion using backend live resume hint', async () => {
-  const { notificationWindow } = loadNotificationWindowModule();
-  const resumeCalls = [];
+test('a Suggestion that was only shown reopens from History as a panel', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const opened = [];
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: (payload) => {
-      resumeCalls.push(payload);
-    },
     resolveOverlayBootstrap: async (suggestionId) =>
-      createBootstrapResponse({
-        suggestionId,
-        snapshot: createSnapshot({
-          suggestionId,
-          actionPhase: 'idle',
-          processId: 'PSUG',
-          isLive: true,
-        }),
-        liveResume: {
-          kind: 'suggestion',
-          processId: 'PSUG',
-          actionId: null,
-          commandId: null,
-          acceptedAt: null,
-        },
-      }),
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+    openActionConversationOverlay: (actionId) => opened.push(actionId),
   });
 
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(resumeCalls, [
-    {
-      kind: 'suggestion',
-      suggestionId: 'S1',
-      actionId: null,
-      commandId: null,
-      processId: 'PSUG',
-      fromStart: true,
-    },
-  ]);
+  assert.deepEqual(opened, []);
+  assert.equal(instances.length, 1);
+  assert.equal(instances[0].options.alwaysOnTop, true);
+  assert.equal(new URL(instances[0].loadedUrl).searchParams.get('surface'), null);
+  instances[0].webContentsEvents.emit('did-finish-load');
+  assert.equal(instances[0].sent[0].channel, 'overlay:snapshot');
 });
 
 test('live overlay receives overlay:snapshot before ws events', () => {
@@ -739,7 +644,6 @@ test('visible live overlay suppresses main restore for activate points inside it
 test('overlay interaction is recorded only for overlay window senders', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async () => null,
   });
 
@@ -755,7 +659,6 @@ test('overlay interaction is recorded only for overlay window senders', () => {
 test('overlay header drag records interaction and moves only overlay senders', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async () => null,
   });
 
@@ -780,7 +683,6 @@ test('overlay header drag records interaction and moves only overlay senders', (
 test('history open keeps interactive overlay always on top', async () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({
         suggestionId,
@@ -807,7 +709,6 @@ test('history open keeps interactive overlay always on top', async () => {
 test('visible history overlay also suppresses main restore for activate points inside its bounds', async () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({
         suggestionId,
@@ -830,7 +731,6 @@ test('middle-row overlays are centered and keep that center until the user acts 
     getPlacements: () => ({ ...DEFAULT_OVERLAY_PLACEMENTS, history: { row: 1, column: 2 } }),
   });
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
   });
@@ -897,7 +797,6 @@ test('history overlay is focusable from native window creation on macOS', async 
   try {
     const { notificationWindow, instances } = loadNotificationWindowModule();
     const handlers = notificationWindow.createNotificationIpcHandlers({
-      resumeLiveProcess: () => {},
       resolveOverlayBootstrap: async (suggestionId) =>
         createBootstrapResponse({
           suggestionId,
@@ -946,7 +845,6 @@ test('an open overlay of any kind leaves the main window able to take typing', a
   try {
     const { notificationWindow, instances, mainWindow } = loadNotificationWindowModule();
     const handlers = notificationWindow.createNotificationIpcHandlers({
-      resumeLiveProcess: () => {},
       resolveOverlayBootstrap: async (suggestionId) =>
         createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
     });
@@ -975,8 +873,6 @@ test('an open overlay of any kind leaves the main window able to take typing', a
 test('closing a conversation Overlay destroys it and releases its Action association', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
-    refreshActionConversation: () => {},
     resolveOverlayBootstrap: async () => null,
   });
 
@@ -1189,15 +1085,14 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
     workArea: MAC_WORK_AREA,
   });
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
   });
 
   notificationWindow.showNotification('S1');
   notificationWindow.openStandaloneConversationOverlay('standalone:1');
-  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S3' });
   await new Promise((resolve) => setImmediate(resolve));
   const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
   assert.deepEqual(instances.map(position), [
@@ -1212,7 +1107,7 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
   // applies to the next window only.
   for (const win of instances) win.windowEvents.emit('ready-to-show');
   assert.equal(instances.filter((win) => win.isVisible()).length, 4);
-  notificationWindow.showNotification('S3');
+  notificationWindow.showNotification('S4');
   assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 132 });
   placements = { ...placements, started: { row: 1, column: 0 } };
   notificationWindow.openStandaloneConversationOverlay('standalone:2');
@@ -1267,7 +1162,6 @@ test('a closed Suggestion reopened from History opens in the History cell; a vis
     workArea: MAC_WORK_AREA,
   });
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
   });
@@ -1293,19 +1187,11 @@ test('a closed Suggestion reopened from History opens in the History cell; a vis
   assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 300, width: 520, height: 300 });
   resize(suggestion, 400);
   assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
-
-  // The same through an Action of that Suggestion opened from the History list or chat.
-  notificationWindow.hideOverlay('S1');
-  suggestion.setBounds({ x: 972, y: 53 });
-  suggestion.webContentsEvents.emit('did-finish-load');
-  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
-  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 520, height: 400 });
 });
 
 test('by default Suggestions and History windows share the top-right stack without covering each other', async () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
   });
@@ -1316,7 +1202,8 @@ test('by default Suggestions and History windows share the top-right stack witho
   const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
 
   notificationWindow.showNotification('S1');
-  // A task the user starts opens centered and is not part of the corner's stack.
+  // A task the user starts opens centered and is not part of the corner's stack, nor is an
+  // ordinary conversation window.
   notificationWindow.openStandaloneConversationOverlay('standalone:1');
   await openFromHistory('S2');
   notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
@@ -1324,13 +1211,12 @@ test('by default Suggestions and History windows share the top-right stack witho
   assert.deepEqual(position(suggestion), { x: 900, y: 20 });
   assert.deepEqual(position(started), { x: 460, y: 390 });
   assert.deepEqual(position(history), { x: 900, y: 152 });
+  assert.deepEqual(position(conversation), { x: 250, y: 130 });
 
   // A window still loading already holds its slot, so the next one takes the following slot.
-  assert.deepEqual(position(conversation), { x: 900, y: 284 });
-  for (const win of instances) win.windowEvents.emit('ready-to-show');
   notificationWindow.showNotification('S3');
-  assert.deepEqual(position(instances[4]), { x: 900, y: 20 + 3 * 132 });
-  instances[4].windowEvents.emit('ready-to-show');
+  assert.deepEqual(position(instances[4]), { x: 900, y: 284 });
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
 
   // A closed Suggestion reopened from History takes the lowest free slot of the corner.
   notificationWindow.hideOverlay('S1');
@@ -1338,13 +1224,12 @@ test('by default Suggestions and History windows share the top-right stack witho
   notificationWindow.showNotification('S4');
   assert.deepEqual(position(instances[5]), { x: 900, y: 20 });
   await openFromHistory('S1');
-  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 3 * 132 });
+  assert.deepEqual(position(suggestion), { x: 900, y: 284 });
 });
 
 test('a window opening in a shared cell takes the slot a closed one freed, not one still in use', async () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
-    resumeLiveProcess: () => {},
     resolveOverlayBootstrap: async (suggestionId) =>
       createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
   });
@@ -1372,6 +1257,229 @@ test('a window opening in a shared cell takes the slot a closed one freed, not o
   notificationWindow.showNotification('S4');
   assert.deepEqual(position(instances[3]), { x: 900, y: 152 });
   // A window still loading holds its slot too.
-  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  notificationWindow.showNotification('S5');
   assert.deepEqual(position(instances[4]), { x: 900, y: 416 });
+});
+
+test('an Action with work opens as an ordinary window, and opening it again focuses that window', () => {
+  const { notificationWindow, instances, registeredIpcSenders } = loadNotificationWindowModule();
+  notificationWindow.registerActionAssociation('A1', 'conversation:A1');
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'),
+    'created'
+  );
+  const [win] = instances;
+  const { options } = win;
+  assert.equal(options.frame, true);
+  assert.equal(options.transparent, undefined);
+  assert.equal(options.alwaysOnTop, undefined);
+  assert.equal(options.type, undefined);
+  assert.equal(options.skipTaskbar, undefined);
+  assert.equal(options.resizable, true);
+  assert.equal(options.movable, true);
+  assert.equal(options.fullscreenable, true);
+  assert.equal(options.acceptFirstMouse, true);
+  assert.equal(options.show, false);
+  assert.equal(options.webPreferences.sandbox, true);
+  assert.equal(options.webPreferences.contextIsolation, true);
+  assert.deepEqual(options.webPreferences.additionalArguments, ['--pantaray-ui-language=en']);
+  const url = new URL(win.loadedUrl);
+  assert.equal(url.pathname, '/notification.html');
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    mode: 'standalone',
+    actionId: 'A1',
+    surface: 'window',
+  });
+  // The main window's size, centered on its display's work area, then 30 px right and down.
+  assert.deepEqual(win.getBounds(), { x: 250, y: 130, width: 1000, height: 700 });
+  assert.equal(registeredIpcSenders.has(win.webContents), true);
+  assert.equal(notificationWindow.resolveOverlayIdForSender(win.webContents), 'conversation:A1');
+
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'),
+    'loading'
+  );
+  win.webContentsEvents.emit('did-finish-load');
+  win.windowEvents.emit('ready-to-show');
+  assert.equal(win.showCalls, 1);
+  assert.equal(win.isVisible(), true);
+
+  win.minimized = true;
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'),
+    'focused'
+  );
+  assert.equal(instances.length, 1);
+  assert.equal(win.restoreCalls, 1);
+  assert.equal(win.focusCalls, 1);
+  assert.equal(win.alwaysOnTop, undefined);
+  assert.equal(win.sent.at(-1).channel, 'overlay:focusComposer');
+
+  // Closed from its title bar or with Command-W.
+  win.destroy();
+  assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
+  assert.equal(registeredIpcSenders.has(win.webContents), false);
+});
+
+test('an ordinary window on macOS has the main window title bar with its lights on the header', () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  try {
+    const { notificationWindow, instances } = loadNotificationWindowModule();
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+    assert.equal(instances[0].options.titleBarStyle, 'hiddenInset');
+    assert.deepEqual(instances[0].options.trafficLightPosition, { x: 10, y: 14 });
+    assert.equal(instances[0].options.type, undefined);
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  }
+});
+
+test("an ordinary window takes the main window's size on its display, or the default size without one", () => {
+  const secondDisplay = {
+    bounds: { x: 1440, y: 0, width: 1920, height: 1080 },
+    workArea: { x: 1440, y: 25, width: 1920, height: 1055 },
+  };
+  const { notificationWindow, instances, mainWindow, setMainWindow } = loadNotificationWindowModule(
+    undefined,
+    { displays: [secondDisplay] }
+  );
+  // Zoomed to fill its display: the window keeps the size it returns to.
+  mainWindow.bounds = { ...secondDisplay.workArea };
+  mainWindow.normalBounds = { x: 1600, y: 100, width: 1200, height: 800 };
+
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  assert.deepEqual(instances[0].getBounds(), {
+    x: 1440 + 360 + 30,
+    y: 25 + 128 + 30,
+    width: 1200,
+    height: 800,
+  });
+
+  setMainWindow(null);
+  notificationWindow.openStandaloneConversationOverlay('conversation:A2', 'A2');
+  assert.deepEqual(instances[1].getBounds(), { x: 250, y: 130, width: 1000, height: 700 });
+});
+
+test('a panel showing an Action is replaced by an ordinary window that keeps its id', () => {
+  const { notificationWindow, instances, registeredIpcSenders } = loadNotificationWindowModule();
+  notificationWindow.setActionLiveSnapshotGetter(() => null);
+  notificationWindow.showNotification('S1');
+  const panel = instances[0];
+  panel.webContentsEvents.emit('did-finish-load');
+  panel.windowEvents.emit('ready-to-show');
+  // Accepted in the chat, then closed: the hidden panel still holds the Action.
+  notificationWindow.setOverlaySnapshot('S1', {
+    snapshot: createSnapshot({ actionId: 'A1', reactionState: 'accepted' }),
+  });
+  notificationWindow.hideOverlay('S1');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'created');
+  const win = instances[1];
+  assert.equal(panel.isDestroyed(), true);
+  assert.equal(registeredIpcSenders.has(panel.webContents), false);
+  assert.equal(new URL(win.loadedUrl).searchParams.get('surface'), 'window');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+  assert.equal(notificationWindow.resolveOverlayIdForSender(win.webContents), 'S1');
+
+  // What arrives while it loads waits for it instead of going to the destroyed panel.
+  const panelMessages = panel.sent.length;
+  notificationWindow.dispatchEventToOverlay('ws:event', { meta: { action_id: 'A1' }, data: {} });
+  assert.equal(panel.sent.length, panelMessages);
+  win.webContentsEvents.emit('did-finish-load');
+  assert.deepEqual(
+    win.sent.map((entry) => entry.channel),
+    ['overlay:snapshot', 'ws:event']
+  );
+  win.windowEvents.emit('ready-to-show');
+
+  // It stays the Action's one surface: opened again it is focused, and showing the Suggestion
+  // puts no panel shell on it.
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
+  notificationWindow.showNotification('S1');
+  assert.equal(instances.length, 2);
+  assert.equal(win.alwaysOnTop, undefined);
+  assert.equal(win.showInactiveCalls, undefined);
+
+  // A New task that started work is replaced the same way, while it is shown.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  const newTask = instances[2];
+  newTask.webContentsEvents.emit('did-finish-load');
+  newTask.windowEvents.emit('ready-to-show');
+  notificationWindow.registerActionAssociation('A2', 'standalone:1');
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('standalone:1', 'A2'),
+    'created'
+  );
+  assert.equal(newTask.isDestroyed(), true);
+  assert.equal(new URL(instances[3].loadedUrl).searchParams.get('actionId'), 'A2');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A2' }), 'standalone:1');
+});
+
+test('an ordinary window keeps the size and place the user gives it', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({});
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [win] = instances;
+  win.webContentsEvents.emit('did-finish-load');
+  win.windowEvents.emit('ready-to-show');
+  const bounds = win.getBounds();
+
+  handlers.onResizeNotificationWindow({ sender: win.webContents }, { height: 300 });
+  handlers.onResizeNotificationWindow({ sender: {} }, { id: 'conversation:A1', height: 300 });
+  handlers.onOverlayDragStart({ sender: win.webContents }, { screenX: 300, screenY: 140 });
+  handlers.onOverlayDragMove({ sender: win.webContents }, { screenX: 320, screenY: 160 });
+  handlers.onOverlayInteraction({ sender: win.webContents });
+
+  assert.deepEqual(win.getBounds(), bounds);
+  assert.equal(notificationWindow.hasRecentOverlayInteraction(), false);
+  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 600, y: 400 }), false);
+});
+
+test('the overlay IPC channels accept an ordinary window until it closes', () => {
+  const { createIpcSenderSecurity } = require('../electron/dist/ipc/senderTrust.js');
+  const { buildFrontendDevPageUrl } = require('../electron/dev_frontend_env');
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const security = createIpcSenderSecurity({
+    getMainWindow: () => null,
+    isDevRuntime: () => true,
+    frontendDevOrigin: new URL(buildFrontendDevPageUrl('/notification.html')).origin,
+    frontendDistIndex: '/app/dist/index.html',
+    recordSecurityEvent: () => {},
+  });
+  notificationWindow.configureIpcWindowSecurity(security);
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [win] = instances;
+  const frame = { url: win.loadedUrl };
+  win.webContents.mainFrame = frame;
+  const event = { sender: win.webContents, senderFrame: frame };
+
+  for (const channel of [
+    'action:submitMessage',
+    'action:resume',
+    'action:readConversationPage',
+    'action:readToolOutputPage',
+    'action:attachImage',
+    'history:markCompletionViewed',
+    'overlay:submitApprovalDecision',
+    'overlay:getActionApprovalMode',
+    'overlay:setActionApprovalMode',
+    'overlay:showChat',
+    'notification-hide',
+    'clipboard:writeText',
+    'ws:getStatus',
+    'ui:getLanguage',
+  ]) {
+    assert.equal(security.authorize(channel, event), 'overlay', channel);
+  }
+  assert.throws(() => security.authorize('history:openOverlay', event), {
+    code: 'channel_not_allowed_for_window',
+  });
+
+  win.destroy();
+  assert.throws(() => security.authorize('action:submitMessage', event), {
+    code: 'window_role_mismatch',
+  });
 });

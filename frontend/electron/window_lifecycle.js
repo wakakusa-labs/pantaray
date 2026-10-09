@@ -13,6 +13,11 @@ const WINDOW_STARTUP_STEP_EINTR_RETRY_LIMIT = 8;
 const DEV_SERVER_WAIT_TIMEOUT_MS = 20000;
 const DEV_SERVER_REQUEST_TIMEOUT_MS = 1500;
 const DEV_WINDOW_LOAD_TIMEOUT_MS = 15000;
+// Also the size of a conversation window opened while no main window exists.
+const MAIN_WINDOW_DEFAULT_SIZE = Object.freeze({ width: 1000, height: 700 });
+// The middle stop of the renderer's fog ground (index.css --app-background), so a window on that
+// ground (this one, and a conversation window) shows the same color before the first paint.
+const MAIN_WINDOW_BACKGROUND_COLOR = '#0f131a';
 
 function isDevRuntime() {
   // NOTE:
@@ -329,15 +334,12 @@ function createMainWindow(options = {}) {
   const hashRoute = '/';
 
   const win = createBrowserWindowWithRetry({
-    width: 1000,
-    height: 700,
+    ...MAIN_WINDOW_DEFAULT_SIZE,
     minWidth: 800,
     minHeight: 600,
     frame: true,
     transparent: false,
-    // The middle stop of the renderer's fog ground (index.css --app-background), so the
-    // window shows the same color before the first paint.
-    backgroundColor: '#0f131a',
+    backgroundColor: MAIN_WINDOW_BACKGROUND_COLOR,
     hasShadow: true,
     resizable: true,
     fullscreenable: true,
@@ -440,6 +442,8 @@ function createMainWindow(options = {}) {
 }
 
 module.exports = {
+  MAIN_WINDOW_BACKGROUND_COLOR,
+  MAIN_WINDOW_DEFAULT_SIZE,
   createMainWindow,
   setupWindowEventListeners,
   createBrowserWindowWithRetry,

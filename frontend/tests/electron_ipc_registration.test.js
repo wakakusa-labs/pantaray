@@ -182,7 +182,10 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
 
   // overlay factory が DI 経由で呼ばれていること（node環境で electron を require しないため）
   assert.equal(overlayFactoryCalls.length, 1);
-  assert.equal(typeof overlayFactoryCalls[0].resumeLiveProcess, 'function');
+  assert.equal(
+    overlayFactoryCalls[0].openActionConversationOverlay,
+    ctx.windows.openActionConversationOverlay
+  );
 
   const openNewConversation = fakeIpc.invokeHandlers.get('history:openNewConversation');
   assert.equal(await openNewConversation({}), undefined);

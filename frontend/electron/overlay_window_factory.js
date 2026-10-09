@@ -2,13 +2,29 @@ const { BrowserWindow, app, screen } = require('electron');
 const path = require('path');
 const { buildFrontendDevPageUrl } = require('./dev_frontend_env');
 const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap');
+const { MAIN_WINDOW_BACKGROUND_COLOR, MAIN_WINDOW_DEFAULT_SIZE } = require('./window_lifecycle');
 const {
   OVERLAY_INITIAL_HEIGHT_PX,
   OVERLAY_WIDTH_PX,
+  resolveConversationWindowBounds,
   resolveOverlayPlacement,
 } = require('./dist/windows/overlayPlacement');
 
 const OVERLAY_ALWAYS_ON_TOP_LEVEL = 'screen-saver';
+// Centers the traffic lights on the window surface's 40 px header.
+const CONVERSATION_WINDOW_TRAFFIC_LIGHT_POSITION = { x: 10, y: 14 };
+
+// What each overlay window is: the small floating 'panel', or an ordinary 'window' that keeps
+// none of the panel's shell (always-on-top, content-sized height, pointer drag).
+const overlaySurfaces = new WeakMap();
+
+function isConversationWindow(win) {
+  return overlaySurfaces.get(win) === 'window';
+}
+
+function isOverlayPanel(win) {
+  return overlaySurfaces.get(win) === 'panel';
+}
 
 function isDevRuntime() {
   return process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -24,7 +40,7 @@ function safeShowInactive(win) {
 }
 
 function applyOverlayShellMode(win, shellMode) {
-  if (win.isDestroyed()) return;
+  if (win.isDestroyed() || isConversationWindow(win)) return;
   win.setFocusable(true);
   win.setAlwaysOnTop(true, OVERLAY_ALWAYS_ON_TOP_LEVEL);
   if (process.platform !== 'darwin' && shellMode === 'interactive') {
@@ -139,6 +155,19 @@ function moveOverlayWindowToCell(win, cell, stackIndex) {
   setOverlayVerticalAnchor(win, placement);
 }
 
+/**
+ * An ordinary conversation window takes the main window's size, on the main window's display;
+ * with no main window, the main window's default size on the primary display.
+ */
+function resolveConversationWindowPlacement(mainWindow) {
+  const hasMainWindow = Boolean(mainWindow && !mainWindow.isDestroyed());
+  const display = hasMainWindow
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const size = hasMainWindow ? mainWindow.getNormalBounds() : MAIN_WINDOW_DEFAULT_SIZE;
+  return resolveConversationWindowBounds(display.workArea, size);
+}
+
 function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
   if (typeof getUiLanguage !== 'function') {
     throw new TypeError('Overlay window factory requires getUiLanguage.');
@@ -147,30 +176,41 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
     throw new TypeError('Overlay window factory requires registerWindow.');
   }
 
-  function additionalArguments() {
-    return buildUiLanguageAdditionalArguments(getUiLanguage());
+  function webPreferences() {
+    return {
+      preload: path.join(__dirname, 'dist', 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      additionalArguments: buildUiLanguageAdditionalArguments(getUiLanguage()),
+      devTools: isDevRuntime(),
+    };
   }
 
-  function loadOverlayPage(win, entryMode, actionId) {
+  // Both surfaces load the same page and act on the same conversations, so both are trusted
+  // as the 'overlay' IPC role.
+  function attachOverlayPage(win, query, { onClosed, onDidFinishLoad, onReadyToShow }) {
+    registerWindow(win);
     const notificationUrl = isDevRuntime()
       ? buildFrontendDevPageUrl('/notification.html')
       : `file://${path.join(__dirname, '../dist/notification.html')}`;
     const url = new URL(notificationUrl);
-    if (entryMode === 'standalone') url.searchParams.set('mode', 'standalone');
-    if (actionId) url.searchParams.set('actionId', actionId);
+    for (const [name, value] of Object.entries(query)) {
+      if (value) url.searchParams.set(name, value);
+    }
     hardDisableDevTools(win);
     win.loadURL(url.toString());
+    win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
+    win.once('ready-to-show', () => onReadyToShow(win));
+    win.on('closed', () => onClosed(win));
   }
 
   function createConversationOverlayWindow({
-    actionId,
     cell,
     entryMode,
     stackIndex,
     interactive,
-    onClosed,
-    onDidFinishLoad,
-    onReadyToShow,
+    ...events
   }) {
     const placement = resolvePrimaryPlacement(cell, stackIndex);
     const win = new BrowserWindow({
@@ -187,14 +227,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
       resizable: false,
       movable: true,
       hasShadow: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'dist', 'preload.js'),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        additionalArguments: additionalArguments(),
-        devTools: isDevRuntime(),
-      },
+      webPreferences: webPreferences(),
       show: false,
       ...(!interactive && { focusable: true }),
       ...(process.platform === 'darwin' && {
@@ -208,17 +241,41 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
         acceptFirstMouse: true,
       }),
     });
+    overlaySurfaces.set(win, 'panel');
     setOverlayVerticalAnchor(win, placement);
-    registerWindow(win);
-    loadOverlayPage(win, entryMode, actionId);
-    win.webContents.on('did-finish-load', () => onDidFinishLoad(win));
-    win.once('ready-to-show', () => onReadyToShow(win));
-    win.on('closed', () => onClosed(win));
+    attachOverlayPage(win, { mode: entryMode === 'standalone' ? 'standalone' : null }, events);
+    return win;
+  }
+
+  /**
+   * An ordinary window for a conversation that has work: titled, resizable, in the window
+   * cycle and Mission Control, and behind other apps once they are clicked.
+   */
+  function createConversationWindow({ bounds, actionId, ...events }) {
+    const win = new BrowserWindow({
+      ...bounds,
+      frame: true,
+      backgroundColor: MAIN_WINDOW_BACKGROUND_COLOR,
+      resizable: true,
+      movable: true,
+      fullscreenable: true,
+      // The click that brings it back in front also acts, as on the main window.
+      acceptFirstMouse: true,
+      webPreferences: webPreferences(),
+      show: false,
+      ...(process.platform === 'darwin' && {
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: CONVERSATION_WINDOW_TRAFFIC_LIGHT_POSITION,
+      }),
+    });
+    overlaySurfaces.set(win, 'window');
+    attachOverlayPage(win, { mode: 'standalone', actionId, surface: 'window' }, events);
     return win;
   }
 
   return {
     createConversationOverlayWindow,
+    createConversationWindow,
   };
 }
 
@@ -226,7 +283,10 @@ module.exports = {
   createOverlayWindowFactory,
   applyOverlayShellMode,
   getOverlayVerticalAnchor,
+  isConversationWindow,
+  isOverlayPanel,
   moveOverlayWindowToCell,
   releaseOverlayCenter,
+  resolveConversationWindowPlacement,
   showInteractiveOverlayWindow,
 };

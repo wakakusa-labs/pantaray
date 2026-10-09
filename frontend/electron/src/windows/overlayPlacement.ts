@@ -67,3 +67,35 @@ export function resolveOverlayPlacement(
 
   return { x, y: clamp(y, minimumY, Math.max(minimumY, maximumY)), anchor };
 }
+
+// A conversation window opens just off the main window's centered spot, so the two never sit
+// exactly on top of each other.
+const CONVERSATION_WINDOW_OFFSET_PX = 30;
+
+/**
+ * Bounds of an ordinary conversation window of `size`: centered on the work area, then offset
+ * right and down, kept inside the work area (and no larger than it).
+ */
+export function resolveConversationWindowBounds(
+  workArea: Rect,
+  size: Readonly<{ width: number; height: number }>
+): Rect {
+  const width = Math.min(size.width, workArea.width);
+  const height = Math.min(size.height, workArea.height);
+  const centeredX = Math.round(workArea.x + (workArea.width - width) / 2);
+  const centeredY = Math.round(workArea.y + (workArea.height - height) / 2);
+  return {
+    x: clamp(
+      centeredX + CONVERSATION_WINDOW_OFFSET_PX,
+      workArea.x,
+      workArea.x + workArea.width - width
+    ),
+    y: clamp(
+      centeredY + CONVERSATION_WINDOW_OFFSET_PX,
+      workArea.y,
+      workArea.y + workArea.height - height
+    ),
+    width,
+    height,
+  };
+}

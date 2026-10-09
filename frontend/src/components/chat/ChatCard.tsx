@@ -2,10 +2,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { useId } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
-import {
-  badgeClassName,
-  getConversationHistoryStatusMeta,
-} from '@/components/history/statusTokens';
+import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
 import type { ChatWorkState } from '@/hooks/useChatWorkStates';
 import type { MessageKey } from '@/i18n/types';
 
@@ -34,7 +31,13 @@ export function ChatCard({
 }) {
   const summaryId = useId();
   const statusId = useId();
-  const statusMeta = isLatest && work ? getConversationHistoryStatusMeta(work.status) : null;
+  const statusMeta =
+    isLatest && work
+      ? getHistoryItemStatusMeta({
+          kind: card.kind === 'action' ? 'conversation' : 'suggestion',
+          status: work.status,
+        })
+      : null;
   return (
     <button
       id={id}

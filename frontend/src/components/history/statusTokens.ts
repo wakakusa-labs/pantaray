@@ -27,11 +27,12 @@ export const getConversationHistoryStatusMeta = (
 };
 
 /**
- * A list row's badge. A Suggestion row says it is a suggestion, brighter while it still waits for
- * the user's answer, so it is not mistaken for an Action waiting for approval.
+ * A work's badge, in the list and on the chat's cards. A Suggestion says it is a suggestion,
+ * brighter while it still waits for the user's answer, so it is not mistaken for an Action waiting
+ * for approval.
  */
 export const getHistoryItemStatusMeta = (
-  item: ConversationHistoryListItem
+  item: Pick<ConversationHistoryListItem, 'kind' | 'status'>
 ): { labelKey: MessageKey; tone: BadgeTone } | null =>
   item.kind === 'suggestion'
     ? {

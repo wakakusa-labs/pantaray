@@ -903,7 +903,7 @@ const ACTION_EVENT_META = {
   command_id: 'CMD1',
 };
 
-function createActionLiveBridge(notificationWindow) {
+function createActionLiveBridge(notificationWindow, { status = 'processing' } = {}) {
   const {
     createOrchestrationRendererBridge,
   } = require('../electron/dist/orchestration/orchestrationRendererBridge.js');
@@ -918,7 +918,7 @@ function createActionLiveBridge(notificationWindow) {
       action: {
         action_id: actionId,
         suggestion_id: 'S1',
-        status: 'processing',
+        status,
         latest_run_id: 'P2',
         approved_suggestion: null,
         resumable: false,
@@ -1507,4 +1507,77 @@ test('the overlay IPC channels accept an ordinary window until it closes', () =>
   assert.throws(() => security.authorize('action:submitMessage', event), {
     code: 'window_role_mismatch',
   });
+});
+
+// The conversation entry the History list, its chat cards, and a Suggestion with work all use.
+function createConversationEntry(notificationWindow) {
+  const {
+    createConversationOverlayOwner,
+  } = require('../electron/dist/windows/conversationOverlay.js');
+  return createConversationOverlayOwner({
+    getRuntimeState: () => ({ status: 'ready', owner: { id: 'owner-a' }, message: null }),
+    openOverlay: notificationWindow.openStandaloneConversationOverlay,
+    destroyOverlay: notificationWindow.destroyOverlayWindow,
+    bindActionToOverlay: notificationWindow.registerActionAssociation,
+    resolveOverlayIdForAction: (actionId) => notificationWindow.resolveOverlayId({ actionId }),
+    hasOverlayWindow: notificationWindow.hasOverlayWindow,
+    refreshAndResumeConversation: () => {},
+    holdsCaptureOsPermissions: () => true,
+    presentRecordingIntro: () => {},
+  });
+}
+
+test("a finished Action stays with the panel that shows it until that panel's window closes", async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const { bridge } = createActionLiveBridge(notificationWindow, { status: 'success' });
+  const entry = createConversationEntry(notificationWindow);
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({
+        suggestionId,
+        snapshot: createSnapshot({ suggestionId, actionId: 'A1', reactionState: 'accepted' }),
+      }),
+    openActionConversationOverlay: entry.openActionConversationOverlay,
+  });
+  const openFromHistory = async () => {
+    handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  notificationWindow.showNotification('S1');
+  const [panel] = instances;
+  panel.webContentsEvents.emit('did-finish-load');
+  panel.windowEvents.emit('ready-to-show');
+  notificationWindow.setOverlaySnapshot('S1', {
+    snapshot: createSnapshot({ actionId: 'A1', reactionState: 'accepted' }),
+  });
+  // An Action no window shows is released when it finishes.
+  notificationWindow.registerActionAssociation('A2', 'S9');
+
+  bridge.refreshActionConversation('A1');
+  bridge.refreshActionConversation('A2');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A2' }), null);
+
+  // Shown: History and the chat card focus the panel.
+  await openFromHistory();
+  assert.equal(entry.openActionConversationOverlay('A1'), 'focused');
+  assert.equal(instances.length, 1);
+  assert.equal(panel.isDestroyed(), false);
+
+  // Closed: History replaces it with an ordinary window under the same id.
+  notificationWindow.hideOverlay('S1');
+  bridge.refreshActionConversation('A1');
+  await new Promise((resolve) => setImmediate(resolve));
+  await openFromHistory();
+  assert.equal(instances.length, 2);
+  assert.equal(panel.isDestroyed(), true);
+  const win = instances[1];
+  assert.equal(new URL(win.loadedUrl).searchParams.get('surface'), 'window');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+  assert.equal(entry.openActionConversationOverlay('A1'), 'loading');
+  assert.equal(instances.length, 2);
+
+  win.destroy();
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
 });

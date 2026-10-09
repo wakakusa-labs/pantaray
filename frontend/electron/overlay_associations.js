@@ -61,11 +61,12 @@ function createOverlayAssociations({ overlayWindows, hasOverlayWindow, sendToOve
     }
   }
 
-  function cleanupMappingsForAction(actionId) {
+  // A finished Action stays bound to a window that still shows it: a follow-up must reach that
+  // window, and opening the Action again must find it instead of opening a second one. Closing
+  // the window releases it (cleanupMappingsForSuggestion); only a binding to no open window goes.
+  function releaseActionAssociationWithoutWindow(actionId) {
     const aid = normalizeId(actionId);
-    if (aid) {
-      actionToOverlayId.delete(aid);
-    }
+    if (aid && !hasOverlayWindow(actionToOverlayId.get(aid))) actionToOverlayId.delete(aid);
   }
 
   function clearActionAssociations() {
@@ -114,7 +115,7 @@ function createOverlayAssociations({ overlayWindows, hasOverlayWindow, sendToOve
     adoptActionAssociation,
     cleanupMappingsForSuggestion,
     cleanupMappingsForProcess,
-    cleanupMappingsForAction,
+    releaseActionAssociationWithoutWindow,
     clearActionAssociations,
     clearAllAssociations,
     resolveOverlayId,

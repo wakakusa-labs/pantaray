@@ -93,7 +93,7 @@ export function createOrchestrationRendererBridge(params: {
         liveProcesses.delete(processId);
         notificationWindow.cleanupMappingsForProcess(processId);
       }
-      notificationWindow.cleanupMappingsForAction(update.snapshot.actionId);
+      notificationWindow.releaseActionAssociationWithoutWindow(update.snapshot.actionId);
     }
   }
 

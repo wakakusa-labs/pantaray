@@ -127,7 +127,8 @@ export type NotificationWindowApi = {
   // Binds unless an open window already shows the Action; for server-event-derived binds.
   adoptActionAssociation: (actionId: string, overlayId: string) => void;
   cleanupMappingsForProcess: (processId: string) => void;
-  cleanupMappingsForAction: (actionId: string) => void;
+  // Unbinds a finished Action unless an open window still shows it.
+  releaseActionAssociationWithoutWindow: (actionId: string) => void;
   clearActionAssociations: () => void;
   resolveOverlayId: (args: {
     suggestionId?: string | null;

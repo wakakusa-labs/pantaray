@@ -83,7 +83,7 @@ function createManagerHarness(overrides = {}) {
       registerProcessAssociation: () => {},
       adoptActionAssociation: () => {},
       cleanupMappingsForProcess: (id) => overrides.onCleanupProcess?.(id),
-      cleanupMappingsForAction: (id) => overrides.onCleanupAction?.(id),
+      releaseActionAssociationWithoutWindow: (id) => overrides.onCleanupAction?.(id),
       clearActionAssociations: () => overrides.onClearActionAssociations?.(),
       resolveOverlayId: overrides.resolveOverlayId || (() => null),
     },
@@ -298,7 +298,7 @@ test('OrchestrationManager: runtimeBackendUrl が無い場合は暗黙フォー�
       registerProcessAssociation: () => {},
       adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
-      cleanupMappingsForAction: () => {},
+      releaseActionAssociationWithoutWindow: () => {},
       resolveOverlayId: () => null,
     },
     createOrchestrationWS: () => ({
@@ -336,7 +336,7 @@ test('OrchestrationManager: runtime が ready でない場合は接続せず既�
       registerProcessAssociation: () => {},
       adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
-      cleanupMappingsForAction: () => {},
+      releaseActionAssociationWithoutWindow: () => {},
       resolveOverlayId: () => null,
     },
     createOrchestrationWS: () => ({
@@ -379,7 +379,7 @@ test('OrchestrationManager: Action conversation reader未注入ではfail-fast�
           registerProcessAssociation: () => {},
           adoptActionAssociation: () => {},
           cleanupMappingsForProcess: () => {},
-          cleanupMappingsForAction: () => {},
+          releaseActionAssociationWithoutWindow: () => {},
           resolveOverlayId: () => null,
         },
         createOrchestrationWS: () => ({
@@ -414,7 +414,7 @@ test('OrchestrationManager: acceptAction は send 例外時にも snapshot を�
       registerProcessAssociation: () => {},
       adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
-      cleanupMappingsForAction: () => {},
+      releaseActionAssociationWithoutWindow: () => {},
       resolveOverlayId: () => null,
     },
     createOrchestrationWS: () => ({

@@ -45,7 +45,7 @@ function createManagerHarness(overrides = {}) {
       registerProcessAssociation: () => {},
       adoptActionAssociation: () => {},
       cleanupMappingsForProcess: () => {},
-      cleanupMappingsForAction: () => {},
+      releaseActionAssociationWithoutWindow: () => {},
       resolveOverlayId: ({ actionId }) => (actionId === 'act-1' ? 'sug-1' : null),
     },
     createOrchestrationWS: (opts) => {

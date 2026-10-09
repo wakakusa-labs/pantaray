@@ -22,7 +22,6 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.schema.chat import (
-    CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS,
     ActionEventContent,
     ChatActionEventKind,
     ChatItemContent,
@@ -127,7 +126,7 @@ def _events(connection: sqlite3.Connection, *, user_id: str) -> list[_Event]:
 def _action_event(
     at: str, message_id: str, action_id: str, event: ChatActionEventKind, answer: str
 ) -> _Event:
-    excerpt = answer.strip()[:CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS] or None
+    excerpt = answer.strip() or None
     return _Event(
         at=at,
         message_id=message_id,

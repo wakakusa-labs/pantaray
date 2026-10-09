@@ -32,7 +32,6 @@ from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
 from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.schema.agent.action_message_codec import render_project_refs
 from pantaray_agents.schema.chat import (
-    CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS,
     ActionEventContent,
     AssistantMessageContent,
     ChatItem,
@@ -217,6 +216,10 @@ def _lay(entries: Sequence[ConversationEntry], *, head_bytes: int) -> LaidOutWin
     )
 
 
+# What 0.4.0 cut a task's answer to before it reached the chat.
+_OLD_EXCERPT_MAX_CODEPOINTS = 4_000
+
+
 def _header(item: ChatItem) -> str:
     # Stored in UTC; the model reasons about "today" on the user's clock.
     return f"[{item.item_id} {describe_utc_timestamp(item.created_at)}]"
@@ -231,14 +234,12 @@ def _body(
         excerpt = content.final_answer_excerpt
         if excerpt is None:
             return event
-        # Said as cut, the model reads the rest instead of reporting a lost
-        # answer. An answer exactly this long is called cut too; reading it
-        # again costs a call, not a wrong report.
-        if len(excerpt) == CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS:
+        # Events stored by 0.4.0 carry only the first 4,000 characters.
+        if len(excerpt) == _OLD_EXCERPT_MAX_CODEPOINTS:
             excerpt += (
-                f"\n[Only the first {CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS} "
-                "characters of the answer are shown here; memory_sql reads the "
-                "whole answer from agent_actions.final_output.]"
+                f"\n[Only the first {_OLD_EXCERPT_MAX_CODEPOINTS} characters are "
+                "shown here; memory_sql reads the whole answer from "
+                "agent_actions.final_output.]"
             )
         return f"{event}\n{excerpt}"
     lines = []

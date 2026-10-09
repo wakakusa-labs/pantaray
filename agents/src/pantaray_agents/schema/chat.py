@@ -35,8 +35,6 @@ from pantaray_agents.schema.conversation_history import ConversationHistoryTimes
 
 # A card is drawn with one or two lines under its title.
 CHAT_CARD_SUMMARY_MAX_CODEPOINTS = 500
-# About 1,000 tokens of the final answer go into the chat's context (design 6.4).
-CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS = 4_000
 
 
 def _bounded_text(limit: int) -> StringConstraints:
@@ -47,8 +45,9 @@ def _bounded_text(limit: int) -> StringConstraints:
 # an Action as it is.
 type ChatText = Annotated[str, _bounded_text(ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)]
 type ChatCardSummary = Annotated[str, _bounded_text(CHAT_CARD_SUMMARY_MAX_CODEPOINTS)]
-type ChatActionEventExcerpt = Annotated[
-    str, _bounded_text(CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS)
+# A task's answer reaches the chat whole; the chat's window budget fits it.
+type ChatActionEventAnswer = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
 ]
 # The same attachment contract and limits as an Action USER message.
 type ChatImages = Annotated[
@@ -123,7 +122,8 @@ class ActionEventContent(_ChatModel):
     action_id: ActionMessageId
     event: ChatActionEventKind
     # Only a run that answered has one; a cancel or an approval wait may not.
-    final_answer_excerpt: ChatActionEventExcerpt | None
+    # The whole answer, despite the name, which rows already stored carry.
+    final_answer_excerpt: ChatActionEventAnswer | None
 
 
 class TurnFailureContent(_ChatModel):
@@ -213,7 +213,6 @@ class ChatTurnRetryStale(_ChatModel):
 
 
 __all__ = [
-    "CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS",
     "CHAT_CARD_SUMMARY_MAX_CODEPOINTS",
     "ActionEventContent",
     "AssistantMessageContent",

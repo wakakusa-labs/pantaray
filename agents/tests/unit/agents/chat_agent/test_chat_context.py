@@ -39,7 +39,6 @@ from pantaray_agents.local_runtime.runtime.identity import (
     reset_logged_out_owner,
 )
 from pantaray_agents.schema.chat import (
-    CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS,
     ActionEventContent,
     AssistantMessageContent,
     ChatActionCard,
@@ -360,11 +359,8 @@ def _task_ended(message_id: str, answer: str) -> ChatItem:
     )
 
 
-@pytest.mark.parametrize(
-    ("length", "said_cut"),
-    [(CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS, True), (120, False)],
-)
-def test_a_cut_answer_is_said_to_be_cut_and_where_the_rest_is(
+@pytest.mark.parametrize(("length", "said_cut"), [(4_000, True), (12_000, False)])
+def test_an_answer_cut_by_0_4_0_says_where_the_rest_is(
     length: int, said_cut: bool
 ) -> None:
     ended = _task_ended("action-run:p1:end", "あ" * length)
@@ -372,6 +368,7 @@ def test_a_cut_answer_is_said_to_be_cut_and_where_the_rest_is(
     (entry,) = render_item(TurnChatItem(item=ended, is_reply=False), NO_MEDIA)
 
     text = entry.item.content[0].text
+    assert "あ" * length in text
     assert ("agent_actions.final_output" in text) is said_cut
 
 

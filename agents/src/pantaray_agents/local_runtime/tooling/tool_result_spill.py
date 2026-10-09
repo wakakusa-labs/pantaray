@@ -20,11 +20,13 @@ TOOL_RESULT_JSON_METADATA_KEYS = frozenset(
 )
 # A result spilled before previews existed has neither of these.
 TOOL_RESULT_PREVIEW_KEYS = frozenset({"preview", "retry_hint"})
+# The result's own status, kept beside the reference only when the result has one.
+TOOL_RESULT_STATUS_KEY = "status"
 TOOL_RESULT_PREVIEW_CHARS = 1_000
 
 
 def is_json_spill_shape(keys: Set[str]) -> bool:
-    return keys in (
+    return keys - {TOOL_RESULT_STATUS_KEY} in (
         TOOL_RESULT_JSON_METADATA_KEYS,
         TOOL_RESULT_JSON_METADATA_KEYS | TOOL_RESULT_PREVIEW_KEYS,
     )

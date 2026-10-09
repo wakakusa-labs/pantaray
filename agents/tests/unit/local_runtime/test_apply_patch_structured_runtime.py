@@ -615,3 +615,18 @@ def test_patch_diff_is_a_valid_unified_diff_and_counts_its_lines(
     assert header.startswith("--- f.txt\n+++ f.txt\n@@ ")
     assert body == expected_body
     assert count_patch_diff_lines(diff) == expected_counts
+
+
+@pytest.mark.parametrize(
+    ("diff", "expected"),
+    [
+        ("--- f.txt\n+++ f.txt\n@@ -1 +1 @@\n-x\n+y\n", (1, 1)),
+        # Stored before unterminated last lines were marked: "+c" hides inside "-b".
+        ("--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n a\n-b+c", None),
+    ],
+    ids=["omitted-range-lengths", "legacy-glued-line"],
+)
+def test_patch_diff_counts_only_lines_that_match_their_hunk_headers(
+    diff: str, expected: tuple[int, int] | None
+) -> None:
+    assert count_patch_diff_lines(diff) == expected

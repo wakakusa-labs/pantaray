@@ -19,7 +19,7 @@ export type DiffLine = Readonly<{
 export type FileDiff = Readonly<{ path: string; hunks: readonly (readonly DiffLine[])[] }>;
 
 const LINE_BREAK = /\r\n|\r|\n/;
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const NEW_FILE_HEADER = '+++ ';
 const LINE_KINDS: ReadonlyMap<string, DiffLineKind> = new Map([
   [' ', 'context'],
@@ -41,18 +41,29 @@ export function parseToolDiff(content: string): FileDiff | null {
   return typeof output.diff === 'string' ? parseUnifiedDiff(output.diff) : null;
 }
 
+/**
+ * 見出しの行数と合わない hunk を持つ diff は null。改行の印を付ける前に保存された diff は、
+ * 改行の無い行に次の行がつながっていて（`-b+c`）、そのまま描くと足した行が消える。
+ */
 export function parseUnifiedDiff(diff: string): FileDiff | null {
   const rows = diff.split(LINE_BREAK);
   if (rows[rows.length - 1] === '') rows.pop();
   let path: string | null = null;
   const hunks: DiffLine[][] = [];
+  // 見出しが言う、まだ現れていない変更前・変更後の行数。
+  let oldLeft = 0;
+  let newLeft = 0;
   let oldNumber = 0;
   let newNumber = 0;
   for (const row of rows) {
     const header = HUNK_HEADER.exec(row);
     if (header !== null) {
+      if (oldLeft !== 0 || newLeft !== 0) return null;
       oldNumber = Number(header[1]);
-      newNumber = Number(header[2]);
+      newNumber = Number(header[3]);
+      // 行数を省いた範囲は 1 行。
+      oldLeft = Number(header[2] ?? 1);
+      newLeft = Number(header[4] ?? 1);
       hunks.push([]);
       continue;
     }
@@ -70,6 +81,8 @@ export function parseUnifiedDiff(diff: string): FileDiff | null {
     }
     const kind = LINE_KINDS.get(row.charAt(0));
     if (kind === undefined) return null;
+    if (kind !== 'added') oldLeft -= 1;
+    if (kind !== 'removed') newLeft -= 1;
     hunk.push({
       kind,
       oldNumber: kind === 'added' ? null : oldNumber++,
@@ -78,5 +91,6 @@ export function parseUnifiedDiff(diff: string): FileDiff | null {
       noNewlineAtEnd: false,
     });
   }
+  if (oldLeft !== 0 || newLeft !== 0) return null;
   return path === null || hunks.length === 0 ? null : { path, hunks };
 }

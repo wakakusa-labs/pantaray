@@ -209,11 +209,9 @@ def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
         and output.get("kind") == RENDERER_PREPARING_OUTPUT_KIND
     ):
         return "preparing"
-    if (
-        step.status == "success"
-        and output.get("status") == PATCH_NEEDS_READ_STATUS
-        and output.get("patch_applied") is False
-    ):
+    # Storage keeps a spilled result's status beside its reference, and this status
+    # alone says the patch was not applied, so a long file read still reads as one.
+    if step.status == "success" and output.get("status") == PATCH_NEEDS_READ_STATUS:
         return "needs_read"
     return "completed"
 
@@ -245,10 +243,12 @@ def _tool_entry_file_edit(
         )
     except ValidationError:
         return None
-    added, removed = count_patch_diff_lines(diff)
+    counts = count_patch_diff_lines(diff)
+    if counts is None:
+        return None
     # apply_patch takes exactly one change per call.
     return ToolEntryFileEdit(
-        operation=args.changes[0].op, added_lines=added, removed_lines=removed
+        operation=args.changes[0].op, added_lines=counts[0], removed_lines=counts[1]
     )
 
 

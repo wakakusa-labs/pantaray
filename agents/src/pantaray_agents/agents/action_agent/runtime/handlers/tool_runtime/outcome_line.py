@@ -153,9 +153,9 @@ def _command_detail(body: Mapping[str, JSONValue]) -> list[str]:
 def _apply_patch_detail(body: Mapping[str, JSONValue]) -> list[str]:
     details = [_count(body, "applied_paths", "file", "files")]
     diff = body.get("diff")
-    if isinstance(diff, str) and diff:
-        added, removed = count_patch_diff_lines(diff)
-        details.append(f"+{added} -{removed}")
+    counts = count_patch_diff_lines(diff) if isinstance(diff, str) and diff else None
+    if counts is not None:
+        details.append(f"+{counts[0]} -{counts[1]}")
     return details
 
 

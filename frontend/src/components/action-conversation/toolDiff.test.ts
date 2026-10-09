@@ -18,7 +18,7 @@ describe('parseUnifiedDiff', () => {
       '+TWO',
       ' three',
       ' four',
-      '@@ -10,3 +10,4 @@',
+      '@@ -10,3 +10,3 @@',
       ' ten',
       '+ten and a half',
       ' eleven',
@@ -57,6 +57,20 @@ describe('parseUnifiedDiff', () => {
       ['removed', 2, null, true],
       ['added', null, 2, true],
     ]);
+  });
+
+  it('numbers a hunk whose header omits one-line range lengths', () => {
+    expect(numbered('--- a\n+++ a\n@@ -3 +3 @@\n-x\n+y\n')).toEqual([
+      [
+        ['removed', 3, null, 'x'],
+        ['added', null, 3, 'y'],
+      ],
+    ]);
+  });
+
+  // 改行の印を付ける前に保存された diff。足した `c` が `-b` の行に隠れている。
+  it('rejects a hunk whose lines disagree with its header', () => {
+    expect(parseUnifiedDiff('--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n a\n-b+c')).toBeNull();
   });
 
   it('numbers a created file from its first line', () => {

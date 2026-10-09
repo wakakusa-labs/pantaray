@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +33,11 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     StructuredPatchFileChange,
     create_patch_diff,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+    release_stored_tool_result,
+    store_tool_result,
 )
 from pantaray_agents.schema.action_conversation import ActionStepStatus
 from pantaray_agents.schema.agent.action_message import (
@@ -797,3 +803,39 @@ def test_a_patch_without_an_inline_diff_has_no_line_counts(
     )
 
     assert project_action_tool_entry(row).file_edit is None
+
+
+def test_a_long_file_held_for_a_read_does_not_claim_an_edit(tmp_path: Path) -> None:
+    """The returned file text pushes the result out of line; the outcome must survive."""
+
+    output = build_needs_read_output(
+        path="page.html",
+        text="b\n" + "x" * 30_000 + "\n",
+        change=ApplyPatchUpdateChange.model_validate(_UPDATE_CHANGE),
+    )
+    stored = store_tool_result(
+        action_tool_results_path=tmp_path, invocation_id="step-1", output=output
+    )
+    assert release_stored_tool_result(stored) is None
+    assert stored.storage_kind == "action_file"
+    assert len(json.dumps(output)) > ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    row = replace(
+        _patch_row(_UPDATE_CHANGE, None),
+        tool_output=_tool_output(output=stored.output_json, storage="action_file"),
+    )
+
+    entry = project_action_tool_entry(row)
+
+    assert (entry.outcome, entry.file_edit) == ("needs_read", None)
+
+
+def test_a_diff_stored_before_unterminated_lines_were_marked_has_no_counts() -> None:
+    output = {
+        "status": "success",
+        "applied_paths": ["/w/page.html"],
+        "diff": "--- page.html\n+++ page.html\n@@ -1,2 +1,2 @@\n a\n-b+c",
+    }
+
+    entry = project_action_tool_entry(_patch_row(_UPDATE_CHANGE, output))
+
+    assert (entry.outcome, entry.file_edit) == ("completed", None)

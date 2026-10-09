@@ -71,7 +71,7 @@ const attachFile = vi.fn(async ({ name }: { name: string }) => ({
 }));
 const discardAttachment = vi.fn(async () => undefined);
 const historyFetch = vi.fn(async () => ({
-  data: [work('A1', '見積書のたたき台を作る', 'running')],
+  data: [work('A1', '見積書のたたき台を作る', 'running')] as ConversationHistoryListItem[],
   nextCursor: null,
   unreadActionIds: [],
   error: null,
@@ -138,6 +138,42 @@ const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '
       </UiLanguageProvider>
     </MemoryRouter>
   );
+
+it('labels a suggestion’s card as a suggestion, as the task list does', async () => {
+  historyFetch.mockResolvedValueOnce({
+    data: [
+      {
+        kind: 'suggestion',
+        suggestion_id: 'S1',
+        title: '請求書の下書きを作る',
+        updated_at: at(0),
+        status: 'approval_pending',
+      },
+    ],
+    nextCursor: null,
+    unreadActionIds: [],
+    error: null,
+    errorCode: null,
+  });
+  pages = [
+    {
+      items: [
+        item(1, {
+          kind: 'assistant_message',
+          text: 'まだ答えていない提案があります。',
+          quote_item_id: null,
+          cards: [{ kind: 'suggestion', suggestion_id: 'S1', summary: '請求書の下書き' }],
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const card = await screen.findByRole('button', { name: '請求書の下書きを作る を開く' });
+  await waitFor(() => expect(within(card).getByText('提案')).toBeInTheDocument());
+  expect(within(card).queryByText('確認待ち')).not.toBeInTheDocument();
+});
 
 it('shows messages and cards, with a work’s status on its latest card only', async () => {
   pages = [

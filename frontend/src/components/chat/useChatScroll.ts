@@ -7,6 +7,10 @@ const FOLLOW_SLACK_PX = 48;
 /** Older messages start loading this far before the top of the chat comes into view. */
 const PRELOAD_MARGIN_PX = 240;
 
+function isAtBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_SLACK_PX;
+}
+
 /**
  * Keeps the reader's place in the chat: it opens at the newest message, follows new ones while
  * the reader is at the bottom, and holds the visible messages still when an older page lands
@@ -71,8 +75,7 @@ export function useChatScroll({
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
     if (!element || element.scrollTop === pinnedTopRef.current) return;
-    followingRef.current =
-      element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_SLACK_PX;
+    followingRef.current = isAtBottom(element);
   }, []);
 
   useLayoutEffect(() => {
@@ -113,9 +116,13 @@ export function useChatScroll({
     return () => observer.disconnect();
   }, [ready, hasOlder, failed, loadingOlder, loadOlderKeepingPlace]);
 
-  /** The reader was taken elsewhere in the chat; a resize or a new item must not pull it back. */
-  const holdPlace = useCallback(() => {
-    followingRef.current = false;
+  /**
+   * The reader was taken to a message: away from the newest, a resize or a new item must not pull
+   * it back; at the newest, the chat follows again. Its scroll event cannot tell: one back to the
+   * last pin's position is skipped, and a scroll that did not move fires none.
+   */
+  const readPlace = useCallback(() => {
+    if (scrollRef.current) followingRef.current = isAtBottom(scrollRef.current);
   }, []);
 
   /** The next items scroll into view, as after the reader sends a message. */
@@ -133,6 +140,6 @@ export function useChatScroll({
     onScroll,
     loadOlderKeepingPlace,
     followNewest,
-    holdPlace,
+    readPlace,
   };
 }

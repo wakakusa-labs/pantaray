@@ -64,6 +64,29 @@
   flex-direction: row-reverse;
 }
 
+/* A message takes focus when the chat is taken to it; the bubble shows it instead of the row. */
+.chat-row:focus {
+  outline: none;
+}
+
+.chat-row:focus-visible .chat-bubble {
+  box-shadow: var(--focus-ring);
+}
+
+/* The message the chat was just taken to glows once, so the eye finds it. */
+.chat-row--found .chat-bubble {
+  animation: chat-found 1.6s ease-out;
+}
+
+@keyframes chat-found {
+  from {
+    box-shadow: 0 0 0 2px rgba(125, 171, 220, 0.9);
+  }
+  to {
+    box-shadow: 0 0 0 2px rgba(125, 171, 220, 0);
+  }
+}
+
 .chat-stack {
   position: relative;
   display: flex;
@@ -134,15 +157,28 @@
 }
 
 .chat-quote {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
   margin: -2px -6px 6px;
   padding: 6px 10px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.22);
   font-size: var(--text-meta-size);
   line-height: 1.5;
+  cursor: pointer;
+}
+
+.chat-quote:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.chat-quote:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-quote__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .chat-quote b {
@@ -150,7 +186,7 @@
   font-weight: var(--weight-semibold);
 }
 
-.chat-quote span {
+.chat-quote__text {
   max-width: 420px;
   overflow: hidden;
   color: var(--fog-text-2);
@@ -159,7 +195,7 @@
 }
 
 .chat-row--mine .chat-quote b,
-.chat-row--mine .chat-quote span {
+.chat-row--mine .chat-quote__text {
   color: rgba(255, 255, 255, 0.8);
 }
 
@@ -317,6 +353,12 @@
     animation: none;
     opacity: 0.7;
   }
+}
+
+.chat-return {
+  flex: none;
+  align-self: center;
+  margin-top: 8px;
 }
 
 .chat-dock {

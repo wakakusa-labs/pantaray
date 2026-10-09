@@ -48,7 +48,7 @@ describe('OverlayPositionSection', () => {
 
     const suggestion = await screen.findByRole('slider', { name: '提案の位置' });
     expect(suggestion).toHaveAttribute('aria-valuetext', '上段・右端');
-    expect(screen.getByRole('slider', { name: '始める作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '新しい作業の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
@@ -76,7 +76,7 @@ describe('OverlayPositionSection', () => {
       [{ kind: 'suggestion', cell: { row: 1, column: 4 } }],
       [{ kind: 'suggestion', cell: { row: 1, column: 3 } }],
     ]);
-    expect(screen.getByRole('slider', { name: '始める作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '新しい作業の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
@@ -85,7 +85,7 @@ describe('OverlayPositionSection', () => {
   it('snaps the dragged block to the cell under the pointer and saves it on drop', async () => {
     const bridge = installBridge();
     render(<OverlayPositionSection t={ja} />);
-    const started = await screen.findByRole('slider', { name: '始める作業の位置' });
+    const started = await screen.findByRole('slider', { name: '新しい作業の位置' });
     const screenElement = layOutScreen(started);
 
     fireEvent.pointerDown(screenElement, { button: 0, pointerId: 1, clientX: 80, clientY: 50 });

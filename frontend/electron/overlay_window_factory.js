@@ -269,6 +269,14 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
       }),
     });
     overlaySurfaces.set(win, 'window');
+    // Closing hides it, as the main window does, so reopening the Action brings back the same
+    // window with its draft, scroll and associations. Hidden windows stay bounded: one per
+    // Action the user opened, destroyed on an owner change and closed when the app quits.
+    win.on('close', (event) => {
+      if (app.isQuitting) return;
+      event.preventDefault();
+      win.hide();
+    });
     attachOverlayPage(win, { mode: 'standalone', actionId, surface: 'window' }, events);
     return win;
   }

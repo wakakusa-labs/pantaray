@@ -209,6 +209,12 @@ function loadNotificationWindowModule(
       this.destroyed = true;
       this.windowEvents.emit('closed');
     }
+    // The title bar's close button and Command-W: 'close' may be prevented, then 'closed'.
+    close() {
+      let prevented = false;
+      this.windowEvents.emit('close', { preventDefault: () => (prevented = true) });
+      if (!prevented) this.destroy();
+    }
     once(event, handler) {
       this.windowEvents.once(event, handler);
     }
@@ -252,6 +258,7 @@ function loadNotificationWindowModule(
       instances,
       registeredIpcSenders,
       mainWindow,
+      app: fakeElectron.app,
       setMainWindow: (win) => {
         currentMainWindow = win;
       },
@@ -870,7 +877,7 @@ test('an open overlay of any kind leaves the main window able to take typing', a
   }
 });
 
-test('closing a conversation Overlay destroys it and releases its Action association', () => {
+test('hiding an ordinary window from its page keeps it and its Action association', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
     resolveOverlayBootstrap: async () => null,
@@ -888,10 +895,10 @@ test('closing a conversation Overlay destroys it and releases its Action associa
 
   handlers.onNotificationHide({ sender: conversationWindow.webContents });
 
-  assert.equal(conversationWindow.destroyed, true);
-  assert.equal(conversationWindow.hideCalls, undefined);
-  assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
-  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
+  assert.equal(conversationWindow.destroyed, false);
+  assert.equal(conversationWindow.hideCalls, 1);
+  assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), true);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
 });
 
 // Every run of a Suggestion's Action carries the Suggestion id, follow-ups and replays included.
@@ -1315,11 +1322,58 @@ test('an Action with work opens as an ordinary window, and opening it again focu
   assert.equal(win.alwaysOnTop, undefined);
   assert.equal(win.sent.at(-1).channel, 'overlay:focusComposer');
 
-  // Closed from its title bar or with Command-W.
+  // Destroyed (an owner change or quitting), it releases the Action and its IPC access.
   win.destroy();
   assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
   assert.equal(registeredIpcSenders.has(win.webContents), false);
+});
+
+test('closing an ordinary window hides it, and reopening the Action brings back the same window', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const entry = createConversationEntry(notificationWindow);
+  assert.equal(entry.openActionConversationOverlay('A1'), 'created');
+  const [win] = instances;
+  const { webContents } = win;
+  win.webContentsEvents.emit('did-finish-load');
+  win.windowEvents.emit('ready-to-show');
+
+  win.close();
+  assert.equal(win.isDestroyed(), false);
+  assert.equal(win.isVisible(), false);
+  assert.equal(win.webContents, webContents);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
+
+  // From History or a chat card.
+  assert.equal(entry.openActionConversationOverlay('A1'), 'focused');
+  assert.equal(instances.length, 1);
+  assert.equal(win.isVisible(), true);
+  assert.equal(win.focusCalls, 1);
+  assert.equal(win.sent.at(-1).channel, 'overlay:focusComposer');
+});
+
+test('quitting the app closes an ordinary window for good', () => {
+  const { notificationWindow, instances, app } = loadNotificationWindowModule();
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [win] = instances;
+  app.isQuitting = true;
+  win.close();
+  assert.equal(win.isDestroyed(), true);
+  assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
+});
+
+test('an owner change destroys a hidden ordinary window and its Action association', () => {
+  let owner = 'owner-a';
+  const { notificationWindow, instances } = loadNotificationWindowModule(() => owner);
+  notificationWindow.registerActionAssociation('A1', 'conversation:A1');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [win] = instances;
+  win.close();
+
+  owner = 'owner-b';
+  notificationWindow.clearForOwnerChange();
+  assert.equal(win.isDestroyed(), true);
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
 });
 
 test('an ordinary window on macOS has the main window title bar with its lights on the header', () => {
@@ -1527,7 +1581,7 @@ function createConversationEntry(notificationWindow) {
   });
 }
 
-test("a finished Action stays with the panel that shows it until that panel's window closes", async () => {
+test('a finished Action stays with the window that shows it until that window is destroyed', async () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const { bridge } = createActionLiveBridge(notificationWindow, { status: 'success' });
   const entry = createConversationEntry(notificationWindow);
@@ -1578,6 +1632,9 @@ test("a finished Action stays with the panel that shows it until that panel's wi
   assert.equal(entry.openActionConversationOverlay('A1'), 'loading');
   assert.equal(instances.length, 2);
 
+  // Hidden by its close button it keeps the Action; destroyed, it releases it.
+  win.close();
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
   win.destroy();
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), null);
 });

@@ -21,9 +21,9 @@ const overlayWindows = new Map(); // key: suggestionId, value: BrowserWindow
 let lastOverlayId = null;
 const overlayState = new Map(); // id -> { ready, queue, shellMode }
 const overlaySnapshotPayloads = new Map(); // id -> latest overlay:snapshot payload
-// Overlay ids whose window this app opened for one conversation (a New-task panel or an
-// ordinary conversation window). Their close control destroys the window instead of hiding it,
-// so a session cannot accumulate invisible conversation renderers.
+// Overlay ids whose panel this app opened for one conversation (a New task). Their close
+// control destroys the panel instead of hiding it, so a session cannot accumulate invisible
+// conversation renderers.
 const conversationOverlayIds = new Set();
 let getUiLanguage = null;
 let getOverlayPlacements = null;
@@ -313,7 +313,6 @@ function createConversationWindow(id, actionId) {
   const runtime = getOverlayRuntimeState(id);
   runtime.ready = false;
   runtime.readyToShow = false;
-  conversationOverlayIds.add(id);
   const win = overlayWindowFactory.createConversationWindow({
     actionId,
     bounds: resolveConversationWindowPlacement(currentMainWindow()),
@@ -436,10 +435,10 @@ function showNotification(id) {
 function hideNotification(id) {
   const win = overlayWindows.get(id);
   if (win && !win.isDestroyed()) {
-    // A conversation window is opened per conversation, so hiding it would leave
-    // a renderer alive for the rest of the session; destroying it also releases
-    // the Action association through onClosed.
-    if (conversationOverlayIds.has(id)) {
+    // A New-task panel is opened per request, so hiding it would leave a renderer alive for
+    // the rest of the session; destroying it also releases the Action association through
+    // onClosed. An ordinary window is hidden like its close button does (see the factory).
+    if (!isConversationWindow(win) && conversationOverlayIds.has(id)) {
       try {
         win.destroy();
       } catch {}

@@ -26,8 +26,9 @@ import {
 type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 /**
- * The quoted message, or a stated absence when it is on a page not read yet. Either way it is a
- * button that jumps to the message.
+ * The quoted message, or a stated absence when it is on a page not read yet. Either way it jumps
+ * to the message. It is not a `<button>`: a drag that starts in a button selects nothing past
+ * it, and the bubble's text, quote included, has to stay copyable.
  */
 function QuotedMessage({
   quoted,
@@ -40,25 +41,33 @@ function QuotedMessage({
 }) {
   const contentId = useId();
   return (
-    <blockquote className="chat-quote">
-      <button
-        type="button"
-        className="chat-quote__jump"
-        aria-label={t('history.chat.quote.jump')}
-        aria-describedby={contentId}
-        onClick={onJump}
-      >
-        <span id={contentId} className="chat-quote__content">
-          {quoted && isChatMessage(quoted) ? (
-            <>
-              <b>{t(speakerKey(quoted))}</b>
-              <span className="chat-quote__text">{quoted.content.text}</span>
-            </>
-          ) : (
-            <span className="chat-quote__text">{t('history.chat.quoteUnavailable')}</span>
-          )}
-        </span>
-      </button>
+    <blockquote
+      className="chat-quote"
+      role="button"
+      tabIndex={0}
+      aria-label={t('history.chat.quote.jump')}
+      aria-describedby={contentId}
+      onClick={() => {
+        // A drag that selected text ends in a click; it was a copy, not a jump.
+        if (window.getSelection()?.isCollapsed === false) return;
+        onJump();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onJump();
+      }}
+    >
+      <span id={contentId} className="chat-quote__content">
+        {quoted && isChatMessage(quoted) ? (
+          <>
+            <b>{t(speakerKey(quoted))}</b>
+            <span className="chat-quote__text">{quoted.content.text}</span>
+          </>
+        ) : (
+          <span className="chat-quote__text">{t('history.chat.quoteUnavailable')}</span>
+        )}
+      </span>
     </blockquote>
   );
 }

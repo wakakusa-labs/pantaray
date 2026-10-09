@@ -158,28 +158,19 @@
 
 .chat-quote {
   margin: -2px -6px 6px;
-}
-
-.chat-quote__jump {
-  display: block;
-  width: 100%;
   padding: 6px 10px;
-  border: none;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.22);
-  color: inherit;
-  font: inherit;
   font-size: var(--text-meta-size);
   line-height: 1.5;
-  text-align: left;
   cursor: pointer;
 }
 
-.chat-quote__jump:hover {
+.chat-quote:hover {
   background: rgba(0, 0, 0, 0.32);
 }
 
-.chat-quote__jump:focus-visible {
+.chat-quote:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }

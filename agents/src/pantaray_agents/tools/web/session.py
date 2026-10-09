@@ -94,8 +94,7 @@ _WEB_SEARCH_KEY_PLACE = (
 _USER_FIX_BY_FAILURE: dict[tuple[str, str], tuple[str, str]] = {
     (PROXY_CONNECTION_NOT_CONFIGURED, "configure_connection"): (
         "Web search is not set up",
-        "they can turn it on by signing in to Pantaray or by saving "
-        f"{_WEB_SEARCH_KEY_PLACE}",
+        f"they can turn it on by saving {_WEB_SEARCH_KEY_PLACE}",
     ),
     (PROXY_AUTHENTICATION_FAILED, "configure_connection"): (
         "The Tavily API key saved for web search was rejected",

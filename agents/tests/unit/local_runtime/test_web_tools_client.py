@@ -745,8 +745,8 @@ _UNAVAILABLE = "Web search is unavailable right now, so nothing was looked up."
         (
             _arrange_unconfigured_web_search,
             "Web search is not set up, so nothing was looked up. Tell the user "
-            "they can turn it on by signing in to Pantaray or by saving the Tavily "
-            "API key in Settings > AI connection > Web search (in Japanese: "
+            "they can turn it on by saving the Tavily API key in Settings > AI "
+            "connection > Web search (in Japanese: "
             '"Tavily API キー" in 設定 > AI 接続 > Web 検索).',
             "Web search is not set up, so nothing was looked up.",
         ),

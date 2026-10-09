@@ -91,6 +91,8 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.retryFailed': 'Couldn’t try the reply again.',
     'history.chat.quote.reply': 'Reply with a quote',
     'history.chat.quote.clear': 'Remove the quote',
+    'history.chat.quote.jump': 'Go to the quoted message',
+    'history.chat.quote.back': 'Back to the original message',
     'history.chat.composer.label': 'Message to Pantaray',
     'history.chat.composer.failed': 'Couldn’t send the message.',
     'history.chat.composer.quoteRejected':
@@ -188,6 +190,8 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.retryFailed': '返信をやり直せませんでした。',
     'history.chat.quote.reply': '引用して返信',
     'history.chat.quote.clear': '引用をやめる',
+    'history.chat.quote.jump': '引用元のメッセージへ移動',
+    'history.chat.quote.back': '元のメッセージに戻る',
     'history.chat.composer.label': 'Pantaray へのメッセージ',
     'history.chat.composer.failed': 'メッセージを送れませんでした。',
     'history.chat.composer.quoteRejected':

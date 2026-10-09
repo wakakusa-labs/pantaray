@@ -666,3 +666,79 @@ it('a reply that arrives before the chat is drawn is not marked read', async () 
   expect(screen.queryByText('下書きを直しました。')).not.toBeInTheDocument();
   expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBeNull();
 });
+
+const sourceMessage = (text: string) =>
+  screen
+    .getAllByRole('article', { name: 'Pantaray' })
+    .find((row) => row.textContent?.includes(text))!;
+
+it('jumps from a quote to the quoted message, and back to the quote', async () => {
+  pages = [
+    {
+      items: [
+        userMessage(3, 'それで進めて', 'item-1'),
+        reply(2, '納期はいつですか？'),
+        reply(1, 'たたき台を作りますね。'),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  await userEvent.click(within(mine).getByRole('button', { name: '引用元のメッセージへ移動' }));
+  expect(sourceMessage('たたき台を作りますね。')).toHaveFocus();
+
+  await userEvent.click(screen.getByRole('button', { name: '元のメッセージに戻る' }));
+  expect(mine).toHaveFocus();
+  expect(screen.queryByRole('button', { name: '元のメッセージに戻る' })).not.toBeInTheDocument();
+});
+
+it('reads older pages to jump to a quoted message that is not loaded yet', async () => {
+  pages = [
+    { items: [userMessage(50, 'それで進めて', 'item-1')], next_cursor: 50 },
+    { items: [reply(30, '途中の話です。')], next_cursor: 30 },
+    { items: [reply(1, 'たたき台を作りますね。')], next_cursor: null },
+  ];
+  renderPage();
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  expect(within(mine).getByText('以前のメッセージ')).toBeInTheDocument();
+  expect(listItems).toHaveBeenCalledTimes(1);
+
+  await userEvent.click(within(mine).getByRole('button', { name: '引用元のメッセージへ移動' }));
+  await waitFor(() => expect(sourceMessage('たたき台を作りますね。')).toHaveFocus());
+  expect(listItems).toHaveBeenLastCalledWith({ before: 30, limit: 50 });
+  expect(within(mine).getByText('たたき台を作りますね。')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '元のメッセージに戻る' })).toBeInTheDocument();
+});
+
+it('stays in place without a way back when an older page cannot be read', async () => {
+  pages = [{ items: [userMessage(50, 'それで進めて', 'item-1')], next_cursor: 50 }];
+  listItems.mockImplementationOnce(async () => pages.shift()!);
+  listItems.mockRejectedValueOnce(new Error('offline'));
+  renderPage();
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  const quote = within(mine).getByRole('button', { name: '引用元のメッセージへ移動' });
+  await userEvent.click(quote);
+  expect(await screen.findByRole('alert')).toHaveTextContent('チャットを読み込めませんでした。');
+  expect(listItems).toHaveBeenCalledTimes(2);
+  expect(quote).toHaveFocus();
+  expect(screen.queryByRole('button', { name: '元のメッセージに戻る' })).not.toBeInTheDocument();
+});
+
+it('drops the way back to the quote once the user sends a message', async () => {
+  pages = [
+    {
+      items: [userMessage(2, 'それで進めて', 'item-1'), reply(1, 'たたき台を作りますね。')],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  await userEvent.click(within(mine).getByRole('button', { name: '引用元のメッセージへ移動' }));
+  expect(screen.getByRole('button', { name: '元のメッセージに戻る' })).toBeInTheDocument();
+
+  sendMessage.mockResolvedValueOnce({ kind: 'sent', item: userMessage(3, '追加でお願い') });
+  await userEvent.type(screen.getByRole('textbox', { name: 'メッセージ' }), '追加でお願い{Enter}');
+  expect(sendMessage).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: '元のメッセージに戻る' })).not.toBeInTheDocument();
+});

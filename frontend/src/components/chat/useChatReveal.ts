@@ -1,48 +1,57 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { cardElementId, type WorkKey } from './chatTimeline';
-
 /** A request from the Overlay to show this Action's latest card; `key` tells requests apart. */
 export type ChatReveal = Readonly<{ actionId: string; key: string }>;
 
 /**
- * Brings an Action's latest card into view and focus, reading older pages until the card is
- * found or the chat has none older. A chat with no card for the Action stays where it is.
+ * A place in the chat to bring into view: `key` tells requests apart, and `elementId` is null
+ * while the item it belongs to is on a page not read yet.
+ */
+export type ChatRevealTarget = Readonly<{ key: string; elementId: string | null }>;
+
+/**
+ * Brings a card or a message into view and focus, reading older pages until its item is found
+ * or the chat has none older. A target that is never found leaves the chat where it is.
  */
 export function useChatReveal({
-  reveal,
+  target,
   ready,
-  latestCards,
   hasOlder,
   failed,
   loadingOlder,
   loadOlder,
-  holdPlace,
+  readPlace,
+  onShown,
 }: {
-  reveal: ChatReveal | null;
+  target: ChatRevealTarget | null;
   ready: boolean;
-  latestCards: ReadonlyMap<WorkKey, string>;
   hasOlder: boolean;
   failed: boolean;
   loadingOlder: boolean;
   loadOlder: () => Promise<void>;
-  /** Stops the chat from following the newest message once the card is shown. */
-  holdPlace: () => void;
+  /** Tells the chat it was scrolled, so it follows the newest message only from there. */
+  readPlace: () => void;
+  /** The target is in view and has focus. */
+  onShown?: () => void;
 }): void {
+  const key = target?.key ?? null;
+  const elementId = target?.elementId ?? null;
   const doneRef = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!reveal || !ready || doneRef.current === reveal.key) return;
-    const position = latestCards.get(`action:${reveal.actionId}`);
-    if (position !== undefined) {
-      const card = document.getElementById(cardElementId(position));
-      holdPlace();
-      card?.scrollIntoView({ block: 'center' });
-      card?.focus({ preventScroll: true });
-      doneRef.current = reveal.key;
+    if (key === null || !ready || doneRef.current === key) return;
+    if (elementId !== null) {
+      doneRef.current = key;
+      // An item the chat does not draw, such as a bridge event, has no element.
+      const element = document.getElementById(elementId);
+      if (!element) return;
+      element.scrollIntoView({ block: 'center' });
+      element.focus({ preventScroll: true });
+      readPlace();
+      onShown?.();
     } else if (hasOlder && !failed) {
       if (!loadingOlder) void loadOlder();
     } else {
-      doneRef.current = reveal.key;
+      doneRef.current = key;
     }
-  }, [reveal, ready, latestCards, hasOlder, failed, loadingOlder, loadOlder, holdPlace]);
+  }, [key, elementId, ready, hasOlder, failed, loadingOlder, loadOlder, readPlace, onShown]);
 }

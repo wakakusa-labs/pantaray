@@ -13,9 +13,11 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import { ChatComposer } from './ChatComposer';
 import { ChatMessage } from './ChatMessage';
 import {
+  cardElementId,
   cardWorkKey,
   isChatMessage,
   latestCardPositions,
+  messageElementId,
   retryableFailure,
   type WorkKey,
 } from './chatTimeline';
@@ -41,6 +43,12 @@ async function openCard(card: ChatCardData): Promise<void> {
     fromStart: true,
   });
 }
+
+/**
+ * A jump to a message: from a quote to the quoted message, with `returnTo` the quote's message,
+ * or back to that message. `shown` once the message is in view.
+ */
+type ChatJump = Readonly<{ key: string; itemId: string; returnTo: string | null; shown: boolean }>;
 
 /**
  * The single chat in the History page: messages with their cards, read newest first and
@@ -103,16 +111,37 @@ export function ChatView({
   }, [failure, hasOlder, readFailed, loadingOlder, loadOlder]);
   const [retrying, setRetrying] = useState(false);
   const turnInProgress = chat.turnRunning;
-  useChatReveal({
-    reveal,
+  const reading = {
     ready,
-    latestCards,
-    hasOlder: chat.hasOlder,
-    failed: chat.failed,
-    loadingOlder: chat.loadingOlder,
-    loadOlder: chat.loadOlder,
-    holdPlace: scroll.holdPlace,
+    hasOlder,
+    failed: readFailed,
+    loadingOlder,
+    loadOlder,
+    readPlace: scroll.readPlace,
+  };
+  const revealCard = reveal ? latestCards.get(`action:${reveal.actionId}`) : undefined;
+  useChatReveal({
+    ...reading,
+    target: reveal && {
+      key: reveal.key,
+      elementId: revealCard === undefined ? null : cardElementId(revealCard),
+    },
   });
+  const [jump, setJump] = useState<ChatJump | null>(null);
+  const jumpCount = useRef(0);
+  const jumpTo = (itemId: string, returnTo: string | null) => {
+    jumpCount.current += 1;
+    setJump({ key: String(jumpCount.current), itemId, returnTo, shown: false });
+  };
+  useChatReveal({
+    ...reading,
+    target: jump && {
+      key: jump.key,
+      elementId: itemsById.has(jump.itemId) ? messageElementId(jump.itemId) : null,
+    },
+    onShown: () => setJump((current) => current && { ...current, shown: true }),
+  });
+  const returnTo = jump?.shown ? jump.returnTo : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleNewWork = async (): Promise<void> => {
@@ -173,6 +202,8 @@ export function ChatView({
             openWork={openWork}
             t={t}
             onOpenCard={(card) => void handleOpenCard(card)}
+            onJumpToQuote={(quoteItemId) => jumpTo(quoteItemId, item.item_id)}
+            found={jump?.shown === true && jump.itemId === item.item_id}
             onQuote={
               composer.state.pending === null
                 ? () => {
@@ -263,11 +294,21 @@ export function ChatView({
         ) : null}
       </div>
       {renderBody()}
+      {returnTo !== null ? (
+        <button
+          type="button"
+          className="history-filter-button chat-return"
+          onClick={() => jumpTo(returnTo, null)}
+        >
+          {t('history.chat.quote.back')}
+        </button>
+      ) : null}
       <ChatComposer
         composer={composer}
         textareaRef={textareaRef}
         t={t}
         onSend={() => {
+          setJump(null);
           scroll.followNewest();
           composer.send();
         }}

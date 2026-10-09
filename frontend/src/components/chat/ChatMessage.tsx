@@ -1,4 +1,5 @@
 import { Reply, RotateCcw } from 'lucide-react';
+import { useId } from 'react';
 
 import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/chat/chatContracts';
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
@@ -16,6 +17,7 @@ import {
   cardPosition,
   cardWorkKey,
   isChatMessage,
+  messageElementId,
   speakerKey,
   type ChatMessageItem,
   type WorkKey,
@@ -23,19 +25,40 @@ import {
 
 type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
-/** The quoted message, or a stated absence when it is on a page not read yet. */
-function QuotedMessage({ quoted, t }: { quoted: ChatItem | undefined; t: Translate }) {
-  if (quoted && isChatMessage(quoted)) {
-    return (
-      <blockquote className="chat-quote">
-        <b>{t(speakerKey(quoted))}</b>
-        <span>{quoted.content.text}</span>
-      </blockquote>
-    );
-  }
+/**
+ * The quoted message, or a stated absence when it is on a page not read yet. Either way it is a
+ * button that jumps to the message.
+ */
+function QuotedMessage({
+  quoted,
+  t,
+  onJump,
+}: {
+  quoted: ChatItem | undefined;
+  t: Translate;
+  onJump: () => void;
+}) {
+  const contentId = useId();
   return (
     <blockquote className="chat-quote">
-      <span>{t('history.chat.quoteUnavailable')}</span>
+      <button
+        type="button"
+        className="chat-quote__jump"
+        aria-label={t('history.chat.quote.jump')}
+        aria-describedby={contentId}
+        onClick={onJump}
+      >
+        <span id={contentId} className="chat-quote__content">
+          {quoted && isChatMessage(quoted) ? (
+            <>
+              <b>{t(speakerKey(quoted))}</b>
+              <span className="chat-quote__text">{quoted.content.text}</span>
+            </>
+          ) : (
+            <span className="chat-quote__text">{t('history.chat.quoteUnavailable')}</span>
+          )}
+        </span>
+      </button>
     </blockquote>
   );
 }
@@ -51,6 +74,8 @@ export function ChatMessage({
   t,
   onOpenCard,
   onQuote,
+  onJumpToQuote,
+  found,
   retry,
 }: {
   item: ChatMessageItem;
@@ -63,21 +88,32 @@ export function ChatMessage({
   onOpenCard: (card: ChatCardData) => void;
   /** Starts a reply that quotes this message; null while the composer cannot take one. */
   onQuote: (() => void) | null;
+  /** Takes the chat to the message this one quotes. */
+  onJumpToQuote: (quoteItemId: string) => void;
+  /** The chat was just taken to this message; it is marked so the eye finds it. */
+  found: boolean;
   /** Runs the failed turn this message started again; its label names why there is no reply. */
   retry: { label: string; disabled: boolean; onRetry: () => void } | null;
 }) {
   const { language } = useI18n();
   const { content } = item;
   const mine = content.kind === 'user_message';
+  const quoteItemId = content.quote_item_id;
   const copy = USER_MESSAGE_COPY[language];
   return (
     <article
-      className={mine ? 'chat-row chat-row--mine' : 'chat-row'}
+      id={messageElementId(item.item_id)}
+      tabIndex={-1}
+      className={['chat-row', mine && 'chat-row--mine', found && 'chat-row--found']
+        .filter(Boolean)
+        .join(' ')}
       aria-label={t(speakerKey(item))}
     >
       <div className="chat-stack">
         <div className="chat-bubble">
-          {content.quote_item_id !== null ? <QuotedMessage quoted={quoted} t={t} /> : null}
+          {quoteItemId !== null ? (
+            <QuotedMessage quoted={quoted} t={t} onJump={() => onJumpToQuote(quoteItemId)} />
+          ) : null}
           {mine ? (
             <p className="chat-bubble__text">
               <ProjectRefText text={content.text} refs={content.project_refs} />

@@ -18,6 +18,11 @@ export function cardElementId(position: string): string {
   return `chat-card:${position}`;
 }
 
+/** Where a message is in the page, so a jump to it can scroll to it. */
+export function messageElementId(itemId: string): string {
+  return `chat-message:${itemId}`;
+}
+
 /** One Action or Suggestion, named the way the history list names its rows. */
 export type WorkKey = `action:${string}` | `suggestion:${string}`;
 

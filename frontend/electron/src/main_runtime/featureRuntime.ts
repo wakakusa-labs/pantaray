@@ -1,4 +1,13 @@
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeImage, shell } from 'electron';
+import {
+  BrowserWindow,
+  app,
+  clipboard,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  nativeImage,
+  shell,
+} from 'electron';
 import path from 'node:path';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
 import type { createLocalBackendAuthContextController } from '../auth/localBackendAuthContextController';
@@ -7,6 +16,7 @@ import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createActionFetcher } from '../actions/actionFetch';
+import { createChatFetcher } from '../chat/chatFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
 import { createActionApprovalDecisionFetcher } from '../actions/actionApprovalDecisionFetch';
 import { createActionApprovalModeFetcher } from '../actions/actionApprovalModeFetch';
@@ -43,6 +53,7 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
@@ -93,6 +104,11 @@ function safely<T>(operation: () => T, fallback: T): T {
 export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   let settingsScopeUserId: string | null = null;
   params.notificationWindow.setLocalOwnerIdGetter(params.supabaseWiring.getLocalOwnerId);
+  const overlayPlacement = createOverlayPlacementStore({
+    userDataDir: app.getPath('userData'),
+    reportInvalid: (reason) => params.logger?.warn?.('OVERLAY_PLACEMENT_INVALID', { reason }),
+  });
+  params.notificationWindow.setOverlayPlacementGetter(overlayPlacement.get);
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -322,6 +338,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         actionFiles: {
           open: ({ path }) => shell.showItemInFolder(path),
         },
+        clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {
           getReadyNotice: params.updateUi.getReadyNotice,
           restartToUpdate: params.updateUi.restartToUpdate,
@@ -336,6 +353,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           resolveOverlayIdForSender: params.notificationWindow.resolveOverlayIdForSender,
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
+        },
+        chat: {
+          ...createChatFetcher({ requestJson, getUserId }),
+          getTurnState: orchestration.getChatTurnState,
         },
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,
@@ -367,6 +388,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           if (result.ok) rebuildMenus();
           return result;
         },
+        overlayPlacement,
         workspaceSettingsGet: workspaceSettingsFetch.get,
         workspaceSettingsGetReadAccessScope: workspaceSettingsFetch.getReadAccessScope,
         workspaceSettingsGetCommandNetwork: workspaceSettingsFetch.getCommandNetwork,

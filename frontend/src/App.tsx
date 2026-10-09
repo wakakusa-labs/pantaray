@@ -22,6 +22,7 @@ import { getSupabase } from './lib/supabase';
 import Layout from './components/Layout';
 import { LocalOwnerBoundary } from './components/LocalOwnerBoundary';
 import SuggestionHistoryPage from './pages/SuggestionHistoryPage';
+import { ChatSessionProvider } from './components/chat/ChatSessionProvider';
 import WorkspacePage from './pages/WorkspacePage';
 import DesktopAppOnlyPage from './pages/DesktopAppOnlyPage';
 import { useI18n } from '@/context/useI18n';
@@ -235,7 +236,9 @@ const MainAppRoutes: React.FC = () => {
             <Route
               element={
                 <LocalOwnerBoundary>
-                  <Outlet />
+                  <ChatSessionProvider>
+                    <Outlet />
+                  </ChatSessionProvider>
                 </LocalOwnerBoundary>
               }
             >

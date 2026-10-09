@@ -1,23 +1,37 @@
+"""One Suggestion research run: a model conversation on the shared loop.
+
+The shared Suggestion prompt is the head every request is sent behind, so the
+lens runs of one Suggestion share its cache prefix; the run's lens is its first
+message. The run researches with its tools and ends with a single
+``submit_suggestion`` call, which ``decide`` accepts or answers with why it was
+rejected. A Suggestion is never resumed -- a retried job starts over -- so the
+history stays in memory. Each turn and each answered call is a run step.
+"""
+
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
-from dataclasses import replace
-from typing import Literal, Protocol
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
-from pantaray_agents.agents.artifact_react import (
-    NativeReactCompletion,
-    NativeReactRunInput,
-    ReactLoopPolicy,
-    ReactLoopStep,
-    ReactToolResult,
-    resolve_react_tool_definitions,
-    run_native_react,
-)
-from pantaray_agents.agents.artifact_react.transcript import (
-    build_prompt_with_transcript,
-)
+from pantaray_agents.agents.artifact_react import ReactLoopStep
+from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.budget import ContextBudget
+from pantaray_agents.conversation.loop import (
+    Continue,
+    ConversationRequest,
+    ConversationRun,
+    Finish,
+    IdleTurn,
+    RecordedTurn,
+    TurnReply,
+    run_conversation,
+)
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
+from pantaray_agents.conversation.window import ConversationEntry, WindowState
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
 )
@@ -26,22 +40,36 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionExtraction,
     SuggestionStructuredOutput,
 )
-from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
-    LlmToolDefinition,
-    LlmToolResult,
+from pantaray_agents.tools.contract import (
+    ReactToolResult,
+    ToolCallEnvelope,
+    resolve_react_tool_definitions,
 )
+from pantaray_llm.contracts.conversation import (
+    LlmTurnItem,
+    LlmTurnToolResultItem,
+    LlmTurnUserItem,
+)
+from pantaray_llm.contracts.input_block import LlmInputTextBlock
+from pantaray_llm.contracts.tool_use import (
+    LlmToolCall,
+    LlmToolDefinition,
+)
+from pantaray_llm.errors import LlmProxyExecutionError
+from pantaray_llm.profiles import SUGGESTION_PROFILE_ID
 
 from .research import SuggestionResearchTools
 
 # Deep research is the point of the run: quality comes before cost or duration.
 SUGGESTION_MAX_LLM_TURNS = 300
 SUGGESTION_MAX_RESEARCH_TOOL_CALLS = 300
-# Design limit: replays measured about 5 bytes per input token over a run and 2.4 at
-# worst for Japanese tool output, so 400 kB stays under a 200k-token context with the
-# system prompt and tools. Raise it when a supported model's measured ratio allows.
-SUGGESTION_MAX_INPUT_BYTES = 400_000
 SUBMIT_SUGGESTION_TOOL_NAME = "submit_suggestion"
+_SUBMIT_REQUIRED = (
+    "Respond with tool calls. When your research is done, call "
+    f"`{SUBMIT_SUGGESTION_TOOL_NAME}` alone with your decision."
+)
+# What a failed send's step keeps when the failure is not the model's output.
+_SEND_FAILED_MESSAGE = "LLM provider request failed."
 # Offered only while the user lets commands run without asking.
 SUGGESTION_COMMAND_TOOL_ID = "bash"
 SUGGESTION_TOOL_IDS: tuple[str, ...] = (
@@ -52,6 +80,7 @@ SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "list",
     "glob",
     "grep",
+    "render_pdf_page",
     "web_search",
     "web_extract",
     "zanei_timeline",
@@ -76,7 +105,11 @@ _STORED_ACTIVITY_KEYS = (
 )
 
 type SuggestionStepRecorder = Callable[[ReactLoopStep], Awaitable[None]]
-type SuggestionThoughtDiscarder = Callable[[], str | None]
+# Sends one research turn, counting its usage on the run's own sink: the lens runs
+# of one Suggestion run at once, and each run's budget reads only its own sends.
+type SuggestionTurnSender = Callable[
+    [ConversationRequest, CountingSink], Awaitable[TurnReply]
+]
 
 
 class SuggestionToolCallGenerator(Protocol):
@@ -85,9 +118,6 @@ class SuggestionToolCallGenerator(Protocol):
         *,
         prompt: str,
         tools: tuple[LlmToolDefinition, ...],
-        continuation_mode: Literal["disabled", "stateless"],
-        continuation: LlmToolContinuation | None,
-        tool_result: LlmToolResult | None,
         system_instruction: str,
         stage: str,
     ) -> LlmToolCallTurn: ...
@@ -117,11 +147,6 @@ def _stored_activity_output(output: JSONValue) -> dict[str, JSONValue]:
     if isinstance(text, str):
         stored["text_characters"] = len(text)
     return stored
-
-
-def _transcript_json(output: JSONValue) -> str:
-    # The serialization build_prompt_with_transcript embeds each result with.
-    return json.dumps(output, ensure_ascii=False)
 
 
 def _terminal_tool() -> LlmToolDefinition:
@@ -204,14 +229,16 @@ async def run_suggestion_react(
     *,
     user_id: str,
     suggestion_id: str,
-    initial_prompt: str,
+    context: str,
+    lens: str,
     system_instruction: str,
     research_tools: SuggestionResearchTools,
-    generate_tool_call: SuggestionToolCallGenerator,
+    send_turn: SuggestionTurnSender,
     parse_output: SuggestionOutputParser,
     record_step: SuggestionStepRecorder,
-    discard_llm_thoughts: SuggestionThoughtDiscarder,
 ) -> SuggestionExtraction:
+    """Research behind ``context`` for ``lens`` until a submission is accepted."""
+
     definitions = research_tools.build_tool_definitions(
         user_id=user_id,
         run_id=suggestion_id,
@@ -225,102 +252,163 @@ async def run_suggestion_react(
             if tool_id != SUGGESTION_COMMAND_TOOL_ID or tool_id in offered
         ),
     )
+    # What the run is asked, as one text: its first step and its extraction keep it.
+    prompt_text = f"{context.rstrip()}\n\n{lens}"
+    sink = CountingSink()
+    steps = _RunSteps(run_id=suggestion_id, record=record_step, prompt=prompt_text)
 
-    async def call_llm(
-        prompt: str,
-        tools: tuple[LlmToolDefinition, ...],
-        continuation: LlmToolContinuation | None,
-        tool_result: LlmToolResult | None,
-    ) -> LlmToolCallTurn:
-        return await generate_tool_call(
-            prompt=prompt,
-            tools=tools,
-            continuation_mode="stateless",
-            continuation=continuation,
-            tool_result=tool_result,
-            system_instruction=system_instruction,
-            stage="suggestion",
-        )
+    async def send(request: ConversationRequest) -> TurnReply:
+        try:
+            return await send_turn(request, sink)
+        except LlmProxyExecutionError as exc:
+            await steps.failed_send(exc)
+            raise
 
-    # (raw, stored) transcript entries, applied to any prompt a step records.
-    activity_replacements: list[tuple[str, str]] = []
-
-    async def persist_step(step: ReactLoopStep) -> None:
-        if step.tool_name in ACTIVITY_TOOL_IDS and step.tool_output is not None:
-            stored = _stored_activity_output(step.tool_output)
-            activity_replacements.append(
-                (_transcript_json(step.tool_output), _transcript_json(stored))
-            )
-            step = replace(step, tool_output=stored)
-        elif step.prompt_text is not None and activity_replacements:
-            prompt = step.prompt_text
-            for raw, stored_text in activity_replacements:
-                prompt = prompt.replace(raw, stored_text)
-            step = replace(step, prompt_text=prompt)
-        await record_step(step)
-
-    async def project_tool_result(result: ReactToolResult) -> ReactToolResult:
-        return result
-
-    def complete(
-        arguments: dict[str, JSONValue],
-        _final_turn: bool,
-    ) -> NativeReactCompletion[SuggestionExtraction]:
+    def decide(turn: IdleTurn) -> Finish[SuggestionExtraction] | Continue:
+        if turn.ending_call is None:
+            return Continue(_SUBMIT_REQUIRED)
+        arguments = turn.ending_call.arguments
         raw_text = json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
         try:
             parsed = SuggestionStructuredOutput.model_validate(arguments)
             extraction = parse_output(raw_text=raw_text, parsed_output=parsed)
         except ValueError as exc:
-            return NativeReactCompletion(
-                value=None,
-                final_text=raw_text,
-                error_message=f"submit_suggestion was rejected: {str(exc)[:1200]}",
+            return Continue(
+                f"{SUBMIT_SUGGESTION_TOOL_NAME} was rejected: {str(exc)[:1200]}"
             )
         extraction["thinking"] = None
-        extraction["prompt_text"] = initial_prompt
+        extraction["prompt_text"] = prompt_text
         extraction["response_text"] = raw_text
-        return NativeReactCompletion(value=extraction, final_text=raw_text)
+        return Finish(extraction)
 
-    def discard_thoughts() -> None:
-        discard_llm_thoughts()
-
-    result = await run_native_react(
-        NativeReactRunInput(
-            run_id=suggestion_id,
-            tool_definitions=tool_definitions,
-            terminal_tool=_terminal_tool(),
-            complete=complete,
-            build_prompt=lambda tool_results, last_error: build_prompt_with_transcript(
-                initial_prompt=initial_prompt,
-                tool_results=tool_results,
-                last_error=last_error,
+    # Suggestion runs on the models an Action does, under the same input cap.
+    tunables = load_local_runtime_tunables().action_agent
+    return await run_conversation(
+        ConversationRun(
+            prompt=context,
+            system_instruction=system_instruction,
+            tools=tool_definitions,
+            ending_tools=(_terminal_tool(),),
+            history=(ConversationEntry(_user_text(lens)),),
+            provider_turns=ProviderTurnStore(identity=None),
+            inference_profile=SUGGESTION_PROFILE_ID,
+            max_turns=SUGGESTION_MAX_LLM_TURNS,
+            max_tool_calls=SUGGESTION_MAX_RESEARCH_TOOL_CALLS,
+            max_parallel_tool_calls=tunables.max_parallel_tool_calls,
+            window=WindowState(
+                budget=ContextBudget(
+                    window_tokens=tunables.context_window_tokens,
+                    baseline=None,
+                    reset_pending=False,
+                ),
+                omit_before=0,
             ),
-            call_llm=call_llm,
-            record_step=persist_step,
-            project_tool_result=project_tool_result,
-            policy=ReactLoopPolicy(
-                max_llm_turns=SUGGESTION_MAX_LLM_TURNS,
-                max_tool_calls=SUGGESTION_MAX_RESEARCH_TOOL_CALLS,
-                max_input_bytes=SUGGESTION_MAX_INPUT_BYTES,
-            ),
-            consume_llm_thoughts=discard_thoughts,
-            final_turn_prompt=(
-                "Research is now closed. Call submit_suggestion with the best "
-                "evidence-grounded decision. If evidence is insufficient or the "
-                "hard gates are not met, submit has_suggestion=false."
-            ),
+            usage=lambda: sink.delta,
+            send=send,
+            before_send=_nothing_arrived,
+            on_turn=steps.on_turn,
+            on_result=steps.on_result,
+            on_notice=_keep_out_of_steps,
+            decide=decide,
         )
     )
-    if result.loop_result.status != "success" or result.value is None:
-        raise RuntimeError(
-            result.loop_result.last_error or "Suggestion ReAct loop failed"
+
+
+@dataclass(slots=True)
+class _RunSteps:
+    """Records the run's steps in order: each turn, answered call and failed send."""
+
+    run_id: str
+    record: SuggestionStepRecorder
+    prompt: str | None  # until the first turn records it
+    count: int = 0
+
+    async def on_turn(self, turn: RecordedTurn) -> None:
+        # Every later request extends the first, which this names whole.
+        prompt, self.prompt = self.prompt, None
+        await self.record(
+            ReactLoopStep(
+                run_id=self.run_id,
+                step_number=self._next(),
+                step_kind="llm",
+                status="success",
+                prompt_text=prompt,
+                # The calls only: commentary may quote activity text, which
+                # stays within the run like the activity output itself.
+                response_text=json.dumps(
+                    [
+                        {"tool_id": call.name, "args": call.arguments}
+                        for call in turn.reply.response.calls
+                    ],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
         )
-    return result.value
+
+    async def on_result(
+        self, call: LlmToolCall, result: ReactToolResult
+    ) -> LlmTurnToolResultItem:
+        await self.record(
+            ReactLoopStep(
+                run_id=self.run_id,
+                step_number=self._next(),
+                step_kind="tool",
+                status="success" if result.status == "success" else "error",
+                tool_name=call.name,
+                tool_call_envelope=ToolCallEnvelope(
+                    tool_id=call.name, reason=None, args=call.arguments
+                ).to_json(),
+                tool_output=_stored_activity_output(result.output)
+                if call.name in ACTIVITY_TOOL_IDS
+                else result.output,
+                error_message=result.error_message,
+            )
+        )
+        return LlmTurnToolResultItem(
+            type="tool_result",
+            call_id=call.call_id,
+            name=call.name,
+            output=result.output,
+        )
+
+    async def failed_send(self, exc: LlmProxyExecutionError) -> None:
+        await self.record(
+            ReactLoopStep(
+                run_id=self.run_id,
+                step_number=self._next(),
+                step_kind="llm",
+                status="error",
+                error_message=exc.error_message
+                if exc.recovery == "repair_next_turn"
+                else _SEND_FAILED_MESSAGE,
+            )
+        )
+
+    def _next(self) -> int:
+        self.count += 1
+        return self.count
+
+
+async def _nothing_arrived() -> Sequence[LlmTurnItem]:
+    return ()
+
+
+async def _keep_out_of_steps(_notice: LlmTurnUserItem) -> None:
+    """A notice is the loop's own text, which the next request carries."""
+
+
+def _user_text(text: str) -> LlmTurnUserItem:
+    return LlmTurnUserItem(
+        type="user", content=[LlmInputTextBlock(type="input_text", text=text)]
+    )
 
 
 __all__ = [
     "ACTIVITY_TOOL_IDS",
     "SUBMIT_SUGGESTION_TOOL_NAME",
+    "SuggestionStepRecorder",
+    "SuggestionTurnSender",
     "SUGGESTION_COMMAND_TOOL_ID",
     "SUGGESTION_TOOL_IDS",
     "SUGGESTION_MAX_LLM_TURNS",

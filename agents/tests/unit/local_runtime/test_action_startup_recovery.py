@@ -19,7 +19,7 @@ from pantaray_agents.local_runtime.runtime.action_startup_recovery import (
 from pantaray_agents.local_runtime.storage.migrations import (
     repair_inflight_jobs_for_startup,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     ensure_action_scratch_execution_context,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext

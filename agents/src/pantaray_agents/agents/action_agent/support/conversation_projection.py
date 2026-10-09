@@ -9,24 +9,20 @@ result -- so this module lays them out as items instead. The string rendering in
 that cannot receive a conversation still send.
 
 What earns the cache read is that one turn's items are the previous turn's items
-with nothing but new items after them. Measured against the live API, a request
-whose input merely *appends* to the previous one reads 81-87% of its input from
-the cache, while rewriting a single item it already sent -- even the last one --
-drops the read back to the first message. So the per-turn context (the time,
-the pending draft) is not a trailing item that each turn replaces: each turn
-appends its own, and the ones it sent before stay where they were, read back
-from the row that recorded them.
+with nothing but new items after them (``conversation/prefix.py``). So the
+per-turn context (the time, the pending draft) is not a trailing item that each
+turn replaces: each turn appends its own, and the ones it sent before stay where
+they were, read back from the row that recorded them.
 
-Two properties keep that true, and both belong to this projection rather than to
-the contract it builds:
+These properties keep that true, and they belong to this projection rather than
+to the contract it builds:
 
 * a row is final the moment it is appended, and the turn context is recorded
   with it, so nothing an earlier turn sent is ever recomputed;
-* a THINK's provider turn is settled when its response arrives -- recorded on
-  its row, held for the rest of the run, read back byte for byte after a restart
-  -- so an item that carried one carries the same one on every later turn;
 * the body-omission boundary only ever moves forward, so omitting old results
   rewrites those items and leaves every later item alone.
+
+A THINK's provider turn may not ride along a rewrite either.
 """
 
 from __future__ import annotations
@@ -47,16 +43,14 @@ from pantaray_agents.agents.action_agent.support.formatter_parts.history import 
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
 from pantaray_agents.agents.core.llm_file_inputs import LlmFileInput
-from pantaray_agents.schema.agent.action import StepType
+from pantaray_agents.conversation.prefix import ConversationLayout, replayable_turn
+from pantaray_agents.schema.agent.action import ActionProviderTurnRecord, StepType
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_llm.contracts.conversation import (
     LlmConversation,
-    LlmProviderTurn,
     LlmTurnAssistantItem,
-    LlmTurnItem,
     LlmTurnToolResultItem,
     LlmTurnUserItem,
-    OpenAiProviderTurn,
 )
 from pantaray_llm.contracts.input_block import (
     LlmImageDescriptor,
@@ -68,14 +62,6 @@ from pantaray_llm.contracts.tool_use import LlmToolCall
 
 # The same mark the string rendering uses for a body past the omission boundary.
 OMITTED_OUTPUT_MARK = "…"
-# One fixed line, so every turn context begins the same way and the model can
-# tell a recorded one from the current one by position alone.
-TURN_CONTEXT_HEADING = (
-    "# Turn Context\nThe state as of this turn. Anything below it is newer.\n\n"
-)
-# Sent when nothing changed but the items would otherwise end on the assistant,
-# which a provider reads as a turn to continue rather than one to answer.
-UNCHANGED_TURN_CONTEXT = "# Turn Context\nNothing has changed since the last one."
 _NOTICE_PREFIX = "System Notice: "
 
 
@@ -86,6 +72,9 @@ class ActionConversationProjection:
     turn_context: str | None
     # The media the items reference, which the request uploads alongside them.
     file_inputs: tuple[LlmFileInput, ...]
+    # The request up to its last item: what a turn this request produces is
+    # recorded with, and handed back only behind.
+    fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,24 +89,24 @@ class _ToolRow:
 def project_action_conversation(
     entries: Sequence[HistoryEntry],
     *,
+    request_fingerprint: str,
     omit_before_step_number: int,
     turn_context: str | None,
     repair_notice: str,
-    provider_turns: Mapping[str, LlmProviderTurn],
+    provider_turns: Mapping[str, ActionProviderTurnRecord],
 ) -> ActionConversationProjection | None:
     """Lay one scope's history out as conversation items, or decline to.
 
-    ``turn_context`` is this turn's own context message, or None when nothing
-    changed; the caller records what was appended on the THINK row it is about
-    to write. ``repair_notice`` is the
-    retry feedback, which follows it as its own item and is never recorded, so
-    that a retry is itself an append to the request that preceded it.
+    ``turn_context`` and ``repair_notice`` close the request as
+    ``ConversationLayout.end_turn`` lays them out; the caller records the turn
+    context it returns on the THINK row it is about to write.
 
     ``provider_turns`` holds the turns this run may hand back, by the
-    ``step_id`` of the THINK that produced each one. The caller decides which
-    ones those are -- whose account issued them, and whether the provider still
-    accepts them -- and this decides only whether a turn still describes the
-    calls its THINK ran.
+    ``step_id`` of the THINK that produced each one. The caller decides whose
+    account issued them; this decides whether a turn still stands behind the
+    prefix it was produced behind (``request_fingerprint`` -- the head, system
+    instruction and tools -- then every item) and still describes the calls its
+    THINK ran.
 
     ``None`` means this window cannot be sent structurally: a tool row in it
     predates the call identity that pairs a result with the call that asked for
@@ -128,7 +117,7 @@ def project_action_conversation(
     tool_rows = _tool_rows_by_llm_step(entries)
     if tool_rows is None:
         return None
-    items: list[LlmTurnItem] = []
+    layout = ConversationLayout(fingerprint=request_fingerprint)
     # An utterance is appended together with the THINK that produced it, so the
     # texts collected here always belong to the next THINK row.
     commentary: list[str] = []
@@ -139,71 +128,47 @@ def project_action_conversation(
             case StepType.USER_REQUEST:
                 # A restored run lists the last turn's answer and then the
                 # follow-up that replied to it, with no THINK row between them.
-                items.extend(_spoken_items(commentary))
+                _add_spoken(layout, commentary)
                 commentary.clear()
-                items.append(_user_item(entry))
+                layout.add(_user_item(entry))
             case StepType.LLM_OUTPUT:
-                items.extend(
-                    _think_items(
-                        entry,
-                        commentary=tuple(commentary),
-                        rows=tool_rows.get(entry["step_id"], ()),
-                        omit_before_step_number=omit_before_step_number,
-                        provider_turn=provider_turns.get(entry["step_id"]),
-                    )
+                _add_think(
+                    layout,
+                    entry,
+                    commentary=tuple(commentary),
+                    rows=tool_rows.get(entry["step_id"], ()),
+                    omit_before_step_number=omit_before_step_number,
+                    record=provider_turns.get(entry["step_id"]),
                 )
                 commentary.clear()
             case StepType.TOOL_EXECUTION:
                 pass  # emitted with the THINK row that declared it
-    items.extend(_spoken_items(commentary))
-    if turn_context is None and (
-        not items or isinstance(items[-1], LlmTurnAssistantItem)
-    ):
-        turn_context = UNCHANGED_TURN_CONTEXT
-    if turn_context is not None:
-        items.append(_text_item(turn_context))
-    if repair_notice:
-        items.append(_text_item(repair_notice))
+    _add_spoken(layout, commentary)
+    sent_context = layout.end_turn(turn_context, repair_notice=repair_notice)
     return ActionConversationProjection(
-        conversation=items,
-        turn_context=turn_context,
+        conversation=layout.items,
+        turn_context=sent_context,
         # ``collect_prompt_file_inputs`` resolves the refs that appear in a text
         # against the rows that own them. The text here is the refs the items
         # placed, so the request uploads exactly that media and nothing else.
         file_inputs=tuple(
             collect_prompt_file_inputs(
-                prompt="\n".join(_placed_media_refs(items)), owners=entries
+                prompt="\n".join(layout.media_refs()), owners=entries
             )
         ),
+        fingerprint=layout.fingerprint,
     )
 
 
-def _spoken_items(commentary: Sequence[str]) -> list[LlmTurnItem]:
+def _add_spoken(layout: ConversationLayout, commentary: Sequence[str]) -> None:
     """What the assistant said with no THINK row after it to carry the words."""
 
-    if not commentary:
-        return []
-    return [
-        LlmTurnAssistantItem(
-            type="assistant", text=list(commentary), calls=[], provider_turn=None
+    if commentary:
+        layout.add(
+            LlmTurnAssistantItem(
+                type="assistant", text=list(commentary), calls=[], provider_turn=None
+            )
         )
-    ]
-
-
-def _placed_media_refs(items: Sequence[LlmTurnItem]) -> list[str]:
-    return [
-        ref
-        for item in items
-        if not isinstance(item, LlmTurnAssistantItem)
-        for block in item.content
-        if not isinstance(block, LlmInputTextBlock)
-        for ref in (
-            block.image.application_ref
-            if isinstance(block, LlmInputImageBlock)
-            else block.file.application_ref,
-        )
-        if ref is not None
-    ]
 
 
 def _tool_rows_by_llm_step(
@@ -237,52 +202,53 @@ def _tool_rows_by_llm_step(
         )
     # A batch's rows take consecutive step numbers in the order the model
     # declared the calls, which is the order both providers read them back in.
+    # History keeps that order now, but a checkpoint saved before it did may
+    # still hold a batch in finishing order.
     return {
         step_id: sorted(group, key=lambda row: row.entry["step_number"])
         for step_id, group in rows.items()
     }
 
 
-def _think_items(
+def _add_think(
+    layout: ConversationLayout,
     entry: HistoryEntry,
     *,
     commentary: tuple[str, ...],
     rows: Sequence[_ToolRow],
     omit_before_step_number: int,
-    provider_turn: LlmProviderTurn | None,
-) -> list[LlmTurnItem]:
+    record: ActionProviderTurnRecord | None,
+) -> None:
     """One THINK: the context it was sent with, what it said, what came back."""
 
-    items: list[LlmTurnItem] = []
     recorded_context = entry.get("turn_context")
     if recorded_context and replays_turn_context(entry, omit_before_step_number):
-        items.append(_text_item(recorded_context))
+        layout.add_text(recorded_context)
     if commentary or rows:
         calls = [_tool_call(row) for row in rows]
-        items.append(
+        turn = replayable_turn(record, calls, prefix=layout.fingerprint)
+        layout.add(
             LlmTurnAssistantItem(
                 type="assistant",
                 text=list(commentary),
                 calls=calls,
-                # A turn stays on its item past the omission boundary: the
-                # boundary is for the weight of old tool output, and dropping
-                # 20 tokens of encrypted state would rewrite an item the
-                # provider already read, for nothing.
-                provider_turn=_replayable_turn(provider_turn, calls),
+                provider_turn=turn,
+            ),
+            turn_of=None if turn is None else entry["step_id"],
+        )
+    for row in rows:
+        layout.add(
+            _tool_result_item(
+                row, omit=row.entry["step_number"] < omit_before_step_number
             )
         )
-    items.extend(
-        _tool_result_item(row, omit=row.entry["step_number"] < omit_before_step_number)
-        for row in rows
-    )
     notice = entry.get("result_line")
     if notice:
         # A THINK's result line reports what the runtime did with the turn --
         # calls it deferred or dropped, a rebuilt window, an invalid output.
         # Those calls have no ``call_id`` to answer, so the line reaches the
         # model as its own message behind the results it belongs with.
-        items.append(_text_item(_NOTICE_PREFIX + notice))
-    return items
+        layout.add_text(_NOTICE_PREFIX + notice)
 
 
 def replays_turn_context(entry: HistoryEntry, omit_before_step_number: int) -> bool:
@@ -295,37 +261,6 @@ def replays_turn_context(entry: HistoryEntry, omit_before_step_number: int) -> b
         and bool(entry.get("turn_context"))
         and entry["step_number"] >= omit_before_step_number
     )
-
-
-def _replayable_turn(
-    turn: LlmProviderTurn | None, calls: Sequence[LlmToolCall]
-) -> LlmProviderTurn | None:
-    """The turn to hand back on this item, when it still describes what ran.
-
-    A turn names every call the model made; the item names the calls that ran.
-    They part company when the batch plan deferred one, or when a run stopped
-    mid-batch, and both providers reject a request showing a call whose result
-    never arrives. The adapters check the same pairing, so an unusable turn is
-    left behind here rather than paid for upstream.
-    """
-
-    if turn is None:
-        return None
-    executed = [(call.call_id, call.name) for call in calls]
-    return turn if _declared_calls(turn) == executed else None
-
-
-def _declared_calls(turn: LlmProviderTurn) -> list[tuple[str, str]]:
-    """The calls a provider turn shows, in the order it shows them."""
-    if isinstance(turn, OpenAiProviderTurn):
-        entries, call_type, id_key = turn.items, "function_call", "call_id"
-    else:
-        entries, call_type, id_key = turn.blocks, "tool_use", "id"
-    return [
-        (str(entry.get(id_key)), str(entry.get("name")))
-        for entry in entries
-        if entry.get("type") == call_type
-    ]
 
 
 def _tool_call(row: _ToolRow) -> LlmToolCall:
@@ -378,12 +313,6 @@ def _user_item(entry: HistoryEntry) -> LlmTurnUserItem:
     return LlmTurnUserItem(type="user", content=content)
 
 
-def _text_item(text: str) -> LlmTurnUserItem:
-    return LlmTurnUserItem(
-        type="user", content=[LlmInputTextBlock(type="input_text", text=text)]
-    )
-
-
 def _media_block(attachment: ToolAttachment) -> LlmInputBlock:
     # The model reads a document as the text `read` returns, so an attachment is
     # only ever an image. A non-image one can still reach here out of history a
@@ -410,8 +339,6 @@ def _media_block(attachment: ToolAttachment) -> LlmInputBlock:
 
 __all__ = [
     "OMITTED_OUTPUT_MARK",
-    "TURN_CONTEXT_HEADING",
-    "UNCHANGED_TURN_CONTEXT",
     "ActionConversationProjection",
     "project_action_conversation",
     "replays_turn_context",

@@ -9,8 +9,6 @@ from pantaray_agents.agents.artifact_react import (
     ReactLoopPolicy,
     ReactLoopResult,
     ReactStepRecorder,
-    ReactToolCall,
-    ReactToolDefinition,
 )
 from pantaray_agents.agents.artifact_react.artifact_runtime import (
     ArtifactLlmCaller,
@@ -19,6 +17,7 @@ from pantaray_agents.agents.artifact_react.artifact_runtime import (
 )
 from pantaray_agents.schema.agent import AgentRequest, AgentResponse
 from pantaray_agents.schema.agent.base import AgentError
+from pantaray_agents.tools.contract import ReactToolCall, ReactToolDefinition
 
 type ArtifactCommitPatch = Callable[
     [str, str, str, ReactToolCall, int], Awaitable[PatchCommitResult]

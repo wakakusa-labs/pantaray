@@ -31,10 +31,10 @@ from pantaray_agents.agents.action_agent.runtime.state import create_initial_sta
 from pantaray_agents.agents.action_agent.tools import (
     APPLY_PATCH_TOOL,
     BASH_TOOL,
-    READ_ACTION_PLAN_TOOL,
+    MEMORY_SQL_TOOL,
     READ_TOOL,
     THINKING_TOOL,
-    WRITE_ACTION_PLAN_TOOL,
+    WRITE_SESSION_MEMORY_TOOL,
 )
 from pantaray_agents.agents.core import CountingSink, LlmUsage, TokenBudgetExceeded
 from pantaray_agents.application.action.ports import ActionStepEventPersistenceError
@@ -42,16 +42,20 @@ from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
-    create_capability_grant,
     ensure_action_scratch_execution_context,
-    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
+)
+from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalPreferenceUpsertInput,
+    CapabilityGrantCreateInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    create_capability_grant,
+    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
     BrokerLocalBudget,
@@ -105,8 +109,8 @@ def _base_state() -> dict:
     )
 
 
-def _valid_plan_args() -> dict:
-    return {"content": "# Action Plan\n\n- step one\n"}
+def _session_memory_args() -> dict:
+    return {"content": "# Notes\n\n- the build uses uv\n"}
 
 
 def _runtime() -> MagicMock:
@@ -163,7 +167,7 @@ async def test_processing_event_failure_survives_invocation_cleanup_failure(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     event_error = ActionStepEventPersistenceError(
         event=ActionStepEventData(
@@ -172,8 +176,8 @@ async def test_processing_event_failure_survives_invocation_cleanup_failure(
             step_kind="tool",
             step_id="step-1",
             step_number=1,
-            tool_id=WRITE_ACTION_PLAN_TOOL.tool_id,
-            label=WRITE_ACTION_PLAN_TOOL.name,
+            tool_id=WRITE_SESSION_MEMORY_TOOL.tool_id,
+            label=WRITE_SESSION_MEMORY_TOOL.name,
             status="processing",
             started_at="2025-01-01T00:00:00Z",
             completed_at=None,
@@ -183,7 +187,7 @@ async def test_processing_event_failure_survives_invocation_cleanup_failure(
     )
     runtime.emit_action_step.side_effect = event_error
     cleanup_error = ToolCompletionAuditPersistenceError(
-        tool_id=WRITE_ACTION_PLAN_TOOL.tool_id,
+        tool_id=WRITE_SESSION_MEMORY_TOOL.tool_id,
         tool_invocation_id="invocation-1",
     )
     finalize_invocation = MagicMock(side_effect=cleanup_error)
@@ -196,8 +200,8 @@ async def test_processing_event_failure_survives_invocation_cleanup_failure(
     with pytest.raises(ActionStepEventPersistenceError) as caught:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=runtime,
@@ -220,7 +224,7 @@ async def test_run_tool_classifies_completion_audit_persistence_failure(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
 
     def fail_completion_audit(**_kwargs) -> None:
@@ -235,8 +239,8 @@ async def test_run_tool_classifies_completion_audit_persistence_failure(
     with pytest.raises(ToolCompletionAuditPersistenceError) as caught:
         await run_tool(
             agent,
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=runtime,
@@ -244,7 +248,7 @@ async def test_run_tool_classifies_completion_audit_persistence_failure(
             actor="supervisor",
         )
 
-    assert caught.value.tool_id == WRITE_ACTION_PLAN_TOOL.tool_id
+    assert caught.value.tool_id == WRITE_SESSION_MEMORY_TOOL.tool_id
     assert caught.value.tool_invocation_id
     assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
 
@@ -457,7 +461,7 @@ async def test_run_tool_records_validation_reject_to_local_audit(
         user_id="user-123",
         action_id="act-123",
         started_at="2025-01-01T00:00:00Z",
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     state["manifest_id"] = context.manifest_id
     state["execution_session_id"] = context.execution_session_id
@@ -466,7 +470,7 @@ async def test_run_tool_records_validation_reject_to_local_audit(
     with pytest.raises(ToolValidationError):
         await run_tool(
             agent,
-            WRITE_ACTION_PLAN_TOOL,
+            WRITE_SESSION_MEMORY_TOOL,
             args={"use_goal_workers": "yes"},
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
@@ -505,7 +509,7 @@ async def test_validation_reject_classifies_terminal_persistence_failure(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
 
     def fail_finalization(**_kwargs: object) -> None:
@@ -520,7 +524,7 @@ async def test_validation_reject_classifies_terminal_persistence_failure(
     with pytest.raises(ToolCompletionAuditPersistenceError) as caught:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
+            WRITE_SESSION_MEMORY_TOOL,
             args={"use_goal_workers": "yes"},
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
@@ -529,7 +533,7 @@ async def test_validation_reject_classifies_terminal_persistence_failure(
             actor="supervisor",
         )
 
-    assert caught.value.tool_id == WRITE_ACTION_PLAN_TOOL.tool_id
+    assert caught.value.tool_id == WRITE_SESSION_MEMORY_TOOL.tool_id
     assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
 
 
@@ -541,7 +545,7 @@ async def test_implementation_failure_classifies_terminal_persistence_failure(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     monkeypatch.setattr(
         "pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.execution."
@@ -561,8 +565,8 @@ async def test_implementation_failure_classifies_terminal_persistence_failure(
     with pytest.raises(ToolCompletionAuditPersistenceError) as caught:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=_runtime(),
@@ -570,7 +574,7 @@ async def test_implementation_failure_classifies_terminal_persistence_failure(
             actor="supervisor",
         )
 
-    assert caught.value.tool_id == WRITE_ACTION_PLAN_TOOL.tool_id
+    assert caught.value.tool_id == WRITE_SESSION_MEMORY_TOOL.tool_id
     assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
 
 
@@ -582,7 +586,7 @@ async def test_output_validation_failure_classifies_terminal_persistence_failure
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     monkeypatch.setattr(
         "pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.execution."
@@ -590,7 +594,7 @@ async def test_output_validation_failure_classifies_terminal_persistence_failure
         AsyncMock(
             return_value=UnprojectedToolExecutionResult(
                 step_id="invalid-output-step",
-                tool_id=WRITE_ACTION_PLAN_TOOL.tool_id,
+                tool_id=WRITE_SESSION_MEMORY_TOOL.tool_id,
                 status="success",
                 started_at="2026-08-12T00:00:00+00:00",
                 completed_at="2026-08-12T00:00:01+00:00",
@@ -611,8 +615,8 @@ async def test_output_validation_failure_classifies_terminal_persistence_failure
     with pytest.raises(ToolCompletionAuditPersistenceError) as caught:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=_runtime(),
@@ -620,7 +624,7 @@ async def test_output_validation_failure_classifies_terminal_persistence_failure
             actor="supervisor",
         )
 
-    assert caught.value.tool_id == WRITE_ACTION_PLAN_TOOL.tool_id
+    assert caught.value.tool_id == WRITE_SESSION_MEMORY_TOOL.tool_id
     assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
 
 
@@ -654,7 +658,7 @@ async def test_run_tool_does_not_treat_unexpected_validation_setup_error_as_user
         user_id="user-123",
         action_id="act-123",
         started_at="2025-01-01T00:00:00Z",
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     state["manifest_id"] = context.manifest_id
     state["execution_session_id"] = context.execution_session_id
@@ -671,8 +675,8 @@ async def test_run_tool_does_not_treat_unexpected_validation_setup_error_as_user
     with pytest.raises(RuntimeError, match="schema setup failed"):
         await run_tool(
             agent,
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=runtime,
@@ -699,8 +703,8 @@ async def test_run_tool_fails_closed_when_local_execution_context_is_missing(
     with pytest.raises(RuntimeError):
         await run_tool(
             agent,
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=runtime,
@@ -886,15 +890,21 @@ async def test_run_tool_spills_large_non_broker_output_before_returning(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(READ_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(MEMORY_SQL_TOOL.tool_id,),
     )
-    raw_output = {"status": "present", "content": "x" * 21_000}
+    raw_output = {
+        "columns": ["c"],
+        "rows": [{"c": "x" * 21_000}],
+        "row_count": 1,
+        "truncated": False,
+        "notes": [],
+    }
     monkeypatch.setattr(
         "pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.execution.run_validated_tool_impl",
         AsyncMock(
             return_value=UnprojectedToolExecutionResult(
                 step_id="step-1",
-                tool_id=READ_ACTION_PLAN_TOOL.tool_id,
+                tool_id=MEMORY_SQL_TOOL.tool_id,
                 status="success",
                 started_at="2025-01-01T00:00:00Z",
                 completed_at="2025-01-01T00:00:01Z",
@@ -905,8 +915,8 @@ async def test_run_tool_spills_large_non_broker_output_before_returning(
 
     result = await run_tool(
         MagicMock(),
-        READ_ACTION_PLAN_TOOL,
-        args={},
+        MEMORY_SQL_TOOL,
+        args={"sql": "SELECT * FROM agent_actions"},
         state=state,  # type: ignore[arg-type]
         sink=CountingSink(),
         runtime=_runtime(),
@@ -928,18 +938,18 @@ async def test_run_tool_surfaces_output_schema_mismatch_after_failed_audit(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     monkeypatch.setattr(
         "pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.execution.run_validated_tool_impl",
         AsyncMock(
             return_value=UnprojectedToolExecutionResult(
                 step_id="step-invalid-output",
-                tool_id=WRITE_ACTION_PLAN_TOOL.tool_id,
+                tool_id=WRITE_SESSION_MEMORY_TOOL.tool_id,
                 status="success",
                 started_at="2025-01-01T00:00:00Z",
                 completed_at="2025-01-01T00:00:01Z",
-                output={"content": "not a plan output"},
+                output={"content": "not the tool output"},
             )
         ),
     )
@@ -947,8 +957,8 @@ async def test_run_tool_surfaces_output_schema_mismatch_after_failed_audit(
     with pytest.raises(FinalizedToolExecutionError) as raised:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=_runtime(),
@@ -995,7 +1005,7 @@ async def test_run_tool_preserves_impl_validation_error_after_failed_audit(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     validation_error = ToolValidationError(
         "selected requirement belongs to another goal",
@@ -1009,8 +1019,8 @@ async def test_run_tool_preserves_impl_validation_error_after_failed_audit(
     with pytest.raises(ToolValidationError) as raised:
         await run_tool(
             MagicMock(),
-            WRITE_ACTION_PLAN_TOOL,
-            args=_valid_plan_args(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
             state=state,  # type: ignore[arg-type]
             sink=CountingSink(),
             runtime=_runtime(),
@@ -1087,12 +1097,12 @@ async def test_run_tool_projects_non_broker_binary_output_before_returning(
     state = _install_local_runtime_context(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        allowed_tool_ids=(WRITE_ACTION_PLAN_TOOL.tool_id,),
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
     )
     payload = b"\x00local tool binary\xff"
     raw_result = UnprojectedToolExecutionResult(
         step_id="step-binary",
-        tool_id=WRITE_ACTION_PLAN_TOOL.tool_id,
+        tool_id=WRITE_SESSION_MEMORY_TOOL.tool_id,
         status="success",
         started_at="2025-01-01T00:00:00Z",
         completed_at="2025-01-01T00:00:01Z",
@@ -1105,8 +1115,8 @@ async def test_run_tool_projects_non_broker_binary_output_before_returning(
 
     result = await run_tool(
         MagicMock(),
-        WRITE_ACTION_PLAN_TOOL,
-        args=_valid_plan_args(),
+        WRITE_SESSION_MEMORY_TOOL,
+        args=_session_memory_args(),
         state=state,  # type: ignore[arg-type]
         sink=CountingSink(),
         runtime=_runtime(),
@@ -1136,9 +1146,14 @@ async def test_run_tool_projects_broker_binary_output_before_returning(
         status="success",
         output=payload,
     )
+    # No read returns bytes, so the outcome is substituted after the read runs.
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read_executor",
-        lambda **_kwargs: raw_outcome,
+        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.tooling.brokering.broker.read_tool_outcome",
+        lambda _result: raw_outcome,
     )
 
     result = await run_tool(
@@ -1175,7 +1190,7 @@ async def test_run_tool_does_not_execute_broker_without_invocation_audit(
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read_executor",
+        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read",
         executor,
     )
 

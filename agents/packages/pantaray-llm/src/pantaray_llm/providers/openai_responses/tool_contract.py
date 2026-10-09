@@ -229,6 +229,12 @@ def _extract_action_messages(
             raise _invalid_action_turn(
                 "OpenAI returned an unfinished Action message.", error_context
             )
+        if item.phase == "final_answer":
+            # The model answered in text; every answer here is a tool call.
+            raise _invalid_action_turn(
+                "The output was a final answer in plain text, outside any tool call.",
+                error_context,
+            )
         try:
             message = LlmCommentary.model_validate(
                 {

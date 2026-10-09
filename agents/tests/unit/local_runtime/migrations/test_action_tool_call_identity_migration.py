@@ -169,6 +169,8 @@ def test_migrated_store_accepts_the_identity_of_a_batched_turn(
         # stored without one, and an identity names no turn on its own.
         "provider_turn = '{\"provider\":\"openai\"}' WHERE step_id = 'think-step'",
         "provider_turn_identity = 'api_key:openai:m:abc' WHERE step_id = 'think-step'",
+        # A prefix fingerprint describes a stored turn and nothing else.
+        "provider_turn_fingerprint = 'fp' WHERE step_id = 'think-step'",
     ],
 )
 def test_migrated_store_rejects_misplaced_identity(

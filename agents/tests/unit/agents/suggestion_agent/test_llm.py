@@ -1,19 +1,32 @@
 """SuggestionAgent LLM応答処理テスト"""
 
 import json
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
 from tests.unit.agents.suggestion_agent.prompt_support import serve_lens_runs
 
+from pantaray_agents.agents.core import CountingSink
+from pantaray_agents.agents.core.llm_file_inputs import (
+    build_blob_file_block,
+    tool_image_file_input,
+)
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
+from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionStructuredOutput,
 )
+from pantaray_agents.tools.contract import ToolImage
 from pantaray_agents.utils.prompt_loader import PromptConfig
+from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
+from pantaray_llm.contracts.conversation import LlmTurnUserItem
+from pantaray_llm.contracts.input_block import LlmInputTextBlock
+from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 
 
 def _no_suggestion_output() -> dict[str, object]:
@@ -318,3 +331,64 @@ async def test_suggestion_agent_reasoning_mode_omits_temperature_and_sets_thinki
     assert (
         _SpyGenerateContentConfig.last_kwargs.get("inference_profile") == "suggestion"
     )
+
+
+async def test_a_research_turn_sends_the_images_its_items_show_as_files(
+    suggestion_agent: SuggestionAgent,
+) -> None:
+    """A read image or a drawn page reaches the model only as an uploaded file."""
+
+    image = ToolImage(
+        ref="tool_attachment:abc123",
+        blob_ref="attachment_blob_abc123",
+        display_path="chart.png",
+        mime_type="image/png",
+        byte_size=68,
+        sha256="0" * 64,
+        workspace_root_path="/runs/suggestion-1",
+        workspace_relative_path="rendered_pages/chart.png",
+    )
+    sent: dict[str, object] = {}
+
+    async def generate_content(**kwargs: object) -> object:
+        sent.update(kwargs)
+        return SimpleNamespace(
+            action_turn=LlmActionTurnResponse(
+                mode="action_turn",
+                messages=[],
+                calls=[
+                    LlmToolCall(call_id="c1", name="submit_suggestion", arguments={})
+                ],
+            ),
+            provider_turn=None,
+            usage_metadata=None,
+        )
+
+    suggestion_agent.client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+    )
+    request = ConversationRequest(
+        prompt="context",
+        system_instruction="system",
+        tools=(
+            LlmToolDefinition(
+                name="read", description="r", parameters={"type": "object"}
+            ),
+        ),
+        max_parallel_tool_calls=3,
+        conversation=[
+            LlmTurnUserItem(
+                type="user", content=[LlmInputTextBlock(type="input_text", text="go")]
+            )
+        ],
+        media_refs=(image.ref,),
+        images=(image,),
+        fingerprint="f",
+    )
+
+    await suggestion_agent._send_research_turn(request, CountingSink())
+
+    files = [
+        item for item in cast(list[object], sent["contents"]) if isinstance(item, dict)
+    ]
+    assert files == [build_blob_file_block(tool_image_file_input(image))]

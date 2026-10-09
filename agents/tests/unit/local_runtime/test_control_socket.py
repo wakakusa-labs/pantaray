@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -15,6 +16,10 @@ from typing import Any, cast
 import pytest
 from starlette.websockets import WebSocket
 
+from pantaray_agents.local_runtime.chat.turn_runs import (
+    chat_turn_running,
+    run_chat_turn_in_thread,
+)
 from pantaray_agents.local_runtime.runtime import (
     control_socket,
     session_store,
@@ -971,6 +976,30 @@ async def test_signing_in_stops_the_logged_out_run_before_the_owner_changes(
     assert _action_status(local_runtime_env, run.action_id) == "canceled"
     assert current_owner_id() == "user-1"
     assert admission_is_open()
+
+
+@pytest.mark.asyncio
+async def test_signing_in_stops_the_logged_out_owners_chat_turn_first(
+    local_runtime_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _configure(signed_in=False)
+    owner_id = logged_out_owner_id()
+    started = threading.Event()
+
+    async def turn() -> str:
+        started.set()
+        await asyncio.sleep(60)
+        return "answered"
+
+    outcome = run_chat_turn_in_thread(owner_id, turn)
+    await asyncio.to_thread(started.wait, 5)
+    observed = _observe_the_swap(monkeypatch, lambda: chat_turn_running(owner_id))
+
+    await dispatch_control_request(request=_sign_in_request())
+
+    # Stopped where it awaited, before anything read the account as the owner.
+    assert observed == [False]
+    assert outcome.result(timeout=5) == "stopped"
 
 
 @pytest.mark.asyncio

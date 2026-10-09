@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    JsonSchema,
+    ReactToolCall,
+    ReactToolDefinition,
+    ToolCallEnvelope,
+)
 from pantaray_agents.utils.artifact_patch.parser import (
     ArtifactCompletion,
     ArtifactGenericToolCall,
@@ -14,8 +20,7 @@ from .artifact_patch_contract import (
     COMPLETED_TOOL_NAME,
     artifact_patch_request_schema,
 )
-from .tooling import JsonSchema, ReactToolDefinition
-from .types import ReactFinish, ReactParseError, ReactToolCall, ToolCallEnvelope
+from .types import ReactFinish, ReactParseError
 
 
 def parse_artifact_document_react_output(

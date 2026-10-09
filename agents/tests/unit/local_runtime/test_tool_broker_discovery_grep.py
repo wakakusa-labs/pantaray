@@ -8,10 +8,8 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -61,90 +59,6 @@ async def test_execute_broker_tool_greps_workspace_files(
     ] == [
         (str(context.workspace_path / "src" / "app.py"), 1, "needle"),
         (str(context.workspace_path / "src" / "util.py"), 2, "needle again"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_grep_does_not_expose_action_plan_matches(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_fake_ripgrep_backend(monkeypatch)
-    db_path, context = _bootstrap_runtime_db(
-        tmp_path,
-        read_access_scope="full_access",
-    )
-    private_plan = context.workspace_path / "PLAN.MD"
-    private_plan.write_text("needle private\n", encoding="utf-8")
-    neighbor = context.workspace_path / "visible.md"
-    neighbor.write_text("needle visible\n", encoding="utf-8")
-    nested_plan = context.workspace_path / "nested" / "plan.md"
-    nested_plan.parent.mkdir()
-    nested_plan.write_text("needle ordinary nested plan\n", encoding="utf-8")
-    # Searched from above app storage, only the Action's own workspace shows.
-    parent = db_path.parent.resolve().parent
-    case_alias = parent.with_name(parent.name.swapcase())
-    grep_base = case_alias if case_alias.exists() else parent
-
-    outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="grep",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={
-            "base_path": str(grep_base),
-            "pattern": "needle",
-            "include_glob": (
-                f"{context.workspace_path.relative_to(parent).as_posix()}/**/*.md"
-            ),
-            "max_matches": 2,
-        },
-    )
-
-    matches = outcome.output["matches"]
-    assert len(matches) == 2
-    matches_by_line = {match["line"]: Path(match["path"]) for match in matches}
-    assert matches_by_line["needle ordinary nested plan"].samefile(nested_plan)
-    assert matches_by_line["needle visible"].samefile(neighbor)
-    assert "needle private" not in (outcome.search_text or "")
-    assert outcome.output["truncated"] is False
-
-
-@pytest.mark.asyncio
-async def test_grep_does_not_expose_action_plan_hardlink(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_fake_ripgrep_backend(monkeypatch)
-    db_path, context = _bootstrap_runtime_db(tmp_path)
-    private_plan = context.workspace_path / "plan.md"
-    private_plan.write_text("needle private\n", encoding="utf-8")
-    hardlink = context.workspace_path / "00-ordinary-name.md"
-    hardlink.hardlink_to(private_plan)
-    neighbor = context.workspace_path / "visible.md"
-    neighbor.write_text("needle visible\n", encoding="utf-8")
-
-    outcome = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="grep",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={
-            "base_path": ".",
-            "pattern": "needle",
-            "include_glob": "*.md",
-            "max_matches": 1,
-        },
-    )
-
-    assert [(match["path"], match["line"]) for match in outcome.output["matches"]] == [
-        (str(neighbor), "needle visible")
     ]
 
 
@@ -227,13 +141,9 @@ async def test_grep_reports_skipped_files_as_warning(
     db_path, context = _bootstrap_runtime_db(tmp_path)
     (context.workspace_path / "notes.txt").write_text("needle\n", encoding="utf-8")
 
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
-    from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-        RipgrepGrepResult,
-    )
-    from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
-        RipgrepGrepMatch,
-    )
+    from pantaray_agents.tools.files import discovery
+    from pantaray_agents.tools.files.grep_lines import RipgrepGrepMatch
+    from pantaray_agents.tools.files.ripgrep import RipgrepGrepResult
 
     def fake_grep(**_: object) -> RipgrepGrepResult:
         return RipgrepGrepResult(
@@ -253,7 +163,7 @@ async def test_grep_reports_skipped_files_as_warning(
             binary_match_paths=tuple(f"blob-{index}.bin" for index in range(12)),
         )
 
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", fake_grep)
+    monkeypatch.setattr(discovery, "run_ripgrep_grep", fake_grep)
 
     outcome = await execute_broker_tool(
         db_path=db_path,

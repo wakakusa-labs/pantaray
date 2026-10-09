@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pantaray_agents.agents.workspace_context import (
+from pantaray_agents.schema.workspace_context import (
     WorkspaceContextCatalog,
     WorkspaceContextFolder,
     WorkspaceContextOrganization,

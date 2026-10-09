@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -41,6 +43,10 @@ CAPTURE_SCREEN_TOOL = ToolDefinition.from_spec(
                 "the error code says which, and no image exists in that case."
             ),
         ),
+        # Sequential: it pauses the Action for approval, then waits up to 15 s for
+        # the desktop client. Beside siblings, the history could not show whether
+        # they ran before the user approved.
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="screen_capture",
             required_capabilities=(CAPTURE_SCREEN_CAPABILITY,),

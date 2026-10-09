@@ -7,6 +7,7 @@ import {
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import type { OverlaySnapshotPayload } from '../../src/components/agent-overlay/model/overlayTypes';
 import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
+import { waitForAnimationsToSettle } from './animations';
 
 // Production renderer with deterministic IPC pages, isolated from live accounts and storage.
 let vite: ViteDevServer;
@@ -40,6 +41,7 @@ function conversation(settled: boolean, includeLastTool = true): ActionConversat
   });
   const user = (step: number, sequence: number, content: string) => ({
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: `step-${step}`,
     step_number: step,
@@ -104,15 +106,7 @@ async function publish(page: Page, version: number, conversationPage: ActionConv
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished)
-    );
-  });
+  await waitForAnimationsToSettle(page);
   await page.locator('[data-overlay-panel]').screenshot({ path: info.outputPath(`${name}.png`) });
 }
 
@@ -127,6 +121,11 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
     Object.defineProperty(window, 'electron', {
       value: {
         ipcRenderer: { on: () => noop, send: noop },
+        clipboard: {
+          writeText: async (text: string) => {
+            document.documentElement.dataset.copied = text;
+          },
+        },
         agentOverlay: {
           onSnapshot: (callback: (payload: OverlaySnapshotPayload) => void) => {
             const listener = (event: Event) =>
@@ -137,6 +136,9 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           },
           resize: noop,
           getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
+          showChat: async (request: { actionId: string }) => {
+            document.documentElement.dataset.showChat = JSON.stringify(request);
+          },
         },
         orchestration: {
           onEvent: () => noop,
@@ -197,7 +199,24 @@ for (const language of ['ja', 'en'] as const) {
     await expect(run).toContainText(
       /設定ファイルを確認して[\s\S]*読み込み順[\s\S]*notes-a.md[\s\S]*関連資料[\s\S]*notes-b.md[\s\S]*変更の影響[\s\S]*影響する箇所[\s\S]*notes-c.md/
     );
+    // Only the live work sweeps, and reduced motion (the English run) keeps it still.
+    const shimmer = page.locator('.action-conversation__shimmer');
+    await expect(shimmer).toHaveCount(1);
+    await expect(shimmer).toHaveText(language === 'ja' ? 'Pantarayの作業' : "Pantaray's work");
+    expect(await work.nth(2).locator('.action-conversation__shimmer').count()).toBe(1);
+    expect(await shimmer.evaluate((element) => getComputedStyle(element).animationName)).toBe(
+      language === 'ja' ? 'action-conversation-shimmer' : 'none'
+    );
     await capture(page, info, 'running');
+    const showChat = page.getByRole('button', {
+      name: language === 'ja' ? 'チャットで見る' : 'Show in chat',
+    });
+    await showChat.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-show-chat',
+      JSON.stringify({ actionId: 'action-1' })
+    );
     if (language === 'ja') {
       const outputButton = page.getByRole('button', { name: /notes-b.md/ });
       await outputButton.click();
@@ -208,6 +227,7 @@ for (const language of ['ja', 'en'] as const) {
     }
     await publish(page, 3, conversation(true));
     await expect(work).toHaveCount(2);
+    await expect(shimmer).toHaveCount(0);
     await expect(work.nth(0)).toBeFocused();
     await expect(work.nth(0)).toHaveAttribute('aria-expanded', 'false');
     await expect(work.nth(1)).toHaveAttribute('aria-expanded', 'false');
@@ -602,3 +622,86 @@ for (const language of ['ja', 'en'] as const) {
     expect(await scroll.evaluate((element) => element.scrollTop)).toBe(100);
   });
 }
+
+test("ja: what the chat wrote shows as Pantaray's note, never as the user's bubble", async ({
+  page,
+}, info) => {
+  const user = (
+    step: number,
+    sequence: number,
+    content: string | null,
+    chatNote: string | null
+  ) => ({
+    step_kind: 'user',
+    chat_note: chatNote,
+    approved_suggestion: null,
+    step_id: `step-${step}`,
+    step_number: step,
+    content,
+    message_id: `message-${sequence}`,
+    accepted_sequence: sequence,
+    images: [],
+    project_refs: [],
+    status: 'adopted',
+  });
+  const handedOver = parseActionConversationPage({
+    action: {
+      action_id: 'action-1',
+      suggestion_id: null,
+      status: 'success',
+      latest_run_id: 'run-1',
+      approved_suggestion: null,
+      resumable: false,
+    },
+    runs: [
+      {
+        run_id: 'run-1',
+        status: 'success',
+        started_at: '2026-10-09T00:00:00.000000Z',
+        completed_at: '2026-10-09T00:01:00.000000Z',
+        completion_event_id: 'completion-1',
+        final_output: '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。',
+        error: null,
+        entries: [
+          // The user's own words, relayed as they wrote them, with the chat's note beside them.
+          user(1, 1, '別作業でダジャレを3つ考えて', null),
+          // The chat's own instruction: Pantaray's, so no user bubble.
+          user(
+            2,
+            2,
+            null,
+            'その履歴の続きで、顧客をリストで教えて。記録の有無を回答するだけではなく、会社名と最終連絡日も添えて。'
+          ),
+        ].reverse(),
+      },
+    ],
+    unadopted_messages: [],
+    next_cursor: null,
+  });
+  await installBridge(page, 'ja');
+  await page.goto(`${baseUrl}notification.html?mode=standalone&actionId=action-1`);
+  await expect(page.locator('html')).toHaveAttribute('data-conversation-ready', 'true');
+  await publish(page, 1, handedOver);
+
+  const mine = page.getByRole('article', { name: 'あなた' });
+  await expect(mine).toHaveCount(1);
+  await expect(mine).toHaveText('別作業でダジャレを3つ考えて');
+  const note = page.getByRole('region', { name: 'チャットから' });
+  await expect(note).toContainText('その履歴の続きで、顧客をリストで教えて。');
+  await expect(mine.getByText('その履歴の続きで', { exact: false })).toHaveCount(0);
+  await capture(page, info, 'chat-handoff-note');
+
+  // The answer's copy button writes through main, which needs no focus on the Overlay, and
+  // works in the collapsed preview too.
+  const answer = '先月連絡した顧客は 3 社です。A 社（10/02）、B 社（10/05）、C 社（10/07）。';
+  const copyAnswer = page.getByRole('button', { name: 'この回答をコピー' });
+  await copyAnswer.click();
+  await expect(page.locator('html')).toHaveAttribute('data-copied', answer);
+  await page.evaluate(() => delete document.documentElement.dataset.copied);
+  await page.getByRole('button', { name: '折りたたむ' }).click();
+  await expect(page.getByRole('button', { name: '展開する' })).toBeVisible();
+  await expect(copyAnswer).toBeInViewport();
+  await copyAnswer.click();
+  await expect(page.locator('html')).toHaveAttribute('data-copied', answer);
+  await capture(page, info, 'collapsed-answer-copy');
+});

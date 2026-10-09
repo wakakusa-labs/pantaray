@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     InputSpec,
@@ -62,6 +63,7 @@ DRAFT_FINAL_ANSWER_TOOL = ToolDefinition.from_spec(
                 "current scope."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="bulk_edit",
             default_timeout_ms=30_000,

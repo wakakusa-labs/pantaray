@@ -21,11 +21,6 @@
   gap: 10px;
 }
 
-.history-sync {
-  font-size: var(--text-meta-size);
-  color: var(--fog-text-3);
-}
-
 .history-search {
   position: relative;
   flex: 1;
@@ -62,26 +57,6 @@
 
 .history-search__input::-webkit-search-cancel-button:hover {
   background-color: var(--text-primary);
-}
-
-.history-toolbar__icon-button {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  color: var(--fog-text-2);
-  cursor: pointer;
-}
-
-.history-toolbar__icon-button:hover {
-  background: var(--fog-mist);
-  color: var(--fog-text);
 }
 
 .history-new-conversation-button {
@@ -121,7 +96,6 @@
   font-weight: var(--weight-regular);
 }
 
-.history-toolbar__icon-button:focus-visible,
 .history-new-conversation-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -337,4 +311,57 @@ html:lang(ja) .history-day {
 
 .history-delete-dialog__confirm {
   color: var(--danger-color);
+}
+
+.history-toolbar__spacer {
+  flex: 1;
+}
+
+.history-mode-switch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--fog-mist);
+}
+
+.history-mode-switch__button {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.history-mode-switch__count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(125, 171, 220, 0.22);
+  color: var(--fog-text);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  text-align: center;
+}
+
+.history-mode-switch__button:hover {
+  color: var(--fog-text);
+}
+
+.history-mode-switch__button[aria-pressed='true'] {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.history-mode-switch__button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

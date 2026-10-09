@@ -89,7 +89,7 @@ async def test_web_crawl_returns_normalized_payload(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -161,7 +161,7 @@ async def test_web_crawl_never_presents_its_pages_as_the_whole_section(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -196,7 +196,7 @@ async def test_web_crawl_invalid_response_maps_to_error(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -218,7 +218,7 @@ async def test_web_crawl_invalid_response_maps_to_error(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_web_crawl_transport_failure_maps_to_error(monkeypatch) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             side_effect=WebContentExecutionError(
                 error_code="PROXY_REQUEST_FAILED",

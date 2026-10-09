@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_epoch,
     serialize_memory_epoch,
@@ -36,7 +35,8 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     MemoryDraftToolSession,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
     MemoryRetrievalSession,
@@ -55,8 +55,7 @@ def _install_empty_memory_search(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
 
@@ -92,8 +91,7 @@ async def test_memory_search_commits_epoch_only_after_result_presentation(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     tools = _retrieval_tools(tmp_path, session)
@@ -211,8 +209,7 @@ async def test_memory_search_reuses_handle_and_promotes_direct_provenance(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     tools = _retrieval_tools(tmp_path, memory_session)
@@ -265,11 +262,11 @@ async def test_retrieval_budget_is_shared_and_reference_results_cannot_chain(
     connection_context = MagicMock()
     connection_context.__enter__.return_value = connection
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.open_memory_catalog_connection",
+        "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
         lambda **_kwargs: connection_context,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         lambda **kwargs: _followed_reference(
             epoch=kwargs["epoch"], target_source="long_term_insight"
         ),
@@ -312,11 +309,11 @@ async def test_reference_result_cannot_be_used_for_second_hop(
     connection_context = MagicMock()
     connection_context.__enter__.return_value = connection
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.open_memory_catalog_connection",
+        "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
         lambda **_kwargs: connection_context,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         lambda **kwargs: _followed_reference(epoch=kwargs["epoch"]),
     )
     tools = _retrieval_tools(tmp_path, session)
@@ -358,18 +355,16 @@ async def test_memory_reference_commits_epoch_only_after_result_presentation(
     connection_context = MagicMock()
     connection_context.__enter__.return_value = MagicMock()
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "open_memory_catalog_connection",
+        "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
         lambda **_kwargs: connection_context,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         lambda **_kwargs: (replacement_epoch, {}),
     )
     tools = _retrieval_tools(tmp_path, session)
 
-    with pytest.raises(ValueError, match="target_context_handle"):
+    with pytest.raises(ValueError, match="target_source"):
         await tools.follow_reference(
             _tool_call(
                 "get_memory_reference",
@@ -393,11 +388,11 @@ async def test_directly_visible_reference_target_keeps_root_provenance(
     connection_context = MagicMock()
     connection_context.__enter__.return_value = connection
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.open_memory_catalog_connection",
+        "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
         lambda **_kwargs: connection_context,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         lambda **kwargs: _followed_reference(epoch=kwargs["epoch"]),
     )
     tools = _retrieval_tools(tmp_path, session)
@@ -530,7 +525,6 @@ def _retrieval_tools(
             search_content_max_chars=None,
             reference_content_max_chars=None,
             enqueue_repair_on_reference_failure=True,
-            full_read_tools_available=True,
         ),
     )
 

@@ -4,7 +4,7 @@ import { CHATGPT_MODEL_CANDIDATES, modelForTarget } from './aiConnectionModel';
 
 it('starts a ChatGPT connection on a model that backend actually serves', () => {
   // 空のままだと経路が unconfigured になり、公開 API の別名は ChatGPT backend に無い。
-  for (const model of ['', 'gpt-5.6', 'claude-opus-5']) {
+  for (const model of ['', 'gpt-5.6', 'claude-opus-5-5']) {
     expect(modelForTarget({ method: 'chatgpt', provider: 'openai', model })).toBe(
       CHATGPT_MODEL_CANDIDATES[0]
     );
@@ -22,7 +22,7 @@ it('keeps a model the target actually offers', () => {
 
 it('does not carry a model into a provider that never serves it', () => {
   expect(modelForTarget({ method: 'api_key', provider: 'anthropic', model: 'gpt-6-luna' })).toBe(
-    'claude-opus-5'
+    'claude-opus-5-5'
   );
 });
 

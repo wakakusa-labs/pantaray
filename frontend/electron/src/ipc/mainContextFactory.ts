@@ -53,8 +53,10 @@ export function buildMainContext(params: {
   markCompletionViewed: MainContext['history']['markCompletionViewed'];
   historyDeleteItem: MainContext['history']['deleteItem'];
   actionFiles: MainContext['actionFiles'];
+  clipboard: MainContext['clipboard'];
   update: MainContext['update'];
   actions: MainContext['actions'];
+  chat: MainContext['chat'];
   actionImages: MainContext['actionImages'];
 
   // ui language
@@ -65,6 +67,7 @@ export function buildMainContext(params: {
   setWorkspaceEditCommandPreference: MainContext['approval']['setWorkspaceEditCommandPreference'];
   getGlobalShortcutState: MainContext['shortcut']['getState'];
   setGlobalShortcutAccelerator: MainContext['shortcut']['setAccelerator'];
+  overlayPlacement: MainContext['overlayPlacement'];
   workspaceSettingsGet: MainContext['workspaceSettings']['get'];
   workspaceSettingsGetReadAccessScope: MainContext['workspaceSettings']['getReadAccessScope'];
   workspaceSettingsGetCommandNetwork: MainContext['workspaceSettings']['getCommandNetwork'];
@@ -196,6 +199,12 @@ export function buildMainContext(params: {
           // no-op
         }
       },
+      showChat: (actionId) => {
+        const mainWindow = params.getMainWindow();
+        // On macOS closing the main window hides it, so it exists while the app runs.
+        if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
+        mainWindow.webContents.send('history:showChat', { actionId });
+      },
     },
 
     auth: {
@@ -234,9 +243,11 @@ export function buildMainContext(params: {
     },
 
     actionFiles: params.actionFiles,
+    clipboard: params.clipboard,
     update: params.update,
 
     actions: params.actions,
+    chat: params.chat,
 
     actionImages: params.actionImages,
 
@@ -262,6 +273,8 @@ export function buildMainContext(params: {
       getState: params.getGlobalShortcutState,
       setAccelerator: params.setGlobalShortcutAccelerator,
     },
+
+    overlayPlacement: params.overlayPlacement,
 
     workspaceSettings: {
       get: async () => params.workspaceSettingsGet(),

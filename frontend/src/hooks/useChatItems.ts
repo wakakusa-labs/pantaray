@@ -1,0 +1,167 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import type { ChatItem } from '../../electron/src/chat/chatContracts';
+import { mergeChatItems, replaceWithNewestPage } from '@/components/chat/chatTimeline';
+
+const CHAT_PAGE_SIZE = 50;
+
+export type ChatItemsResult = {
+  /** Oldest first. */
+  items: ChatItem[];
+  /** The last item that arrived live, for announcing it; pages read never count. */
+  arrived: ChatItem | null;
+  loading: boolean;
+  failed: boolean;
+  hasOlder: boolean;
+  loadingOlder: boolean;
+  loadOlder: () => Promise<void>;
+  /** Adds an item this window appended itself; the relay's copy of it is the same item. */
+  appendItem: (item: ChatItem) => void;
+  /** True while a turn is answering the chat. */
+  turnRunning: boolean;
+  /**
+   * Runs the turn a failure ended again. A later turn has ended since when the backend says
+   * `stale`, so the chat is read again to show what it now holds.
+   */
+  retryTurn: (failureItemId: string) => Promise<void>;
+};
+
+/**
+ * The owner's single chat, newest page first and older pages on demand.
+ *
+ * Live items arrive through `chat:itemAppended`; a WS session that started over may have missed
+ * some, so `session_started` reads the newest page again. A reload bumps the generation, which
+ * drops an older page still in flight: its cursor belongs to the chat as it was read before.
+ */
+export function useChatItems(): ChatItemsResult {
+  const [items, setItems] = useState<ChatItem[]>([]);
+  const [arrived, setArrived] = useState<ChatItem | null>(null);
+  const [olderCursor, setOlderCursor] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [turnRunning, setTurnRunning] = useState(false);
+  const generationRef = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const reloadingRef = useRef(false);
+
+  const reload = useCallback(async () => {
+    const generation = ++generationRef.current;
+    reloadingRef.current = true;
+    try {
+      const chat = window.electron?.chat;
+      if (!chat) throw new Error('Chat bridge is unavailable.');
+      const page = await chat.listItems({ before: null, limit: CHAT_PAGE_SIZE });
+      if (generation !== generationRef.current) return;
+      setItems((current) => replaceWithNewestPage(current, page.items));
+      setOlderCursor(page.next_cursor);
+      setFailed(false);
+    } catch {
+      if (generation === generationRef.current) setFailed(true);
+    } finally {
+      if (generation === generationRef.current) {
+        reloadingRef.current = false;
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  const loadOlder = useCallback(async () => {
+    const chat = window.electron?.chat;
+    // While the newest page is read again, the cursor in hand belongs to the chat as it was: an
+    // older page read with it could land after the new page and leave a gap above it.
+    if (olderCursor === null || loadingOlderRef.current || reloadingRef.current || !chat) return;
+    const generation = generationRef.current;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await chat.listItems({ before: olderCursor, limit: CHAT_PAGE_SIZE });
+      if (generation !== generationRef.current) return;
+      setItems((current) => mergeChatItems(current, page.items));
+      setOlderCursor(page.next_cursor);
+      setFailed(false);
+    } catch {
+      if (generation === generationRef.current) setFailed(true);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [olderCursor]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    const onItemAppended = window.electron?.chat?.onItemAppended;
+    if (!onItemAppended) return;
+    return onItemAppended((item) => {
+      setItems((current) => mergeChatItems(current, [item]));
+      setArrived(item);
+    });
+  }, []);
+
+  // Set once anything newer than the mount-time read of the turn's state has been heard.
+  const turnStateHeardRef = useRef(false);
+
+  useEffect(() => {
+    const onStatus = window.electron?.orchestration?.onStatus;
+    if (!onStatus) return;
+    return onStatus((status) => {
+      if (status.status === 'closed' || status.status === 'error') {
+        // A closed session says nothing more about the turn; a failure lands as an item.
+        turnStateHeardRef.current = true;
+        setTurnRunning(false);
+        return;
+      }
+      if (status.status !== 'session_started') return;
+      // The new session sends the turn's state once at its start; until then nothing is known.
+      turnStateHeardRef.current = true;
+      setTurnRunning(false);
+      void reload();
+    });
+  }, [reload]);
+
+  useEffect(() => {
+    const chat = window.electron?.chat;
+    if (!chat) return;
+    // Main sends the state only when it changes; a page loaded mid-turn reads it once.
+    const unsubscribe = chat.onTurnState((state) => {
+      turnStateHeardRef.current = true;
+      setTurnRunning(state.running);
+    });
+    void chat.getTurnState().then(
+      (state) => {
+        if (!turnStateHeardRef.current && state !== null) setTurnRunning(state.running);
+      },
+      () => undefined
+    );
+    return unsubscribe;
+  }, []);
+
+  const retryTurn = useCallback(
+    async (failureItemId: string) => {
+      const chat = window.electron?.chat;
+      if (!chat) throw new Error('Chat bridge is unavailable.');
+      const result = await chat.retryTurn({ failure_item_id: failureItemId });
+      if (result.kind === 'stale') await reload();
+    },
+    [reload]
+  );
+
+  return {
+    items,
+    arrived,
+    loading,
+    failed,
+    hasOlder: olderCursor !== null,
+    loadingOlder,
+    loadOlder,
+    turnRunning,
+    retryTurn,
+    appendItem: useCallback(
+      (item: ChatItem) => setItems((current) => mergeChatItems(current, [item])),
+      []
+    ),
+  };
+}

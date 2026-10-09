@@ -15,12 +15,6 @@ from pantaray_agents.agents.action_agent.runtime.error_redaction import (
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.assistant_message import (
     prepare_llm_turn_commit,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
-    ToolBatchPlan,
-    plan_tool_batch,
-)
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import (
     PendingToolBatchModel,
     PendingToolCallModel,
@@ -50,6 +44,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 from pantaray_agents.agents.action_agent.tools import (
     DRAFT_FINAL_ANSWER_TOOL_ID,
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+    TOOL_CONCURRENCY,
     build_native_action_tools,
     select_tool_registry,
     split_step_note,
@@ -60,6 +55,14 @@ from pantaray_agents.agents.core.tool_call_repair import (
 )
 from pantaray_agents.application.action.ports import ActionAssistantMessageEmission
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation.budget import ContextCapacityExceeded
+from pantaray_agents.conversation.provider_turns import read_provider_turn_target
+from pantaray_agents.conversation.tool_batch import (
+    EXCLUSION_NOTICES,
+    PROVIDER_DROPPED_NOTICE,
+    ToolBatchPlan,
+    plan_tool_batch,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import StepType
@@ -77,7 +80,6 @@ from .llm.helpers import (
     _apply_llm_step_state_update,
     _infer_supervisor_think_short_step_id,
 )
-from .llm.provider_turns import read_provider_turn_target
 from .llm.recorder import record_llm_step
 from .llm.send import EXECUTING_STAGE, build_executing_window, send_executing_turn
 from .llm.turn_input import build_executing_turn
@@ -291,6 +293,7 @@ async def execution_think_step(  # noqa: C901
     parse_failed = False
     accepted_turn: LlmActionTurnResponse | None = None
     accepted_provider_turn: LlmProviderTurn | None = None
+    accepted_fingerprint: str | None = None
 
     batch: PendingToolBatchModel | None = None
     batch_notice: str | None = None
@@ -336,7 +339,7 @@ async def execution_think_step(  # noqa: C901
         )
         try:
             prepared = prepare()
-        except context_budget.ContextCapacityExceeded as exc:
+        except ContextCapacityExceeded as exc:
             error = runtime.services.response.build_agent_error(
                 error_type="context_capacity_exceeded",
                 error_code="ACTION_CONTEXT_CAPACITY_EXCEEDED",
@@ -355,7 +358,7 @@ async def execution_think_step(  # noqa: C901
         window_rebuilt = window_rebuilt or prepared.did_rebuild
         usage_before = sink.delta
         try:
-            native_turn = await send_executing_turn(
+            reply, sent = await send_executing_turn(
                 agent,
                 sink=sink,
                 prepared=prepared,
@@ -386,9 +389,9 @@ async def execution_think_step(  # noqa: C901
                 rendered_bytes=prepared.rendered_bytes,
                 did_rebuild=prepared.did_rebuild,
             )
+        native_turn = reply.response
         response_text = native_turn.model_dump_json()
         thinking = agent._consume_llm_thoughts() or ""
-        provider_turn = agent._consume_action_provider_turn()
         step_completed_at = datetime.now(UTC)
 
         # 許可外 tool_id と step_note 違反はどちらも repair loop へ戻す。
@@ -403,6 +406,7 @@ async def execution_think_step(  # noqa: C901
         if accepted_calls:
             plan = plan_tool_batch(
                 accepted_calls,
+                concurrency=TOOL_CONCURRENCY,
                 max_parallel=max_parallel_tool_calls,
                 remaining_tool_steps=remaining_tool_steps,
             )
@@ -418,7 +422,8 @@ async def execution_think_step(  # noqa: C901
                 provider_dropped_call_names=native_turn.dropped_call_names,
             )
         accepted_turn = native_turn
-        accepted_provider_turn = provider_turn
+        accepted_provider_turn = reply.provider_turn
+        accepted_fingerprint = sent.fingerprint
         if DRAFT_FINAL_ANSWER_TOOL_ID in native_turn.dropped_call_names or any(
             call.tool_id == DRAFT_FINAL_ANSWER_TOOL_ID for call in accepted_calls
         ):
@@ -534,10 +539,13 @@ async def execution_think_step(  # noqa: C901
             world_state=prepared.world_state,
             # Held for the rest of this run as it is written, so the next turn
             # hands back the same bytes whether it reads them from here or,
-            # after a restart, from the row this writes.
+            # after a restart, from the row this writes. The fingerprint is of
+            # the window that was sent, repair notice included: a turn accepted
+            # on a retry was produced behind a notice no later turn replays.
             provider_turn=provider_turns.accept(
                 step_id=step_id,
                 turn=accepted_provider_turn,
+                fingerprint=accepted_fingerprint,
             ),
         )
     except LLMStepPersistenceError:

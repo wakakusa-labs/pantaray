@@ -11,17 +11,19 @@ import pytest
 from pantaray_agents.agents.artifact_react import (
     PatchCommitResult,
     ReactLoopStep,
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolRegistry,
-    ReactToolResult,
     run_artifact_update_react_loop,
     run_react_loop,
 )
 from pantaray_agents.agents.artifact_react.artifact_patch_tool import (
     PATCH_APPLY_MESSAGE,
 )
-from pantaray_agents.agents.artifact_react.tooling import ToolResponseValidationError
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolRegistry,
+    ReactToolResult,
+    ToolResponseValidationError,
+)
 from pantaray_agents.utils.log_redaction import RedactingFormatter
 from pantaray_agents.utils.structured_logging import fingerprint_text
 from pantaray_agents.utils.trace_context import TraceContextManager

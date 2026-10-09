@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..action_subagent_resource_authority import (
     ActionSubagentResourceActorError,
@@ -22,7 +23,7 @@ from ..action_subagent_resource_authority import (
 from ..models import ToolInvocationStartInput
 from ..repository import claim_approval_execution_start
 from .action_subagent_broker_authority import ACTION_SUBAGENT_WRITE_DENIED
-from .broker_common import BrokerContext, BrokerPolicyError
+from .broker_common import BrokerContext
 from .broker_protocol import (
     ValidatedCommandRequest,
     ValidatedGlobRequest,

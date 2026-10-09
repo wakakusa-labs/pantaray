@@ -13,9 +13,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tools import (
     _run_validated_tool_impl,
     _validate_tool_args,
 )
-from pantaray_agents.agents.action_agent.services.memory_sql import (
-    MEMORY_SQL_ALLOWED_TABLES,
-)
 from pantaray_agents.agents.action_agent.tools import (
     MEMORY_SQL_TOOL,
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
@@ -26,6 +23,10 @@ from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
 )
+from pantaray_agents.tools.memory.sql import (
+    MEMORY_SQL_ALLOWED_TABLES,
+)
+from pantaray_agents.tools.memory.sql_tool import MEMORY_SQL_REQUEST_SCHEMA
 
 BUSY_TIMEOUT_MS = 1_000
 
@@ -99,6 +100,12 @@ async def _run_tool(
 def test_memory_sql_tool_is_registered() -> None:
     assert TOOL_REGISTRY["memory_sql"] is MEMORY_SQL_TOOL
     assert "memory_sql" in SUPERVISOR_SINGLE_REACT_TOOL_IDS
+
+
+def test_suggestion_and_the_chat_take_the_request_the_action_takes() -> None:
+    # Both are built from the same fields; a field added to one only would be
+    # refused by the other.
+    assert MEMORY_SQL_TOOL.build_validation_input_schema() == MEMORY_SQL_REQUEST_SCHEMA
 
 
 def test_memory_sql_model_visible_description_names_every_readable_table() -> None:

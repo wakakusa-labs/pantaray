@@ -8,19 +8,13 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
-)
-from pantaray_agents.local_runtime.tooling.action_plan_document import (
-    ACTION_PLAN_TEMP_PREFIX,
-    ACTION_PLAN_TEMP_SUFFIX,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
 )
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .action_seed import insert_agent_action
 from .migrated_db import prepare_test_database
@@ -55,91 +49,6 @@ async def test_read_directory_entries(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_keeps_action_plan_private_but_allows_ordinary_plans(
-    tmp_path: Path,
-) -> None:
-    db_path, context = bootstrap_read_runtime_db(
-        tmp_path,
-        read_access_scope="full_access",
-    )
-    private_plan = context.workspace_path / "plan.md"
-    private_plan.write_text("private plan\n", encoding="utf-8")
-    alias = context.workspace_path / "plan-alias.md"
-    alias.symlink_to(private_plan)
-    hardlink = context.workspace_path / "plan-hardlink.md"
-    hardlink.hardlink_to(private_plan)
-    abandoned_write = context.workspace_path.parent / (
-        f"{ACTION_PLAN_TEMP_PREFIX}crashed{ACTION_PLAN_TEMP_SUFFIX}".upper()
-    )
-    abandoned_write.write_text("private replacement\n", encoding="utf-8")
-    lexical_parent = context.workspace_path / "subdirectory"
-    lexical_parent.mkdir()
-    neighbor = context.workspace_path / "notes.md"
-    neighbor.write_text("neighbor\n", encoding="utf-8")
-    other_plan = tmp_path / "other-workspace" / "plan.md"
-    other_plan.parent.mkdir()
-    other_plan.write_text("ordinary plan\n", encoding="utf-8")
-
-    private_paths = [
-        private_plan,
-        alias,
-        hardlink,
-        abandoned_write,
-        lexical_parent / ".." / private_plan.name,
-    ]
-    case_alias = private_plan.with_name(private_plan.name.upper())
-    if case_alias.exists():
-        private_paths.append(case_alias)
-    for path in private_paths:
-        with pytest.raises(BrokerPolicyError) as exc_info:
-            await execute_read_tool(
-                db_path=db_path,
-                context=context,
-                args={"path": str(path)},
-            )
-        assert exc_info.value.code == "ACTION_PLAN_PATH_PRIVATE"
-
-    with pytest.raises(BrokerPolicyError) as missing:
-        await execute_read_tool(
-            db_path=db_path,
-            context=context,
-            args={"path": str(context.workspace_path / "plan-alia.md")},
-        )
-    assert alias.name not in str(missing.value)
-
-    directory = await execute_read_tool(
-        db_path=db_path,
-        context=context,
-        args={"path": "."},
-    )
-    # The Action root around the workspace is private app storage.
-    with pytest.raises(BrokerPolicyError) as action_root:
-        await execute_read_tool(
-            db_path=db_path,
-            context=context,
-            args={"path": str(context.workspace_path.parent)},
-        )
-    neighbor_read = await execute_read_tool(
-        db_path=db_path,
-        context=context,
-        args={"path": str(neighbor)},
-    )
-    other_read = await execute_read_tool(
-        db_path=db_path,
-        context=context,
-        args={"path": str(other_plan)},
-    )
-
-    assert {entry["name"] for entry in directory.output["entries"]} >= {"notes.md"}
-    assert {"plan.md", "plan-alias.md", "plan-hardlink.md"}.isdisjoint(
-        entry["name"] for entry in directory.output["entries"]
-    )
-    assert action_root.value.code == "READ_PATH_DENIED"
-    assert neighbor_read.output["content"] == "neighbor\n"
-    assert other_read.output["content"] == "ordinary plan\n"
-
-
-@pytest.mark.asyncio
 async def test_read_skips_symlink_loops_in_directory_and_missing_suggestions(
     tmp_path: Path,
 ) -> None:
@@ -151,8 +60,6 @@ async def test_read_skips_symlink_loops_in_directory_and_missing_suggestions(
     neighbor.write_text("visible\n", encoding="utf-8")
     loop = context.workspace_path / "missing-loop.md"
     loop.symlink_to(loop.name)
-    plan_loop = context.workspace_path / "plan.md"
-    plan_loop.symlink_to(plan_loop.name)
     dangling = context.workspace_path / "current"
     dangling.symlink_to("releases/missing")
 

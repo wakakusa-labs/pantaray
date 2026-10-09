@@ -12,11 +12,10 @@ from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentInvalidResponseError,
     build_web_tools_wrapper_context,
-    invoke_web_tools_wrapper,
     require_non_empty_string,
-    require_non_empty_text,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.web.fetch import WebCrawlResponse, fetch_web_crawl
 from pantaray_llm.errors import (
     PROXY_OUTCOME_COMPLETE,
     PROXY_OUTCOME_NO_RESULTS,
@@ -36,18 +35,6 @@ from pantaray_llm.profiles import (
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent
     from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
-
-
-class _TavilyCrawlRow(TypedDict, total=False):
-    url: str
-    raw_content: str
-
-
-class _TavilyCrawlResponse(TypedDict, total=False):
-    base_url: str
-    results: list[_TavilyCrawlRow]
-    response_time: float
-    request_id: str
 
 
 class WebCrawlResult(TypedDict, total=False):
@@ -72,75 +59,16 @@ class WebCrawlExecutionOutcome:
     completion_tokens: int
 
 
-def _coerce_crawl_row(value: object) -> _TavilyCrawlRow | None:
-    if not isinstance(value, dict):
-        return None
-    row: _TavilyCrawlRow = {}
-    if "url" in value:
-        row["url"] = value.get("url")
-    if "raw_content" in value:
-        row["raw_content"] = value.get("raw_content")
-    return row
-
-
-def _coerce_crawl_response(value: object) -> _TavilyCrawlResponse | None:
-    if not isinstance(value, dict):
-        return None
-    base_url = value.get("base_url")
-    if not isinstance(base_url, str):
-        return None
-    if "results" not in value or not isinstance(value.get("results"), list):
-        return None
-
-    rows: list[_TavilyCrawlRow] = []
-    for row in value["results"]:
-        typed_row = _coerce_crawl_row(row)
-        if typed_row is None:
-            return None
-        rows.append(typed_row)
-
-    response: _TavilyCrawlResponse = {"base_url": base_url, "results": rows}
-    response_time = value.get("response_time")
-    if response_time is not None:
-        if not isinstance(response_time, int | float):
-            return None
-        response["response_time"] = float(response_time)
-    request_id = value.get("request_id")
-    if request_id is not None:
-        if not isinstance(request_id, str):
-            return None
-        response["request_id"] = request_id
-    return response
-
-
-def _normalize_crawl_rows(
-    rows: list[_TavilyCrawlRow],
-) -> list[WebCrawlResult]:
-    return [
-        {
-            "url": require_non_empty_string(row.get("url"), field_name="url"),
-            "raw_content": require_non_empty_text(
-                row.get("raw_content"),
-                field_name="content",
-            ),
-        }
-        for row in rows
-    ]
-
-
-def _normalize_crawl_payload(
-    response: _TavilyCrawlResponse,
-) -> WebCrawlPayload:
+def _crawl_payload(response: WebCrawlResponse) -> WebCrawlPayload:
     payload: WebCrawlPayload = {
-        "base_url": require_non_empty_string(
-            response.get("base_url"),
-            field_name="base_url",
-        ),
-        "results": _normalize_crawl_rows(response["results"]),
+        "base_url": response.base_url,
+        "results": [
+            {"url": page.url, "raw_content": page.raw_content}
+            for page in response.results
+        ],
     }
-    response_time = response.get("response_time")
-    if isinstance(response_time, float):
-        payload["response_time"] = response_time
+    if response.response_time is not None:
+        payload["response_time"] = response.response_time
     return payload
 
 
@@ -222,26 +150,14 @@ async def run_web_crawl_tool(
         user_id=state.get("user_id"),
         action_id=state.get("action_id"),
     )
-    wrapper_args: dict[str, JSONValue] = {"url": url}
-    if instructions:
-        wrapper_args["instructions"] = instructions
-
     try:
-        parsed = _coerce_crawl_response(
-            (
-                await invoke_web_tools_wrapper(
-                    tool_id="web_crawl",
-                    web_tool_profile=WEB_CRAWL_PROFILE_ID,
-                    args=wrapper_args,
-                    context=request_context,
-                    max_retries=max_retries,
-                )
-            ).get("result")
-            or {}
+        response = await fetch_web_crawl(
+            context=request_context,
+            url=url,
+            instructions=instructions,
+            max_retries=max_retries,
         )
-        if parsed is None:
-            raise WebContentInvalidResponseError("response")
-        payload = _normalize_crawl_payload(parsed)
+        payload = _crawl_payload(response)
         if payload["results"]:
             payload["retry_hint"] = _crawl_retry_hint(
                 page_count=len(payload["results"]),
@@ -250,7 +166,7 @@ async def run_web_crawl_tool(
         payload["meta"] = _build_crawl_meta(
             payload=payload,
             request_id=request_context["request_id"],
-            upstream_request_id=parsed.get("request_id"),
+            upstream_request_id=response.upstream_request_id,
         )
         status = "success"
     except (RuntimeError, WebContentInvalidResponseError, ValueError) as exc:

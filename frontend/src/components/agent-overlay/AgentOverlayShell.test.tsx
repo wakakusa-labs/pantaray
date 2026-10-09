@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -31,6 +32,7 @@ describe('AgentOverlayShell', () => {
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
     const onConversationAction = vi.fn();
     const onConversationLink = vi.fn();
+    const onCopyAnswer = vi.fn();
     let revealLateControl = () => {};
     let enableStatefulControl = () => {};
     const LateControl = () => {
@@ -80,6 +82,9 @@ describe('AgentOverlayShell', () => {
                 Conversation link
               </a>
               <textarea aria-label="Tool output" readOnly value="Visible output" />
+              <button type="button" data-collapsed-clickable onClick={onCopyAnswer}>
+                Copy answer
+              </button>
               <LateControl />
             </>
           }
@@ -106,6 +111,13 @@ describe('AgentOverlayShell', () => {
     expect(toolOutput).toBeEnabled();
     expect(toolOutput).toHaveAttribute('tabindex', '-1');
     expect(toolOutput).not.toHaveAttribute('aria-disabled');
+    // The answer's copy button stays out of the tab order but still copies on click.
+    const copyAnswer = screen.getByRole('button', { name: 'Copy answer' });
+    expect(copyAnswer).toHaveAttribute('tabindex', '-1');
+    expect(copyAnswer).toBeEnabled();
+    expect(copyAnswer).not.toHaveAttribute('aria-disabled');
+    fireEvent.click(copyAnswer);
+    expect(onCopyAnswer).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Expand' })).toHaveFocus();
     toolOutput.focus();
     expect(toolOutput).toHaveFocus();
@@ -159,6 +171,44 @@ describe('AgentOverlayShell', () => {
     // 採用直後は run がまだ無く停止も出せない。ここで何も出さないとパネルは止まって見える。
     expect(shell.getByRole('status')).toHaveTextContent('Running');
     expect(shell.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+
+  it('opens the shown Action in the main chat from the header once the Action exists', async () => {
+    const onShowChat = vi.fn(async () => undefined);
+    const renderShell = (chatActionId: string | null) => (
+      <UiLanguageProvider initialLanguage="ja">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={true}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={true}
+          showFooterActions={false}
+          chatActionId={chatActionId}
+          onShowChat={onShowChat}
+        />
+      </UiLanguageProvider>
+    );
+    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
+    const { container, rerender } = render(renderShell(null));
+    const shell = within(container);
+    // A Suggestion not yet accepted has no Action to show.
+    expect(shell.queryByRole('button', { name: 'チャットで見る' })).toBeNull();
+
+    rerender(renderShell('action-1'));
+    const button = shell.getByRole('button', { name: 'チャットで見る' });
+    expect(button).toHaveAttribute('title', 'チャットで見る');
+    expect(button).toHaveTextContent('');
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onShowChat).toHaveBeenCalledWith({ actionId: 'action-1' });
+    // The busy dots are gone, but the running state is still announced.
+    expect(shell.getByRole('status')).toHaveTextContent('実行中');
   });
 
   it('keeps the composer out of the scrolling conversation and never puts Stop in the header', () => {

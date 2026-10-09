@@ -5,10 +5,9 @@ import pytest
 from pantaray_agents.agents.artifact_react import (
     ReactFinish,
     ReactLoopStep,
-    ReactToolCall,
-    ReactToolResult,
     run_react_loop,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ReactToolResult
 
 
 @pytest.mark.asyncio

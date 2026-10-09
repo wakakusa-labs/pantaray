@@ -269,13 +269,13 @@ async def _run_parallel_batch(
 ) -> ActionAgentState:
     """読み取り専用の呼び出しをセマフォ下で同時に走らせる。
 
-    並列 allowlist のツールは state を書き換えないので、兄弟呼び出しは 1 つの state
+    ``parallel`` を宣言したツールは state を書き換えないので、兄弟呼び出しは 1 つの state
     を共有し、履歴と永続化だけをそれぞれの slot に書く。
 
-    このパスは承認 pause を持たない。``PARALLEL_SAFE_TOOL_IDS`` のうち broker を通るのは
+    このパスは承認 pause を持たない。``parallel`` を宣言したツールのうち broker を通るのは
     ``read`` / ``list`` / ``glob`` / ``grep`` だけで、いずれも
     ``NON_PREFLIGHT_BROKERED_TOOL_IDS`` に入っていて capability 検査しか受けない。承認を
-    要求しうるツール（``apply_patch`` / ``bash`` / ``run_python``）は serial-only なので、
+    要求しうるツール（``apply_patch`` / ``bash`` / ``run_python``）は ``sequential`` なので、
     バッチに 1 件でもあれば逐次パスへ落ちる。
     """
 

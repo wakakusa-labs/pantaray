@@ -355,6 +355,21 @@ export type ScreenCaptureRequestedEvent = OrchestrationEventEnvelope<
   }
 >;
 
+/**
+ * An item appended to the owner's chat. Only the main window shows the chat, so main parses
+ * the item and hands it to that window alone; it never reaches an Overlay.
+ */
+export type ChatItemAppendedEvent = OrchestrationEventEnvelope<
+  'chat_item_appended',
+  { item: unknown }
+>;
+
+/** Whether a turn is answering the owner's chat: the main window's typing bubble. */
+export type ChatTurnStateEvent = OrchestrationEventEnvelope<
+  'chat_turn_state',
+  { running: unknown }
+>;
+
 export type OrchestrationServerEvent =
   | SuggestionChunkEvent
   | SuggestionReactionCommittedEvent
@@ -365,6 +380,8 @@ export type OrchestrationServerEvent =
   | CompletionChunkEvent
   | ProcessPausedActionEvent
   | ScreenCaptureRequestedEvent
+  | ChatItemAppendedEvent
+  | ChatTurnStateEvent
   | ProcessCompletedSuggestionEvent
   | ProcessCompletedActionEvent
   | SessionResumedEvent
@@ -423,6 +440,16 @@ export function isScreenCaptureRequestedEvent(
   event: OrchestrationServerEvent
 ): event is ScreenCaptureRequestedEvent {
   return event.event === 'screen_capture_requested';
+}
+
+export function isChatItemAppendedEvent(
+  event: OrchestrationServerEvent
+): event is ChatItemAppendedEvent {
+  return event.event === 'chat_item_appended';
+}
+
+export function isChatTurnStateEvent(event: OrchestrationServerEvent): event is ChatTurnStateEvent {
+  return event.event === 'chat_turn_state';
 }
 
 export function isProcessCompletedSuggestionEvent(

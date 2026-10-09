@@ -3,14 +3,18 @@
 import logging
 import random
 from datetime import UTC, datetime
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.capability_envelopes import (
     ACTION_AGENT_CAPABILITY_ENVELOPE,
 )
 from pantaray_agents.agents.core import BaseAgent, CountingSink
-from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+from pantaray_agents.agents.core.llm_file_inputs import tool_image_file_input
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
+    ActionTurnReply,
+    LlmToolCallTurn,
+)
 from pantaray_agents.agents.suggestion_agent.context_density import (
     CONTEXT_DENSITY_LOW_MAX_PRESENT as DENSITY_LOW_MAX_PRESENT,
 )
@@ -54,6 +58,7 @@ from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
     write_suggestion_answer,
 )
+from pantaray_agents.conversation.loop import ConversationRequest
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.runtime_ports import (
     SuggestionRepositoryPort,
@@ -74,9 +79,7 @@ from pantaray_agents.schema.repository_errors import repository_data_or_raise
 from pantaray_agents.utils.local_time import describe_local_time, local_zone_name
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
     LlmToolDefinition,
-    LlmToolResult,
 )
 from pantaray_llm.profiles import SUGGESTION_PROFILE_ID
 
@@ -350,9 +353,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             *,
             prompt: str,
             tools: tuple[LlmToolDefinition, ...],
-            continuation_mode: Literal["disabled", "stateless"],
-            continuation: LlmToolContinuation | None,
-            tool_result: LlmToolResult | None,
             system_instruction: str,
             stage: str,
         ) -> LlmToolCallTurn:
@@ -360,9 +360,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 sink=sink,
                 prompt=prompt,
                 tools=tools,
-                continuation_mode=continuation_mode,
-                continuation=continuation,
-                tool_result=tool_result,
                 system_instruction=system_instruction,
                 stage=stage,
             )
@@ -380,9 +377,9 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             lens_config=self._lens_prompt_config,
             selector_config=self._selector_prompt_config,
             research_tools=self.research_tools,
+            send_turn=self._send_research_turn,
             generate_tool_call=generate_tool_call,
             record_step=self._record_react_step,
-            discard_llm_thoughts=self._consume_llm_thoughts,
         )
         extracted = decision.extraction
         decided = extracted["decided"]
@@ -413,6 +410,21 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._last_prompt_text = prompt
         self._last_response_text = extracted["response_text"]
         return extracted
+
+    async def _send_research_turn(
+        self, request: ConversationRequest, sink: CountingSink
+    ) -> ActionTurnReply:
+        return await self._generate_llm_action_turn(
+            sink=sink,
+            prompt=request.prompt,
+            tools=request.tools,
+            max_parallel_tool_calls=request.max_parallel_tool_calls,
+            system_instruction=request.system_instruction,
+            # The images the items show, read from their files when sent.
+            file_inputs=[tool_image_file_input(image) for image in request.images],
+            conversation=request.conversation,
+            stage="suggestion",
+        )
 
     async def _record_react_step(self, step: ReactLoopStep) -> None:
         self._last_step_number = max(self._last_step_number, step.step_number)

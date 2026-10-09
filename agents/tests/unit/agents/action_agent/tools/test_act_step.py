@@ -153,7 +153,7 @@ async def test_action_step_web_search_tool_end_to_end(
 ) -> None:
     """web_search が action_step 経由で実行され、state/DB に反映されること。"""
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             return_value={
                 "tool_id": "web_search",
@@ -246,7 +246,7 @@ async def test_action_step_web_extract_tool_end_to_end(
     tmp_path,
 ) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             return_value={
                 "tool_id": "web_extract",
@@ -391,7 +391,7 @@ async def test_action_step_web_crawl_tool_end_to_end(
     tmp_path,
 ) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             return_value={
                 "tool_id": "web_crawl",

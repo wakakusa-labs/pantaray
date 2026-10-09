@@ -8,6 +8,7 @@
 import type { MainContext } from '../context';
 import type { CreateNotificationIpcHandlers } from '../../orchestration/contracts';
 import type { IpcRegistrar } from '../registrar';
+import { ActionConversationOverlayRequestSchema } from '../schemas/actions';
 import { parseInput } from '../schemas/error';
 import {
   ActionApprovalModeUpdateSchema,
@@ -51,6 +52,12 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     ctx.windows.showMainRoute('/workspace');
   });
 
+  registrar.handle('overlay:showChat', (_event, request) =>
+    ctx.windows.showChat(
+      parseInput(ActionConversationOverlayRequestSchema, 'overlay:showChat', request).actionId
+    )
+  );
+
   const injectedFactory = ctx.overlay.createNotificationIpcHandlers;
   const factory =
     typeof injectedFactory === 'function'
@@ -62,7 +69,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     resumeLiveProcess: ctx.overlay.resumeLiveProcess,
     resolveOverlayBootstrap: ctx.overlay.resolveOverlayBootstrap,
     refreshActionConversation: ctx.actions.refreshActionConversation,
-    getMainWindow: ctx.windows.getMainWindow,
   });
 
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);

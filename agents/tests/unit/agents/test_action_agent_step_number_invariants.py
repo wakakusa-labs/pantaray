@@ -110,9 +110,9 @@ async def test_step_number_is_shared_between_think_and_action(
         }
     ]
 
-    # THINK が read_action_plan を選択
+    # THINK が write_session_memory を選択
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=native_tool_turn("read_action_plan", {})
+        return_value=native_tool_turn("write_session_memory", {"content": "notes"})
     )
 
     after_think = await execution_think_step(
@@ -140,7 +140,7 @@ async def test_step_number_is_shared_between_think_and_action(
     assert think_entry["phase"] == action_entry["phase"] == "executing"
     assert think_entry["step_number"] == action_entry["step_number"] == 2
 
-    # 永続化される step_number も一致する（THINK と tool::read_action_plan）
+    # 永続化される step_number も一致する（THINK と tool::write_session_memory）
     assert agent.repository.save_action_step.await_count == 2  # type: ignore[attr-defined]
     first = agent.repository.save_action_step.call_args_list[0].kwargs  # type: ignore[attr-defined]
     second = agent.repository.save_action_step.call_args_list[1].kwargs  # type: ignore[attr-defined]

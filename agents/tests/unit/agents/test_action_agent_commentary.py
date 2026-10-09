@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from tests.unit.agents.test_action_agent_tool_batch_execution import (
-    PLAN_TOOL,
+    SQL_CALL,
+    SQL_TOOL,
     _act,
     _build_fixture,
     _think,
@@ -27,6 +28,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.action_st
 from pantaray_agents.agents.action_agent.runtime.steps.llm import (
     LLMStepPersistenceError,
 )
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.application.action.cancellation_service import (
     ActionCancellationService,
 )
@@ -54,7 +56,7 @@ async def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         monkeypatch,
         tmp_path,
         action_id="message-action",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     db_path = tmp_path / "runtime.db"
     agent.repository = LocalActionRepository(db_path=db_path, busy_timeout_ms=1000)
@@ -104,14 +106,15 @@ async def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return agent, runtime, state, request, db_path
 
 
-def _commentary_turn(*, with_tool: bool = False) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _commentary_turn(*, with_tool: bool = False) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[
             LlmCommentary(phase="commentary", source_message_id="msg-1", text=MESSAGE)
         ],
-        calls=_turn((PLAN_TOOL, {})).calls if with_tool else [],
+        calls=_turn(SQL_CALL).response.calls if with_tool else [],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _rows(db_path: Path, sql: str) -> list[sqlite3.Row]:
@@ -138,13 +141,13 @@ async def test_draft_turn_suppresses_commentary_and_submits_after_resume(
     agent, runtime, state, request, db_path = await _fixture(monkeypatch, tmp_path)
     turn = _turn(("draft_final_answer", {"answer": MESSAGE}))
     if draft_position == "later":
-        turn = _turn((PLAN_TOOL, {}), ("draft_final_answer", {"answer": MESSAGE}))
+        turn = _turn(SQL_CALL, ("draft_final_answer", {"answer": MESSAGE}))
     retry_turns = []
     if draft_position == "dropped":
         retry_turns.append(turn)
-        turn = _turn((PLAN_TOOL, {}), (PLAN_TOOL, {}))
-        turn.dropped_call_names = ["draft_final_answer"]
-    turn.messages = [
+        turn = _turn(SQL_CALL, SQL_CALL)
+        turn.response.dropped_call_names = ["draft_final_answer"]
+    turn.response.messages = [
         LlmCommentary(
             phase="commentary", source_message_id="draft-msg", text=commentary
         )
@@ -278,7 +281,7 @@ async def test_message_is_durable_assistant_and_batch_continues_after_resume(
         len(
             _rows(
                 db_path,
-                "SELECT * FROM agent_action_steps WHERE step_name='tool::read_action_plan' AND status='success'",
+                "SELECT * FROM agent_action_steps WHERE step_name='tool::memory_sql' AND status='success'",
             )
         )
         == 1
@@ -434,10 +437,8 @@ async def test_invalid_call_discards_its_commentary_before_repair(
 ) -> None:
     agent, runtime, state, _, db_path = await _fixture(monkeypatch, tmp_path)
     invalid = _commentary_turn(with_tool=True)
-    invalid.calls[0].name = "not_an_allowed_tool"
-    agent._generate_llm_action_turn = AsyncMock(
-        side_effect=[invalid, _turn((PLAN_TOOL, {}))]
-    )
+    invalid.response.calls[0].name = "not_an_allowed_tool"
+    agent._generate_llm_action_turn = AsyncMock(side_effect=[invalid, _turn(SQL_CALL)])
     runtime.emit_action_step = AsyncMock()
     state = await _think(agent, runtime, state)
     assert state["next_action"] is not None
@@ -455,9 +456,9 @@ async def test_commentary_only_think_identity_is_not_reused_after_tool_repair(
     agent, runtime, state, _, db_path = await _fixture(monkeypatch, tmp_path)
     agent._generate_llm_action_turn = AsyncMock(
         side_effect=[
-            _turn((PLAN_TOOL, {"invalid_field": True})),
+            _turn((SQL_TOOL, {"invalid_field": True})),
             _commentary_turn(),
-            _turn((PLAN_TOOL, {})),
+            _turn(SQL_CALL),
         ]
     )
     state = await _think(agent, runtime, state)
@@ -484,7 +485,7 @@ async def test_commentary_only_think_identity_is_not_reused_after_tool_repair(
 
 
 @pytest.mark.asyncio
-async def test_compiled_graph_continues_commentary_until_budget_finalization(
+async def test_graph_continues_commentary_until_budget_finalization(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

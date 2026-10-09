@@ -3,10 +3,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import ManifestRoot, load_manifest_roots
 
 from ...storage.migrations import MigrationError
 from ..models import (
@@ -31,9 +33,6 @@ from ..repository import (
 )
 from .broker_protocol import BrokerPathAccessKind
 
-if TYPE_CHECKING:
-    from .manifest_paths import ManifestRoot
-
 READ_TOOL_ID = "read"
 RENDER_PDF_PAGE_TOOL_ID = "render_pdf_page"
 LIST_TOOL_ID = "list"
@@ -53,23 +52,6 @@ APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
 APPROVAL_STATUS_APPROVED_ONCE: Literal["approved_once"] = "approved_once"
 APPROVAL_STATUS_DENIED: Literal["denied"] = "denied"
 BROKER_TOOL_TIMEOUT_ERROR_TYPE = "ToolTimeoutError"
-
-
-class BrokerPolicyError(RuntimeError):
-    """Broker policy rejection with optional LLM repair guidance."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "BROKER_POLICY_REJECTED",
-        fix_hint: str | None = None,
-        examples: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.fix_hint = fix_hint
-        self.examples = examples
 
 
 class BrokerExecutionError(RuntimeError):
@@ -213,8 +195,6 @@ def load_broker_context(
         user_id=user_id,
         manifest_id=manifest_id,
     )
-    from .manifest_paths import load_manifest_roots
-
     manifest_roots = load_manifest_roots(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -578,7 +558,6 @@ __all__ = [
     "BrokerApprovalRequiredError",
     "BrokerContext",
     "BrokerExecutionError",
-    "BrokerPolicyError",
     "READ_TOOL_ID",
     "RENDER_PDF_PAGE_TOOL_ID",
     "RUN_PYTHON_TOOL_ID",

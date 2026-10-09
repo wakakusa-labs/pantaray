@@ -9,12 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import (
-    ReactLoopResult,
-    ReactToolCall,
-    ReactToolDefinition,
-    ToolCallEnvelope,
-)
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
@@ -78,6 +72,11 @@ from pantaray_agents.tasks.internal_jobs.memory_update import (
     execute_memory_update_job,
 )
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ToolCallEnvelope,
+)
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
@@ -129,11 +128,6 @@ class _ScriptedMemoryAgent:
             assert isinstance(result.output, dict)
             draft_revision = str(result.output["draft_revision"])
         return MemoryUpdateAgentResult(
-            loop_result=ReactLoopResult(
-                status="success",
-                final_text="done",
-                steps=(),
-            ),
             applied_memory_request_ids=self.applied_memory_request_ids,
         )
 
@@ -309,10 +303,7 @@ class _AgentThatReplacesTheRoute:
             expires_at="2099-08-16T00:00:00Z",
             session_version="2",
         )
-        return MemoryUpdateAgentResult(
-            loop_result=ReactLoopResult(status="success", final_text="done", steps=()),
-            applied_memory_request_ids=(),
-        )
+        return MemoryUpdateAgentResult(applied_memory_request_ids=())
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str
@@ -543,6 +534,79 @@ async def test_only_the_final_successful_remember_calls_of_the_turn_are_rendered
         f"- request_id: R1 (action_id: {ACTION_ID}, step S-5-TOOL) "
         'note: "passphrase \\"second\\"\\ntry"'
     )
+
+
+def _seed_session_memory_steps(
+    runtime: LocalMemoryFileEditorRuntime,
+    steps: tuple[tuple[int, str, str], ...],
+) -> None:
+    """write_session_memory calls as (step_number, status, content)."""
+
+    _seed_remember_steps(runtime, ())  # only the Action row
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        for step_number, status, content in steps:
+            connection.execute(
+                """
+                INSERT INTO agent_action_steps(
+                    step_id, action_id, user_id, step_number, local_step_number,
+                    short_step_id, step_type, step_name, status, tool_args,
+                    started_at, completed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'tool_execution',
+                          'tool::write_session_memory', ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"notes-{step_number}",
+                    ACTION_ID,
+                    USER_ID,
+                    step_number,
+                    step_number,
+                    f"S-{step_number}-TOOL",
+                    status,
+                    json.dumps(
+                        {
+                            "tool_id": "write_session_memory",
+                            "args": {"content": content},
+                        }
+                    ),
+                    TRIGGER_AT,
+                    TRIGGER_AT,
+                    TRIGGER_AT,
+                ),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        (
+            (
+                (2, "success", "earlier notes"),
+                (5, "success", 'current "notes"\nline 2'),
+                (6, "error", "rejected notes"),
+                (7, "success", "notes after the turn"),
+            ),
+            'step S-5-TOOL) content: "current \\"notes\\"\\nline 2"',
+        ),
+        # Notes written in an earlier turn are still current at this turn's end.
+        (((2, "success", "earlier notes"),), 'step S-2-TOOL) content: "earlier notes"'),
+    ],
+)
+async def test_the_latest_successful_session_memory_by_the_turn_end_is_rendered(
+    tmp_path: Path, steps: tuple[tuple[int, str, str], ...], expected: str
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    _seed_session_memory_steps(runtime, steps)
+    _with_turn(payload, 4, 6)
+    agent = _ScriptedMemoryAgent(())
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    (context,) = agent.contexts
+    assert context.session_memories == f"- action_id: {ACTION_ID} ({expected}"
 
 
 @pytest.mark.asyncio

@@ -7,16 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_read_protocol import (
-    ReadToolOutput,
-)
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.read_output import (
+    ReadToolOutput,
+)
 
 from .read_tool_broker_support import (
     bootstrap_read_runtime_db,
@@ -283,7 +281,7 @@ async def test_read_rejects_attachment_over_size_limit(
 ) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker_direct_read.MAX_ATTACHMENT_BYTES",
+        "pantaray_agents.tools.files.read.MAX_ATTACHMENT_BYTES",
         16,
     )
     (context.workspace_path / "huge.png").write_bytes(

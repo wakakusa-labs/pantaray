@@ -7,10 +7,8 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -50,82 +48,6 @@ async def test_execute_broker_tool_lists_workspace_directory(tmp_path: Path) -> 
         str(context.workspace_path / "src"),
         str(context.workspace_path / "src" / "app.py"),
     }
-
-
-@pytest.mark.asyncio
-async def test_list_and_glob_hide_only_the_action_plan(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_fake_ripgrep_backend(monkeypatch)
-    db_path, context = _bootstrap_runtime_db(
-        tmp_path,
-        read_access_scope="full_access",
-    )
-    private_plan = context.workspace_path / "plan.md"
-    private_plan.write_text("private\n", encoding="utf-8")
-    hardlinks = tuple(
-        context.workspace_path / f"0{index}-alias.md" for index in range(3)
-    )
-    for hardlink in hardlinks:
-        hardlink.hardlink_to(private_plan)
-    neighbor = context.workspace_path / "visible.md"
-    neighbor.write_text("visible\n", encoding="utf-8")
-    nested_plan = context.workspace_path / "nested" / "plan.md"
-    nested_plan.parent.mkdir()
-    nested_plan.write_text("ordinary nested plan\n", encoding="utf-8")
-    private_names = {private_plan.name, *(path.name for path in hardlinks)}
-    list_limit = sum(
-        child.name not in private_names for child in context.workspace_path.iterdir()
-    )
-    # Searched from above app storage, only the Action's own workspace shows.
-    parent = db_path.parent.resolve().parent
-    case_alias = parent.with_name(parent.name.swapcase())
-    glob_base = case_alias if case_alias.exists() else parent
-
-    listed = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="list",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={"path": ".", "max_depth": 1, "limit": list_limit},
-    )
-    globbed = await execute_broker_tool(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        tool_id="glob",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session_id,
-        args={
-            "base_path": str(glob_base),
-            "pattern": (
-                f"{context.workspace_path.relative_to(parent).as_posix()}/**/*.md"
-            ),
-            "limit": 2,
-        },
-    )
-
-    listed_paths = {entry["path"] for entry in listed.output["entries"]}
-    globbed_paths = {match["path"] for match in globbed.output["matches"]}
-    assert neighbor.as_posix() in listed_paths
-    assert any(Path(path).samefile(neighbor) for path in globbed_paths)
-    assert any(Path(path).samefile(nested_plan) for path in globbed_paths)
-    assert private_plan.as_posix() not in listed_paths
-    assert not any(Path(path).samefile(private_plan) for path in globbed_paths)
-    assert not any(
-        entry.samefile(private_plan)
-        for entry in map(Path, listed_paths)
-        if entry.is_file()
-    )
-    assert private_plan.as_posix() not in (listed.search_text or "")
-    assert private_plan.as_posix() not in (globbed.search_text or "")
-    assert listed.output["truncated"] is False
-    assert globbed.output["truncated"] is False
 
 
 @pytest.mark.asyncio

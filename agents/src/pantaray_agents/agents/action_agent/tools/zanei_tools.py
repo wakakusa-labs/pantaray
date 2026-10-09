@@ -1,6 +1,7 @@
 """Raw computer-activity read tools for the user-initiated Action conversation.
 
-The short Insight agent owns the same two reads (``insight_agent.zanei_tools``).
+The shared tool layer owns the same two reads (``tools.zanei``), which the
+short Insight agent also offers.
 This module only declares the Action-facing contract; the runtime handler reuses
 that implementation so both agents share one reader, cursor and evidence path.
 """
@@ -14,6 +15,7 @@ from pantaray_agents.local_runtime.context.source_protocol import (
     EvidenceField,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
     InputSpec,
@@ -167,6 +169,10 @@ ZANEI_TIMELINE_TOOL = ToolDefinition.from_spec(
                 "general recall of stored knowledge - use memory_search for that."
             ),
         ),
+        # Sequential although it only reads: it advances the run's one
+        # runtime.zanei_session (cursor, observation registry, page budget), and
+        # calls at once would make paging nondeterministic and open it twice.
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=ZANEI_READ_TIMEOUT_MS,
@@ -206,6 +212,8 @@ ZANEI_QUERY_TOOL = ToolDefinition.from_spec(
                 "plus web_extract over reading a long captured text body."
             ),
         ),
+        # Sequential: it shares zanei_timeline's runtime.zanei_session.
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=ZANEI_READ_TIMEOUT_MS,

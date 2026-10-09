@@ -1,3 +1,5 @@
+const { getOverlayVerticalAnchor, releaseOverlayCenter } = require('./overlay_window_factory');
+
 const OVERLAY_RESIZE_TOP_MARGIN_PX = 8;
 const OVERLAY_RESIZE_BOTTOM_MARGIN_PX = 8;
 const OVERLAY_MIN_HEIGHT_PX = 120;
@@ -15,8 +17,15 @@ function clampOverlayBounds(screen, win, requestedHeight) {
   const height = Math.max(OVERLAY_MIN_HEIGHT_PX, Math.min(requested, maximumHeight));
   const minimumY = workArea.y + OVERLAY_RESIZE_TOP_MARGIN_PX;
   const maximumY = workArea.y + workArea.height - OVERLAY_RESIZE_BOTTOM_MARGIN_PX - height;
-  const y = Math.max(minimumY, Math.min(bounds.y, maximumY));
-  return { previousY: bounds.y, height, y };
+  const anchor = getOverlayVerticalAnchor(win);
+  const preferredY =
+    anchor?.kind === 'center'
+      ? Math.round(anchor.y - height / 2)
+      : anchor?.kind === 'bottom'
+        ? bounds.y + bounds.height - height
+        : bounds.y;
+  const y = Math.max(minimumY, Math.min(preferredY, maximumY));
+  return { height, y };
 }
 
 function resizeWindow(screen, win, requestedHeight) {
@@ -49,9 +58,6 @@ function hideLastWindow(windows) {
 function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, interactions }) {
   return function createNotificationIpcHandlers(options = {}) {
     const { refreshActionConversation, resumeLiveProcess, resolveOverlayBootstrap } = options;
-    windows.setMainWindowGetter(
-      typeof options.getMainWindow === 'function' ? options.getMainWindow : null
-    );
 
     return {
       onResizeNotificationWindow: (event, payload) => {
@@ -81,6 +87,7 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
       onOverlayInteraction: (event) => {
         const win = findSenderWindow(BrowserWindow, event);
         if (!interactions.activationTracker.isOverlayWindow(win)) return;
+        releaseOverlayCenter(win);
         interactions.activationTracker.recordInteraction();
       },
       onOverlayDragStart: (event, payload) => interactions.dragController.start(event, payload),
@@ -138,4 +145,4 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
   };
 }
 
-module.exports = { createNotificationIpcHandlerFactory };
+module.exports = { createNotificationIpcHandlerFactory, resizeOverlayWindow: resizeWindow };

@@ -34,10 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pantaray_agents.agents.artifact_react.tooling import tool_error_output
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
+from pantaray_agents.tools.contract import tool_error_output
 
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
@@ -127,11 +127,12 @@ WHERE child.kind = :child_kind AND child.result_collected_at IS NULL
 ORDER BY child.process_id
 """
 
-# ``tool_request_id`` is ``<child process id>:<process event seq at request>``,
-# so the trailing sequence orders invocations against the child's own transcript.
+# ``tool_request_id`` is ``<child process id>:<process event seq at request>:<call
+# id>``, so the sequence orders invocations against the child's own history rows
+# (CAST reads the leading integer) and the call id names the call it answers.
 _UNRECORDED_INVOCATION_SQL = """
 SELECT invocation.tool_id, invocation.status, invocation.command_summary_json,
-       output.output_json
+       output.output_json, invocation.tool_request_id
 FROM tool_invocations AS invocation
 LEFT JOIN tool_outputs AS output
   ON output.invocation_id = invocation.invocation_id
@@ -482,7 +483,7 @@ def _collect_claimed_invocation(
             {
                 "action_id": payload["action_id"],
                 "process_id": process_id,
-                "request_prefix": f"{process_id}:%",
+                "request_prefix": f"{process_id}:%:%",
                 "seq_offset": len(process_id) + 2,
                 "tool_event": ACTION_SUBAGENT_TOOL_EVENT,
                 "user_id": payload["user_id"],
@@ -515,6 +516,7 @@ def _collect_claimed_invocation(
         payload=payload,
         job_id=job_id,
         entry={
+            "call_id": str(row[4])[len(process_id) + 1 :].split(":", 1)[1],
             "tool_name": str(row[0]),
             "status": "completed" if completed else "error",
             "arguments": _decoded_json(row[2], default={}),

@@ -54,11 +54,12 @@ def build_anthropic_tools(tool_use: AnthropicToolRequest) -> list[JSONValue]:
 
 
 def build_anthropic_tool_choice(tool_use: AnthropicToolRequest) -> JSONValue:
-    # Action のターンは発話だけでも成立する。tool use の要求は少なくとも 1 件の
-    # 呼び出しを契約しているので、モデルに必ず道具を使わせる。
-    choice: dict[str, JSONValue] = {
-        "type": "auto" if isinstance(tool_use, LlmActionTurnRequest) else "any"
-    }
+    # Opus 5.5, Sonnet 5.5 and Fable 5.1 reject a forced choice ("any" or
+    # "tool") with a 400, so a tool use request asks with "auto" too. The
+    # provider asks again after a reply without a call, and the response
+    # contract rejects one that still has none.
+    # https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
+    choice: dict[str, JSONValue] = {"type": "auto"}
     if tool_use.max_parallel_tool_calls == 1:
         choice["disable_parallel_tool_use"] = True
     return choice

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_llm.profiles import (
     WEB_CRAWL_MAX_BREADTH,
     WEB_CRAWL_MAX_DEPTH,
@@ -49,6 +50,7 @@ WEB_CRAWL_TOOL = ToolDefinition.from_spec(
                 "a final answer."
             ),
         ),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="network_access",
             default_timeout_ms=60_000,

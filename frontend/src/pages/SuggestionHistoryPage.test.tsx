@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ActionConversationPage } from '../../electron/src/actions/actionContracts';
 import type {
@@ -11,7 +13,19 @@ import type { ConversationHistoryListItem } from '../../electron/src/history/his
 import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import { t as translate } from '@/i18n/translate';
+import { ChatSessionProvider } from '@/components/chat/ChatSessionProvider';
+import { LocalOwnerContext } from '@/context/localOwnerContext';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
+
+function PageWrapper({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter>
+      <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
+        <ChatSessionProvider>{children}</ChatSessionProvider>
+      </LocalOwnerContext.Provider>
+    </MemoryRouter>
+  );
+}
 const mocks = vi.hoisted(() => ({
   error: 'history.error.fetchFailed' as string | null,
   itemsOverride: null as ConversationHistoryListItem[] | null,
@@ -58,7 +72,6 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
     isRealtimeSyncing: false,
     searchText: '',
     setSearchText: mocks.setSearchText,
-    refresh: vi.fn(),
     loadMore: mocks.loadMore,
     hasMore: true,
     isUnread: (item: { action_id?: string }) => item.action_id === mocks.unreadActionId,
@@ -69,6 +82,8 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 
 beforeEach(() => {
+  // These cases cover the list mode; the chat mode has its own tests.
+  localStorage.setItem('pantaray.history-view-mode', 'list');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -94,10 +109,10 @@ afterEach(() => {
 it('空状態でも起動ボタンは右上の1つだけで、keyboardから開ける', async () => {
   const openNewConversation = vi.fn(async () => undefined);
   window.electron = { history: { openNewConversation } } as unknown as Window['electron'];
-  const { rerender } = render(<SuggestionHistoryPage />);
+  const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
-  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい会話');
-  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New conversation');
+  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい作業');
+  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New task');
   expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
   const cta = screen.getByRole('button', { name: 'history.newConversation' });
   expect(cta.closest('.history-toolbar')).not.toBeNull();
@@ -128,7 +143,7 @@ it('設定中のショートカットはCTAの中に薄いキーキャップで�
     history: { openNewConversation: vi.fn(async () => undefined) },
     shortcut: { getState },
   } as unknown as Window['electron'];
-  const { container, rerender } = render(<SuggestionHistoryPage />);
+  const { container, rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   const cta = screen.getByRole('button', { name: 'history.newConversation' });
   // While the shortcut loads, the button shows nothing extra.
@@ -169,7 +184,7 @@ it('ショートカットが登録できていないときはキーキャップ�
       })),
     },
   } as unknown as Window['electron'];
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   const cta = screen.getByRole('button', { name: 'history.newConversation' });
   await waitFor(() => expect(cta).toHaveAttribute('title', 'shortcut.hint.unavailable'));
@@ -198,7 +213,7 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
     row('O1', new Date(2026, 8, 29, 8)),
   ];
   try {
-    render(<SuggestionHistoryPage />);
+    render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'history.day.today',
@@ -206,7 +221,9 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
       '9月29日',
     ]);
     // Under today and yesterday a row shows its time; older rows keep the full date.
-    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(/^T108:00$/);
+    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(
+      /^T108:00history.status.suggestion$/
+    );
     expect(screen.getByRole('button', { name: /^O1/ })).toHaveTextContent('2026年9月29日 08:00');
     expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
     expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');
@@ -222,7 +239,7 @@ it('Conversation行はOverlayを開き、実際の表示前に既読にしない
     agentOverlay: { showHistory },
     history: { openConversation, markCompletionViewed: mocks.markCompletionViewed },
   } as unknown as Window['electron'];
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   const conversation = screen.getByRole('button', { name: /^Conversation/ });
   expect(conversation).not.toHaveAttribute('aria-expanded');
@@ -245,7 +262,7 @@ it('Conversation行はOverlayを開き、実際の表示前に既読にしない
 it('履歴の取得失敗は読み上げソフトに届くalertとして出す', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.unreadActionId = null;
-  const { rerender } = render(<SuggestionHistoryPage />);
+  const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   expect(screen.getByRole('alert')).toHaveTextContent('history.error.fetchFailed');
 
@@ -260,7 +277,7 @@ it('Overlay起動失敗を通知し、追加読み込みと検索に応答する
   window.electron = { history: { openConversation } } as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = null;
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: /^Conversation/ }));
   openConversation.mockRejectedValueOnce(new Error('unavailable'));
@@ -305,7 +322,7 @@ it('バッジは running / approval_pending だけに出し、idle には出さ�
       latest_completion_event_id: null,
     },
   ];
-  const { container } = render(<SuggestionHistoryPage />);
+  const { container } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   expect([...container.querySelectorAll('.badge')].map((badge) => badge.textContent)).toEqual([
     'history.status.running',
@@ -382,7 +399,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
     latest_completion_event_id: null,
   });
   mocks.itemsOverride = [conversation('A1'), conversation('A2')];
-  const { container } = render(<SuggestionHistoryPage />);
+  const { container } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
   const lines = () =>
     [...container.querySelectorAll('.history-item')].map(
       (row) => row.querySelector('.history-item-live')?.textContent ?? null
@@ -467,7 +484,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     row('O2', new Date(2026, 8, 29, 7)),
   ];
   try {
-    const { rerender } = render(<SuggestionHistoryPage />);
+    const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
     const older = screen.getByRole('button', { name: /^O1/ });
     older.focus();
 
@@ -502,7 +519,7 @@ function installDeleteBridge(result: { ok: true } | { ok: false; errorCode: stri
 
 it('削除の確認はキャンセルが初期フォーカスで、キャンセルもEscも削除せず元のボタンへ戻る', async () => {
   const deleteItem = installDeleteBridge({ ok: true });
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
@@ -523,7 +540,7 @@ it('削除の確認はキャンセルが初期フォーカスで、キャンセ�
 
 it('削除すると行を一覧から外し、次の行へフォーカスを移す', async () => {
   const deleteItem = installDeleteBridge({ ok: true });
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
   await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
@@ -540,7 +557,7 @@ it('削除すると行を一覧から外し、次の行へフォーカスを移�
 
 it('実行中で断られたら短い通知を出し、行を残して削除ボタンへ戻る', async () => {
   installDeleteBridge({ ok: false, errorCode: 'CONVERSATION_BUSY' });
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
@@ -558,7 +575,7 @@ it('ほかの失敗は削除失敗として通知する', async () => {
     ok: false,
     errorCode: 'CONVERSATION_HISTORY_DELETE_FAILED',
   });
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
   await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
@@ -598,7 +615,7 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       status: 'approval_pending',
     },
   ];
-  render(<SuggestionHistoryPage />);
+  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
 
   expect(screen.getByRole('button', { name: 'common.delete Running' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'common.delete Approval' })).toBeDisabled();

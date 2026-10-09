@@ -1,8 +1,6 @@
 import time
 from datetime import datetime
 
-import pytest
-
 from .ws_orchestration_test_helpers import (
     _assert_has_event,
     _drain_until,
@@ -37,17 +35,8 @@ def test_relayed_suggestion_stream_basic(ws_app_harness) -> None:
         _assert_has_event(msgs, OutboundEvent.PROCESS_COMPLETED.value)
 
 
-def test_dismiss_suggestion_flow_basic(
-    ws_app_harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from pantaray_agents.orchestration.ws import action as ws_action_module
+def test_dismiss_suggestion_flow_basic(ws_app_harness) -> None:
     from pantaray_agents.schema.events import OutboundEvent
-
-    monkeypatch.setattr(
-        ws_action_module,
-        "is_local_runtime_enabled",
-        lambda: True,
-    )
 
     user_id = "user_test"
     with _ws_connect(ws_app_harness, user_id=user_id) as ws:

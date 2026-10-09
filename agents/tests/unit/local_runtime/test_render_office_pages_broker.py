@@ -29,8 +29,6 @@ from pantaray_agents.local_runtime.runtime.office_runtime import (
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_action_storage_paths,
 )
-from pantaray_agents.local_runtime.tooling.brokering import broker_direct_render_pdf
-from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RenderPdfPageOutput,
 )
@@ -47,6 +45,8 @@ from pantaray_agents.local_runtime.tooling.tool_result_validation import (
     validate_successful_tool_output,
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import render_pages as drawing
 
 from .read_tool_broker_support import ReadRuntimeContext, bootstrap_read_runtime_db
 from .test_read_document_broker import write_sample_pptx
@@ -82,7 +82,7 @@ class FakeOfficeRuntime:
 def use_runtime(
     monkeypatch: pytest.MonkeyPatch, runtime: FakeOfficeRuntime
 ) -> FakeOfficeRuntime:
-    monkeypatch.setattr(broker_direct_render_pdf, "OFFICE_RUNTIME", runtime)
+    monkeypatch.setattr(drawing, "OFFICE_RUNTIME", runtime)
     return runtime
 
 
@@ -111,9 +111,7 @@ def stub_converter(
             raise error
         destination.write_bytes(b"%PDF-1.7 converted")
 
-    monkeypatch.setattr(
-        broker_direct_render_pdf, "convert_office_to_pdf", fake_convert_office_to_pdf
-    )
+    monkeypatch.setattr(drawing, "convert_office_to_pdf", fake_convert_office_to_pdf)
     return calls
 
 

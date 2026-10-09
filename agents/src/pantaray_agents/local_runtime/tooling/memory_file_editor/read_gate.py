@@ -209,7 +209,7 @@ def _target_windows(
     if not candidates:
         candidates.append(ReadWindowCandidate(0, 0, "no_context_start"))
     return build_bounded_read_windows(
-        text=text,
+        segments=_line_segments(text),
         candidates=tuple(candidates),
         margin_lines=WINDOW_MARGIN_LINES,
     )

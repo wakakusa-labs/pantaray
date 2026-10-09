@@ -10,6 +10,7 @@ field by field with the meanings ``client.py`` parses out of the cloud's JSON.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from typing import TypedDict
 
@@ -38,6 +39,11 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     ChatGptConnection,
     LlmConnection,
 )
+from pantaray_agents.local_runtime.runtime.job_types import (
+    CHAT_TURN_TRACE_TYPE,
+    LOCAL_ACTION_JOB_TYPE,
+)
+from pantaray_agents.utils.trace_context import get_trace_context
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.request import (
     LlmModelOutputError,
@@ -63,7 +69,10 @@ from pantaray_llm.errors import (
     resolve_proxy_recovery,
 )
 from pantaray_llm.profiles.direct import resolve_direct_profile
-from pantaray_llm.providers.anthropic.provider import execute_anthropic_request
+from pantaray_llm.providers.anthropic.provider import (
+    MISSING_CALL_REPAIR_LIMIT,
+    execute_anthropic_request,
+)
 from pantaray_llm.providers.openai_responses.provider import execute_openai_request
 from pantaray_llm.providers.openai_responses.retry_policy import OPENAI_SDK_MAX_RETRIES
 from pantaray_llm.providers.openai_responses.transport import (
@@ -139,7 +148,10 @@ async def _dispatch(
             provider="anthropic", model=connection.model, request=request
         )
         async with source_http_client(
-            user_id, timeout=_PROVIDER_TIMEOUT, max_requests=1
+            user_id,
+            timeout=_PROVIDER_TIMEOUT,
+            # A tool use reply without a call is asked again on the same client.
+            max_requests=1 + MISSING_CALL_REPAIR_LIMIT,
         ) as http_client:
             return await execute_anthropic_request(
                 request=request,
@@ -151,6 +163,16 @@ async def _dispatch(
     # The other three connections speak OpenAI Responses and differ only in
     # endpoint, credential and request policy (design 6.5).
     transport = _openai_transport(connection)
+    headers = dict(transport.extra_headers)
+    if isinstance(connection, ChatGptConnection):
+        # The ChatGPT backend keeps a session's prompt cache together by its
+        # session-id header, which Codex sets, with the prompt_cache_key, to
+        # its conversation: the Action across its runs, the user's chat across
+        # its turns, otherwise the job. At Action scale a per-job session read
+        # 88% of the input from the cache, the per-owner key 37%.
+        session = _conversation_session(request, user_id=user_id)
+        request = request.model_copy(update={"prompt_cache_key": session})
+        headers["session-id"] = session
     profile = resolve_direct_profile(
         provider=transport.provider, model=connection.model, request=request
     )
@@ -171,11 +193,32 @@ async def _dispatch(
             client=AsyncOpenAI(
                 api_key=transport.api_key,
                 base_url=transport.base_url,
-                default_headers=dict(transport.extra_headers),
+                default_headers=headers,
                 http_client=http_client,
                 max_retries=OPENAI_SDK_MAX_RETRIES,
             ),
         )
+
+
+def _conversation_session(request: LlmRequest, *, user_id: str) -> str:
+    """One conversation's key, digested off the wire.
+
+    An Action's own runs continue one conversation, so a follow-up run reads
+    the cache the last one left: the job executor names the Action in the
+    trace it runs under. The user's one chat continues across its turns the
+    same way. A subagent's job names its parent's Action too, but sends its
+    own prefix, so it keeps its job, as every other job does.
+    """
+
+    trace = get_trace_context()
+    work = trace.extra.get("job_type") if trace is not None else None
+    if work == LOCAL_ACTION_JOB_TYPE and trace is not None and trace.action_id:
+        conversation = f"action:{trace.action_id}"
+    elif work == CHAT_TURN_TRACE_TYPE:
+        conversation = f"chat:{user_id}"
+    else:
+        conversation = request.trace.local_job_id
+    return hashlib.sha256(conversation.encode()).hexdigest()
 
 
 def _openai_transport(connection: LlmConnection) -> OpenAiResponsesTransport:

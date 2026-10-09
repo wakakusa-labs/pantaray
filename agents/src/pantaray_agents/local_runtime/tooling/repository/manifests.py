@@ -4,10 +4,10 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from pantaray_agents.agents.workspace_context import (
+from pantaray_agents.local_runtime.artifacts.paths import resolve_artifact_path
+from pantaray_agents.schema.workspace_context import (
     workspace_context_catalog_to_snapshot,
 )
-from pantaray_agents.local_runtime.artifacts.paths import resolve_artifact_path
 
 from ...storage.migrations import MigrationError
 from .common import _configure_connection, _serialize_json

@@ -99,9 +99,13 @@ class _Action:
         )
 
     def attach(self, tool_id: str, args: dict[str, JSONValue]) -> str | None:
-        return attach_repository_agents_md(
-            self.state, tool_id=tool_id, args=args, read_context=self.read_context()
+        context = self.state["context"]
+        attached = list(context.get("agents_md_attached_paths", []))
+        text = attach_repository_agents_md(
+            attached, tool_id=tool_id, args=args, read_context=self.read_context()
         )
+        context["agents_md_attached_paths"] = attached
+        return text
 
     async def read(self, path: Path | str, **extra: JSONValue) -> Any:
         with TraceContextManager(extra={"process_id": BROKER_ACTOR_PROCESS_ID}):
@@ -427,6 +431,7 @@ def test_attached_instructions_survive_output_omission() -> None:
     think.pop("agents_md")
     projection = project_action_conversation(
         cast(Any, [think, entry]),
+        request_fingerprint="",
         omit_before_step_number=3,
         turn_context="TC",
         repair_notice="",

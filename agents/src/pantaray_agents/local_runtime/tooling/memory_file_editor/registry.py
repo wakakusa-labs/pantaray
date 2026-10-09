@@ -4,12 +4,6 @@ import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.agents.memory_file_editor.tools import (
     APPLY_PATCH_TOOL_NAME,
     READ_FILE_TOOL_NAME,
@@ -40,6 +34,12 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     retry_advice_for_patch_error,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 
 from .bounded_workspace_io import (
     DEFAULT_READ_LINE_LIMIT,

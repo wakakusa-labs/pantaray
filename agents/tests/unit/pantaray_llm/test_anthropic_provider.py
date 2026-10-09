@@ -14,7 +14,6 @@ from pantaray_llm.providers.anthropic import transport as anthropic_transport
 from pantaray_llm.providers.anthropic.provider import execute_anthropic_request
 from pantaray_llm.providers.anthropic.settings import (
     AnthropicAdaptiveThinking,
-    AnthropicBudgetThinking,
     AnthropicLlmProfile,
 )
 
@@ -128,6 +127,11 @@ def _install(
     return calls
 
 
+_CACHED_SYSTEM = [
+    {"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}
+]
+
+
 def _ok(payload: dict[str, object], **headers: str) -> httpx.Response:
     return httpx.Response(200, json=payload, headers=headers)
 
@@ -146,30 +150,22 @@ async def _execute(
     )
 
 
-@pytest.mark.parametrize("budget", [1023, 256])
-def test_invalid_thinking_budgets_are_rejected(budget: int) -> None:
-    with pytest.raises(ValueError):
-        _profile(thinking=AnthropicBudgetThinking(budget_tokens=budget))
-
-
 @pytest.mark.asyncio
 async def test_plain_text_request_sends_the_messages_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install(monkeypatch, _ok(_message(), **{"request-id": "req_1"}))
 
-    response = await _execute(
-        _request(),
-        profile=_profile(
-            max_output_tokens=4096, thinking=AnthropicBudgetThinking(budget_tokens=1024)
-        ),
-    )
+    response = await _execute(_request(), profile=_profile(max_output_tokens=4096))
 
     body = calls[0]["body"]
     assert body["model"] == "claude-test-model"
     assert body["max_tokens"] == 4096
-    assert body["system"] == "sys"
-    assert body["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    # One breakpoint closes the tools and system prefix; the automatic one rides
+    # the end of the messages, which carry no cache markers of their own.
+    assert body["system"] == _CACHED_SYSTEM
+    assert body["cache_control"] == {"type": "ephemeral"}
+    assert "thinking" not in body
     assert body["messages"] == [
         {"role": "user", "content": [{"type": "text", "text": "hi"}]}
     ]
@@ -440,8 +436,9 @@ async def test_borrowed_client_preserves_transport_and_caller_lifetime(
     assert json.loads(requests[0].content) == {
         "model": "claude-test-model",
         "max_tokens": 256,
-        "system": "sys",
+        "system": _CACHED_SYSTEM,
         "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        "cache_control": {"type": "ephemeral"},
     }
 
 
@@ -459,7 +456,7 @@ async def test_adaptive_thinking_without_structured_output(
 
 
 @pytest.mark.asyncio
-async def test_tool_use_requests_force_exactly_one_call(
+async def test_tool_use_requests_ask_for_one_call_without_forcing_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     content = [{"type": "text", "text": "Looking it up."}, _tool_block()]
@@ -481,7 +478,8 @@ async def test_tool_use_requests_force_exactly_one_call(
             "input_schema": _TOOL["parameters"],
         }
     ]
-    assert body["tool_choice"] == {"type": "any", "disable_parallel_tool_use": True}
+    # Current models reject a forced tool choice; the response side enforces it.
+    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
     call = response.tool_use.calls[0]
     assert (call.call_id, call.name, call.arguments) == (
         "toolu_1",
@@ -492,6 +490,88 @@ async def test_tool_use_requests_force_exactly_one_call(
     assert response.finish_reason == "tool_use"
     assert response.output[0].content[0].text == "Looking it up."
     assert response.meta.outcome == "complete"
+
+
+def _install_sequence(
+    monkeypatch: pytest.MonkeyPatch, responses: list[httpx.Response]
+) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    async def send(
+        *, api_key: str, body: dict[str, object], client: httpx.AsyncClient | None
+    ) -> httpx.Response:
+        calls.append({"api_key": api_key, "body": body})
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(anthropic_provider, "send_anthropic_message", send)
+    return calls
+
+
+_TEXT_ONLY = [
+    {"type": "thinking", "thinking": "", "signature": "sig-0"},
+    {"type": "text", "text": "I will look it up."},
+]
+_REPAIR_REQUEST = {
+    "role": "user",
+    "content": [{"type": "text", "text": anthropic_provider.MISSING_CALL_REPAIR_TEXT}],
+}
+
+
+@pytest.mark.asyncio
+async def test_a_text_only_reply_to_a_tool_use_request_is_asked_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_sequence(
+        monkeypatch,
+        [
+            _ok(_message(content=_TEXT_ONLY)),
+            _ok(_message(content=[_tool_block()], stop_reason="tool_use")),
+        ],
+    )
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "stateless"})
+    )
+
+    first, second = (call["body"]["messages"] for call in calls)
+    assert first == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+    # The reply stays in place, signed thinking included, so the second request
+    # only appends to the first one's prefix.
+    assert second == [
+        *first,
+        {"role": "assistant", "content": _TEXT_ONLY},
+        _REPAIR_REQUEST,
+    ]
+    assert response.meta.outcome == "complete"
+    assert response.tool_use.calls[0].call_id == "toolu_1"
+    assert response.tool_use.continuation.messages == [
+        *second,
+        {"role": "assistant", "content": [_tool_block()]},
+    ]
+    # Both requests are billed.
+    assert response.usage.prompt_tokens == 34
+    assert response.usage.cached_prompt_tokens == 10
+    assert response.usage.total_tokens == 40
+
+
+@pytest.mark.asyncio
+async def test_repeated_text_only_replies_stop_at_the_repair_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = anthropic_provider.MISSING_CALL_REPAIR_LIMIT
+    calls = _install_sequence(
+        monkeypatch, [_ok(_message(content=_TEXT_ONLY))] * (limit + 1)
+    )
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "disabled"})
+    )
+
+    assert len(calls) == limit + 1
+    assert response.meta.outcome == "model_output_rejected"
+    assert response.model_error.violation_reason == "missing_call"
+    assert response.model_error.recovery == "repair_next_turn"
+    assert response.usage.total_tokens == 20 * (limit + 1)
 
 
 @pytest.mark.asyncio
@@ -669,8 +749,10 @@ async def test_tool_results_resume_the_conversation_unmodified(
             ],
         },
     ]
-    # The system instruction and the tool declarations are resent every turn.
-    assert second_calls[0]["body"]["system"] == "sys"
+    # The system instruction and the tool declarations are resent every turn,
+    # and the automatic breakpoint moves to the end of the longer conversation.
+    assert second_calls[0]["body"]["system"] == _CACHED_SYSTEM
+    assert second_calls[0]["body"]["cache_control"] == {"type": "ephemeral"}
     assert second_calls[0]["body"]["tools"][0]["name"] == "lookup"
     assert second.tool_use.calls[0].call_id == "toolu_2"
     assert second.tool_use.continuation.messages == [

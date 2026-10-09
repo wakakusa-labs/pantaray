@@ -5,6 +5,7 @@ from __future__ import annotations
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     attach_repository_agents_md,
 )
+from pantaray_agents.agents.action_agent.runtime.state.context import ensure_context
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
     coerce_tool_attachments,
 )
@@ -16,7 +17,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
     BrokerCompletionPersistenceError,
     BrokerExecutionError,
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
     execute_broker_tool,
 )
@@ -31,6 +31,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .approval_preparation import (
@@ -248,9 +249,12 @@ async def run_broker_tool_wrapper(
             # An Action that may not read files gets no AGENTS.md either.
             read_context = None
         if read_context is not None:
+            context = ensure_context(state)
+            attached = list(context.get("agents_md_attached_paths", []))
             agents_md = attach_repository_agents_md(
-                state, tool_id=tool_def.tool_id, args=args, read_context=read_context
+                attached, tool_id=tool_def.tool_id, args=args, read_context=read_context
             )
+            context["agents_md_attached_paths"] = attached
     return ToolExecutionPreparation(
         result=UnprojectedToolExecutionResult(
             step_id=step_id,

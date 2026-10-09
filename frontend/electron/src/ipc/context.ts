@@ -11,6 +11,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
 
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
@@ -54,6 +55,8 @@ import type {
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { createActionFetcher } from '../actions/actionFetch';
+import type { ChatTurnState } from '../chat/chatContracts';
+import type { createChatFetcher } from '../chat/chatFetch';
 import type {
   CreateNotificationIpcHandlers,
   AcceptActionRequest,
@@ -125,6 +128,8 @@ export type MainContext = {
     showMainRoute: (route: MainWindowRoute) => void;
     openNewConversationOverlay: () => void;
     openActionConversationOverlay: (actionId: string) => void;
+    /** Brings the main window forward and asks it to show this Action's latest chat card. */
+    showChat: (actionId: string) => void;
   };
 
   auth: {
@@ -154,12 +159,21 @@ export type MainContext = {
     open: (params: ActionFileOpenInput) => void;
   };
 
+  clipboard: {
+    writeText: (text: string) => void;
+  };
+
   actionImages: {
     /** `LOCAL_ARTIFACT_ROOT`; images live under `{root}/generated/images`. */
     localArtifactRoot: string;
     /** `nativeImage` decode, injected so the handler stays testable outside Electron. */
     decodeImageDimensions: (bytes: Buffer) => { widthPx: number; heightPx: number } | null;
     revealInFolder: (absolutePath: string) => void;
+  };
+
+  chat: ReturnType<typeof createChatFetcher> & {
+    /** The chat turn's state as the live session last sent it, for a window that loads mid-turn. */
+    getTurnState: () => ChatTurnState | null;
   };
 
   actions: ReturnType<typeof createActionFetcher> & {
@@ -188,6 +202,11 @@ export type MainContext = {
   shortcut: {
     getState: () => GlobalShortcutState;
     setAccelerator: (accelerator: string) => GlobalShortcutChangeResult;
+  };
+
+  overlayPlacement: {
+    get: () => OverlayPlacements;
+    set: (update: OverlayPlacementUpdate) => OverlayPlacements;
   };
 
   workspaceSettings: {

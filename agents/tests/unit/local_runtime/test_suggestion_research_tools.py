@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import os
+import dataclasses
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-import pantaray_agents.local_runtime.tooling.react_tools.file_access as file_access_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolRegistry,
-    ToolCallEnvelope,
-)
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -67,18 +64,6 @@ from pantaray_agents.local_runtime.memory_catalog.semantic_index import (
     store_embedding_success,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.brokering import (
-    workspace_descriptor_access as descriptor_access,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.react_tools import (
-    MemoryReadRoot,
-    ReadOnlyFileAccess,
-    WorkspaceReadRoot,
-    memory_revision_by_source,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
     list_workspace_settings,
@@ -90,6 +75,12 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
 )
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolRegistry,
+    ToolCallEnvelope,
+)
+from pantaray_agents.tools.web.session import WebResearchToolSession
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION
 from .test_memory_artifact_publication import (
@@ -98,6 +89,7 @@ from .test_memory_artifact_publication import (
     _publication,
     _runtime,
 )
+from .test_read_document_broker import PIXEL_PNG
 from .test_workspace_settings_repository import TIMESTAMP
 from .test_workspace_settings_repository import _bootstrap_db as _bootstrap_app_db
 
@@ -187,263 +179,6 @@ def _snapshot(*, db_path: Path, artifact_root: Path | None = None):
     )
 
 
-def test_read_only_file_access_reads_only_registered_roots(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    root = tmp_path / "repo"
-    root.mkdir()
-    source = root / "design.md"
-    source.write_text("first\nshared contract\nthird\n", encoding="utf-8")
-    outside = tmp_path / "outside.md"
-    outside.write_text("private", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=root)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[0].root_id
-
-    read_result = reader.read(
-        root_id=root_id,
-        path="design.md",
-        offset=2,
-        column=1,
-        limit=1,
-    )
-    assert read_result["content"] == "shared contract\n"
-    assert read_result["next_offset"] == 3
-    assert read_result["truncated"] is True
-    assert read_result["truncation_reason"] == "page_limit"
-    assert read_result["retry_hint"] == (
-        "Continue with offset=next_offset and column=next_column."
-    )
-    with pytest.raises(BrokerPolicyError, match="root-relative"):
-        reader.read(
-            root_id=root_id,
-            path=str(outside),
-            offset=1,
-            column=1,
-            limit=1,
-        )
-    symlink = root / "outside-link"
-    symlink.symlink_to(outside)
-    with pytest.raises(BrokerPolicyError, match="symlink"):
-        reader.read(
-            root_id=root_id,
-            path="outside-link",
-            offset=1,
-            column=1,
-            limit=1,
-        )
-
-
-def test_read_only_file_access_hides_private_app_storage_in_a_parent_folder(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    storage = db_path.parent
-    (storage / "notes.txt").write_text("needle secret\n", encoding="utf-8")
-    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=tmp_path)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[-1].root_id
-
-    listed = reader.list(root_id=root_id, path=".", max_depth=3, offset=1, limit=50)
-    globbed = reader.glob(
-        root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
-    )
-
-    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
-    assert globbed["matches"] == ["sibling.txt"]
-    alias = storage.with_name(storage.name.upper())
-    private_paths = [f"{storage.name}/notes.txt", f"{storage.name}/{db_path.name}"]
-    if alias.exists() and alias.samefile(storage):
-        private_paths.append(f"{alias.name}/notes.txt")
-    for path in private_paths:
-        with pytest.raises(BrokerPolicyError) as caught:
-            reader.read(root_id=root_id, path=path, offset=1, column=1, limit=10)
-        assert "private app storage" in str(caught.value), path
-        assert "memory_search" in str(caught.value), path
-        assert "memory_sql" not in str(caught.value), path
-    for search in (
-        lambda: reader.list(
-            root_id=root_id, path=storage.name, max_depth=1, offset=1, limit=10
-        ),
-        lambda: reader.glob(
-            root_id=root_id, base_path=storage.name, pattern="*", offset=1, limit=10
-        ),
-    ):
-        with pytest.raises(BrokerPolicyError, match="private app storage"):
-            search()
-
-
-def test_read_only_file_access_never_walks_into_private_app_storage(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    storage = db_path.parent
-    records = storage / "records"
-    records.mkdir()
-    for index in range(60):
-        (records / f"{index}.txt").write_text("needle secret\n", encoding="utf-8")
-    # Opening this would fail the whole scan, so the scan must not reach it.
-    unreadable = storage / "unreadable.txt"
-    unreadable.write_text("needle secret\n", encoding="utf-8")
-    unreadable.chmod(0)
-    (tmp_path / "sibling.txt").write_text("needle sibling\n", encoding="utf-8")
-    _register_workspace(db_path=db_path, root=tmp_path)
-    snapshot = _snapshot(db_path=db_path)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    root_id = snapshot.roots[-1].root_id
-
-    try:
-        results = (
-            reader.list(root_id=root_id, path=".", max_depth=4, offset=1, limit=50),
-            reader.glob(
-                root_id=root_id, base_path=".", pattern="**/*", offset=1, limit=50
-            ),
-        )
-    finally:
-        unreadable.chmod(0o600)
-
-    listed, globbed = results
-    assert [entry["path"] for entry in listed["entries"]] == ["sibling.txt"]  # type: ignore[index]
-    assert globbed["matches"] == ["sibling.txt"]
-    for result in results:
-        assert result["truncated"] is False
-        assert result["warning"] is None
-
-
-def test_workspace_read_remains_pinned_after_parent_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    parent = root / "parent"
-    parent.mkdir(parents=True)
-    (parent / "document.txt").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "document.txt").write_text("outside secret\n", encoding="utf-8")
-    real_open = os.open
-    swapped = False
-
-    def racing_open(
-        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-        flags: int,
-        mode: int = 0o777,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        nonlocal swapped
-        if path == "document.txt" and dir_fd is not None and not swapped:
-            swapped = True
-            parent.rename(root / "original-parent")
-            parent.symlink_to(outside, target_is_directory=True)
-        return real_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(descriptor_access.os, "open", racing_open)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.read(
-        root_id="workspace",
-        path="parent/document.txt",
-        offset=1,
-        column=1,
-        limit=10,
-    )
-
-    assert result["content"] == "inside\n"
-    assert "outside secret" not in str(result)
-
-
-def test_workspace_list_remains_pinned_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "inside.txt").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    for index in range(30):
-        (outside / f"outside-{index}.txt").write_text("secret\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.list(
-        root_id="workspace",
-        path="base",
-        max_depth=1,
-        offset=1,
-        limit=100,
-    )
-
-    assert result["entries"] == [
-        {"path": "base/inside.txt", "kind": "file", "name": "inside.txt"}
-    ]
-    assert result["truncation_reason"] is None
-
-
-def test_workspace_glob_remains_pinned_after_base_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    base = root / "base"
-    base.mkdir(parents=True)
-    (base / "inside.py").write_text("inside\n", encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "outside.py").write_text("secret\n", encoding="utf-8")
-    real_scandir = os.scandir
-    swapped = False
-
-    def racing_scandir(
-        path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
-    ):
-        nonlocal swapped
-        if isinstance(path, int) and not swapped:
-            swapped = True
-            base.rename(root / "original-base")
-            base.symlink_to(outside, target_is_directory=True)
-        return real_scandir(path)
-
-    monkeypatch.setattr(descriptor_access.os, "scandir", racing_scandir)
-    reader = ReadOnlyFileAccess(
-        roots=(WorkspaceReadRoot("workspace", "Workspace", root, ()),)
-    )
-
-    result = reader.glob(
-        root_id="workspace",
-        base_path="base",
-        pattern="**/*.py",
-        offset=1,
-        limit=100,
-    )
-
-    assert result["matches"] == ["base/inside.py"]
-    assert "outside.py" not in str(result)
-
-
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     tmp_path: Path,
 ) -> None:
@@ -464,46 +199,17 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     )
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
+    assert snapshot.memory_revisions["fact"] == revision.revision_id
     assert (
-        "facts: Structured Facts; entry=facts/index.md" in snapshot.stable_memory.prompt
+        "### Structured Facts\nEntry: facts/index.md" in snapshot.stable_memory.prompt
     )
     assert "Profile brief:\nbrief" in snapshot.stable_memory.prompt
-    assert "File tree:\n- facts/index.md\n- facts/project.md" in (
+    assert "Documents:\n- facts/index.md\n- facts/project.md" in (
         snapshot.stable_memory.prompt
     )
     assert "[Project](project.md)" in snapshot.stable_memory.prompt
     assert "Leaf-only detail" not in snapshot.stable_memory.prompt
-    assert reader.list(root_id="facts", path="facts", max_depth=2, offset=1, limit=10)[
-        "entries"
-    ]
-    assert reader.glob(
-        root_id="facts", base_path="facts", pattern="*.md", offset=1, limit=10
-    )["matches"] == ["facts/index.md", "facts/project.md"]
-    assert reader.grep(
-        root_id="facts",
-        base_path="facts",
-        pattern="Leaf-only",
-        include_glob="*.md",
-        offset=1,
-        max_matches=10,
-    )["matches"] == [
-        {"path": "facts/project.md", "line_number": 2, "line": "Leaf-only detail"}
-    ]
-    artifact_leaf = (
-        artifact_root / str(revision.artifact_root_path) / "facts/project.md"
-    )
-    artifact_leaf.write_text("# Project\nChanged after snapshot\n", encoding="utf-8")
-
-    result = reader.read(
-        root_id="facts",
-        path="facts/project.md",
-        offset=1,
-        column=1,
-        limit=20,
-    )
-    assert result["content"] == "# Project\nLeaf-only detail\n"
 
 
 def test_published_insight_snapshot_seeds_index_and_reads_leaf(
@@ -519,68 +225,16 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
     _publish_insight_tree(db_path=db_path, artifact_root=artifact_root)
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
-    assert "insights: Long-term Insights; entry=insights/index.md" in (
+    assert "### Long-term Insights\nEntry: insights/index.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Profile brief:\ninsight brief" in snapshot.stable_memory.prompt
-    assert "File tree:\n- insights/index.md\n- insights/topic.md" in (
+    assert "Documents:\n- insights/index.md\n- insights/topic.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Insight leaf detail" not in snapshot.stable_memory.prompt
     assert len(snapshot.stable_memory.prompt) <= 4_500
-    assert (
-        reader.read(
-            root_id="insights",
-            path="insights/topic.md",
-            offset=1,
-            column=1,
-            limit=20,
-        )["content"]
-        == "# Topic\nInsight leaf detail\n"
-    )
-
-
-def test_memory_grep_stops_a_backtracking_pattern_at_the_search_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A plain backtracking engine needs ~0.3 s here and the timed engine ~0.7 s,
-    # so the shortened deadline must cut the search off instead of finishing it.
-    monkeypatch.setattr(file_access_module, "SEARCH_TIMEOUT_SECONDS", 0.05)
-    backtracking_line = ("来週の定例で見積もりの件を先方に確認" * 2)[:24]
-    reader = ReadOnlyFileAccess(
-        roots=(
-            MemoryReadRoot(
-                root_id="facts",
-                display_name="Facts",
-                revision_id="revision-1",
-                node_id="node-1",
-                entry_path="facts/index.md",
-                documents=(
-                    MemoryDocument(
-                        "facts/notes.md",
-                        f"release 2\n{backtracking_line}\nrelease 3\n",
-                    ),
-                ),
-            ),
-        )
-    )
-
-    result = reader.grep(
-        root_id="facts",
-        base_path=".",
-        pattern=r"(?:\w|\w\w|\w\w\w)*[0-9]$",
-        include_glob=None,
-        offset=1,
-        max_matches=10,
-    )
-
-    assert result["matches"] == [
-        {"path": "facts/notes.md", "line_number": 1, "line": "release 2"}
-    ]
-    assert result["truncated"] is True
-    assert result["truncation_reason"] == "timeout"
 
 
 def test_stable_memory_bounds_include_truncation_markers() -> None:
@@ -593,12 +247,12 @@ def test_stable_memory_bounds_include_truncation_markers() -> None:
     )
 
     assert len(bounded) <= 650
-    assert bounded.endswith("[truncated; continue with read]")
+    assert bounded.endswith("[truncated; find the rest with memory_search]")
     assert len(tree) <= 450
-    assert tree.endswith("[truncated; continue with list]")
+    assert tree.endswith("[truncated]")
 
 
-def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
+def test_snapshot_search_remains_pinned_after_fact_head_update(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -620,14 +274,6 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
     second_revision = _publish_second_fact_revision(
         db_path=db_path,
         artifact_root=artifact_root,
-    )
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    read_result = reader.read(
-        root_id="facts",
-        path="facts/old.md",
-        offset=1,
-        column=1,
-        limit=20,
     )
     ensure_user_embedding_generation(
         db_path=db_path,
@@ -691,7 +337,7 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
             center_time=None,
             radius_hours=None,
             limit=8,
-            pinned_revisions=memory_revision_by_source(snapshot.roots),
+            pinned_revisions=snapshot.memory_revisions,
         )
         current, _ = search_memory_catalog(
             connection=connection,
@@ -707,14 +353,13 @@ def test_snapshot_read_and_search_remain_pinned_after_fact_head_update(
         )
 
     assert first_revision.revision_id != second_revision.revision_id
-    assert read_result["content"] == "# Old\nDurableobsolete marker\n"
     assert "Durableobsolete marker" in [row["content"] for row in pinned]
     assert {item.revision_id for item in epoch.items} == {first_revision.revision_id}
     assert current
     assert all(row["match_kind"] == "semantic" for row in current)
 
 
-def test_snapshot_omits_root_for_preparing_node(
+def test_snapshot_pins_nothing_for_a_preparing_node(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -722,7 +367,8 @@ def test_snapshot_omits_root_for_preparing_node(
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
-    assert all(root.root_id != "facts" for root in snapshot.roots)
+    assert snapshot.memory_revisions["fact"] is None
+    assert "Structured Facts" not in snapshot.stable_memory.prompt
 
 
 def test_revision_integrity_rollback_restores_revision_owned_brief(
@@ -847,36 +493,20 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
         connection.execute("DELETE FROM agent_long_term_insight_state")
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
 
-    assert [root.root_id for root in snapshot.roots] == [
-        "facts",
-        "insights",
-        "agent_experience",
-    ]
-    assert memory_revision_by_source(snapshot.roots) == {
+    assert snapshot.memory_revisions == {
         "fact": fact_revision.revision_id,
         "long_term_insight": insight_revision.revision_id,
         "agent_experience": experience_revision.revision_id,
     }
-    assert "agent_experience: Agent Experience; entry=agent_experience/index.md" in (
+    assert "### Agent Experience\nEntry: agent_experience/index.md" in (
         snapshot.stable_memory.prompt
     )
-    assert "File tree:\n- agent_experience/entries/exp-1.md" in (
+    assert "Documents:\n- agent_experience/entries/exp-1.md" in (
         snapshot.stable_memory.prompt
     )
     assert "Experience leaf detail" not in snapshot.stable_memory.prompt
     assert len(snapshot.stable_memory.prompt) <= 4_500
-    assert (
-        reader.read(
-            root_id="agent_experience",
-            path="agent_experience/entries/exp-1.md",
-            offset=1,
-            column=1,
-            limit=20,
-        )["content"]
-        == "# Experience\nExperience leaf detail\n"
-    )
 
 
 def test_snapshot_without_experience_head_excludes_later_experience_revision(
@@ -890,7 +520,7 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
         publication=_publication(_fact_draft(db_path)),
     )
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
-    pinned_revisions = memory_revision_by_source(snapshot.roots)
+    pinned_revisions = snapshot.memory_revisions
     _publish_experience_tree(db_path=db_path, artifact_root=artifact_root)
 
     with open_memory_catalog_connection(
@@ -923,7 +553,6 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             limit=8,
         )
 
-    assert all(root.root_id != "agent_experience" for root in snapshot.roots)
     assert pinned_revisions["agent_experience"] is None
     assert pinned == []
     assert [row["source"] for row in current] == ["agent_experience"]
@@ -957,6 +586,7 @@ def test_suggestion_research_tool_set_is_read_only(
         "list",
         "glob",
         "grep",
+        "render_pdf_page",
         "web_search",
         "web_extract",
         "zanei_timeline",
@@ -1024,8 +654,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
 
@@ -1052,7 +681,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session.follow_memory_reference",
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         follow_reference,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1124,8 +753,7 @@ async def test_suggestion_memory_search_uses_snapshot_revision(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1161,7 +789,7 @@ async def test_suggestion_memory_search_uses_snapshot_revision(
 
 
 @pytest.mark.asyncio
-async def test_suggestion_memory_search_content_can_be_read_to_completion(
+async def test_suggestion_reads_memory_through_memory_search_not_read(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1198,8 +826,7 @@ async def test_suggestion_memory_search_content_can_be_read_to_completion(
         )
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.memory_retrieval.session."
-        "execute_memory_search",
+        "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1222,39 +849,20 @@ async def test_suggestion_memory_search_content_can_be_read_to_completion(
         1,
     )
     search_row = search_result.output["results"][0]
-    first = await registry.execute(
-        _tool_call(
-            "read",
-            {
-                "root": search_row["read_root"],
-                "path": search_row["read_path"],
-                "offset": 1,
-                "column": 1,
-                "limit": 1,
-            },
-        ),
-        2,
+    by_handle = await registry.execute(
+        _tool_call("read", {"path": search_row["context_handle"]}), 2
     )
-    second = await registry.execute(
-        _tool_call(
-            "read",
-            {
-                "root": search_row["read_root"],
-                "path": search_row["read_path"],
-                "offset": first.output["next_offset"],
-                "column": first.output["next_column"],
-                "limit": 1,
-            },
-        ),
-        3,
+    by_memory_path = await registry.execute(
+        _tool_call("read", {"path": "insights/todos.md"}), 3
     )
 
-    assert search_row["content_truncated"] is True
-    assert first.output["next_offset"] == 1
-    assert first.output["next_column"] == 1_601
-    assert first.output["content"] + second.output["content"] == full_content
-    assert second.output["next_offset"] is None
-    assert second.output["next_column"] is None
+    # memory_search is where memory is read: the passage comes back whole.
+    assert search_row["content"] == full_content
+    assert search_row["content_truncated"] is False
+    for refused in (by_handle, by_memory_path):
+        assert refused.status == "error"
+        assert refused.output["error_code"] == "PATH_NOT_ABSOLUTE"
+        assert "memory_search" in refused.output["details"]["fix_hint"]
 
 
 @pytest.mark.asyncio
@@ -1269,11 +877,16 @@ async def test_suggestion_web_search_returns_shared_client_response(
         captured.update(kwargs)
         return {
             "status": "success",
-            "result": {"query": "current evidence", "results": []},
+            "result": {
+                "status": "success",
+                "query": "current evidence",
+                "results": [],
+                "images": [],
+            },
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     definitions = LocalSuggestionResearchTools(
@@ -1324,6 +937,7 @@ async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
         return {
             "status": "success",
             "result": {
+                "status": "success",
                 "query": "current evidence",
                 "results": [
                     {
@@ -1334,11 +948,12 @@ async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
                     }
                     for index in range(1, 4)
                 ],
+                "images": [],
             },
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1409,7 +1024,7 @@ async def test_suggestion_web_extract_pages_content_from_one_snapshot(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1492,7 +1107,7 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.react_tools.web_session.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
     registry = ReactToolRegistry(
@@ -1523,6 +1138,45 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
     assert row["truncated"] is True
     assert row["truncation_reason"] == "query_excerpts"
     assert "query=null" in row["retry_hint"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "args", "result"),
+    [
+        (
+            "web_search",
+            {"query": "evidence", "offset": 1, "limit": 8},
+            {"status": "success", "query": "other", "results": [], "images": []},
+        ),
+        (
+            "web_extract",
+            {"urls": ["https://example.com/a"], "query": None, "offset": 1, "limit": 9},
+            {
+                "results": [{"url": "https://e.com/b", "raw_content": "body"}],
+                "failed_results": [],
+            },
+        ),
+    ],
+)
+async def test_suggestion_web_tools_reject_a_result_for_another_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    args: dict[str, object],
+    result: dict[str, object],
+) -> None:
+    invoke = AsyncMock(return_value={"result": result})
+    monkeypatch.setattr(
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
+    )
+    registry = ReactToolRegistry(
+        WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
+    )
+
+    results = [await registry.execute(_tool_call(tool_name, args), n) for n in (1, 2)]
+
+    assert [r.output["error_code"] for r in results] == ["WEB_TOOL_FAILED"] * 2
+    assert invoke.await_count == 2
 
 
 def _publish_insight_tree(
@@ -1660,7 +1314,7 @@ def _publish_second_fact_revision(
 
 
 @pytest.mark.parametrize("has_direction", [False, True])
-def test_todo_file_and_full_read_do_not_invent_long_term_context(
+def test_todo_file_does_not_invent_long_term_context(
     tmp_path: Path,
     has_direction: bool,
 ) -> None:
@@ -1685,21 +1339,6 @@ def test_todo_file_and_full_read_do_not_invent_long_term_context(
     assert snapshot.stable_memory.has_insights is has_direction
     # A file within the bound reaches the prompt whole.
     assert snapshot.stable_memory.pending_work == todo.strip()
-    reader = ReadOnlyFileAccess(roots=snapshot.roots)
-    full = reader.read(
-        root_id="insights", path="insights/todos.md", offset=1, column=1, limit=200
-    )
-    assert full["truncated"] is True
-    remainder = reader.read(
-        root_id="insights",
-        path="insights/todos.md",
-        offset=full["next_offset"],
-        column=full["next_column"],
-        limit=200,
-    )
-    assert remainder["truncated"] is False
-    assert full["content"] + remainder["content"] == todo
-    assert "Other project: submit the estimate." in remainder["content"]
 
 
 def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
@@ -1730,7 +1369,7 @@ def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
     pending = snapshot.stable_memory.pending_work
     assert len(pending) <= snapshot_module.PENDING_WORK_MAX_CHARS < len(todo)
-    assert pending.endswith("[truncated; continue with read]")
+    assert pending.endswith("[truncated; find the rest with memory_search]")
 
     agent = SuggestionAgent(
         config={"llm_client": MockLLMClient()},
@@ -1754,4 +1393,125 @@ def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
         }
     )
     assert len(prompt) <= SUGGESTION_INITIAL_PROMPT_MAX_CHARS
-    assert "[truncated; continue with read]" in prompt
+    assert "[truncated; find the rest with memory_search]" in prompt
+
+
+_NO_SUGGESTION = {
+    "has_suggestion": False,
+    "interaction_contract": None,
+    "key_point": "",
+    "suggestion_summary": None,
+    "target_context": None,
+    "candidates": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
+    tmp_path: Path,
+) -> None:
+    from pantaray_agents.agents.artifact_react import ReactLoopStep
+    from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
+    from pantaray_agents.agents.suggestion_agent.output import (
+        parse_suggestion_output,
+    )
+    from pantaray_agents.agents.suggestion_agent.react import (
+        SUBMIT_SUGGESTION_TOOL_NAME,
+        run_suggestion_react,
+    )
+    from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
+    from pantaray_llm.contracts.tool_use import LlmToolCall
+
+    db_path = _bootstrap_db(tmp_path)
+    root = (tmp_path / "repo").resolve()
+    root.mkdir()
+    for index in range(400):
+        (root / f"meeting-notes-with-a-long-name-{index:04}.md").write_text("x")
+    _register_workspace(db_path=db_path, root=root)
+    tool_outputs: list[Any] = []
+    turns = iter(
+        (
+            ("list", lambda: {"path": str(root), "limit": 500}),
+            ("read", lambda: {"path": tool_outputs[0]["path"], "offset": 2}),
+            (SUBMIT_SUGGESTION_TOOL_NAME, lambda: _NO_SUGGESTION),
+        )
+    )
+
+    async def send_turn(_request: object, _sink: object) -> ActionTurnReply:
+        name, arguments = next(turns)
+        call = LlmToolCall(call_id=name, name=name, arguments=arguments())
+        return ActionTurnReply(
+            response=LlmActionTurnResponse(
+                mode="action_turn", messages=[], calls=[call]
+            ),
+            provider_turn=None,
+        )
+
+    async def record_step(step: ReactLoopStep) -> None:
+        if step.step_kind == "tool" and step.status == "success":
+            tool_outputs.append(step.tool_output)
+
+    result = await run_suggestion_react(
+        user_id="user-1",
+        suggestion_id="suggestion-1",
+        context="context",
+        lens="lens",
+        system_instruction="system",
+        research_tools=LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=_snapshot(db_path=db_path),
+            activity_start=None,
+        ),
+        send_turn=send_turn,
+        parse_output=parse_suggestion_output,
+        record_step=record_step,
+    )
+
+    assert result["has_suggestion"] is False
+
+    listing, page = tool_outputs[:2]
+    assert listing["storage"] == "action_file"
+    assert "meeting-notes-with-a-long-name-0000.md" in page["content"]
+
+
+@pytest.mark.asyncio
+async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    folder = (tmp_path / "home").resolve()
+    folder.mkdir()
+    (folder / "chart.png").write_bytes(PIXEL_PNG)
+    snapshot = dataclasses.replace(_snapshot(db_path=db_path), folders=(folder,))
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=snapshot,
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    image = await registry.execute(
+        _tool_call("read", {"path": str(folder / "chart.png")}), 1
+    )
+
+    # Its sender passes the image as a file, so the run keeps it.
+    assert image.status == "success"
+    assert [item.display_path for item in image.images] == [str(folder / "chart.png")]
+
+
+def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:
+    from pantaray_agents.conversation.tool_batch import plan_tool_batch
+
+    tools = WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
+    # Run at once, two pages of one query would each fetch and store a snapshot.
+    plan = plan_tool_batch(
+        [SimpleNamespace(tool_id="web_search")] * 2,
+        concurrency={tool.name: tool.concurrency for tool in tools},
+        max_parallel=3,
+        remaining_tool_steps=3,
+    )
+
+    assert plan.mode == "sequential"

@@ -11,9 +11,11 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     PRIVATE_TEMP_DIRNAME,
+)
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     execute_broker_tool,
@@ -226,9 +228,6 @@ async def test_bash_sandbox_request_uses_manifest_roots_without_workspace_id(
 
     assert outcome.status == "success"
     assert "workspace_id" not in captured_payload
-    assert captured_payload["action_storage"]["plan_path"] == str(
-        context.workspace_path / "plan.md"
-    )
     assert str(context.workspace_path.resolve()) in captured_payload["real_read_roots"]
     real_write_roots = [
         Path(root) for root in cast(list[str], captured_payload["real_write_roots"])

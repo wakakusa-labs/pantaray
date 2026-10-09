@@ -10,23 +10,29 @@ import pytest
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
-    bootstrap_local_tooling_catalog,
-    create_capability_grant,
-    ensure_action_scratch_execution_context,
-    start_local_tool_invocation_audit,
-    upsert_approval_preference,
-)
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     PRIVATE_TEMP_DIRNAME,
 )
 from pantaray_agents.local_runtime.tooling.audit_payloads import (
     build_run_python_request_audit_args,
 )
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    bootstrap_local_tooling_catalog,
+    ensure_action_scratch_execution_context,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
-from pantaray_agents.local_runtime.tooling.models import ToolRuntimeResourceCreateInput
+from pantaray_agents.local_runtime.tooling.invocation_audit import (
+    start_local_tool_invocation_audit,
+)
+from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalPreferenceUpsertInput,
+    CapabilityGrantCreateInput,
+    ToolRuntimeResourceCreateInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    create_capability_grant,
+    upsert_approval_preference,
+)
 from pantaray_agents.local_runtime.tooling.resources.resource_repository import (
     create_tool_runtime_resource,
 )

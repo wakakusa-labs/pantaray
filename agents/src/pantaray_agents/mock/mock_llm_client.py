@@ -11,6 +11,10 @@ import logging
 import uuid
 from typing import Any, Protocol
 
+from pantaray_llm.contracts.action_turn import (
+    LlmActionTurnRequest,
+    LlmActionTurnResponse,
+)
 from pantaray_llm.contracts.tool_use import (
     LlmToolCall,
     LlmToolUseRequest,
@@ -39,6 +43,8 @@ class GeminiResponse:
         self.tool_calls = tool_calls
         self.dropped_tool_call_names: tuple[str, ...] = ()
         self.tool_continuation = tool_continuation
+        self.action_turn: LlmActionTurnResponse | None = None
+        self.provider_turn = None
 
 
 class ModelInterface(Protocol):
@@ -106,8 +112,8 @@ class AIOModelInterface:
 
         text = self.parent.get_response_text(prompt)
         if tool_use is not None:
-            if not isinstance(tool_use, LlmToolUseRequest):
-                raise TypeError("Mock tool_use must be an LlmToolUseRequest")
+            if not isinstance(tool_use, LlmToolUseRequest | LlmActionTurnRequest):
+                raise TypeError("Mock tool_use must be a tool-use request")
             return self._build_tool_use_response(text=text, tool_use=tool_use)
         parsed = None
         if response_mime_type == "application/json" and response_schema is not None:
@@ -123,7 +129,7 @@ class AIOModelInterface:
         return GeminiResponse(text, parsed)
 
     def _build_tool_use_response(
-        self, *, text: str, tool_use: LlmToolUseRequest
+        self, *, text: str, tool_use: LlmToolUseRequest | LlmActionTurnRequest
     ) -> GeminiResponse:
         loaded = json.loads(text)
         if not isinstance(loaded, dict):
@@ -135,6 +141,12 @@ class AIOModelInterface:
             raise ValueError(
                 "Mock native tool response exceeds max_parallel_tool_calls"
             )
+        if isinstance(tool_use, LlmActionTurnRequest):
+            response = GeminiResponse(text)
+            response.action_turn = LlmActionTurnResponse(
+                mode="action_turn", messages=[], calls=list(calls)
+            )
+            return response
         return GeminiResponse(
             text,
             tool_calls=calls,
@@ -152,7 +164,7 @@ class AIOModelInterface:
         )
 
     def _build_tool_call(
-        self, spec: object, *, tool_use: LlmToolUseRequest
+        self, spec: object, *, tool_use: LlmToolUseRequest | LlmActionTurnRequest
     ) -> LlmToolCall:
         if not isinstance(spec, dict):
             raise ValueError("Mock native tool call must be an object")

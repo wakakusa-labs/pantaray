@@ -37,7 +37,6 @@ def _validated_command_request(*, network_policy: str) -> ValidatedCommandReques
         action_id="action-1",
         approval_session_id="approval-session-1",
         approval_source="settings",
-        action_plan_path="/workspace/plan.md",
         private_storage_roots=["/app-data", "/artifacts"],
         action_workspace_root="/workspace",
         published_results_root="/published-results",
@@ -85,8 +84,6 @@ def test_render_workspace_profile_is_limited_to_declared_roots() -> None:
     assert "(allow process*)" not in profile
     assert '(subpath "/workspace")' in profile
     assert '(subpath "/dev/fd")' in profile
-    assert '(literal "/workspace/plan.md")' in profile
-    assert '(subpath "/workspace/plan.md")' in profile
     assert '(subpath "/app-temp/action-1")' not in profile
     assert '(subpath "/system-temp/worker-temp")' in profile
 
@@ -277,9 +274,6 @@ def test_system_temp_roots_open_to_commands_beneath_private_storage_deny() -> No
     assert profile.index(f"(deny file-read* (require-all {private_deny}") > (
         profile.index(read_allow)
     )
-    assert profile.index('(deny file-write*\n    (literal "/workspace/plan.md")') > (
-        profile.index(write_allow)
-    )
 
 
 def test_login_environment_profile_adds_keychain_and_agent() -> None:
@@ -320,7 +314,6 @@ def test_ripgrep_profile_without_own_roots_denies_all_private_storage() -> None:
         read_roots=("/",),
         private_storage_roots=("/app-data",),
         readable_private_roots=(),
-        action_plan_path="/app-data/workspace/plan.md",
     )
 
     # sandbox-exec rejects an empty (require-any), which would fail every search.

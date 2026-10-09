@@ -24,7 +24,6 @@ dependencies = [
     "numpy>=2.2.0",
     "pillow>=12.3.0",
     "httpx2==2.12.0",
-    "langgraph>=1.2.4",
     "jsonschema==4.25.1",
     "prometheus-client==0.23.1",
     "pantaray-llm",
@@ -94,12 +93,19 @@ files = [
     "src/pantaray_agents/schema/repositories",
     "src/pantaray_agents/schema/variables.py",
     "src/pantaray_agents/schema/memory_catalog.py",
+    "src/pantaray_agents/schema/chat.py",
+    "src/pantaray_agents/local_runtime/chat",
+    "src/pantaray_agents/routers/chat.py",
+    "src/pantaray_agents/agents/chat_agent",
+    "src/pantaray_agents/tasks/chat_turns.py",
     # NOTE: 実装（agents/repositories/utils 等）は段階導入。まずは API 契約（schema）を0件にする。
     #
     # 慎重な拡張:
     # - 3rd party の型スタブが薄い領域（prometheus_client 等）を避け、
     #   stdlib + fastapi + 自前schema で閉じている範囲から段階的に広げる。
     "src/pantaray_agents/security",
+    "src/pantaray_agents/tools",
+    "src/pantaray_agents/conversation",
     "src/pantaray_agents/config_tunables.py",
     "src/pantaray_agents/utils/public_error.py",
     "src/pantaray_agents/utils/trace_context.py",
@@ -118,13 +124,10 @@ files = [
     "src/pantaray_agents/agents/action_agent/runtime/steps/counters.py",
     "src/pantaray_agents/agents/action_agent/runtime/steps/persistence.py",
     "src/pantaray_agents/agents/action_agent/runtime/state/coercion.py",
-    "src/pantaray_agents/agents/action_agent/runtime/handlers/tool_runtime/parallel_policy.py",
     "src/pantaray_agents/local_runtime/memory_catalog",
     "src/pantaray_agents/local_runtime/embedding_local",
-    # 文書の読み取り（documents パッケージと、read ツールの文書分岐・ページ封筒）。
+    # 文書の読み取り（documents パッケージ。read ツールの文書分岐は tools にある）。
     "src/pantaray_agents/local_runtime/tooling/documents",
-    "src/pantaray_agents/local_runtime/tooling/brokering/broker_direct_read_document.py",
-    "src/pantaray_agents/local_runtime/tooling/brokering/broker_direct_read_page.py",
 ]
 warn_return_any = true
 warn_unused_configs = true

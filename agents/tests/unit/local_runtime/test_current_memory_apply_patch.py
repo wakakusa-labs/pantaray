@@ -22,10 +22,10 @@ from pantaray_agents.local_runtime.memory_catalog.editable_files import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -212,6 +212,24 @@ async def test_external_crlf_change_invalidates_the_read_snapshot(memory_runtime
     assert result.output["status"] == "needs_read"
     assert result.output["text"] == "external\r\n"
     assert target.read_bytes() == b"external\r\n"
+
+
+@pytest.mark.asyncio
+async def test_bom_memory_file_edits_from_the_returned_first_line(memory_runtime):
+    _, _, root = memory_runtime
+    target = root / "agent_experience/project.md"
+    target.write_bytes(b"\xef\xbb\xbfold\r\nkeep\r\n")
+    first = await _execute(memory_runtime, _change(target), "bom-read")
+    assert first.output["status"] == "needs_read"
+    returned_first_line = first.output["text"].split("\r\n")[0]
+    change = {
+        "op": "update",
+        "path": str(target),
+        "edits": [{"old_lines": [returned_first_line], "new_lines": ["new"]}],
+    }
+    saved = await _execute(memory_runtime, change, "bom-save")
+    assert saved.output["status"] == "success"
+    assert target.read_bytes() == b"\xef\xbb\xbfnew\r\nkeep\r\n"
 
 
 @pytest.mark.asyncio

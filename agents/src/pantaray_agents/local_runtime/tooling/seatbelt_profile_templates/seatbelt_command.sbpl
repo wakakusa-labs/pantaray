@@ -16,13 +16,11 @@
 (allow file-read-metadata
 {{PATH_ANCESTOR_CLAUSES}}
 )
-{{ACTION_PLAN_READ_DENY}}
 (deny file-write*)
 (allow file-write*
 {{FILE_WRITE_ROOT_CLAUSES}}
     (literal "/dev/null")
 )
-{{ACTION_PLAN_WRITE_DENY}}
 {{PRIVATE_STORAGE_DENY_RULES}}
 {{NETWORK_CLAUSE}}
 {{LOGIN_ENVIRONMENT_CLAUSE}}

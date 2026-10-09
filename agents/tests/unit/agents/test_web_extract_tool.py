@@ -104,7 +104,7 @@ async def test_web_extract_returns_normalized_payload(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -162,7 +162,7 @@ async def test_web_extract_without_query_reports_full_pages(monkeypatch) -> None
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -190,7 +190,7 @@ async def test_web_extract_invalid_response_maps_to_error(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         _fake_invoke,
     )
 
@@ -214,7 +214,7 @@ async def test_web_extract_invalid_response_maps_to_error(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_web_extract_transport_failure_maps_to_error(monkeypatch) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime.invoke_web_tools_wrapper",
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         AsyncMock(
             side_effect=WebContentExecutionError(
                 error_code="PROXY_REQUEST_FAILED",

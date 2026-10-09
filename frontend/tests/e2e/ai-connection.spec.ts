@@ -12,7 +12,9 @@ test('ゲスト起動から API キー接続を設定できる', async ({}, test
     await page.getByRole('link', { name: 'AI接続を設定' }).click();
     await page.waitForURL(/#\/settings\?section=ai_connection$/);
     await page.locator('#ai-model').fill('gpt-4.1');
-    await page.locator('form:has(#ai-model) button[type=submit]').click();
+    // The model is saved when the field is committed; there is no Save button for it.
+    await page.locator('#ai-model').press('Enter');
+    await expect(page.getByText('モデルを保存しました。')).toBeVisible();
     await page.locator('#ai-api-key').fill('e2e-local-placeholder');
     await page.locator('#ai-api-key + button').click();
 

@@ -24,11 +24,11 @@ from tests.unit.agents.action_runtime_failure_test_support import (
 from pantaray_agents.agents.action_agent.runtime.steps.counters import (
     CounterInvariantError,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
+    ActionExecutionContextError,
     ensure_action_scratch_execution_context,
-    load_execution_session,
 )
-from pantaray_agents.local_runtime.tooling.bootstrap import ActionExecutionContextError
+from pantaray_agents.local_runtime.tooling.repository import load_execution_session
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.mock_repository import MockRepository
@@ -529,7 +529,8 @@ async def test_invalid_tool_args_return_error_to_terminal_writer(
     invalid_arguments = {"content": 1}
     action_use_case._agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]  # noqa: SLF001
         side_effect=[
-            native_tool_turn("write_action_plan", invalid_arguments) for _ in range(5)
+            native_tool_turn("write_session_memory", invalid_arguments)
+            for _ in range(5)
         ]
     )
     request = _request(

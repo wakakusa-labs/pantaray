@@ -29,6 +29,7 @@ const canonicalUser = (key: string, content: string): CanonicalUserItem => ({
   visibility: 'always',
   entry: {
     step_kind: 'user',
+    chat_note: null,
     approved_suggestion: null,
     step_id: `step-${key}`,
     step_number: 1,
@@ -977,6 +978,46 @@ describe('ActionConversationView', () => {
     expect(screen.queryByText('実行中')).toBeNull();
   });
 
+  it('shimmers the live work and its running Tool only while the run is running', async () => {
+    const running: ActionConversationRunItem = {
+      kind: 'run',
+      runId: 'run-1',
+      status: 'running',
+      startedAt: '2026-08-30T00:00:00.000000Z',
+      completedAt: null,
+      lines: [tool('listed', 'List files'), tool('reading', 'Read file', 'processing', 2)],
+    };
+    const renderRun = (run: ActionConversationRunItem) => (
+      <UiLanguageProvider initialLanguage="en">
+        <ActionConversationView
+          view={viewWith([run])}
+          toolOutputLoader={EMPTY_TOOL_OUTPUT_LOADER}
+        />
+      </UiLanguageProvider>
+    );
+    const { container, rerender } = render(renderRun(running));
+    const shimmering = () =>
+      Array.from(container.querySelectorAll('.action-conversation__shimmer'), (node) =>
+        node.closest('.action-conversation__tool') ? 'tool' : node.textContent
+      );
+
+    expect(shimmering()).toEqual(["Pantaray's work"]);
+    await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work 2,/ }));
+    // Only the running Tool's line sweeps; the finished one stays still.
+    expect(shimmering()).toEqual(["Pantaray's work", 'tool']);
+    expect(
+      toolLineOf(
+        container.querySelector('.action-conversation__shimmer.action-conversation__tool-text')!
+      )
+    ).toHaveTextContent('Running');
+
+    // A run paused for approval is not working, and a finished run has nothing in progress.
+    rerender(renderRun({ ...running, status: 'approval_pending' }));
+    expect(shimmering()).toEqual([]);
+    rerender(renderRun({ ...running, status: 'success', lines: [tool('listed', 'List files')] }));
+    expect(shimmering()).toEqual([]);
+  });
+
   it.each([
     ['error', 'Action failed', 'Public failure'],
     ['canceled', 'Action canceled', 'Canceled by user'],
@@ -1220,7 +1261,10 @@ describe('ActionConversationView', () => {
     const writeText = vi.fn<(text: string) => Promise<void>>();
     beforeEach(() => {
       writeText.mockReset().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      Object.defineProperty(window, 'electron', {
+        configurable: true,
+        value: { clipboard: { writeText } },
+      });
     });
 
     it('copies the Markdown source of that answer only, and only final answers offer it', async () => {
@@ -1244,7 +1288,7 @@ describe('ActionConversationView', () => {
     });
 
     it('reports a clipboard failure instead of looking copied', async () => {
-      writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+      writeText.mockRejectedValue(new Error('IPC sender is not authorized.'));
       renderView(viewWith([answered('run-1', 'First')], 'success'));
 
       await userEvent.click(screen.getByRole('button', { name: 'Copy this answer' }));

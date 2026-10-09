@@ -14,6 +14,8 @@ export function CopyAnswerButton({ markdown }: { markdown: string }) {
       <button
         className="action-conversation__copy"
         type="button"
+        // Stays clickable in the collapsed preview (useCollapsedFocusBoundary).
+        data-collapsed-clickable
         aria-label={t('overlay.copyThisAnswer')}
         title={failed ?? t('overlay.copyThisAnswer')}
         onClick={() => void copy(() => markdown)}

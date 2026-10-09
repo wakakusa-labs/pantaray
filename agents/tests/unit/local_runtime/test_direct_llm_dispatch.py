@@ -43,12 +43,23 @@ from pantaray_agents.local_runtime.runtime.connection_store import (
     ChatGptCredential,
     LlmConnection,
 )
-from pantaray_llm.contracts.request import LlmProxyResponse, LlmRequest
+from pantaray_agents.local_runtime.runtime.job_types import (
+    CHAT_TURN_TRACE_TYPE,
+    LOCAL_ACTION_JOB_TYPE,
+    LOCAL_ACTION_SUBAGENT_JOB_TYPE,
+)
+from pantaray_agents.utils.trace_context import TraceContextManager
+from pantaray_llm.contracts.request import (
+    LlmProxyResponse,
+    LlmRequest,
+    LlmRequestTrace,
+)
 from pantaray_llm.contracts.tool_use import LlmToolUseResponse
 from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import LlmProxyExecutionError, ProviderError
 from pantaray_llm.profiles import ACTIVITY_SUMMARY_PROFILE_ID, MEMORY_UPDATE_PROFILE_ID
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.providers.anthropic.provider import MISSING_CALL_REPAIR_LIMIT
 from pantaray_llm.providers.openai_responses.retry_policy import (
     LLM_TRANSPORT_MAX_ATTEMPTS,
 )
@@ -74,7 +85,7 @@ FIREWORKS_CONNECTION = ApiKeyConnection(
     api_key=FIREWORKS_KEY,
 )
 ANTHROPIC_CONNECTION = ApiKeyConnection(
-    provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY
+    provider="anthropic", model="claude-sonnet-5-5", api_key=ANTHROPIC_KEY
 )
 CHATGPT_CONNECTION = ChatGptConnection(
     model="gpt-5.6-sol",
@@ -104,7 +115,7 @@ ANSWER_SCHEMA = {
 ANTHROPIC_MESSAGE = {
     "type": "message",
     "id": "msg_anthropic_1",
-    "model": "claude-sonnet-5-2026",
+    "model": "claude-sonnet-5-5",
     "content": [
         {"type": "thinking", "thinking": "considering"},
         {"type": "text", "text": "hello"},
@@ -654,7 +665,7 @@ async def test_a_known_capability_gap_fails_before_any_request(
 
 
 @pytest.mark.parametrize(
-    ("connection", "host", "path", "sends", "headers"),
+    ("connection", "host", "path", "budget", "headers"),
     [
         (
             CHATGPT_CONNECTION,
@@ -680,7 +691,8 @@ async def test_a_known_capability_gap_fails_before_any_request(
             ANTHROPIC_CONNECTION,
             "api.anthropic.com",
             "/v1/messages",
-            1,
+            # Room to ask again after a tool use reply without a call.
+            1 + MISSING_CALL_REPAIR_LIMIT,
             {"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01"},
         ),
     ],
@@ -691,15 +703,15 @@ async def test_each_connection_reaches_only_its_own_endpoint(
     connection: LlmConnection,
     host: str,
     path: str,
-    sends: int,
+    budget: int,
     headers: dict[str, str],
 ) -> None:
     recorder = boundary()
 
     result = await dispatch(connection)
 
-    assert len(recorder.requests) == sends
-    assert recorder.budgets == [sends]
+    assert len(recorder.requests) == 1
+    assert recorder.budgets == [budget]
     assert recorder.subjects == [OWNER_ID]
     assert recorder.targets[-1] == (host, path)
     assert {reached for reached, _ in recorder.targets} == {host}
@@ -722,7 +734,7 @@ async def test_each_connection_reaches_only_its_own_endpoint(
             api_key=FIREWORKS_KEY,
         ),
         ApiKeyConnection(
-            provider="anthropic", model="claude-opus-5", api_key=ANTHROPIC_KEY
+            provider="anthropic", model="claude-opus-5-5", api_key=ANTHROPIC_KEY
         ),
         ChatGptConnection(model=USER_MODEL, credential=CHATGPT_CONNECTION.credential),
     ],
@@ -793,6 +805,99 @@ async def test_a_rejected_tool_call_becomes_the_model_output_error(
     assert exc_info.value.tool_name == "not_declared"
     assert exc_info.value.usage_metadata is not None
     assert exc_info.value.local_job_id == LOCAL_JOB_ID
+
+
+async def test_a_chatgpt_conversation_keeps_one_cache_session_per_job(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """The backend keeps a session's cache together only by its session-id."""
+
+    recorder = boundary()
+
+    def job(job_id: str) -> LlmRequest:
+        return llm_request().model_copy(
+            update={
+                "prompt_cache_key": "owner-key",
+                "trace": LlmRequestTrace(local_job_id=job_id),
+            }
+        )
+
+    for request in (job("job-a"), job("job-a"), job("job-b")):
+        await dispatch(CHATGPT_CONNECTION, request=request)
+    await dispatch(
+        ApiKeyConnection(provider="openai", model=USER_MODEL, api_key=OPENAI_KEY),
+        request=job("job-a"),
+    )
+
+    sent = [
+        (request.headers.get("session-id"), json.loads(request.content))
+        for request in recorder.requests
+        if request.url.path.endswith("/responses")
+    ]
+    sessions = [session for session, _ in sent]
+    # The key and the header name one conversation; the raw job id stays off.
+    assert all(body["prompt_cache_key"] == session for session, body in sent[:3])
+    assert sessions[0] == sessions[1] != sessions[2]
+    assert "job-a" not in str(sessions[0])
+    # Another provider keeps the key it was given and gets no session header.
+    assert sent[3] == (None, {**sent[3][1], "prompt_cache_key": "owner-key"})
+
+
+async def test_an_actions_runs_share_one_session_and_its_children_do_not(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """A follow-up run continues the Action's conversation; a child has its own."""
+
+    recorder = boundary()
+
+    async def run(job_id: str, job_type: str) -> str | None:
+        request = llm_request().model_copy(
+            update={"trace": LlmRequestTrace(local_job_id=job_id)}
+        )
+        # What the job executor binds for every job it runs.
+        trace = {"action_id": "action-1", "extra": {"job_type": job_type}}
+        with TraceContextManager(user_id=OWNER_ID, local_job_id=job_id, **trace):
+            await dispatch(CHATGPT_CONNECTION, request=request)
+        return recorder.requests[-1].headers.get("session-id")
+
+    first = await run("job-1", LOCAL_ACTION_JOB_TYPE)
+    follow_up = await run("job-2", LOCAL_ACTION_JOB_TYPE)
+    child = await run("job-3", LOCAL_ACTION_SUBAGENT_JOB_TYPE)
+    sibling = await run("job-4", LOCAL_ACTION_SUBAGENT_JOB_TYPE)
+
+    assert first == follow_up
+    assert len({first, child, sibling}) == 3
+    assert "action-1" not in str(first)
+
+
+async def test_the_chat_keeps_one_session_per_user_across_its_turns(
+    boundary: Callable[..., SendBoundary],
+) -> None:
+    """Every chat turn names itself, so the user's chat reads its own cache."""
+
+    recorder = boundary()
+
+    async def turn(user_id: str, key: str) -> str | None:
+        request = llm_request().model_copy(
+            update={"trace": LlmRequestTrace(local_job_id=f"chat:{key}")}
+        )
+        # What tasks/chat_turns.py binds for each turn.
+        chat = {"extra": {"job_type": CHAT_TURN_TRACE_TYPE}}
+        with TraceContextManager(user_id=user_id, local_job_id=f"chat:{key}", **chat):
+            await direct.execute_direct_llm_request(
+                connection=CHATGPT_CONNECTION,
+                request=request,
+                uploaded_blobs={},
+                user_id=user_id,
+                response_schema=None,
+            )
+        return recorder.requests[-1].headers.get("session-id")
+
+    first, next_turn = await turn(OWNER_ID, "a1"), await turn(OWNER_ID, "a7")
+    other_user = await turn("owner-2", "a1")
+
+    assert first == next_turn != other_user
+    assert OWNER_ID not in str(first)
 
 
 async def test_a_credential_never_reaches_the_caller_or_the_log(

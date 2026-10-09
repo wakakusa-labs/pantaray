@@ -34,9 +34,10 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .action_subagent_broker_authority import authorize_direct_workspace_writes
-from .broker_common import BrokerContext, BrokerPolicyError
+from .broker_common import BrokerContext
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_patch_read_gate import needs_read_output
 from .broker_protocol import (

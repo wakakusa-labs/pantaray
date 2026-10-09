@@ -27,8 +27,9 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: frontendPort,
       strictPort: true,
-      host: true,
-      cors: true,
+      // Loopback only, with Vite's default CORS (localhost origins): the dev server serves
+      // source and project files, so neither the LAN nor arbitrary web pages may read it.
+      host: '127.0.0.1',
     },
     build: {
       outDir: 'dist',

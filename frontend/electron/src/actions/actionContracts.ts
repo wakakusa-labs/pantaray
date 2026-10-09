@@ -12,7 +12,7 @@ const ToolStatusSchema = z.enum(['processing', 'success', 'error', 'timeout']);
 const TERMINAL_CONVERSATION_STATUSES = new Set(['success', 'error', 'canceled']);
 const ACTION_MESSAGE_ID_MAX_CODEPOINTS = 128;
 const ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS = 32_000;
-const ACTION_MESSAGE_MAX_IMAGES = 32;
+export const ACTION_MESSAGE_MAX_IMAGES = 32;
 const ACTION_MESSAGE_MAX_PROJECT_REFS = 32;
 /** Documents one message may carry; the local backend enforces the same limit. */
 export const ACTION_MESSAGE_MAX_FILES = 10;
@@ -47,8 +47,10 @@ function boundedActionMessageText(maxCodePoints: number): z.ZodType<string> {
     );
 }
 
-const ActionMessageIdSchema = boundedActionMessageText(ACTION_MESSAGE_ID_MAX_CODEPOINTS);
-const ActionMessageContentSchema = boundedActionMessageText(ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS);
+export const ActionMessageIdSchema = boundedActionMessageText(ACTION_MESSAGE_ID_MAX_CODEPOINTS);
+export const ActionMessageContentSchema = boundedActionMessageText(
+  ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS
+);
 
 const ActionMessageTargetSchema = z.discriminatedUnion('kind', [
   z
@@ -67,7 +69,7 @@ const ActionMessageTargetSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-const ImageReferenceSchema = z
+export const ImageReferenceSchema = z
   .object({
     kind: z.literal('image'),
     storage_path: NonBlankTextSchema,
@@ -186,6 +188,8 @@ const UserEntrySchema = z
     accepted_sequence: z.number().int().positive(),
     content: NonBlankTextSchema.nullable(),
     approved_suggestion: ApprovedSuggestionSchema.nullable(),
+    // What Pantaray's chat wrote when it handed this to the task: Pantaray's, not the user's.
+    chat_note: NonBlankTextSchema.nullable(),
     images: z.array(ImageReferenceSchema),
     // Code-point spans of workspace projects named in `content`, as sent.
     project_refs: z.array(
@@ -205,7 +209,7 @@ const UserEntrySchema = z
   })
   .strict()
   .superRefine((entry, context) => {
-    if (entry.content === null && entry.approved_suggestion === null) {
+    if (entry.content === null && entry.approved_suggestion === null && entry.chat_note === null) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'USER content is missing' });
     }
     if ((entry.status === 'adopted') !== (entry.step_number !== null)) {

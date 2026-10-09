@@ -33,6 +33,16 @@ import type {
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type {
+  ChatItem,
+  ChatItemPage,
+  ChatItemPageRequest,
+  ChatMessageRequest,
+  ChatMessageSendResult,
+  ChatTurnRetryRequest,
+  ChatTurnRetryResult,
+  ChatTurnState,
+} from '../../electron/src/chat/chatContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
@@ -109,6 +119,11 @@ type ElectronGlobalShortcutChangeResult =
       reason: 'registration_unavailable' | 'persistence_failed';
       state: ElectronGlobalShortcutState;
     };
+
+/** Mirrors electron/src/ipc/schemas/overlayPlacement.ts: a cell of the 3 × 5 screen grid. */
+type ElectronOverlayPlacementKind = 'suggestion' | 'started' | 'history';
+type ElectronOverlayCell = { row: number; column: number };
+type ElectronOverlayPlacements = Record<ElectronOverlayPlacementKind, ElectronOverlayCell>;
 
 type ElectronOverlaySnapshot = {
   suggestionId: string;
@@ -216,9 +231,28 @@ declare global {
           'created' | 'loading' | 'focused' | 'initializing' | 'login' | 'recording_intro'
         >;
         onChanged?: (cb: (payload: unknown) => void) => () => void;
+        /** The Overlay asked to show this Action's latest card in the chat. */
+        onShowChat?: (cb: (payload: { actionId: string }) => void) => () => void;
+      };
+      /** The single chat; main accepts these from the main window only. */
+      chat?: {
+        sendMessage: (request: ChatMessageRequest) => Promise<ChatMessageSendResult>;
+        /** Newest first; pass the page's `next_cursor` as `before` for older items. */
+        listItems: (request: ChatItemPageRequest) => Promise<ChatItemPage>;
+        onItemAppended: (callback: (item: ChatItem) => void) => () => void;
+        /** Runs the turn that ended in this failure again (the chat's 「もう一度」). */
+        retryTurn: (request: ChatTurnRetryRequest) => Promise<ChatTurnRetryResult>;
+        /** The turn's state as main last heard it; null before the live session has said. */
+        getTurnState: () => Promise<ChatTurnState | null>;
+        /** Whether a turn is answering: the typing bubble. */
+        onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };
       actionFiles?: {
         open: (params: { path: string }) => Promise<void>;
+      };
+      /** Overlay windows only. */
+      clipboard?: {
+        writeText: (text: string) => Promise<void>;
       };
       actions?: {
         submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageSubmitResult>;
@@ -276,6 +310,13 @@ declare global {
       shortcut?: {
         getState: () => Promise<ElectronGlobalShortcutState>;
         setAccelerator: (accelerator: string) => Promise<ElectronGlobalShortcutChangeResult>;
+      };
+      overlayPlacement?: {
+        get: () => Promise<ElectronOverlayPlacements>;
+        set: (update: {
+          kind: ElectronOverlayPlacementKind;
+          cell: ElectronOverlayCell;
+        }) => Promise<ElectronOverlayPlacements>;
       };
       workspaceSettings?: {
         get: () => Promise<ElectronWorkspaceSettings>;
@@ -359,6 +400,8 @@ declare global {
         dragEnd?: () => void;
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
+        /** Brings the main window forward on this Action's latest chat card. */
+        showChat?: (request: { actionId: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
         rejectAction: (data: unknown) => void;
         hide: () => void;

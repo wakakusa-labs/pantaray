@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -241,7 +242,12 @@ def upsert_history_entry(
     history: list[HistoryEntry],
     entry: HistoryEntry,
 ) -> None:
-    """Store one logical History Ref, replacing an earlier projection if present."""
+    """Store one logical History Ref, replacing an earlier projection if present.
+
+    History stays in ``step_number`` order. Every path but a parallel batch
+    writes in that order already; a parallel batch's siblings finish in any
+    order, and their rows still land in the order the model declared them.
+    """
     short_step_id = entry.get("short_step_id")
     if isinstance(short_step_id, str) and short_step_id:
         history[:] = [
@@ -249,7 +255,7 @@ def upsert_history_entry(
             for current in history
             if current.get("short_step_id") != short_step_id
         ]
-    history.append(entry)
+    bisect.insort(history, entry, key=lambda current: current["step_number"])
 
 
 def project_latest_history_entries(

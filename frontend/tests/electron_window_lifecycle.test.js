@@ -256,6 +256,8 @@ test('createMainWindow continues when centering is interrupted by EINTR', () => 
   const win = withMutedConsole(() => createMainWindow({ initialUiLanguage: 'ja' }));
 
   assert.equal(win.options.width, 1000);
+  // The first click after an overlay took keyboard focus acts instead of only refocusing.
+  assert.equal(win.options.acceptFirstMouse, true);
   assert.deepEqual(calls, [
     'center',
     'center',

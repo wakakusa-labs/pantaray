@@ -1,6 +1,6 @@
 """Computer activity recorded after the Insight a Suggestion run decides on.
 
-The reads belong to ``insight_agent.zanei_tools.ZaneiTools``. This session opens
+The reads belong to ``tools.zanei.ZaneiTools``. This session opens
 one per run at the cursor the triggering short Insight committed, so the run sees
 what happened after the observations in its prompt even when later Insights have
 moved the shared cursor. It never writes a cursor. The Suggestion job owns the
@@ -12,13 +12,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.local_runtime.context.source_gate import (
+    ActiveSource,
+    SourceInvalidated,
+)
+from pantaray_agents.local_runtime.context.source_reader import SourceReader
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     tool_error_response,
 )
-from pantaray_agents.agents.insight_agent.zanei_tools import (
+from pantaray_agents.tools.zanei import (
     EVENT_REQUEST_SCHEMA,
     EVENT_TOOL,
     MAX_TIMELINE_PAGES_PER_RUN,
@@ -26,11 +31,6 @@ from pantaray_agents.agents.insight_agent.zanei_tools import (
     PAGE_TOOL,
     ZaneiTools,
 )
-from pantaray_agents.local_runtime.context.source_gate import (
-    ActiveSource,
-    SourceInvalidated,
-)
-from pantaray_agents.local_runtime.context.source_reader import SourceReader
 
 RECORDING_UNAVAILABLE_STATUS = "recording_unavailable"
 ZANEI_READ_FAILED_ERROR_CODE = "ZANEI_READ_FAILED"

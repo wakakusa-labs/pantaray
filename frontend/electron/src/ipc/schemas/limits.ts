@@ -15,3 +15,5 @@ export const MAX_ARRAY_LENGTH = 1000;
 export const MAX_REASON_LENGTH = 1024;
 export const MAX_LAST_CHUNK_INDEX = 1_000_000;
 export const MAX_ACCELERATOR_LENGTH = 128;
+/** A whole conversation copied as Markdown, in UTF-16 code units. */
+export const MAX_CLIPBOARD_TEXT_LENGTH = 10_000_000;

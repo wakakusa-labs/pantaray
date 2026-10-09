@@ -1,50 +1,54 @@
+"""One memory update as a model conversation on the shared loop.
+
+The harness adds what every memory edit run needs around the editing tools: a
+run-local store that keeps an oversized tool result out of the conversation and
+the `tool_result_fetch` tool that pages it back, and the `completed` ending
+tool that reports which memory requests the run applied. A run is never
+resumed -- a stopped job prepares a fresh workspace and starts over -- so the
+history stays in memory.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from pantaray_agents.agents.artifact_react import (
-    COMPLETED_TOOL_NAME,
-    ReactLoopPolicy,
-    ReactLoopResult,
-    ReactLoopStep,
-    ReactToolDefinition,
-    ReactToolResult,
+from pantaray_agents.agents.artifact_react import COMPLETED_TOOL_NAME
+from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.conversation import provider_turns
+from pantaray_agents.conversation.budget import ContextBudget, UsageTotals
+from pantaray_agents.conversation.loop import (
+    Continue,
+    ConversationEntry,
+    ConversationRun,
+    Finish,
+    IdleTurn,
+    RecordedTurn,
+    SendTurn,
+    run_conversation,
 )
-from pantaray_agents.agents.artifact_react.native_runner import (
-    NativeReactCompletion,
-    NativeReactRunInput,
-    run_native_react,
-)
-from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import LlmToolCallTurn
+from pantaray_agents.conversation.window import WindowState
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_llm.contracts.tool_use import (
-    LlmToolContinuation,
-    LlmToolDefinition,
-    LlmToolResult,
+from pantaray_agents.tools.contract import ReactToolDefinition, ReactToolResult
+from pantaray_llm.contracts.conversation import (
+    LlmTurnItem,
+    LlmTurnToolResultItem,
+    LlmTurnUserItem,
 )
+from pantaray_llm.contracts.input_block import LlmInputTextBlock
+from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
+from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 
 from .tool_result_projection import project_tool_result
 from .tool_result_store import TOOL_RESULT_FETCH_TOOL_NAME, RunToolResultStore
 
-type MemoryLlmCaller = Callable[
-    [
-        str,
-        tuple[LlmToolDefinition, ...],
-        LlmToolContinuation | None,
-        LlmToolResult | None,
-    ],
-    Awaitable[LlmToolCallTurn],
-]
-type MemoryStepRecorder = Callable[[ReactLoopStep], Awaitable[None]]
-type MemoryPromptBuilder = Callable[[tuple[ReactToolResult, ...], str | None], str]
-type MemoryThoughtConsumer = Callable[[], str | None]
-type MemoryCompletionValidator = Callable[[], str | None]
-type SyncOperation[T] = Callable[[], T]
-
 APPLIED_MEMORY_REQUESTS_ARG = "applied_memory_requests"
+_COMPLETE_REQUIRED = (
+    "Respond with tool calls. When the memory update is correct and complete, "
+    f"call `{COMPLETED_TOOL_NAME}` alone."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,20 +57,17 @@ class MemoryFileEditorRunInput:
     # The runner borrows this descriptor and owns only its internal duplicate.
     tool_result_directory_fd: int
     tool_definitions: tuple[ReactToolDefinition, ...]
-    build_prompt: MemoryPromptBuilder
-    call_llm: MemoryLlmCaller
-    record_step: MemoryStepRecorder
-    policy: ReactLoopPolicy
-    consume_llm_thoughts: MemoryThoughtConsumer | None = None
-    validate_completion: MemoryCompletionValidator | None = None
+    # The request's own message every turn is sent behind, and the run's task,
+    # which leads the history.
+    prompt: str
+    task: str
+    system_instruction: str
+    send: SendTurn
+    usage: Callable[[], UsageTotals]
+    max_turns: int
+    max_tool_calls: int
     # The memory requests this run renders; `completed` reports which it applied.
     memory_request_ids: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class MemoryFileEditorRunResult:
-    loop_result: ReactLoopResult
-    applied_memory_request_ids: tuple[str, ...]
 
 
 def _completed_tool(memory_request_ids: tuple[str, ...]) -> LlmToolDefinition:
@@ -98,7 +99,9 @@ def _completed_tool(memory_request_ids: tuple[str, ...]) -> LlmToolDefinition:
 
 async def run_memory_file_editor(
     run_input: MemoryFileEditorRunInput,
-) -> MemoryFileEditorRunResult:
+) -> tuple[str, ...]:
+    """Run the update to its accepted `completed`; return the applied requests."""
+
     if any(
         definition.name == TOOL_RESULT_FETCH_TOOL_NAME
         for definition in run_input.tool_definitions
@@ -110,59 +113,66 @@ async def run_memory_file_editor(
         directory_fd=os.dup(run_input.tool_result_directory_fd)
     )
 
-    def complete(
-        arguments: dict[str, JSONValue],
-        _final_turn: bool,
-    ) -> NativeReactCompletion[tuple[str, ...]]:
-        applied = arguments.get(APPLIED_MEMORY_REQUESTS_ARG, [])
-        applied_ids = (
-            tuple(item for item in applied if isinstance(item, str))
-            if isinstance(applied, list)
-            else ()
-        )
-        if not isinstance(applied, list) or len(applied_ids) != len(applied):
-            return NativeReactCompletion(
-                value=None,
-                final_text="",
-                error_message=(
-                    f"{APPLIED_MEMORY_REQUESTS_ARG} must be a list of request_id "
-                    "strings."
-                ),
+    def decide(turn: IdleTurn) -> Finish[tuple[str, ...]] | Continue:
+        if turn.ending_call is None:
+            return Continue(_COMPLETE_REQUIRED)
+        applied = turn.ending_call.arguments.get(APPLIED_MEMORY_REQUESTS_ARG, [])
+        if not isinstance(applied, list) or not all(
+            isinstance(item, str) for item in applied
+        ):
+            return Continue(
+                f"{APPLIED_MEMORY_REQUESTS_ARG} must be a list of request_id strings."
             )
-        completion_error = (
-            run_input.validate_completion()
-            if run_input.validate_completion is not None
-            else None
-        )
-        if completion_error is not None:
-            return NativeReactCompletion(
-                value=None,
-                final_text="",
-                error_message=completion_error,
-            )
-        return NativeReactCompletion(value=applied_ids, final_text="")
+        return Finish(tuple(item for item in applied if isinstance(item, str)))
 
-    async def project_result(result: ReactToolResult) -> ReactToolResult:
-        return await _run_sync_to_completion(
-            lambda: project_tool_result(result=result, store=result_store)
+    async def on_result(
+        call: LlmToolCall, result: ReactToolResult
+    ) -> LlmTurnToolResultItem:
+        # The loop awaits this to its end through a stop, so the store is
+        # never closed under a projection still writing to it.
+        projected = await asyncio.to_thread(
+            project_tool_result, result=result, store=result_store
+        )
+        return LlmTurnToolResultItem(
+            type="tool_result",
+            call_id=call.call_id,
+            name=call.name,
+            output=projected.output,
         )
 
+    # Memory update runs on the models an Action does, under the same input cap.
+    tunables = load_local_runtime_tunables().action_agent
+    identity, _ = provider_turns.read_provider_turn_target(
+        inference_profile=MEMORY_UPDATE_PROFILE_ID
+    )
     try:
-        result = await run_native_react(
-            NativeReactRunInput(
-                run_id=run_input.run_id,
-                tool_definitions=(
-                    *run_input.tool_definitions,
-                    result_store.fetch_definition(),
+        applied = await run_conversation(
+            ConversationRun(
+                prompt=run_input.prompt,
+                system_instruction=run_input.system_instruction,
+                tools=(*run_input.tool_definitions, result_store.fetch_definition()),
+                ending_tools=(_completed_tool(run_input.memory_request_ids),),
+                history=(ConversationEntry(_user_text(run_input.task)),),
+                provider_turns=provider_turns.ProviderTurnStore(identity),
+                inference_profile=MEMORY_UPDATE_PROFILE_ID,
+                max_turns=run_input.max_turns,
+                max_tool_calls=run_input.max_tool_calls,
+                max_parallel_tool_calls=tunables.max_parallel_tool_calls,
+                window=WindowState(
+                    budget=ContextBudget(
+                        window_tokens=tunables.context_window_tokens,
+                        baseline=None,
+                        reset_pending=False,
+                    ),
+                    omit_before=0,
                 ),
-                terminal_tool=_completed_tool(run_input.memory_request_ids),
-                complete=complete,
-                build_prompt=run_input.build_prompt,
-                call_llm=run_input.call_llm,
-                record_step=run_input.record_step,
-                project_tool_result=project_result,
-                policy=run_input.policy,
-                consume_llm_thoughts=run_input.consume_llm_thoughts,
+                usage=run_input.usage,
+                send=run_input.send,
+                before_send=_nothing_arrives,
+                on_turn=_keep_nothing,
+                on_result=on_result,
+                on_notice=_keep_nothing,
+                decide=decide,
             )
         )
     except BaseException as run_error:
@@ -174,39 +184,26 @@ async def run_memory_file_editor(
                 f"{type(close_error).__name__}: {close_error}"
             )
         raise
-    else:
-        result_store.close()
-        return MemoryFileEditorRunResult(
-            loop_result=result.loop_result,
-            applied_memory_request_ids=result.value or (),
-        )
+    result_store.close()
+    return applied
 
 
-async def _run_sync_to_completion[T](operation: SyncOperation[T]) -> T:
-    worker = asyncio.create_task(asyncio.to_thread(operation))
-    try:
-        return await asyncio.shield(worker)
-    except asyncio.CancelledError as cancellation:
-        while not worker.done():
-            try:
-                await asyncio.shield(worker)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        try:
-            worker.result()
-        except BaseException as worker_error:
-            cancellation.add_note(
-                "background operation also failed after cancellation: "
-                f"{type(worker_error).__name__}: {worker_error}"
-            )
-        raise
+async def _nothing_arrives() -> Sequence[LlmTurnItem]:
+    return ()
+
+
+async def _keep_nothing(_item: RecordedTurn | LlmTurnUserItem) -> None:
+    return None
+
+
+def _user_text(text: str) -> LlmTurnUserItem:
+    return LlmTurnUserItem(
+        type="user", content=[LlmInputTextBlock(type="input_text", text=text)]
+    )
 
 
 __all__ = [
     "APPLIED_MEMORY_REQUESTS_ARG",
     "MemoryFileEditorRunInput",
-    "MemoryFileEditorRunResult",
     "run_memory_file_editor",
 ]

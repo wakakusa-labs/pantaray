@@ -408,7 +408,7 @@ async def test_wire_request_keeps_the_cloud_envelope_for_media_and_structured_ou
                 "type": "json_schema",
                 "json_schema": _StructuredResponse.model_json_schema(),
             },
-            "prompt_cache_key": "action-42",
+            "prompt_cache_key": hashlib.sha256(b"user-1").hexdigest(),
         },
         ensure_ascii=False,
     )
@@ -473,6 +473,7 @@ async def test_wire_request_keeps_the_cloud_envelope_for_tool_use_continuation(
                 "session_version": "1",
             },
             "tool_use": tool_use.model_dump(mode="json"),
+            "prompt_cache_key": hashlib.sha256(b"user-1").hexdigest(),
         },
         ensure_ascii=False,
     )
@@ -862,21 +863,23 @@ async def test_generate_content_rejects_more_tool_calls_than_requested(
 
 
 @pytest.mark.asyncio
-async def test_generate_content_pins_the_prompt_cache_key_to_the_action(
+async def test_generate_content_keys_the_prompt_cache_by_owner_not_by_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """action の推論は action_id 固定の prompt cache key で送る（決定事項 8）。"""
+    """An Action and a background job of one owner share one opaque cache key."""
 
     monkeypatch.setattr(
         "pantaray_agents.local_runtime.llm_proxy.client.httpx2.AsyncClient",
         _RecordingAsyncClient,
     )
     client = _build_client()
+    sent_keys: list[str] = []
 
-    for _ in range(2):
-        with TraceContextManager(
-            user_id="user-1", local_job_id="req-1", action_id="action-42"
-        ):
+    for trace in (
+        {"local_job_id": "action-job", "action_id": "action-42"},
+        {"local_job_id": "suggestion-job", "suggestion_id": "suggestion-7"},
+    ):
+        with TraceContextManager(user_id="user-1", **trace):
             await client.aio.models.generate_content(
                 contents=["prompt"],
                 config=types.GenerateContentConfig(
@@ -887,29 +890,6 @@ async def test_generate_content_pins_the_prompt_cache_key_to_the_action(
         request = _RecordingAsyncClient.last_request
         assert request is not None
         request_json = json.loads(request["data"]["request"])  # type: ignore[index]
-        assert request_json["prompt_cache_key"] == "action-42"
+        sent_keys.append(request_json["prompt_cache_key"])
 
-
-@pytest.mark.asyncio
-async def test_generate_content_omits_the_prompt_cache_key_outside_an_action(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.llm_proxy.client.httpx2.AsyncClient",
-        _RecordingAsyncClient,
-    )
-    client = _build_client()
-
-    with TraceContextManager(user_id="user-1", local_job_id="req-1"):
-        await client.aio.models.generate_content(
-            contents=["prompt"],
-            config=types.GenerateContentConfig(
-                inference_profile="dummy.default",
-                system_instruction="system prompt",
-            ),
-        )
-
-    request = _RecordingAsyncClient.last_request
-    assert request is not None
-    request_json = json.loads(request["data"]["request"])  # type: ignore[index]
-    assert "prompt_cache_key" not in request_json
+    assert sent_keys == [hashlib.sha256(b"user-1").hexdigest()] * 2

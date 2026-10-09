@@ -4,24 +4,17 @@ import styled from 'styled-components';
 import { ArrowUp, Play, Plus, Square } from 'lucide-react';
 
 import { useI18n } from '@/context/useI18n';
-import {
-  ACTION_IMAGE_MIME_TYPES,
-  buildActionImageUrl,
-} from '../../../electron/src/protocol/imageStoragePath';
-import { ACTION_DOCUMENT_EXTENSIONS } from '../../../electron/src/ipc/schemas/actionAttachments';
-import { ACTION_IMAGE_MAX_PER_MESSAGE } from '../../../electron/src/ipc/schemas/actionImages';
-import { ACTION_MESSAGE_MAX_FILES } from '../../../electron/src/actions/actionContracts';
-import { AttachedFileChip, FileChip } from '../action-conversation/AttachedFileChip';
 import { ApprovalModeMenu } from './ApprovalModeMenu';
 import { ComposerMessageField } from './ComposerMessageField';
 import type { ComposerMention } from './composerMentions';
 import type { ActionApprovalModeControl } from './useActionApprovalMode';
+import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
 import {
-  attachmentKey,
+  ATTACHMENT_ACCEPT,
   type AttachmentFailure,
   type ComposerAttachment,
-  type ComposerState,
-} from './useOverlayComposerController';
+} from './attachmentStaging';
+import type { ComposerState } from './useOverlayComposerController';
 
 /**
  * 入力欄と、その入力に対する操作をひとつにまとめた枠。
@@ -51,60 +44,6 @@ const ComposerForm = styled.form`
   &:has(textarea:focus-visible) {
     outline: 2px solid rgba(255, 255, 255, 0.7);
     outline-offset: -1px;
-  }
-`;
-
-const ComposerAlert = styled.span`
-  color: rgba(254, 202, 202, 0.95);
-  font-size: var(--text-meta-size);
-`;
-
-const AttachmentList = styled.ul`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-`;
-
-const AttachmentItem = styled.li`
-  position: relative;
-
-  img {
-    box-sizing: border-box;
-    display: block;
-    width: 96px;
-    height: 96px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    object-fit: cover;
-  }
-
-  /* Room for the remove button, so it never covers the name. */
-  ${FileChip}:not(:last-child) {
-    padding-right: 32px;
-  }
-`;
-
-const AttachmentRemoveButton = styled.button`
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 50%;
-  color: var(--text-primary);
-  background: rgba(20, 24, 30, 0.9);
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-
-  &:focus-visible {
-    outline: 2px solid rgba(255, 255, 255, 0.7);
-    outline-offset: 2px;
   }
 `;
 
@@ -201,9 +140,6 @@ const ComposerPrimaryButton = styled.button`
     cursor: default;
   }
 `;
-
-/** What the picker offers; dropped and pasted files go through the same controller checks. */
-const ATTACH_ACCEPT = [...ACTION_IMAGE_MIME_TYPES, ...ACTION_DOCUMENT_EXTENSIONS].join(',');
 
 const MESSAGE_FIELD_ID = 'overlay-composer-message';
 const MESSAGE_ERROR_ID = 'overlay-composer-message-error';
@@ -350,17 +286,7 @@ export function OverlayComposer({
 }: OverlayComposerProps) {
   const { t } = useI18n();
   const attachInputRef = useRef<HTMLInputElement>(null);
-  const attachmentListRef = useRef<HTMLUListElement>(null);
   const isReadOnly = retryAcceptance || Boolean(submissionControls);
-  const images = attachments.filter((attachment) => attachment.kind === 'image');
-  // The removed button leaves the page; focus moves to the neighbouring remove button, or back
-  // to the message once nothing is attached, so a keyboard user is never dropped on <body>.
-  const removeAttachment = (attachment: ComposerAttachment, index: number) => {
-    const removeButtons = attachmentListRef.current?.querySelectorAll('button') ?? [];
-    const next = removeButtons[index + 1] ?? removeButtons[index - 1] ?? textareaRef.current;
-    onRemoveAttachment(attachment);
-    next?.focus();
-  };
 
   return (
     <ComposerForm
@@ -390,6 +316,7 @@ export function OverlayComposer({
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
+        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
           // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。
@@ -405,61 +332,13 @@ export function OverlayComposer({
           onAttachFiles(files);
         }}
       />
-      {attachments.length > 0 ? (
-        <AttachmentList
-          ref={attachmentListRef}
-          aria-label={t('overlay.composer.attachments', { count: attachments.length })}
-        >
-          {attachments.map((attachment, index) => (
-            <AttachmentItem
-              key={attachmentKey(attachment)}
-              className="overlay-composer__attachment"
-            >
-              {attachment.kind === 'image' ? (
-                <img
-                  src={buildActionImageUrl(attachment.storagePath)}
-                  alt={t('overlay.composer.attachmentAlt', {
-                    index: images.indexOf(attachment) + 1,
-                    count: images.length,
-                  })}
-                  loading="lazy"
-                  decoding="async"
-                  width={96}
-                  height={96}
-                />
-              ) : (
-                <AttachedFileChip name={attachment.name} byteSize={attachment.byteSize} />
-              )}
-              {!isReadOnly && (
-                <AttachmentRemoveButton
-                  type="button"
-                  aria-label={
-                    attachment.kind === 'image'
-                      ? t('overlay.composer.attachmentRemove', {
-                          index: images.indexOf(attachment) + 1,
-                          count: images.length,
-                        })
-                      : t('overlay.composer.fileRemove', { name: attachment.name })
-                  }
-                  onClick={() => removeAttachment(attachment, index)}
-                >
-                  ×
-                </AttachmentRemoveButton>
-              )}
-            </AttachmentItem>
-          ))}
-        </AttachmentList>
-      ) : null}
-      {attachmentFailure ? (
-        <ComposerAlert role="alert">
-          {t(`overlay.composer.attachFailed.${attachmentFailure}`, {
-            limit:
-              attachmentFailure === 'too_many_files'
-                ? ACTION_MESSAGE_MAX_FILES
-                : ACTION_IMAGE_MAX_PER_MESSAGE,
-          })}
-        </ComposerAlert>
-      ) : null}
+      <ComposerAttachments
+        attachments={attachments}
+        failure={attachmentFailure}
+        readOnly={isReadOnly}
+        focusAfterLastRemoved={textareaRef}
+        onRemove={onRemoveAttachment}
+      />
       {validationFailed ? (
         <ComposerAlert id={MESSAGE_ERROR_ID} role="alert">
           {t(action === 'accept' ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
@@ -476,7 +355,7 @@ export function OverlayComposer({
               type="file"
               hidden
               multiple
-              accept={ATTACH_ACCEPT}
+              accept={ATTACHMENT_ACCEPT}
               onChange={(event) => {
                 const files = Array.from(event.target.files ?? []);
                 // Reset so re-picking the same file still fires a change event.

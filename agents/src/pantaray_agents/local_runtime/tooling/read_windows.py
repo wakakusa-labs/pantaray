@@ -32,12 +32,13 @@ class ReadWindowTooLargeError(ValueError):
 
 def build_bounded_read_windows(
     *,
-    text: str,
+    segments: tuple[str, ...],
     candidates: tuple[ReadWindowCandidate, ...],
     margin_lines: int,
     max_total_bytes: int = READ_WINDOW_MAX_BYTES,
 ) -> tuple[ReadWindow, ...]:
-    segments = _line_segments(text)
+    # Callers split lines (with endings kept) the same way their candidate
+    # indices and visibility checks do, so window line numbers agree.
     if not segments:
         return (ReadWindow(1, 1, "empty_file", ""),)
 
@@ -118,7 +119,3 @@ def _fit_first_window(
 
 def _range_size(segments: tuple[str, ...], start: int, end: int) -> int:
     return sum(len(segment.encode("utf-8")) for segment in segments[start : end + 1])
-
-
-def _line_segments(text: str) -> tuple[str, ...]:
-    return tuple(text.splitlines(keepends=True)) if text else ()

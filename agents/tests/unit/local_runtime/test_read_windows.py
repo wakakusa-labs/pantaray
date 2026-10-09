@@ -11,7 +11,7 @@ def test_first_window_shrinks_margins_to_total_byte_limit() -> None:
     text = "\n".join(lines) + "\n"
 
     windows = build_bounded_read_windows(
-        text=text,
+        segments=tuple(text.splitlines(keepends=True)),
         candidates=(ReadWindowCandidate(50, 50, "exact_match"),),
         margin_lines=40,
     )

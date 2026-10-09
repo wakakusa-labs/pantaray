@@ -49,6 +49,7 @@ class ActionSubagentApprovalPause(BaseException):  # noqa: N818
         arguments: dict[str, JSONValue],
         tool_request_id: str,
         approval_session_id: str,
+        call_id: str,
         intent_class: str,
         command_summary: dict[str, JSONValue],
     ) -> None:
@@ -57,6 +58,7 @@ class ActionSubagentApprovalPause(BaseException):  # noqa: N818
         self.arguments = arguments
         self.tool_request_id = tool_request_id
         self.approval_session_id = approval_session_id
+        self.call_id = call_id
         self.intent_class = intent_class
         self.command_summary = command_summary
 
@@ -69,9 +71,13 @@ class PausedChildAnchor:
 
 
 def next_action_subagent_tool_request_id(
-    *, db_path: Path, busy_timeout_ms: int, process_id: str
+    *, db_path: Path, busy_timeout_ms: int, process_id: str, call_id: str
 ) -> str:
-    """Return the child's next durable, never-reused Tool request identity."""
+    """Return the child's next durable, never-reused Tool request identity.
+
+    ``<process id>:<next event seq>:<call id>``: the sequence orders it against
+    the child's history rows, and the call id names the call a restart answers.
+    """
 
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
@@ -81,7 +87,7 @@ def next_action_subagent_tool_request_id(
         ).fetchone()
     if row is None:
         raise LocalJobEnvelopeIntegrityError("Subagent Tool request process is missing")
-    return f"{process_id}:{int(row[0])}"
+    return f"{process_id}:{int(row[0])}:{call_id}"
 
 
 def pause_action_subagent_for_approval(
@@ -199,6 +205,7 @@ def _pause_anchor_payload(
             }
         ],
         "tool_arguments": pause.arguments,
+        "call_id": pause.call_id,
     }
 
 

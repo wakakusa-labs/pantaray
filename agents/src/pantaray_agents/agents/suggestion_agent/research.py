@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from pantaray_agents.agents.artifact_react import ReactToolDefinition
+from pantaray_agents.tools.contract import ReactToolDefinition
 
 
 class SuggestionResearchTools(Protocol):

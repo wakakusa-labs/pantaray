@@ -53,6 +53,12 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
   const snapshotChannel = createSnapshotChannel({ ipcRenderer, logError });
 
   return {
+    clipboard: {
+      writeText: (text) => {
+        assertValidInvokeChannel('clipboard:writeText');
+        return ipcRenderer.invoke('clipboard:writeText', { text });
+      },
+    },
     agentOverlay: {
       showHistory: (payload) => {
         if (isValidSendChannel('history:openOverlay')) {
@@ -91,6 +97,7 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       dragEnd: () => {
         if (isValidSendChannel('overlay:dragEnd')) ipcRenderer.send('overlay:dragEnd');
       },
+      showChat: (request) => ipcRenderer.invoke('overlay:showChat', request),
       openWorkspaceSettings: () => {
         if (isValidSendChannel('overlay:openWorkspaceSettings')) {
           ipcRenderer.send('overlay:openWorkspaceSettings');

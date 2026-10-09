@@ -21,11 +21,14 @@ function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
+const MAIN_WINDOW = { isDestroyed: () => false, webContents: { id: 9 } };
+
 function harness(overrides = {}) {
   const localArtifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-attach-'));
   const revealed = [];
   const handlers = new Map();
   const ctx = {
+    windows: { getMainWindow: () => MAIN_WINDOW },
     actions: {
       getCurrentSubjectId: () => 'user-1',
       resolveOverlayIdForSender: () => 'overlay-1',
@@ -160,6 +163,23 @@ test('attaching rejects malformed payloads and senders that are not a registered
     (error) => error instanceof IpcSenderRejectedError
   );
 
+  // The main window's chat composer attaches too, through the same validation.
+  const mainWindowOnly = harness({ actions: { resolveOverlayIdForSender: () => null } });
+  const fromMain = await mainWindowOnly.invoke(
+    'action:attachImage',
+    { bytes, declaredMimeType: 'image/png' },
+    MAIN_WINDOW.webContents
+  );
+  assert.equal(fromMain.kind, 'attached');
+  await assert.rejects(
+    mainWindowOnly.invoke(
+      'action:attachImage',
+      { bytes, declaredMimeType: 'image/svg+xml' },
+      MAIN_WINDOW.webContents
+    ),
+    (error) => error instanceof IpcValidationError
+  );
+
   const signedOut = harness({ actions: { getCurrentSubjectId: () => null } });
   await assert.rejects(
     signedOut.invoke('action:attachImage', { bytes, declaredMimeType: 'image/png' }),
@@ -192,4 +212,25 @@ test('revealing an image resolves it through the same validation as the image pr
     { revealed: false }
   );
   assert.equal(app.revealed.length, 1);
+
+  // The main window's chat reveals through the same check; any other unregistered window cannot.
+  const mainWindowOnly = harness({ actions: { resolveOverlayIdForSender: () => null } });
+  const fromMain = await mainWindowOnly.invoke(
+    'action:attachImage',
+    { bytes: toArrayBuffer(pngBytes()), declaredMimeType: 'image/png' },
+    MAIN_WINDOW.webContents
+  );
+  assert.deepEqual(
+    await mainWindowOnly.invoke(
+      'actionImage:reveal',
+      { storagePath: fromMain.storagePath },
+      MAIN_WINDOW.webContents
+    ),
+    { revealed: true }
+  );
+  await assert.rejects(
+    mainWindowOnly.invoke('actionImage:reveal', { storagePath: fromMain.storagePath }),
+    (error) => error instanceof IpcSenderRejectedError
+  );
+  assert.equal(mainWindowOnly.revealed.length, 1);
 });

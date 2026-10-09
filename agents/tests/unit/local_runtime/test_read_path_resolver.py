@@ -1,26 +1,32 @@
+"""The read scope's path contract, checked without any Action session."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerContext,
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import ManifestRoot
-from pantaray_agents.local_runtime.tooling.brokering.read_path_resolver import (
-    READ_PATH_NOT_FOUND,
-    READ_SCOPE_DENIED,
-    resolve_read_local_path,
-    resolve_read_target,
-)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
 )
+from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.discovery import run_list
+from pantaray_agents.tools.files.manifest_paths import ManifestRoot
+from pantaray_agents.tools.files.private_storage import (
+    PRIVATE_APP_STORAGE_MESSAGE,
+    PrivateAppStorage,
+)
+from pantaray_agents.tools.files.read_contract import ListToolArgs
+from pantaray_agents.tools.files.read_paths import (
+    READ_PATH_DENIED,
+    READ_PATH_NOT_FOUND,
+    READ_SCOPE_DENIED,
+    resolve_read_path,
+)
+from pantaray_agents.tools.files.read_scope import ReadScope
+from pantaray_agents.tools.files.read_target import resolve_read_target
 
 
 def test_relative_path_resolves_from_execution_cwd(tmp_path: Path) -> None:
@@ -28,10 +34,10 @@ def test_relative_path_resolves_from_execution_cwd(tmp_path: Path) -> None:
     workspace.mkdir()
     note_path = workspace / "notes.txt"
     note_path.write_text("note\n", encoding="utf-8")
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     target = resolve_read_target(
-        context=cast(BrokerContext, context),
+        scope=scope,
         raw_path="notes.txt",
     )
 
@@ -44,10 +50,10 @@ def test_read_accepts_literal_glob_metacharacters_in_file_name(tmp_path: Path) -
     workspace.mkdir()
     note_path = workspace / "notes[final]?.txt"
     note_path.write_text("note\n", encoding="utf-8")
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     target = resolve_read_target(
-        context=cast(BrokerContext, context),
+        scope=scope,
         raw_path=note_path.name,
     )
 
@@ -63,7 +69,7 @@ def test_absolute_path_respects_more_specific_unreadable_root(
     private_file = private / "secret.txt"
     private_file.parent.mkdir(parents=True)
     private_file.write_text("secret\n", encoding="utf-8")
-    context = _context(
+    scope = _scope(
         cwd_path=workspace,
         roots=(
             _root(real_path=private, can_read=False),
@@ -73,7 +79,7 @@ def test_absolute_path_respects_more_specific_unreadable_root(
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         resolve_read_target(
-            context=cast(BrokerContext, context),
+            scope=scope,
             raw_path=str(private_file),
         )
 
@@ -87,11 +93,11 @@ def test_absolute_symlink_escape_is_denied(tmp_path: Path) -> None:
     outside_file.write_text("secret\n", encoding="utf-8")
     link_path = workspace / "secret-link.txt"
     link_path.symlink_to(outside_file)
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         resolve_read_target(
-            context=cast(BrokerContext, context),
+            scope=scope,
             raw_path=str(link_path),
         )
 
@@ -106,11 +112,11 @@ def test_workspace_scope_missing_outside_path_does_not_suggest_parent_entries(
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "secret-nearby.txt").write_text("secret\n", encoding="utf-8")
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         resolve_read_target(
-            context=cast(BrokerContext, context),
+            scope=scope,
             raw_path=str(outside / "secret-typo.txt"),
         )
 
@@ -121,11 +127,11 @@ def test_workspace_scope_missing_outside_path_does_not_suggest_parent_entries(
 def test_workspace_scope_missing_inside_path_returns_not_found(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         resolve_read_target(
-            context=cast(BrokerContext, context),
+            scope=scope,
             raw_path=str(workspace / "missing" / "notes.txt"),
         )
 
@@ -138,11 +144,11 @@ def test_workspace_scope_preserves_in_workspace_shape_errors(tmp_path: Path) -> 
     workspace.mkdir()
     target_file = workspace / "notes.txt"
     target_file.write_text("hello", encoding="utf-8")
-    context = _context(cwd_path=workspace, roots=(_root(real_path=workspace),))
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
 
     with pytest.raises(BrokerPolicyError) as exc_info:
-        resolve_read_local_path(
-            context=cast(BrokerContext, context),
+        resolve_read_path(
+            scope=scope,
             raw_path=str(target_file),
             must_exist=True,
             must_be_dir=True,
@@ -159,14 +165,14 @@ def test_full_access_scope_allows_absolute_path_outside_workspace(
     workspace.mkdir()
     outside_file = tmp_path / "outside.txt"
     outside_file.write_text("outside\n", encoding="utf-8")
-    context = _context(
+    scope = _scope(
         cwd_path=workspace,
         roots=(_root(real_path=workspace),),
         read_access_scope=READ_ACCESS_SCOPE_FULL_ACCESS,
     )
 
     target = resolve_read_target(
-        context=cast(BrokerContext, context),
+        scope=scope,
         raw_path=str(outside_file),
     )
 
@@ -174,20 +180,78 @@ def test_full_access_scope_allows_absolute_path_outside_workspace(
     assert target.real_path == outside_file.resolve()
 
 
-def _context(
+def test_workspace_scope_denies_existing_file_outside_roots(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("outside\n", encoding="utf-8")
+    scope = _scope(cwd_path=workspace, roots=(_root(real_path=workspace),))
+
+    with pytest.raises(BrokerPolicyError) as exc_info:
+        resolve_read_target(scope=scope, raw_path=str(outside_file))
+
+    assert exc_info.value.code == READ_SCOPE_DENIED
+
+
+def test_full_access_scope_refuses_private_app_storage(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    storage = tmp_path / "app-data"
+    storage.mkdir()
+    (storage / "runtime.db").write_text("private\n", encoding="utf-8")
+    scope = _scope(
+        cwd_path=workspace,
+        roots=(_root(real_path=workspace),),
+        read_access_scope=READ_ACCESS_SCOPE_FULL_ACCESS,
+        private_storage_roots=(storage,),
+    )
+
+    for raw_path in (str(storage), str(storage / "runtime.db")):
+        with pytest.raises(BrokerPolicyError) as exc_info:
+            resolve_read_target(scope=scope, raw_path=raw_path)
+        assert exc_info.value.code == READ_PATH_DENIED
+        assert str(exc_info.value) == PRIVATE_APP_STORAGE_MESSAGE
+
+
+def test_list_from_a_parent_leaves_out_private_app_storage(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("note\n", encoding="utf-8")
+    storage = tmp_path / "app-data"
+    storage.mkdir()
+    (storage / "runtime.db").write_text("private\n", encoding="utf-8")
+    scope = _scope(
+        cwd_path=workspace,
+        roots=(_root(real_path=tmp_path),),
+        private_storage_roots=(storage,),
+    )
+
+    result = run_list(
+        scope=scope, request=ListToolArgs(path=str(tmp_path), max_depth=3, limit=50)
+    )
+
+    listed = str(result.output["entries"])
+    assert "notes.txt" in listed
+    assert "app-data" not in listed
+    assert "runtime.db" not in listed
+
+
+def _scope(
     *,
     cwd_path: Path,
     roots: tuple[ManifestRoot, ...],
-    read_access_scope: str = READ_ACCESS_SCOPE_WORKSPACE,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        execution_session=SimpleNamespace(cwd_path=str(cwd_path.resolve())),
-        scratch_root_path=cwd_path.resolve(),
-        tool_definition=SimpleNamespace(tool_id="read"),
-        path_access_kind="read",
+    read_access_scope: ReadAccessScope = READ_ACCESS_SCOPE_WORKSPACE,
+    private_storage_roots: tuple[Path, ...] = (),
+) -> ReadScope:
+    return ReadScope(
         manifest_roots=roots,
+        cwd_path=cwd_path.resolve(),
         read_access_scope=read_access_scope,
-        db_path=cwd_path.resolve().parent / "app-data" / "runtime.db",
+        scratch_root_path=cwd_path.resolve(),
+        private_storage=PrivateAppStorage(
+            storage_roots=tuple(root.resolve() for root in private_storage_roots),
+            readable_roots=(),
+        ),
     )
 
 

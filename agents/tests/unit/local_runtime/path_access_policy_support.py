@@ -6,15 +6,15 @@ from types import SimpleNamespace
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
 )
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import ManifestRoot
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_WORKSPACE,
     update_read_access_scope,
 )
+from pantaray_agents.tools.files.manifest_paths import ManifestRoot
 
 from .action_seed import insert_agent_action
 from .broker_test_support import _seed_broker_actor_process

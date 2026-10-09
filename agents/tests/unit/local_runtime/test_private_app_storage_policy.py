@@ -14,26 +14,22 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
-from pantaray_agents.local_runtime.tooling.brokering import broker_discovery_ripgrep
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-    RIPGREP_TRUSTED_PATH,
-)
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    load_tool_results_root,
-)
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
+from pantaray_agents.local_runtime.tooling.brokering.action_path_policy import (
     EXEC_CWD_DENIED,
-    READ_PATH_DENIED,
     WRITE_PATH_DENIED,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.files.manifest_paths import (
+    load_tool_results_root,
+)
+from pantaray_agents.tools.files.read_paths import READ_PATH_DENIED
+from pantaray_agents.tools.files.ripgrep import RIPGREP_TRUSTED_PATH
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -384,8 +380,7 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
     line = "needle secret\n"
     for index in range(3):
         (bulk / f"big-{index}.txt").write_text(
-            line
-            * (broker_discovery_ripgrep.RIPGREP_MAX_STDOUT_BYTES // len(line) // 2),
+            line * (ripgrep.RIPGREP_MAX_STDOUT_BYTES // len(line) // 2),
             encoding="utf-8",
         )
 
@@ -400,7 +395,7 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
     assert sorted(_paths(grep, "matches")) == sorted([public, own, result_file])
 
     # File names spend the output budget too; lower it so a few hundred do.
-    monkeypatch.setattr(broker_discovery_ripgrep, "RIPGREP_MAX_STDOUT_BYTES", 4_096)
+    monkeypatch.setattr(ripgrep, "RIPGREP_MAX_STDOUT_BYTES", 4_096)
     for index in range(300):
         (bulk / f"private-{index:04}.txt").write_text("", encoding="utf-8")
 
@@ -413,3 +408,40 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
 
     assert glob.output["truncation_reason"] is None
     assert sorted(_paths(glob, "matches")) == sorted([public, own, result_file])
+
+
+@pytest.mark.skipif(
+    shutil.which("rg", path=RIPGREP_TRUSTED_PATH) is None,
+    reason="ripgrep is not installed in a trusted location",
+)
+@pytest.mark.asyncio
+async def test_grep_does_not_follow_a_swapped_link_to_decide_an_encoding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path, context, public, _own = _seed_registered_parent(tmp_path)
+    line = "日本語 needle\n".encode("cp932")
+    public.write_bytes(line)
+    hidden = db_path.parent / "secret.txt"
+    # Read whole, this file would decide CP932 and show the line as Japanese.
+    hidden.write_bytes(line)
+    run_ripgrep_lines = ripgrep._run_ripgrep_lines
+
+    def swap_after_search(**kwargs: object) -> ripgrep.RipgrepRunResult:
+        result = run_ripgrep_lines(**kwargs)  # type: ignore[arg-type]
+        public.unlink()
+        public.symlink_to(hidden)
+        return result
+
+    monkeypatch.setattr(ripgrep, "_run_ripgrep_lines", swap_after_search)
+
+    grep = await _run(
+        db_path=db_path,
+        context=context,
+        tool_id="grep",
+        args={"base_path": str(public.parent), "pattern": "needle"},
+    )
+
+    assert [match["line"] for match in grep.output["matches"]] == [
+        line.decode("utf-8", errors="replace").removesuffix("\n")
+    ]

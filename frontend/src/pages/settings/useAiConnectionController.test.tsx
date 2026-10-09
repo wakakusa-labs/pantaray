@@ -230,7 +230,7 @@ it('uses refreshed provider metadata and sends the key only to the selected prov
   const updated = saved();
   updated.settings.preferences.provider = 'anthropic';
   // 'test-model' は Anthropic の候補に無いので、切り替えとともに既定へ戻る。
-  updated.settings.preferences.model = 'claude-opus-5';
+  updated.settings.preferences.model = 'claude-opus-5-5';
   api.getState.mockResolvedValue(updated);
   fireEvent.change(provider, { target: { value: 'anthropic' } });
   await waitFor(() => expect(provider).toHaveValue('anthropic'));
@@ -273,6 +273,68 @@ it('switches to ChatGPT on a model that backend serves instead of an unusable on
     expect(api.update).toHaveBeenCalledWith({
       operation: 'save_preferences',
       preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-6-luna' },
+    })
+  );
+});
+
+it('saves each model choice as it is made and settles on the last one', async () => {
+  const chatgpt = saved();
+  chatgpt.settings.preferences = { method: 'chatgpt', provider: 'openai', model: 'gpt-6-luna' };
+  chatgpt.settings.chatgpt = { status: 'connected' };
+  const api = bridge(chatgpt);
+  render(<AiConnectionSettingsSection />);
+  const picker = await screen.findByRole('combobox', {
+    name: 'settings.aiConnection.modelLabel',
+  });
+  const choose = async (model: string) => {
+    const applied = deferred<ConnectionUpdateResult>();
+    api.update.mockReturnValueOnce(applied.promise);
+    const next = saved();
+    next.settings = {
+      ...chatgpt.settings,
+      preferences: { ...chatgpt.settings.preferences, model },
+    };
+    api.getState.mockResolvedValue(next);
+    fireEvent.change(picker, { target: { value: model } });
+    // A second choice cannot start while this one is applying, so it cannot be overwritten.
+    expect(picker).toBeDisabled();
+    await act(async () => applied.resolve({ ok: true }));
+    await waitFor(() => expect(picker).toBeEnabled());
+  };
+  await choose('gpt-6-sol');
+  await choose('gpt-5.5');
+  expect(api.update.mock.calls.map(([command]) => command)).toEqual([
+    {
+      operation: 'save_preferences',
+      preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-6-sol' },
+    },
+    {
+      operation: 'save_preferences',
+      preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-5.5' },
+    },
+  ]);
+  expect(picker).toHaveValue('gpt-5.5');
+  expect(screen.getByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+});
+
+it('keeps an API key unsaved until its Save button is pressed', async () => {
+  const api = bridge();
+  render(<AiConnectionSettingsSection />);
+  const key = await screen.findByLabelText('settings.aiConnection.key.label');
+  fireEvent.change(key, { target: { value: 'typed-secret' } });
+  fireEvent.blur(key);
+  fireEvent.submit(key);
+  expect(api.update).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: 'settings.aiConnection.key.label: settings.aiConnection.key.save',
+    })
+  );
+  await waitFor(() =>
+    expect(api.update).toHaveBeenCalledWith({
+      operation: 'save_api_key',
+      provider: 'openai',
+      apiKey: 'typed-secret',
     })
   );
 });

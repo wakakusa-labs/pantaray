@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, overload
+from typing import overload
 
 from pantaray_agents.agents.core.llm_file_inputs import (
     LlmFileInput,
@@ -21,13 +21,9 @@ from pantaray_llm.contracts.conversation import (
     OpenAiProviderTurn,
 )
 from pantaray_llm.contracts.tool_use import (
-    AnthropicToolContinuation,
     LlmToolCall,
-    LlmToolContinuation,
     LlmToolDefinition,
-    LlmToolResult,
     LlmToolUseRequest,
-    OpenAiToolContinuation,
 )
 from pantaray_llm.errors import LlmProxyExecutionError
 
@@ -45,7 +41,6 @@ from .llm_usage import (
 @dataclass(frozen=True, slots=True)
 class LlmToolCallTurn:
     calls: tuple[LlmToolCall, ...]
-    continuation: LlmToolContinuation | None
     dropped_call_names: tuple[str, ...] = ()
 
     @property
@@ -53,56 +48,43 @@ class LlmToolCallTurn:
         return self.calls[0]
 
 
+@dataclass(frozen=True, slots=True)
+class ActionTurnReply:
+    """One Action turn, and the provider output the next turn may hand back."""
+
+    response: LlmActionTurnResponse
+    # Beside the response rather than inside it: ``LlmActionTurnResponse`` is
+    # validated closed and shared with the cloud. None on a request that sent
+    # no conversation, and from a cloud deployment that predates the field.
+    provider_turn: LlmProviderTurn | None
+
+
 class LlmToolUseResponseError(RuntimeError):
     pass
 
 
-def _validate_tool_call_response(
-    *, response: object, continuation_mode: Literal["disabled", "stateless"]
-) -> LlmToolCallTurn:
+def _validate_tool_call_response(*, response: object) -> LlmToolCallTurn:
     calls = getattr(response, "tool_calls", ())
     if not isinstance(calls, tuple) or not calls:
         raise LlmToolUseResponseError("LLM proxy returned no native tool call")
-    dropped_call_names = getattr(response, "dropped_tool_call_names", ())
-    continuation = getattr(response, "tool_continuation", None)
-    if continuation is not None and not isinstance(
-        continuation, OpenAiToolContinuation | AnthropicToolContinuation
-    ):
-        raise LlmToolUseResponseError("LLM proxy returned invalid continuation state")
-    if continuation_mode == "stateless" and continuation is None:
-        raise LlmToolUseResponseError("LLM proxy omitted required continuation state")
-    if continuation_mode == "disabled" and continuation is not None:
+    # A one-shot call sends no continuation state and must get none back.
+    if getattr(response, "tool_continuation", None) is not None:
         raise LlmToolUseResponseError(
             "LLM proxy returned unexpected continuation state"
         )
     return LlmToolCallTurn(
         calls=calls,
-        continuation=continuation,
-        dropped_call_names=dropped_call_names,
+        dropped_call_names=getattr(response, "dropped_tool_call_names", ()),
     )
 
 
 class LlmToolUseMixin(LLMGenerationMixin):
-    # The output items the last Action turn produced. They cannot ride inside
-    # ``LlmActionTurnResponse``, which is validated closed and shared with the
-    # cloud, so they arrive beside it and are consumed as thoughts are.
-    _last_action_provider_turn: LlmProviderTurn | None = None
-
-    def _consume_action_provider_turn(self) -> LlmProviderTurn | None:
-        """The last Action turn's provider turn, cleared as it is read."""
-        turn = self._last_action_provider_turn
-        self._last_action_provider_turn = None
-        return turn
-
     async def _generate_llm_tool_call(
         self,
         *,
         sink: TokenSink,
         prompt: str,
         tools: tuple[LlmToolDefinition, ...],
-        continuation_mode: Literal["disabled", "stateless"],
-        continuation: LlmToolContinuation | None = None,
-        tool_result: LlmToolResult | None = None,
         conversation: LlmConversation | None = None,
         max_parallel_tool_calls: int = 1,
         system_instruction: str | None = None,
@@ -115,9 +97,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
             prompt=prompt,
             request=LlmToolUseRequest(
                 tools=list(tools),
-                continuation_mode=continuation_mode,
-                continuation=continuation,
-                tool_result=tool_result,
+                continuation_mode="disabled",
                 conversation=conversation,
                 max_parallel_tool_calls=max_parallel_tool_calls,
             ),
@@ -139,7 +119,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         conversation: LlmConversation | None = None,
         stage: str | None = None,
         before_attempt: Callable[[], None] | None = None,
-    ) -> LlmActionTurnResponse:
+    ) -> ActionTurnReply:
         return await self._generate_llm_native_turn(
             sink=sink,
             prompt=prompt,
@@ -179,7 +159,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         file_inputs: list[LlmFileInput] | None,
         stage: str | None,
         before_attempt: Callable[[], None] | None,
-    ) -> LlmActionTurnResponse: ...
+    ) -> ActionTurnReply: ...
 
     async def _generate_llm_native_turn(
         self,
@@ -191,7 +171,7 @@ class LlmToolUseMixin(LLMGenerationMixin):
         file_inputs: list[LlmFileInput] | None,
         stage: str | None,
         before_attempt: Callable[[], None] | None,
-    ) -> LlmToolCallTurn | LlmActionTurnResponse:
+    ) -> LlmToolCallTurn | ActionTurnReply:
         sink.guard()
         use_system_instruction = self._resolve_system_instruction(system_instruction)
         inference_profile = self._resolve_inference_profile_id(stage=stage)
@@ -250,27 +230,24 @@ class LlmToolUseMixin(LLMGenerationMixin):
         self._last_llm_thoughts = thoughts
         _LLM_THOUGHTS_CONTEXT.set(thoughts)
         try:
-            turn: LlmToolCallTurn | LlmActionTurnResponse
+            turn: LlmToolCallTurn | ActionTurnReply
             if isinstance(request, LlmActionTurnRequest):
                 action_turn = getattr(response, "action_turn", None)
                 if not isinstance(action_turn, LlmActionTurnResponse):
                     raise LlmToolUseResponseError("LLM proxy returned no Action turn")
-                # Absent on a request that sent no conversation, and on a cloud
-                # deployment that predates the field.
                 provider_turn = getattr(response, "provider_turn", None)
-                self._last_action_provider_turn = (
-                    provider_turn
-                    if isinstance(
-                        provider_turn, OpenAiProviderTurn | AnthropicProviderTurn
-                    )
-                    else None
+                turn = ActionTurnReply(
+                    response=action_turn,
+                    provider_turn=(
+                        provider_turn
+                        if isinstance(
+                            provider_turn, OpenAiProviderTurn | AnthropicProviderTurn
+                        )
+                        else None
+                    ),
                 )
-                turn = action_turn
             else:
-                turn = _validate_tool_call_response(
-                    response=response,
-                    continuation_mode=request.continuation_mode,
-                )
+                turn = _validate_tool_call_response(response=response)
         except LlmToolUseResponseError:
             sink.record(usage_ledger, stage=stage, may_raise=False)
             raise
@@ -278,4 +255,9 @@ class LlmToolUseMixin(LLMGenerationMixin):
         return turn
 
 
-__all__ = ["LlmToolCallTurn", "LlmToolUseMixin", "LlmToolUseResponseError"]
+__all__ = [
+    "ActionTurnReply",
+    "LlmToolCallTurn",
+    "LlmToolUseMixin",
+    "LlmToolUseResponseError",
+]

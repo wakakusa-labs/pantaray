@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     create_initial_state,
 )
 from pantaray_agents.agents.action_agent.tools import STEP_NOTE_ARG
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
@@ -65,20 +66,21 @@ def _call(
 def _turn(
     *calls: LlmToolCall,
     dropped_call_names: tuple[str, ...] = (),
-) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=list(calls),
         dropped_call_names=list(dropped_call_names),
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _note_for(tool_id: str) -> str:
     return f"{tool_id} の結果が必要なので、この呼び出しで確認する。"
 
 
-def _batch_turn(*tool_ids: str) -> LlmActionTurnResponse:
+def _batch_turn(*tool_ids: str) -> ActionTurnReply:
     return _turn(
         *(
             _call(tool_id, note=_note_for(tool_id), index=index)
@@ -176,7 +178,7 @@ async def _think(
     tmp_path,
     *,
     action_id: str,
-    turns: LlmActionTurnResponse | list[LlmActionTurnResponse],
+    turns: ActionTurnReply | list[ActionTurnReply],
     max_tool_steps: int = 20,
 ) -> tuple[ActionAgent, ActionGraphRuntime, ActionAgentState]:
     agent, runtime, state = await _build_supervisor_fixture(
@@ -221,18 +223,18 @@ async def test_read_only_batch_runs_in_parallel(
         monkeypatch,
         tmp_path,
         action_id="act-batch-parallel",
-        turns=_batch_turn("read_action_plan", "history_fetch", "memory_sql"),
+        turns=_batch_turn("web_search", "history_fetch", "memory_sql"),
     )
 
     batch = _require_batch(state)
     assert batch.mode == "parallel"
     assert [pending.tool_id for pending in batch.calls] == [
-        "read_action_plan",
+        "web_search",
         "history_fetch",
         "memory_sql",
     ]
     assert [pending.step_note for pending in batch.calls] == [
-        _note_for("read_action_plan"),
+        _note_for("web_search"),
         _note_for("history_fetch"),
         _note_for("memory_sql"),
     ]
@@ -242,7 +244,7 @@ async def test_read_only_batch_runs_in_parallel(
 
     think_entry = _think_history_entry(state)
     assert think_entry["summary"] == (
-        f"1. read_action_plan: {_note_for('read_action_plan')}\n"
+        f"1. web_search: {_note_for('web_search')}\n"
         f"2. history_fetch: {_note_for('history_fetch')}\n"
         f"3. memory_sql: {_note_for('memory_sql')}"
     )

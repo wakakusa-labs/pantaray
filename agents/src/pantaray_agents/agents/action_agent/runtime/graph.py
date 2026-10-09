@@ -1,22 +1,24 @@
-"""ActionAgent 用 LangGraph 構築ヘルパー。"""
+"""The ActionAgent graph: its node dependencies and the loop that runs them."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from pantaray_agents.agents.core import TokenBudgetExceeded
-from pantaray_agents.agents.insight_agent.zanei_tools import ZaneiTools
 from pantaray_agents.application.action.cancellation_service import (
     ActionCancellationService,
 )
 from pantaray_agents.application.action.ports import ActionStepEmitter
 from pantaray_agents.application.action.response_service import ActionResponseService
+from pantaray_agents.application.action.resume_routing import ResumeRouteName
 from pantaray_agents.application.action.resume_service import ActionResumeService
+from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.local_runtime.runtime.action_user_adoption import (
     adopt_pending_action_user_steps_at_parent_think,
 )
@@ -30,6 +32,7 @@ from pantaray_agents.repositories.action_runtime_resume_contract import (
 )
 from pantaray_agents.schema.agent.action import ActionAgentRequest
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.zanei import ZaneiTools
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from ..services.prompt_rendering_service import PromptRenderingService
@@ -38,12 +41,6 @@ from ..services.token_accounting_service import (
     StateTokenSink,
 )
 from ..support.status import ACTION_TERMINAL_STATUSES
-from . import compiled_graph as _compiled_graph
-from .compiled_graph import (
-    ACTION_GRAPH_RUNTIME_CONFIG_KEY,
-    ResumeRouteName,
-    cached_action_agent_compiled_graph,
-)
 from .error_redaction import emit_redacted_agent_error
 from .handlers.nodes import (
     action_step,
@@ -51,10 +48,7 @@ from .handlers.nodes import (
     finalize_step,
     initialize_context,
 )
-from .handlers.nodes.llm.provider_turns import (
-    ActionProviderTurnStore,
-    load_action_provider_turns,
-)
+from .handlers.nodes.llm.provider_turns import load_action_provider_turns
 from .handlers.nodes.llm.send import EXECUTING_STAGE
 from .models.approval import PendingApprovalRequestModel
 from .state import (
@@ -78,8 +72,47 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 type ActionEventPayload = Mapping[str, JSONValue]
-RESUME_ROUTE_TO_NODE = _compiled_graph.RESUME_ROUTE_TO_NODE
-clear_cached_action_agent_graph = _compiled_graph.clear_cached_action_agent_graph
+
+_END: Final = "__end__"
+RESUME_ROUTE_TO_NODE: Final[Mapping[ResumeRouteName, str]] = {
+    "init": "init",
+    "think": "think",
+    "action": "action",
+    "finalize": "finalize",
+    "halt": _END,
+}
+_THINK_ROUTE_TO_NODE: Final[Mapping[str, str]] = {
+    "think": "think",
+    "action": "action",
+    "finalize": "finalize",
+}
+_ACTION_ROUTE_TO_NODE: Final[Mapping[str, str]] = {
+    "halt": _END,
+    "think": "think",
+    "finalize": "finalize",
+}
+# Declaration order, the order every node reads the state in.
+_STATE_KEYS: Final = tuple(ActionAgentState.__annotations__)
+
+type _Node = Callable[[ActionAgentState], Coroutine[object, object, ActionAgentState]]
+
+
+# A failed run stores the exception's class name, so these two keep the names
+# (and bases) LangGraph gave them.
+class GraphRecursionError(RecursionError):
+    """The run took as many node steps as its limit allows."""
+
+
+class NodeCancelledError(Exception):
+    """A node raised ``CancelledError`` while the run itself was not cancelled.
+
+    A bare ``CancelledError`` would end the run as if it had been torn down; this
+    reports it as the node's failure instead.
+    """
+
+    def __init__(self, node: str) -> None:
+        super().__init__(f"Node {node!r} raised asyncio.CancelledError")
+        self.node = node
 
 
 def _should_finalize(state: ActionAgentState) -> bool:
@@ -104,7 +137,7 @@ class RuntimeServices(BaseModel):
 
 @dataclass(slots=True)
 class ActionGraphRuntime:
-    """LangGraph node dependencies and event callbacks."""
+    """The nodes, their routes, and the run's dependencies and event callbacks."""
 
     agent: ActionAgent
     request: ActionAgentRequest
@@ -119,11 +152,11 @@ class ActionGraphRuntime:
     # The provider turns this run may hand back, opened at its first THINK. Out
     # of the checkpoint too: a turn is 1-4 KB and the checkpoint is rewritten on
     # every step, so the turns live on their own step rows.
-    provider_turns: ActionProviderTurnStore | None = None
+    provider_turns: ProviderTurnStore | None = None
 
     async def open_provider_turn_store(
         self, state: ActionAgentState
-    ) -> ActionProviderTurnStore:
+    ) -> ProviderTurnStore:
         """This run's store, reading back what earlier runs recorded, once."""
 
         if self.provider_turns is None:
@@ -269,25 +302,80 @@ class ActionGraphRuntime:
 def build_action_agent_graph(
     runtime: ActionGraphRuntime,
 ) -> Callable[[ActionAgentState], Awaitable[ActionAgentState]]:
-    """Cached compiled graph から ActionAgent runner を返す。
+    """Return the runner that takes a state through the nodes until a route ends it.
 
-    グラフ構造:
-        init -> think -> action -> think -> finalize -> END
+    resume_gate routes to a node or ends the run, init goes to think, think and
+    action route on, and finalize ends the run.
     """
 
-    compiled_graph = cached_action_agent_compiled_graph()
+    def next_node(node: str, state: ActionAgentState) -> str:
+        if node == "resume_gate":
+            return RESUME_ROUTE_TO_NODE[runtime.route_from_resume(state)]
+        if node == "think":
+            return _THINK_ROUTE_TO_NODE[runtime.route_from_think(state)]
+        if node == "action":
+            return _ACTION_ROUTE_TO_NODE[runtime.route_after_action(state)]
+        return "think" if node == "init" else _END
 
     async def runner(state: ActionAgentState) -> ActionAgentState:
-        """状態を受け取り LangGraph を逐次実行する簡易ランナー。"""
-
-        graph_recursion_limit = (state["max_steps"] + state["max_tool_steps"]) * 2 + 10
-        result = await compiled_graph.ainvoke(
-            cast(Any, state),
-            config={
-                "recursion_limit": graph_recursion_limit,
-                "configurable": {ACTION_GRAPH_RUNTIME_CONFIG_KEY: runtime},
-            },
-        )
-        return cast(ActionAgentState, result)
+        nodes: Mapping[str, _Node] = {
+            "resume_gate": runtime.resume_gate,
+            "init": runtime.init,
+            "think": runtime.think,
+            "action": runtime.action,
+            "finalize": runtime.finalize,
+        }
+        step_limit = (state["max_steps"] + state["max_tool_steps"]) * 2 + 10
+        values: dict[str, object] = {}
+        _overwrite(values, state)
+        node = "resume_gate"
+        steps = 0
+        while True:
+            _overwrite(values, await _run_node(node, nodes[node], _read(values)))
+            node = next_node(node, _read(values))
+            steps += 1
+            if steps == step_limit:
+                # Even the step that would end the run fails it here.
+                raise GraphRecursionError(
+                    f"Recursion limit of {step_limit} reached without hitting a "
+                    "stop condition."
+                )
+            if node == _END:
+                return _read(values)
 
     return runner
+
+
+def _read(values: Mapping[str, object]) -> ActionAgentState:
+    """A fresh state dict: a node may reassign its keys without touching ``values``."""
+
+    return cast(
+        ActionAgentState, {key: values[key] for key in _STATE_KEYS if key in values}
+    )
+
+
+def _overwrite(values: dict[str, object], update: Mapping[str, object]) -> None:
+    """Take the state keys ``update`` carries; a key it lacks keeps its value.
+
+    So a key a node pops stays set for the nodes after it.
+    """
+
+    for key, value in update.items():
+        if key in _STATE_KEYS:
+            values[key] = value
+
+
+async def _run_node(
+    name: str,
+    node: _Node,
+    state: ActionAgentState,
+) -> ActionAgentState:
+    try:
+        # Its own task: what the node sets on a ContextVar stays in the node,
+        # and asyncio.current_task() in it is not the runner's task.
+        return await asyncio.create_task(node(state))
+    except asyncio.CancelledError as exc:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling() == 0:
+            raise NodeCancelledError(name) from exc
+        raise

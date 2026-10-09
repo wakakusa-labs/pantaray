@@ -15,23 +15,11 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import bootstrap_local_tooling_catalog
-from pantaray_agents.local_runtime.tooling.action_plan_document import (
-    ACTION_PLAN_TEMP_PREFIX,
-    ACTION_PLAN_TEMP_SUFFIX,
-)
 from pantaray_agents.local_runtime.tooling.bootstrap import (
     ActionExecutionContextError,
+    bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
     validate_reusable_action_scratch_execution_context,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    WORKSPACE_PATH_OUTSIDE_ROOTS,
-    load_manifest_roots,
-    resolve_local_path,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     create_workspace_folder,
@@ -41,6 +29,12 @@ from pantaray_agents.local_runtime.tooling.repository import (
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
+)
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    WORKSPACE_PATH_OUTSIDE_ROOTS,
+    load_manifest_roots,
+    resolve_local_path,
 )
 
 from .action_seed import insert_agent_action
@@ -345,49 +339,6 @@ def test_action_storage_layout_uses_canonical_db_parent(
     assert context.tool_results_path == context.tool_results_path.resolve()
     assert context.action_temp_dir == context.action_temp_dir.resolve()
     assert real_parent in context.workspace_path.parents
-
-
-def test_action_storage_bootstrap_removes_abandoned_plan_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from pantaray_agents.local_runtime.tooling import bootstrap as bootstrap_module
-
-    db_path = _bootstrap_db(tmp_path)
-    monkeypatch.setattr(
-        bootstrap_module,
-        "_resolve_verified_app_runtime_python",
-        lambda: Path(sys.executable).resolve(),
-    )
-    context = ensure_action_scratch_execution_context(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        action_id="action-1",
-        started_at="2026-03-23T00:00:00Z",
-        allowed_tool_ids=("read",),
-    )
-    orphan_names = tuple(
-        f"{ACTION_PLAN_TEMP_PREFIX}{identity}{ACTION_PLAN_TEMP_SUFFIX}"
-        for identity in ("first", "second")
-    )
-    user_file = context.workspace_path / orphan_names[0]
-    user_file.write_text("user workspace content", encoding="utf-8")
-    abandoned = tuple(context.workspace_path.parent / name for name in orphan_names)
-    for path in abandoned:
-        path.write_text("private partial plan", encoding="utf-8")
-
-    ensure_action_scratch_execution_context(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        action_id="action-1",
-        started_at="2026-03-23T00:01:00Z",
-        allowed_tool_ids=("read",),
-    )
-
-    assert not any(path.exists() for path in abandoned)
-    assert user_file.read_text(encoding="utf-8") == "user workspace content"
 
 
 def test_action_storage_layout_upgrades_existing_managed_directories_to_owner_only(

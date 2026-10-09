@@ -7,6 +7,7 @@ lives here so neither route duplicates content-block assembly or file reads.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from pantaray_agents.local_runtime.llm_proxy.content_files import (
@@ -22,7 +23,6 @@ from pantaray_agents.local_runtime.llm_proxy.response_parsing import (
     coerce_non_empty_string,
     is_mapping,
 )
-from pantaray_agents.utils.trace_context import get_trace_context
 from pantaray_llm.contracts.action_turn import LlmActionTurnRequest
 from pantaray_llm.contracts.conversation import LlmTurnAssistantItem
 from pantaray_llm.contracts.request import (
@@ -124,7 +124,7 @@ def build_llm_request(
             messages=messages,
             response_format=settings.response_format,
             tool_use=tool_use,
-            prompt_cache_key=_read_prompt_cache_key(),
+            prompt_cache_key=_prompt_cache_key(user_id),
         ),
         multipart_files=multipart_files,
         response_schema=settings.response_schema,
@@ -236,16 +236,18 @@ def _file_block(prepared_file: PreparedContentFile) -> LlmInputBlock:
     )
 
 
-def _read_prompt_cache_key() -> str | None:
-    """1 つの action の推論を同じ prompt cache prefix に載せるキー（決定事項 8）。
+def _prompt_cache_key(user_id: str) -> str:
+    """One stable key per owner, the same on every route and for every job.
 
-    action の外（memory / suggestion など）の推論は action_id を持たないので、
-    キーを送らずに provider の既定の振る舞いに任せる。
+    On GPT-5.6 and later the key no longer steers cache routing; it only keeps
+    each key's cached prefixes apart. Per owner, every run of a kind reuses the
+    shared system prompt and tool prefix instead of rewriting it at 1.25x, and
+    owners who share the cloud's one organization cannot probe each other's
+    prompts through cache hits. The digest keeps the raw ID off the wire.
+    https://developers.openai.com/api/docs/guides/prompt-caching#prompt-cache-keys
     """
 
-    trace_context = get_trace_context()
-    action_id = trace_context.action_id if trace_context is not None else None
-    return action_id or None
+    return hashlib.sha256(user_id.encode()).hexdigest()
 
 
 __all__ = ["BuiltLlmRequest", "build_llm_request"]

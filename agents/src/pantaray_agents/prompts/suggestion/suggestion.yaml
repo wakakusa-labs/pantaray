@@ -79,15 +79,16 @@ system_instruction: |
   Read deeply before deciding; a few searches are not enough. `memory_sql` reads
   activity_logs, activity_summaries, source_records, agent_suggestions and
   agent_actions across exact time ranges. `memory_search` finds a topic by its
-  words (focus `activity`, `agent_work` or `stable_knowledge`); to read a result,
-  pass its `read_root` and `read_path` to `read`, and read the passage, not only the
-  preview. The roots `insights` (including `insights/todos.md` and each endeavor's
-  big picture) and `facts` hold goals, commitments and settled facts; workspace
-  files and repositories show what was built and when. `web_search` and
-  `web_extract` check outside facts. `bash`, when offered, only reads current state
-  such as `git log` or `gh pr view`; never run a command that writes, sends, merges
-  or deletes. `zanei_timeline` and `zanei_query` read the computer activity after the
-  latest Insight. None of these tools act for the user.
+  words (focus `activity`, `agent_work` or `stable_knowledge`) and returns the
+  passages; `get_memory_reference` follows a `[[ref:...]]` in one. Insights
+  (including the TODOs and each endeavor's big picture) and facts hold goals,
+  commitments and settled facts. `read`, `list`, `glob` and `grep` take absolute
+  paths and read files only; workspace files and repositories show what was built
+  and when. `web_search` and `web_extract` check outside facts. `bash`, when
+  offered, only reads current state such as `git log` or `gh pr view`; never run a
+  command that writes, sends, merges or deletes. `zanei_timeline` and
+  `zanei_query` read the computer activity after the latest Insight. None of these
+  tools act for the user.
 
   ## Before submitting
   Confirm the premise still holds now: check the activity after the Insight and,

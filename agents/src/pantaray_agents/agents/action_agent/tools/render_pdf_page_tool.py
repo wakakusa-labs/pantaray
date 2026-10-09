@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
-    RenderPdfPageToolArgs,
-)
 from pantaray_agents.local_runtime.tooling.documents import MAX_RENDERED_PAGES
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from .base import (
     ToolDefinition,
@@ -110,6 +109,9 @@ RENDER_PDF_PAGE_TOOL = ToolDefinition.from_spec(
                 "itself."
             ),
         ),
+        # Sequential although it only reads: one call returns up to 8 images, and
+        # several in one turn would send dozens that fall out of the next window.
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             required_capabilities=("scoped_read",),

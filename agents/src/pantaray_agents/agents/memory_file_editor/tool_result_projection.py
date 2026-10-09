@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TypedDict, cast
 
-from pantaray_agents.agents.artifact_react import ReactToolResult
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import ReactToolResult
 
 from .tool_result_store import (
     MEMORY_TOOL_RESULT_INLINE_CHARACTER_LIMIT,

@@ -6,15 +6,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-from pantaray_agents.agents.artifact_react import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     react_tool_response_schema,
     tool_error_response,
 )
-from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import serialize_json_tool_output
 
 TOOL_RESULT_FETCH_TOOL_NAME: Literal["tool_result_fetch"] = "tool_result_fetch"
 MEMORY_TOOL_RESULT_INLINE_CHARACTER_LIMIT = 20_000

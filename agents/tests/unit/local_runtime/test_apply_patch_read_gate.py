@@ -10,9 +10,6 @@ import pytest
 from pantaray_agents.local_runtime.tooling.brokering import (
     broker_structured_patch,
 )
-from pantaray_agents.local_runtime.tooling.brokering import (
-    workspace_descriptor_access as descriptor_access,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerToolOutcome,
@@ -42,6 +39,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     load_action_file_json_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files import (
+    workspace_descriptor_access as descriptor_access,
+)
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -58,6 +58,11 @@ TARGET_NOT_FILE_FEEDBACK = (
 )
 READ_FAILED_FEEDBACK = (
     "PATCH_READ_FAILED: re-read the target paths after they are readable."
+)
+ENCODING_UNSUPPORTED_FEEDBACK = (
+    "PATCH_ENCODING_UNSUPPORTED: apply_patch cannot edit this file without "
+    "changing its encoding. Do not rewrite or re-encode it another way unless "
+    "the user agrees."
 )
 
 
@@ -98,11 +103,11 @@ def _update_args(
     )
 
 
-async def _execute_initial_update(
+async def _execute_patch(
     *,
     db_path: Path,
     context: ActionExecutionContext,
-    path: str,
+    args: dict[str, JSONValue],
     invocation_suffix: str,
 ) -> BrokerToolOutcome:
     outcome = await execute_broker_tool(
@@ -115,10 +120,25 @@ async def _execute_initial_update(
         execution_session_id=context.execution_session_id,
         invocation_id=f"invocation-{invocation_suffix}",
         tool_request_id=f"request-{invocation_suffix}",
-        args=_update_args(path=path, old_lines=["old"], new_lines=["new"]),
+        args=args,
     )
     assert isinstance(outcome, BrokerToolOutcome)
     return outcome
+
+
+async def _execute_initial_update(
+    *,
+    db_path: Path,
+    context: ActionExecutionContext,
+    path: str,
+    invocation_suffix: str,
+) -> BrokerToolOutcome:
+    return await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(path=path, old_lines=["old"], new_lines=["new"]),
+        invocation_suffix=invocation_suffix,
+    )
 
 
 def _assert_patch_error(
@@ -314,23 +334,155 @@ async def test_apply_patch_symlink_target_reports_target_not_file(
 
 
 @pytest.mark.asyncio
-async def test_apply_patch_decode_failure_reports_read_failed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("data", "encoding_hint"),
+    [
+        ("old\r\n\u65e5\u672c\u8a9e\r\n".encode("cp932"), "CP932/Shift_JIS"),
+        ("old\r\n".encode("utf-16"), "UTF-16"),
+    ],
+    ids=["cp932", "utf-16-bom"],
+)
+async def test_apply_patch_refuses_non_utf8_file_unchanged(
+    tmp_path: Path, data: bytes, encoding_hint: str
+) -> None:
     db_path, context = _bootstrap_workspace_write_context(tmp_path)
-    target = context.workspace_path / "invalid-utf8.txt"
-    target.write_bytes(b"\xff")
+    target = context.workspace_path / "legacy.txt"
+    target.write_bytes(data)
 
     outcome = await _execute_initial_update(
         db_path=db_path,
         context=context,
         path=target.name,
-        invocation_suffix="apply-patch-decode-failure",
+        invocation_suffix="apply-patch-non-utf8",
     )
 
     _assert_patch_error(
         outcome,
-        code="PATCH_READ_FAILED",
-        llm_feedback=READ_FAILED_FEEDBACK,
+        code="PATCH_ENCODING_UNSUPPORTED",
+        llm_feedback=ENCODING_UNSUPPORTED_FEEDBACK,
     )
+    assert isinstance(outcome.output, dict)
+    error = outcome.output["error"]
+    assert isinstance(error, dict)
+    assert encoding_hint in str(error["message"])
+    assert target.read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_window_numbers_lines_like_the_patch_matcher(
+    tmp_path: Path,
+) -> None:
+    db_path, context = _bootstrap_workspace_write_context(tmp_path)
+    # U+2028 and form feed are not line ends for patches or the read tool.
+    lines = [f"note {index}\u2028 more\x0c page" for index in range(100)]
+    lines += [f"line {index}" for index in range(1_000)]
+    lines[600] = "target"
+    target = context.workspace_path / "separators.txt"
+    target.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+
+    first = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(path=target.name, old_lines=["target"], new_lines=["x"]),
+        invocation_suffix="separator-window",
+    )
+
+    assert first.output["status"] == "needs_read"
+    windows = first.output["windows"]
+    assert isinstance(windows, list) and len(windows) == 1
+    window = windows[0]
+    assert isinstance(window, dict)
+    start_line = window["start_line"]
+    assert isinstance(start_line, int)
+    window_lines = str(window["text"]).split("\n")
+    copied_target = window_lines[601 - start_line]
+    assert copied_target == "target"
+
+    retried = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name,
+            old_lines=[copied_target],
+            new_lines=["changed"],
+        ),
+        invocation_suffix="separator-retry",
+    )
+
+    assert retried.output["status"] == "success"
+    lines[600] = "changed"
+    assert target.read_bytes() == ("\n".join(lines) + "\n").encode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_needs_read_text_omits_bom_and_edit_keeps_one(
+    tmp_path: Path,
+) -> None:
+    db_path, context = _bootstrap_workspace_write_context(tmp_path)
+    target = context.workspace_path / "bom.txt"
+    target.write_bytes(b"\xef\xbb\xbfold\r\nkeep\r\n")
+
+    first = await _execute_initial_update(
+        db_path=db_path,
+        context=context,
+        path=target.name,
+        invocation_suffix="bom-read",
+    )
+    assert first.output["status"] == "needs_read"
+    returned_first_line = str(first.output["text"]).split("\r\n")[0]
+
+    saved = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name, old_lines=[returned_first_line], new_lines=["new"]
+        ),
+        invocation_suffix="bom-save",
+    )
+
+    assert saved.output["status"] == "success"
+    assert target.read_bytes() == b"\xef\xbb\xbfnew\r\nkeep\r\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_window_keeps_interior_bom_character_visible(
+    tmp_path: Path,
+) -> None:
+    db_path, context = _bootstrap_workspace_write_context(tmp_path)
+    target = context.workspace_path / "joined.txt"
+    long_before = "x" * 40_000
+    long_after = "y" * 40_000
+    target.write_bytes(f"{long_before}\n\ufefftarget\n{long_after}\n".encode())
+
+    first = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name, old_lines=["\ufefftarget"], new_lines=["x"]
+        ),
+        invocation_suffix="interior-bom-window",
+    )
+
+    assert first.output["status"] == "needs_read"
+    windows = first.output["windows"]
+    assert isinstance(windows, list) and len(windows) == 1
+    window = windows[0]
+    assert isinstance(window, dict)
+    assert (window["start_line"], window["end_line"]) == (2, 2)
+    copied_line = str(window["text"]).split("\n")[0]
+
+    retried = await _execute_patch(
+        db_path=db_path,
+        context=context,
+        args=_update_args(
+            path=target.name, old_lines=[copied_line], new_lines=["changed"]
+        ),
+        invocation_suffix="interior-bom-retry",
+    )
+
+    # The success diff is large enough to be stored as an action file.
+    assert retried.status == "success"
+    assert target.read_bytes() == (f"{long_before}\nchanged\n{long_after}\n".encode())
 
 
 @pytest.mark.asyncio

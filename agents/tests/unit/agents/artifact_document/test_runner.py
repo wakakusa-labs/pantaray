@@ -10,8 +10,6 @@ from pantaray_agents.agents.artifact_document import (
 from pantaray_agents.agents.artifact_react import (
     PatchCommitResult,
     ReactLoopStep,
-    ReactToolCall,
-    ReactToolResult,
     build_artifact_react_response_format,
     parse_artifact_document_react_output,
     run_react_loop,
@@ -21,6 +19,7 @@ from pantaray_agents.agents.artifact_react.artifact_patch_contract import (
 )
 from pantaray_agents.local_runtime.llm_proxy.generate_config import serialize_for_json
 from pantaray_agents.schema.agent.base import AgentError
+from pantaray_agents.tools.contract import ReactToolCall, ReactToolResult
 from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.errors.error_contract import PROXY_REQUEST_FAILED

@@ -7,8 +7,11 @@ import { RecordingIntroDialog } from './RecordingIntroDialog';
 import { RecordingRailControl } from './RecordingRailControl';
 import { AiConnectionNotice } from './AiConnectionNotice';
 import { LocalOwnerBoundary } from './LocalOwnerBoundary';
+import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
+import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
+import { saveHistoryViewMode, showChatState } from '@/history/historyViewMode';
 import './Layout.css';
 
 /**
@@ -19,11 +22,22 @@ const Layout: React.FC = () => {
   const needsLogin = authStatus === 'expired';
   const hasAccount = authStatus === 'authenticated' || needsLogin;
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // The Overlay's chat button: from any page, open History's chat on that Action's latest card.
+  useEffect(() => {
+    const onShowChat = window.electron?.history?.onShowChat;
+    if (!onShowChat) return;
+    return onShowChat(({ actionId }) => {
+      saveHistoryViewMode('chat');
+      navigate('/history', { state: showChatState(actionId) });
+    });
+  }, [navigate]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -82,88 +96,103 @@ const Layout: React.FC = () => {
   ];
 
   return (
-    <div className="app-shell">
-      {/* The window has no title bar; this strip above the content is what drags it. */}
-      <div className="app-titlebar" aria-hidden="true" />
-      <nav className="app-rail">
-        {navItems.map(({ path, label, Icon }) => {
-          const isActive = location.pathname === path;
-          return (
-            <button
-              key={path}
-              type="button"
-              onClick={() => navigate(path)}
-              className={['app-rail-item', isActive ? 'app-rail-item--active' : null]
-                .filter(Boolean)
-                .join(' ')}
-              aria-label={label}
-              title={label}
-              aria-current={isActive ? 'page' : undefined}
-            >
-              <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-          );
-        })}
-        <div className="app-rail-bottom">
-          {/* Recording belongs to the local owner; without one there is nothing to show. */}
-          <LocalOwnerBoundary fallback={null}>
-            <RecordingRailControl />
-          </LocalOwnerBoundary>
-          {PANTARAY_ACCOUNT_LOGIN_ENABLED && (
-            <div className="app-rail-user" ref={dropdownRef}>
+    <ChatUnreadContext.Provider value={chatUnread}>
+      <div className="app-shell">
+        {/* The window has no title bar; this strip above the content is what drags it. */}
+        <div className="app-titlebar" aria-hidden="true" />
+        <nav className="app-rail">
+          {navItems.map(({ path, label, Icon }) => {
+            const isActive = location.pathname === path;
+            const unread = path === '/history' && chatUnread > 0;
+            return (
               <button
+                key={path}
                 type="button"
-                ref={menuButtonRef}
-                aria-expanded={isDropdownOpen}
-                aria-controls="app-user-dropdown"
-                className="app-user-button"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                aria-label={t('layout.userMenuAriaLabel')}
+                onClick={() => navigate(path)}
+                className={['app-rail-item', isActive ? 'app-rail-item--active' : null]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-label={label}
+                title={label}
+                aria-current={isActive ? 'page' : undefined}
+                aria-describedby={unread ? 'app-rail-chat-unread' : undefined}
               >
-                {user ? getUserInitials(user.email) : <UserRound size={18} aria-hidden="true" />}
+                <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
+                {unread ? <span className="app-rail-unread-dot" aria-hidden="true" /> : null}
               </button>
-              {isDropdownOpen && (
-                <div className="app-user-dropdown" id="app-user-dropdown">
-                  {user?.email && <div className="app-user-dropdown-email">{user.email}</div>}
-                  {needsLogin && (
-                    <p className="app-user-dropdown-email" role="status">
-                      {t('layout.sessionExpired')}
-                    </p>
-                  )}
-                  {!user && (
-                    <Link
-                      className="app-user-dropdown-item"
-                      to="/login"
-                      onClick={() => setIsDropdownOpen(false)}
-                    >
-                      {t(needsLogin ? 'menu.reauthenticate' : 'menu.login')}
-                    </Link>
-                  )}
-                  {hasAccount && (
-                    <button className="app-user-dropdown-item" onClick={handleLogout}>
-                      {t('menu.logout')}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </nav>
+            );
+          })}
+          <div className="app-rail-bottom">
+            {/* Recording belongs to the local owner; without one there is nothing to show. */}
+            <LocalOwnerBoundary fallback={null}>
+              <RecordingRailControl />
+            </LocalOwnerBoundary>
+            {PANTARAY_ACCOUNT_LOGIN_ENABLED && (
+              <div className="app-rail-user" ref={dropdownRef}>
+                <button
+                  type="button"
+                  ref={menuButtonRef}
+                  aria-expanded={isDropdownOpen}
+                  aria-controls="app-user-dropdown"
+                  className="app-user-button"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  aria-label={t('layout.userMenuAriaLabel')}
+                >
+                  {user ? getUserInitials(user.email) : <UserRound size={18} aria-hidden="true" />}
+                </button>
+                {isDropdownOpen && (
+                  <div className="app-user-dropdown" id="app-user-dropdown">
+                    {user?.email && <div className="app-user-dropdown-email">{user.email}</div>}
+                    {needsLogin && (
+                      <p className="app-user-dropdown-email" role="status">
+                        {t('layout.sessionExpired')}
+                      </p>
+                    )}
+                    {!user && (
+                      <Link
+                        className="app-user-dropdown-item"
+                        to="/login"
+                        onClick={() => setIsDropdownOpen(false)}
+                      >
+                        {t(needsLogin ? 'menu.reauthenticate' : 'menu.login')}
+                      </Link>
+                    )}
+                    {hasAccount && (
+                      <button className="app-user-dropdown-item" onClick={handleLogout}>
+                        {t('menu.logout')}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </nav>
+        {chatUnread > 0 ? (
+          <span id="app-rail-chat-unread" hidden>
+            {t('history.chat.unread', { count: chatUnread })}
+          </span>
+        ) : null}
 
-      {/* Recording belongs to the local owner; without one there is nothing to ask for. */}
-      <LocalOwnerBoundary fallback={null}>
-        <RecordingIntroDialog />
-      </LocalOwnerBoundary>
+        {/* The chat's unread count, for the rail and History's chat switch on every page. */}
+        <LocalOwnerBoundary fallback={null}>
+          <ChatUnreadTracker onCount={setChatUnread} />
+        </LocalOwnerBoundary>
 
-      <main className="app-main">
-        <div className={isSplitPage ? 'app-surface app-surface--split' : 'app-surface'}>
-          {isSplitPage ? null : <AiConnectionNotice />}
-          <Outlet />
-        </div>
-        <UpdateReadyNotice />
-      </main>
-    </div>
+        {/* Recording belongs to the local owner; without one there is nothing to ask for. */}
+        <LocalOwnerBoundary fallback={null}>
+          <RecordingIntroDialog />
+        </LocalOwnerBoundary>
+
+        <main className="app-main">
+          <div className={isSplitPage ? 'app-surface app-surface--split' : 'app-surface'}>
+            {isSplitPage ? null : <AiConnectionNotice />}
+            <Outlet />
+          </div>
+          <UpdateReadyNotice />
+        </main>
+      </div>
+    </ChatUnreadContext.Provider>
   );
 };
 

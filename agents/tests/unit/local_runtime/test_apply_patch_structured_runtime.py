@@ -8,12 +8,17 @@ from typing import cast
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker_structured_patch
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    ApplyPatchEdit,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    apply_patch_edits,
+    patch_line_texts,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -458,3 +463,115 @@ async def test_apply_patch_update_rejects_invalid_omitted_pattern(
     assert isinstance(error, dict)
     assert error["code"] == "PATCH_LINE_PATTERN_INVALID"
     assert workspace_file.read_text(encoding="utf-8") == "value = old\n"
+
+
+def _diff_body_lines(diff: str) -> list[str]:
+    return [
+        line
+        for line in diff.splitlines()
+        if line.startswith(("-", "+")) and not line.startswith(("---", "+++"))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_update_keeps_crlf_and_utf8_bom(tmp_path: Path) -> None:
+    db_path, context = _bootstrap_typed_runtime_db(tmp_path)
+    _grant_workspace_full_access(
+        db_path=db_path,
+        manifest_id=context.manifest_id,
+        capability="scoped_write",
+    )
+    target = context.workspace_path / "Module1.vb"
+    target.write_bytes(
+        b"\xef\xbb\xbfImports System\r\n"
+        b"Module Module1\r\n"
+        b"    Sub One()\r\n"
+        b"    End Sub\r\n"
+        b"End Module\r\n"
+    )
+
+    outcome = await _execute_apply_patch_after_needs_read(
+        db_path=db_path,
+        context=context,
+        invocation_id="invocation-apply-patch-crlf",
+        tool_request_id="request-apply-patch-crlf",
+        args={
+            "changes": [
+                _update_change(
+                    path="Module1.vb",
+                    old_lines=["Imports System", "Module Module1", "    Sub One()"],
+                    new_lines=[
+                        "Imports System",
+                        "Module Module1",
+                        "    Sub Two()",
+                        "    ' added",
+                    ],
+                )
+            ]
+        },
+    )
+
+    assert outcome.status == "success"
+    assert target.read_bytes() == (
+        b"\xef\xbb\xbfImports System\r\n"
+        b"Module Module1\r\n"
+        b"    Sub Two()\r\n"
+        b"    ' added\r\n"
+        b"    End Sub\r\n"
+        b"End Module\r\n"
+    )
+    assert _diff_body_lines(str(outcome.output["diff"])) == [
+        "-    Sub One()",
+        "+    Sub Two()",
+        "+    ' added",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("old_text", "old_lines", "new_lines", "expected"),
+    [
+        ("a\nb\n", ["b"], ["B", "C"], "a\nB\nC\n"),
+        ("a\r\nb", ["b"], ["B"], "a\r\nB"),
+        ("a\r\nb", ["b"], ["b", "c"], "a\r\nb\r\nc"),
+        ("a\r\nb\nc\r\n", ["c"], ["C"], "a\r\nb\nC\r\n"),
+        ("a\rb\n\nc\n", ["b"], ["B"], "a\rB\n\nc\n"),
+        ("a\rb\n\nc\n", ["b"], [], "a\n\nc\n"),
+    ],
+    ids=[
+        "lf",
+        "crlf-no-final-newline",
+        "append-after-unterminated",
+        "mixed",
+        "cr-replace-before-empty-lf-line",
+        "cr-delete-before-empty-lf-line",
+    ],
+)
+def test_apply_patch_edits_keep_line_endings(
+    old_text: str, old_lines: list[str], new_lines: list[str], expected: str
+) -> None:
+    edit = ApplyPatchEdit(old_lines=old_lines, new_lines=new_lines)
+
+    assert apply_patch_edits(old_text=old_text, edits=[edit]) == expected
+
+
+@pytest.mark.parametrize(
+    "old_text",
+    [
+        "a\rb\n\nc\n",
+        "a\r\n\rb\r\n\nc",
+        "\ra\n\rb\r\n\n",
+        "a\rb\rc\n\n\r",
+    ],
+)
+def test_apply_patch_edits_never_merge_or_split_untouched_lines(old_text: str) -> None:
+    old_lines = list(patch_line_texts(old_text))
+    for index, line in enumerate(old_lines):
+        if not line:
+            continue
+        for new_lines in (["R"], [], [line, ""], ["", line]):
+            edit = ApplyPatchEdit(old_lines=[line], new_lines=new_lines)
+            expected = old_lines[:index] + new_lines + old_lines[index + 1 :]
+
+            new_text = apply_patch_edits(old_text=old_text, edits=[edit])
+
+            assert list(patch_line_texts(new_text)) == expected, (line, new_lines)

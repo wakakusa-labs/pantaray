@@ -3,13 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolExecutor,
-    ReactToolResult,
-    tool_error_response,
-)
 from pantaray_agents.agents.memory_file_editor.tools import (
     DELETE_MEMORY_FILE_TOOL_NAME,
     LINK_MEMORY_TOOL_NAME,
@@ -42,10 +35,17 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     SandboxPathError,
     TextFileError,
 )
-from pantaray_agents.local_runtime.tooling.memory_retrieval import (
+from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolExecutor,
+    ReactToolResult,
+    tool_error_response,
+)
+from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 
 from .logical_draft_io import (
     require_editable_document_path,

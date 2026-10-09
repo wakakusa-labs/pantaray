@@ -64,6 +64,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models 
 from pantaray_agents.local_runtime.tooling.suggestion_research import (
     SuggestionResearchSnapshot,
 )
+from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
+    suggestion_tool_results_root,
+)
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
 from pantaray_agents.schema.context_source import (
@@ -77,7 +80,8 @@ from pantaray_agents.tasks.internal_jobs.suggestion import _run_suggestion_job
 from pantaray_agents.tasks.types import SuggestionJobPayload
 
 _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
-    roots=(),
+    folders=(),
+    memory_revisions={},
     stable_memory=SuggestionStableMemoryContext(
         prompt="No stable memory roots are available.",
         has_facts=False,
@@ -437,6 +441,7 @@ async def test_run_suggestion_job_returns_terminal_row_before_snapshot(
 @pytest.mark.asyncio
 async def test_run_suggestion_job_finalizes_processing_row_on_worker_failure(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     repository = SimpleNamespace(
         get_suggestion=AsyncMock(
@@ -474,12 +479,19 @@ async def test_run_suggestion_job_finalizes_processing_row_on_worker_failure(
     )
     monkeypatch.setattr(
         "pantaray_agents.tasks.internal_jobs.suggestion.read_local_runtime_db_config",
-        lambda: ("runtime.db", 1_000),
+        lambda: (tmp_path / "runtime.db", 1_000),
     )
+    # What the run's read tools spilled before it failed.
+    spill_root = suggestion_tool_results_root(
+        db_path=tmp_path / "runtime.db", run_id="suggestion-1"
+    )
+    spill_root.mkdir(parents=True)
+    (spill_root / "output.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="boom"):
         await _run_suggestion_job(_payload())
 
+    assert not spill_root.exists()
     repository.finalize_suggestion_start_error_if_processing.assert_awaited_once()
     kwargs = repository.finalize_suggestion_start_error_if_processing.await_args.kwargs
     assert kwargs["user_id"] == "user-1"

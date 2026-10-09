@@ -7,6 +7,7 @@ import {
   type ActionMessageRequest,
 } from '../../electron/src/actions/actionContracts';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import { waitForAnimationsToSettle } from './animations';
 
 // Render the production entry with deterministic IPC inputs; no backend, account, or live store.
 let vite: ViteDevServer;
@@ -127,15 +128,7 @@ async function showSuggestion(
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished)
-    );
-  });
+  await waitForAnimationsToSettle(page);
   const panel = page.locator('[data-overlay-panel]');
   await expect
     .poll(async () => Number(await page.locator('html').getAttribute('data-overlay-height')))
@@ -173,13 +166,13 @@ test('offer: inline decisions, expanded instructions and fresh suggestion reset'
   const open = page.getByRole('button', { name: '追加の指示（任意）' });
   const accept = page.getByRole('button', { name: '承認', exact: true });
   await expect(page.getByRole('textbox')).toHaveCount(0);
+  await capture(page, info, 'offer-collapsed');
   const iconBox = (await open.boundingBox())!;
   const acceptBox = (await accept.boundingBox())!;
   expect(
     Math.abs(iconBox.y + iconBox.height / 2 - acceptBox.y - acceptBox.height / 2)
   ).toBeLessThan(2);
   expect(acceptBox.x).toBeGreaterThan(iconBox.x + iconBox.width);
-  await capture(page, info, 'offer-collapsed');
   await open.click();
   const input = page.getByRole('textbox', { name: '追加の指示（任意）' });
   await expect(input).toBeFocused();
@@ -261,7 +254,8 @@ test('continuation: list floats above, filters, closes, and sends the reference'
   const entry = (step: number, content: string) =>
     step % 2
       ? // prettier-ignore
-        { step_kind: 'user', approved_suggestion: null, step_id: `step-${step}`, step_number: step, content, message_id: `message-${step}`, accepted_sequence: step, images: [], project_refs: [], status: 'adopted' }
+        { step_kind: 'user',
+    chat_note: null, approved_suggestion: null, step_id: `step-${step}`, step_number: step, content, message_id: `message-${step}`, accepted_sequence: step, images: [], project_refs: [], status: 'adopted' }
       : { step_kind: 'assistant', step_id: `step-${step}`, step_number: step, content };
   // prettier-ignore
   const conversation = parseActionConversationPage({
@@ -403,7 +397,8 @@ for (const language of ['ja', 'en'] as const) {
     await page.goto(`${baseUrl}notification.html?mode=standalone&actionId=action-1`);
     await expect(page.locator('html')).toHaveAttribute('data-conversation-ready', 'true');
     // prettier-ignore
-    const sent = { step_kind: 'user', approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: 'message-1', accepted_sequence: 1, content: '先月の見積書を確認して', images: [], project_refs: [], files: [{ name: '2026年8月 見積書（改訂版・最終）.pdf', byte_size: 1_258_291 }], status: 'adopted' };
+    const sent = { step_kind: 'user',
+    chat_note: null, approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: 'message-1', accepted_sequence: 1, content: '先月の見積書を確認して', images: [], project_refs: [], files: [{ name: '2026年8月 見積書（改訂版・最終）.pdf', byte_size: 1_258_291 }], status: 'adopted' };
     // prettier-ignore
     const conversation = parseActionConversationPage({
       action: { action_id: 'action-1', suggestion_id: null, status: 'success', latest_run_id: 'run-1', approved_suggestion: null, resumable: false },

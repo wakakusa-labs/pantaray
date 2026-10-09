@@ -9,6 +9,17 @@ from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.discovery import run_glob, run_grep, run_list
+from pantaray_agents.tools.files.read import run_read
+from pantaray_agents.tools.files.read_contract import (
+    GlobToolArgs,
+    GrepToolArgs,
+    ListToolArgs,
+    ReadToolArgs,
+)
+from pantaray_agents.tools.files.read_scope import ReadScope
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -23,6 +34,7 @@ from ..tool_result_finalization import (
     finalize_local_tool_result,
 )
 from ..tool_result_validation import ToolOutputValidationError
+from .action_path_policy import read_scope
 from .broker_command_validation import (
     build_validated_command_request,
     build_validated_python_request,
@@ -42,9 +54,9 @@ from .broker_common import (
     BrokerApprovalRequiredError,
     BrokerContext,
     BrokerExecutionError,
-    BrokerPolicyError,
     FinalizedBrokerPolicyError,
     apply_approval_decision,
+    ensure_session_capabilities,
     ensure_tool_authorization,
     load_broker_context,
 )
@@ -53,13 +65,7 @@ from .broker_direct import (
     resolve_patch_mount_plan,
     run_apply_patch_executor,
 )
-from .broker_direct_read import run_read_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
-from .broker_discovery import (
-    run_glob_executor,
-    run_grep_executor,
-    run_list_executor,
-)
 from .broker_failure_finalization import (
     finalize_broker_invocation_error,
     finalize_canceled_broker_invocation,
@@ -68,16 +74,12 @@ from .broker_outcome import (
     BrokerPreflightOutcome,
     BrokerToolOutcome,
     project_broker_tool_outcome,
+    read_tool_outcome,
 )
 from .broker_protocol import (
     ApplyPatchToolArgs,
     BashToolArgs,
     BrokerToolRequest,
-    GlobToolArgs,
-    GrepToolArgs,
-    ListToolArgs,
-    ReadToolArgs,
-    RenderPdfPageToolArgs,
     RunPythonToolArgs,
     ValidatedCommandRequest,
     ValidatedGlobRequest,
@@ -206,11 +208,7 @@ def _validate_request(
             action_id=context.execution_session.action_id or "unknown",
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,
-            path=request.args.path,
-            offset=request.args.offset,
-            column=request.args.column,
-            limit=request.args.limit,
-            start_unit=request.args.start_unit,
+            args=request.args,
         )
     if definition.execution_path == "broker_direct_render_pdf":
         assert isinstance(request.args, RenderPdfPageToolArgs)
@@ -233,9 +231,7 @@ def _validate_request(
             action_id=context.execution_session.action_id or "unknown",
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,
-            path=request.args.path,
-            max_depth=request.args.max_depth,
-            limit=request.args.limit,
+            args=request.args,
         )
     if definition.execution_path == "broker_direct_glob":
         assert isinstance(request.args, GlobToolArgs)
@@ -246,9 +242,7 @@ def _validate_request(
             action_id=context.execution_session.action_id or "unknown",
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,
-            base_path=request.args.base_path,
-            pattern=request.args.pattern,
-            limit=request.args.limit,
+            args=request.args,
         )
     if definition.execution_path == "broker_direct_grep":
         assert isinstance(request.args, GrepToolArgs)
@@ -259,10 +253,7 @@ def _validate_request(
             action_id=context.execution_session.action_id or "unknown",
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,
-            base_path=request.args.base_path,
-            pattern=request.args.pattern,
-            include_glob=request.args.include_glob,
-            max_matches=request.args.max_matches,
+            args=request.args,
         )
     if definition.execution_path == "broker_direct_patch":
         assert isinstance(request.args, ApplyPatchToolArgs)
@@ -380,6 +371,13 @@ def _build_validated_patch_request(
     )
 
 
+def _checked_read_scope(context: BrokerContext) -> ReadScope:
+    """The scope a read/search call runs in, once the Action's own checks pass."""
+
+    ensure_session_capabilities(context=context)
+    return read_scope(context)
+
+
 async def execute_broker_tool(
     *,
     db_path: Path,
@@ -446,10 +444,12 @@ async def execute_broker_tool(
                 request=validated,
             )
         elif isinstance(validated, ValidatedReadRequest):
-            outcome = await asyncio.to_thread(
-                run_read_executor,
-                context=context,
-                request=validated,
+            outcome = read_tool_outcome(
+                await asyncio.to_thread(
+                    run_read,
+                    scope=_checked_read_scope(context),
+                    request=validated.args,
+                )
             )
         elif isinstance(validated, ValidatedRenderPdfPageRequest):
             # Drawing already waits on a child process, so it is awaited here
@@ -460,22 +460,28 @@ async def execute_broker_tool(
                 request=validated,
             )
         elif isinstance(validated, ValidatedListRequest):
-            outcome = await asyncio.to_thread(
-                run_list_executor,
-                context=context,
-                request=validated,
+            outcome = read_tool_outcome(
+                await asyncio.to_thread(
+                    run_list,
+                    scope=_checked_read_scope(context),
+                    request=validated.args,
+                )
             )
         elif isinstance(validated, ValidatedGlobRequest):
-            outcome = await asyncio.to_thread(
-                run_glob_executor,
-                context=context,
-                request=validated,
+            outcome = read_tool_outcome(
+                await asyncio.to_thread(
+                    run_glob,
+                    scope=_checked_read_scope(context),
+                    request=validated.args,
+                )
             )
         elif isinstance(validated, ValidatedGrepRequest):
-            outcome = await asyncio.to_thread(
-                run_grep_executor,
-                context=context,
-                request=validated,
+            outcome = read_tool_outcome(
+                await asyncio.to_thread(
+                    run_grep,
+                    scope=_checked_read_scope(context),
+                    request=validated.args,
+                )
             )
         else:
             verify_outside_workspace_folders_unchanged(
@@ -574,7 +580,6 @@ __all__ = [
     "BrokerApprovalRequiredError",
     "BrokerCompletionPersistenceError",
     "BrokerExecutionError",
-    "BrokerPolicyError",
     "BrokerPreflightOutcome",
     "BrokerToolOutcome",
     "FinalizedBrokerPolicyError",

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
+from pantaray_agents.tools.contract import ToolImage
+
 LLM_FILE_DATA_KEY = "file_data"
 TOOL_ATTACHMENT_REF_PREFIX = "tool_attachment:"
 USER_ATTACHMENT_REF_PREFIX = "user_attachment:"
@@ -114,6 +116,21 @@ def interleave_file_inputs(
     return contents
 
 
+def tool_image_file_input(image: ToolImage) -> WorkspaceLlmFileInput:
+    """The file a request reads a tool's image from, under the ref it is shown by."""
+
+    return {
+        "ref": image.ref,
+        "blob_ref": image.blob_ref,
+        "mime_type": image.mime_type,
+        "byte_size": image.byte_size,
+        "sha256": image.sha256,
+        "source_kind": "workspace_file",
+        "workspace_root_path": image.workspace_root_path,
+        "workspace_relative_path": image.workspace_relative_path,
+    }
+
+
 __all__ = [
     "LocalImageLlmFileInput",
     "LLM_FILE_DATA_KEY",
@@ -125,4 +142,5 @@ __all__ = [
     "TextOrFileContent",
     "build_blob_file_block",
     "interleave_file_inputs",
+    "tool_image_file_input",
 ]

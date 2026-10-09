@@ -29,7 +29,7 @@ async def test_broker_persists_wrapped_io_cause_and_cleanup_note(
             error.add_note("Closing the file descriptor also failed: bad descriptor")
             raise error from cause
 
-    monkeypatch.setattr(broker, "run_read_executor", fail_read)
+    monkeypatch.setattr(broker, "run_read", fail_read)
     with pytest.raises(BrokerExecutionError) as caught:
         await execute_read_tool(
             db_path=db_path,

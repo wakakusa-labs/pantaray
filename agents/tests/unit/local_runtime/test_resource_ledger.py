@@ -9,11 +9,11 @@ import pantaray_agents.local_runtime.tooling.resources.resource_tracking as reso
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
-    complete_execution_session,
     ensure_action_scratch_execution_context,
 )
+from pantaray_agents.local_runtime.tooling.repository import complete_execution_session
 from pantaray_agents.local_runtime.tooling.resources.resource_repository import (
     ToolRuntimeResourceSessionConflictError,
 )

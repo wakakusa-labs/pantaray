@@ -220,6 +220,7 @@ export function StepItem({
               : toolRowStatus(entry, copy)
         }
         announceStatus={announceToolStatus}
+        shimmer={running && !runStopped && !awaitingApproval}
         images={entry.images}
         imagesCopy={copy.toolImages}
         outputKey={readableOutput && actionId !== null ? { actionId, stepId: entry.step_id } : null}
@@ -333,6 +334,8 @@ function WorkSection({
   const [expansion, setExpansion] = useState({ key: expansionKey, expanded: false });
   const expanded = expansion.key === expansionKey && expansion.expanded;
   const count = section.lines.filter((line) => line.kind === 'tool').length;
+  // The section the running Tool belongs to shimmers; it is the on-screen sign of progress.
+  const live = !awaitingApproval && section.lines.some((line) => line.key === liveToolKey);
   const disclosureRef = useCallback(
     (element: HTMLButtonElement | null) => registerDisclosure(section.key, element),
     [registerDisclosure, section.key]
@@ -353,7 +356,7 @@ function WorkSection({
         aria-expanded={expanded}
         onClick={() => setExpansion({ key: expansionKey, expanded: !expanded })}
       >
-        {copy.agentWork}
+        <span className={live ? 'action-conversation__shimmer' : undefined}>{copy.agentWork}</span>
         {count > 0 ? (
           <span className="action-conversation__count" aria-hidden>
             {count}

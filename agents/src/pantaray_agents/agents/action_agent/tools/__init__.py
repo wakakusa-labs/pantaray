@@ -1,11 +1,9 @@
 """ActionAgent で使用するツール定義を公開するモジュール。"""
 
-from .action_plan_tools import (
-    READ_ACTION_PLAN_TOOL,
-    READ_ACTION_PLAN_TOOL_ID,
-    WRITE_ACTION_PLAN_TOOL,
-    WRITE_ACTION_PLAN_TOOL_ID,
-)
+from collections.abc import Mapping
+
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .apply_patch_tool import APPLY_PATCH_TOOL
 from .base import ToolDefinition
 from .bash_tool import BASH_TOOL
@@ -37,6 +35,11 @@ from .render_pdf_page_tool import (
     RENDER_PDF_PAGE_TOOL_ID,
 )
 from .run_python_tool import RUN_PYTHON_TOOL
+from .session_memory_tool import (
+    SESSION_MEMORY_MAX_BYTES,
+    WRITE_SESSION_MEMORY_TOOL,
+    WRITE_SESSION_MEMORY_TOOL_ID,
+)
 from .subagent_tool import (
     CANCEL_SUBAGENT_TOOL,
     CANCEL_SUBAGENT_TOOL_ID,
@@ -65,10 +68,9 @@ from .zanei_tools import (
 
 __all__ = [
     "ToolDefinition",
-    "READ_ACTION_PLAN_TOOL",
-    "READ_ACTION_PLAN_TOOL_ID",
-    "WRITE_ACTION_PLAN_TOOL",
-    "WRITE_ACTION_PLAN_TOOL_ID",
+    "SESSION_MEMORY_MAX_BYTES",
+    "WRITE_SESSION_MEMORY_TOOL",
+    "WRITE_SESSION_MEMORY_TOOL_ID",
     "READ_TOOL",
     "RENDER_PDF_PAGE_TOOL",
     "RENDER_PDF_PAGE_TOOL_ID",
@@ -112,6 +114,7 @@ __all__ = [
     "SUPERVISOR_SINGLE_REACT_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS",
     "TOOL_REGISTRY",
+    "TOOL_CONCURRENCY",
     "select_tool_registry",
     "build_native_action_tools",
     "split_step_note",
@@ -144,8 +147,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         BASH_TOOL,
         RUN_PYTHON_TOOL,
         CAPTURE_SCREEN_TOOL,
-        READ_ACTION_PLAN_TOOL,
-        WRITE_ACTION_PLAN_TOOL,
+        WRITE_SESSION_MEMORY_TOOL,
         DRAFT_FINAL_ANSWER_TOOL,
         SUBMIT_FINAL_ANSWER_TOOL,
         HISTORY_FETCH_TOOL,
@@ -156,6 +158,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         WAIT_SUBAGENTS_TOOL,
         CANCEL_SUBAGENT_TOOL,
     )
+}
+
+TOOL_CONCURRENCY: Mapping[str, ToolConcurrency] = {
+    tool_id: tool.concurrency for tool_id, tool in TOOL_REGISTRY.items()
 }
 
 SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
@@ -178,8 +184,7 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     BASH_TOOL.tool_id,
     RUN_PYTHON_TOOL.tool_id,
     CAPTURE_SCREEN_TOOL.tool_id,
-    READ_ACTION_PLAN_TOOL.tool_id,
-    WRITE_ACTION_PLAN_TOOL.tool_id,
+    WRITE_SESSION_MEMORY_TOOL.tool_id,
     SPAWN_SUBAGENT_TOOL.tool_id,
     SEND_MESSAGE_TO_SUBAGENT_TOOL.tool_id,
     WAIT_SUBAGENTS_TOOL.tool_id,

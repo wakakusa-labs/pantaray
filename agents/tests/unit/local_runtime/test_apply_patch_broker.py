@@ -6,11 +6,9 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime import descriptor_access
-from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BrokerPolicyError,
-    execute_broker_tool,
-)
+from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -102,67 +100,6 @@ async def test_execute_broker_tool_applies_structured_update(
     assert workspace_file.read_text(encoding="utf-8") == "## Tasks\n- new\n"
     assert outcome.output["applied_paths"] == [str(context.workspace_path / "todo.md")]
     assert "--- todo.md" in str(outcome.output["diff"])
-
-
-@pytest.mark.asyncio
-async def test_apply_patch_rejects_resolved_action_plan_alias(
-    tmp_path: Path,
-) -> None:
-    db_path, context = _bootstrap_runtime_db(tmp_path)
-    private_plan = context.workspace_path / "plan.md"
-    private_plan.write_text("private\n", encoding="utf-8")
-    alias = context.workspace_path / "plan-alias.md"
-    alias.symlink_to(private_plan)
-    hardlink = context.workspace_path / "plan-hardlink.md"
-    hardlink.hardlink_to(private_plan)
-
-    for index, path in enumerate(
-        (alias.name, hardlink.name, private_plan.name.upper())
-    ):
-        with pytest.raises(BrokerPolicyError) as exc_info:
-            await execute_broker_tool(
-                db_path=db_path,
-                busy_timeout_ms=1_000,
-                tool_id="apply_patch",
-                user_id="user-1",
-                actor_process_id=BROKER_ACTOR_PROCESS_ID,
-                manifest_id=context.manifest_id,
-                execution_session_id=context.execution_session_id,
-                invocation_id=f"invocation-private-plan-alias-{index}",
-                tool_request_id=f"request-private-plan-alias-{index}",
-                args=_update_args(
-                    path=path,
-                    old_lines=["private"],
-                    new_lines=["changed"],
-                ),
-            )
-
-        assert exc_info.value.code == "ACTION_PLAN_PATH_PRIVATE"
-    assert private_plan.read_text(encoding="utf-8") == "private\n"
-    private_plan.unlink()
-    with pytest.raises(BrokerPolicyError) as descendant:
-        await execute_broker_tool(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            tool_id="apply_patch",
-            user_id="user-1",
-            actor_process_id=BROKER_ACTOR_PROCESS_ID,
-            manifest_id=context.manifest_id,
-            execution_session_id=context.execution_session_id,
-            invocation_id="invocation-private-plan-descendant",
-            tool_request_id="request-private-plan-descendant",
-            args={
-                "changes": [
-                    {
-                        "op": "add",
-                        "path": "plan.md/notes.txt",
-                        "new_lines": ["x"],
-                        "trailing_newline": True,
-                    }
-                ]
-            },
-        )
-    assert descendant.value.code == "ACTION_PLAN_PATH_PRIVATE"
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -44,6 +43,7 @@ from pantaray_agents.tasks.types import (
     MemoryUpdateActionTerminal,
     MemoryUpdateJobPayload,
 )
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"

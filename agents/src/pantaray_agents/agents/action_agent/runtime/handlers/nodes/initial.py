@@ -31,7 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.user_image_attachments import (
 from pantaray_agents.agents.action_agent.support.repository_result import (
     ensure_repository_result,
 )
-from pantaray_agents.agents.workspace_context import render_workspace_context_prompt
+from pantaray_agents.schema.workspace_context import render_workspace_context_prompt
 from pantaray_agents.tasks.action_user_message import render_action_user_request_text
 
 from .assistant_message import project_persisted_assistant_messages

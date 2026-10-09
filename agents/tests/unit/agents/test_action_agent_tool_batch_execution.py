@@ -36,6 +36,7 @@ from pantaray_agents.agents.action_agent.tools import (
     STEP_NOTE_ARG,
     select_supervisor_act_tool_registry,
 )
+from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
 )
@@ -48,7 +49,12 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
-PLAN_TOOL = "read_action_plan"
+# A read-only tool that really runs against the fixture's local database.
+SQL_TOOL = "memory_sql"
+SQL_CALL: tuple[str, dict[str, JSONValue]] = (
+    SQL_TOOL,
+    {"sql": "SELECT COUNT(*) AS n FROM agent_actions"},
+)
 PATCH_TOOL = "apply_patch"
 _PATCH_ARGS: dict[str, JSONValue] = {
     "changes": [
@@ -70,8 +76,8 @@ def _note(index: int) -> str:
     return f"{index} 件目の呼び出しとして、必要な情報をここで確認する。"
 
 
-def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> LlmActionTurnResponse:
-    return LlmActionTurnResponse(
+def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> ActionTurnReply:
+    response = LlmActionTurnResponse(
         mode="action_turn",
         messages=[],
         calls=[
@@ -83,6 +89,7 @@ def _turn(*calls: tuple[str, dict[str, JSONValue]]) -> LlmActionTurnResponse:
             for index, (tool_id, args) in enumerate(calls)
         ],
     )
+    return ActionTurnReply(response=response, provider_turn=None)
 
 
 def _make_agent() -> ActionAgent:
@@ -233,16 +240,19 @@ def _success_result(*, step_id: str, tool_id: str) -> ToolExecutionResult:
 async def test_parallel_batch_numbers_and_parents_every_call(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """K=3 の並列バッチは 3 行の TOOL step を連番・別 short id で残す。"""
+    """K=3 の並列バッチは 3 行の TOOL step を連番・別 short id で残す。
+
+    The calls finish in reverse; history still lists them in declared order.
+    """
 
     agent, runtime, state, request = await _build_fixture(
         monkeypatch,
         tmp_path,
         action_id="act-batch-parallel",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -250,6 +260,21 @@ async def test_parallel_batch_numbers_and_parents_every_call(
     assert batch is not None
     assert batch.mode == "parallel"
     base_step_number = state["step"]
+
+    # Each call runs the real tool, then waits for the call declared after it.
+    # This needs max_parallel_tool_calls >= 3, so all three run at once.
+    real_run_tool = call_execution.run_tool
+    finished = {base_step_number + index: asyncio.Event() for index in range(3)}
+
+    async def _run_tool_finishing_in_reverse(*args, **kwargs):
+        result = await real_run_tool(*args, **kwargs)
+        later = finished.get(kwargs["step_number"] + 1)
+        if later is not None:
+            await later.wait()
+        finished[kwargs["step_number"]].set()
+        return result
+
+    monkeypatch.setattr(call_execution, "run_tool", _run_tool_finishing_in_reverse)
 
     state = await _act(agent, runtime, state)
 
@@ -265,7 +290,7 @@ async def test_parallel_batch_numbers_and_parents_every_call(
         _note(2),
     ]
     assert {entry["result_line"] for entry in tool_entries} == {
-        f"{PLAN_TOOL}: ok",
+        f"{SQL_TOOL}: ok",
     }
 
     think_entry = _think_history(state)
@@ -297,10 +322,10 @@ async def test_batch_consumes_one_tool_step_per_call(
         monkeypatch,
         tmp_path,
         action_id="act-batch-budget",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -320,7 +345,7 @@ async def test_batch_consumes_one_tool_step_per_call(
 def test_call_timeout_comes_from_the_declared_tool_policy() -> None:
     """per-call timeout は既存の ``default_timeout_ms`` をそのまま使う。"""
 
-    tool_def = select_supervisor_act_tool_registry()[PLAN_TOOL]
+    tool_def = select_supervisor_act_tool_registry()[SQL_TOOL]
     slot = MagicMock()
     slot.tool_def = tool_def
     assert act.call_timeout_seconds(slot) == (
@@ -338,10 +363,10 @@ async def test_parallel_call_timeout_only_fails_that_call(
         monkeypatch,
         tmp_path,
         action_id="act-batch-timeout",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -362,7 +387,7 @@ async def test_parallel_call_timeout_only_fails_that_call(
     timed_out = [
         entry
         for entry in tool_entries
-        if entry["result_line"] == f"{PLAN_TOOL}: failed TOOL_BATCH_TIMEOUT"
+        if entry["result_line"] == f"{SQL_TOOL}: failed TOOL_BATCH_TIMEOUT"
     ]
     assert len(timed_out) == 1
     assert timed_out[0]["step_number"] == slow_step_number
@@ -370,7 +395,7 @@ async def test_parallel_call_timeout_only_fails_that_call(
         entry["result_line"]
         for entry in tool_entries
         if entry["step_number"] != slow_step_number
-    ] == [f"{PLAN_TOOL}: ok", f"{PLAN_TOOL}: ok"]
+    ] == [f"{SQL_TOOL}: ok", f"{SQL_TOOL}: ok"]
 
     persisted = _persisted_tool_steps(agent, request.action_id)
     assert len(persisted) == 3

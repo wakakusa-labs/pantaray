@@ -49,6 +49,7 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
   const openActionConversationCalls = [];
   const deleteItemCalls = [];
   const shortcutInputs = [];
+  const placementUpdates = [];
   const updateCalls = [];
   const ctx = {
     ipcMain: fakeIpc,
@@ -104,6 +105,13 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
       setAccelerator: (accelerator) => {
         shortcutInputs.push(accelerator);
         return { ok: true, state: { accelerator, failure: null } };
+      },
+    },
+    overlayPlacement: {
+      get: () => ({ suggestion: { row: 0, column: 4 } }),
+      set: (update) => {
+        placementUpdates.push(update);
+        return { [update.kind]: update.cell };
       },
     },
     screenshot: {
@@ -213,6 +221,25 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
   assert.throws(() => setShortcut({}, '   '), /shortcut:setAccelerator/);
   assert.throws(() => setShortcut({}, 'A'.repeat(129)), /shortcut:setAccelerator/);
   assert.deepEqual(shortcutInputs, ['Command+K', "Command+'"]);
+
+  const setPlacement = fakeIpc.invokeHandlers.get('overlayPlacement:set');
+  assert.deepEqual(setPlacement({}, { kind: 'history', cell: { row: 2, column: 0 } }), {
+    history: { row: 2, column: 0 },
+  });
+  for (const invalid of [
+    { kind: 'history', cell: { row: 3, column: 0 } },
+    { kind: 'history', cell: { row: 0, column: 5 } },
+    { kind: 'history', cell: { row: -1, column: 0 } },
+    { kind: 'history', cell: { row: 0.5, column: 0 } },
+    { kind: 'history', cell: { row: '1', column: 0 } },
+    { kind: 'history', cell: { row: 0, column: 0, extra: true } },
+    { kind: 'main', cell: { row: 0, column: 0 } },
+    { kind: 'history' },
+    null,
+  ]) {
+    assert.throws(() => setPlacement({}, invalid), /overlayPlacement:set/);
+  }
+  assert.deepEqual(placementUpdates, [{ kind: 'history', cell: { row: 2, column: 0 } }]);
 
   assert.deepEqual(await fakeIpc.invokeHandlers.get('update:getReadyNotice')({}), {
     version: '0.2.2',

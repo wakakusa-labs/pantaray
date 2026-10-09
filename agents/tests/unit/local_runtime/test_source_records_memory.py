@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.agents.artifact_react import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
@@ -27,10 +26,6 @@ from pantaray_agents.local_runtime.storage.migrations import (
     verify_database_integrity,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.memory_retrieval import MemoryContextSession
-from pantaray_agents.local_runtime.tooling.react_tools.file_session import (
-    ReadOnlyFileToolSession,
-)
 from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
     LocalSuggestionResearchTools,
 )
@@ -38,6 +33,7 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.snapshot import (
     SuggestionResearchSnapshot,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
 from .migrated_db import prepare_test_database
 
@@ -189,7 +185,7 @@ def test_search_keeps_source_boundary_and_observation_time(
     assert epoch.items[0].item.source == "source_records"
 
 
-async def test_search_result_can_be_read_without_other_users_evidence(
+async def test_suggestion_memory_search_returns_only_the_users_evidence(
     db_path: Path,
 ) -> None:
     prepare_test_database(db_path, 1000, load_default_migrations())
@@ -197,7 +193,8 @@ async def test_search_result_can_be_read_without_other_users_evidence(
         db_path=db_path,
         busy_timeout_ms=1000,
         snapshot=SuggestionResearchSnapshot(
-            roots=(),
+            folders=(),
+            memory_revisions={},
             stable_memory=SuggestionStableMemoryContext("", False, False),
             commands_allowed=False,
             read_access_scope="workspace",
@@ -211,41 +208,8 @@ async def test_search_result_can_be_read_without_other_users_evidence(
     )
     assert searched.status == "success"
     result = searched.output["results"][0]
-    assert result["read_root"] == "context"
-    read = await tools["read"].execute(
-        _call(
-            "read",
-            {
-                "root": result["read_root"],
-                "path": result["read_path"],
-                "offset": 1,
-                "column": 1,
-                "limit": 100,
-            },
-        ),
-        2,
-    )
-    assert read.status == "success"
-    assert read.output["content"] == result["content"]
-    other = ReadOnlyFileToolSession(
-        roots=(),
-        user_id="other",
-        memory_context=MemoryContextSession(user_id="other", run_id="different"),
-    )
-    denied = await other.read(
-        _call(
-            "read",
-            {
-                "root": "context",
-                "path": result["read_path"],
-                "offset": 1,
-                "column": 1,
-                "limit": 100,
-            },
-        ),
-        1,
-    )
-    assert denied.status == "error"
+    assert "見積資料" in result["content"]
+    assert "record-other" not in result["content"]
 
 
 def _call(name: str, args: dict[str, JSONValue]) -> ReactToolCall:

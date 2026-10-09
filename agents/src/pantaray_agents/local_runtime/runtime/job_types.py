@@ -8,6 +8,9 @@ LOCAL_SUGGESTION_JOB_TYPE: Final[str] = "generate_suggestion"
 LOCAL_ACTIVITY_SUMMARY_JOB_TYPE: Final[str] = "summarize_activity"
 LOCAL_INSIGHT_JOB_TYPE: Final[str] = "generate_insight"
 LOCAL_MEMORY_UPDATE_JOB_TYPE: Final[str] = "memory_update"
+# Not a worker job: the chat's turns run on threads of their own and name their
+# work this way in the trace, where a job names its job type.
+CHAT_TURN_TRACE_TYPE: Final[str] = "chat_turn"
 
 ACTION_PROCESS_KIND: Final[str] = "action"
 ACTION_SUBAGENT_PROCESS_KIND: Final[str] = "action_subagent"

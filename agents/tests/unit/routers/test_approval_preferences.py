@@ -13,11 +13,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling import (
-    ToolInvocationStartInput,
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
-    record_tool_invocation_start,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
@@ -26,7 +24,13 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerToolOutcome,
 )
-from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
+from pantaray_agents.local_runtime.tooling.models import (
+    ActionExecutionContext,
+    ToolInvocationStartInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    record_tool_invocation_start,
+)
 
 
 def _patch_args(new_line: str = "new line") -> dict[str, object]:

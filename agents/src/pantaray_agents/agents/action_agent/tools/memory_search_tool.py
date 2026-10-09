@@ -22,6 +22,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.memory_embeddings import (
     MEMORY_SEARCH_SEMANTIC_STATUS_VALUES,
 )
+from pantaray_agents.tools.contract import ToolConcurrency
 from pantaray_agents.utils.strict_numbers import is_strict_int
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
@@ -186,6 +187,9 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                 "the result list was full, so more may match."
             ),
         ),
+        # Reads memory_context_epoch and writes the extended epoch back; two at
+        # once would lose one extension and leave later handles unresolvable.
+        concurrency=ToolConcurrency("parallel", shared_state="memory_context_epoch"),
         execution_policy=tool_execution_policy(
             intent_class="read_only",
             default_timeout_ms=30_000,

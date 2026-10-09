@@ -9,9 +9,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering import broker
-from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
-    UnprojectedBrokerToolOutcome,
-)
+from pantaray_agents.tools.files.read_contract import ReadToolResult
 
 from .read_tool_broker_support import (
     bootstrap_read_runtime_db,
@@ -34,12 +32,12 @@ async def test_canceled_brokered_read_finalizes_its_invocation_as_canceled(
     executor_started = threading.Event()
     release_executor = threading.Event()
 
-    def blocking_read_executor(**_kwargs: object) -> UnprojectedBrokerToolOutcome:
+    def blocking_read_executor(**_kwargs: object) -> ReadToolResult:
         executor_started.set()
         release_executor.wait(timeout=_THREAD_RELEASE_TIMEOUT_SECONDS)
         raise AssertionError("the canceled read must not produce an outcome")
 
-    monkeypatch.setattr(broker, "run_read_executor", blocking_read_executor)
+    monkeypatch.setattr(broker, "run_read", blocking_read_executor)
 
     task = asyncio.ensure_future(
         execute_read_tool(

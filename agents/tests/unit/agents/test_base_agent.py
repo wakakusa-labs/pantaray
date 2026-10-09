@@ -592,7 +592,6 @@ async def test_generate_llm_tool_call_does_not_retry_contract_violation(
                     parameters={"type": "object", "properties": {}},
                 ),
             ),
-            continuation_mode="disabled",
         )
 
     assert exc_info.value is contract_error
@@ -659,7 +658,6 @@ async def test_generate_llm_tool_call_retries_transient_proxy_failure(
                 parameters={"type": "object", "properties": {}},
             ),
         ),
-        continuation_mode="disabled",
     )
 
     assert turn.call.name == "completed"
@@ -709,7 +707,6 @@ async def test_generate_llm_tool_call_stops_after_five_transport_attempts(
                     parameters={"type": "object", "properties": {}},
                 ),
             ),
-            continuation_mode="disabled",
         )
 
     assert exc_info.value is transient_error
@@ -750,7 +747,6 @@ async def test_generate_llm_tool_call_returns_the_whole_batch(
                 parameters={"type": "object", "properties": {}},
             ),
         ),
-        continuation_mode="disabled",
         max_parallel_tool_calls=2,
     )
 

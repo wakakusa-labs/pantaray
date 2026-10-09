@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 
+from pantaray_agents.conversation import provider_turns
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     ActionSubagentApprovalDecisionError,
     apply_action_subagent_approval_decision,
@@ -48,7 +49,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
-from pantaray_agents.local_runtime.tooling import (
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
 )
@@ -76,13 +77,24 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
 from pantaray_agents.schema.agent.action_subagent import ActionSubagentWaitRequest
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs import action_subagent as subagent_job
+from pantaray_agents.tasks.internal_jobs import (
+    action_subagent_broker as subagent_broker,
+)
+from pantaray_agents.tasks.internal_jobs import (
+    action_subagent_history as subagent_history,
+)
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.utils.llm_types import GenerateContentConfig
-from pantaray_llm.contracts.conversation import LlmTurnToolResultItem
-from pantaray_llm.contracts.tool_use import (
-    LlmToolCall,
-    LlmToolUseRequest,
+from pantaray_llm.contracts.action_turn import (
+    LlmActionTurnRequest,
+    LlmActionTurnResponse,
+    LlmCommentary,
 )
+from pantaray_llm.contracts.conversation import (
+    LlmTurnToolResultItem,
+    OpenAiProviderTurn,
+)
+from pantaray_llm.contracts.tool_use import LlmToolCall
 from pantaray_llm.errors import (
     PROXY_LLM_TOOL_CALL_INVALID,
     LlmProxyExecutionError,
@@ -103,6 +115,7 @@ class _Models:
         self.client.profiles.append(str(config.inference_profile))
         self.client.prompts.append(str(kwargs["contents"]))
         self.client.system_instructions.append(str(config.system_instruction))
+        assert isinstance(config.tool_use, LlmActionTurnRequest)
         self.client.tool_uses.append(config.tool_use)
         if self.client.on_call is not None:
             self.client.on_call(len(self.client.prompts))
@@ -127,10 +140,33 @@ class _Models:
                 },
             )
         )
+        # A provider names every call of a run apart, as the loop requires.
+        calls = [
+            call.model_copy(update={"call_id": f"{call.call_id}#{call_index}"})
+            for call in (tool_call if isinstance(tool_call, tuple) else (tool_call,))
+        ]
         return SimpleNamespace(
-            tool_calls=tool_call if isinstance(tool_call, tuple) else (tool_call,),
-            dropped_tool_call_names=(),
-            tool_continuation=None,
+            action_turn=LlmActionTurnResponse(
+                mode="action_turn",
+                messages=[
+                    LlmCommentary(
+                        phase="commentary",
+                        source_message_id=f"m{call_index}",
+                        text=f"Turn {call_index}.",
+                    )
+                ],
+                calls=calls,
+            ),
+            provider_turn=OpenAiProviderTurn(
+                provider="openai",
+                items=[
+                    {"type": "reasoning", "id": f"rs-{call_index}"},
+                    *(
+                        {"type": "function_call", "call_id": c.call_id, "name": c.name}
+                        for c in calls
+                    ),
+                ],
+            ),
             usage_metadata=None,
             thinking=THINKING_MARKER,
         )
@@ -155,7 +191,7 @@ class _Client:
         self.profiles: list[str] = []
         self.prompts: list[str] = []
         self.system_instructions: list[str] = []
-        self.tool_uses: list[LlmToolUseRequest | None] = []
+        self.tool_uses: list[LlmActionTurnRequest] = []
         self.aio = SimpleNamespace(models=_Models(self))
 
 
@@ -347,7 +383,8 @@ def test_configured_profiles_retry_exactly_and_persist_only_private_terminal(
             "SELECT status,completed_at,error_code,error_message FROM job_attempts"
         ).fetchone()
         event = connection.execute(
-            "SELECT event_id,event_name,payload_json,created_at FROM process_events"
+            "SELECT event_id,event_name,payload_json,created_at FROM process_events "
+            "WHERE event_name='stream_end'"
         ).fetchone()
         public_count = connection.execute(
             "SELECT COUNT(*) FROM agent_process_events"
@@ -481,18 +518,17 @@ def test_cancel_after_tool_return_preserves_tool_then_closes(
     db_path, payload = _running_child(
         tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
     )
-    real_append = subagent_job.append_action_subagent_tool_transcript
+    real_append = subagent_history.append_action_subagent_event
 
     def append_then_cancel(**kwargs: object) -> None:
         real_append(**kwargs)  # type: ignore[arg-type]
-        _request_cancel(db_path, payload)
+        if kwargs["event_name"] == "action_subagent_tool":
+            _request_cancel(db_path, payload)
 
     client = _Client(reports=(1,))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     monkeypatch.setattr(
-        subagent_job,
-        "append_action_subagent_tool_transcript",
-        append_then_cancel,
+        subagent_history, "append_action_subagent_event", append_then_cancel
     )
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
@@ -503,7 +539,12 @@ def test_cancel_after_tool_return_preserves_tool_then_closes(
         event_names = connection.execute(
             "SELECT event_name FROM process_events ORDER BY event_seq"
         ).fetchall()
-    assert event_names == [("action_subagent_tool",), ("stream_end",)]
+    assert event_names == [
+        ("action_subagent_turn",),
+        ("action_subagent_tool",),
+        ("stream_end",),
+    ]
+    assert len(client.prompts) == 1
     _assert_canceled(db_path)
 
 
@@ -513,23 +554,21 @@ def test_cancel_between_tool_and_next_proxy_stops_second_request(
     db_path, payload = _running_child(
         tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
     )
-    real_load = subagent_job.load_action_subagent_transcript
+    real_deliver = subagent_history.deliver_action_subagent_messages
     prompt_builds = 0
 
-    def load_then_cancel(**kwargs: object) -> tuple[object, ...]:
+    def deliver_then_cancel(**kwargs: object) -> tuple[str, ...]:
         nonlocal prompt_builds
-        transcript = real_load(**kwargs)  # type: ignore[arg-type]
+        delivered = real_deliver(**kwargs)  # type: ignore[arg-type]
         prompt_builds += 1
         if prompt_builds == 2:
             _request_cancel(db_path, payload)
-        return transcript
+        return delivered
 
     client = _Client(reports=(1, "must not be submitted"))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     monkeypatch.setattr(
-        subagent_job,
-        "load_action_subagent_transcript",
-        load_then_cancel,
+        subagent_history, "deliver_action_subagent_messages", deliver_then_cancel
     )
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
@@ -575,23 +614,14 @@ def test_message_between_turns_rebuilds_the_durable_prompt(
     assert _items(client, 0).count("Inspect the assigned boundary") == 1
     assert _items(client, 1).count("Use the corrected evidence") == 1
     assert _results(client, 1) == [("submit_subagent_report", "error")]
-    assert "界" not in _items(client, 1)
-    # Nothing is carried between turns, so the child asks the adapter to build no
-    # continuation either.
-    assert all(
-        request is not None
-        and request.continuation_mode == "disabled"
-        and request.continuation is None
-        and request.tool_result is None
-        for request in client.tool_uses
-    )
-    with sqlite3.connect(db_path) as connection:
-        events = connection.execute(
-            "SELECT event_name FROM process_events ORDER BY event_seq"
-        ).fetchall()
-    assert [event[0] for event in events] == [
+    # The message landed mid-send, ahead of the turn's row, and went in only
+    # once that turn was answered.
+    assert _child_events(db_path) == [
         "action_subagent_message",
+        "action_subagent_turn",
         "action_subagent_tool",
+        "action_subagent_messages_delivered",
+        "action_subagent_turn",
         "stream_end",
     ]
 
@@ -615,14 +645,10 @@ def test_invalid_report_repairs_stop_after_three_llm_calls(
             subagent_job.run_action_subagent_job(payload)
 
     assert len(client.prompts) == 3
-    with sqlite3.connect(db_path) as connection:
-        events = connection.execute(
-            "SELECT event_name FROM process_events ORDER BY event_seq"
-        ).fetchall()
-    assert events == [
-        ("action_subagent_tool",),
-        ("action_subagent_tool",),
-        ("stream_end",),
+    # Each rejected report is answered, the last one as the run stops.
+    assert _child_events(db_path) == [
+        *["action_subagent_turn", "action_subagent_tool"] * 3,
+        "stream_end",
     ]
 
 
@@ -670,13 +696,6 @@ def test_broker_read_is_durable_in_the_next_fresh_prompt(
     assert content not in client.prompts[0]
     assert _results(client, 1) == [("read", "completed")]
     assert _items(client, 1).count(prompt_fragment) == 1
-    assert all(
-        request is not None
-        and request.continuation_mode == "disabled"
-        and request.continuation is None
-        and request.tool_result is None
-        for request in client.tool_uses
-    )
     with sqlite3.connect(db_path) as connection:
         invocation = connection.execute(
             "SELECT invocations.tool_id,invocations.status,invocations.started_at,"
@@ -824,10 +843,13 @@ def _decide(db_path: Path, session_id: str, request_id: str, decision: str) -> N
 
 
 def _resume_child(
-    monkeypatch: pytest.MonkeyPatch, db_path: Path, payload: ActionSubagentJobPayload
+    monkeypatch: pytest.MonkeyPatch,
+    db_path: Path,
+    payload: ActionSubagentJobPayload,
+    calls: tuple[LlmToolCall, ...] = (),
 ) -> _Client:
     _claim_child(db_path)
-    client = _Client(calls=(_REPORT_CALL,))
+    client = _Client(calls=(*calls, _REPORT_CALL))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
@@ -862,7 +884,8 @@ def test_gated_tool_pause_writes_one_anchor_without_a_false_error_transcript(
             "json_extract(payload_json,'$.approval_blockers[0].tool_request_id'),"
             "json_extract(payload_json,'$.approval_blockers[0].intent_class'),"
             "json_extract(payload_json,'$.tool_arguments.changes[0].path') "
-            "FROM process_events WHERE process_id='child-process'"
+            "FROM process_events WHERE process_id='child-process' "
+            "AND event_name<>'action_subagent_turn'"
         ).fetchall()
         statuses = connection.execute(
             "SELECT job.status,process.status,attempt.status FROM jobs AS job "
@@ -923,8 +946,10 @@ def test_decided_gated_tool_settles_the_saved_request_exactly_once(
     assert _results(client, 0) == [("apply_patch", "completed")]
     assert _items(client, 0).count(fragment) == 1
     assert _child_events(db_path) == [
+        "action_subagent_turn",
         "process_paused",
         "action_subagent_tool",
+        "action_subagent_turn",
         "stream_end",
     ]
     with sqlite3.connect(db_path) as connection:
@@ -961,7 +986,7 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
     ):
         subagent_job.run_action_subagent_job(payload)
 
-    assert _child_events(db_path) == ["stream_end"]
+    assert _child_events(db_path) == ["action_subagent_turn", "stream_end"]
     assert not (_workspace(db_path) / "gated.txt").exists()
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
@@ -1197,10 +1222,10 @@ def test_paused_approval_race_settles_one_winner_without_cross_child_mutation(
     assert _sibling_snapshot(db_path) == sibling_before
 
 
-def _conversation(request: LlmToolUseRequest | None) -> tuple[str, ...]:
+def _conversation(request: LlmActionTurnRequest) -> tuple[str, ...]:
     """One turn's items as JSON, which is how a cache prefix is compared."""
 
-    assert request is not None and request.conversation is not None
+    assert request.conversation is not None
     return tuple(item.model_dump_json() for item in request.conversation)
 
 
@@ -1214,7 +1239,7 @@ def _results(client: _Client, index: int) -> list[tuple[str, object]]:
     """Every tool result that turn carried, as (tool name, status), in order."""
 
     request = client.tool_uses[index]
-    assert request is not None and request.conversation is not None
+    assert request.conversation is not None
     return [
         (item.name, cast(dict[str, JSONValue], item.output)["status"])
         for item in request.conversation
@@ -1284,13 +1309,13 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
     assert conversation is not None
     kinds = [item.type for item in conversation]
     # The assigned task comes first. The parent's message landed while the first
-    # turn was still in flight, so it is ordered by the row it took, ahead of
-    # the call that turn went on to make.
+    # turn was still in flight, so it goes in before the next send, behind the
+    # answers of the turn that was in flight.
     assert kinds == [
-        "user",
         "user",
         "assistant",
         "tool_result",
+        "user",
         "assistant",
         "tool_result",
     ]
@@ -1300,11 +1325,8 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
     results = [item for item in conversation if item.type == "tool_result"]
     assert [call.name for call in calls] == ["read", "read"]
     assert [call.arguments for call in calls] == [{"path": "evidence.txt"}] * 2
-    # Paired by the transcript's own row identity, not by the id the provider
-    # gave a call it has long since forgotten.
     assert [call.call_id for call in calls] == [result.call_id for result in results]
     assert len({call.call_id for call in calls}) == 2
-    assert all(call.call_id.startswith("subagent-call-") for call in calls)
     assert all(
         result.name == "read"
         and isinstance(result.output, dict)
@@ -1317,7 +1339,7 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
         .content[0]
         .text.startswith("# Assigned Task\nInspect the assigned boundary\n")
     )
-    assert conversation[1].content[0].text == "Use the corrected evidence"
+    assert conversation[3].content[0].text == "Use the corrected evidence"
 
 
 def test_the_repair_notice_is_appended_without_touching_what_was_sent(
@@ -1372,14 +1394,14 @@ def test_the_repair_notice_is_appended_without_touching_what_was_sent(
     assert len(repaired) == len(rejected) + 1
     assert after[: len(rejected)] == rejected
     assert [
-        any("# Previous Error" in item for item in turn)
+        any("could not be processed" in item for item in turn)
         for turn in (rejected, repaired, after)
     ] == [False, True, False]
     # The request's own message never carries it either.
     assert len(set(client.prompts)) == 1
     notice = client.tool_uses[2].conversation[-1]
     assert notice.type == "user"
-    assert notice.content[0].text.startswith("# Previous Error\n")
+    assert notice.content[0].text.startswith("# System Notice\n")
     assert "multiple_calls" in notice.content[0].text
 
 
@@ -1426,6 +1448,20 @@ def test_read_only_calls_of_one_turn_all_run_and_keep_their_own_results(
     workspace = _workspace(db_path)
     (workspace / "a.txt").write_text("alpha contents", "utf-8")
     (workspace / "b.txt").write_text("bravo contents", "utf-8")
+    real_execute = subagent_broker.execute_broker_tool
+    both_started = asyncio.Event()
+    started: list[object] = []
+
+    async def overlapping(**kwargs: object) -> object:
+        # Each read waits for the other to start, which only calls run at
+        # once can do.
+        started.append(kwargs["args"])
+        if len(started) == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=5)
+        return await real_execute(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(subagent_broker, "execute_broker_tool", overlapping)
     client = _Client(
         calls=(
             (
@@ -1622,7 +1658,7 @@ def test_a_pause_inside_a_turn_answers_every_call_and_runs_none_twice(
             assert "TOOL_CALL_NOT_RUN" not in answer
         elif requested is later:
             assert "TOOL_CALL_NOT_RUN" in answer
-            assert "waited for the user's approval" in answer
+            assert "the run stopped" in answer
         else:
             assert "read before the edit" in answer
     assert (workspace / "gated.txt").exists() == (decision == "approved_once")
@@ -1734,3 +1770,257 @@ def test_two_reports_in_one_turn_end_nothing_until_one_comes_alone(
             "WHERE process_id='child-process' AND event_name='stream_end'"
         ).fetchone()
     assert json.loads(terminal[0]) == {"outcome": "success", "report": "Corrected"}
+
+
+def test_a_resumed_child_sends_the_same_prefix_and_hands_its_turns_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """承認待ちから再開した子は、止まる前に送った列をそのまま先頭に送り直す。"""
+
+    monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    (_workspace(db_path) / "notes.txt").write_text("read before the edit", "utf-8")
+    read = LlmToolCall(call_id="read", name="read", arguments={"path": "notes.txt"})
+    client = _Client(calls=(read, _APPLY_PATCH_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT approval_session_id,tool_request_id FROM approval_sessions"
+        ).fetchone()
+    _decide(db_path, str(session[0]), str(session[1]), "approved_once")
+
+    resumed = _resume_child(monkeypatch, db_path, payload)
+
+    before = client.tool_uses[-1].conversation
+    after = resumed.tool_uses[0].conversation
+    assert before is not None and after is not None
+    # The rebuilt history is what was sent, item for item, and the paused
+    # turn and its answer follow it.
+    assert after[: len(before)] == before
+    assert [item.type for item in after[len(before) :]] == ["assistant", "tool_result"]
+    # Each turn goes back only behind the prefix it was produced behind, so a
+    # rebuilt prefix that differed by one byte would leave them all off.
+    assistants = [item for item in after if item.type == "assistant"]
+    assert len(assistants) == 2
+    assert all(item.provider_turn is not None for item in assistants)
+    assert resumed.prompts == [client.prompts[0]]
+    assert (_workspace(db_path) / "gated.txt").read_text("utf-8") == "approved\n"
+
+
+class _Crash(BaseException):
+    """The worker dying mid-call: nothing below the job sees it as a failure."""
+
+
+def test_a_call_a_crash_left_unanswered_is_answered_as_not_run_on_resume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """途中で落ちたターンの答えのない呼び出しは、再開時に未実行として答えてから進む。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _allow_workspace_commands(db_path)
+
+    async def command(
+        *, request: ValidatedCommandRequest, **_kwargs: object
+    ) -> UnprojectedBrokerToolOutcome:
+        if "two" in request.argv[-1]:
+            raise _Crash
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={"status": "success", "exit_code": 0, "stdout": "1", "stderr": ""},
+        )
+
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", command)
+    first = LlmToolCall(
+        call_id="c1", name="bash", arguments={"command": "echo one", "cwd": "."}
+    )
+    second = first.model_copy(
+        update={"call_id": "c2", "arguments": {"command": "echo two", "cwd": "."}}
+    )
+    client = _Client(calls=((first, second),))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        with pytest.raises(_Crash):
+            subagent_job.run_action_subagent_job(payload)
+    assert _child_events(db_path) == ["action_subagent_turn", "action_subagent_tool"]
+    # A restart puts the child back in the queue as it was.
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE jobs SET status='queued',claimed_by=NULL,claimed_at=NULL,"
+            "heartbeat_at=NULL WHERE job_id='child-job'"
+        )
+        connection.execute(
+            "UPDATE processes SET status='enqueued',current_job_id=NULL "
+            "WHERE process_id='child-process'"
+        )
+        connection.execute(
+            "UPDATE job_attempts SET status='failed',completed_at=? "
+            "WHERE job_id='child-job'",
+            (TIMESTAMP,),
+        )
+
+    resumed = _resume_child(monkeypatch, db_path, payload)
+
+    conversation = resumed.tool_uses[0].conversation
+    assert conversation is not None
+    answers = {
+        item.call_id: json.dumps(item.output)
+        for item in conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    }
+    assert list(answers) == ["c1#0", "c2#0"]
+    assert '"stdout": "1"' in answers["c1#0"]
+    assert "TOOL_CALL_NOT_RUN" in answers["c2#0"] and "interrupted" in answers["c2#0"]
+    assert _child_events(db_path) == [
+        "action_subagent_turn",
+        "action_subagent_tool",
+        "action_subagent_tool",
+        "action_subagent_turn",
+        "stream_end",
+    ]
+
+
+def test_the_childs_session_memory_stays_in_its_own_conversation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """子の write_session_memory は子の会話にだけ残り、親や記憶更新からは見えない。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    note = "CHILD_SESSION_NOTE: module a uses tabs"
+    client = _Client(
+        calls=(
+            LlmToolCall(
+                call_id="memo", name="write_session_memory", arguments={"content": note}
+            ),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert any(
+        tool.name == "write_session_memory" for tool in client.tool_uses[0].tools
+    )
+    assert _results(client, 1) == [("write_session_memory", "completed")]
+    # Only the child's private rows hold it: no Action step, no public event,
+    # nothing the memory update reads from the parent.
+    with sqlite3.connect(db_path) as connection:
+        holders = {
+            table
+            for (table,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND sql NOT LIKE 'CREATE VIRTUAL%'"
+            ).fetchall()
+            for column in connection.execute(f"PRAGMA table_info('{table}')")
+            if connection.execute(
+                f"SELECT 1 FROM '{table}' WHERE instr(\"{column[1]}\", ?) > 0",
+                (note,),
+            ).fetchone()
+        }
+        private = connection.execute(
+            "SELECT DISTINCT process_id FROM process_events WHERE instr(payload_json, ?)",
+            (note,),
+        ).fetchall()
+    assert (holders, private) == ({"process_events"}, [("child-process",)])
+
+
+def _agents_md_workspace(db_path: Path) -> Path:
+    workspace = _workspace(db_path)
+    (workspace / "AGENTS.md").write_text("ROOT_RULES", "utf-8")
+    (workspace / "sub").mkdir()
+    (workspace / "sub" / "AGENTS.md").write_text("SUB_RULES", "utf-8")
+    (workspace / "sub" / "notes.txt").write_text("notes", "utf-8")
+    return workspace
+
+
+def _read(call_id: str, path: str) -> LlmToolCall:
+    return LlmToolCall(call_id=call_id, name="read", arguments={"path": path})
+
+
+def test_repository_agents_md_reaches_the_child_once_across_a_resume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """子が初めて触れたディレクトリの AGENTS.md は一度だけ届き、再開後も二度は届かない。"""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        claim_workspace=True,
+    )
+    _agents_md_workspace(db_path)
+    # The read claims the files; the edit of the same turn then waits for
+    # approval, so no send carries them before the pause.
+    client = _Client(calls=((_read("r1", "sub/notes.txt"), _APPLY_PATCH_CALL),))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+    assert len(client.tool_uses) == 1
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT approval_session_id,tool_request_id FROM approval_sessions"
+        ).fetchone()
+    _decide(db_path, str(session[0]), str(session[1]), "approved_once")
+
+    resumed = _resume_child(
+        monkeypatch, db_path, payload, calls=(_read("r2", "sub/notes.txt"),)
+    )
+
+    # The resumed run's first send carries them, root first, after the
+    # turn's answers; a later read in the same directory adds nothing.
+    first = _items(resumed, 0)
+    assert first.count("ROOT_RULES") == first.count("SUB_RULES") == 1
+    assert first.index("ROOT_RULES") < first.index("SUB_RULES")
+    assert first.rindex('"type":"tool_result"') < first.index("ROOT_RULES")
+    last = _items(resumed, len(resumed.tool_uses) - 1)
+    assert last.count("ROOT_RULES") == last.count("SUB_RULES") == 1
+
+
+def test_a_child_that_may_not_read_files_gets_no_agents_md(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ファイルを読めない子には AGENTS.md を添えない。"""
+
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    _agents_md_workspace(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE execution_sessions SET tool_allowlist_json=? "
+            "WHERE action_id='action-1'",
+            (json.dumps(["list", "glob", "grep", "apply_patch", "bash"]),),
+        )
+    client = _Client(
+        calls=(
+            LlmToolCall(call_id="l1", name="list", arguments={"path": "sub"}),
+            _REPORT_CALL,
+        )
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert _results(client, 1) == [("list", "completed")]
+    assert "RULES" not in _items(client, 1)

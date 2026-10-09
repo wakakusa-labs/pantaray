@@ -11,6 +11,7 @@ from typing import Literal
 from jsonschema import Draft7Validator  # type: ignore[import-untyped]
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import ToolConcurrency
 
 from . import schema_types as _schema_types
 
@@ -156,6 +157,7 @@ class ToolSpec:
     execution_policy: ToolExecutionPolicy
     input_spec: InputSpec
     output_schema: Mapping[str, JSONValue]
+    concurrency: ToolConcurrency
     runtime_config: Mapping[str, JSONValue] | None = None
     pre_validate_args: ToolArgsValidator | None = None
 
@@ -183,6 +185,7 @@ class ToolDefinition:
         prompt_contract: LLM向けの表示契約
         input_schema: JSON Schema 互換の入力定義（不変 Mapping）
         output_schema: JSON Schema 互換の出力定義
+        concurrency: 同じターンの他の呼び出しと並べてよいか（ツール自身の宣言）
         runtime_config: ツール実装が参照する実行時設定（内部プロンプト/定数など、LLMには出さない前提）
         input_schema_fingerprint: input_schema の canonical JSON から算出した SHA-256（validator cache key 用）
     """
@@ -195,6 +198,7 @@ class ToolDefinition:
     execution_policy: ToolExecutionPolicy
     input_schema: SchemaMapping
     output_schema: Mapping[str, JSONValue]
+    concurrency: ToolConcurrency
     runtime_config: Mapping[str, JSONValue] | None = None
     pre_validate_args: ToolArgsValidator | None = field(
         default=None,
@@ -271,6 +275,7 @@ class ToolDefinition:
             execution_policy=spec.execution_policy,
             input_schema=build_validation_input_schema(spec.input_spec),
             output_schema=spec.output_schema,
+            concurrency=spec.concurrency,
             runtime_config=spec.runtime_config,
             pre_validate_args=spec.pre_validate_args,
         )

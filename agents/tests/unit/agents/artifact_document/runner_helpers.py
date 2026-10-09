@@ -7,14 +7,16 @@ from pantaray_agents.agents.artifact_react import (
     PatchCommitResult,
     ReactLoopResult,
     ReactLoopStep,
+)
+from pantaray_agents.schema.agent import AgentRequest, AgentResponse
+from pantaray_agents.schema.agent.base import AgentError
+from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
     ToolCallEnvelope,
     react_tool_response_schema,
 )
-from pantaray_agents.schema.agent import AgentRequest, AgentResponse
-from pantaray_agents.schema.agent.base import AgentError
 from pantaray_agents.utils.artifact_text_patch import ArtifactTextPatchError
 
 

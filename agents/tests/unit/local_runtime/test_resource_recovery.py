@@ -10,9 +10,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.tooling import (
-    complete_execution_session,
-    create_execution_session,
+from pantaray_agents.local_runtime.tooling.bootstrap import (
     ensure_action_scratch_execution_context,
 )
 from pantaray_agents.local_runtime.tooling.locks.workspace_lock_coordinator import (
@@ -22,6 +20,10 @@ from pantaray_agents.local_runtime.tooling.models import (
     ExecutionSessionCreateInput,
     ToolInvocationCompletionInput,
     ToolRuntimeResourceCreateInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    complete_execution_session,
+    create_execution_session,
 )
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     record_tool_invocation_completion,

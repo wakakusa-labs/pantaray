@@ -40,6 +40,7 @@ test('IPC sender guard allows overlay capabilities but rejects privacy operation
   security.registerWindow('overlay', overlayEvent.sender);
 
   assert.equal(security.authorize('actionFile:open', overlayEvent), 'overlay');
+  assert.equal(security.authorize('clipboard:writeText', overlayEvent), 'overlay');
   assert.throws(
     () => security.authorize('privacy:updateCaptureSettings', overlayEvent),
     (error) =>
@@ -91,19 +92,15 @@ test('Conversation submission and read receipts belong to Overlay; History opens
   security.registerWindow('overlay', overlayEvent.sender);
 
   assert.equal(security.authorize('action:submitMessage', overlayEvent), 'overlay');
-  const attachmentChannels = [
+  // The main window's chat attaches and shows attached images too.
+  for (const channel of [
     'action:attachImage',
-    'actionImage:reveal',
     'action:attachFile',
     'action:discardAttachment',
-  ];
-  for (const channel of attachmentChannels) {
+    'actionImage:reveal',
+  ]) {
     assert.equal(security.authorize(channel, overlayEvent), 'overlay');
-    assert.throws(
-      () => security.authorize(channel, mainEvent),
-      (error) =>
-        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-    );
+    assert.equal(security.authorize(channel, mainEvent), 'main');
   }
   assert.throws(
     () => security.authorize('action:submitMessage', mainEvent),
@@ -139,6 +136,33 @@ test('Only the Overlay asks main to open the workspace settings page', () => {
   assert.equal(security.authorize('overlay:openWorkspaceSettings', overlayEvent), 'overlay');
   assert.throws(
     () => security.authorize('overlay:openWorkspaceSettings', mainEvent),
+    (error) =>
+      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
+  );
+});
+
+// Design 8: the chat belongs to the main window; the Overlay keeps its own Action path.
+test('Only the main window uses the chat, and only the Overlay asks to show it', () => {
+  const { mainEvent, security } = createSecurityHarness();
+  const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
+  security.registerWindow('overlay', overlayEvent.sender);
+
+  for (const channel of [
+    'chat:sendMessage',
+    'chat:listItems',
+    'chat:retryTurn',
+    'chat:getTurnState',
+  ]) {
+    assert.equal(security.authorize(channel, mainEvent), 'main');
+    assert.throws(
+      () => security.authorize(channel, overlayEvent),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
+    );
+  }
+  assert.equal(security.authorize('overlay:showChat', overlayEvent), 'overlay');
+  assert.throws(
+    () => security.authorize('overlay:showChat', mainEvent),
     (error) =>
       error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
   );

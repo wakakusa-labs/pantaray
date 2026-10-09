@@ -102,7 +102,14 @@ def apply_action_file_read_memory_migration(
 
 
 def _normalize_historical_read_output(output_json: JSONValue) -> JSONValue:
-    if not isinstance(output_json, dict) or "column" in output_json:
+    if not isinstance(output_json, dict) or "encoding" in output_json:
+        return output_json
+    # Every read stored before the encoding field decoded its file as UTF-8.
+    return {**_with_cursor(output_json), "encoding": "utf-8"}
+
+
+def _with_cursor(output_json: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    if "column" in output_json:
         return output_json
     if "total_lines" not in output_json:
         legacy = _LegacyReadFileOutput.model_validate(output_json)
@@ -120,21 +127,18 @@ def _normalize_historical_read_output(output_json: JSONValue) -> JSONValue:
         }
     pre_cursor = _PreCursorReadFileOutput.model_validate(output_json)
     last_line = pre_cursor.content.splitlines()[-1] if pre_cursor.content else ""
-    return cast(
-        JSONValue,
-        {
-            "kind": pre_cursor.kind,
-            "path": pre_cursor.path,
-            "content": pre_cursor.content,
-            "offset": pre_cursor.offset,
-            "column": 1,
-            "end_line": pre_cursor.end_line,
-            "end_column": len(last_line),
-            "total_lines": pre_cursor.total_lines,
-            "next_offset": pre_cursor.next_offset,
-            "next_column": 1 if pre_cursor.next_offset is not None else None,
-            "truncated": pre_cursor.truncated,
-            "truncation_reason": pre_cursor.truncation_reason,
-            "retry_hint": pre_cursor.retry_hint,
-        },
-    )
+    return {
+        "kind": pre_cursor.kind,
+        "path": pre_cursor.path,
+        "content": pre_cursor.content,
+        "offset": pre_cursor.offset,
+        "column": 1,
+        "end_line": pre_cursor.end_line,
+        "end_column": len(last_line),
+        "total_lines": pre_cursor.total_lines,
+        "next_offset": pre_cursor.next_offset,
+        "next_column": 1 if pre_cursor.next_offset is not None else None,
+        "truncated": pre_cursor.truncated,
+        "truncation_reason": pre_cursor.truncation_reason,
+        "retry_hint": pre_cursor.retry_hint,
+    }

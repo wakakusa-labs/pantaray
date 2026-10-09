@@ -11,18 +11,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pantaray_agents.agents.artifact_react import (
-    ReactToolCall,
-    ReactToolDefinition,
-    ReactToolResult,
-    react_tool_response_schema,
-    tool_error_response,
-)
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_COMMAND_TOOL_ID
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     ReadAccessScope,
+)
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolDefinition,
+    ReactToolResult,
+    react_tool_response_schema,
+    tool_error_response,
 )
 
 from ...app_runtime_verification import load_and_verify_app_runtime_python_from_env

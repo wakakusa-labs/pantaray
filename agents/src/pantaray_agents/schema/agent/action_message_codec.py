@@ -24,6 +24,16 @@ _ATTACHED_FILES_PREAMBLE = (
     "not ask them to paste the contents."
 )
 _BYTES_PER_KILOBYTE = 1024
+# What the chat wrote when it handed work over is Pantaray's, so the task is told
+# whose words are whose. The text itself stays first: titles and search read it.
+_CHAT_INSTRUCTION_TRAILER = (
+    "(You wrote the instruction above in your chat with the user when you "
+    "handed this work over; it is not the user's own words.)"
+)
+_CHAT_NOTE_HEADING = (
+    "Your note from your chat with the user (you wrote this; it is not the "
+    "user's own words):"
+)
 
 
 def serialize_action_user_message(message: ActionUserMessageInput) -> str:
@@ -64,18 +74,24 @@ def render_action_user_visible_text(*, content: str, supplement: str | None) -> 
 
 
 def render_action_user_request_text(message: ActionUserMessageInput) -> str:
-    sections = [
-        render_action_user_visible_text(
-            content=message.content, supplement=message.supplement
-        )
-    ]
+    handoff = message.chat_handoff
+    if message.is_chat_instruction:
+        sections = [message.content, _CHAT_INSTRUCTION_TRAILER]
+    else:
+        sections = [
+            render_action_user_visible_text(
+                content=message.content, supplement=message.supplement
+            )
+        ]
+        if handoff is not None and handoff.note is not None:
+            sections.append(f"{_CHAT_NOTE_HEADING}\n{handoff.note}")
     approval = message.suggestion_approval
     if approval is not None:
         metadata_lines = _render_suggestion_metadata(approval)
         sections.append("Suggestion metadata:\n" + "\n".join(metadata_lines))
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
-        sections.append(_render_project_refs(project_refs))
+        sections.append(render_project_refs(project_refs))
     if message.files:
         sections.append(_render_files(message.files))
     return "\n\n".join(sections)
@@ -93,7 +109,7 @@ def _render_suggestion_metadata(approval: SuggestionApprovalInput) -> list[str]:
     return metadata_lines
 
 
-def _render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
+def render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
     first_by_project: dict[str, ActionProjectRef] = {}
     for ref in refs:
         first_by_project.setdefault(ref.project_id, ref)
@@ -125,6 +141,7 @@ def _format_byte_size(byte_size: int) -> str:
 
 __all__ = [
     "parse_action_user_message",
+    "render_project_refs",
     "parse_stored_action_user_message",
     "render_action_user_request_text",
     "render_action_user_visible_text",

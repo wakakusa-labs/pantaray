@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+from pantaray_agents.tools.contract import BrokerPolicyError
+
 from ..action_subagent_resource_authority import (
     ActionSubagentResourceActorError,
     ActionSubagentResourceWriteDeniedError,
@@ -13,7 +15,7 @@ from ..action_subagent_resource_identity import (
     ActionSubagentResourceIdentityError,
     WorkspaceResourceIdentity,
 )
-from .broker_common import BrokerContext, BrokerPolicyError
+from .broker_common import BrokerContext
 
 ACTION_SUBAGENT_WRITE_DENIED = "ACTION_SUBAGENT_WRITE_DENIED"
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pantaray_agents.tools.contract import ToolConcurrency
+
 from .base import (
     InputSpec,
     ToolDefinition,
@@ -42,6 +44,7 @@ REMEMBER_TOOL = ToolDefinition.from_spec(
                 "or tokens."
             ),
         ),
+        concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="surgical_edit",
             default_timeout_ms=30_000,

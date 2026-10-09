@@ -8,23 +8,22 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.brokering.broker import BrokerPolicyError
-from pantaray_agents.local_runtime.tooling.brokering.broker_discovery_ripgrep import (
-    RipgrepGlobResult,
-    RipgrepGrepResult,
-    _is_excluded_relative_path,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_grep_lines import (
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.grep_lines import (
     RipgrepGrepMatch,
     grep_match,
+)
+from pantaray_agents.tools.files.ripgrep import (
+    RipgrepGlobResult,
+    RipgrepGrepResult,
 )
 
 
 def install_fake_ripgrep_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pantaray_agents.local_runtime.tooling.brokering import broker_discovery
+    from pantaray_agents.tools.files import discovery
 
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_files", _fake_files)
-    monkeypatch.setattr(broker_discovery, "run_ripgrep_grep", _fake_grep)
+    monkeypatch.setattr(discovery, "run_ripgrep_files", _fake_files)
+    monkeypatch.setattr(discovery, "run_ripgrep_grep", _fake_grep)
 
 
 def _fake_files(
@@ -34,7 +33,6 @@ def _fake_files(
     glob_pattern: str,
     limit: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
     include_path: Callable[[Path], bool] | None = None,
@@ -47,8 +45,6 @@ def _fake_files(
         pruned_relative_paths=pruned_relative_paths,
         extra_search_paths=extra_search_paths,
     ):
-        if _is_excluded_relative_path(relative_path, excluded_relative_path):
-            continue
         if include_path is not None and not include_path(cwd / relative_path):
             continue
         if not _matches_relative_glob(relative_path, glob_pattern):
@@ -75,9 +71,9 @@ def _fake_grep(
     include_glob: str | None,
     max_matches: int,
     follow_symlinks: bool = False,
-    excluded_relative_path: str | None = None,
     pruned_relative_paths: tuple[str, ...] = (),
     extra_search_paths: tuple[str, ...] = (),
+    open_matched_file: Callable[[str], int],
     include_path: Callable[[Path], bool] | None = None,
 ) -> RipgrepGrepResult:
     try:
@@ -97,8 +93,6 @@ def _fake_grep(
         pruned_relative_paths=pruned_relative_paths,
         extra_search_paths=extra_search_paths,
     ):
-        if _is_excluded_relative_path(relative_path, excluded_relative_path):
-            continue
         if include_path is not None and not include_path(cwd / relative_path):
             continue
         if include_glob and not _matches_relative_glob(relative_path, include_glob):

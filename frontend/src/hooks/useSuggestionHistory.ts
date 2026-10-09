@@ -10,7 +10,6 @@ type UseSuggestionHistoryResult = {
   error: string | null;
   searchText: string;
   setSearchText: (searchText: string) => void;
-  refresh: () => Promise<void>;
   loadMore: () => Promise<void>;
   hasMore: boolean;
   isRealtimeSyncing: boolean;
@@ -162,7 +161,6 @@ export const useSuggestionHistory = (): UseSuggestionHistoryResult => {
     [searchText, t]
   );
 
-  const refresh = useCallback(() => runFetch(null, true), [runFetch]);
   const loadMore = useCallback(
     () =>
       nextCursor === null || firstPageRequestRef.current !== null
@@ -220,7 +218,6 @@ export const useSuggestionHistory = (): UseSuggestionHistoryResult => {
     error,
     searchText,
     setSearchText,
-    refresh,
     loadMore,
     hasMore: nextCursor !== null,
     isRealtimeSyncing,

@@ -25,6 +25,9 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     build_action_subagent_broker_tools,
 )
+from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
+    AgentsMdClaims,
+)
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 
 
@@ -43,6 +46,11 @@ def _model_facing_parameters() -> dict[str, dict[str, JSONValue]]:
             busy_timeout_ms=0,
             payload=cast(ActionSubagentJobPayload, {}),
             authority=cast(ActionSubagentBrokerAuthority, None),
+            agents_md=AgentsMdClaims(
+                db_path=Path("unused.sqlite3"),
+                busy_timeout_ms=0,
+                payload=cast(ActionSubagentJobPayload, {}),
+            ),
         )
     }
     return {**action, **subagent}

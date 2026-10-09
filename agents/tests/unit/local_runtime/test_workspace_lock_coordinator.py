@@ -7,10 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling import (
-    ToolInvocationStartInput,
-    record_tool_invocation_start,
-)
 from pantaray_agents.local_runtime.tooling.locks import (
     workspace_lock as workspace_lock_module,
 )
@@ -30,6 +26,10 @@ from pantaray_agents.local_runtime.tooling.locks.workspace_lock_coordinator impo
 from pantaray_agents.local_runtime.tooling.models import (
     StoredToolRuntimeResource,
     ToolInvocationCompletionInput,
+    ToolInvocationStartInput,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    record_tool_invocation_start,
 )
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     record_tool_invocation_completion,

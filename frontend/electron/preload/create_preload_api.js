@@ -1,6 +1,7 @@
 const { createAuthHistoryApi } = require('./auth_history_api');
 const { createActionsApi } = require('./actions_api');
 const { createCaptureApi } = require('./capture_api');
+const { createChatApi } = require('./chat_api');
 const { createCoreApi } = require('./core_api');
 const { createOrchestrationApi } = require('./orchestration_api');
 const { createOverlayApi } = require('./overlay_api');
@@ -11,6 +12,7 @@ function createPreloadApi(params) {
     ...createCoreApi(params),
     ...createAuthHistoryApi(params),
     ...createActionsApi(params),
+    ...createChatApi(params),
     ...createCaptureApi(params),
     ...createSettingsApi(params),
     ...createOverlayApi(params),

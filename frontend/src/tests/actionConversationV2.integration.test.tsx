@@ -83,6 +83,7 @@ it('projects the newest-first backend page as chronological history', () => {
           },
           {
             step_kind: 'user',
+            chat_note: null,
             approved_suggestion: null,
             step_id: 'step-3',
             step_number: 3,
@@ -106,6 +107,7 @@ it('projects the newest-first backend page as chronological history', () => {
         entries: [
           {
             step_kind: 'user',
+            chat_note: null,
             approved_suggestion: null,
             step_id: 'step-1',
             step_number: 1,

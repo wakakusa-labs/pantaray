@@ -70,19 +70,38 @@ function createBootstrapResponse(overrides = {}) {
   };
 }
 
-function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
+const { DEFAULT_OVERLAY_PLACEMENTS } = require('../electron/dist/settings/overlayPlacement.js');
+
+function loadNotificationWindowModule(
+  getOwnerId = () => 'owner-a',
+  {
+    getPlacements = () => DEFAULT_OVERLAY_PLACEMENTS,
+    workArea = { x: 0, y: 0, width: 1440, height: 900 },
+  } = {}
+) {
   const originalLoad = Module._load;
   const targetPath = require.resolve('../electron/notification_window.js');
   const factoryPath = require.resolve('../electron/overlay_window_factory.js');
+  const ipcPath = require.resolve('../electron/notification_window_ipc.js');
   delete require.cache[targetPath];
   delete require.cache[factoryPath];
+  delete require.cache[ipcPath];
 
   const instances = [];
   const registeredIpcSenders = new Set();
   let appActive = true;
+  // The main window, focused while Pantaray is the active app: the History list and its chat.
+  const mainWindow = {
+    id: 'main-window',
+    focusableChanges: [],
+    setFocusable(value) {
+      this.focusableChanges.push(value);
+    },
+    isDestroyed: () => false,
+  };
   const display = {
     bounds: { x: 0, y: 0, width: 1440, height: 900 },
-    workArea: { x: 0, y: 0, width: 1440, height: 900 },
+    workArea,
   };
 
   class FakeBrowserWindow {
@@ -115,7 +134,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
 
     // Another Pantaray window (the history list) holds focus while Pantaray is the active app.
     static getFocusedWindow() {
-      return appActive ? { id: 'main-window' } : null;
+      return appActive ? mainWindow : null;
     }
 
     static fromWebContents(webContents) {
@@ -199,6 +218,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
   try {
     const notificationWindow = require(targetPath);
     notificationWindow.setUiLanguageGetter(() => 'en');
+    notificationWindow.setOverlayPlacementGetter(getPlacements);
     notificationWindow.setLocalOwnerIdGetter(getOwnerId);
     notificationWindow.configureIpcWindowSecurity({
       registerWindow: (role, sender) => {
@@ -211,6 +231,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
       notificationWindow,
       instances,
       registeredIpcSenders,
+      mainWindow,
       setAppActive: (active) => {
         appActive = active;
       },
@@ -219,6 +240,7 @@ function loadNotificationWindowModule(getOwnerId = () => 'owner-a') {
     Module._load = originalLoad;
     delete require.cache[targetPath];
     delete require.cache[factoryPath];
+    delete require.cache[ipcPath];
   }
 }
 
@@ -226,9 +248,7 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   let owner = 'owner-a';
   const { notificationWindow: windows, instances, registeredIpcSenders } =
     loadNotificationWindowModule(() => owner);
-  const main = { isDestroyed: () => false, setFocusable: value => { main.focusable = value; } };
   const handlers = windows.createNotificationIpcHandlers({
-    getMainWindow: () => main,
     resolveOverlayBootstrap: async () => createBootstrapResponse({ snapshot: createSnapshot({ suggestionId: 'history' }) }),
   });
   windows.showNotification('suggestion');
@@ -240,7 +260,6 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   windows.sendToOverlay('suggestion', 'ws:event', { private: 'old event' });
   windows.sendToOverlay('queued-without-window', 'ws:event', { private: 'queued event' });
   assert.equal(instances.length, 3);
-  if (process.platform === 'darwin') assert.equal(main.focusable, false);
 
   owner = null;
   windows.clearForOwnerChange();
@@ -248,7 +267,6 @@ test('owner cleanup destroys all window kinds and removes snapshots, queues, map
   assert.equal(registeredIpcSenders.size, 0);
   assert.equal(windows.resolveOverlayId({ actionId: 'old-action' }), null);
   assert.equal(windows.resolveOverlayId({ processId: 'old-process' }), null);
-  if (process.platform === 'darwin') assert.equal(main.focusable, true);
   owner = 'owner-b';
   windows.showNotification('suggestion');
   windows.showNotification('queued-without-window');
@@ -780,6 +798,10 @@ test('history open keeps interactive overlay always on top', async () => {
   assert.equal(instances[0].focusable, true);
   assert.ok((instances[0].focusCalls || 0) >= 1);
   assert.ok((instances[0].showCalls || 0) >= 1);
+  // Joining every Space over full-screen apps turns the whole app into a UI element on macOS
+  // (Electron hides the Dock icon to do it): the menu bar then never shows Pantaray, even while
+  // its main window is in use.
+  assert.equal(instances[0].visibleOnAllWorkspaces, undefined);
 });
 
 test('visible history overlay also suppresses main restore for activate points inside its bounds', async () => {
@@ -799,7 +821,71 @@ test('visible history overlay also suppresses main restore for activate points i
   assert.equal(instances.length, 1);
   instances[0].windowEvents.emit('ready-to-show');
 
-  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1050, y: 30 }), true);
+  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1000, y: 60 }), true);
+});
+
+test('middle-row overlays are centered and keep that center until the user acts in them; top-row ones grow downward', async () => {
+  // History windows default to the top-right now; this covers the middle row a user can choose.
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({ ...DEFAULT_OVERLAY_PLACEMENTS, history: { row: 1, column: 2 } }),
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+
+  notificationWindow.showNotification('S1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
+  await new Promise((resolve) => setImmediate(resolve));
+  // Tasks the user starts never stack, even over a window already in their cell.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.openStandaloneConversationOverlay('standalone:2');
+  const [suggestion, history, typed, clicked] = instances;
+
+  assert.deepEqual(suggestion.getBounds(), { x: 900, y: 20, width: 520, height: 120 });
+  for (const win of [typed, clicked, history]) {
+    assert.deepEqual(win.getBounds(), { x: 460, y: 390, width: 520, height: 120 });
+  }
+
+  resize(suggestion, 400);
+  assert.equal(suggestion.getBounds().y, 20);
+
+  // Content loading in keeps the window centered, up to the screen edges.
+  for (const height of [401, 120, 401]) resize(history, height);
+  assert.deepEqual(history.getBounds(), { x: 460, y: 250, width: 520, height: 401 });
+  resize(history, 2000);
+  assert.deepEqual(history.getBounds(), { x: 460, y: 8, width: 520, height: 884 });
+
+  // After the user's first key or click, the window grows downward from its top.
+  typed.webContentsEvents.emit('before-input-event', {}, { key: '@' });
+  resize(typed, 320);
+  assert.deepEqual(typed.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
+  handlers.onOverlayInteraction({ sender: clicked.webContents });
+  resize(clicked, 320);
+  assert.deepEqual(clicked.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
+});
+
+test('macOS overlays have no hidden title bar, whose clicks would activate the app', () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', {
+    value: 'darwin',
+    configurable: true,
+  });
+  try {
+    const { notificationWindow, instances } = loadNotificationWindowModule();
+    notificationWindow.showNotification('S1');
+
+    assert.equal(instances[0].options.type, 'panel');
+    assert.equal(instances[0].options.roundedCorners, false);
+  } finally {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      configurable: true,
+    });
+  }
 });
 
 test('history overlay is focusable from native window creation on macOS', async () => {
@@ -852,46 +938,37 @@ test('hide overlay hides window instead of destroying it', () => {
   assert.equal(instances[0].hideCalls || 0, 1);
 });
 
-test('history overlay detaches main window from focus candidates while visible', async () => {
+test('an open overlay of any kind leaves the main window able to take typing', async () => {
+  // The main window holds the chat composer and the History search box. A History overlay used
+  // to make it unfocusable on macOS while open, so it took clicks but no keys.
   const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', {
-    value: 'darwin',
-    configurable: true,
-  });
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
   try {
-    const { notificationWindow } = loadNotificationWindowModule();
-    const mainWindow = {
-      focusable: true,
-      setFocusable(value) {
-        this.focusable = value;
-      },
-      isDestroyed() {
-        return false;
-      },
-    };
+    const { notificationWindow, instances, mainWindow } = loadNotificationWindowModule();
     const handlers = notificationWindow.createNotificationIpcHandlers({
       resumeLiveProcess: () => {},
       resolveOverlayBootstrap: async (suggestionId) =>
-        createBootstrapResponse({
-          suggestionId,
-          snapshot: createSnapshot({ suggestionId }),
-        }),
-      getMainWindow: () => mainWindow,
+        createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
     });
 
     handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
     await new Promise((resolve) => setImmediate(resolve));
-
-    assert.equal(mainWindow.focusable, false);
-
+    notificationWindow.showNotification('S2');
+    notificationWindow.openStandaloneConversationOverlay('standalone:1');
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+    for (const win of instances) {
+      win.webContentsEvents.emit('did-finish-load');
+      win.windowEvents.emit('ready-to-show');
+    }
+    handlers.onOverlayInteraction({ sender: instances[0].webContents });
     notificationWindow.hideOverlay('S1');
+    handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+    await new Promise((resolve) => setImmediate(resolve));
 
-    assert.equal(mainWindow.focusable, true);
+    assert.equal(instances.filter((win) => win.isVisible()).length, 4);
+    assert.deepEqual(mainWindow.focusableChanges, []);
   } finally {
-    Object.defineProperty(process, 'platform', {
-      value: originalPlatform,
-      configurable: true,
-    });
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   }
 });
 
@@ -1096,4 +1173,205 @@ test('a server event binds the Action to its Suggestion once the bound window is
   bridge.forwardEventToRenderers(actionProcessStarted());
 
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
+});
+
+// A macOS work area: below a 33 px menu bar, above a 70 px Dock.
+const MAC_WORK_AREA = { x: 0, y: 33, width: 1512, height: 879 };
+
+test('each kind of overlay opens in the cell chosen for it, read when the window opens', async () => {
+  let placements = {
+    suggestion: { row: 2, column: 0 },
+    started: { row: 0, column: 4 },
+    history: { row: 2, column: 3 },
+  };
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => placements,
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+
+  notificationWindow.showNotification('S1');
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S2' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+  assert.deepEqual(instances.map(position), [
+    { x: 20, y: 772 },
+    { x: 972, y: 53 },
+    { x: 798, y: 772 },
+    // The second History window stacks upward over the first, which is still loading.
+    { x: 798, y: 772 - 132 },
+  ]);
+
+  // A Suggestion arriving stacks upward over the one shown in its cell only; a moved setting
+  // applies to the next window only.
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  assert.equal(instances.filter((win) => win.isVisible()).length, 4);
+  notificationWindow.showNotification('S3');
+  assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 132 });
+  placements = { ...placements, started: { row: 1, column: 0 } };
+  notificationWindow.openStandaloneConversationOverlay('standalone:2');
+  assert.deepEqual(position(instances[5]), { x: 20, y: 413 });
+  assert.deepEqual(position(instances[1]), { x: 972, y: 53 });
+});
+
+test('a bottom-row overlay grows upward from where it is and stays on screen', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({
+      suggestion: { row: 2, column: 4 },
+      started: { row: 2, column: 2 },
+      history: { row: 0, column: 0 },
+    }),
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({});
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  notificationWindow.showNotification('S1');
+  const [typed, suggestion] = instances;
+  const workAreaBottom = 33 + 879;
+
+  resize(typed, 300);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 772 + 120 - 300, width: 520, height: 300 });
+  // The user's first key does not turn it downward, off the bottom of the screen.
+  typed.webContentsEvents.emit('before-input-event', {}, { key: 'a' });
+  handlers.onOverlayInteraction({ sender: typed.webContents });
+  resize(typed, 400);
+  assert.equal(typed.getBounds().y + typed.getBounds().height, 892);
+  resize(typed, 2000);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 33 + 8, width: 520, height: 879 - 16 });
+
+  // Dragged elsewhere, it keeps its new bottom edge.
+  typed.setBounds({ y: 200, height: 300 });
+  resize(typed, 200);
+  assert.deepEqual(typed.getBounds(), { x: 496, y: 300, width: 520, height: 200 });
+
+  resize(suggestion, 500);
+  assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
+  assert.ok(suggestion.getBounds().y + 500 <= workAreaBottom);
+});
+
+test('a closed Suggestion reopened from History opens in the History cell; a visible one stays put', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule(undefined, {
+    getPlacements: () => ({
+      suggestion: { row: 0, column: 4 },
+      started: { row: 1, column: 2 },
+      history: { row: 2, column: 0 },
+    }),
+    workArea: MAC_WORK_AREA,
+  });
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const resize = (win, height) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, { height });
+
+  notificationWindow.showNotification('S1');
+  const [suggestion] = instances;
+  suggestion.windowEvents.emit('ready-to-show');
+  resize(suggestion, 300);
+  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+
+  // Visible: History brings it forward where the user already sees it.
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+
+  // Closed, then reopened from History: bottom-left, keeping its height, growing upward.
+  notificationWindow.hideOverlay('S1');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(instances.length, 1);
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 300, width: 520, height: 300 });
+  resize(suggestion, 400);
+  assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
+
+  // The same through an Action of that Suggestion opened from the History list or chat.
+  notificationWindow.hideOverlay('S1');
+  suggestion.setBounds({ x: 972, y: 53 });
+  suggestion.webContentsEvents.emit('did-finish-load');
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 520, height: 400 });
+});
+
+test('by default Suggestions and History windows share the top-right stack without covering each other', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const openFromHistory = async (suggestionId) => {
+    handlers.onHistoryOpenOverlay({}, { suggestionId });
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+
+  notificationWindow.showNotification('S1');
+  // A task the user starts opens centered and is not part of the corner's stack.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  await openFromHistory('S2');
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  const [suggestion, started, history, conversation] = instances;
+  assert.deepEqual(position(suggestion), { x: 900, y: 20 });
+  assert.deepEqual(position(started), { x: 460, y: 390 });
+  assert.deepEqual(position(history), { x: 900, y: 152 });
+
+  // A window still loading already holds its slot, so the next one takes the following slot.
+  assert.deepEqual(position(conversation), { x: 900, y: 284 });
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  notificationWindow.showNotification('S3');
+  assert.deepEqual(position(instances[4]), { x: 900, y: 20 + 3 * 132 });
+  instances[4].windowEvents.emit('ready-to-show');
+
+  // A closed Suggestion reopened from History takes the lowest free slot of the corner.
+  notificationWindow.hideOverlay('S1');
+  notificationWindow.hideOverlay('S3');
+  notificationWindow.showNotification('S4');
+  assert.deepEqual(position(instances[5]), { x: 900, y: 20 });
+  await openFromHistory('S1');
+  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 3 * 132 });
+});
+
+test('a window opening in a shared cell takes the slot a closed one freed, not one still in use', async () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    resolveOverlayBootstrap: async (suggestionId) =>
+      createBootstrapResponse({ suggestionId, snapshot: createSnapshot({ suggestionId }) }),
+  });
+  const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
+
+  notificationWindow.showNotification('S1');
+  notificationWindow.showNotification('S2');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S3' });
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  const [first, middle, last] = instances;
+  assert.deepEqual([first, middle, last].map(position), [
+    { x: 900, y: 20 },
+    { x: 900, y: 152 },
+    { x: 900, y: 284 },
+  ]);
+
+  // Closing the middle one frees its slot; the closed first one reopened from History takes
+  // the lowest free slot, and the next Suggestion the one after, never one in use.
+  notificationWindow.hideOverlay('S1');
+  notificationWindow.hideOverlay('S2');
+  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(position(first), { x: 900, y: 20 });
+  notificationWindow.showNotification('S4');
+  assert.deepEqual(position(instances[3]), { x: 900, y: 152 });
+  // A window still loading holds its slot too.
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  assert.deepEqual(position(instances[4]), { x: 900, y: 416 });
 });

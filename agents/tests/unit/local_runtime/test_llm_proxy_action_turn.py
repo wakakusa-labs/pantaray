@@ -161,6 +161,7 @@ async def test_client_receives_action_turn_without_flattening_messages(
                 "session_version": "1",
             },
             "tool_use": _request().model_dump(mode="json"),
+            "prompt_cache_key": hashlib.sha256(b"user-1").hexdigest(),
         },
         ensure_ascii=False,
     )

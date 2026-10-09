@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from tests.unit.agents.test_action_agent_tool_batch_execution import (
-    PLAN_TOOL,
+    SQL_CALL,
+    SQL_TOOL,
     _act,
     _build_fixture,
     _persisted_tool_steps,
@@ -61,10 +62,10 @@ async def test_repair_after_a_partly_executed_batch_keeps_completed_sibling_rows
         monkeypatch,
         tmp_path,
         action_id="act-batch-repair",
-        allowed_tool_ids=(PLAN_TOOL,),
+        allowed_tool_ids=(SQL_TOOL,),
     )
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL, SQL_CALL)
     )
 
     state = await _think(agent, runtime, state)
@@ -91,10 +92,10 @@ async def test_repair_after_a_partly_executed_batch_keeps_completed_sibling_rows
     ]
     assert state["context"]["tool_validation_error_streak"] == 1
     completed_head = dict(executed[base_step_number])
-    assert completed_head["result_line"] == f"{PLAN_TOOL}: ok"
+    assert completed_head["result_line"] == f"{SQL_TOOL}: ok"
 
     agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
-        return_value=_turn((PLAN_TOOL, {}), (PLAN_TOOL, {}))
+        return_value=_turn(SQL_CALL, SQL_CALL)
     )
     state = await _think(agent, runtime, state)
     state = await _act(agent, runtime, state)
@@ -104,7 +105,7 @@ async def test_repair_after_a_partly_executed_batch_keeps_completed_sibling_rows
     head = repaired[base_step_number]
     assert head["short_step_id"] == completed_head["short_step_id"]
     assert head["step_id"] == completed_head["step_id"]
-    assert head["result_line"] == f"{PLAN_TOOL}: ok"
+    assert head["result_line"] == f"{SQL_TOOL}: ok"
     refs = [str(entry["short_step_id"]) for entry in _tool_history(state)]
     assert len(refs) == len(set(refs)) == 5
 

@@ -39,6 +39,8 @@ ACTION_PROJECT_REF_MAX_PATHS = 32
 ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS = 200
 ACTION_PROJECT_REF_PATH_MAX_CODEPOINTS = 4096
 ACTION_MESSAGE_MAX_FILES = 10
+# The user's chat messages one hand-off relays as their words.
+ACTION_MESSAGE_MAX_RELAYED_ITEMS = 32
 # The document formats the read tool extracts, with the name the model sees for
 # each. The Electron attach IPC admits the same extensions.
 ACTION_FILE_TYPE_LABEL_BY_EXTENSION: Mapping[str, str] = MappingProxyType(
@@ -135,7 +137,7 @@ def _bounded_items(*, limit: int, unit: str) -> Callable[[object], object]:
 _bounded_images = _bounded_items(
     limit=ACTION_MESSAGE_MAX_IMAGES, unit="image_references"
 )
-_bounded_project_refs = _bounded_items(
+bounded_project_refs = _bounded_items(
     limit=ACTION_MESSAGE_MAX_PROJECT_REFS, unit="project_references"
 )
 _bounded_files = _bounded_items(limit=ACTION_MESSAGE_MAX_FILES, unit="files")
@@ -230,7 +232,7 @@ class FileAttachmentInput(BaseModel):
         return f"{ACTION_ATTACHMENTS_DIRNAME}/{self.attachment_id}/{self.name}"
 
 
-def _require_project_ref_spans(
+def require_project_ref_spans(
     refs: tuple[ActionProjectRef, ...], info: ValidationInfo, *, text_field: str
 ) -> tuple[ActionProjectRef, ...]:
     """Check each reference names its own span of the text, in order.
@@ -273,6 +275,26 @@ class SuggestionApprovalInput(BaseModel):
     _validate_approved_at = field_validator("approved_at")(_non_blank_text)
 
 
+class ChatHandoffInput(BaseModel):
+    """What Pantaray's chat put into this message when it handed work to the task.
+
+    ``relayed_item_ids`` names the user's chat messages whose words are in the
+    message, verbatim: ``content``, or ``supplement`` on a Suggestion approval.
+    ``note`` is the chat's own instruction beside them. With nothing relayed and
+    no approval, ``content`` is the chat's instruction itself. Either way, what
+    the chat wrote is Pantaray's, never shown as the user's words.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    relayed_item_ids: tuple[str, ...]
+    note: Annotated[str, AfterValidator(_non_blank_text)] | None = None
+
+    _validate_item_ids = field_validator("relayed_item_ids", mode="before")(
+        _bounded_items(limit=ACTION_MESSAGE_MAX_RELAYED_ITEMS, unit="relayed_items")
+    )
+
+
 class ActionUserMessageInput(BaseModel):
     """Canonical durable USER envelope used by internal Action callers."""
 
@@ -289,12 +311,13 @@ class ActionUserMessageInput(BaseModel):
     project_refs: tuple[ActionProjectRef, ...] = ()
     supplement_project_refs: tuple[ActionProjectRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
+    chat_handoff: ChatHandoffInput | None = None
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
     _bound_project_refs = field_validator(
         "project_refs", "supplement_project_refs", mode="before"
-    )(_bounded_project_refs)
+    )(bounded_project_refs)
     _bound_files = field_validator("files", mode="before")(_bounded_files)
 
     @field_validator("project_refs")
@@ -302,14 +325,38 @@ class ActionUserMessageInput(BaseModel):
     def _validate_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="content")
+        return require_project_ref_spans(refs, info, text_field="content")
 
     @field_validator("supplement_project_refs")
     @classmethod
     def _validate_supplement_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="supplement")
+        return require_project_ref_spans(refs, info, text_field="supplement")
+
+    @property
+    def is_chat_instruction(self) -> bool:
+        """``content`` is what Pantaray's chat wrote, not the user's words."""
+
+        handoff = self.chat_handoff
+        return (
+            handoff is not None
+            and not handoff.relayed_item_ids
+            and self.suggestion_approval is None
+        )
+
+    @model_validator(mode="after")
+    def _require_relayed_words_for_a_note(self) -> Self:
+        if (
+            self.is_chat_instruction
+            and self.chat_handoff is not None
+            and self.chat_handoff.note is not None
+        ):
+            raise PydanticCustomError(
+                "action_message_not_allowed",
+                "a chat note goes beside relayed words; alone it is the content",
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_suggestion_approval_for_supplement(self) -> Self:
@@ -378,7 +425,7 @@ class ActionMessageHttpMessage(_ActionMessageHttpModel):
     _validate_content = field_validator("content")(_bounded_content)
     _validate_images = field_validator("images", mode="before")(_bounded_images)
     _bound_project_refs = field_validator("project_refs", mode="before")(
-        _bounded_project_refs
+        bounded_project_refs
     )
     _bound_files = field_validator("files", mode="before")(_bounded_files)
 
@@ -387,7 +434,7 @@ class ActionMessageHttpMessage(_ActionMessageHttpModel):
     def _validate_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return _require_project_ref_spans(refs, info, text_field="content")
+        return require_project_ref_spans(refs, info, text_field="content")
 
     @field_validator("version", mode="before")
     @classmethod
@@ -492,6 +539,8 @@ def validate_action_user_message_for_submit(
 
 
 __all__ = [
+    "bounded_project_refs",
+    "require_project_ref_spans",
     "ACTION_ATTACHMENTS_DIRNAME",
     "ACTION_FILE_NAME_MAX_BYTES",
     "ACTION_FILE_TYPE_LABEL_BY_EXTENSION",
@@ -525,6 +574,7 @@ __all__ = [
     "ActionProjectRef",
     "ActionResumeHttpRequest",
     "ActionUserMessageInput",
+    "ChatHandoffInput",
     "FileAttachmentInput",
     "SuggestionApprovalInput",
     "validate_action_user_message_for_submit",

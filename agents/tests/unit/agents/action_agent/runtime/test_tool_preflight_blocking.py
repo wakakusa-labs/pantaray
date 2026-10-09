@@ -88,9 +88,7 @@ def test_broker_policy_error_payload_includes_repair_hint() -> None:
     from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.broker_tools import (
         _build_error_preparation,
     )
-    from pantaray_agents.local_runtime.tooling.brokering.broker import (
-        BrokerPolicyError,
-    )
+    from pantaray_agents.tools.contract import BrokerPolicyError
 
     preparation = _build_error_preparation(
         step_id="step-1",

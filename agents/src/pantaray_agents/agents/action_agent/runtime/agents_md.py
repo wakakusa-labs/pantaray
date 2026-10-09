@@ -5,9 +5,10 @@ prompt head ahead of every file the user wrote. The Pantaray-wide file
 (``~/.pantaray/AGENTS.md``) is read once when the Action starts and rides in the
 stable prompt head. Repository files are attached to the
 result of the first tool call that works in their directory: every AGENTS.md from
-the project root down to that directory, each at most once per Action. The
-attached set lives in the checkpointed context, so a resumed Action does not send
-a file twice. Both follow Codex (``codex-rs/core/src/agents_md.rs``): the project
+the project root down to that directory, each at most once per Action (and
+once per subagent). The caller keeps the attached set where a resumed run reads
+it back -- the Action in its checkpointed context, a subagent in its history
+rows -- so a resumed run does not send a file twice. Both follow Codex (``codex-rs/core/src/agents_md.rs``): the project
 root is the nearest ancestor holding ``.git``, the text is read as lossy UTF-8,
 and blank files are skipped.
 """
@@ -20,12 +21,13 @@ import stat
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
-from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
-from pantaray_agents.agents.action_agent.runtime.state.context import ensure_context
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     DescriptorPathMissingError,
     open_regular_file_descriptor,
+)
+from pantaray_agents.local_runtime.tooling.brokering.action_path_policy import (
+    resolve_read_tool_path,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     APPLY_PATCH_TOOL_ID,
@@ -36,15 +38,12 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     READ_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
     BrokerContext,
-    BrokerPolicyError,
-)
-from pantaray_agents.local_runtime.tooling.brokering.manifest_paths import (
-    ResolvedManifestPath,
-)
-from pantaray_agents.local_runtime.tooling.brokering.tool_path_policy import (
-    resolve_read_tool_path,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.manifest_paths import (
+    ResolvedManifestPath,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +94,7 @@ def load_pantaray_agents_md() -> str:
 
 
 def attach_repository_agents_md(
-    state: ActionAgentState,
+    attached: list[str],
     *,
     tool_id: str,
     args: Mapping[str, JSONValue],
@@ -105,12 +104,12 @@ def attach_repository_agents_md(
 
     ``read_context`` is the Action's read-tool context, so a file is attached only
     when the ``read`` tool could open it: inside the read scope, outside private
-    app storage, and not through a symlink that leaves its root. Runs without an
-    ``await`` so parallel sibling calls sharing one state cannot claim twice.
+    app storage, and not through a symlink that leaves its root. Each file it
+    attaches is appended to ``attached``, which also says what is already sent.
+    Runs without an ``await`` so parallel sibling calls sharing one set cannot
+    claim twice.
     """
 
-    context = ensure_context(state)
-    attached = list(context.get("agents_md_attached_paths", []))
     blocks: list[str] = []
     remaining = AGENTS_MD_MAX_BYTES
     for raw_path in _touched_paths(tool_id, args):
@@ -130,7 +129,6 @@ def attach_repository_agents_md(
             attached.append(key)
             remaining -= len(data)
             blocks.append(_render_block(f"for {scope}", data))
-    context["agents_md_attached_paths"] = attached
     return "\n\n".join(blocks) if blocks else None
 
 

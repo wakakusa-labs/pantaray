@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import AgentOverlayShell from './AgentOverlayShell';
+import { OverlaySurfaceContext, type OverlaySurface } from './OverlaySurfaceContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 
 describe('AgentOverlayShell', () => {
@@ -364,5 +365,65 @@ describe('AgentOverlayShell', () => {
     fireEvent.click(button);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  describe('surface', () => {
+    const renderOnSurface = (surface: OverlaySurface) => {
+      const handlers = {
+        onToggleExpand: vi.fn(),
+        onClose: vi.fn(),
+        onShowChat: vi.fn(async () => {}),
+        onHeaderPointerDown: vi.fn(),
+      };
+      const { container } = render(
+        <UiLanguageProvider initialLanguage="en">
+          <OverlaySurfaceContext.Provider value={surface}>
+            <AgentOverlayShell
+              isVisible={true}
+              isContentVisible={true}
+              isExpanded={true}
+              content={null}
+              suggestionText=""
+              isSuggestionStreamFinished={true}
+              actionText=""
+              isActionStreamFinished={true}
+              approvalUiState="hidden"
+              showBusyIndicator={false}
+              showFooterActions={false}
+              conversationContent={<p>conversation</p>}
+              chatActionId="act-1"
+              {...handlers}
+            />
+          </OverlaySurfaceContext.Provider>
+        </UiLanguageProvider>
+      );
+      const shell = within(container);
+      const showChat = shell.getByRole('button', { name: 'Show in chat' });
+      return { handlers, shell, showChat, header: showChat.parentElement as HTMLElement };
+    };
+    const appRegion = (element: Element) =>
+      getComputedStyle(element).getPropertyValue('-webkit-app-region');
+
+    it('leaves closing and moving the window to its title bar', () => {
+      const { handlers, shell, showChat, header } = renderOnSurface('window');
+
+      expect(shell.queryByRole('button', { name: 'Collapse' })).toBeNull();
+      expect(shell.queryByRole('button', { name: 'Hide Notification' })).toBeNull();
+      expect(appRegion(header)).toBe('drag');
+      expect(appRegion(showChat)).toBe('no-drag');
+      fireEvent.pointerDown(header, { button: 0, pointerId: 1 });
+      expect(handlers.onHeaderPointerDown).not.toHaveBeenCalled();
+    });
+
+    it("keeps the panel's collapse, hide and pointer drag", () => {
+      const { handlers, shell, header } = renderOnSurface('panel');
+
+      fireEvent.click(shell.getByRole('button', { name: 'Collapse' }));
+      fireEvent.click(shell.getByRole('button', { name: 'Hide Notification' }));
+      expect(handlers.onToggleExpand).toHaveBeenCalledTimes(1);
+      expect(handlers.onClose).toHaveBeenCalledTimes(1);
+      expect(appRegion(header)).toBe('no-drag');
+      fireEvent.pointerDown(header, { button: 0, pointerId: 1 });
+      expect(handlers.onHeaderPointerDown).toHaveBeenCalledTimes(1);
+    });
   });
 });

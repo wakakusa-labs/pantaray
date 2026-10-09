@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AgentOverlay from './AgentOverlay';
+import { OverlaySurfaceContext } from './agent-overlay/OverlaySurfaceContext';
 import {
   readConversationScrollPosition,
   saveConversationScrollPosition,
@@ -439,6 +440,34 @@ describe('AgentOverlay broader E2E', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     await waitFor(() => expect(resizeOverlay.mock.lastCall?.[0]).toBeGreaterThan(500));
+  });
+
+  it('leaves the window surface at the size the user gives it, with the whole conversation shown', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <OverlaySurfaceContext.Provider value="window">
+          <AgentOverlay />
+        </OverlaySurfaceContext.Provider>
+      </UiLanguageProvider>
+    );
+    // A snapshot that collapses the panel must not collapse the window.
+    const completed = { ...createResumedSnapshot(), initialUiState: { expand: false } };
+    Object.assign(completed.snapshot, {
+      actionPhase: 'terminal',
+      actionStatus: 'success',
+      processId: null,
+      isLive: false,
+    });
+    await act(async () => snapshotListener?.(completed));
+    await act(async () => conversationListener?.(createConversationUpdate()));
+    await act(async () => new Promise<number>((resolve) => window.requestAnimationFrame(resolve)));
+
+    const scroll = document.querySelector('[data-overlay-scroll="true"]') as HTMLElement;
+    expect(within(scroll).getByText('canonical final output')).toBeInTheDocument();
+    expect(getComputedStyle(scroll).maxHeight).toBe('none');
+    expect(screen.queryByRole('button', { name: /Collapse|Expand/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Hide Notification' })).toBeNull();
+    expect(resizeOverlay).not.toHaveBeenCalled();
   });
 
   describe('conversation copy', () => {

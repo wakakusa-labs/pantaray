@@ -255,8 +255,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const { endRef: completionEndRef, failed: completionReadFailed } = useCompletionViewed(
     conversationActionId,
     completionEventId,
-    (entryMode === 'standalone' || state.isOverlayVisible) &&
-      (state.historyExpandOverride ?? state.isExpanded)
+    (entryMode === 'standalone' || state.isOverlayVisible) && ctrl.isExpanded
   );
   const failureFallbackText =
     !operationalError &&
@@ -525,9 +524,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     <AgentOverlayShell
       isVisible={entryMode === 'standalone' || state.isOverlayVisible}
       isContentVisible={entryMode === 'standalone' || state.isOverlayVisible}
-      isExpanded={
-        state.historyExpandOverride !== null ? state.historyExpandOverride : state.isExpanded
-      }
+      isExpanded={ctrl.isExpanded}
       content={state.content}
       {...suggestionDisplay}
       actionText={operationalError}

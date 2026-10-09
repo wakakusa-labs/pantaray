@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
-import { PopupContainer } from './OverlayBackground';
-import HeaderRow, { HeaderButtonGroup } from './HeaderBar';
+import { PopupContainer, WindowContainer } from './OverlayBackground';
+import HeaderRow, { HeaderButtonGroup, WindowHeaderRow } from './HeaderBar';
+import { useOverlaySurface } from './OverlaySurfaceContext';
 import { ApprovalPanel as ApprovalPanelView } from './ApprovalPanel';
 import type { ApprovalDecision } from './approvalDisplayModel';
 import {
@@ -194,6 +195,9 @@ const AgentOverlayShell = ({
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
   const { t } = useI18n();
+  // The window surface keeps its size, and its title bar closes and moves it, so it has no
+  // collapse or hide buttons and no panel drag.
+  const isWindow = useOverlaySurface() === 'window';
   const showApprovalPanel = approvalUiState === 'approval_pending' && approvalBlockers.length > 0;
   const copyConversationFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
@@ -242,81 +246,69 @@ const AgentOverlayShell = ({
     }, SCROLL_INDICATOR_HIDE_DELAY_MS);
   };
 
-  return (
-    <PopupContainer
-      ref={containerRef}
-      $bg={overlayBackground}
-      $isVisible={isVisible}
-      $fadeMs={fadeDurationMs}
-      data-overlay-panel="true"
-    >
-      <HeaderRow
-        ref={headerRef}
-        onPointerDown={onHeaderPointerDown}
-        onPointerMove={onHeaderPointerMove}
-        onPointerUp={onHeaderPointerUp}
-        onPointerCancel={onHeaderPointerCancel}
-      >
-        {showBusyIndicator && (
-          <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>
+  const headerControls = (
+    <>
+      {showBusyIndicator && <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>}
+      {chatActionId !== null && onShowChat && (
+        <ShowChatButton
+          $visible={isVisible}
+          onClick={() => void onShowChat({ actionId: chatActionId })}
+          aria-label={t('overlay.showInChat')}
+          title={t('overlay.showInChat')}
+        >
+          <MessageCircle strokeWidth={1.75} aria-hidden />
+        </ShowChatButton>
+      )}
+      <HeaderButtonGroup>
+        {conversationCopy && (
+          <>
+            <HeaderIconButton
+              $visible={isVisible}
+              onClick={conversationCopy.copy}
+              aria-label={t('overlay.copyConversation')}
+              title={copyConversationFailed ?? t('overlay.copyConversation')}
+            >
+              {conversationCopy.status === 'copied' ? (
+                <Check strokeWidth={1.75} />
+              ) : conversationCopy.status === 'failed' ? (
+                <CircleAlert strokeWidth={1.75} />
+              ) : (
+                <Clipboard strokeWidth={1.75} />
+              )}
+            </HeaderIconButton>
+            {copyConversationFailed ? (
+              <VisuallyHidden role="alert">{copyConversationFailed}</VisuallyHidden>
+            ) : null}
+          </>
         )}
-        {chatActionId !== null && onShowChat && (
-          <ShowChatButton
+        {onToggleExpand && !isWindow && (
+          <HeaderIconButton
+            ref={expandButtonRef}
             $visible={isVisible}
-            onClick={() => void onShowChat({ actionId: chatActionId })}
-            aria-label={t('overlay.showInChat')}
-            title={t('overlay.showInChat')}
+            onClick={onToggleExpand}
+            aria-label={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
+            title={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
           >
-            <MessageCircle strokeWidth={1.75} aria-hidden />
-          </ShowChatButton>
+            {isExpanded ? <ChevronUp strokeWidth={1.75} /> : <ChevronDown strokeWidth={1.75} />}
+          </HeaderIconButton>
         )}
-        <HeaderButtonGroup>
-          {conversationCopy && (
-            <>
-              <HeaderIconButton
-                $visible={isVisible}
-                onClick={conversationCopy.copy}
-                aria-label={t('overlay.copyConversation')}
-                title={copyConversationFailed ?? t('overlay.copyConversation')}
-              >
-                {conversationCopy.status === 'copied' ? (
-                  <Check strokeWidth={1.75} />
-                ) : conversationCopy.status === 'failed' ? (
-                  <CircleAlert strokeWidth={1.75} />
-                ) : (
-                  <Clipboard strokeWidth={1.75} />
-                )}
-              </HeaderIconButton>
-              {copyConversationFailed ? (
-                <VisuallyHidden role="alert">{copyConversationFailed}</VisuallyHidden>
-              ) : null}
-            </>
-          )}
-          {onToggleExpand && (
-            <HeaderIconButton
-              ref={expandButtonRef}
-              $visible={isVisible}
-              onClick={onToggleExpand}
-              aria-label={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
-              title={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
-            >
-              {isExpanded ? <ChevronUp strokeWidth={1.75} /> : <ChevronDown strokeWidth={1.75} />}
-            </HeaderIconButton>
-          )}
-          {onClose && (
-            <HeaderIconButton
-              $visible={isVisible}
-              onMouseDown={handleCloseMouseDown}
-              onClick={handleCloseClick}
-              aria-label={t('overlay.hideNotification')}
-              title={t('overlay.hideNotification')}
-            >
-              <Minus strokeWidth={1.75} />
-            </HeaderIconButton>
-          )}
-        </HeaderButtonGroup>
-      </HeaderRow>
+        {onClose && !isWindow && (
+          <HeaderIconButton
+            $visible={isVisible}
+            onMouseDown={handleCloseMouseDown}
+            onClick={handleCloseClick}
+            aria-label={t('overlay.hideNotification')}
+            title={t('overlay.hideNotification')}
+          >
+            <Minus strokeWidth={1.75} />
+          </HeaderIconButton>
+        )}
+      </HeaderButtonGroup>
+    </>
+  );
 
+  const body = (
+    <>
       <ContentFade $visible={isContentVisible}>
         <ScrollableContent
           ref={resolvedScrollableRef}
@@ -400,6 +392,32 @@ const AgentOverlayShell = ({
           onReject={onReject}
         />
       )}
+    </>
+  );
+
+  return isWindow ? (
+    <WindowContainer ref={containerRef}>
+      <WindowHeaderRow ref={headerRef}>{headerControls}</WindowHeaderRow>
+      {body}
+    </WindowContainer>
+  ) : (
+    <PopupContainer
+      ref={containerRef}
+      $bg={overlayBackground}
+      $isVisible={isVisible}
+      $fadeMs={fadeDurationMs}
+      data-overlay-panel="true"
+    >
+      <HeaderRow
+        ref={headerRef}
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerCancel}
+      >
+        {headerControls}
+      </HeaderRow>
+      {body}
     </PopupContainer>
   );
 };

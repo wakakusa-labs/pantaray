@@ -147,11 +147,9 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.overlayPosition.kind.suggestion': 'Suggestions',
     'settings.overlayPosition.kind.suggestion.description': 'Suggestions that arrive on their own.',
     'settings.overlayPosition.kind.started': 'New tasks',
-    'settings.overlayPosition.kind.started.description':
-      'Opened with New task or the shortcut.',
-    'settings.overlayPosition.kind.history': 'Opened from History',
-    'settings.overlayPosition.kind.history.description':
-      'Tasks and suggestions you reopen from History.',
+    'settings.overlayPosition.kind.started.description': 'Opened with New task or the shortcut.',
+    'settings.overlayPosition.kind.history': 'Suggestions from History',
+    'settings.overlayPosition.kind.history.description': 'Suggestions you reopen from History.',
     'settings.overlayPosition.gridLabel': '{kind} position',
     'settings.overlayPosition.cell': '{row}, {column}',
     'settings.overlayPosition.row.0': 'Top',
@@ -440,8 +438,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.overlayPosition.kind.started': '新しい作業',
     'settings.overlayPosition.kind.started.description':
       '「新しい作業」ボタンやショートカットから開く作業です。',
-    'settings.overlayPosition.kind.history': '履歴から開く作業',
-    'settings.overlayPosition.kind.history.description': '履歴から開き直す作業と提案です。',
+    'settings.overlayPosition.kind.history': '履歴から開き直す提案',
+    'settings.overlayPosition.kind.history.description': '履歴から開き直す提案です。',
     'settings.overlayPosition.gridLabel': '{kind}の位置',
     'settings.overlayPosition.cell': '{row}・{column}',
     'settings.overlayPosition.row.0': '上段',

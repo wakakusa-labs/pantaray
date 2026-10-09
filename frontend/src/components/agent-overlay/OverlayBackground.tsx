@@ -1,5 +1,6 @@
 // Overlay background styled-only
 import styled from 'styled-components';
+import { ComposerDock, ContentFade, ContentInner } from './ContentLayout';
 
 // Preserve the initial image framing and edge mask throughout the conversation.
 const TINT_BLEED_PX = 66;
@@ -140,6 +141,35 @@ export const PopupContainer = styled.div<{
     box-shadow: none;
     pointer-events: none;
     z-index: 0;
+  }
+`;
+
+/** The main window's chat column width (`chatView.css`), so a long answer reads the same in both. */
+const WINDOW_COLUMN_MAX_WIDTH_PX = 720;
+
+/**
+ * The window surface: an opaque, full-height ordinary window on the main window's ground.
+ *
+ * The conversation scrolls across the full width, so the wheel works anywhere and the scroll bar
+ * sits at the window edge; its text and the composer share one centred column, which keeps the
+ * panel's side padding when the window is narrow.
+ */
+export const WindowContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: 16px;
+  overflow: clip;
+  background: var(--app-background);
+
+  ${ContentFade} {
+    flex: 1 1 auto;
+  }
+
+  ${ContentInner}, ${ComposerDock} {
+    width: min(${WINDOW_COLUMN_MAX_WIDTH_PX}px, calc(100% - ${2 * PANEL_INLINE_PADDING_PX}px));
+    margin-inline: auto;
   }
 `;
 

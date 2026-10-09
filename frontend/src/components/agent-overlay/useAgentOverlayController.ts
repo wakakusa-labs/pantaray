@@ -5,6 +5,7 @@ import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
+import { useOverlaySurface } from './OverlaySurfaceContext';
 
 const RESIZE_EXPAND_THRESHOLD_PX = 4;
 const ACTION_RESIZE_BUFFER_PX = 32;
@@ -14,6 +15,8 @@ const REQUEST_STATE_REQUESTING: AgentOverlayState['requestState'] = 'requesting'
 
 export type AgentOverlayController = {
   state: AgentOverlayState;
+  /** The window surface always shows the whole conversation; the panel can be collapsed. */
+  isExpanded: boolean;
   // refs
   headerRef: React.RefObject<HTMLDivElement>;
   scrollableContentRef: React.RefObject<HTMLDivElement>;
@@ -52,6 +55,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   );
   const effectiveVisible = isStandalone || state.isOverlayVisible;
   const effectiveActionPhase = isStandalone || state.isActionPhase;
+  const surface = useOverlaySurface();
+  // Only the panel sizes its window to the content. The user sizes the window surface.
+  const sizesWindowToContent = surface === 'panel';
 
   const headerRef = useRef<HTMLDivElement>(null);
   const scrollableContentRef = useRef<HTMLDivElement>(null);
@@ -227,7 +233,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   // Auto resize when visibility or expansion changes
   useEffect(() => {
-    if (!effectiveVisible) return;
+    if (!effectiveVisible || !sizesWindowToContent) return;
     const effect = () => {
       measureAndResize();
       manualResizeRef.current = false;
@@ -244,11 +250,12 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     state.isActionStreamFinished,
     state.reactionState,
     measureAndResize,
+    sizesWindowToContent,
   ]);
 
   // 本文と折り畳みプレビューの実サイズを監視して再計測する。
   useEffect(() => {
-    if (!effectiveVisible) return;
+    if (!effectiveVisible || !sizesWindowToContent) return;
     if (typeof ResizeObserver === 'undefined') return;
 
     let rafId: number | null = null;
@@ -284,7 +291,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
         window.cancelAnimationFrame(rafId);
       }
     };
-  }, [effectiveVisible, measureAndResize]);
+  }, [effectiveVisible, measureAndResize, sizesWindowToContent]);
 
   // Orchestration status (resume hints)
   useEffect(() => {
@@ -391,6 +398,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   return {
     state,
+    isExpanded: surface === 'window' || (state.historyExpandOverride ?? state.isExpanded),
     headerRef,
     scrollableContentRef,
     contentInnerRef,

@@ -52,7 +52,7 @@ describe('OverlayPositionSection', () => {
       'aria-valuetext',
       '中段・中央'
     );
-    expect(screen.getByRole('slider', { name: '履歴から開く作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '履歴から開き直す提案の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
@@ -118,7 +118,7 @@ describe('OverlayPositionSection', () => {
       )
     );
     render(<OverlayPositionSection t={ja} />);
-    const history = await screen.findByRole('slider', { name: '履歴から開く作業の位置' });
+    const history = await screen.findByRole('slider', { name: '履歴から開き直す提案の位置' });
 
     fireEvent.keyDown(history, { key: 'ArrowDown' });
     expect(history).toHaveAttribute('aria-valuetext', '下段・中央');

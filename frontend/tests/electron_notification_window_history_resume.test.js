@@ -1402,20 +1402,45 @@ test('a panel showing an Action is replaced by an ordinary window that keeps its
   assert.equal(instances.length, 2);
   assert.equal(win.alwaysOnTop, undefined);
   assert.equal(win.showInactiveCalls, undefined);
+});
 
-  // A New task that started work is replaced the same way, while it is shown.
+test('a visible panel showing an Action is focused as it is, keeping its draft; a hidden one is replaced', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  // A Suggestion accepted in the chat while its panel stays open, and a New task that started
+  // work: both may hold an unsent draft in their page.
+  notificationWindow.showNotification('S1');
   notificationWindow.openStandaloneConversationOverlay('standalone:1');
-  const newTask = instances[2];
-  newTask.webContentsEvents.emit('did-finish-load');
-  newTask.windowEvents.emit('ready-to-show');
+  const [suggestion, newTask] = instances;
+  for (const panel of [suggestion, newTask]) {
+    panel.webContentsEvents.emit('did-finish-load');
+    panel.windowEvents.emit('ready-to-show');
+  }
+  notificationWindow.setOverlaySnapshot('S1', {
+    snapshot: createSnapshot({ actionId: 'A1', reactionState: 'accepted' }),
+  });
   notificationWindow.registerActionAssociation('A2', 'standalone:1');
-  assert.equal(
-    notificationWindow.openStandaloneConversationOverlay('standalone:1', 'A2'),
-    'created'
-  );
-  assert.equal(newTask.isDestroyed(), true);
-  assert.equal(new URL(instances[3].loadedUrl).searchParams.get('actionId'), 'A2');
-  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A2' }), 'standalone:1');
+
+  for (const [panel, id, actionId] of [
+    [suggestion, 'S1', 'A1'],
+    [newTask, 'standalone:1', 'A2'],
+  ]) {
+    const { webContents } = panel;
+    const focusCalls = panel.focusCalls || 0;
+    assert.equal(notificationWindow.openStandaloneConversationOverlay(id, actionId), 'focused');
+    assert.equal(panel.isDestroyed(), false);
+    assert.equal(panel.webContents, webContents);
+    assert.equal(notificationWindow.resolveOverlayIdForSender(webContents), id);
+    assert.equal(panel.focusCalls, focusCalls + 1);
+    assert.equal(panel.sent.at(-1).channel, 'overlay:focusComposer');
+  }
+  assert.equal(instances.length, 2);
+
+  // Once closed, the Suggestion's panel gives way to an ordinary window.
+  notificationWindow.hideOverlay('S1');
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'created');
+  assert.equal(suggestion.isDestroyed(), true);
+  assert.equal(new URL(instances[2].loadedUrl).searchParams.get('surface'), 'window');
+  assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
 });
 
 test('an ordinary window keeps the size and place the user gives it', () => {

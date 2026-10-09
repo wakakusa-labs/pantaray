@@ -378,9 +378,10 @@ function getOrCreateHistoryOverlayWindow(id) {
 
 /**
  * Opens a conversation the user asked for. One with work (an Action) is an ordinary window; a
- * New task starts as a panel. An Action has at most one surface: its window is focused again,
- * and a panel showing it (a Suggestion accepted elsewhere, or a New task that started work) is
- * replaced by a window under the same id, keeping the Action's associations.
+ * New task starts as a panel. An Action has at most one surface, so an existing one is focused
+ * again: its window, or a visible panel showing it, whose unsent draft lives only in its page.
+ * A hidden panel showing it (a Suggestion accepted elsewhere, then closed) is replaced by a
+ * window under the same id, keeping the Action's associations.
  */
 function openStandaloneConversationOverlay(id, actionId = null) {
   readOwnerScope();
@@ -391,7 +392,8 @@ function openStandaloneConversationOverlay(id, actionId = null) {
   if (!runtime) throw new Error('Standalone Overlay state is unavailable.');
   const current = overlayWindows.get(normalizedId);
   const existing = current && !current.isDestroyed() ? current : null;
-  if (normalizedActionId && !isConversationWindow(existing)) {
+  const keepsSurface = existing && (isConversationWindow(existing) || existing.isVisible());
+  if (normalizedActionId && !keepsSurface) {
     createConversationWindow(normalizedId, normalizedActionId);
     existing?.destroy();
     return 'created';

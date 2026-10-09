@@ -74,9 +74,12 @@ export function ChatView({
   const [openWork, setOpenWork] = useState<WorkKey | null>(null);
   // The Overlay that asked to show its Action is the one open now.
   const [revealSeen, setRevealSeen] = useState<string | null>(null);
+  const [jump, setJump] = useState<ChatJump | null>(null);
   if (reveal && reveal.key !== revealSeen) {
     setRevealSeen(reveal.key);
     setOpenWork(`action:${reveal.actionId}`);
+    // The Overlay's request is the newer one; a jump still looking for its message gives way.
+    setJump(null);
   }
   const ready = !chat.loading;
   const scroll = useChatScroll({
@@ -116,7 +119,8 @@ export function ChatView({
     hasOlder,
     failed: readFailed,
     loadingOlder,
-    loadOlder,
+    // Pages read on the way to the target keep the reader's place, in case it is never found.
+    loadOlder: scroll.loadOlderKeepingPlace,
     readPlace: scroll.readPlace,
   };
   const revealCard = reveal ? latestCards.get(`action:${reveal.actionId}`) : undefined;
@@ -127,7 +131,6 @@ export function ChatView({
       elementId: revealCard === undefined ? null : cardElementId(revealCard),
     },
   });
-  const [jump, setJump] = useState<ChatJump | null>(null);
   const jumpCount = useRef(0);
   const jumpTo = (itemId: string, returnTo: string | null) => {
     jumpCount.current += 1;

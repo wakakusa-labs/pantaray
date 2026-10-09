@@ -28,7 +28,7 @@ export function useChatReveal({
   hasOlder: boolean;
   failed: boolean;
   loadingOlder: boolean;
-  loadOlder: () => Promise<void>;
+  loadOlder: () => void;
   /** Tells the chat it was scrolled, so it follows the newest message only from there. */
   readPlace: () => void;
   /** The target is in view and has focus. */
@@ -49,7 +49,7 @@ export function useChatReveal({
       readPlace();
       onShown?.();
     } else if (hasOlder && !failed) {
-      if (!loadingOlder) void loadOlder();
+      if (!loadingOlder) loadOlder();
     } else {
       doneRef.current = key;
     }

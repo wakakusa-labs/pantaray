@@ -146,7 +146,7 @@ export const SETTINGS_MESSAGES = defineMessages({
       'Drag the block, or move it with the arrow keys. Overlays open there from next time.',
     'settings.overlayPosition.kind.suggestion': 'Suggestions',
     'settings.overlayPosition.kind.suggestion.description': 'Suggestions that arrive on their own.',
-    'settings.overlayPosition.kind.started': 'Tasks you start',
+    'settings.overlayPosition.kind.started': 'New tasks',
     'settings.overlayPosition.kind.started.description':
       'Opened with New task or the shortcut.',
     'settings.overlayPosition.kind.history': 'Opened from History',
@@ -437,7 +437,7 @@ export const SETTINGS_MESSAGES = defineMessages({
       'ブロックをドラッグするか矢印キーで動かすと、次に開くときからその位置に出ます。',
     'settings.overlayPosition.kind.suggestion': '提案',
     'settings.overlayPosition.kind.suggestion.description': '自動で届く提案です。',
-    'settings.overlayPosition.kind.started': '始める作業',
+    'settings.overlayPosition.kind.started': '新しい作業',
     'settings.overlayPosition.kind.started.description':
       '「新しい作業」ボタンやショートカットから開く作業です。',
     'settings.overlayPosition.kind.history': '履歴から開く作業',

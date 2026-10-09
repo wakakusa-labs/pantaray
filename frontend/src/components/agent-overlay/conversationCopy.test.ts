@@ -53,6 +53,7 @@ const tool = (step: number): Entry => ({
   output_preview: null,
   output_available: true,
   images: [],
+  file_edit: null,
 });
 /** Entries are given oldest first and stored newest first, as the backend pages them. */
 const run = (id: string, entries: Entry[], outcome: Pick<Run, 'final_output' | 'error'>): Run => ({

@@ -422,6 +422,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
           output_preview: null,
           output_available: false,
           images: [],
+          file_edit: null,
         },
         { step_kind: 'assistant', step_id: 'assistant-1', step_number: 1, content: 'Looking' },
       ])

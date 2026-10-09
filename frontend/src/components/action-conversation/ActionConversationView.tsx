@@ -64,15 +64,17 @@ type LabeledToolStatus = Exclude<ToolStatus, 'success'>;
  * 承認されなかった呼び出しと、記録がオフのまま呼ばれた読み取りは、成功したステップとして
  * 残る。停止が届いたとき発行前だった呼び出しは、失敗したステップとして残る。どれも
  * 走らなかったことに変わりはないので、状態語より先に「未実行」を出す。行を眺めるだけの
- * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページも失敗ではなく、行の文が
- * そう言うので状態語は出さない。
+ * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページと、編集の前に読ませる
+ * ため中身だけを返したパッチも失敗ではなく、行の文がそう言うので状態語は出さない。
  */
 function toolRowStatus(entry: ToolEntry, copy: Copy): ToolRowStatus | null {
   if (entry.outcome === 'not_executed') return { label: copy.toolNotRun, failed: false };
   if (entry.status !== 'success') {
     return { label: copy.toolStatus[entry.status], failed: entry.status !== 'processing' };
   }
-  return entry.outcome === 'completed' || entry.outcome === 'preparing'
+  return entry.outcome === 'completed' ||
+    entry.outcome === 'preparing' ||
+    entry.outcome === 'needs_read'
     ? null
     : { label: copy.toolNotRun, failed: false };
 }
@@ -206,10 +208,12 @@ export function StepItem({
                 subject: entry.subject,
                 running,
                 outcome: entry.outcome,
+                fileOperation: entry.file_edit?.operation,
               })
         }
         // 引数を持たないツールは、結果の頭を添えて何が返ったかだけでも見せる。
         preview={entry.subject === null ? entry.output_preview : null}
+        fileEdit={entry.file_edit}
         stepNumber={entry.step_number}
         runLabel={runLabel}
         status={

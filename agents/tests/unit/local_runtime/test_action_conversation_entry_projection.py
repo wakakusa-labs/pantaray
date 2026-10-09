@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -22,6 +23,16 @@ from pantaray_agents.local_runtime.action_conversation.history_queries import (
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_USER_STEP_NAME,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate import (
+    build_needs_read_output,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    ApplyPatchUpdateChange,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    StructuredPatchFileChange,
+    create_patch_diff,
+)
 from pantaray_agents.schema.action_conversation import ActionStepStatus
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
@@ -35,7 +46,10 @@ from pantaray_agents.schema.agent.action_message_codec import (
     serialize_action_user_message,
 )
 from pantaray_agents.schema.agent.image import ImageInput
-from pantaray_agents.schema.tool_result import FormalToolStepOutput
+from pantaray_agents.schema.tool_result import (
+    FormalToolStepOutput,
+    build_runtime_tool_error_output,
+)
 
 
 def _modern_user_row(
@@ -666,3 +680,120 @@ def test_a_chat_note_on_an_approval_stays_pantarays() -> None:
     assert entry.approved_suggestion is not None
     assert entry.content == "その条件でお願い"
     assert entry.chat_note == "社名は匿名化する"
+
+
+_UPDATE_CHANGE = {
+    "op": "update",
+    "path": "page.html",
+    "edits": [{"old_lines": ["b"], "new_lines": ["c"]}],
+}
+
+
+def _patch_row(
+    change: dict[str, object], output: object, *, status: ActionStepStatus = "success"
+) -> ActionHistoryToolRow:
+    return ActionHistoryToolRow(
+        "step-1",
+        1,
+        "apply_patch",
+        status,
+        _tool_output(status=status, output=output),
+        json.dumps({"tool_id": "apply_patch", "args": {"changes": [change]}}),
+        "run-1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "old_text", "new_text", "expected"),
+    [
+        (_UPDATE_CHANGE, "a\nb", "a\nc", ("update", 1, 1)),
+        (
+            {
+                "op": "add",
+                "path": "page.html",
+                "new_lines": ["x", "y"],
+                "trailing_newline": True,
+            },
+            "",
+            "x\ny\n",
+            ("add", 2, 0),
+        ),
+        ({"op": "delete", "path": "page.html"}, "x\ny\n", "", ("delete", 0, 2)),
+    ],
+    ids=["update", "add", "delete"],
+)
+def test_projects_an_applied_patch_as_its_line_counts(
+    change: dict[str, object],
+    old_text: str,
+    new_text: str,
+    expected: tuple[str, int, int],
+) -> None:
+    diff = create_patch_diff(
+        StructuredPatchFileChange(
+            operation=change["op"],  # type: ignore[arg-type]
+            path="page.html",
+            old_text=old_text,
+            new_text=new_text,
+        )
+    )
+    output = {"status": "success", "applied_paths": ["/w/page.html"], "diff": diff}
+
+    entry = project_action_tool_entry(_patch_row(change, output))
+
+    assert entry.outcome == "completed"
+    assert entry.file_edit is not None
+    assert (
+        entry.file_edit.operation,
+        entry.file_edit.added_lines,
+        entry.file_edit.removed_lines,
+    ) == expected
+
+
+def test_a_patch_held_for_a_read_does_not_claim_an_edit() -> None:
+    output = build_needs_read_output(
+        path="page.html",
+        text="a\nb\n",
+        change=ApplyPatchUpdateChange.model_validate(_UPDATE_CHANGE),
+    )
+
+    entry = project_action_tool_entry(_patch_row(_UPDATE_CHANGE, output))
+
+    assert (entry.status, entry.outcome, entry.file_edit) == (
+        "success",
+        "needs_read",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "output", "storage"),
+    [
+        (
+            "error",
+            build_runtime_tool_error_output(error_type="X", message="failed"),
+            "inline_json",
+        ),
+        (
+            "success",
+            {
+                "storage": "action_file",
+                "path": "tool-results/output.json",
+                "media_type": "application/json",
+                "byte_size": 30_000,
+                "character_count": 30_000,
+                "line_count": 900,
+            },
+            "action_file",
+        ),
+    ],
+    ids=["failed", "spilled"],
+)
+def test_a_patch_without_an_inline_diff_has_no_line_counts(
+    status: ActionStepStatus, output: object, storage: str
+) -> None:
+    row = _patch_row(_UPDATE_CHANGE, output, status=status)
+    row = replace(
+        row, tool_output=_tool_output(status=status, output=output, storage=storage)
+    )
+
+    assert project_action_tool_entry(row).file_edit is None

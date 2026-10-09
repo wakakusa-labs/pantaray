@@ -13,7 +13,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchEdit,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    StructuredPatchFileChange,
     apply_patch_edits,
+    count_patch_diff_lines,
+    create_patch_diff,
     patch_line_texts,
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
@@ -575,3 +578,40 @@ def test_apply_patch_edits_never_merge_or_split_untouched_lines(old_text: str) -
             new_text = apply_patch_edits(old_text=old_text, edits=[edit])
 
             assert list(patch_line_texts(new_text)) == expected, (line, new_lines)
+
+
+@pytest.mark.parametrize(
+    ("old_text", "new_text", "expected_body", "expected_counts"),
+    [
+        (
+            "a\nb",
+            "a\nc",
+            " a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n",
+            (1, 1),
+        ),
+        (
+            "a\nb",
+            "a\nb\n",
+            " a\n-b\n\\ No newline at end of file\n+b\n",
+            (1, 1),
+        ),
+        ("-- a\nb\n", "b\n", "--- a\n b\n", (0, 1)),
+    ],
+    ids=["unterminated-both", "newline-added", "removed-line-looks-like-header"],
+)
+def test_patch_diff_is_a_valid_unified_diff_and_counts_its_lines(
+    old_text: str,
+    new_text: str,
+    expected_body: str,
+    expected_counts: tuple[int, int],
+) -> None:
+    diff = create_patch_diff(
+        StructuredPatchFileChange(
+            operation="update", path="f.txt", old_text=old_text, new_text=new_text
+        )
+    )
+
+    header, _, body = diff.partition(" @@\n")
+    assert header.startswith("--- f.txt\n+++ f.txt\n@@ ")
+    assert body == expected_body
+    assert count_patch_diff_lines(diff) == expected_counts

@@ -53,6 +53,7 @@ PATCH_ERROR_WRITE_FAILED = "PATCH_WRITE_FAILED"
 
 _UTF8_BOM = "\ufeff"
 _LINE_ENDING = re.compile(r"(\r\n|\r|\n)")
+_NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
 
 
 class StructuredPatchError(RuntimeError):
@@ -517,14 +518,30 @@ def _apply_file_changes(
 
 
 def create_patch_diff(change: StructuredPatchFileChange) -> str:
+    # difflib emits an unterminated last line as is, gluing the next diff line onto
+    # it. GNU diff ends it and adds the marker, which keeps the text a valid diff.
     return "".join(
-        unified_diff(
+        line if line.endswith(("\n", "\r")) else f"{line}\n{_NO_NEWLINE_MARKER}"
+        for line in unified_diff(
             patch_line_segments(change.old_text),
             patch_line_segments(change.new_text),
             fromfile=change.path,
             tofile=change.path,
         )
     )
+
+
+def count_patch_diff_lines(diff_text: str) -> tuple[int, int]:
+    """Return the (added, removed) line counts of one file's create_patch_diff text."""
+
+    lines = patch_line_segments(diff_text)
+    # The file header precedes the first hunk; inside hunks "---" is a removed line.
+    first_hunk = next(
+        (index for index, line in enumerate(lines) if line.startswith("@@")),
+        len(lines),
+    )
+    signs = [line[:1] for line in lines[first_hunk:]]
+    return signs.count("+"), signs.count("-")
 
 
 def _apply_single_change(

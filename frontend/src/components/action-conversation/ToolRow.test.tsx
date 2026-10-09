@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -62,6 +62,7 @@ function row(
           outcome: 'completed',
         })}
         preview={null}
+        fileEdit={null}
         stepNumber={1}
         runLabel={language === 'ja' ? '実行 1: 2026/8/30' : 'Run 1: 8/30/2026'}
         status={null}
@@ -118,6 +119,7 @@ describe('ToolRow', () => {
             output_preview: null,
             output_available: true,
             images: [],
+            file_edit: null,
           },
         },
       ],
@@ -332,5 +334,58 @@ describe('ToolRow', () => {
     rerender(<ToolOutputText content={largeOutput} label="Tool output" />);
     expect(box.textContent).toHaveLength(largeOutput.length);
     expect(box.textContent?.endsWith('line 9999')).toBe(true);
+  });
+
+  it('reads an edit with its line counts and opens it as a diff', async () => {
+    const diff = '--- page.html\n+++ page.html\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n';
+    const content = JSON.stringify({ status: 'success', applied_paths: ['/w/page.html'], diff });
+    const loader: ActionToolOutputLoader = {
+      load: vi.fn(() => Promise.resolve({ kind: 'text' as const, content, truncated: false })),
+      retry: vi.fn(),
+      clear: vi.fn(),
+    };
+    render(
+      row(loader, 'en', {
+        Icon: resolveToolDisplay('apply_patch', 'en').Icon,
+        line: resolveToolLine('apply_patch', 'en', {
+          subject: 'page.html',
+          running: false,
+          outcome: 'completed',
+          fileOperation: 'update',
+        }),
+        fileEdit: { operation: 'update', added_lines: 1, removed_lines: 1 },
+      })
+    );
+    const disclosure = screen.getByRole('button', {
+      name: /^Edited page\.html, 1 line added, 1 line removed, Step 1,/,
+    });
+    expect(disclosure).toHaveTextContent('Edited page.html+1−1');
+
+    await userEvent.click(disclosure);
+
+    const table = await screen.findByRole('table');
+    expect(
+      screen.getByText('page.html', { selector: '.action-conversation__diff-path' })
+    ).toBeVisible();
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((line) => line.textContent)).toEqual(['11 a', '2−Removed: b', '2+Added: c']);
+    expect(screen.queryByLabelText(/^Tool output/, { selector: 'pre' })).toBeNull();
+  });
+
+  it('shows a patch result without a diff as the raw output', async () => {
+    const content = JSON.stringify({ status: 'needs_read', patch_applied: false, text: 'a\n' });
+    const loader: ActionToolOutputLoader = {
+      load: vi.fn(() => Promise.resolve({ kind: 'text' as const, content, truncated: false })),
+      retry: vi.fn(),
+      clear: vi.fn(),
+    };
+    renderRow(loader);
+
+    await userEvent.click(screen.getByRole('button', { name: /^Searched for files/ }));
+
+    expect(await screen.findByLabelText(/^Tool output/, { selector: 'pre' })).toHaveTextContent(
+      'needs_read'
+    );
+    expect(screen.queryByRole('table')).toBeNull();
   });
 });

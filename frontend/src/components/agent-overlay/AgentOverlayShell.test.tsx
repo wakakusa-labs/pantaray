@@ -391,6 +391,7 @@ describe('AgentOverlayShell', () => {
               showFooterActions={false}
               conversationContent={<p>conversation</p>}
               chatActionId="act-1"
+              conversationCopy={{ status: 'idle', copy: vi.fn() }}
               {...handlers}
             />
           </OverlaySurfaceContext.Provider>
@@ -398,24 +399,33 @@ describe('AgentOverlayShell', () => {
       );
       const shell = within(container);
       const showChat = shell.getByRole('button', { name: 'Show in chat' });
-      return { handlers, shell, showChat, header: showChat.parentElement as HTMLElement };
+      const copy = shell.getByRole('button', { name: 'Copy conversation' });
+      return { handlers, shell, showChat, copy };
     };
     const appRegion = (element: Element) =>
       getComputedStyle(element).getPropertyValue('-webkit-app-region');
 
     it('leaves closing and moving the window to its title bar', () => {
-      const { handlers, shell, showChat, header } = renderOnSurface('window');
+      const { handlers, shell, showChat, copy } = renderOnSurface('window');
+      // The left end is left to the traffic lights: chat and copy sit together, in that order.
+      const group = copy.parentElement as HTMLElement;
+      const header = group.parentElement as HTMLElement;
 
+      expect(Array.from(group.querySelectorAll('button'))).toEqual([showChat, copy]);
+      expect(header.querySelectorAll(':scope > button')).toHaveLength(0);
       expect(shell.queryByRole('button', { name: 'Collapse' })).toBeNull();
       expect(shell.queryByRole('button', { name: 'Hide Notification' })).toBeNull();
       expect(appRegion(header)).toBe('drag');
       expect(appRegion(showChat)).toBe('no-drag');
+      expect(appRegion(copy)).toBe('no-drag');
       fireEvent.pointerDown(header, { button: 0, pointerId: 1 });
       expect(handlers.onHeaderPointerDown).not.toHaveBeenCalled();
     });
 
     it("keeps the panel's collapse, hide and pointer drag", () => {
-      const { handlers, shell, header } = renderOnSurface('panel');
+      const { handlers, shell, showChat } = renderOnSurface('panel');
+      // The panel keeps the chat button at the header's left end, outside the right group.
+      const header = showChat.parentElement as HTMLElement;
 
       fireEvent.click(shell.getByRole('button', { name: 'Collapse' }));
       fireEvent.click(shell.getByRole('button', { name: 'Hide Notification' }));

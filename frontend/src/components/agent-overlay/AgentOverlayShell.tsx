@@ -246,20 +246,25 @@ const AgentOverlayShell = ({
     }, SCROLL_INDICATOR_HIDE_DELAY_MS);
   };
 
+  const showChatButton = chatActionId !== null && onShowChat && (
+    <ShowChatButton
+      $visible={isVisible}
+      onClick={() => void onShowChat({ actionId: chatActionId })}
+      aria-label={t('overlay.showInChat')}
+      title={t('overlay.showInChat')}
+    >
+      <MessageCircle strokeWidth={1.75} aria-hidden />
+    </ShowChatButton>
+  );
+
+  // The window's left end belongs to the traffic lights, so its buttons all sit together on
+  // the right; the panel keeps the chat button at its left end.
   const headerControls = (
     <>
       {showBusyIndicator && <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>}
-      {chatActionId !== null && onShowChat && (
-        <ShowChatButton
-          $visible={isVisible}
-          onClick={() => void onShowChat({ actionId: chatActionId })}
-          aria-label={t('overlay.showInChat')}
-          title={t('overlay.showInChat')}
-        >
-          <MessageCircle strokeWidth={1.75} aria-hidden />
-        </ShowChatButton>
-      )}
+      {!isWindow && showChatButton}
       <HeaderButtonGroup>
+        {isWindow && showChatButton}
         {conversationCopy && (
           <>
             <HeaderIconButton

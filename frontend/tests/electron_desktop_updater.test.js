@@ -81,7 +81,7 @@ function withStagedUpdate({ appVersion, stagedVersion }, fn) {
       const hooks = {};
       const updater = createDesktopUpdater({
         logger: null,
-        onUpdateDownloaded: () => callbacks.push('downloaded'),
+        onReadyChanged: () => callbacks.push('readyChanged'),
         onUpdateAvailable: ({ reason, info }) => callbacks.push(['available', reason, info.version]),
         onUpdateNotAvailable: ({ reason, info }) => {
           callbacks.push(['notAvailable', reason, info.version]);
@@ -162,7 +162,7 @@ test('an update is ready only after Squirrel.Mac has prepared it', () => {
   withDesktopUpdaterMocks({ app, autoUpdater, squirrelUpdater, timers }, ({ createDesktopUpdater }) => {
     const updater = createDesktopUpdater({
       logger: null,
-      onUpdateDownloaded: () => calls.push(['onUpdateDownloaded']),
+      onReadyChanged: () => calls.push(['onReadyChanged']),
       beforeQuitAndInstall: () => calls.push(['beforeQuitAndInstall']),
     });
     autoUpdater.emit('update-available', { version: '0.3.1' });
@@ -184,7 +184,7 @@ test('an update is ready only after Squirrel.Mac has prepared it', () => {
   });
 
   assert.deepEqual(calls, [
-    ['onUpdateDownloaded'],
+    ['onReadyChanged'],
     ['beforeQuitAndInstall'],
     ['quitAndInstall'],
     ['timer', 6000],
@@ -222,7 +222,7 @@ test('a Squirrel.Mac error before the update is ready is logged and lets the nex
   assert.deepEqual(checks, ['checkForUpdates', 'checkForUpdates']);
 });
 
-test('a newer release replaces the staged update, and the notice switches once Squirrel.Mac has it', async () => {
+test('a newer release replaces the staged update, with no restart offered until Squirrel.Mac has it', async () => {
   await withStagedUpdate(
     { appVersion: '0.3.2', stagedVersion: '0.3.3' },
     async ({ updater, feed, calls, callbacks }) => {
@@ -232,17 +232,17 @@ test('a newer release replaces the staged update, and the notice switches once S
       await updater.checkForUpdates('auto');
       assert.deepEqual(calls, ['checkForUpdates', 'downloadUpdate']);
 
-      // Squirrel.Mac still holds 0.3.3 until it has prepared 0.4.0.
+      // Preparing 0.4.0, Squirrel.Mac clears the 0.3.3 it held: a restart would install nothing.
       assert.equal(updater.getUpdateState(), 'downloading');
-      assert.equal(updater.isUpdateDownloaded(), true);
-      assert.equal(updater.getPendingVersion(), '0.3.3');
+      assert.equal(updater.isUpdateDownloaded(), false);
+      assert.equal(updater.getPendingVersion(), null);
       updater.quitAndInstall();
-      assert.deepEqual(calls.slice(2), ['quitAndInstall']);
+      assert.deepEqual(calls, ['checkForUpdates', 'downloadUpdate']);
 
       feed.stage('0.4.0');
       assert.equal(updater.getUpdateState(), 'downloaded');
       assert.equal(updater.getPendingVersion(), '0.4.0');
-      assert.deepEqual(callbacks, [['available', 'auto', '0.4.0'], 'downloaded']);
+      assert.deepEqual(callbacks, ['readyChanged', ['available', 'auto', '0.4.0'], 'readyChanged']);
     },
   );
 });
@@ -280,7 +280,7 @@ test('test-channel releases are ordered by their number, and a stable release fo
   );
 });
 
-test('a failed replacement keeps the staged update installable and lets the next check retry', async () => {
+test('a failed replacement leaves nothing to install and lets the next check retry', async () => {
   await withStagedUpdate(
     { appVersion: '0.3.2', stagedVersion: '0.3.3' },
     async ({ updater, feed, calls, autoUpdater }) => {
@@ -288,18 +288,12 @@ test('a failed replacement keeps the staged update installable and lets the next
       await updater.checkForUpdates('auto');
       autoUpdater.emit('error', new Error('net::ERR_CONNECTION_RESET'));
 
-      assert.equal(updater.getUpdateState(), 'downloaded');
-      assert.equal(updater.getPendingVersion(), '0.3.3');
+      assert.equal(updater.getUpdateState(), 'idle');
+      assert.equal(updater.getPendingVersion(), null);
       updater.quitAndInstall();
       await updater.checkForUpdates('auto');
 
-      assert.deepEqual(calls, [
-        'checkForUpdates',
-        'downloadUpdate',
-        'quitAndInstall',
-        'checkForUpdates',
-        'downloadUpdate',
-      ]);
+      assert.deepEqual(calls, ['checkForUpdates', 'downloadUpdate', 'checkForUpdates', 'downloadUpdate']);
     },
   );
 });
@@ -469,7 +463,7 @@ test('a downloaded update becomes the main window notice and restarts through th
     });
     updater = module.createDesktopUpdater({
       logger: null,
-      onUpdateDownloaded: () => updateUi.handleUpdateDownloaded(),
+      onReadyChanged: () => updateUi.handleUpdateDownloaded(),
     });
 
     // Nothing downloaded: no notice, and a restart request does not quit the app.

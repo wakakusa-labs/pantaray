@@ -16,8 +16,8 @@
  *   zip を受け取り、展開と署名の検証をする。インストールできるのは Electron の autoUpdater
  *   （Squirrel.Mac）が `update-downloaded` を出してからなので、それまでは `downloading` のまま
  * - 準備済みの更新があってもチェックを続け、それより新しい版が出たら取り直して置き換える。
- *   1 回の再起動で最新版に届くようにするため。Squirrel.Mac が新しい版の準備を終えるまでは
- *   準備済みの版を案内し、その版をインストールできる
+ *   1 回の再起動で最新版に届くようにするため。Squirrel.Mac は次の版の準備で前の版を片付けるので、
+ *   置き換えが終わるまで再起動では何も入らない
  */
 
 import { app, autoUpdater as squirrelUpdater } from 'electron';
@@ -91,7 +91,8 @@ export function hasUpdateFeed(): boolean {
 
 export function createDesktopUpdater(params: {
   logger: LoggerLike | null;
-  onUpdateDownloaded?: () => void;
+  /** A restart can install an update now, or no longer can. */
+  onReadyChanged?: () => void;
   onUpdateAvailable?: (payload: { reason: 'auto' | 'manual'; info: unknown }) => void;
   onUpdateNotAvailable?: (payload: { reason: 'auto' | 'manual'; info: unknown }) => void;
   onUpdateError?: (payload: { reason: 'auto' | 'manual'; error: unknown }) => void;
@@ -143,6 +144,12 @@ export function createDesktopUpdater(params: {
       }
       downloadingVersion = info.version;
       log('info', 'AUTO_UPDATE_AVAILABLE', { info, reason, pendingVersion });
+      if (pendingVersion !== null) {
+        // Squirrel.Mac が次の版の準備を始めると、持っていた版を片付ける（SQRLUpdater の
+        // housekeeping）。準備済みの版はもう入れられないので、次の版が揃うまで再起動を案内しない。
+        pendingVersion = null;
+        notifyReadyChanged();
+      }
       if (reason) {
         try {
           params.onUpdateAvailable?.({ reason, info });
@@ -166,8 +173,7 @@ export function createDesktopUpdater(params: {
       }
     });
     // MacUpdater は Squirrel.Mac の error もこのイベントに流す。Squirrel の準備前に失敗したら
-    // downloading をやめ、次の自動または手動のチェックでやり直せるようにする。準備済みの更新は
-    // そのまま残り、再起動でインストールできる。
+    // downloading をやめ、次の自動または手動のチェックでやり直せるようにする。
     autoUpdater.on('error', (err) => {
       downloadingVersion = null;
       const reason = lastCheckReason;
@@ -191,12 +197,16 @@ export function createDesktopUpdater(params: {
       pendingVersion = downloadingVersion;
       downloadingVersion = null;
       log('info', 'AUTO_UPDATE_READY', { pendingVersion });
-      try {
-        params.onUpdateDownloaded?.();
-      } catch {
-        // no-op
-      }
+      notifyReadyChanged();
     });
+  }
+
+  function notifyReadyChanged(): void {
+    try {
+      params.onReadyChanged?.();
+    } catch {
+      // no-op
+    }
   }
 
   // 初期設定。feed は app-update.yml（electron-builder の publish 設定）が決める。

@@ -435,10 +435,14 @@ function showNotification(id) {
 function hideNotification(id) {
   const win = overlayWindows.get(id);
   if (win && !win.isDestroyed()) {
-    // A New-task panel is opened per request, so hiding it would leave a renderer alive for
-    // the rest of the session; destroying it also releases the Action association through
-    // onClosed. An ordinary window is hidden like its close button does (see the factory).
-    if (!isConversationWindow(win) && conversationOverlayIds.has(id)) {
+    // An ordinary window is minimized, as its close button does (see the factory). A New-task
+    // panel is opened per request, so hiding it would leave a renderer alive for the rest of
+    // the session; destroying it also releases the Action association through onClosed.
+    if (isConversationWindow(win)) {
+      win.minimize();
+      return;
+    }
+    if (conversationOverlayIds.has(id)) {
       try {
         win.destroy();
       } catch {}

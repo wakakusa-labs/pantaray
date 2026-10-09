@@ -209,6 +209,9 @@ function loadNotificationWindowModule(
       this.destroyed = true;
       this.windowEvents.emit('closed');
     }
+    minimize() {
+      this.minimized = true;
+    }
     // The title bar's close button and Command-W: 'close' may be prevented, then 'closed'.
     close() {
       let prevented = false;
@@ -877,7 +880,7 @@ test('an open overlay of any kind leaves the main window able to take typing', a
   }
 });
 
-test('hiding an ordinary window from its page keeps it and its Action association', () => {
+test('hiding an ordinary window from its page minimizes it and keeps its Action association', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const handlers = notificationWindow.createNotificationIpcHandlers({
     resolveOverlayBootstrap: async () => null,
@@ -896,7 +899,8 @@ test('hiding an ordinary window from its page keeps it and its Action associatio
   handlers.onNotificationHide({ sender: conversationWindow.webContents });
 
   assert.equal(conversationWindow.destroyed, false);
-  assert.equal(conversationWindow.hideCalls, 1);
+  assert.equal(conversationWindow.isMinimized(), true);
+  assert.equal(conversationWindow.hideCalls, undefined);
   assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), true);
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
 });
@@ -1329,7 +1333,7 @@ test('an Action with work opens as an ordinary window, and opening it again focu
   assert.equal(registeredIpcSenders.has(win.webContents), false);
 });
 
-test('closing an ordinary window hides it, and reopening the Action brings back the same window', () => {
+test('closing an ordinary window minimizes it, and reopening the Action restores the same window', () => {
   const { notificationWindow, instances } = loadNotificationWindowModule();
   const entry = createConversationEntry(notificationWindow);
   assert.equal(entry.openActionConversationOverlay('A1'), 'created');
@@ -1340,14 +1344,16 @@ test('closing an ordinary window hides it, and reopening the Action brings back 
 
   win.close();
   assert.equal(win.isDestroyed(), false);
-  assert.equal(win.isVisible(), false);
+  assert.equal(win.isMinimized(), true);
+  assert.equal(win.hideCalls, undefined);
   assert.equal(win.webContents, webContents);
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'conversation:A1');
 
   // From History or a chat card.
   assert.equal(entry.openActionConversationOverlay('A1'), 'focused');
   assert.equal(instances.length, 1);
-  assert.equal(win.isVisible(), true);
+  assert.equal(win.restoreCalls, 1);
+  assert.equal(win.isMinimized(), false);
   assert.equal(win.focusCalls, 1);
   assert.equal(win.sent.at(-1).channel, 'overlay:focusComposer');
 });
@@ -1362,7 +1368,7 @@ test('quitting the app closes an ordinary window for good', () => {
   assert.equal(notificationWindow.hasOverlayWindow('conversation:A1'), false);
 });
 
-test('an owner change destroys a hidden ordinary window and its Action association', () => {
+test('an owner change destroys a minimized ordinary window and its Action association', () => {
   let owner = 'owner-a';
   const { notificationWindow, instances } = loadNotificationWindowModule(() => owner);
   notificationWindow.registerActionAssociation('A1', 'conversation:A1');
@@ -1632,7 +1638,7 @@ test('a finished Action stays with the window that shows it until that window is
   assert.equal(entry.openActionConversationOverlay('A1'), 'loading');
   assert.equal(instances.length, 2);
 
-  // Hidden by its close button it keeps the Action; destroyed, it releases it.
+  // Minimized by its close button it keeps the Action; destroyed, it releases it.
   win.close();
   assert.equal(notificationWindow.resolveOverlayId({ actionId: 'A1' }), 'S1');
   win.destroy();

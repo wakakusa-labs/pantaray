@@ -269,13 +269,14 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
       }),
     });
     overlaySurfaces.set(win, 'window');
-    // Closing hides it, as the main window does, so reopening the Action brings back the same
-    // window with its draft, scroll and associations. Hidden windows stay bounded: one per
-    // Action the user opened, destroyed on an owner change and closed when the app quits.
+    // Closing minimizes it to the Dock, where the user finds it again, and reopening the Action
+    // restores the same window with its draft, scroll and associations. Minimized windows stay
+    // bounded: one per Action the user opened, destroyed on an owner change (which does not
+    // emit 'close') and closed when the app quits.
     win.on('close', (event) => {
       if (app.isQuitting) return;
       event.preventDefault();
-      win.hide();
+      win.minimize();
     });
     attachOverlayPage(win, { mode: 'standalone', actionId, surface: 'window' }, events);
     return win;

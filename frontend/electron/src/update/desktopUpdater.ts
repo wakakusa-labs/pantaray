@@ -15,6 +15,9 @@
  * - electron-updater の `update-downloaded` は zip を取り終えた時点で、Squirrel.Mac はその後に
  *   zip を受け取り、展開と署名の検証をする。インストールできるのは Electron の autoUpdater
  *   （Squirrel.Mac）が `update-downloaded` を出してからなので、それまでは `downloading` のまま
+ * - 準備済みの更新があってもチェックを続け、それより新しい版が出たら取り直して置き換える。
+ *   1 回の再起動で最新版に届くようにするため。Squirrel.Mac は次の版の準備で前の版を片付けるので、
+ *   置き換えが終わるまで再起動では何も入らない
  */
 
 import { app, autoUpdater as squirrelUpdater } from 'electron';
@@ -38,7 +41,7 @@ export type DesktopUpdater = {
   isUpdateDownloaded: () => boolean;
   /** 現在の更新ダウンロード状態を返す。 */
   getUpdateState: () => UpdateState;
-  /** ダウンロード中または完了済みの更新先バージョン文字列（例: "0.0.46"）。未検出なら null。 */
+  /** 再起動でインストールされる（Squirrel.Mac が準備済みの）バージョン（例: "0.0.46"）。なければ null。 */
   getPendingVersion: () => string | null;
   quitAndInstall: () => void;
   dispose: () => void;
@@ -51,13 +54,34 @@ const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // release-desktop.yml が受け付けるバージョンと同じ形式。prerelease 識別子は `test` だけ。
 // electron-updater の GitHub provider は、現在のバージョンと同じ prerelease 識別子を持つ
 // prerelease しか選ばないため、test チャネルの識別子は 1 つに固定する。
-const RELEASE_VERSION = /^\d+\.\d+\.\d+(-test\.\d+)?$/;
+const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-test\.(\d+))?$/;
 
 /** 配布ビルドの更新チャネル。配布物ではないバージョン（`-dev` など）は null（更新しない）。 */
 export function resolveChannelFromVersion(ver: string): UpdateChannel | null {
   const match = RELEASE_VERSION.exec(ver);
   if (!match) return null;
-  return match[1] ? 'test' : 'stable';
+  return match[4] ? 'test' : 'stable';
+}
+
+/** 同じ X.Y.Z では stable が `-test.N` より新しい。 */
+function releaseOrder(ver: string): number[] | null {
+  const match = RELEASE_VERSION.exec(ver);
+  if (!match) return null;
+  return [
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+    match[4] ? Number(match[4]) : Infinity,
+  ];
+}
+
+// feed の版は release workflow のタグなので RELEASE_VERSION に合う。合わなければ新しいとみなさない。
+function isNewerRelease(candidate: string, staged: string): boolean {
+  const a = releaseOrder(candidate);
+  const b = releaseOrder(staged);
+  if (!a || !b) return false;
+  const i = a.findIndex((part, index) => part !== b[index]);
+  return i >= 0 && a[i] > b[i];
 }
 
 /** packaged かつ配布ビルドのときだけ更新 feed がある。 */
@@ -67,7 +91,8 @@ export function hasUpdateFeed(): boolean {
 
 export function createDesktopUpdater(params: {
   logger: LoggerLike | null;
-  onUpdateDownloaded?: () => void;
+  /** A restart can install an update now, or no longer can. */
+  onReadyChanged?: () => void;
   onUpdateAvailable?: (payload: { reason: 'auto' | 'manual'; info: unknown }) => void;
   onUpdateNotAvailable?: (payload: { reason: 'auto' | 'manual'; info: unknown }) => void;
   onUpdateError?: (payload: { reason: 'auto' | 'manual'; error: unknown }) => void;
@@ -75,8 +100,9 @@ export function createDesktopUpdater(params: {
 }): DesktopUpdater {
   let disposed = false;
   let started = false;
-  let updateDownloaded = false;
-  let updateDownloading = false;
+  // ダウンロード中か Squirrel.Mac が準備中のバージョン。
+  let downloadingVersion: string | null = null;
+  // Squirrel.Mac が準備を終え、再起動でインストールされるバージョン。
   let pendingVersion: string | null = null;
   let checking = false;
   let interval: NodeJS.Timeout | null = null;
@@ -102,14 +128,28 @@ export function createDesktopUpdater(params: {
     // 多重登録を避けるため、dispose までに1回だけ登録する設計
     autoUpdater.on('checking-for-update', () => log('info', 'AUTO_UPDATE_CHECKING'));
     autoUpdater.on('update-available', (info) => {
-      updateDownloading = true;
-      pendingVersion =
-        info && typeof (info as { version?: unknown }).version === 'string'
-          ? (info as { version: string }).version
-          : null;
       const reason = lastCheckReason;
       lastCheckReason = null;
-      log('info', 'AUTO_UPDATE_AVAILABLE', { info, reason });
+      // electron-updater は実行中のバージョンとしか比べない。準備済みの版より新しくなければ取り直さない。
+      if (pendingVersion !== null && !isNewerRelease(info.version, pendingVersion)) {
+        log('info', 'AUTO_UPDATE_ALREADY_PENDING', { info, reason, pendingVersion });
+        if (reason) {
+          try {
+            params.onUpdateNotAvailable?.({ reason, info });
+          } catch {
+            // no-op
+          }
+        }
+        return;
+      }
+      downloadingVersion = info.version;
+      log('info', 'AUTO_UPDATE_AVAILABLE', { info, reason, pendingVersion });
+      if (pendingVersion !== null) {
+        // Squirrel.Mac が次の版の準備を始めると、持っていた版を片付ける（SQRLUpdater の
+        // housekeeping）。準備済みの版はもう入れられないので、次の版が揃うまで再起動を案内しない。
+        pendingVersion = null;
+        notifyReadyChanged();
+      }
       if (reason) {
         try {
           params.onUpdateAvailable?.({ reason, info });
@@ -117,6 +157,8 @@ export function createDesktopUpdater(params: {
           // no-op
         }
       }
+      // 失敗は downloadUpdate が 'error' イベントでも通知し、下の handler が扱う。
+      autoUpdater.downloadUpdate().catch(() => undefined);
     });
     autoUpdater.on('update-not-available', (info) => {
       const reason = lastCheckReason;
@@ -131,9 +173,9 @@ export function createDesktopUpdater(params: {
       }
     });
     // MacUpdater は Squirrel.Mac の error もこのイベントに流す。Squirrel の準備前に失敗したら
-    // idle に戻し、次の自動または手動のチェックでやり直せるようにする。
+    // downloading をやめ、次の自動または手動のチェックでやり直せるようにする。
     autoUpdater.on('error', (err) => {
-      updateDownloading = false;
+      downloadingVersion = null;
       const reason = lastCheckReason;
       lastCheckReason = null;
       log('error', 'AUTO_UPDATE_ERR', { err, reason });
@@ -152,15 +194,19 @@ export function createDesktopUpdater(params: {
       log('info', 'AUTO_UPDATE_DOWNLOADED', { info });
     });
     squirrelUpdater.on('update-downloaded', () => {
-      updateDownloaded = true;
-      updateDownloading = false;
+      pendingVersion = downloadingVersion;
+      downloadingVersion = null;
       log('info', 'AUTO_UPDATE_READY', { pendingVersion });
-      try {
-        params.onUpdateDownloaded?.();
-      } catch {
-        // no-op
-      }
+      notifyReadyChanged();
     });
+  }
+
+  function notifyReadyChanged(): void {
+    try {
+      params.onReadyChanged?.();
+    } catch {
+      // no-op
+    }
   }
 
   // 初期設定。feed は app-update.yml（electron-builder の publish 設定）が決める。
@@ -169,7 +215,8 @@ export function createDesktopUpdater(params: {
   if (app.isPackaged && !updatesEnabled) {
     log('info', 'AUTO_UPDATE_DISABLED', { version: app.getVersion() });
   }
-  autoUpdater.autoDownload = true;
+  // ダウンロードは準備済みの版と比べてから update-available の handler が始める。
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = channel === 'test';
   autoUpdater.allowDowngrade = false;
@@ -177,10 +224,9 @@ export function createDesktopUpdater(params: {
 
   async function checkForUpdates(reason: 'auto' | 'manual'): Promise<void> {
     if (disposed || !updatesEnabled) return;
-    // A later check would replace pendingVersion while Squirrel.Mac still prepares or holds
-    // the earlier update, and the notice would then name a version the restart does not install.
-    if (reason === 'auto' && (updateDownloading || updateDownloaded)) {
-      log('info', 'AUTO_UPDATE_CHECK_SKIPPED', { pendingVersion });
+    // 準備中に次の版を取りに行くと、Squirrel.Mac がどちらの版を準備したのか分からなくなる。
+    if (downloadingVersion !== null) {
+      log('info', 'AUTO_UPDATE_CHECK_SKIPPED', { reason, downloadingVersion });
       return;
     }
     if (checking) {
@@ -218,20 +264,20 @@ export function createDesktopUpdater(params: {
       void checkForUpdates('auto');
     },
     checkForUpdates,
-    isUpdateDownloaded: () => Boolean(updateDownloaded),
+    isUpdateDownloaded: () => pendingVersion !== null,
     getUpdateState: (): UpdateState => {
-      if (updateDownloaded) return 'downloaded';
-      if (updateDownloading) return 'downloading';
+      if (downloadingVersion !== null) return 'downloading';
+      if (pendingVersion !== null) return 'downloaded';
       return 'idle';
     },
     getPendingVersion: () => pendingVersion,
     quitAndInstall: () => {
       // Squirrel.Mac の準備前に終了すると何もインストールされない（下の強制終了も含めて）。
-      if (!updateDownloaded) {
-        log('warn', 'AUTO_UPDATE_QUIT_INSTALL_NOT_READY', { pendingVersion });
+      if (pendingVersion === null) {
+        log('warn', 'AUTO_UPDATE_QUIT_INSTALL_NOT_READY', { downloadingVersion });
         return;
       }
-      log('info', 'AUTO_UPDATE_QUIT_INSTALL_REQUESTED', { pendingVersion });
+      log('info', 'AUTO_UPDATE_QUIT_INSTALL_REQUESTED', { pendingVersion, downloadingVersion });
       try {
         params.beforeQuitAndInstall?.();
       } catch {

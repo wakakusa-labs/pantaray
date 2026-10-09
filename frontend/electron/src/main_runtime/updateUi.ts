@@ -114,23 +114,6 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
         return;
       }
 
-      if (updater.isUpdateDownloaded()) {
-        const pending = updater.getPendingVersion();
-        const versionHint = pending ? ` (${deps.app.getVersion()} → ${pending})` : '';
-        void deps.dialog
-          .showMessageBox({
-            type: 'info',
-            title: text.updateReadyTitle,
-            message: `${text.updateReadyBody}${versionHint}`,
-            buttons: [text.restartToUpdate, text.laterLabel],
-            defaultId: 0,
-          })
-          .then(({ response }) => {
-            if (response === 0) restartToUpdate();
-          });
-        return;
-      }
-
       if (updater.getUpdateState() === 'downloading') {
         void deps.dialog.showMessageBox({
           type: 'info',
@@ -148,6 +131,24 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
 
   const handleNoUpdateAvailable = (text: UpdateMenuCopy): void => {
     try {
+      const updater = deps.getDesktopUpdater();
+      // Nothing newer than the update already prepared: a restart installs that one.
+      if (updater?.isUpdateDownloaded()) {
+        const pending = updater.getPendingVersion();
+        const versionHint = pending ? ` (${deps.app.getVersion()} → ${pending})` : '';
+        void deps.dialog
+          .showMessageBox({
+            type: 'info',
+            title: text.updateReadyTitle,
+            message: `${text.updateReadyBody}${versionHint}`,
+            buttons: [text.restartToUpdate, text.laterLabel],
+            defaultId: 0,
+          })
+          .then(({ response }) => {
+            if (response === 0) restartToUpdate();
+          });
+        return;
+      }
       void deps.dialog.showMessageBox({
         type: 'info',
         title: text.noUpdateTitle,

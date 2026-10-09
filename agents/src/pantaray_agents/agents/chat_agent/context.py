@@ -216,6 +216,10 @@ def _lay(entries: Sequence[ConversationEntry], *, head_bytes: int) -> LaidOutWin
     )
 
 
+# What 0.4.0 cut a task's answer to before it reached the chat.
+_OLD_EXCERPT_MAX_CODEPOINTS = 4_000
+
+
 def _header(item: ChatItem) -> str:
     # Stored in UTC; the model reasons about "today" on the user's clock.
     return f"[{item.item_id} {describe_utc_timestamp(item.created_at)}]"
@@ -228,7 +232,16 @@ def _body(
     if isinstance(content, ActionEventContent):
         event = f"Your task {content.action_id}: {content.event}."
         excerpt = content.final_answer_excerpt
-        return event if excerpt is None else f"{event}\n{excerpt}"
+        if excerpt is None:
+            return event
+        # Events stored by 0.4.0 carry only the first 4,000 characters.
+        if len(excerpt) == _OLD_EXCERPT_MAX_CODEPOINTS:
+            excerpt += (
+                f"\n[Only the first {_OLD_EXCERPT_MAX_CODEPOINTS} characters are "
+                "shown here; memory_sql reads the whole answer from "
+                "agent_actions.final_output.]"
+            )
+        return f"{event}\n{excerpt}"
     lines = []
     if content.quote_item_id is not None:
         lines.append(f"Quoting {content.quote_item_id}.")

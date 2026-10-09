@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import uuid
@@ -54,6 +55,8 @@ from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.input_block import LlmInputImageBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
+# Long enough to have been cut before the chat took answers whole.
+ANSWER = "Report drafted. " + "x" * 5_000
 USER = "user-1"
 LATER = "2999-01-01T00:00:00Z"
 
@@ -145,7 +148,7 @@ async def test_the_chat_hears_when_its_own_task_waits_and_ends(owner: Path) -> N
             "INSERT INTO process_events(process_id, event_seq, event_id, event_name, "
             "payload_json, created_at) VALUES (?, 101, 'end-1', 'process_completed', "
             "?, ?)",
-            (process_id, '{"final_output": "Report drafted."}', LATER),
+            (process_id, json.dumps({"final_output": ANSWER}), LATER),
         )
         connection.execute(
             "UPDATE processes SET status = 'completed', terminal_event_id = 'end-1' "
@@ -167,7 +170,7 @@ async def test_the_chat_hears_when_its_own_task_waits_and_ends(owner: Path) -> N
     ]
     assert {(e["event"], e["final_answer_excerpt"]) for e in events} == {
         ("approval_pending", None),
-        ("completed", "Report drafted."),
+        ("completed", ANSWER),
     }
     assert all(e["action_id"] == started.output["action_id"] for e in events)
 

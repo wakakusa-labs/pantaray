@@ -39,6 +39,8 @@ from pantaray_agents.local_runtime.runtime.identity import (
     reset_logged_out_owner,
 )
 from pantaray_agents.schema.chat import (
+    CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS,
+    ActionEventContent,
     AssistantMessageContent,
     ChatActionCard,
     ChatItem,
@@ -339,4 +341,49 @@ def test_a_named_project_reaches_the_model_with_its_folders() -> None:
         "Aurora Web の README を要約して\n\n"
         "Referenced workspace projects:\n- Aurora Web: /Users/me/aurora\n"
         "Your own read tools can open these folders."
+    )
+
+
+def _task_ended(message_id: str, answer: str) -> ChatItem:
+    insert_agent_action(
+        db_path=Path(os.environ["LOCAL_DB_PATH"]), user_id=USER, action_id="act-1"
+    )
+    return append_chat_item(
+        user_id=USER,
+        message_id=message_id,
+        content=ActionEventContent(
+            kind="action_event",
+            action_id="act-1",
+            event="completed",
+            final_answer_excerpt=answer,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("length", "said_cut"),
+    [(CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS, True), (120, False)],
+)
+def test_a_cut_answer_is_said_to_be_cut_and_where_the_rest_is(
+    length: int, said_cut: bool
+) -> None:
+    ended = _task_ended("action-run:p1:end", "あ" * length)
+
+    (entry,) = render_item(TurnChatItem(item=ended, is_reply=False), NO_MEDIA)
+
+    text = entry.item.content[0].text
+    assert ("agent_actions.final_output" in text) is said_cut
+
+
+def test_a_reply_cannot_quote_a_task_event() -> None:
+    ended = _task_ended("action-run:p1:end", "Done.")
+
+    verdict = check_reply(
+        user_id=USER,
+        arguments={"text": "Hi", "quote_item_id": ended.item_id, "cards": []},
+    )
+
+    assert (
+        verdict
+        == "The reply was not sent: quote_item_id is not a message of this chat."
     )

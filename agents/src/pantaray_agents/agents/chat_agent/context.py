@@ -32,6 +32,7 @@ from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
 from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.schema.agent.action_message_codec import render_project_refs
 from pantaray_agents.schema.chat import (
+    CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS,
     ActionEventContent,
     AssistantMessageContent,
     ChatItem,
@@ -228,7 +229,18 @@ def _body(
     if isinstance(content, ActionEventContent):
         event = f"Your task {content.action_id}: {content.event}."
         excerpt = content.final_answer_excerpt
-        return event if excerpt is None else f"{event}\n{excerpt}"
+        if excerpt is None:
+            return event
+        # Said as cut, the model reads the rest instead of reporting a lost
+        # answer. An answer exactly this long is called cut too; reading it
+        # again costs a call, not a wrong report.
+        if len(excerpt) == CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS:
+            excerpt += (
+                f"\n[Only the first {CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS} "
+                "characters of the answer are shown here; memory_sql reads the "
+                "whole answer from agent_actions.final_output.]"
+            )
+        return f"{event}\n{excerpt}"
     lines = []
     if content.quote_item_id is not None:
         lines.append(f"Quoting {content.quote_item_id}.")

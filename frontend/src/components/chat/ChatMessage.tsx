@@ -120,7 +120,9 @@ export function ChatMessage({
     >
       <div className="chat-stack">
         <div className="chat-bubble">
-          {quoteItemId !== null ? (
+          {/* Replies saved before quotes were limited to messages may quote a task event,
+              which the chat does not draw. */}
+          {quoteItemId !== null && (quoted === undefined || isChatMessage(quoted)) ? (
             <QuotedMessage quoted={quoted} t={t} onJump={() => onJumpToQuote(quoteItemId)} />
           ) : null}
           {mine ? (

@@ -175,6 +175,31 @@ it('labels a suggestion’s card as a suggestion, as the task list does', async 
   expect(within(card).queryByText('確認待ち')).not.toBeInTheDocument();
 });
 
+it('shows no quote on a reply that quoted a task event', async () => {
+  pages = [
+    {
+      items: [
+        reply(2, '調査結果を受け取りました。', [], 'item-1'),
+        item(1, {
+          kind: 'action_event',
+          action_id: 'A1',
+          event: 'completed',
+          final_answer_excerpt: 'できました',
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const answer = await screen.findByRole('article', { name: 'Pantaray' });
+  expect(within(answer).getByText('調査結果を受け取りました。')).toBeInTheDocument();
+  expect(within(answer).queryByText('以前のメッセージ')).not.toBeInTheDocument();
+  expect(
+    within(answer).queryByRole('button', { name: '引用元のメッセージへ移動' })
+  ).not.toBeInTheDocument();
+});
+
 it('shows messages and cards, with a work’s status on its latest card only', async () => {
   pages = [
     {

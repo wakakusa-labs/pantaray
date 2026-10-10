@@ -16,6 +16,7 @@ import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore
 import type { OrchestrationServerEvent } from '../../electron/src/orchestration/contracts';
 
 import type { OverlaySnapshotPayload } from './agent-overlay/model/overlayTypes';
+import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 
 type ElectronBridge = NonNullable<Window['electron']>;
 
@@ -273,6 +274,8 @@ describe('AgentOverlay broader E2E', () => {
   const attachImage = vi.fn();
   const attachFile = vi.fn();
   const discardAttachment = vi.fn();
+  // Main's shared task drafts: this panel is one window, and a test may open another.
+  let drafts = createTaskDraftBridge();
   const olderPage = createConversationUpdate().snapshot.page;
   Object.assign(olderPage.runs[0], { run_id: 'run-0', final_output: 'older final output' });
 
@@ -313,6 +316,8 @@ describe('AgentOverlay broader E2E', () => {
       })
     );
     discardAttachment.mockReset().mockResolvedValue(undefined);
+    drafts = createTaskDraftBridge();
+    const { openDraft, updateDraft, closeDraft, onDraftChanged } = drafts.window();
     stopAction.mockReset();
     sendOrchestration.mockReset();
     acceptAction.mockReset().mockResolvedValue(null);
@@ -388,11 +393,15 @@ describe('AgentOverlay broader E2E', () => {
           send: sendOrchestration,
         },
         actions: {
-          submitMessage,
+          submitMessage: drafts.sending(submitMessage),
           resumeAction,
           attachImage,
           attachFile,
           discardAttachment,
+          openDraft,
+          updateDraft,
+          closeDraft,
+          onDraftChanged,
           readConversationPage,
           onConversationUpdated: (cb: typeof conversationListener) => {
             conversationListener = cb;
@@ -718,7 +727,7 @@ describe('AgentOverlay broader E2E', () => {
     fireEvent.click(retry);
     await waitFor(() => expect(submitMessage).toHaveBeenCalledTimes(2));
 
-    expect(submitMessage.mock.calls[1][0]).toBe(exactRequest);
+    expect(submitMessage.mock.calls[1][0]).toEqual(exactRequest);
     expect(randomUUID).toHaveBeenCalledTimes(1);
     const refresh = await screen.findByRole('button', { name: 'Refresh conversation' });
     await waitFor(() => expect(refresh).toHaveFocus());
@@ -767,14 +776,14 @@ describe('AgentOverlay broader E2E', () => {
     expect(retry).toBeVisible();
     fireEvent.click(retry);
     await screen.findByRole('button', { name: 'Retry sending' });
-    expect(submitMessage.mock.calls[1][0]).toBe(exactRequest);
+    expect(submitMessage.mock.calls[1][0]).toEqual(exactRequest);
     expect(input).toHaveValue('Keep my message');
     submitMessage.mockResolvedValueOnce(
       createSubmittedResult('act-1', exactRequest.message.message_id)
     );
     fireEvent.click(screen.getByRole('button', { name: 'Retry sending' }));
     await screen.findByRole('button', { name: 'Refresh conversation' });
-    expect(submitMessage.mock.calls[2][0]).toBe(exactRequest);
+    expect(submitMessage.mock.calls[2][0]).toEqual(exactRequest);
     await act(async () =>
       conversationListener?.(
         withUserMessage(
@@ -2458,7 +2467,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(discardAttachment).not.toHaveBeenCalled();
   });
 
-  it('discards staged documents when the next suggestion replaces the composer', async () => {
+  it("keeps a suggestion's staged documents in its draft when the next suggestion replaces the composer", async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -2476,9 +2485,10 @@ describe('AgentOverlay broader E2E', () => {
 
     snapshot.snapshot.suggestionId = 'sug-next';
     await act(async () => snapshotListener?.(snapshot));
-    expect(discardAttachment).toHaveBeenCalledWith({
-      attachmentId: '12222222-2222-4222-8222-222222222222',
-    });
+    expect(discardAttachment).not.toHaveBeenCalled();
+    // The draft stays with its suggestion, for any window that shows it.
+    const kept = () => drafts.store.open('user-1', 'suggestion:sug-comment', { id: 9, send() {} });
+    await waitFor(() => expect(kept()?.attachments).toMatchObject([{ name: 'notes.pdf' }]));
 
     // A document still being staged when the composer is replaced is discarded when it lands.
     fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
@@ -2492,8 +2502,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => snapshotListener?.(snapshot));
     const lateId = '33333333-3333-4333-8333-333333333333';
     await act(async () => finishAttach({ attachmentId: lateId, name: 'late.pdf', byteSize: 4 }));
-    expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: lateId });
-    expect(discardAttachment).toHaveBeenCalledTimes(2);
+    expect(discardAttachment).toHaveBeenCalledExactlyOnceWith({ attachmentId: lateId });
   });
 
   it('leaves a document that went out with a reply to the backend when the composer is replaced', async () => {

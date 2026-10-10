@@ -185,6 +185,7 @@ type OverlayComposerProps = {
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
+  sendSuperseded?: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
   /** The host's own wording for the empty field; otherwise the Overlay's for `action`. */
@@ -291,6 +292,7 @@ export function OverlayComposer({
   action,
   canSend,
   resumeFailed,
+  sendSuperseded = false,
   canResume,
   textareaRef,
   placeholder,
@@ -360,6 +362,9 @@ export function OverlayComposer({
       ) : null}
       {resumeFailed ? (
         <ComposerAlert role="alert">{t('overlay.composer.resumeFailed')}</ComposerAlert>
+      ) : null}
+      {sendSuperseded ? (
+        <ComposerAlert role="alert">{t('overlay.composer.sendSuperseded')}</ComposerAlert>
       ) : null}
       {submissionControls ??
         (retryAcceptance ? (

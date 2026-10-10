@@ -4,15 +4,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import type { ActionMessageSubmitResult } from '../../../electron/src/actions/actionContracts';
 import { NewTaskPane } from './NewTaskPane';
-import { createTaskComposerDrafts } from './taskComposerDrafts';
+import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 
 const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
 const onStarted = vi.fn();
 
-function renderPane(drafts = createTaskComposerDrafts(undefined)) {
+function renderPane() {
   return render(
     <UiLanguageProvider initialLanguage="en">
-      <NewTaskPane onStarted={onStarted} onAddProject={() => undefined} drafts={drafts} />
+      <NewTaskPane onStarted={onStarted} onAddProject={() => undefined} />
     </UiLanguageProvider>
   );
 }
@@ -20,6 +20,7 @@ function renderPane(drafts = createTaskComposerDrafts(undefined)) {
 beforeEach(() => {
   submitMessage.mockReset();
   onStarted.mockReset();
+  const bridge = createTaskDraftBridge();
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -32,7 +33,8 @@ beforeEach(() => {
         })),
       },
       actions: {
-        submitMessage,
+        submitMessage: bridge.sending(submitMessage),
+        ...bridge.window(),
         attachImage: vi.fn(),
         attachFile: vi.fn(),
         discardAttachment: vi.fn(async () => undefined),
@@ -84,16 +86,23 @@ it('shows an empty composer whose send opens a new Action and hands the pane to 
     },
   });
   await waitFor(() => expect(onStarted).toHaveBeenCalledWith('act-new'));
+  // The draft went with the send: the next new task starts empty.
+  cleanup();
+  renderPane();
+  await act(async () => {});
+  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
 });
 
 it('keeps an unsent draft for the new task while the pane is away', async () => {
-  const drafts = createTaskComposerDrafts(undefined);
-  const first = renderPane(drafts);
+  const first = renderPane();
+  await act(async () => {});
   fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
     target: { value: 'Half a thought' },
   });
   first.unmount();
 
-  renderPane(drafts);
-  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Half a thought');
+  renderPane();
+  await waitFor(() =>
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Half a thought')
+  );
 });

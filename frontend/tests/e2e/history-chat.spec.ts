@@ -3,6 +3,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import type { ChatItem, ChatItemPage } from '../../electron/src/chat/chatContracts';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import { waitForAnimationsToSettle } from './animations';
+import { installTaskDrafts } from './taskDrafts';
 
 // The main window's History page from the production entry, with deterministic IPC inputs.
 let vite: ViteDevServer;
@@ -242,6 +243,7 @@ async function installBridge(
     },
     { chat: chatPage, history: historyItems }
   );
+  await installTaskDrafts(page);
   await page.goto(`${baseUrl}#/history`);
 }
 

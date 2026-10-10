@@ -11,14 +11,34 @@ import {
 import { useConversationCopy } from '@/components/agent-overlay/conversationCopy';
 import { useCompletionViewed } from '@/components/agent-overlay/useCompletionViewed';
 import { useConversationScroll } from '@/components/agent-overlay/useConversationScroll';
-import {
-  badgeClassName,
-  getConversationHistoryStatusMeta,
-} from '@/components/history/statusTokens';
+import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { useI18n } from '@/context/useI18n';
+import type { HistoryLiveStage } from '@/history/historyLiveStage';
+import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
+import type { MessageKey } from '@/i18n/types';
 
 import { useActionTask } from './useActionTask';
 import './actionTaskPane.css';
+
+// Same wording as the history list's live line.
+function liveStageText(
+  stage: HistoryLiveStage,
+  language: 'en' | 'ja',
+  t: (key: MessageKey) => string
+): string {
+  switch (stage.kind) {
+    case 'tool':
+      return resolveToolLine(stage.label, language, {
+        subject: stage.subject,
+        running: true,
+        outcome: stage.outcome,
+      }).text;
+    case 'message':
+      return stage.text;
+    case 'thinking':
+      return t('overlay.thinking');
+  }
+}
 
 type ActionTaskPaneProps = {
   /** The pane holds one Action's state, so the page keys it by this id. */
@@ -46,7 +66,7 @@ export function ActionTaskPane({
   onAddProject,
   renderFileChips,
 }: ActionTaskPaneProps) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const titleId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -77,9 +97,7 @@ export function ActionTaskPane({
     true
   );
 
-  const badge = getConversationHistoryStatusMeta(
-    status.kind === 'running' || status.kind === 'approval_pending' ? status.kind : 'idle'
-  );
+  const liveStage = useHistoryLiveStages().get(actionId);
   const canStop = status.kind === 'running' && status.stopTarget !== null;
   // A run that ended but whose page read failed leaves no answer; reopening reads it again.
   const runEndedUnread = lifecycle !== null && lifecycle.status !== 'processing';
@@ -116,7 +134,14 @@ export function ActionTaskPane({
     <section className={`action-task action-task--${layout}`} aria-labelledby={titleId}>
       <header className="action-task__header">
         <h1 id={titleId}>{title}</h1>
-        {badge ? <span className={badgeClassName(badge.tone)}>{t(badge.labelKey)}</span> : null}
+        {status.kind === 'approval_pending' ? (
+          <p className="action-task__state">{t('history.status.approvalPending')}</p>
+        ) : liveStage ? (
+          // Visual only: it changes on every step, and the conversation announces the run.
+          <p className="action-task__state" aria-hidden="true">
+            {liveStageText(liveStage, language, t)}
+          </p>
+        ) : null}
         <div className="action-task__header-actions">
           <button
             type="button"

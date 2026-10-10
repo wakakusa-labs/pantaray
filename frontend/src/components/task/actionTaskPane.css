@@ -26,6 +26,7 @@
 }
 
 .action-task__header h1 {
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -35,8 +36,16 @@
   white-space: nowrap;
 }
 
-.action-task__header .badge {
-  flex-shrink: 0;
+/* What the run is doing now, as plain muted text; the title keeps the room first. */
+.action-task__state {
+  flex: 0 10 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fog-text-3);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-task__header-actions {

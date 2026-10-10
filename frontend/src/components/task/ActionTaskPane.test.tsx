@@ -120,14 +120,38 @@ afterEach(() => {
 });
 
 describe('ActionTaskPane', () => {
-  it('names the task and its state, and shows it in the chat or copies it', async () => {
+  it('shows the running step in plain text beside the title, and nothing once idle', async () => {
+    await renderPane();
+    const running = createActionPage('act-1', 'processing');
+    running.runs[0].entries = [
+      {
+        step_kind: 'tool',
+        step_id: 'tool-1',
+        step_number: 1,
+        label: 'read',
+        status: 'processing',
+        outcome: 'completed',
+        subject: 'quote_v3.html',
+        output_preview: null,
+        output_available: false,
+        images: [],
+        file_edit: null,
+      },
+    ];
+    emit(update(running, 1));
+    const state = () => document.querySelector('header .action-task__state');
+    expect(state()?.textContent).toContain('quote_v3.html');
+    expect(document.querySelector('header .badge')).toBeNull();
+
+    emit(update(createActionPage('act-1', 'success'), 2));
+    expect(state()).toBeNull();
+  });
+
+  it('names the task, and shows it in the chat or copies it', async () => {
     readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
     await renderPane();
     expect(screen.getByRole('region', { name: 'Rebuild the quote' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1, name: 'Rebuild the quote' })).toBeTruthy();
-
-    emit(update(createActionPage('act-1', 'processing'), 1));
-    expect(screen.getByText('Running', { selector: '.badge' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Show in chat' }));
     expect(onShowInChat).toHaveBeenCalledTimes(1);
@@ -171,7 +195,9 @@ describe('ActionTaskPane', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
 
     emit(update(createActionPage('act-1', 'processing'), 1, { approvalBlockers: [blocker] }));
-    expect(screen.getByText('Waiting for approval', { selector: '.badge' })).toBeTruthy();
+    expect(
+      screen.getByText('Waiting for approval', { selector: 'header .action-task__state' })
+    ).toBeTruthy();
     await act(async () => fireEvent.click(primaryButton('Approve')));
     expect(submitApprovalDecision).toHaveBeenCalledWith({
       actionId: 'act-1',

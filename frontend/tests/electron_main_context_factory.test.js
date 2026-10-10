@@ -137,9 +137,9 @@ test('buildMainContext: showMainRoute brings a minimized main window forward on 
   };
   const { context } = createMainContextForAuthTests({ getMainWindow: () => mainWindow });
 
-  context.windows.showMainRoute('/history');
+  context.windows.showMainRoute('/history?project=new');
 
-  assert.deepEqual(calls, ['file:///tmp/index.html#/history', 'restore', 'focus']);
+  assert.deepEqual(calls, ['file:///tmp/index.html#/history?project=new', 'restore', 'focus']);
 });
 
 test('buildMainContext: ui.setLanguage saves before mutating in-memory language', () => {

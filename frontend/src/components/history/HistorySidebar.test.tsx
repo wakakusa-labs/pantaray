@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   removeItem: vi.fn(),
   setSearchText: vi.fn(),
   unreadActionId: 'A1' as string | null,
-  addProjectFromFolder: vi.fn(async () => undefined),
+  startCreatingProject: vi.fn(),
   workspace: null as WorkspaceProjects['settings'],
 }));
 vi.mock('@/context/useI18n', () => ({
@@ -82,11 +82,12 @@ function Sidebar() {
           settings: mocks.workspace,
           errorMessage: null,
           pending: new Set(),
-          addProjectFromFolder: mocks.addProjectFromFolder,
           dragController: {},
           busy: false,
         } as unknown as WorkspaceProjects
       }
+      creatingProject={false}
+      onCreatingProjectChange={mocks.startCreatingProject}
       selected={mocks.selected}
       onSelect={mocks.select}
     />
@@ -161,7 +162,7 @@ it('チャットと作業の間にプロジェクトを並べ、＋で追加の�
   const add = within(section).getByRole('button', { name: 'history.projects.add' });
   add.focus();
   await userEvent.keyboard('{Enter}');
-  expect(mocks.addProjectFromFolder).toHaveBeenCalledOnce();
+  expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
 it('起動ボタンはサイドバーの先頭に1つだけで、空状態でもkeyboardから開ける', async () => {

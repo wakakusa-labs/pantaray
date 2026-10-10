@@ -188,7 +188,6 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.loadFailed': 'Couldn’t load the projects.',
     'settings.workspace.saveFailed': 'Couldn’t save the change.',
     'settings.workspace.selectFolderFailed': 'Failed to choose a folder.',
-    'settings.workspace.folderAlreadyRegistered': 'This folder is already registered.',
     'settings.general.title': 'General',
     'settings.screenshotCapture.title': 'Computer activity recording',
     'settings.screenshotCapture.description':
@@ -458,7 +457,6 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.loadFailed': 'プロジェクトを読み込めませんでした。',
     'settings.workspace.saveFailed': '変更を保存できませんでした。',
     'settings.workspace.selectFolderFailed': 'フォルダ選択に失敗しました。',
-    'settings.workspace.folderAlreadyRegistered': 'このフォルダはすでに登録されています。',
     'settings.general.title': '一般',
     'settings.screenshotCapture.title': 'コンピューター操作の記録',
     'settings.screenshotCapture.description':

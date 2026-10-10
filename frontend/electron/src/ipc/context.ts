@@ -102,7 +102,7 @@ export type CaptureGateState = {
 export type UpdateReadyNotice = { version: string | null };
 
 // Main-window pages that main opens on its own; each has a caller.
-export type MainWindowRoute = '/login' | '/history';
+export type MainWindowRoute = '/login' | '/history?project=new';
 
 export type MainContext = {
   aiConnection: Pick<

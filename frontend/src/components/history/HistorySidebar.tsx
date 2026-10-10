@@ -135,6 +135,8 @@ function ChatRow({
 export function HistorySidebar({
   history,
   projects,
+  creatingProject,
+  onCreatingProjectChange,
   selected,
   onSelect,
 }: {
@@ -142,6 +144,8 @@ export function HistorySidebar({
   history: ReturnType<typeof useSuggestionHistory>;
   /** The page's composers add projects too. */
   projects: WorkspaceProjects;
+  creatingProject: boolean;
+  onCreatingProjectChange: (creating: boolean) => void;
   selected: HistorySelection;
   onSelect: (selection: HistorySelection, options?: { replace: true }) => void;
 }) {
@@ -352,7 +356,12 @@ export function HistorySidebar({
         ) : null}
       </div>
       <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
-      <HistoryProjects projects={projects} t={t} />
+      <HistoryProjects
+        projects={projects}
+        creating={creatingProject}
+        onCreatingChange={onCreatingProjectChange}
+        t={t}
+      />
       <div className="history-sidebar__tasks">{renderContent()}</div>
       {confirmingDelete ? (
         <HistoryDeleteDialog

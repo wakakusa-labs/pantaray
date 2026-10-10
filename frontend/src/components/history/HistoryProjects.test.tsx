@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { LocalOwnerContext } from '@/context/localOwnerContext';
@@ -48,10 +49,22 @@ function createApi() {
       renamed.display_name = displayName;
       return { ...renamed };
     }),
-    createFolder: vi.fn(),
+    createFolder: vi.fn(async (input: { realPath: string; projectIds: string[] }) => {
+      const created = folder(input.realPath.split('/').pop()!, input.projectIds);
+      store.folders.push(created);
+      return structuredClone(created);
+    }),
     reorderProjects: vi.fn(async ({ projectIds }: { projectIds: string[] }) => ({
       project_ids: projectIds,
     })),
+    createProject: vi.fn(async ({ displayName }: { displayName: string }) => {
+      if (store.projects.some((item) => item.display_name === displayName))
+        return { errorCode: 'PROJECT_NAME_TAKEN' as const };
+      const created = project(`p-${displayName}`, store.projects.length);
+      created.display_name = displayName;
+      store.projects.push(created);
+      return { ...created };
+    }),
     deleteProject: vi.fn(async () => undefined),
     deleteFolder: vi.fn(async (folderId: string) => {
       store.folders = store.folders.filter((f) => f.folder_id !== folderId);
@@ -82,7 +95,15 @@ function installApi() {
 }
 
 function Projects() {
-  return <HistoryProjects projects={useWorkspaceSettingsController(t)} t={t} />;
+  const [creating, setCreating] = useState(false);
+  return (
+    <HistoryProjects
+      projects={useWorkspaceSettingsController(t)}
+      creating={creating}
+      onCreatingChange={setCreating}
+      t={t}
+    />
+  );
 }
 
 async function renderProjects() {
@@ -328,6 +349,53 @@ it('フォルダ選択の間はほかの変更を受け付けず、選んだ後�
     })
   );
   expect(api.updateFolderLinks).toHaveBeenCalledOnce();
+});
+
+it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロジェクトを開いてフォルダの追加へ進む', async () => {
+  api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/delta' });
+  await renderProjects();
+
+  await userEvent.click(screen.getByRole('button', { name: 'history.projects.add' }));
+  const name = screen.getByRole('textbox', { name: 'history.projects.nameLabel' });
+  expect(name).toHaveFocus();
+  expect(name).toHaveAttribute('placeholder', 'history.projects.nameLabel');
+  await userEvent.type(name, 'delta');
+  fireEvent.keyDown(name, { key: 'Enter', isComposing: true });
+  expect(api.createProject).not.toHaveBeenCalled();
+  await userEvent.keyboard('{Enter}');
+
+  expect(api.createProject).toHaveBeenCalledWith({ displayName: 'delta', organizationIds: [] });
+  expect(api.selectFolder).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'delta' })).toHaveAttribute('aria-expanded', 'true');
+  const addFolder = screen.getByRole('button', { name: 'history.projects.addFolder' });
+  expect(addFolder).toHaveFocus();
+  await userEvent.click(addFolder);
+  await waitFor(() =>
+    expect(api.createFolder).toHaveBeenCalledWith(
+      expect.objectContaining({ realPath: '/Users/me/delta', projectIds: ['p-delta'] })
+    )
+  );
+  expect(await screen.findByTitle('/Users/me/delta')).toBeInTheDocument();
+});
+
+it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻り、使われている名前は欄を残して知らせる', async () => {
+  await renderProjects();
+  const add = screen.getByRole('button', { name: 'history.projects.add' });
+
+  await userEvent.click(add);
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(add).toHaveFocus();
+
+  await userEvent.click(add);
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+  expect(screen.queryByRole('textbox')).toBeNull();
+
+  await userEvent.click(add);
+  await userEvent.keyboard('b{Enter}');
+  expect(api.createProject).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('history.projects.nameTaken {"name":"b"}');
+  expect(screen.getByRole('textbox', { name: 'history.projects.nameLabel' })).toHaveValue('b');
 });
 
 it('Finder で開くは最初のフォルダを開き、フォルダのないプロジェクトでは押せない', async () => {

@@ -115,16 +115,6 @@ const createProject = vi.fn(async ({ displayName }: { displayName: string }) => 
   sort_order: 0,
   organization_ids: [],
 }));
-const createFolder = vi.fn(
-  async (input: { displayName: string; realPath: string; projectIds: string[] }) => ({
-    folder_id: 'f-1',
-    display_name: input.displayName,
-    real_path: input.realPath,
-    canonical_real_path: input.realPath,
-    organization_ids: [],
-    project_ids: input.projectIds,
-  })
-);
 const historyFetch = vi.fn(async () => ({
   data: [work('A1', '見積書のたたき台を作る', 'running')] as ConversationHistoryListItem[],
   nextCursor: null,
@@ -170,7 +160,6 @@ beforeEach(() => {
       }),
       selectFolder,
       createProject,
-      createFolder,
     },
     process: { platform: 'darwin', env: { NODE_ENV: 'test' } },
   } as unknown as Window['electron'];
@@ -359,15 +348,17 @@ it('a card selects its work for the detail pane, without opening an Overlay', as
   expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
-it('a task pane’s Add project adds the chosen folder as a project in the sidebar', async () => {
+it('a task pane’s Add project names a new project in the sidebar', async () => {
   pages = [{ items: [], next_cursor: null }];
   renderPage({ pathname: '/history', search: '?item=action:A1' });
   const projects = await screen.findByRole('region', { name: 'プロジェクト' });
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
+  const name = within(projects).getByRole('textbox', { name: 'プロジェクト名' });
+  expect(name).toHaveFocus();
+  await userEvent.type(name, 'aurora{Enter}');
   expect(await within(projects).findByRole('button', { name: 'aurora' })).toBeInTheDocument();
-  expect(createFolder).toHaveBeenCalledWith(
-    expect.objectContaining({ realPath: '/Users/me/aurora', projectIds: ['p-1'] })
-  );
+  expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
+  expect(selectFolder).not.toHaveBeenCalled();
   expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
 });
 
@@ -880,7 +871,7 @@ it('names a workspace project with @ and sends it the way an Action message name
   expect(within(mine).getByText('Aurora Web')).toHaveClass('action-conversation__project-ref');
 });
 
-it('adds a project from @ in place, keeping the draft and its document', async () => {
+it('starts naming a project from @, keeping the draft and its document', async () => {
   pages = [{ items: [], next_cursor: null }];
   renderPage();
   const input = (await screen.findByRole('textbox', { name: 'メッセージ' })) as HTMLTextAreaElement;
@@ -895,8 +886,8 @@ it('adds a project from @ in place, keeping the draft and its document', async (
   await userEvent.click(await screen.findByRole('option', { name: 'プロジェクトを追加' }));
 
   const projects = screen.getByRole('region', { name: 'プロジェクト' });
-  expect(await within(projects).findByText('aurora')).toBeInTheDocument();
-  expect(selectFolder).toHaveBeenCalledOnce();
+  expect(within(projects).getByRole('textbox', { name: 'プロジェクト名' })).toHaveFocus();
+  expect(selectFolder).not.toHaveBeenCalled();
   // The draft, @ included, and the staged file are as they were left.
   expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
   expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();

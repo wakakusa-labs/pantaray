@@ -31,8 +31,8 @@ export function createSuggestionRecords(params: {
   onRecordsChanged: () => void;
 }) {
   const records = new Map<string, SuggestionRecord>();
-  // Dismissed suggestions for this owner: a read that left before the dismissal must not
-  // answer the suggestion again.
+  // Dismissed suggestions for this owner: neither a read that left before the dismissal nor an
+  // event resent after it may answer the suggestion again.
   const dismissed = new Map<string, OverlaySnapshot>();
 
   function sendToMain(snapshot: OverlaySnapshot): void {
@@ -46,6 +46,8 @@ export function createSuggestionRecords(params: {
   }
 
   function store(record: SuggestionRecord): OverlaySnapshot {
+    const dismissedSnapshot = dismissed.get(String(record.snapshot.suggestionId));
+    if (dismissedSnapshot) return dismissedSnapshot;
     const normalized = {
       ...record.snapshot,
       updatedAt: record.snapshot.updatedAt ?? new Date().toISOString(),

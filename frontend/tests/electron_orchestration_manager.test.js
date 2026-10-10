@@ -1457,3 +1457,32 @@ test('an older read still fills the body of an accepted suggestion the events ne
   assert.equal(read.lastSequence, 5);
   assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
 });
+
+test('an event resent after a dismissal does not bring the suggestion back', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+  const hooks = harness.getWsHooks();
+  hooks.forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+  const sentBeforeResend = suggestionSnapshotsSentToMain(harness).length;
+
+  hooks.forwardEventToRenderers({
+    event: 'suggestion_chunk',
+    sequence: 5,
+    data: { content: 'resent' },
+    meta: { suggestion_id: 'sug-1', process_id: 'proc-s1', kind: 'suggestion' },
+  });
+
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+  assert.equal(suggestionSnapshotsSentToMain(harness).length, sentBeforeResend);
+  assert.doesNotMatch(harness.overlayPayloads.get('sug-1').snapshot.suggestionText, /resent/);
+  assert.equal(
+    harness.manager.adoptSuggestionSnapshot(persistedSnapshot()).reactionState,
+    'rejected'
+  );
+});

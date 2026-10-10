@@ -404,6 +404,15 @@ export function useOverlayComposerController({
       );
     }
   };
+  // Typing dismisses a failed resume's notice.
+  const changeDraft = (draft: string, mentions: readonly ComposerMention[]) =>
+    setComposer((current) => ({
+      ...current,
+      draft,
+      mentions,
+      validationFailed: false,
+      resume: current.resume?.state === 'failed' ? null : current.resume,
+    }));
   const retrySubmission = () => {
     const request = composer.submission?.request;
     if (
@@ -438,6 +447,7 @@ export function useOverlayComposerController({
     restoreComposerFocusRef,
     submitDraft,
     requestResume,
+    changeDraft,
     attachFiles,
     removeAttachment,
     refreshSubmission,

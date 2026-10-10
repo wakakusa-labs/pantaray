@@ -158,40 +158,32 @@ test('comment: quiet entry, keyboard reveal, resize and reply', async ({ page },
   expect(request.message.content).toBe('決めたいことを3つに整理して');
 });
 
-test('offer: inline decisions, expanded instructions and fresh suggestion reset', async ({
-  page,
-}, info) => {
+test('offer: decisions in the composer and fresh suggestion reset', async ({ page }, info) => {
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  const open = page.getByRole('button', { name: '追加の指示（任意）' });
-  const accept = page.getByRole('button', { name: '承認', exact: true });
-  await expect(page.getByRole('textbox')).toHaveCount(0);
-  await capture(page, info, 'offer-collapsed');
-  const iconBox = (await open.boundingBox())!;
-  const acceptBox = (await accept.boundingBox())!;
-  expect(
-    Math.abs(iconBox.y + iconBox.height / 2 - acceptBox.y - acceptBox.height / 2)
-  ).toBeLessThan(2);
-  expect(acceptBox.x).toBeGreaterThan(iconBox.x + iconBox.width);
-  await open.click();
   const input = page.getByRole('textbox', { name: '追加の指示（任意）' });
-  await expect(input).toBeFocused();
+  const accept = page.getByRole('button', { name: '承認', exact: true });
+  const dismiss = page.getByRole('button', { name: '見送る', exact: true });
+  await expect(input).toBeVisible();
+  await expect(page.getByRole('button', { name: '送信', exact: true })).toHaveCount(0);
+  await capture(page, info, 'offer');
   await input.fill('未決事項だけを、箇条書きでまとめて');
+  // Enter decides nothing.
+  await input.press('Enter');
+  await expect(page.locator('html')).not.toHaveAttribute('data-accepted', /.+/);
   await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
   await page.getByRole('button', { name: /ファイル編集・コマンド実行の権限/ }).click();
   await page.getByRole('menuitemradio', { name: /自動承認/ }).click();
-  await capture(page, info, 'offer-expanded');
+  await capture(page, info, 'offer-written');
+  // 見送る then 承認, side by side at the composer's bottom-right, where the send button is.
   const composerBox = (await page.locator('.overlay-composer').boundingBox())!;
-  const expandedAcceptBox = (await accept.boundingBox())!;
-  const dismissBox = (await page
-    .getByRole('button', { name: '見送る', exact: true })
-    .boundingBox())!;
-  expect(expandedAcceptBox.y).toBeGreaterThan(composerBox.y + composerBox.height);
-  expect(Math.abs(expandedAcceptBox.y - dismissBox.y)).toBeLessThan(2);
-  expect(expandedAcceptBox.x).toBeGreaterThan(dismissBox.x + dismissBox.width);
+  const acceptBox = (await accept.boundingBox())!;
+  const dismissBox = (await dismiss.boundingBox())!;
+  expect(acceptBox.y + acceptBox.height).toBeLessThanOrEqual(composerBox.y + composerBox.height);
+  expect(Math.abs(acceptBox.y - dismissBox.y)).toBeLessThan(2);
+  expect(acceptBox.x).toBeGreaterThan(dismissBox.x + dismissBox.width);
+  expect(composerBox.x + composerBox.width - acceptBox.x - acceptBox.width).toBeLessThan(16);
   await showSuggestion(page, 'action_offer', 'suggestion-2');
-  await expect(open).toBeVisible();
-  await open.click();
   await expect(input).toHaveValue('');
   await expect(page.getByRole('button', { name: /権限: 毎回確認/ })).toBeVisible();
   await input.fill('未決事項だけを、箇条書きでまとめて');
@@ -220,17 +212,13 @@ test('narrow English layout and reduced motion keep the controls reachable', asy
   await page.addInitScript(() => localStorage.setItem('pantaray_ui_language', 'en'));
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  const open = page.getByRole('button', { name: 'Additional instructions (optional)' });
-  const controlsId = await open.getAttribute('aria-controls');
-  await open.focus();
-  await page.keyboard.press('Space');
-  await expect(
-    page.getByRole('textbox', { name: 'Additional instructions (optional)' })
-  ).toBeFocused();
+  const input = page.getByRole('textbox', { name: 'Additional instructions (optional)' });
+  await input.focus();
+  await expect(input).toBeFocused();
   await expect(page.getByRole('button', { name: 'Accept', exact: true })).toBeInViewport();
-  expect(
-    await page.locator(`[id="${controlsId}"]`).evaluate((element) => element.getAnimations().length)
-  ).toBe(0);
+  await expect(
+    page.getByRole('button', { name: 'Dismiss suggestion', exact: true })
+  ).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
   await capture(page, info, 'offer-narrow-reduced-motion');
 });
@@ -365,7 +353,7 @@ test('suggestion reply and approval supplement carry picked projects', async ({ 
 
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  await page.getByRole('button', { name: '追加の指示（任意）' }).click();
+  await page.getByRole('textbox', { name: '追加の指示（任意）' }).click();
   await page.keyboard.type('  @北極');
   await page.keyboard.press('Tab');
   await page.keyboard.type('だけ');

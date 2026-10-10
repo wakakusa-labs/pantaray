@@ -170,21 +170,37 @@ describe('SuggestionTaskPane', () => {
     expect(dismissButton()).toBeEnabled();
     expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
       'placeholder',
-      'Add conditions and approve (optional)'
+      "Conditions to approve with, or why you're passing (optional)"
     );
   });
 
-  it('puts dismiss, then accept, in one row above the composer, outside the text column', async () => {
+  it('puts dismiss, then accept, where the composer sends, after its other controls', async () => {
     await renderPane();
 
-    const bar = dismissButton().parentElement;
-    expect(bar).toBe(acceptButton().parentElement);
-    expect(
-      Array.from(bar?.querySelectorAll('button') ?? [], (button) => button.textContent)
-    ).toEqual(['Dismiss suggestion', 'Accept']);
-    expect(bar?.closest('.suggestion-task__column')).toBeNull();
-    // The composer follows the bar.
-    expect(bar?.nextElementSibling?.matches('form.overlay-composer')).toBe(true);
+    const composer = document.querySelector('form.overlay-composer');
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    // Reading and tab order: the field, the composer's own controls, then decline and approve.
+    const order = Array.from(composer?.querySelectorAll('textarea, button') ?? [], (element) =>
+      element instanceof HTMLTextAreaElement
+        ? 'field'
+        : (element.getAttribute('aria-label') ?? element.textContent)
+    );
+    expect(order[0]).toBe('field');
+    expect(order[1]).toBe('Add files');
+    expect(order.slice(-2)).toEqual(['Dismiss suggestion', 'Accept']);
+  });
+
+  it('leaves both decisions to their buttons: Enter neither approves nor dismisses', async () => {
+    await renderPane();
+    const field = screen.getByLabelText('Additional instructions (optional)');
+    fireEvent.change(field, { target: { value: 'Use the new unit price' } });
+
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    expect(acceptAction).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(field).toHaveValue('Use the new unit price');
+    expect(acceptButton()).toBeEnabled();
   });
 
   it('offers the same header buttons as a task: show in chat, and copy the suggestion', async () => {
@@ -345,6 +361,58 @@ describe('SuggestionTaskPane', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  it('dismisses with the words, then sends them as a reply once the dismissal is recorded', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000044';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
+    submitMessage.mockReturnValueOnce(new Promise(() => {}));
+    await renderPane();
+    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
+      target: { value: 'Only the summary, please' },
+    });
+
+    fireEvent.click(dismissButton());
+    expect(send).toHaveBeenCalledWith({
+      event: 'dismiss_suggestion',
+      data: { suggestion_id: 'sug-1' },
+    });
+    // The backend takes a reply only to a dismissed offer.
+    expect(submitMessage).not.toHaveBeenCalled();
+
+    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
+    expect(submitMessage).toHaveBeenCalledTimes(1);
+    expect(submitMessage).toHaveBeenCalledWith({
+      target: { kind: 'new', approval_mode: 'prompt_each_time', reply_to_suggestion_id: 'sug-1' },
+      message: {
+        version: 1,
+        message_id: messageId,
+        content: 'Only the summary, please',
+        images: [],
+        language: 'en',
+        project_refs: [],
+        files: [],
+      },
+    });
+    expect(acceptAction).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+  });
+
+  it('keeps the words for a retry when the reply after a dismissal fails', async () => {
+    submitMessage.mockRejectedValueOnce(new Error('Disconnected'));
+    await renderPane();
+    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
+      target: { value: 'Only the summary, please' },
+    });
+    fireEvent.click(dismissButton());
+    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
+
+    expect(submitMessage).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue(
+      'Only the summary, please'
+    );
+    expect(screen.getByRole('button', { name: 'Retry sending' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
   it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {

@@ -43,12 +43,10 @@ export function SuggestionInputDisclosure({
   label,
   inputRef,
   children,
-  collapsedActions,
 }: {
   label: string;
   inputRef: RefObject<HTMLTextAreaElement>;
   children: ReactNode;
-  collapsedActions?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const inputId = useId();
@@ -61,10 +59,7 @@ export function SuggestionInputDisclosure({
       <div>{children}</div>
     </ExpandedInput>
   ) : (
-    <div
-      id={inputId}
-      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-    >
+    <div id={inputId} style={{ display: 'flex', alignItems: 'center' }}>
       <ReplyButton
         type="button"
         aria-label={label}
@@ -75,7 +70,6 @@ export function SuggestionInputDisclosure({
       >
         <MessageCircle strokeWidth={1.75} aria-hidden />
       </ReplyButton>
-      {collapsedActions}
     </div>
   );
 }

@@ -7,28 +7,6 @@ import AgentOverlayShell from './AgentOverlayShell';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 
 describe('AgentOverlayShell', () => {
-  it('does not show suggestion status text even while stop action is visible', () => {
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlayShell
-          isVisible={true}
-          isContentVisible={true}
-          isExpanded={true}
-          content={null}
-          suggestionText="提案です"
-          isSuggestionStreamFinished={true}
-          actionText=""
-          isActionStreamFinished={false}
-          approvalUiState="hidden"
-          showBusyIndicator={true}
-          showFooterActions={true}
-        />
-      </UiLanguageProvider>
-    );
-
-    expect(screen.queryByText('承認')).toBeNull();
-  });
-
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
     const onConversationAction = vi.fn();
     const onConversationLink = vi.fn();
@@ -68,7 +46,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={false}
-          showFooterActions={false}
           conversationContent={
             <>
               <button
@@ -162,7 +139,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={true}
-          showFooterActions={false}
         />
       </UiLanguageProvider>
     );
@@ -188,7 +164,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={true}
-          showFooterActions={false}
           chatActionId={chatActionId}
           onShowChat={onShowChat}
         />
@@ -227,7 +202,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={true}
-          showFooterActions={false}
           conversationContent={<p>long conversation</p>}
           composer={<textarea aria-label="Message" />}
         />
@@ -271,7 +245,6 @@ describe('AgentOverlayShell', () => {
             },
           ]}
           showBusyIndicator={false}
-          showFooterActions={false}
           conversationContent={<p>long conversation</p>}
           composer={<textarea aria-label="Message" />}
         />
@@ -320,7 +293,6 @@ describe('AgentOverlayShell', () => {
             isActionStreamFinished={false}
             approvalUiState="hidden"
             showBusyIndicator={false}
-            showFooterActions={false}
             conversationContent={<p>conversation</p>}
             composer={<textarea aria-label="Message" />}
           />
@@ -353,7 +325,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={true}
           approvalUiState="hidden"
           showBusyIndicator={false}
-          showFooterActions={false}
           onClose={onClose}
         />
       </UiLanguageProvider>

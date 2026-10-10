@@ -1,8 +1,8 @@
 import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 
-import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
+import { SuggestionDecisionButtons } from '@/components/agent-overlay/SuggestionDecisionButtons';
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import {
   ComposerSubmissionStatus,
@@ -23,7 +23,6 @@ const COPY = {
     dismissed: 'You dismissed this suggestion.',
     notStarted: 'This could not be started. Try again.',
     dismissFailed: 'Could not dismiss this suggestion. Try again.',
-    supplementPlaceholder: 'Add conditions and approve (optional)',
     copySuggestion: 'Copy suggestion',
   },
   ja: {
@@ -33,7 +32,6 @@ const COPY = {
     dismissed: 'この提案は見送りました。',
     notStarted: '開始できませんでした。もう一度お試しください。',
     dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
-    supplementPlaceholder: '条件を足して承認する（任意）',
     copySuggestion: '提案をコピー',
   },
 } as const;
@@ -55,9 +53,10 @@ type SuggestionTaskPaneProps = {
 };
 
 /**
- * An unanswered suggestion in the main window's detail pane: its text, 承認 / 見送る, and an
- * optional extra instruction that goes with the approval. A message-only suggestion is answered
- * by a reply, which starts a new Action; so is a dismissed one, if the user writes after all.
+ * An unanswered suggestion in the main window's detail pane: its text, and a composer whose
+ * 承認 / 見送る take what the user wrote, as the approval's extra instruction or as a reply after
+ * the dismissal. A message-only suggestion is answered by a reply, which starts a new Action; so
+ * is a dismissed one, if the user writes after all.
  */
 export function SuggestionTaskPane({
   suggestionId,
@@ -86,12 +85,13 @@ export function SuggestionTaskPane({
     if (task.actionId !== null) onStartedRef.current(task.actionId);
   }, [task.actionId]);
 
-  const isOffer = snapshot?.interactionContract === 'action_offer';
   const dismissed = phase === 'dismissed';
-  // An offer takes the composer as the approval's extra instruction until it is dismissed.
-  const accepts = isOffer && !dismissed;
-  const showsDecision =
-    isOffer && (phase === 'actionable' || phase === 'starting' || phase === 'dismissing');
+  // An offer's composer holds 承認 / 見送る until it is dismissed; while one of them is under way
+  // both stay in place, disabled.
+  const decides =
+    snapshot?.interactionContract === 'action_offer' &&
+    snapshot.reactionState !== 'rejected' &&
+    (phase === 'actionable' || phase === 'starting' || phase === 'dismissing');
   const failureText = (current: SuggestionStartFailure) =>
     current.stage === 'accept_failed'
       ? t('overlay.acceptFailed')
@@ -171,29 +171,7 @@ export function SuggestionTaskPane({
         </div>
       </div>
       <div className="suggestion-task__dock">
-        {/* One row above the composer, as an approval asks: decline, then the way forward. */}
-        {showsDecision ? (
-          <div className="suggestion-task__decision">
-            <ApprovalDecisionButton
-              type="button"
-              $variant="secondary"
-              disabled={!task.canDismiss}
-              title={t('overlay.dismissTitle')}
-              onClick={task.dismiss}
-            >
-              {t('overlay.dismissSuggestion')}
-            </ApprovalDecisionButton>
-            <ApprovalDecisionButton
-              type="button"
-              $variant="primary"
-              disabled={!task.canAccept}
-              onClick={() => void task.accept()}
-            >
-              {t('overlay.accept')}
-            </ApprovalDecisionButton>
-          </div>
-        ) : null}
-        {phase === 'actionable' || dismissed ? (
+        {decides || phase === 'actionable' || dismissed ? (
           <OverlayComposer
             approvalMode={approvalMode}
             draft={draft.draft}
@@ -211,20 +189,27 @@ export function SuggestionTaskPane({
             retryAcceptance={failure?.stage === 'accept_failed'}
             attachments={draft.attachments}
             attachmentFailure={draft.attachmentFailure}
-            validationFailed={accepts ? composer.supplementInvalid : draft.validationFailed}
+            validationFailed={decides ? composer.supplementInvalid : draft.validationFailed}
             canAttach={composer.canAttach}
-            action={accepts ? 'accept' : 'send'}
-            canSend={accepts ? task.canAccept : task.canReply}
+            action={
+              decides
+                ? {
+                    decision: (
+                      <SuggestionDecisionButtons
+                        canDismiss={task.canDismiss}
+                        canAccept={task.canAccept}
+                        onDismiss={task.dismiss}
+                        onAccept={() => void task.accept()}
+                      />
+                    ),
+                  }
+                : 'send'
+            }
+            canSend={task.canReply}
             resumeFailed={false}
             canResume={false}
             textareaRef={textareaRef}
-            placeholder={
-              dismissed
-                ? t('overlay.composer.dismissedPlaceholder')
-                : accepts
-                  ? copy.supplementPlaceholder
-                  : undefined
-            }
+            placeholder={dismissed ? t('overlay.composer.dismissedPlaceholder') : undefined}
             onAddProject={onAddProject}
             onDraftChange={(value, mentions) =>
               setComposer((current) => ({
@@ -236,7 +221,7 @@ export function SuggestionTaskPane({
             }
             onAttachFiles={(files) => void composer.attachFiles(files)}
             onRemoveAttachment={composer.removeAttachment}
-            onSubmit={accepts ? () => void task.accept() : task.reply}
+            onSubmit={task.reply}
             onStop={noop}
             onResume={noop}
           />

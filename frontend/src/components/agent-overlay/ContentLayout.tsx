@@ -61,10 +61,7 @@ export const UserActionArea = styled.div`
   text-align: right;
 `;
 
-export const ScrollableContent = styled.div<{
-  $collapsed?: boolean;
-  $hasFooter?: boolean;
-}>`
+export const ScrollableContent = styled.div<{ $collapsed?: boolean }>`
   -webkit-app-region: no-drag;
   -webkit-user-select: text;
   user-select: text;
@@ -88,10 +85,7 @@ export const ScrollableContent = styled.div<{
    * 開閉でずれ幅が変わる）。スクロールバーは 5px 幅・スクロール中だけ可視で、
    * レイアウト幅を取らないオーバーレイ表示なので、帯は確保しない。
    */
-  margin-bottom: ${(props) => {
-    if (props.$collapsed) return '4px';
-    return props.$hasFooter ? '8px' : '0';
-  }};
+  margin-bottom: ${(props) => (props.$collapsed ? '4px' : '0')};
   position: relative;
   z-index: 1;
   scrollbar-width: thin;

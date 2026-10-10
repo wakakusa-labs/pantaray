@@ -14,7 +14,6 @@ export function HistoryProjectRow({
   folders,
   menuItems,
   menuButtonId,
-  menuDisabled,
   renaming,
   t,
   onRename,
@@ -24,7 +23,6 @@ export function HistoryProjectRow({
   folders: WorkspaceFolder[];
   menuItems: HistoryProjectMenuItem[];
   menuButtonId: string;
-  menuDisabled: boolean;
   renaming: boolean;
   t: ReturnType<typeof useI18n>['t'];
   onRename: (displayName: string) => Promise<boolean>;
@@ -57,7 +55,6 @@ export function HistoryProjectRow({
       <HistoryProjectMenu
         label={t('history.projects.menu', { name: project.display_name })}
         buttonId={menuButtonId}
-        disabled={menuDisabled}
         items={menuItems}
       />
     </li>

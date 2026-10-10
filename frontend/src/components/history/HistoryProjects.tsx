@@ -26,7 +26,6 @@ export type WorkspaceProjects = Pick<
   | 'openFolder'
   | 'addOrganization'
   | 'updateProjectOrganizations'
-  | 'busy'
 >;
 
 type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject };
@@ -107,7 +106,7 @@ export function HistoryProjects({
           aria-label={t('history.projects.add')}
           title={t('history.projects.add')}
           aria-busy={pending.has(workspacePendingKey.projectCreate)}
-          disabled={settings === null || projects.busy}
+          disabled={settings === null}
           onClick={() => void projects.addProjectFromFolder()}
         >
           <Plus size={15} aria-hidden="true" />
@@ -127,7 +126,6 @@ export function HistoryProjects({
               folders={foldersOf(project.project_id)}
               menuItems={menuItems(project)}
               menuButtonId={menuButtonId(project.project_id)}
-              menuDisabled={projects.busy}
               renaming={renamingId === project.project_id}
               t={t}
               onRename={(name) => projects.renameProject(project.project_id, name)}

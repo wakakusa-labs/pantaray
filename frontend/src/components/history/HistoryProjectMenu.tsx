@@ -20,13 +20,10 @@ export function HistoryProjectMenu({
   label,
   buttonId,
   items,
-  disabled,
 }: {
   label: string;
   buttonId: string;
   items: HistoryProjectMenuItem[];
-  /** While another workspace change runs; the changes here would be refused. */
-  disabled: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -107,7 +104,6 @@ export function HistoryProjectMenu({
         aria-label={label}
         title={label}
         aria-haspopup="menu"
-        disabled={disabled}
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
         onClick={() => setIsOpen((open) => !open)}

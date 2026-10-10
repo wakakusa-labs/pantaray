@@ -48,8 +48,9 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     return await ctx.overlay.setActionApprovalMode(parsed.actionId, parsed.approvalMode);
   });
 
+  // The projects the workspace is made of are managed in the History page's sidebar.
   registrar.on('overlay:openWorkspaceSettings', () => {
-    ctx.windows.showMainRoute('/settings?section=workspace');
+    ctx.windows.showMainRoute('/history');
   });
 
   registrar.handle('overlay:showChat', (_event, request) =>

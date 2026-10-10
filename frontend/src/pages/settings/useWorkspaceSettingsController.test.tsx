@@ -19,7 +19,6 @@ const emptySettings = {
   projects: [],
   folders: [],
 };
-const testFocus = { onSuccess: 'focus-success', onFailure: 'focus-failure' };
 
 // The owner boundary mounts this controller for one confirmed owner and unmounts it when the
 // owner changes, so the controller is always exercised inside a single owner's scope here.
@@ -40,31 +39,26 @@ describe('useWorkspaceSettingsController', () => {
 
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
 
-    await waitFor(() => expect(result.current.showLoading).toBe(false));
-    expect(result.current.settings).toEqual(emptySettings);
+    await waitFor(() => expect(result.current.settings).toEqual(emptySettings));
     expect(get).toHaveBeenCalledOnce();
   });
 
   it('guards duplicate mutation calls synchronously within the same tick', async () => {
-    const deleteRequest = createDeferred<void>();
-    const deleteOrganization = vi.fn(() => deleteRequest.promise);
-    installWorkspaceApi({
-      get: async () => ({
-        ...emptySettings,
-        organizations: [{ organization_id: 'org-a', display_name: 'Org A' }],
-      }),
-      deleteOrganization,
-    });
+    const createRequest = createDeferred<{ organization_id: string; display_name: string }>();
+    const createOrganization = vi.fn(() => createRequest.promise);
+    installWorkspaceApi({ get: async () => emptySettings, createOrganization });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
-    await waitFor(() => expect(result.current.showLoading).toBe(false));
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
 
     act(() => {
-      void result.current.deleteOrganization('org-a', testFocus);
-      void result.current.deleteOrganization('org-a', testFocus);
+      void result.current.addOrganization('Org A');
+      void result.current.addOrganization('Org A');
     });
 
-    expect(deleteOrganization).toHaveBeenCalledOnce();
-    await act(async () => deleteRequest.resolve());
+    expect(createOrganization).toHaveBeenCalledOnce();
+    await act(async () =>
+      createRequest.resolve({ organization_id: 'org-a', display_name: 'Org A' })
+    );
     await waitFor(() => expect(result.current.pending.size).toBe(0));
   });
 
@@ -80,28 +74,22 @@ describe('useWorkspaceSettingsController', () => {
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
 
     expect(result.current.settings).toEqual(saved);
-    expect(result.current.showLoading).toBe(false);
     await act(async () => initial.resolve(saved));
   });
 
   it('keeps a mutation that landed while the mount read was still in flight', async () => {
     setCachedWorkspaceSettings(OWNER.id, emptySettings);
     const read = createDeferred<typeof emptySettings>();
-    const created = {
-      project_id: 'project-a',
-      display_name: 'Project A',
-      organization_ids: [],
-      sort_order: 0,
-    };
-    installWorkspaceApi({ get: () => read.promise, createProject: async () => created });
+    const created = { organization_id: 'org-a', display_name: 'Org A' };
+    installWorkspaceApi({ get: () => read.promise, createOrganization: async () => created });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await act(async () => {
-      expect(await result.current.createProject('Project A', [])).toBe(true);
+      expect(await result.current.addOrganization('Org A')).toBe('org-a');
     });
 
     await act(async () => read.resolve(emptySettings));
 
-    expect(result.current.settings?.projects).toEqual([created]);
+    expect(result.current.settings?.organizations).toEqual([created]);
   });
 
   it('does not publish the defaults as the current settings when a mutation follows a failed read', async () => {
@@ -109,22 +97,17 @@ describe('useWorkspaceSettingsController', () => {
       get: async () => {
         throw new Error('workspace settings unavailable');
       },
-      createProject: async () => ({
-        project_id: 'project-a',
-        display_name: 'Project A',
-        organization_ids: [],
-        sort_order: 0,
-      }),
+      createOrganization: async () => ({ organization_id: 'org-a', display_name: 'Org A' }),
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
-    await waitFor(() => expect(result.current.showLoading).toBe(false));
+    await waitFor(() => expect(result.current.errorMessage).toBe('settings.workspace.loadFailed'));
 
     await act(async () => {
-      await result.current.createProject('Project A', []);
+      await result.current.addOrganization('Org A');
     });
 
     // The read never answered, so there is nothing current to show or to cache: the one
-    // created project on top of the defaults is not this owner's workspace.
+    // created organization on top of the defaults is not this owner's workspace.
     expect(result.current.settings).toBeNull();
     expect(getCachedWorkspaceSettings(OWNER.id)).toBeNull();
   });
@@ -157,7 +140,7 @@ describe('useWorkspaceSettingsController', () => {
       deleteProject,
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
-    await waitFor(() => expect(result.current.showLoading).toBe(false));
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
 
     await act(async () => result.current.addProjectFromFolder());
     expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
@@ -240,16 +223,9 @@ describe('useWorkspaceSettingsController', () => {
     ]);
     expect(result.current.errorMessage).toBe('settings.workspace.folderAlreadyRegistered');
 
-    // Settings' "Add folder" on project c: the folder joins c and keeps a and b.
+    // Add folder on project c: the folder joins c and keeps a and b.
     await act(async () => {
-      expect(
-        await result.current.createFolder({
-          displayName: 'shared',
-          realPath: '/Users/me/shared',
-          organizationIds: [],
-          projectIds: ['c'],
-        })
-      ).toBe(true);
+      expect(await result.current.addFolderToProject('c')).toBe(true);
     });
     expect(createFolder).not.toHaveBeenCalled();
     expect(folders[0].project_ids).toEqual(['a', 'b', 'c']);

@@ -2,12 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyWorkspaceMutation,
-  countOrganizationUsage,
-  getUnassignedFolders,
   orderProjectsByIds,
   resolveProjectOrganizations,
-  successorFocusKey,
-  workspaceFocusId,
   type WorkspaceFolder,
   type WorkspaceOrganization,
   type WorkspaceProject,
@@ -93,41 +89,6 @@ describe('workspaceSettingsModel', () => {
     expect(projects[0].sort_order).toBe(0);
   });
 
-  it('counts project and direct unassigned-folder organization usage', () => {
-    const usageFolders = [
-      {
-        folder_id: 'folder-direct',
-        display_name: 'Direct',
-        real_path: '/direct',
-        canonical_real_path: '/direct',
-        organization_ids: ['org-b'],
-        project_ids: [],
-      },
-      {
-        folder_id: 'folder-assigned',
-        display_name: 'Assigned',
-        real_path: '/assigned',
-        canonical_real_path: '/assigned',
-        organization_ids: ['org-b'],
-        project_ids: ['project-b'],
-      },
-      {
-        folder_id: 'folder-stale',
-        display_name: 'Stale',
-        real_path: '/stale',
-        canonical_real_path: '/stale',
-        organization_ids: ['org-b'],
-        project_ids: ['missing-project'],
-      },
-    ];
-
-    expect(getUnassignedFolders(usageFolders, projects).map((folder) => folder.folder_id)).toEqual([
-      'folder-direct',
-      'folder-stale',
-    ]);
-    expect(countOrganizationUsage('org-b', projects, usageFolders)).toBe(3);
-  });
-
   it('orders mutation upserts with the SQLite BINARY collation', () => {
     const lowercaseSettings: WorkspaceSettings = {
       read_access_scope: 'workspace',
@@ -192,11 +153,6 @@ describe('workspaceSettingsModel', () => {
       },
       select: (next: WorkspaceSettings) => next.organizations,
       expectedIds: ['org-new', 'org-a', 'org-z', 'org-b'],
-    },
-    {
-      event: { type: 'organizationDeleted' as const, organizationId: 'org-b' },
-      select: (next: WorkspaceSettings) => next.organizations,
-      expectedIds: ['org-z', 'org-a'],
     },
     {
       event: {
@@ -308,19 +264,6 @@ describe('workspaceSettingsModel', () => {
   });
 
   it('mirrors link-table cascades and drops folders only a deleted project held', () => {
-    const withoutOrganization = applyWorkspaceMutation(settings, {
-      type: 'organizationDeleted',
-      organizationId: 'org-a',
-    });
-    expect(
-      withoutOrganization.projects.find((project) => project.project_id === 'project-c')
-        ?.organization_ids
-    ).toEqual([]);
-    expect(
-      withoutOrganization.folders.find((folder) => folder.folder_id === 'folder-a')
-        ?.organization_ids
-    ).toEqual([]);
-
     const withoutProject = applyWorkspaceMutation(settings, {
       type: 'projectDeleted',
       projectId: 'project-b',
@@ -346,33 +289,6 @@ describe('workspaceSettingsModel', () => {
 
     expect(next.projects.map((project) => project.sort_order)).toEqual([0, 1, 2, 3]);
     expect(next.projects[0].organization_ids).toEqual(['org-a']);
-  });
-
-  it.each([
-    {
-      ids: ['a', 'b', 'c'],
-      removedId: 'b',
-      expected: 'delete-c',
-    },
-    {
-      ids: ['a', 'b', 'c'],
-      removedId: 'c',
-      expected: 'delete-b',
-    },
-    {
-      ids: ['a'],
-      removedId: 'a',
-      expected: workspaceFocusId.projectAdd,
-    },
-    {
-      ids: ['a'],
-      removedId: 'missing',
-      expected: workspaceFocusId.projectAdd,
-    },
-  ])('selects the deterministic focus successor for $removedId', ({ ids, removedId, expected }) => {
-    expect(
-      successorFocusKey(ids, removedId, (id) => `delete-${id}`, workspaceFocusId.projectAdd)
-    ).toBe(expected);
   });
 });
 

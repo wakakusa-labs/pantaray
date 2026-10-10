@@ -176,10 +176,31 @@ export function useWorkspaceSettingsController(t: Translate) {
     return project !== null;
   };
 
+  // The picker answers with the canonical path (featureRuntime.ts), the form the backend keys
+  // folders by. Creating a registered folder again would replace all of its links.
+  const findRegisteredFolder = (realPath: string) =>
+    settings?.folders.find((folder) => folder.canonical_real_path === realPath);
+
   const createFolder = async (input: WorkspaceFolderCreateInput): Promise<boolean> => {
     const displayName = input.displayName.trim();
     const realPath = input.realPath.trim();
     if (!displayName || !realPath) return false;
+    const registered = findRegisteredFolder(realPath);
+    if (registered) {
+      // A folder already in the workspace joins this project as well, keeping its other links.
+      if (input.projectIds.every((projectId) => registered.project_ids.includes(projectId)))
+        return true;
+      const linked = await commitMutation(
+        workspacePendingKey.folderLinks(registered.folder_id),
+        async () =>
+          await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
+            organizationIds: registered.organization_ids,
+            projectIds: [...new Set([...registered.project_ids, ...input.projectIds])],
+          }),
+        (updated) => ({ type: 'folderLinksUpdated', folder: updated })
+      );
+      return linked !== null;
+    }
     const folder = await commitMutation(
       workspacePendingKey.folderCreate(input.projectIds[0] ?? 'unassigned'),
       async () =>
@@ -290,8 +311,14 @@ export function useWorkspaceSettingsController(t: Translate) {
 
   /** The sidebar's ＋: a chosen folder becomes a project of its own, named after the folder. */
   const addProjectFromFolder = async (): Promise<void> => {
+    // Without the current folders a registered one could not be told apart.
+    if (!settings) return;
     const realPath = await selectFolder();
     if (!realPath) return;
+    if (findRegisteredFolder(realPath)) {
+      setErrorMessage(t('settings.workspace.folderAlreadyRegistered'));
+      return;
+    }
     const displayName = displayNameFromPath(realPath);
     const project = await commitMutation(
       workspacePendingKey.projectCreate,

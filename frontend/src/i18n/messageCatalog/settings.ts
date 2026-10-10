@@ -211,6 +211,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.loadFailed': 'Failed to load workspace settings.',
     'settings.workspace.saveFailed': 'Failed to save workspace settings.',
     'settings.workspace.selectFolderFailed': 'Failed to choose a folder.',
+    'settings.workspace.folderAlreadyRegistered': 'This folder is already registered.',
     'settings.general.title': 'General',
     'settings.screenshotCapture.title': 'Computer activity recording',
     'settings.screenshotCapture.description':
@@ -503,6 +504,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.workspace.loadFailed': 'ワークスペース設定の読み込みに失敗しました。',
     'settings.workspace.saveFailed': 'ワークスペース設定の保存に失敗しました。',
     'settings.workspace.selectFolderFailed': 'フォルダ選択に失敗しました。',
+    'settings.workspace.folderAlreadyRegistered': 'このフォルダはすでに登録されています。',
     'settings.general.title': '一般',
     'settings.screenshotCapture.title': 'コンピューター操作の記録',
     'settings.screenshotCapture.description':

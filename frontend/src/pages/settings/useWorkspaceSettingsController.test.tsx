@@ -148,7 +148,10 @@ describe('useWorkspaceSettingsController', () => {
     const deleteProject = vi.fn(async () => undefined);
     installWorkspaceApi({
       get: async () => emptySettings,
-      selectFolder: async () => ({ canceled: false, path: '/Users/me/aurora/' }),
+      selectFolder: vi
+        .fn()
+        .mockResolvedValueOnce({ canceled: false, path: '/Users/me/aurora' })
+        .mockResolvedValueOnce({ canceled: false, path: '/Users/me/billing' }),
       createProject,
       createFolder,
       deleteProject,
@@ -160,19 +163,97 @@ describe('useWorkspaceSettingsController', () => {
     expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
     expect(createFolder).toHaveBeenCalledWith({
       displayName: 'aurora',
-      realPath: '/Users/me/aurora/',
+      realPath: '/Users/me/aurora',
       organizationIds: [],
       projectIds: ['project-a'],
     });
     expect(result.current.settings?.projects).toEqual([project]);
     expect(result.current.settings?.folders).toHaveLength(1);
 
-    createFolder.mockRejectedValueOnce(new Error('already registered'));
+    createFolder.mockRejectedValueOnce(new Error('not a directory'));
     createProject.mockResolvedValueOnce({ ...project, project_id: 'project-b' });
     await act(async () => result.current.addProjectFromFolder());
     expect(deleteProject).toHaveBeenCalledWith('project-b');
     expect(result.current.settings?.projects).toEqual([project]);
     expect(result.current.errorMessage).toBe('settings.workspace.saveFailed');
+  });
+
+  it('never creates a registered folder again, whose upsert would replace its links', async () => {
+    // As create_workspace_folder does: a folder is keyed by its canonical path, and creating it
+    // again replaces every project and organization link it had.
+    const folders = [
+      {
+        folder_id: 'shared',
+        display_name: 'shared',
+        real_path: '/Users/me/shared',
+        canonical_real_path: '/Users/me/shared',
+        organization_ids: [] as string[],
+        project_ids: ['a', 'b'],
+      },
+    ];
+    const project = (projectId: string, sortOrder: number) => ({
+      project_id: projectId,
+      display_name: projectId,
+      organization_ids: [],
+      sort_order: sortOrder,
+    });
+    const createProject = vi.fn(async () => project('new', 3));
+    const createFolder = vi.fn(
+      async (input: { displayName: string; realPath: string; projectIds: string[] }) => {
+        const existing = folders.find((folder) => folder.canonical_real_path === input.realPath);
+        if (!existing) throw new Error('only the registered folder is picked here');
+        existing.project_ids = [...input.projectIds];
+        existing.organization_ids = [];
+        return { ...existing };
+      }
+    );
+    const updateFolderLinks = vi.fn(
+      async (folderId: string, links: { organizationIds: string[]; projectIds: string[] }) => {
+        const existing = folders.find((folder) => folder.folder_id === folderId)!;
+        existing.project_ids = [...links.projectIds].sort();
+        return { ...existing };
+      }
+    );
+    installWorkspaceApi({
+      get: async () => ({
+        ...emptySettings,
+        projects: [project('a', 0), project('b', 1), project('c', 2)],
+        folders: folders.map((folder) => ({ ...folder })),
+      }),
+      selectFolder: async () => ({ canceled: false, path: '/Users/me/shared' }),
+      createProject,
+      createFolder,
+      updateFolderLinks,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    // The sidebar's ＋ on it: nothing is created, its links stay, and the user is told why.
+    await act(async () => result.current.addProjectFromFolder());
+    expect(createProject).not.toHaveBeenCalled();
+    expect(createFolder).not.toHaveBeenCalled();
+    expect(folders[0].project_ids).toEqual(['a', 'b']);
+    expect(result.current.settings?.projects.map((item) => item.project_id)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(result.current.errorMessage).toBe('settings.workspace.folderAlreadyRegistered');
+
+    // Settings' "Add folder" on project c: the folder joins c and keeps a and b.
+    await act(async () => {
+      expect(
+        await result.current.createFolder({
+          displayName: 'shared',
+          realPath: '/Users/me/shared',
+          organizationIds: [],
+          projectIds: ['c'],
+        })
+      ).toBe(true);
+    });
+    expect(createFolder).not.toHaveBeenCalled();
+    expect(folders[0].project_ids).toEqual(['a', 'b', 'c']);
+    expect(result.current.settings?.folders[0].project_ids).toEqual(['a', 'b', 'c']);
   });
 
   it('removes a project with the folders only it holds, keeping a folder another project shares', async () => {

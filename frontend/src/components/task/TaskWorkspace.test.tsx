@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -73,7 +73,10 @@ async function renderFinishedTask() {
   return rendered;
 }
 
-const chip = (name: string) => screen.getByRole('button', { name: new RegExp(name) });
+const chip = (name: string) =>
+  within(screen.getByRole('group', { name: 'この作業の成果物' })).getByRole('button', {
+    name: new RegExp(name),
+  });
 
 /** Opens the preview's 開く menu and lists its items. */
 function openMenu(): HTMLElement[] {

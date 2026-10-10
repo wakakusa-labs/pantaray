@@ -17,6 +17,7 @@ export type WorkspaceMutationEvent =
   | { type: 'organizationCreated'; organization: WorkspaceOrganization }
   | { type: 'organizationDeleted'; organizationId: string }
   | { type: 'projectCreated'; project: WorkspaceProject }
+  | { type: 'projectRenamed'; project: WorkspaceProject }
   | { type: 'projectDeleted'; projectId: string }
   | { type: 'folderCreated'; folder: WorkspaceFolder }
   | { type: 'folderDeleted'; folderId: string }
@@ -93,6 +94,7 @@ export function applyWorkspaceMutation(
         })),
       };
     case 'projectCreated':
+    case 'projectRenamed':
     case 'projectLinksUpdated':
       return {
         ...settings,

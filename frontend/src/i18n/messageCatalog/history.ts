@@ -17,6 +17,8 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.projects.deleteConfirmTitle': 'Delete {name}?',
     'history.projects.deleteConfirmBody':
       'It leaves this list. The files in its folder stay as they are.',
+    'history.projects.nameTaken': 'A project named {name} already exists.',
+    'history.projects.openFailed': 'Couldn’t open the folder.',
     'history.loadFailedPrefix': 'Failed to load history:',
     'history.error.bridgeUnavailable': 'The desktop history bridge is unavailable.',
     'history.error.runtimeUnavailable': 'The local runtime is unavailable.',
@@ -123,6 +125,8 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.projects.deleteConfirmTitle': '{name} を削除しますか？',
     'history.projects.deleteConfirmBody':
       '一覧から外れます。フォルダのファイルはそのまま残ります。',
+    'history.projects.nameTaken': '{name} という名前のプロジェクトがすでにあります。',
+    'history.projects.openFailed': 'フォルダを開けませんでした。',
     'history.loadFailedPrefix': '履歴の読み込みに失敗しました:',
     'history.error.bridgeUnavailable': '提案履歴の取得に必要なブリッジが利用できません。',
     'history.error.runtimeUnavailable': 'ローカル実行基盤が利用できません。',

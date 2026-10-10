@@ -44,6 +44,7 @@ export type WorkspacePendingKey =
   | `organization:delete:${string}`
   | `project:delete:${string}`
   | `project:links:${string}`
+  | `project:rename:${string}`
   | `folder:create:${string}`
   | `folder:delete:${string}`
   | `folder:links:${string}`;
@@ -55,6 +56,7 @@ export const workspacePendingKey = {
   projectCreate: 'project:create' as WorkspacePendingKey,
   projectDelete: (projectId: string): WorkspacePendingKey => `project:delete:${projectId}`,
   projectLinks: (projectId: string): WorkspacePendingKey => `project:links:${projectId}`,
+  projectRename: (projectId: string): WorkspacePendingKey => `project:rename:${projectId}`,
   folderCreate: (projectId: string): WorkspacePendingKey => `folder:create:${projectId}`,
   folderDelete: (folderId: string): WorkspacePendingKey => `folder:delete:${folderId}`,
   folderLinks: (folderId: string): WorkspacePendingKey => `folder:links:${folderId}`,
@@ -295,7 +297,11 @@ export function useWorkspaceSettingsController(t: Translate) {
 
   const updateProjectOrganizations = locked(
     false,
-    async (projectId: string, organizationIds: string[], focus: FocusRequest): Promise<boolean> => {
+    async (
+      projectId: string,
+      organizationIds: string[],
+      focus?: FocusRequest
+    ): Promise<boolean> => {
       const project = await commitMutation(
         workspacePendingKey.projectLinks(projectId),
         async () =>
@@ -422,6 +428,46 @@ export function useWorkspaceSettingsController(t: Translate) {
     return removed !== null;
   });
 
+  /** A name another project has is refused here: the backend keeps project names unique. */
+  const renameProject = locked(false, async (projectId: string, displayName: string) => {
+    const name = displayName.trim();
+    const project = settings?.projects.find((candidate) => candidate.project_id === projectId);
+    if (!settings || !project || !name) return false;
+    if (name === project.display_name) return true;
+    if (settings.projects.some((candidate) => candidate.display_name === name)) {
+      setErrorMessage(t('history.projects.nameTaken', { name }));
+      return false;
+    }
+    const renamed = await commitMutation(
+      workspacePendingKey.projectRename(projectId),
+      async () =>
+        await requireWorkspaceSettingsApi().renameProject(projectId, { displayName: name }),
+      (updated) => ({ type: 'projectRenamed', project: updated })
+    );
+    return renamed !== null;
+  });
+
+  // Holds the lock from before the dialog opens, so nothing changes the folder meanwhile.
+  const addFolderToProject = locked(false, async (projectId: string) => {
+    const realPath = await selectFolder();
+    if (!realPath) return false;
+    return await linkOrCreateFolder({
+      displayName: displayNameFromPath(realPath),
+      realPath,
+      organizationIds: [],
+      projectIds: [projectId],
+    });
+  });
+
+  const openFolder = async (folderId: string): Promise<void> => {
+    setErrorMessage(null);
+    try {
+      await requireWorkspaceSettingsApi().openFolder(folderId);
+    } catch {
+      setErrorMessage(t('history.projects.openFailed'));
+    }
+  };
+
   const previewProjectOrder = (projects: WorkspaceSettings['projects']) => {
     dispatchSettings({
       type: 'projectsOrderPreview',
@@ -466,6 +512,7 @@ export function useWorkspaceSettingsController(t: Translate) {
   }, []);
 
   return {
+    addFolderToProject,
     addOrganization,
     addProjectFromFolder,
     assignFolderToProject,
@@ -478,9 +525,11 @@ export function useWorkspaceSettingsController(t: Translate) {
     dragController,
     errorMessage,
     focusRequest,
+    openFolder,
     pending,
     clearFocusRequest,
     removeProject,
+    renameProject,
     selectFolder,
     settings,
     showLoading,

@@ -299,9 +299,10 @@ it('shows the chat in the pane beside the sidebar of the chat row and the tasks'
   expect(chatRow).toHaveAttribute('aria-current', 'true');
   expect(within(sidebar).getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
   expect(within(sidebar).getByRole('searchbox', { name: '作業を検索' })).toBeInTheDocument();
+  // A running task's row is its title on screen, and says it is running to assistive technology.
   expect(
     await within(sidebar).findByRole('button', { name: /^見積書のたたき台を作る/ })
-  ).toHaveTextContent('実行中');
+  ).toHaveAccessibleName('見積書のたたき台を作る 実行中');
 
   const chat = await screen.findByRole('list', { name: 'Pantaray とのチャット' });
   expect(sidebar).not.toContainElement(chat);

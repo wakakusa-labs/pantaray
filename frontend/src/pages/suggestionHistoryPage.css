@@ -296,7 +296,17 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #7dabdc;
+  background: var(--fog-light);
+}
+
+/* Read out with the title only; the live line shows a running task on screen. */
+.history-item-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .history-item-live {

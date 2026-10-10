@@ -21,12 +21,26 @@ import type { MessageKey } from '@/i18n/types';
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import HistorySearchField from './HistorySearchField';
 import { NewWorkButton } from './NewWorkButton';
-import { badgeClassName, getHistoryItemStatusMeta } from './statusTokens';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
 const CHAT_UNREAD_ID = 'history-chat-unread';
 const MAX_SHOWN_UNREAD = 99;
+
+/**
+ * Why a row needs the user's eye, for its dot: an Action waiting for approval, a suggestion waiting
+ * for an answer, or a completion not viewed yet. Null for a row that needs nothing.
+ */
+function attentionLabelKey(
+  item: ConversationHistoryListItem,
+  completionUnread: boolean
+): MessageKey | null {
+  if (item.status === 'approval_pending')
+    return item.kind === 'suggestion'
+      ? 'history.attention.suggestion'
+      : 'history.status.approvalPending';
+  return completionUnread ? 'history.unread' : null;
+}
 
 /**
  * A running or approval-waiting conversation is one whose own run the backend refuses to delete
@@ -262,28 +276,27 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
               </li>,
               ...day.items.map((item) => {
                 const identity = itemIdentity(item);
-                const statusMeta = getHistoryItemStatusMeta(item);
+                const attention = attentionLabelKey(item, isUnread(item));
                 const liveStage =
                   item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
                 const content = (
                   <>
                     <span className="history-item-head">
                       <span className="history-item-title">{item.title}</span>
-                      {isUnread(item) ? (
+                      {item.kind === 'conversation' && item.status === 'running' ? (
+                        // Heard, not seen: the live line shows the running task, out of hearing.
+                        <span className="history-item-status">{t('history.status.running')}</span>
+                      ) : null}
+                      {attention ? (
                         <span
                           className="history-item-unread"
                           role="img"
-                          aria-label={t('history.unread')}
+                          aria-label={t(attention)}
                         />
-                      ) : null}
-                      {statusMeta ? (
-                        <span className={badgeClassName(statusMeta.tone)}>
-                          {t(statusMeta.labelKey)}
-                        </span>
                       ) : null}
                     </span>
                     {liveStage ? (
-                      // Visual only: it changes on every step, and the badge carries the status.
+                      // Visual only: it changes on every step.
                       <span className="history-item-live" aria-hidden="true">
                         {liveStageText(liveStage, language, t)}
                       </span>

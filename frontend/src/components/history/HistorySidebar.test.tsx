@@ -217,10 +217,8 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
       'history.day.yesterday',
       '9月29日',
     ]);
-    // A row is its title and badge; the day heading carries the date.
-    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(
-      /^T1history.status.suggestion$/
-    );
+    // A row is its title; the day heading carries the date.
+    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(/^T1$/);
     expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
     expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');
   } finally {
@@ -291,10 +289,10 @@ it('Overlay起動失敗を通知し、追加読み込みと検索に応答する
   await waitFor(() => expect(mocks.setSearchText).toHaveBeenCalledWith('😀'.repeat(256)));
 });
 
-it('バッジは実行中・確認待ち・提案に出し、終わった会話には出さない', () => {
+it('行はバッジを出さず、確認待ち・返事待ちの提案・未読の完了にだけ理由つきの点を出す', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
-  mocks.unreadActionId = null;
+  mocks.unreadActionId = 'A-unread';
   mocks.itemsOverride = [
     {
       kind: 'conversation',
@@ -321,25 +319,61 @@ it('バッジは実行中・確認待ち・提案に出し、終わった会話�
       latest_completion_event_id: null,
     },
     {
+      kind: 'conversation',
+      action_id: 'A-unread',
+      title: 'Unread',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'idle',
+      latest_completion_event_id: 'C1',
+    },
+    {
       kind: 'suggestion',
       suggestion_id: 'S-offer',
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
     },
+    {
+      kind: 'suggestion',
+      suggestion_id: 'S-decided',
+      title: 'Decided',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'idle',
+    },
   ];
   const { container } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
     wrapper: SidebarWrapper,
   });
 
-  // Blue while running; amber while it waits on the user, for an approval or an answer.
+  expect(container.querySelector('.badge')).toBeNull();
+  const dotOf = (title: string) =>
+    screen
+      .getByRole('button', { name: new RegExp(`^${title}`) })
+      .querySelector('[role="img"]')
+      ?.getAttribute('aria-label') ?? null;
   expect(
-    [...container.querySelectorAll('.badge')].map((badge) => [badge.textContent, badge.className])
+    ['Running', 'Approval', 'Idle', 'Unread', 'Offer', 'Decided'].map((title) => [
+      title,
+      dotOf(title),
+    ])
   ).toEqual([
-    ['history.status.running', 'badge badge--info'],
-    ['history.status.approvalPending', 'badge badge--warning'],
-    ['history.status.suggestion', 'badge badge--warning'],
+    ['Running', null],
+    ['Approval', 'history.status.approvalPending'],
+    ['Idle', null],
+    ['Unread', 'history.unread'],
+    ['Offer', 'history.attention.suggestion'],
+    ['Decided', null],
   ]);
+  // A row shows its title alone; the reason, and that a task is running, are heard.
+  expect(screen.getByRole('button', { name: /^Approval/ })).toHaveTextContent(/^Approval$/);
+  expect(screen.getByRole('button', { name: /^Running/ })).toHaveAccessibleName(
+    'Running history.status.running'
+  );
+  expect(screen.getByRole('button', { name: /^Idle/ })).toHaveAccessibleName('Idle');
+  expect(screen.getByRole('button', { name: /^Offer/ })).toHaveAccessibleName(
+    'Offer history.attention.suggestion'
+  );
+  expect(HISTORY_MESSAGES.ja['history.attention.suggestion']).toBe('返事待ちの提案');
 });
 
 it('チャットの行は表示中として示し、未読の件数を数字と説明で伝える', () => {
@@ -483,7 +517,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
   expect(screen.getByRole('button', { name: /^A1/ })).toBe(row);
   expect(row).toHaveFocus();
 
-  // While an approval is pending the badge says so; the line would only repeat it.
+  // While an approval is pending the dot says so; the line would only repeat it.
   publish(
     liveUpdate(found, [
       {

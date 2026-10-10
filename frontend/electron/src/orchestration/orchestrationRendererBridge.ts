@@ -486,6 +486,7 @@ export function createOrchestrationRendererBridge(params: {
   return {
     acceptAction,
     adoptSuggestionSnapshot: suggestionRecords.adoptPersisted,
+    recordSuggestionReply: suggestionRecords.recordReply,
     forwardEventToRenderers,
     forwardStatusToRenderers,
     getOverlaySnapshot: suggestionRecords.getSnapshot,

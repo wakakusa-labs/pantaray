@@ -101,7 +101,6 @@ export type HistoryChangedPayload =
 export type NotificationIpcHandlers = {
   onResizeNotificationWindow: (event: unknown, payload: unknown) => void;
   onNotificationActionAccept: (event: unknown, payload: unknown) => void;
-  onNotificationActionReject: (event: unknown, payload: unknown) => void;
   onNotificationHide: (event: unknown) => void;
   onNotificationStopAction: (event: unknown) => void;
   onOverlayInteraction: (event: unknown) => void;

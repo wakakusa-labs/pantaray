@@ -330,14 +330,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     if (interactionContractRef.current !== 'action_offer') return;
     if (reactionStateRef.current !== null) return;
     dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    try {
-      window.electron?.agentOverlay?.rejectAction({
-        id: 'some-notification-id',
-        action: 'dismiss',
-      });
-    } catch {
-      // no-op
-    }
+    // The Overlay stays open: the user may still say why, or ask for something else.
     const sid = suggestionIdRef.current;
     if (sid) {
       window.electron?.orchestration?.send({

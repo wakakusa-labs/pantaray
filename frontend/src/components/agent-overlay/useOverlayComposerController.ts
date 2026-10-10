@@ -172,6 +172,22 @@ export function useOverlayComposerController({
     void actions
       .submitMessage(request)
       .then((result) => {
+        if (result.kind === 'reply_exists') {
+          // The suggestion already has its conversation: open that one, keeping the draft for it.
+          setComposer((current) =>
+            current.submissionStartFence?.messageId === messageId
+              ? {
+                  ...current,
+                  submission: null,
+                  submissionStartFence: null,
+                  failureKind: null,
+                  refreshState: 'idle',
+                  initialActionId: result.actionId,
+                }
+              : current
+          );
+          return;
+        }
         if (result.kind !== 'submitted') {
           setComposer((current) => {
             if (current.submissionStartFence?.messageId !== messageId) return current;

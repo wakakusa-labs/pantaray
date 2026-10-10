@@ -154,7 +154,6 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
         return {
           onResizeNotificationWindow: () => {},
           onNotificationActionAccept: () => {},
-          onNotificationActionReject: () => {},
           onNotificationHide: () => {},
           onNotificationStopAction: () => {},
           onOverlayInteraction: () => {},
@@ -302,7 +301,6 @@ test('IPC registration: window:move rejects invalid payload', async () => {
       createNotificationIpcHandlers: () => ({
         onResizeNotificationWindow: () => {},
         onNotificationActionAccept: () => {},
-        onNotificationActionReject: () => {},
         onNotificationHide: () => {},
         onNotificationStopAction: () => {},
         onOverlayInteraction: () => {},

@@ -54,7 +54,6 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
 const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'resize-notification-window',
   'notification-action-accept',
-  'notification-action-reject',
   'notification-hide',
   'notification-stop-action',
   'overlay:recordInteraction',

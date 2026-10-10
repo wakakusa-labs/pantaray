@@ -426,6 +426,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         enqueueResumeRequest: (payload) => orchestration.enqueueResumeRequest(payload),
         resolveOverlayBootstrap,
         adoptSuggestionSnapshot: orchestration.adoptSuggestionSnapshot,
+        recordSuggestionReply: orchestration.recordSuggestionReply,
         submitApprovalDecision: async (payload) => {
           const subjectId = getUserId();
           if (subjectId === null) throw new Error('Missing authenticated user id.');

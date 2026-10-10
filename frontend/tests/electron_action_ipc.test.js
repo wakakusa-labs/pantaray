@@ -408,3 +408,72 @@ function validSubmit() {
     },
   };
 }
+
+function replySubmit() {
+  return {
+    target: {
+      kind: 'new',
+      approval_mode: 'prompt_each_time',
+      reply_to_suggestion_id: 'sug-1',
+    },
+    message: { version: 1, message_id: 'message-1', content: 'Only the summary', images: [] },
+  };
+}
+
+test('A reply tells every window which Action it opened for the suggestion', async () => {
+  const calls = [];
+  const invoke = register(
+    {
+      submitMessage: async () => MESSAGE_RESPONSE,
+      registerActionAssociation: (actionId) => calls.push(`bind:${actionId}`),
+      refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+    },
+    {
+      recordSuggestionReply: (suggestionId, actionId) =>
+        calls.push(`reply:${suggestionId}:${actionId}`),
+    }
+  );
+
+  await invoke('action:submitMessage', replySubmit());
+
+  assert.deepEqual(calls, ['reply:sug-1:action-1', 'bind:action-1', 'refresh:action-1']);
+});
+
+test('A reply refused because the suggestion has its conversation opens that conversation', async () => {
+  for (const existing of ['action-existing', null]) {
+    const calls = [];
+    const invoke = register(
+      {
+        submitMessage: async () => {
+          throw new LocalBackendRequestError('replied', 409, 'ActionConflict');
+        },
+        registerActionAssociation: (actionId) => calls.push(`bind:${actionId}`),
+        refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+      },
+      {
+        resolveOverlayBootstrap: async (suggestionId) => {
+          calls.push(`read:${suggestionId}`);
+          return { snapshot: { actionId: existing } };
+        },
+        recordSuggestionReply: (suggestionId, actionId) =>
+          calls.push(`reply:${suggestionId}:${actionId}`),
+        resumeLiveProcess: () => calls.push('resume'),
+      }
+    );
+
+    const result = await invoke('action:submitMessage', replySubmit());
+
+    if (existing) {
+      assert.deepEqual(result, { kind: 'reply_exists', actionId: existing });
+      assert.deepEqual(calls, [
+        'read:sug-1',
+        `reply:sug-1:${existing}`,
+        `bind:${existing}`,
+        `refresh:${existing}`,
+      ]);
+    } else {
+      assert.deepEqual(result, { kind: 'action_conflict' });
+      assert.deepEqual(calls, ['read:sug-1']);
+    }
+  }
+});

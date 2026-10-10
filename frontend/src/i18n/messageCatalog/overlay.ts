@@ -11,6 +11,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.label': 'Message',
     'overlay.composer.open': 'Reply to this suggestion',
     'overlay.composer.placeholder': 'Send a message',
+    'overlay.composer.dismissedPlaceholder':
+      'Add a reason, or what you would like instead (optional)',
     'overlay.composer.send': 'Send',
     'overlay.composer.sending': 'Sending…',
     'overlay.composer.stop': 'Stop',
@@ -132,6 +134,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.label': 'メッセージ',
     'overlay.composer.open': 'この提案に返信',
     'overlay.composer.placeholder': 'メッセージを入力',
+    'overlay.composer.dismissedPlaceholder': '理由や、代わりに頼みたいことを書く（任意）',
     'overlay.composer.send': '送信',
     'overlay.composer.sending': '送信中…',
     'overlay.composer.stop': '停止',

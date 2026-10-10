@@ -406,7 +406,6 @@ declare global {
         /** Brings the main window forward on this Action's latest chat card. */
         showChat?: (request: { actionId: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
-        rejectAction: (data: unknown) => void;
         hide: () => void;
         stopAction: () => void;
       };

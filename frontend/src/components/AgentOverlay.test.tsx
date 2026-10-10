@@ -13,6 +13,7 @@ import type {
   ActionMessageSubmitResult,
 } from '../../electron/src/actions/actionContracts';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type { OrchestrationServerEvent } from '../../electron/src/orchestration/contracts';
 
 import type { OverlaySnapshotPayload } from './agent-overlay/model/overlayTypes';
 
@@ -234,6 +235,7 @@ function createStartedResult(actionId: string, messageId: string): ActionMessage
 
 describe('AgentOverlay broader E2E', () => {
   let snapshotListener: ((payload: unknown) => void) | null = null;
+  let eventListener: ((event: OrchestrationServerEvent) => void) | null = null;
   let conversationListener: ((payload: ActionLiveUpdate) => void) | null;
   let retainedConversationUpdate: ConversationUpdate | null;
   let focusComposerListener: (() => void) | null;
@@ -324,6 +326,7 @@ describe('AgentOverlay broader E2E', () => {
       source: 'user_default',
     });
     snapshotListener = null;
+    eventListener = null;
     conversationListener = null;
     retainedConversationUpdate = null;
     focusComposerListener = null;
@@ -369,7 +372,12 @@ describe('AgentOverlay broader E2E', () => {
           openWorkspaceSettings,
         },
         orchestration: {
-          onEvent: () => () => {},
+          onEvent: (cb: typeof eventListener) => {
+            eventListener = cb;
+            return () => {
+              if (eventListener === cb) eventListener = null;
+            };
+          },
           onStatus: () => () => {},
           acceptAction,
           send: sendOrchestration,
@@ -1379,6 +1387,144 @@ describe('AgentOverlay broader E2E', () => {
       conversationListener?.(createConversationUpdate('older', true, 'act-comment'))
     );
     expect(screen.queryByText('Just a comment, nothing to approve')).toBeNull();
+  });
+
+  it('keeps the composer after a dismissal, and a message replies to the dismissed suggestion', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000043';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
+    submitMessage.mockResolvedValueOnce(createStartedResult('act-after-dismissal', messageId));
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const offer = createCommentOnlySnapshot();
+    Object.assign(offer.snapshot, {
+      suggestionId: 'sug-offer',
+      interactionContract: 'action_offer',
+      suggestionText: 'Draft the invoice?',
+    });
+    await act(async () => snapshotListener?.(offer));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
+    expect(sendOrchestration).toHaveBeenCalledWith({
+      event: 'dismiss_suggestion',
+      data: { suggestion_id: 'sug-offer' },
+    });
+    await act(async () =>
+      eventListener?.({
+        event: 'suggestion_reaction_committed',
+        data: {
+          suggestion_id: 'sug-offer',
+          reaction: 'rejected',
+          committed_at: '2026-03-08T00:00:01Z',
+        },
+        meta: { suggestion_id: 'sug-offer' },
+        sequence: 4,
+      })
+    );
+
+    // Nothing written yet: the dismissal stands, and the composer waits for words.
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    expect(screen.getByText('Draft the invoice?')).toBeInTheDocument();
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    expect(composer).toHaveAttribute(
+      'placeholder',
+      'Add a reason, or what you would like instead (optional)'
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(submitMessage).not.toHaveBeenCalled();
+    expect(sendOrchestration).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(composer, { target: { value: 'Only the summary, please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submitMessage).toHaveBeenCalledWith({
+      target: {
+        kind: 'new',
+        approval_mode: 'prompt_each_time',
+        reply_to_suggestion_id: 'sug-offer',
+      },
+      message: {
+        version: 1,
+        message_id: messageId,
+        content: 'Only the summary, please',
+        images: [],
+        language: 'en',
+        project_refs: [],
+        files: [],
+      },
+    });
+    expect(acceptAction).not.toHaveBeenCalled();
+  });
+
+  it('follows a reply to a dismissed suggestion, sent here or found already open', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const dismissed = createCommentOnlySnapshot();
+    Object.assign(dismissed.snapshot, {
+      interactionContract: 'action_offer',
+      reactionState: 'rejected',
+      isLive: false,
+    });
+    await act(async () => snapshotListener?.(dismissed));
+    // The backend already holds this suggestion's conversation, which this panel had not heard of.
+    submitMessage.mockResolvedValueOnce({ kind: 'reply_exists', actionId: 'act-existing' });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Also this' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+
+    // That conversation opens, and the draft waits to be sent into it.
+    await act(async () =>
+      conversationListener?.(createConversationUpdate(null, false, 'act-existing'))
+    );
+    expect(screen.getByText('canonical final output')).toBeInTheDocument();
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    expect(composer).toHaveValue('Also this');
+    expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    submitMessage.mockResolvedValueOnce(createSubmittedResult('act-existing', 'follow-up'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submitMessage.mock.calls[1][0].target).toEqual({
+      kind: 'existing',
+      action_id: 'act-existing',
+      expected_process_id: null,
+    });
+  });
+
+  it('stops offering a new reply once the other window replied to the dismissed suggestion', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const dismissed = createCommentOnlySnapshot();
+    Object.assign(dismissed.snapshot, {
+      interactionContract: 'action_offer',
+      reactionState: 'rejected',
+      isLive: false,
+    });
+    await act(async () => snapshotListener?.(dismissed));
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
+      'placeholder',
+      'Add a reason, or what you would like instead (optional)'
+    );
+
+    const replied = structuredClone(dismissed);
+    replied.snapshot.actionId = 'act-reply';
+    await act(async () => snapshotListener?.(replied));
+
+    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+    await act(async () =>
+      conversationListener?.(createConversationUpdate(null, false, 'act-reply'))
+    );
+    expect(screen.getByText('canonical final output')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
+      'placeholder',
+      'Send a message'
+    );
+    expect(submitMessage).not.toHaveBeenCalled();
   });
 
   it('approves with images and consent, blocks pending uploads and invalid instructions, and preserves a failed request', async () => {

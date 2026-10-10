@@ -285,6 +285,8 @@ export type MainContext = {
     resolveOverlayBootstrap: (suggestionId: string) => Promise<OverlayBootstrapResponse | null>;
     /** Stores a persisted suggestion snapshot in main's record; returns what the record holds. */
     adoptSuggestionSnapshot: (snapshot: OverlaySnapshot) => OverlaySnapshot;
+    /** Tells every window showing the suggestion which Action a reply to it opened. */
+    recordSuggestionReply: (suggestionId: string, actionId: string) => void;
     submitApprovalDecision: (payload: SubmitApprovalDecisionPayload) => Promise<void>;
     getActionApprovalMode: (actionId: string) => Promise<ActionApprovalModeResponse>;
     setActionApprovalMode: (

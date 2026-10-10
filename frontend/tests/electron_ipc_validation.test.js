@@ -155,7 +155,6 @@ function buildCtx(overrides = {}) {
       createNotificationIpcHandlers: () => ({
         onResizeNotificationWindow: () => {},
         onNotificationActionAccept: () => {},
-        onNotificationActionReject: () => {},
         onNotificationHide: () => {},
         onNotificationStopAction: () => {},
         onOverlayInteraction: () => {},

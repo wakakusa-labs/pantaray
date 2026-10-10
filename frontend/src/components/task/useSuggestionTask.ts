@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useI18n } from '@/context/useI18n';
 import type { OverlaySnapshot } from '../../../electron/src/orchestration/contracts';
@@ -8,11 +8,13 @@ import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
 
 /**
- * Why the last start did not happen. `accept_failed` is the accept call itself failing (main sent
- * nothing, or put its record back); the other two are the backend's answer to `execute_action`.
+ * Why the last answer did not go through. `accept_failed` is the accept call itself failing (main
+ * sent nothing, or put its record back); `preflight_rejected` and `start_failed` are the backend's
+ * answer to `execute_action`; `dismiss_failed` is its error answer to `dismiss_suggestion`.
  */
 export type SuggestionStartFailure =
   | { stage: 'accept_failed' }
+  | { stage: 'dismiss_failed' }
   | { stage: 'preflight_rejected' | 'start_failed'; message: string | null };
 
 export type SuggestionTaskPhase =
@@ -113,11 +115,27 @@ export function useSuggestionTask(suggestionId: string) {
     };
   }, [suggestions, suggestionId]);
 
-  // main's record does not keep why a start failed; the backend's error event says it.
+  // The suggestion this pane sent dismiss_suggestion for and has no answer to yet.
+  const dismissingRef = useRef<string | null>(null);
+
+  // main's record keeps neither why a start failed nor that a dismissal did; the backend's error
+  // events say it.
   useEffect(() => {
     if (!orchestration?.onEvent) return;
     return orchestration.onEvent((event) => {
-      if (!isErrorEvent(event) || !isActionErrorMeta(event.meta)) return;
+      if (!isErrorEvent(event)) return;
+      // The backend answers a dismissal it could not read or save with a suggestion error.
+      if (
+        event.meta?.kind === 'suggestion' &&
+        event.meta.suggestion_id === suggestionId &&
+        dismissingRef.current === suggestionId
+      ) {
+        dismissingRef.current = null;
+        setPending(null);
+        setFailure({ suggestionId, value: { stage: 'dismiss_failed' } });
+        return;
+      }
+      if (!isActionErrorMeta(event.meta)) return;
       const { stage, suggestion_id } = event.meta;
       if (suggestion_id !== suggestionId) return;
       if (stage !== 'preflight_rejected' && stage !== 'start_failed') return;
@@ -184,7 +202,10 @@ export function useSuggestionTask(suggestionId: string) {
   const canDismiss = phase === 'actionable' && contract === 'action_offer';
   const dismiss = () => {
     if (!canDismiss || !orchestration) return;
+    // ws:send is fire-and-forget: a transport failure in main never reaches this window.
+    dismissingRef.current = suggestionId;
     setPending({ suggestionId, value: 'dismiss' });
+    setFailure(null);
     orchestration.send({ event: 'dismiss_suggestion', data: { suggestion_id: suggestionId } });
   };
 

@@ -52,6 +52,25 @@ function actionError(
   };
 }
 
+// The shape the backend's dismiss handler sends when it cannot read or save the suggestion.
+function suggestionError(stage: string, suggestionId = 'sug-1'): OrchestrationServerEvent {
+  return {
+    event: 'error',
+    data: {
+      error_type: 'internal_error',
+      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+      error_message: 'Failed to persist suggestion state.',
+      severity: 'error',
+    },
+    meta: {
+      kind: 'suggestion',
+      suggestion_id: suggestionId,
+      stage,
+      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+    },
+  };
+}
+
 let snapshotListener: ((payload: OverlaySnapshotPayload) => void) | null;
 let eventListener: ((event: OrchestrationServerEvent) => void) | null;
 const read = vi.fn<NonNullable<ElectronBridge['suggestions']>['read']>();
@@ -226,6 +245,28 @@ describe('SuggestionTaskPane', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
+  });
+
+  it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {
+    await renderPane();
+    // A suggestion error the pane did not cause leaves it as it is.
+    await emit(suggestionError('load_state_failed'));
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(dismissButton());
+    await emit(suggestionError('load_state_failed', 'sug-2'));
+    expect(dismissButton()).toBeDisabled();
+    await emit(suggestionError('persist_status_failed'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not dismiss this suggestion. Try again.'
+    );
+    expect(acceptButton()).toBeEnabled();
+    expect(dismissButton()).toBeEnabled();
+    expect(screen.getByLabelText('Additional instructions (optional)')).toBeInTheDocument();
+    fireEvent.click(dismissButton());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('returns to actionable with the error after preflight_rejected', async () => {

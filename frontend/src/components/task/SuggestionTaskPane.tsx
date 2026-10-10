@@ -18,6 +18,7 @@ const COPY = {
     starting: 'Starting',
     dismissed: 'You dismissed this suggestion.',
     notStarted: 'This could not be started. Try again.',
+    dismissFailed: 'Could not dismiss this suggestion. Try again.',
   },
   ja: {
     loading: '提案を読み込んでいます',
@@ -25,6 +26,7 @@ const COPY = {
     starting: '開始しています',
     dismissed: 'この提案は見送りました。',
     notStarted: '開始できませんでした。もう一度お試しください。',
+    dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
   },
 } as const;
 
@@ -78,8 +80,10 @@ export function SuggestionTaskPane({
   const failureText = (current: SuggestionStartFailure) =>
     current.stage === 'accept_failed'
       ? t('overlay.acceptFailed')
-      : (current.message ??
-        (current.stage === 'start_failed' ? t('common.unexpectedError') : copy.notStarted));
+      : current.stage === 'dismiss_failed'
+        ? copy.dismissFailed
+        : (current.message ??
+          (current.stage === 'start_failed' ? t('common.unexpectedError') : copy.notStarted));
 
   return (
     <section className="suggestion-task" aria-labelledby={titleId}>

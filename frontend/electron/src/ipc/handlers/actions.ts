@@ -131,10 +131,17 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     const parsed = parseInput(ActionMessageRequestSchema, 'action:submitMessage', request);
     const replyTo =
       parsed.target.kind === 'new' ? (parsed.target.reply_to_suggestion_id ?? null) : null;
-    // A composer shares nothing while its send is out; how the send ends settles the task's draft.
+    // The task's draft is cleared as its words go out and settled by how the send ends. The new
+    // task's draft is the main window's: the small New task window keeps its own.
     const owner = ctx.actions.getCurrentSubjectId();
+    const mainWindow = ctx.windows.getMainWindow();
+    const fromMainWindow =
+      mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.webContents === event.sender;
+    const work = sendWork(parsed);
+    const drafted = owner !== null && (work !== 'new' || fromMainWindow);
+    if (drafted) ctx.taskDrafts.clearForSend(owner, work);
     const settle = (outcome: TaskSendOutcome) => {
-      if (owner !== null) ctx.taskDrafts.settleSend(owner, sendWork(parsed), parsed, outcome);
+      if (drafted) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
     };
     try {
       const result = await openUserTurn(

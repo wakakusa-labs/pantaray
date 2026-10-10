@@ -311,8 +311,12 @@ test('How a send ends settles the task draft, also with its window gone', async 
     attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
   };
 
+  // The words leave the draft as they go out: no window offers them while the send is out.
+  taskDrafts.update('user-1', 'action:action-1', { ...words, retry: null }, 8);
+  heard.length = 0;
   await send(async () => MESSAGE_RESPONSE);
-  assert.deepEqual(heard, []);
+  assert.deepEqual(heard, [{ work: 'action:action-1', draft: null }]);
+  heard.length = 0;
 
   // The response was lost: only this exact request, deduped by its message_id, may follow.
   await assert.rejects(
@@ -327,19 +331,47 @@ test('How a send ends settles the task draft, also with its window gone', async 
   await send(async () => MESSAGE_RESPONSE);
   assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
 
-  // Refused: the words come back as a plain draft, unless a newer one was written meanwhile.
+  // Refused: the words come back as a plain draft.
   await send(async () => {
     throw new LocalBackendRequestError('stale process', 409, 'ExpectedProcessConflict');
   });
   assert.deepEqual(heard.at(-1).draft, { ...words, retry: null });
-  taskDrafts.update('user-1', 'action:action-1', { ...words, text: 'newer', retry: null }, 7);
-  const count = heard.length;
+
+  // Another window wrote a newer draft while the send was out: the newer draft wins.
+  const newer = { ...words, text: 'newer', retry: null };
   await assert.rejects(
     send(async () => {
+      taskDrafts.update('user-1', 'action:action-1', newer, 8);
       throw new Error('socket hang up');
     })
   );
-  assert.equal(heard.length, count);
+  assert.deepEqual(heard.at(-1).draft, newer);
+  assert.deepEqual(taskDrafts.open('user-1', 'action:action-1', { id: 9, send() {} }), newer);
+});
+
+test("Only the main window's new-task send touches the new task's draft", async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const newTask = { text: 'Tidy the notes', mentions: [], attachments: [], retry: null };
+  taskDrafts.open('user-1', 'new', { id: 7, send: () => {} });
+  taskDrafts.update('user-1', 'new', newTask, 7);
+  const request = {
+    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    message: { version: 1, message_id: 'message-1', content: 'Other words', images: [] },
+  };
+  const fail = async () => {
+    throw new Error('socket hang up');
+  };
+  const read = () => taskDrafts.open('user-1', 'new', { id: 9, send: () => {} });
+
+  // The small New task window keeps its own draft.
+  await assert.rejects(
+    register({ submitMessage: fail }, {}, null, taskDrafts)('action:submitMessage', request)
+  );
+  assert.deepEqual(read(), newTask);
+
+  const fromMain = register({ submitMessage: fail }, {}, mainWindowOf(MAIN_SENDER), taskDrafts);
+  await assert.rejects(fromMain('action:submitMessage', request, MAIN_SENDER));
+  assert.equal(read().retry.message.message_id, 'message-1');
 });
 
 function mainWindowOf(webContents) {

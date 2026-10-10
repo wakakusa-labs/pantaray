@@ -111,6 +111,18 @@ export function createTaskDraftStore(params: {
     },
 
     /**
+     * A send of the task's words has gone out: no window offers them as unsent meanwhile. The
+     * composer that sent writes nothing until the send is settled, so a draft another window
+     * writes meanwhile is the newer one.
+     */
+    clearForSend(owner: string, work: TaskDraftWork): void {
+      if (owner !== ownerId || !drafts.delete(work)) return;
+      for (const subscriber of subscribers.get(work)?.values() ?? []) {
+        subscriber.send('action:draftChanged', { work, draft: null });
+      }
+    },
+
+    /**
      * Settles the task's draft by how a send ended, also when the window that sent it is gone:
      * a send that went through clears the draft that still offers it as a retry; a refused one
      * gives its words back; one whose outcome is unknown comes back as that exact retry. A newer
@@ -126,9 +138,6 @@ export function createTaskDraftStore(params: {
       const current = drafts.get(work);
       const offersThisSend = current?.retry?.message.message_id === request.message.message_id;
       if (current !== undefined && !offersThisSend) return;
-      // The new task's draft is the main window's: a send from the small New task window, which
-      // keeps its own, settles it only when the draft offers that very send.
-      if (work === 'new' && !offersThisSend) return;
       if (outcome === 'sent' && !offersThisSend) return;
       const { content, images, files } = request.message;
       const draft: TaskDraft | null =

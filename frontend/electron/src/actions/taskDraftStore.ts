@@ -1,3 +1,4 @@
+import type { ActionMessageRequest } from './actionContracts';
 import type { TaskDraft, TaskDraftWork } from '../ipc/schemas/taskDrafts';
 
 /** What a composer hears: the task's draft as another window left it, or null once cleared. */
@@ -11,10 +12,18 @@ export type TaskDraftSubscriber = {
 
 export type TaskDraftStore = ReturnType<typeof createTaskDraftStore>;
 
-const fileIds = (draft: TaskDraft): string[] =>
-  draft.attachments.flatMap((attachment) =>
+const fileIds = (draft: TaskDraft): string[] => [
+  ...draft.attachments.flatMap((attachment) =>
     attachment.kind === 'file' ? [attachment.attachmentId] : []
-  );
+  ),
+  ...(draft.retry?.message.files ?? []).map((file) => file.attachment_id),
+];
+
+const isEmpty = (draft: TaskDraft) =>
+  draft.text === '' && draft.attachments.length === 0 && draft.retry === null;
+
+/** How a send ended, as main heard it from the backend. */
+export type TaskSendOutcome = 'sent' | 'refused' | 'unknown';
 
 /**
  * The unsent draft of each task, shared by every window whose composer shows it: the main
@@ -80,8 +89,9 @@ export function createTaskDraftStore(params: {
         (attachment) => attachment.kind !== 'file' || !removed.has(attachment.attachmentId)
       );
       const corrected = attachments.length !== draft.attachments.length;
-      if (draft.text === '' && attachments.length === 0) drafts.delete(work);
-      else drafts.set(work, { ...draft, attachments });
+      const next = { ...draft, attachments };
+      if (isEmpty(next)) drafts.delete(work);
+      else drafts.set(work, next);
       for (const attachmentId of [...awaitingDiscard]) {
         if (isReferenced(attachmentId)) continue;
         awaitingDiscard.delete(attachmentId);
@@ -94,13 +104,45 @@ export function createTaskDraftStore(params: {
     },
 
     /**
-     * A send that failed gives its words and attachments back, unless the task has a newer draft
-     * or the owner changed. Every composer of the task hears it, the sender's included: the
-     * window that sent may be gone.
+     * Settles the task's draft by how a send ended, also when the window that sent it is gone:
+     * a send that went through clears the draft that still offers it as a retry; a refused one
+     * gives its words back; one whose outcome is unknown comes back as that exact retry. A newer
+     * draft written meanwhile, or another owner's, is left alone.
      */
-    restore(owner: string, work: TaskDraftWork, draft: TaskDraft): void {
-      if (owner !== ownerId || drafts.has(work)) return;
-      drafts.set(work, draft);
+    settleSend(
+      owner: string,
+      work: TaskDraftWork,
+      request: ActionMessageRequest,
+      outcome: TaskSendOutcome
+    ): void {
+      if (owner !== ownerId) return;
+      const current = drafts.get(work);
+      const offersThisSend = current?.retry?.message.message_id === request.message.message_id;
+      if (current !== undefined && !offersThisSend) return;
+      if (outcome === 'sent' && !offersThisSend) return;
+      const { content, images, files } = request.message;
+      const draft: TaskDraft | null =
+        outcome === 'sent'
+          ? null
+          : {
+              text: content,
+              mentions: current?.mentions ?? [],
+              attachments: [
+                ...images.map((image) => ({
+                  kind: 'image' as const,
+                  storagePath: image.storage_path,
+                })),
+                ...(files ?? []).map((file) => ({
+                  kind: 'file' as const,
+                  attachmentId: file.attachment_id,
+                  name: file.name,
+                  byteSize: file.byte_size,
+                })),
+              ],
+              retry: outcome === 'unknown' ? request : null,
+            };
+      if (draft === null) drafts.delete(work);
+      else drafts.set(work, draft);
       for (const subscriber of subscribers.get(work)?.values() ?? []) {
         subscriber.send('action:draftChanged', { work, draft });
       }

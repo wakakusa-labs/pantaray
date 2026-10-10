@@ -743,3 +743,32 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
   expect(screen.getByRole('button', { name: 'common.delete Approval' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'common.delete Offer' })).toBeEnabled();
 });
+
+it('削除の応答を待つ間に選択が変わったら、応答の時点の選択で判断する', async () => {
+  let answer: (result: { ok: true }) => void = () => undefined;
+  const deleteItem = installDeleteBridge({ ok: true });
+  deleteItem.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+  const deleteConversation = async () => {
+    await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  };
+
+  // Shown when the delete started, then the user moved on: the selection stays theirs.
+  mocks.selected = 'action:A1';
+  const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
+  await deleteConversation();
+  mocks.selected = 'suggestion:S1';
+  rerender(<Sidebar />);
+  await act(async () => answer({ ok: true }));
+  expect(mocks.removeItem).toHaveBeenCalledWith('conversation:A1');
+  expect(mocks.select).not.toHaveBeenCalled();
+
+  // Not shown when the delete started, then selected: the pane moves off it.
+  mocks.selected = 'chat';
+  rerender(<Sidebar />);
+  await deleteConversation();
+  mocks.selected = 'action:A1';
+  rerender(<Sidebar />);
+  await act(async () => answer({ ok: true }));
+  expect(mocks.select).toHaveBeenCalledExactlyOnceWith('suggestion:S1', { replace: true });
+});

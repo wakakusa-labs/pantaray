@@ -1,5 +1,5 @@
 import { MessageCircle, Trash2 } from 'lucide-react';
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
@@ -163,6 +163,11 @@ export function HistorySidebar({
   const [deletingIdentity, setDeletingIdentity] = useState<string | null>(null);
   const [focusTargetId, setFocusTargetId] = useState<string | null>(null);
   const shortcutHint = useGlobalShortcutHint();
+  // A delete answers after the user may have moved on: its outcome reads the page as it is then.
+  const latest = useRef({ items, selected, onSelect });
+  useEffect(() => {
+    latest.current = { items, selected, onSelect };
+  });
   useLayoutEffect(() => {
     if (focusTargetId === null) return;
     document.getElementById(focusTargetId)?.focus();
@@ -177,8 +182,6 @@ export function HistorySidebar({
     const item = confirmingDelete;
     if (!item) return;
     const identity = itemIdentity(item);
-    const index = items.findIndex((candidate) => itemIdentity(candidate) === identity);
-    const successor: ConversationHistoryListItem | undefined = items[index + 1] ?? items[index - 1];
     setConfirmingDelete(null);
     setDeletingIdentity(identity);
     setNotice(null);
@@ -195,11 +198,16 @@ export function HistorySidebar({
       setFocusTargetId(deleteButtonId(identity));
       return;
     }
+    const { items: rows, selected: shown, onSelect: select } = latest.current;
+    const index = rows.findIndex((candidate) => itemIdentity(candidate) === identity);
+    // A refresh may already have taken the row out; then nothing stands in its place.
+    const successor: ConversationHistoryListItem | undefined =
+      index === -1 ? undefined : (rows[index + 1] ?? rows[index - 1]);
     removeItem(identity);
     setFocusTargetId(successor ? openButtonId(itemIdentity(successor)) : NEW_WORK_BUTTON_ID);
     // The pane cannot keep showing a deleted task; this entry stands in for it in the history.
-    if (historyItemSelection(item) === selected)
-      onSelect(successor ? historyItemSelection(successor) : 'chat', { replace: true });
+    if (historyItemSelection(item) === shown)
+      select(successor ? historyItemSelection(successor) : 'chat', { replace: true });
   };
   const handleNewConversation = async (): Promise<void> => {
     setNotice(null);

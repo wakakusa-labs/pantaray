@@ -70,33 +70,20 @@ function taskFile(path: string): TaskFile | null {
 }
 
 /**
- * The documents an Action produced, in the order the conversation names them: files its final
- * answers link, and files its patches created or edited. A patch's subject is the path as the
- * call gave it, so only an absolute one that was not cut short names a file the app can open.
+ * The documents an Action produced, in the order its final answers link them. Only those links
+ * name a file main will serve: a step's subject is display text, not a path.
  */
 export function deriveTaskFiles(view: ActionConversationView): TaskFile[] {
-  const paths: string[] = [];
+  const files = new Map<string, TaskFile>();
   for (const item of view.items) {
     if (item.kind !== 'run') continue;
     for (const line of item.lines) {
-      if (line.kind === 'final_output') paths.push(...pantarayFilePaths(line.text));
-      if (line.kind !== 'tool') continue;
-      const { file_edit: fileEdit, subject } = line.entry;
-      if (
-        fileEdit !== null &&
-        fileEdit.operation !== 'delete' &&
-        subject !== null &&
-        subject.startsWith('/') &&
-        !subject.endsWith('…')
-      ) {
-        paths.push(subject);
+      if (line.kind !== 'final_output') continue;
+      for (const path of pantarayFilePaths(line.text)) {
+        const file = files.has(path) ? null : taskFile(path);
+        if (file) files.set(path, file);
       }
     }
-  }
-  const files = new Map<string, TaskFile>();
-  for (const path of paths) {
-    const file = files.has(path) ? null : taskFile(path);
-    if (file) files.set(path, file);
   }
   return [...files.values()];
 }

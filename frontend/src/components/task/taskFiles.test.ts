@@ -40,12 +40,13 @@ function files(entries: Entry[], finalOutput: string) {
 }
 
 describe('deriveTaskFiles', () => {
-  it('lists the documents patches wrote and the answer links, once each, in order', () => {
+  it('lists the documents the answer links, once each, in order', () => {
     expect(
       files(
-        [patch(1, '/work/quote/見積書_v3.html'), patch(2, '/work/quote/見積書_v3.html', 'update')],
+        [],
         [
           '見積書を作り直しました: [見積書_v3.html](pantaray-file:///work/quote/%E8%A6%8B%E7%A9%8D%E6%9B%B8_v3.html)',
+          'もう一度: pantaray-file:///work/quote/%E8%A6%8B%E7%A9%8D%E6%9B%B8_v3.html',
           '送付メールは pantaray-file:///work/quote/mail.md 、単価表は pantaray-file:///work/quote/rates.xlsx。',
           '図は [chart](pantaray-file:///work/quote/chart.PNG) 、元データは pantaray-file:///work/quote/data.json',
           '要約 pantaray-file:///work/quote/summary.pdf',
@@ -61,20 +62,22 @@ describe('deriveTaskFiles', () => {
     ]);
   });
 
-  it('leaves code, deleted files and paths it cannot open to the steps', () => {
+  it('leaves code and files only a step names to the steps', () => {
     expect(
       files(
-        [
-          patch(1, '/work/app/main.py'),
-          patch(2, '/work/notes/old.md', 'delete'),
-          // Relative to the run's folder, or cut short: neither names a file the app can open.
-          patch(3, 'docs/report.md'),
-          patch(4, '/work/a-very-long-folder/report…'),
-          // A patch that failed or waited for a read changed nothing.
-          { ...patch(5, '/work/notes/plan.md'), file_edit: null },
-        ],
+        // A step's subject is display text, not a path: main would refuse it.
+        [patch(1, '/work/notes/plan.md'), patch(2, '/work/notes/summary.html', 'update')],
         'Done: [main.py](pantaray-file:///work/app/main.py), [Makefile](pantaray-file:///work/Makefile)'
       )
     ).toEqual([]);
+  });
+
+  it('keeps a linked path exactly, whitespace included', () => {
+    const page = createActionPage('act-1', 'success');
+    page.runs[0].final_output =
+      '[見積書](pantaray-file:///work/%E8%A6%8B%E7%A9%8D%E6%9B%B8%20%20v3.md)';
+    expect(deriveTaskFiles(projectActionConversationView([page])).map((file) => file.path)).toEqual(
+      ['/work/見積書  v3.md']
+    );
   });
 });

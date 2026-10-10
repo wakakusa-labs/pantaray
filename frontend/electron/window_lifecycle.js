@@ -329,10 +329,11 @@ function createMainWindow(options = {}) {
   const hashRoute = '/';
 
   const win = createBrowserWindowWithRetry({
-    width: 1000,
-    height: 700,
-    minWidth: 800,
-    minHeight: 600,
+    // Room for the rail, the History sidebar and a readable detail column.
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
     frame: true,
     transparent: false,
     // The middle stop of the renderer's fog ground (index.css --app-background), so the

@@ -142,11 +142,16 @@ FROM agent_action_steps AS step,
 WHERE step.user_id = :user_id AND step.action_id = :action_id
   AND json_extract(attachment.value, '$.source_kind') = 'local_image_blob'
 """
-# Design limit: one scan of the user's steps per deleted image; add an image
-# reference table when a delete with images exceeds 100 ms.
+# A chat message hands its images to a task by the same storage_path, so the
+# chat's rows still show an image the deleted conversation also named.
+# Design limit: one scan of the user's steps and chat items per deleted image;
+# add an image reference table when a delete with images exceeds 100 ms.
 _IMAGE_REFERENCED_SQL = """
 SELECT EXISTS (SELECT 1 FROM agent_action_steps
-  WHERE user_id = ? AND (instr(user_message_json, ?) > 0 OR instr(tool_output, ?) > 0))
+  WHERE user_id = :user_id
+    AND (instr(user_message_json, :path) > 0 OR instr(tool_output, :path) > 0))
+  OR EXISTS (SELECT 1 FROM chat_items
+  WHERE user_id = :user_id AND instr(payload, :path) > 0)
 """
 
 
@@ -201,7 +206,7 @@ def delete_history_item(
                     path
                     for path in images
                     if not connection.execute(
-                        _IMAGE_REFERENCED_SQL, (user_id, path, path)
+                        _IMAGE_REFERENCED_SQL, {"user_id": user_id, "path": path}
                     ).fetchone()[0]
                 )
             )

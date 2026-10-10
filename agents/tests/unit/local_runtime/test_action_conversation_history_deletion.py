@@ -309,6 +309,31 @@ def test_files_go_only_after_commit_and_shared_images_stay(
     assert [path.exists() for path in files] == [fails, fails, True]
 
 
+def test_an_image_the_chat_still_shows_stays(tmp_path: Path) -> None:
+    """The chat hands its images to a task by the same path and keeps showing them."""
+
+    db_path = _db(tmp_path)
+    own, handed = _image("aaaaaaaa"), _image("eeeeeeee")
+    chat_payload = json.dumps(
+        {
+            "kind": "user_message",
+            "quote_item_id": None,
+            "images": [{"kind": "image", "storage_path": handed}],
+        }
+    )
+    _seed(
+        db_path,
+        _action("act-1", images=(own, handed))
+        + f"""INSERT INTO chat_items(item_id,user_id,message_id,kind,payload,created_at)
+              VALUES ('item-1','{USER}','chat-1','user_message','{chat_payload}','{T}');""",
+    )
+    files = _files(db_path, (own, handed))
+
+    _delete(db_path, "conversation", "act-1")
+
+    assert [path.exists() for path in files] == [False, False, True]
+
+
 def _publish_linked(
     db_path: Path,
     *,

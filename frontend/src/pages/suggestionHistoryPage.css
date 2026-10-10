@@ -1,3 +1,53 @@
+/* History: the sidebar, then the detail pane, edge to edge beside the rail. */
+.history-page {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-sidebar {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 1 300px;
+  flex-direction: column;
+  min-width: 240px;
+  min-height: 0;
+  border-left: 1px solid var(--fog-line);
+  border-right: 1px solid var(--fog-line);
+}
+
+/* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */
+.history-sidebar__head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 52px 14px 10px;
+}
+
+.history-sidebar__chat {
+  padding: 0 8px;
+}
+
+.history-sidebar__tasks {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.history-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .history-container {
   position: relative;
   display: flex;
@@ -7,24 +57,41 @@
   overflow: hidden;
 }
 
-.history-header {
+.history-pane-header {
+  box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  flex-shrink: 0;
-  padding-bottom: var(--space-md);
+  flex: none;
+  align-items: center;
+  height: 52px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--fog-line);
 }
 
-.history-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.history-pane-header h1 {
+  margin: 0;
+  color: var(--fog-text);
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+}
+
+/* The pane's notices and the chat's column keep a gutter from the pane's edges. */
+.history-detail .app-connection-notice,
+.history-pane-notice {
+  flex: none;
+  margin: 12px 28px 0;
+}
+
+.history-detail .chat-scroll,
+.history-detail .chat-dock {
+  padding-inline: 28px;
+}
+
+.history-detail .chat-dock {
+  max-width: calc(720px + 56px);
 }
 
 .history-search {
   position: relative;
-  flex: 1;
-  min-width: 0;
   margin: 0;
 }
 
@@ -38,10 +105,10 @@
 }
 
 .history-search .history-search__input {
-  height: 38px;
-  padding-left: 34px;
-  border-radius: 10px;
-  font-size: 13.5px;
+  height: 32px;
+  padding-left: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
 }
 
 /* Chromium's default clear button is blue; draw it in the field's muted text color. */
@@ -60,31 +127,34 @@
 }
 
 .history-new-conversation-button {
-  flex: 0 0 auto;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid rgba(214, 226, 248, 0.14);
-  border-radius: 10px;
-  background: transparent;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
   color: var(--fog-text);
   cursor: pointer;
   font: inherit;
-  font-size: 13.5px;
-  font-weight: var(--weight-semibold);
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .history-new-conversation-button:hover {
-  background: var(--fog-mist);
+  background: var(--fog-mist-strong);
 }
 
-/* Dimmed keycaps after the label, the way menus show a shortcut. */
+.history-new-conversation-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Dimmed keycaps at the far end, the way menus show a shortcut. */
 .history-new-conversation-keys {
   display: inline-flex;
-  margin-left: 6px;
+  margin-left: auto;
 }
 
 .history-new-conversation-keys .shortcut-keycap {
@@ -96,20 +166,52 @@
   font-weight: var(--weight-regular);
 }
 
-.history-new-conversation-button:focus-visible {
+.history-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fog-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.history-chat-row:hover {
+  background: var(--fog-mist);
+}
+
+.history-chat-row[aria-current='true'] {
+  background: var(--fog-mist-strong);
+}
+
+.history-chat-row:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-.history-sidebar__tasks {
-  display: flex;
+.history-chat-row__label {
   flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 6px 8px 12px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
+
+.history-chat-row__count {
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #7dabdc;
+  color: #0b0e14;
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-bold);
+  line-height: 18px;
+  text-align: center;
 }
 
 .history-empty {
@@ -218,14 +320,14 @@
   white-space: nowrap;
 }
 
-.badge--warning {
-  background: rgba(233, 201, 139, 0.14);
-  color: #e9c98b;
-}
-
 .badge--info {
   background: rgba(125, 171, 220, 0.16);
   color: #9cc3ec;
+}
+
+.badge--warning {
+  background: rgba(233, 201, 139, 0.14);
+  color: #e9c98b;
 }
 
 .history-load-more {
@@ -233,7 +335,8 @@
   margin-top: 14px;
 }
 
-/* Shown while the row is pointed at or holds focus, so titles keep the sidebar's width. */
+/* Shown while the row is pointed at or holds keyboard focus, so titles keep the sidebar's width.
+   Not on focus alone: a clicked row keeps focus while its Overlay is open in another window. */
 .history-item-delete {
   flex: 0 0 auto;
   display: inline-flex;
@@ -252,12 +355,12 @@
 }
 
 .history-item:hover .history-item-delete,
-.history-item:focus-within .history-item-delete {
+.history-item:has(:focus-visible) .history-item-delete {
   opacity: 1;
 }
 
 .history-item:hover .history-item-delete:disabled,
-.history-item:focus-within .history-item-delete:disabled {
+.history-item:has(:focus-visible) .history-item-delete:disabled {
   cursor: not-allowed;
   opacity: 0.35;
 }
@@ -307,57 +410,4 @@
 
 .history-delete-dialog__confirm {
   color: var(--danger-color);
-}
-
-.history-toolbar__spacer {
-  flex: 1;
-}
-
-.history-mode-switch {
-  flex: 0 0 auto;
-  display: inline-flex;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--fog-mist);
-}
-
-.history-mode-switch__button {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--fog-text-2);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13.5px;
-  white-space: nowrap;
-}
-
-.history-mode-switch__count {
-  display: inline-block;
-  min-width: 18px;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgba(125, 171, 220, 0.22);
-  color: var(--fog-text);
-  font-size: var(--text-meta-size);
-  font-weight: var(--weight-semibold);
-  line-height: 18px;
-  text-align: center;
-}
-
-.history-mode-switch__button:hover {
-  color: var(--fog-text);
-}
-
-.history-mode-switch__button[aria-pressed='true'] {
-  background: var(--fog-mist-strong);
-  color: var(--fog-text);
-  font-weight: var(--weight-semibold);
-}
-
-.history-mode-switch__button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }

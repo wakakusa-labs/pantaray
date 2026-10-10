@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -16,6 +17,11 @@ import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
+import { ChatUnreadTracker } from './ChatUnreadTracker';
+import { ChatUnreadContext } from './chatUnread';
+
+// The AI-connection notice reads the account; its own tests cover it.
+vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
 
@@ -80,6 +86,9 @@ const historyFetch = vi.fn(async () => ({
 
 beforeEach(() => {
   localStorage.clear();
+  // Every subscriber hears an appended item, as main's relay reaches them all.
+  const appended = new Set<(item: ChatItem) => void>();
+  appendItem = (item) => appended.forEach((callback) => callback(item));
   window.electron = {
     chat: {
       listItems,
@@ -91,8 +100,8 @@ beforeEach(() => {
         return () => {};
       },
       onItemAppended: (callback: (item: ChatItem) => void) => {
-        appendItem = callback;
-        return () => {};
+        appended.add(callback);
+        return () => appended.delete(callback);
       },
     },
     orchestration: {
@@ -282,22 +291,122 @@ it('opens a card’s work in the Overlay and outlines it', async () => {
   expect(card).toHaveAttribute('aria-current', 'true');
 });
 
-it('remembers the chosen view and keeps focus on the switch', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  const { unmount } = renderPage();
-  const chatMode = await screen.findByRole('button', { name: 'チャット', pressed: true });
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole('button', { name: '作業', pressed: false }));
-  const listMode = screen.getByRole('button', { name: '作業', pressed: true });
-  expect(listMode).toHaveFocus();
-  expect(screen.getByRole('searchbox')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-  expect(chatMode).not.toBeInTheDocument();
-
-  unmount();
+it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
+  pages = [{ items: [reply(1, '始めます。')], next_cursor: null }];
   renderPage();
-  expect(await screen.findByRole('button', { name: '作業', pressed: true })).toBeInTheDocument();
+  const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
+  const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
+  expect(chatRow).toHaveAttribute('aria-current', 'true');
+  expect(within(sidebar).getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
+  expect(within(sidebar).getByRole('searchbox', { name: '作業を検索' })).toBeInTheDocument();
+  expect(
+    await within(sidebar).findByRole('button', { name: /^見積書のたたき台を作る/ })
+  ).toHaveTextContent('実行中');
+
+  const chat = await screen.findByRole('list', { name: 'Pantaray とのチャット' });
+  expect(sidebar).not.toContainElement(chat);
+  expect(screen.getByRole('heading', { level: 1, name: 'チャット' })).toBeInTheDocument();
+  expect(within(chat).getByText('始めます。')).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toBeInTheDocument();
+});
+
+/** The unread count as `Layout` provides it, so the sidebar's Chat row shows it. */
+function WithUnreadCount({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  return (
+    <ChatUnreadContext.Provider value={count}>
+      <ChatUnreadTracker onCount={setCount} />
+      {children}
+    </ChatUnreadContext.Provider>
+  );
+}
+
+it('the Chat row takes a reader who scrolled up back to the newest message, which reads it', async () => {
+  const page = {
+    items: [reply(2, 'おはようございます。'), userMessage(1, 'おはよう')],
+    next_cursor: null,
+  };
+  // One read for the chat, one for the unread count.
+  pages = [page, page];
+  render(
+    <MemoryRouter initialEntries={['/history']}>
+      <UiLanguageProvider initialLanguage="ja">
+        <LocalOwnerContext.Provider value={OWNER}>
+          <ChatSessionProvider>
+            <WithUnreadCount>
+              <SuggestionHistoryPage />
+            </WithUnreadCount>
+          </ChatSessionProvider>
+        </LocalOwnerContext.Provider>
+      </UiLanguageProvider>
+    </MemoryRouter>
+  );
+  await screen.findByText('おはようございます。');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+
+  act(() => appendItem(reply(3, '表紙も作りました。')));
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  await waitFor(() => expect(chatRow).toHaveAccessibleDescription('未読 1 件'));
+  expect(scroll.scrollTop).toBe(100);
+
+  await userEvent.click(chatRow);
+  expect(scroll.scrollTop).toBe(1000);
+  await waitFor(() => expect(chatRow).not.toHaveAccessibleDescription());
+  expect(chatRow).toHaveTextContent(/^チャット$/);
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('3');
+});
+
+it('the Chat row keeps the chat at the newest message when an older page lands after it', async () => {
+  pages = [{ items: [reply(5, '最新の返信')], next_cursor: 5 }];
+  renderPage();
+  await screen.findByText('最新の返信');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+  let landOlder!: (page: ChatItemPage) => void;
+  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
+  await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  expect(scroll.scrollTop).toBe(1000);
+  await act(async () => landOlder({ items: [userMessage(4, '以前')], next_cursor: null }));
+  expect(screen.getByText('以前')).toBeInTheDocument();
+  expect(scroll.scrollTop).toBe(1000);
+
+  // Still following: a reply that arrives is at the bottom, so it is read.
+  act(() => appendItem(reply(6, '次の返信')));
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('6');
+});
+
+it('the Chat row drops an Overlay request still reading older pages for its card', async () => {
+  pages = [{ items: [userMessage(3, 'ほかの話')], next_cursor: 3 }];
+  let landOlder!: (page: ChatItemPage) => void;
+  listItems.mockImplementationOnce(async () => pages.shift()!);
+  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
+  renderPage({ pathname: '/history', state: showChatState('A1') });
+  await waitFor(() => expect(listItems).toHaveBeenLastCalledWith({ before: 3, limit: 50 }));
+
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  await userEvent.click(chatRow);
+  await act(async () =>
+    landOlder({
+      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
+      next_cursor: null,
+    })
+  );
+  const card = screen.getByRole('button', { name: '見積書のたたき台を作る を開く' });
+  expect(card).not.toHaveFocus();
+  expect(chatRow).toHaveFocus();
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
@@ -425,7 +534,6 @@ it('resends a failed message with the same message_id and points at a refused fi
 });
 
 it('opens on the chat at the Action’s latest card when the Overlay asks, reading older pages', async () => {
-  localStorage.setItem('pantaray.history-view-mode', 'list');
   pages = [
     { items: [userMessage(3, 'ほかの話'), userMessage(2, 'まだほかの話')], next_cursor: 2 },
     {
@@ -437,25 +545,7 @@ it('opens on the chat at the Action’s latest card when the Overlay asks, readi
   const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
   await waitFor(() => expect(card).toHaveFocus());
   expect(card).toHaveAttribute('aria-current', 'true');
-  expect(screen.getByRole('button', { name: 'チャット', pressed: true })).toBeInTheDocument();
   expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
-});
-
-it('keeps the draft and a failed request across a switch to the list', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  renderPage();
-  const input = await screen.findByRole('textbox', { name: 'メッセージ' });
-  sendMessage.mockRejectedValueOnce(new Error('response lost'));
-  await userEvent.type(input, '届いたかわからない{Enter}');
-  await screen.findByRole('button', { name: '同じメッセージを再送' });
-
-  await userEvent.click(screen.getByRole('button', { name: '作業' }));
-  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
-  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('届いたかわからない');
-
-  sendMessage.mockResolvedValueOnce({ kind: 'rejected', field: 'body' });
-  await userEvent.click(screen.getByRole('button', { name: '同じメッセージを再送' }));
-  expect(sendMessage.mock.calls[1][0].message_id).toBe(sendMessage.mock.calls[0][0].message_id);
 });
 
 it('discards a document whose write finishes after the page closed', async () => {

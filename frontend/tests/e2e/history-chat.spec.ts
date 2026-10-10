@@ -119,17 +119,12 @@ const HISTORY: ConversationHistoryListItem[] = [
 
 async function installBridge(
   page: Page,
-  mode: 'chat' | 'list' | null,
   chatPage: ChatItemPage = CHAT,
   historyItems: ConversationHistoryListItem[] = HISTORY
 ) {
   await page.addInitScript(
-    ({ chat, history, storedMode }) => {
+    ({ chat, history }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
-      if (storedMode !== null && !sessionStorage.getItem('seeded')) {
-        localStorage.setItem('pantaray.history-view-mode', storedMode);
-        sessionStorage.setItem('seeded', '1');
-      }
       const noop = () => {};
       const opened: string[] = [];
       Object.defineProperty(window, 'e2eOpened', { value: opened });
@@ -242,20 +237,24 @@ async function installBridge(
         },
       });
     },
-    { chat: chatPage, history: historyItems, storedMode: mode }
+    { chat: chatPage, history: historyItems }
   );
   await page.goto(`${baseUrl}#/history`);
 }
 
-test('chat mode is the default: bubbles, cards with latest-only status, no event bubbles', async ({
+const sidebarOf = (page: Page) => page.getByRole('complementary', { name: 'チャットと作業' });
+
+test('the chat pane: bubbles, cards with latest-only status, no event bubbles', async ({
   page,
 }, info) => {
-  await installBridge(page, null);
+  await installBridge(page);
   const chat = page.getByRole('list', { name: 'Pantaray とのチャット' });
   await expect(chat).toBeVisible();
-  await expect(page.getByRole('button', { name: 'チャット', pressed: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '新しい作業' })).toBeVisible();
-  await expect(page.getByRole('searchbox')).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'チャット' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'チャット', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
 
   await expect(chat.getByRole('article', { name: 'あなた' })).toHaveCount(3);
   await expect(chat.getByRole('article', { name: 'Pantaray' })).toHaveCount(5);
@@ -284,32 +283,42 @@ test('chat mode is the default: bubbles, cards with latest-only status, no event
   }
 });
 
-test('the chosen view is remembered, and the list stays as it was', async ({ page }, info) => {
-  await installBridge(page, 'chat');
-  await page.getByRole('button', { name: '作業', exact: true, pressed: false }).click();
-  await expect(
-    page.getByRole('button', { name: '作業', exact: true, pressed: true })
-  ).toBeFocused();
-
-  // Today's list: search, day heading, rows with a delete button and a muted status badge.
-  await expect(page.getByRole('searchbox')).toBeVisible();
-  await expect(page.getByRole('heading', { name: '今日' })).toBeVisible();
-  const row = page.getByRole('button', { name: /見積書のたたき台を作る/ }).first();
+test('the sidebar holds New task, search, the chat row and the tasks by day', async ({
+  page,
+}, info) => {
+  await installBridge(page);
+  const sidebar = sidebarOf(page);
+  await expect(sidebar.getByRole('button', { name: '新しい作業' })).toBeVisible();
+  await expect(sidebar.getByRole('searchbox', { name: '作業を検索' })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('heading', { level: 2, name: '今日' })).toBeVisible();
+  const row = sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ });
   await expect(row.getByText('実行中')).toBeVisible();
-  await expect(page.getByRole('button', { name: '削除 見積書のたたき台を作る' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '新しい作業' })).toBeVisible();
-  await waitForAnimationsToSettle(page);
-  await page.screenshot({ path: info.outputPath('list.png') });
-
-  await page.reload();
+  // The delete button shows while its row is pointed at; a running task's stays disabled.
+  const trash = sidebar.getByRole('button', { name: '削除 見積書のたたき台を作る' });
+  await expect(trash).toHaveCSS('opacity', '0');
+  await row.hover();
+  await expect(trash).toHaveCSS('opacity', '0.35');
+  // A clicked row keeps focus while its Overlay is open, which must not keep the button shown.
+  await row.click();
+  await page.mouse.move(900, 400);
+  await expect(row).toBeFocused();
+  await expect(trash).toHaveCSS('opacity', '0');
+  // Keyboard focus shows it.
+  await page.keyboard.press('Tab');
   await expect(
-    page.getByRole('button', { name: '作業', exact: true, pressed: true })
-  ).toBeVisible();
-  await expect(page.getByRole('searchbox')).toBeVisible();
+    sidebar.getByRole('button', { name: /^登壇資料のスライドを下書きする/ })
+  ).toBeFocused();
+  await expect(
+    sidebar.getByRole('button', { name: '削除 登壇資料のスライドを下書きする' })
+  ).toHaveCSS('opacity', '0.35');
+  expect((await sidebar.boundingBox())!.width).toBeCloseTo(300, -1);
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('sidebar.png') });
 });
 
 test('composer: quote a message, attach a document, send with Enter', async ({ page }, info) => {
-  await installBridge(page, null);
+  await installBridge(page);
   const chat = page.getByRole('list', { name: 'Pantaray とのチャット' });
   const input = page.getByRole('textbox', { name: 'メッセージ' });
   await expect(input).toBeVisible();
@@ -352,7 +361,7 @@ test('composer: quote a message, attach a document, send with Enter', async ({ p
 
 test('the Overlay’s chat button opens the chat at that Action’s latest card', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 520 });
-  await installBridge(page, 'list');
+  await installBridge(page);
   await expect(page.getByRole('searchbox')).toBeVisible();
   await page.evaluate(() =>
     (window as unknown as { e2eShowChat: (p: { actionId: string }) => void }).e2eShowChat({
@@ -360,7 +369,6 @@ test('the Overlay’s chat button opens the chat at that Action’s latest card'
     })
   );
   const card = page.getByRole('button', { name: '登壇資料のスライドを下書きする を開く' });
-  await expect(page.getByRole('button', { name: 'チャット', pressed: true })).toBeVisible();
   await expect(card).toBeFocused();
   await expect(card).toBeInViewport();
   await expect(card).toHaveAttribute('aria-current', 'true');
@@ -369,7 +377,7 @@ test('the Overlay’s chat button opens the chat at that Action’s latest card'
 test('a running turn shows the typing bubble; a failed turn offers to try again', async ({
   page,
 }, info) => {
-  await installBridge(page, null, {
+  await installBridge(page, {
     items: [
       item(11, 41, { kind: 'turn_failure', reason: 'llm_connection' }),
       user(10, 41, '登壇資料の構成、もう一度見直して'),
@@ -451,7 +459,7 @@ test('text in either side’s bubbles, with its quote and link, copies with the 
   context,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await installBridge(page, null, {
+  await installBridge(page, {
     items: [
       reply(
         3,
@@ -491,7 +499,7 @@ async function appendLive(page: Page, chatItem: ChatItem) {
   }, chatItem);
 }
 
-test('unread Pantaray messages mark the rail and the chat switch until the chat is read', async ({
+test('unread Pantaray messages mark the rail and the chat row until the chat is read', async ({
   page,
 }, info) => {
   // Read up to the user's first message before this window opened: four replies came after it.
@@ -500,27 +508,18 @@ test('unread Pantaray messages mark the rail and the chat switch until the chat 
     localStorage.setItem(key, '2');
     sessionStorage.setItem('read-seeded', '1');
   }, READ_POSITION_KEY);
-  await installBridge(page, 'list');
+  await installBridge(page);
   const history = page.getByRole('button', { name: '履歴' });
-  const chatSwitch = page.getByRole('button', { name: 'チャット', exact: true });
-  await expect(history).toHaveAccessibleDescription('未読 4 件');
-  await expect(chatSwitch).toHaveAccessibleDescription('未読 4 件');
-  await expect(chatSwitch).toHaveText('チャット4');
-  await expect(history.locator('.app-rail-unread-dot')).toBeVisible();
-  await waitForAnimationsToSettle(page);
-  await page.screenshot({ path: info.outputPath('unread-rail-and-switch.png') });
-  await page.screenshot({
-    path: info.outputPath('unread-rail-and-switch-detail.png'),
-    clip: { x: 0, y: 0, width: 620, height: 160 },
-  });
+  const chatRow = sidebarOf(page).getByRole('button', { name: 'チャット', exact: true });
 
-  // Opening the chat shows its newest message, so everything is read.
-  await chatSwitch.click();
+  // The chat opens on its newest message, so everything is read.
   await expect(page.getByText('納期を直しますね。')).toBeInViewport();
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
+    .toBe('9');
   await expect(history).not.toHaveAccessibleDescription(/未読/);
   await expect(history.locator('.app-rail-unread-dot')).toHaveCount(0);
-  await expect(chatSwitch).toHaveText('チャット');
-  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('9');
+  await expect(chatRow).toHaveText('チャット');
 
   // A reply that arrives while the newest message is in view is read as it lands.
   await appendLive(page, reply(10, 40, '下書きを直しました。'));
@@ -536,29 +535,41 @@ test('unread Pantaray messages mark the rail and the chat switch until the chat 
   await expect(page.getByText('じゃあスライドの下書きから始めますね。')).toBeInViewport();
   await appendLive(page, reply(11, 41, '表紙も作りました。'));
   await expect(history).toHaveAccessibleDescription('未読 1 件');
+  await expect(chatRow).toHaveAccessibleDescription('未読 1 件');
+  await expect(chatRow).toHaveText('チャット1');
+  await expect(history.locator('.app-rail-unread-dot')).toBeVisible();
   expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
 
-  // On the task list, Pantaray's replies count and the user's own messages never do.
-  await page.getByRole('button', { name: '作業', exact: true }).click();
+  // Pantaray's replies count and the user's own messages never do.
   await appendLive(page, user(12, 42, 'ありがとう'));
   await appendLive(page, reply(13, 43, 'ほかに直すところがあれば言ってください。'));
   await expect(history).toHaveAccessibleDescription('未読 2 件');
-  await expect(page.getByRole('button', { name: 'チャット', exact: true })).toHaveText('チャット2');
+  await expect(chatRow).toHaveText('チャット2');
+  await waitForAnimationsToSettle(page);
+  await page.screenshot({ path: info.outputPath('unread-rail-and-row.png') });
+  await page.screenshot({
+    path: info.outputPath('unread-rail-and-row-detail.png'),
+    clip: { x: 0, y: 0, width: 620, height: 200 },
+  });
+
+  // The Chat row takes the reader back to the newest message, which reads it.
+  await chatRow.click();
+  await expect(chatList.getByText('ほかに直すところがあれば言ってください。')).toBeInViewport();
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+  await expect(chatRow).toHaveText('チャット');
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
 
   // A restart reads the stored position, so what was read stays read.
   await page.reload();
-  await expect(
-    page.getByRole('button', { name: '作業', exact: true, pressed: true })
-  ).toBeVisible();
-  await expect(page.locator('html')).toBeVisible();
-  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
+  await expect(chatRow).toBeVisible();
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
   await expect(history).not.toHaveAccessibleDescription(/未読/);
 });
 
 test('a first run marks the existing chat read instead of showing it all as unread', async ({
   page,
 }) => {
-  await installBridge(page, 'list');
+  await installBridge(page);
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
     .toBe('9');
@@ -568,7 +579,7 @@ test('a first run marks the existing chat read instead of showing it all as unre
 test('a suggestion the user has not answered is listed as 提案 and reopens its Overlay', async ({
   page,
 }, info) => {
-  await installBridge(page, 'list', CHAT, [
+  await installBridge(page, CHAT, [
     {
       kind: 'suggestion',
       suggestion_id: 'suggestion-1',
@@ -578,10 +589,11 @@ test('a suggestion the user has not answered is listed as 提案 and reopens its
     },
     ...HISTORY,
   ]);
-  const row = page.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
+  const sidebar = sidebarOf(page);
+  const row = sidebar.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
   await expect(row.getByText('提案', { exact: true })).toBeVisible();
-  // An Action waiting for approval keeps its own label.
-  await expect(page.getByRole('button', { name: /見積書のたたき台を作る/ }).first()).toContainText(
+  // A running Action keeps its own label.
+  await expect(sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ })).toContainText(
     '実行中'
   );
   await waitForAnimationsToSettle(page);

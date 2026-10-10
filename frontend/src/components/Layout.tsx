@@ -11,7 +11,7 @@ import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
 import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
-import { saveHistoryViewMode, showChatState } from '@/history/historyViewMode';
+import { showChatState } from '@/history/historyViewMode';
 import './Layout.css';
 
 /**
@@ -34,7 +34,6 @@ const Layout: React.FC = () => {
     const onShowChat = window.electron?.history?.onShowChat;
     if (!onShowChat) return;
     return onShowChat(({ actionId }) => {
-      saveHistoryViewMode('chat');
       navigate('/history', { state: showChatState(actionId) });
     });
   }, [navigate]);
@@ -84,6 +83,7 @@ const Layout: React.FC = () => {
   // A page with its own columns shows the AI-connection notice in its right column. Workspace
   // has those columns only once the local owner it belongs to is published.
   const isSplitPage =
+    location.pathname === '/history' ||
     location.pathname === '/settings' ||
     (location.pathname === '/workspace' &&
       runtimeState.status === 'ready' &&
@@ -174,7 +174,7 @@ const Layout: React.FC = () => {
           </span>
         ) : null}
 
-        {/* The chat's unread count, for the rail and History's chat switch on every page. */}
+        {/* The chat's unread count, for the rail and History's chat row on every page. */}
         <LocalOwnerBoundary fallback={null}>
           <ChatUnreadTracker onCount={setChatUnread} />
         </LocalOwnerBoundary>

@@ -1,4 +1,4 @@
-/** The navigation state `Layout` sends with an Overlay's request to show an Action in the chat. */
+/** Navigation state asking History's chat to show an Action, from the Overlay or a task pane. */
 export type ShowChatState = { showChat: { actionId: string } };
 
 export function showChatState(actionId: string): ShowChatState {

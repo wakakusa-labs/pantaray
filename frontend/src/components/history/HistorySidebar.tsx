@@ -1,8 +1,7 @@
 import { MessageCircle, Trash2 } from 'lucide-react';
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
-import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
 import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
 import {
@@ -11,15 +10,16 @@ import {
 } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
+import { historyItemSelection, type HistorySelection } from '@/history/historySelection';
 import { NEW_WORK_BUTTON_ID, openNewWork } from '@/history/newWork';
-import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
-import { itemIdentity, useSuggestionHistory } from '@/hooks/useSuggestionHistory';
+import { itemIdentity, type useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import HistorySearchField from './HistorySearchField';
+import { liveStageText } from './liveStageText';
 import { NewWorkButton } from './NewWorkButton';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
@@ -67,37 +67,6 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
   return result.ok ? null : deleteFailureMessageKey(result.errorCode);
 }
 
-function openSuggestionHistory(suggestionId: string): void {
-  const showHistory = window.electron?.agentOverlay?.showHistory;
-  if (!showHistory) throw new Error('Suggestion history overlay bridge is unavailable.');
-  showHistory({ suggestionId, initialUiState: { expand: true }, fromStart: true });
-}
-
-async function openConversation(actionId: string): Promise<void> {
-  const open = window.electron?.history?.openConversation;
-  if (!open) throw new Error('Conversation overlay bridge is unavailable.');
-  await open({ actionId });
-}
-
-function liveStageText(
-  stage: HistoryLiveStage,
-  language: 'en' | 'ja',
-  t: (key: MessageKey) => string
-): string {
-  switch (stage.kind) {
-    case 'tool':
-      return resolveToolLine(stage.label, language, {
-        subject: stage.subject,
-        running: true,
-        outcome: stage.outcome,
-      }).text;
-    case 'message':
-      return stage.text;
-    case 'thinking':
-      return t('overlay.thinking');
-  }
-}
-
 /**
  * Points at the New task button, naming the shortcut only while it is registered. The sentence
  * stays one translatable string; `{shortcut}` marks where the keycaps replace it.
@@ -121,15 +90,14 @@ function EmptyStateHint({
   );
 }
 
-/**
- * The chat's row: always the one shown for now, with Pantaray's unread messages counted. It takes
- * the chat back to its newest message.
- */
+/** The chat's row, with Pantaray's unread messages counted. */
 function ChatRow({
   t,
+  current,
   onShow,
 }: {
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+  current: boolean;
   onShow: () => void;
 }) {
   const unread = useChatUnreadCount();
@@ -138,7 +106,7 @@ function ChatRow({
       <button
         type="button"
         className="history-chat-row"
-        aria-current="true"
+        aria-current={current ? 'true' : undefined}
         aria-describedby={unread > 0 ? CHAT_UNREAD_ID : undefined}
         onClick={onShow}
       >
@@ -160,10 +128,19 @@ function ChatRow({
 }
 
 /**
- * The History page's sidebar: New task, search, the chat, and the user's tasks by day. A task
- * row opens its Overlay.
+ * The History page's sidebar: New task, search, the chat, and the user's tasks by day. A row
+ * selects what the detail pane shows; the selected one is marked current.
  */
-export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
+export function HistorySidebar({
+  history,
+  selected,
+  onSelect,
+}: {
+  /** The page reads the list too, for the selected task's title. */
+  history: ReturnType<typeof useSuggestionHistory>;
+  selected: HistorySelection;
+  onSelect: (selection: HistorySelection, options?: { replace: true }) => void;
+}) {
   const {
     items,
     loading,
@@ -176,7 +153,7 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
     hasMore,
     isUnread,
     removeItem,
-  } = useSuggestionHistory();
+  } = history;
   const { t, language } = useI18n();
   const liveStages = useHistoryLiveStages();
   const [notice, setNotice] = useState<string | null>(null);
@@ -186,6 +163,11 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
   const [deletingIdentity, setDeletingIdentity] = useState<string | null>(null);
   const [focusTargetId, setFocusTargetId] = useState<string | null>(null);
   const shortcutHint = useGlobalShortcutHint();
+  // A delete answers after the user may have moved on: its outcome reads the page as it is then.
+  const latest = useRef({ items, selected, onSelect });
+  useEffect(() => {
+    latest.current = { items, selected, onSelect };
+  });
   useLayoutEffect(() => {
     if (focusTargetId === null) return;
     document.getElementById(focusTargetId)?.focus();
@@ -200,9 +182,6 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
     const item = confirmingDelete;
     if (!item) return;
     const identity = itemIdentity(item);
-    const identities = items.map(itemIdentity);
-    const index = identities.indexOf(identity);
-    const successor = identities[index + 1] ?? identities[index - 1];
     setConfirmingDelete(null);
     setDeletingIdentity(identity);
     setNotice(null);
@@ -219,21 +198,21 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
       setFocusTargetId(deleteButtonId(identity));
       return;
     }
+    const { items: rows, selected: shown, onSelect: select } = latest.current;
+    const index = rows.findIndex((candidate) => itemIdentity(candidate) === identity);
+    // A refresh may already have taken the row out; then nothing stands in its place.
+    const successor: ConversationHistoryListItem | undefined =
+      index === -1 ? undefined : (rows[index + 1] ?? rows[index - 1]);
     removeItem(identity);
-    setFocusTargetId(successor ? openButtonId(successor) : NEW_WORK_BUTTON_ID);
+    setFocusTargetId(successor ? openButtonId(itemIdentity(successor)) : NEW_WORK_BUTTON_ID);
+    // The pane cannot keep showing a deleted task; this entry stands in for it in the history.
+    if (historyItemSelection(item) === shown)
+      select(successor ? historyItemSelection(successor) : 'chat', { replace: true });
   };
   const handleNewConversation = async (): Promise<void> => {
     setNotice(null);
     try {
       await openNewWork();
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
-  const handleConversation = async (actionId: string): Promise<void> => {
-    setNotice(null);
-    try {
-      await openConversation(actionId);
     } catch {
       setNotice(t('history.openOverlayFailed'));
     }
@@ -276,6 +255,7 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
               </li>,
               ...day.items.map((item) => {
                 const identity = itemIdentity(item);
+                const selection = historyItemSelection(item);
                 const attention = attentionLabelKey(item, isUnread(item));
                 const liveStage =
                   item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
@@ -310,18 +290,8 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
                       type="button"
                       id={openButtonId(identity)}
                       className="history-item-button"
-                      onClick={() => {
-                        if (item.kind === 'conversation') {
-                          void handleConversation(item.action_id);
-                          return;
-                        }
-                        setNotice(null);
-                        try {
-                          openSuggestionHistory(item.suggestion_id);
-                        } catch {
-                          setNotice(t('history.openOverlayFailed'));
-                        }
-                      }}
+                      aria-current={selection === selected ? 'true' : undefined}
+                      onClick={() => onSelect(selection)}
                     >
                       {content}
                     </button>
@@ -377,7 +347,7 @@ export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
           </div>
         ) : null}
       </div>
-      <ChatRow t={t} onShow={onShowChat} />
+      <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
       <div className="history-sidebar__tasks">{renderContent()}</div>
       {confirmingDelete ? (
         <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />

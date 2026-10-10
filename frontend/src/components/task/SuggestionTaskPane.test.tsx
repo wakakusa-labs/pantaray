@@ -163,7 +163,10 @@ describe('SuggestionTaskPane', () => {
     expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
     expect(acceptButton()).toBeEnabled();
     expect(dismissButton()).toBeEnabled();
-    expect(screen.getByLabelText('Additional instructions (optional)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
+      'placeholder',
+      'Add conditions and approve (optional)'
+    );
   });
 
   it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {

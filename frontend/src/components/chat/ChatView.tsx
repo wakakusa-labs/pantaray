@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
 import { useI18n } from '@/context/useI18n';
 import { groupByLocalDay } from '@/history/historyDayGroups';
 import type { ChatItemsResult } from '@/hooks/useChatItems';
@@ -33,22 +32,6 @@ import { useChatScroll } from './useChatScroll';
 
 import './chatView.css';
 
-async function openCard(card: ChatCardData): Promise<void> {
-  if (card.kind === 'action') {
-    const open = window.electron?.history?.openConversation;
-    if (!open) throw new Error('Conversation overlay bridge is unavailable.');
-    await open({ actionId: card.action_id });
-    return;
-  }
-  const showHistory = window.electron?.agentOverlay?.showHistory;
-  if (!showHistory) throw new Error('Suggestion history overlay bridge is unavailable.');
-  showHistory({
-    suggestionId: card.suggestion_id,
-    initialUiState: { expand: true },
-    fromStart: true,
-  });
-}
-
 /**
  * A jump to a message: from a quote to the quoted message, with `returnTo` the quote's message,
  * or back to that message. `shown` once the message is in view.
@@ -70,15 +53,17 @@ export const ChatView = forwardRef<
     /** The chat and its composer outlive this view, so leaving the page loses neither. */
     chat: ChatItemsResult;
     composer: ChatComposerControl;
-    /** The Action whose latest card the Overlay asked to show, or null. */
+    /** The Action whose latest card the Overlay or its task pane asked to show, or null. */
     reveal: ChatReveal | null;
+    /** A card selects its work for the detail pane. */
+    onOpenWork: (work: WorkKey) => void;
   }
->(function ChatView({ notice: pageNotice, chat, composer, reveal }, ref) {
+>(function ChatView({ notice: pageNotice, chat, composer, reveal, onOpenWork }, ref) {
   const { t, language } = useI18n();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
+  // The work whose card was asked to be shown; its card is outlined.
   const [openWork, setOpenWork] = useState<WorkKey | null>(null);
-  // The Overlay that asked to show its Action is the one open now.
   const [revealSeen, setRevealSeen] = useState<string | null>(null);
   const [jump, setJump] = useState<ChatJump | null>(null);
   // An Overlay request the reader left for the newest message; only a new request shows a card.
@@ -178,15 +163,6 @@ export const ChatView = forwardRef<
       setRetrying(false);
     }
   };
-  const handleOpenCard = async (card: ChatCardData): Promise<void> => {
-    setNotice(null);
-    try {
-      await openCard(card);
-      setOpenWork(cardWorkKey(card));
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
 
   const locale = getLocaleForUiLanguage(language);
   const formatTime = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
@@ -216,7 +192,7 @@ export const ChatView = forwardRef<
             works={works}
             openWork={openWork}
             t={t}
-            onOpenCard={(card) => void handleOpenCard(card)}
+            onOpenCard={(card) => onOpenWork(cardWorkKey(card))}
             onJumpToQuote={(quoteItemId) => jumpTo(quoteItemId, item.item_id)}
             found={jump?.shown === true && jump.itemId === item.item_id}
             onQuote={

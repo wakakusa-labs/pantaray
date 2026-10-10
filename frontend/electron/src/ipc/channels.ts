@@ -88,6 +88,9 @@ export const validInvokeChannels = [
   'workspaceSettings:updateReadAccessScope',
   'workspaceSettings:selectFolder',
   'actionFile:open',
+  // Main window: preview a file an Action names, or open it in its default app
+  'actionFile:read',
+  'actionFile:openInApp',
   // Overlay copy buttons: written by main, so a window without focus still copies.
   'clipboard:writeText',
   'action:submitMessage',

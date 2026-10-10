@@ -158,6 +158,8 @@ export type MainContext = {
   actionFiles: {
     /** Selects the path in Finder; never opens or executes it. */
     open: (params: ActionFileOpenInput) => void;
+    /** `shell.openPath` for a vetted Action file: the error message, empty on success. */
+    openInApp: (realPath: string) => Promise<string>;
   };
 
   clipboard: {

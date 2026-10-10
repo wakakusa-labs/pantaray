@@ -29,6 +29,9 @@ function buildContentSecurityPolicy({ isDev, apiOrigin, accountLoginEnabled }) {
     // pantaray-image: serves user-attached images out of the local artifact root. The scheme is
     // registered without bypassCSP, so it has to be named here to render at all.
     "img-src 'self' data: blob: pantaray-image:;",
+    // pantaray-action-file: serves a PDF an Action names to the preview frame, which Chromium's
+    // PDF viewer draws. Frames only; it never serves a script or a page.
+    "frame-src 'self' pantaray-action-file:;",
     isDev ? "script-src 'self' 'unsafe-inline';" : "script-src 'self';",
     "style-src 'self' 'unsafe-inline';",
     "worker-src 'self' blob:;",

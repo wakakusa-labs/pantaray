@@ -102,6 +102,12 @@ function setupWindowEventListeners(win) {
     'csp-listener',
     () => {
       win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        // The window's policy forbids being framed; a previewed PDF is framed by design and
+        // carries no script of the app's.
+        if (details.url.startsWith('pantaray-action-file:')) {
+          callback({});
+          return;
+        }
         const isDev = isDevRuntime();
         let apiOrigin = null;
         if (!isDev) {
@@ -221,9 +227,7 @@ function waitForWindowLoad(win, url, timeoutMs = DEV_WINDOW_LOAD_TIMEOUT_MS) {
 
     const onFail = (_event, errorCode, errorDescription, validatedURL) => {
       rejectOnce(
-        new Error(
-          `Window load failed: ${validatedURL || url} (${errorCode}: ${errorDescription})`
-        )
+        new Error(`Window load failed: ${validatedURL || url} (${errorCode}: ${errorDescription})`)
       );
     };
 
@@ -256,10 +260,7 @@ function reportDevWindowLoadFailure(error, finalUrl) {
     error: message,
   });
   try {
-    dialog.showErrorBox(
-      '起動エラー',
-      `開発用フロントエンドを読み込めませんでした。\n\n${message}`
-    );
+    dialog.showErrorBox('起動エラー', `開発用フロントエンドを読み込めませんでした。\n\n${message}`);
   } catch {}
 }
 
@@ -351,6 +352,8 @@ function createMainWindow(options = {}) {
       contextIsolation: true,
       sandbox: true,
       webviewTag: false,
+      // Chromium's PDF viewer, the only plugin, draws a previewed PDF.
+      plugins: true,
       additionalArguments: buildUiLanguageAdditionalArguments(options.initialUiLanguage),
       // 配布版は devtools を開けない（ログ/内部情報の露出を防ぐ）
       devTools: isDev,

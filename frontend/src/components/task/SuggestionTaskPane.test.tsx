@@ -189,6 +189,24 @@ describe('SuggestionTaskPane', () => {
     expect(field()).toHaveValue('');
   });
 
+  it('keeps a draft when the pane is left while the suggestion loads or after its read failed', async () => {
+    const drafts = createTaskComposerDrafts(undefined);
+    const field = () => screen.getByLabelText('Additional instructions (optional)');
+    const first = await renderPane('sug-1', drafts);
+    fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
+    first.unmount();
+
+    read.mockReturnValueOnce(new Promise(() => {}));
+    (await renderPane('sug-1', drafts)).unmount();
+    read.mockRejectedValueOnce(new Error('unavailable'));
+    const failed = await renderPane('sug-1', drafts);
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load this suggestion.');
+    failed.unmount();
+
+    await renderPane('sug-1', drafts);
+    expect(field()).toHaveValue('Use the new unit price');
+  });
+
   it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {
     let settle: (value: null) => void = () => undefined;
     acceptAction.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));

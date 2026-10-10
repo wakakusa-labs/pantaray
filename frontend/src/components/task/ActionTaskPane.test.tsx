@@ -320,4 +320,61 @@ describe('ActionTaskPane', () => {
     expect(submitMessage.mock.calls[1][0]).toEqual(failed);
     expect(actions.discardAttachment).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'a lost connection offers the retry again',
+      () => Promise.reject(new Error('offline')),
+      'Retry sending',
+    ],
+    [
+      'an accepted send waits for the conversation',
+      () =>
+        Promise.resolve({
+          kind: 'submitted' as const,
+          response: {
+            action_id: 'act-1',
+            message_id: 'm',
+            step_id: 'step-9',
+            action_status: 'processing' as const,
+            disposition: 'pending' as const,
+            process_id: null,
+          },
+        }),
+      'Refresh conversation',
+    ],
+    [
+      'a conflict says the message was not sent',
+      () => Promise.resolve({ kind: 'action_conflict' as const }),
+      'This conversation cannot accept another message. Your message was not sent.',
+    ],
+  ])(
+    'a retry of a send kept while the pane was away hears its answer: %s',
+    async (_, answer, shown) => {
+      const first = await renderPane();
+      emit(update(createActionPage('act-1', 'success'), 1));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'add the totals' },
+      });
+      // Left while the send is still out: its answer goes to a pane that is gone.
+      fireEvent.click(primaryButton('Send'));
+      first.unmount();
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <ActionTaskPane
+            actionId="act-1"
+            title="Rebuild the quote"
+            onShowInChat={onShowInChat}
+            onAddProject={onAddProject}
+            drafts={drafts}
+          />
+        </UiLanguageProvider>
+      );
+      submitMessage.mockImplementationOnce(answer as Actions['submitMessage']);
+      fireEvent.click(await screen.findByRole('button', { name: 'Retry sending' }));
+      expect(submitMessage.mock.calls[1][0]).toEqual(submitMessage.mock.calls[0][0]);
+      expect(await screen.findByText(shown)).toBeInTheDocument();
+      expect(screen.queryByText('Sending…')).toBeNull();
+    }
+  );
 });

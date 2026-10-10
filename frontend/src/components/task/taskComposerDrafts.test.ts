@@ -19,7 +19,7 @@ const state = (patch: Partial<ComposerState>): ComposerState => ({
   ...patch,
 });
 
-it('keeps nothing for an empty composer, and a send still in flight as failed for its retry', () => {
+it('keeps nothing for an empty composer, and a send still in flight as failed, fenced for its retry', () => {
   expect(keptComposerState(state({}))).toBeNull();
   expect(
     keptComposerState(
@@ -32,7 +32,8 @@ it('keeps nothing for an empty composer, and a send still in flight as failed fo
   ).toMatchObject({
     submission: { request, state: 'failed' },
     failureKind: 'transport',
-    submissionStartFence: null,
+    // Its retry's answers are matched by this fence.
+    submissionStartFence: { messageId: 'm-1', sequence: 0, processId: null },
     attachmentsInFlight: 0,
   });
 });

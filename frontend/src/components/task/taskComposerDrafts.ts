@@ -33,7 +33,7 @@ export function keptComposerState(state: ComposerState): ComposerState | null {
     submission,
     failureKind: inFlight ? 'transport' : state.failureKind,
     attachmentsInFlight: 0,
-    submissionStartFence: null,
+    // The fence names the send whose answers count; a retry of the kept send answers to it.
     refreshState: 'idle',
     resume:
       state.resume?.state === 'requesting' ? { ...state.resume, state: 'failed' } : state.resume,

@@ -12,9 +12,7 @@ import type { ConversationHistoryListItem } from '../../../electron/src/history/
 import { ChatUnreadContext } from '@/components/chat/chatUnread';
 import type { HistorySelection } from '@/history/historySelection';
 import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
-import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
-import { t as translate } from '@/i18n/translate';
 import type { WorkspaceProjects } from './HistoryProjects';
 import { HistorySidebar } from './HistorySidebar';
 
@@ -147,15 +145,31 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('チャットと作業の間にプロジェクトを並べ、＋で追加の流れを呼ぶ', async () => {
+it('上からショートカット、検索、プロジェクト、チャット、作業の順に並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
-  render(<Sidebar />, { wrapper: SidebarWrapper });
+  window.electron = {
+    process: { platform: 'darwin' },
+    shortcut: { getState: vi.fn(async () => ({ accelerator: 'Option+Space', failure: null })) },
+  } as unknown as Window['electron'];
+  const { container } = render(<Sidebar />, { wrapper: SidebarWrapper });
 
+  const hint = await waitFor(() => {
+    const found = container.querySelector('.history-shortcut-hint');
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  // The hint is the head's first line, right above the search.
+  expect(hint.nextElementSibling).toHaveAttribute('role', 'search');
+  const order = [
+    hint.parentElement!,
+    screen.getByRole('region', { name: 'history.projects.title' }),
+    screen.getByRole('button', { name: 'history.chat.title' }),
+    screen.getByRole('region', { name: 'history.tasks.title' }),
+    screen.getByRole('button', { name: /^Conversation/ }),
+  ];
+  for (const [earlier, later] of order.slice(0, -1).map((node, i) => [node, order[i + 1]]))
+    expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const section = screen.getByRole('region', { name: 'history.projects.title' });
-  const chatRow = screen.getByRole('button', { name: 'history.chat.title' });
-  const firstTask = screen.getByRole('button', { name: /^Conversation/ });
-  expect(chatRow.compareDocumentPosition(section)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-  expect(section.compareDocumentPosition(firstTask)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   const projectRows = within(section).getAllByRole('button', { name: /^(aurora|billing)$/u });
   expect(projectRows.map((row) => row.textContent)).toEqual(['aurora', 'billing']);
 
@@ -165,95 +179,46 @@ it('チャットと作業の間にプロジェクトを並べ、＋で追加の�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
-it('起動ボタンはサイドバーの先頭に1つだけで、空状態でもkeyboardから開ける', async () => {
-  const openNewConversation = vi.fn(async () => undefined);
-  window.electron = { history: { openNewConversation } } as unknown as Window['electron'];
-  const { rerender } = render(<Sidebar />, {
-    wrapper: SidebarWrapper,
-  });
-
-  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい作業');
-  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New task');
-  expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  expect(cta.closest('.history-sidebar__head')).not.toBeNull();
-  cta.focus();
-  await userEvent.keyboard('{Enter}');
-  expect(openNewConversation).toHaveBeenCalledOnce();
-  expect(openNewConversation).toHaveBeenCalledWith();
-
-  mocks.error = null;
-  mocks.itemsOverride = [];
-  rerender(<Sidebar />);
-  expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: 'history.newConversation' })).toBe(cta);
-  expect(cta).toHaveFocus();
-  // No shortcut bridge: the empty state points at the button alone.
-  expect(screen.getByText('history.empty.startWithButton')).toBeInTheDocument();
-  expect(HISTORY_MESSAGES.ja['history.empty.startWithShortcut']).toContain('{shortcut}');
-
-  openNewConversation.mockRejectedValueOnce(new Error('unavailable'));
-  await userEvent.click(cta);
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.openOverlayFailed');
-});
-
-it('設定中のショートカットはCTAの中に薄いキーキャップで出し、名前は変えない', async () => {
-  const getState = vi.fn(async () => ({ accelerator: 'Option+Space', failure: null }));
+it('設定中のショートカットを押せない薄い文で出し、登録できていなければ出さない', async () => {
+  const getState = vi
+    .fn()
+    .mockResolvedValueOnce({ accelerator: 'Option+Space', failure: null })
+    .mockResolvedValueOnce({ accelerator: 'Option+Space', failure: 'registration_unavailable' });
   window.electron = {
     process: { platform: 'darwin' },
-    history: { openNewConversation: vi.fn(async () => undefined) },
     shortcut: { getState },
   } as unknown as Window['electron'];
-  const { container, rerender } = render(<Sidebar />, {
-    wrapper: SidebarWrapper,
+  const { container, unmount } = render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  const hint = await waitFor(() => {
+    const found = container.querySelector('.history-shortcut-hint');
+    expect(found).not.toBeNull();
+    return found!;
   });
+  expect(hint.tagName).toBe('P');
+  expect(within(hint as HTMLElement).queryByRole('button')).toBeNull();
+  expect([...hint.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['⌥', 'Space']);
+  expect(HISTORY_MESSAGES.ja['history.shortcutHint']).toBe('{shortcut} で新しい作業');
+  expect(HISTORY_MESSAGES.en['history.shortcutHint'].split('{shortcut}')).toHaveLength(2);
+  unmount();
 
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  // While the shortcut loads, the button shows nothing extra.
-  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
-  expect(cta).not.toHaveAttribute('title');
-  await waitFor(() => expect(cta).toHaveAttribute('aria-keyshortcuts', 'Alt+Space'));
-  const keys = cta.querySelector('.history-new-conversation-keys');
-  expect(keys).toHaveAttribute('aria-hidden', 'true');
-  expect([...keys!.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['⌥', 'Space']);
-  expect(cta).toHaveAccessibleName('history.newConversation');
-  expect(container.querySelectorAll('.shortcut-keycaps')).toHaveLength(1);
-  expect(translate('ja', 'shortcut.hint.label', { keys: 'Option Space' })).toBe(
-    'ショートカット: Option Space'
-  );
-  expect(COMMON_MESSAGES.en['shortcut.hint.label']).toBe('Shortcut: {keys}');
-
-  mocks.error = null;
-  mocks.itemsOverride = [];
-  rerender(<Sidebar />);
-  // The empty state names the shortcut inside the sentence instead of repeating the button.
-  const hint = container.querySelector('.history-empty-hint');
-  expect(hint?.querySelector('.shortcut-keycaps')).not.toBeNull();
-  expect(HISTORY_MESSAGES.ja['history.empty.startWithShortcut'].split('{shortcut}')).toHaveLength(
-    2
-  );
-  expect(HISTORY_MESSAGES.en['history.empty.startWithShortcut'].split('{shortcut}')).toHaveLength(
-    2
-  );
+  const { container: second } = render(<Sidebar />, { wrapper: SidebarWrapper });
+  await waitFor(() => expect(getState).toHaveBeenCalledTimes(2));
+  expect(second.querySelector('.history-shortcut-hint')).toBeNull();
 });
 
-it('ショートカットが登録できていないときはキーキャップを出さず、CTAの説明で伝える', async () => {
-  window.electron = {
-    process: { platform: 'darwin' },
-    shortcut: {
-      getState: vi.fn(async () => ({
-        accelerator: 'Option+Space',
-        failure: 'registration_unavailable',
-      })),
-    },
-  } as unknown as Window['electron'];
+it('作業の見出しは作業が無くても出し、その ✎ で新しい作業を詳細に選ぶ', async () => {
+  mocks.error = null;
+  mocks.itemsOverride = [];
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  await waitFor(() => expect(cta).toHaveAttribute('title', 'shortcut.hint.unavailable'));
-  expect(cta).toHaveAccessibleDescription('shortcut.hint.unavailable');
-  expect(cta).not.toHaveAttribute('aria-keyshortcuts');
-  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
+  const tasks = screen.getByRole('region', { name: 'history.tasks.title' });
+  expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('作業');
+  expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Tasks');
+  const compose = within(tasks).getByRole('button', { name: 'history.newConversation' });
+  compose.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(mocks.select).toHaveBeenCalledWith('new');
 });
 
 it('行は最終更新の日ごとに、今日・昨日・日付の見出しの下にまとめる', () => {
@@ -278,8 +243,7 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
   try {
     render(<Sidebar />, { wrapper: SidebarWrapper });
 
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'history.projects.title',
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
       'history.day.today',
       'history.day.yesterday',
       '9月29日',
@@ -642,8 +606,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     ];
     rerender(<Sidebar />);
 
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'history.projects.title',
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
       'history.day.today',
       'history.day.yesterday',
       '9月29日',

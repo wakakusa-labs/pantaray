@@ -4,14 +4,17 @@ import type { WorkKey } from '@/components/chat/chatTimeline';
 import { discardDocuments, type AttachmentActions } from '../agent-overlay/attachmentStaging';
 import type { ComposerState } from '../agent-overlay/useOverlayComposerController';
 
+/** A task pane's composer: one work's, or the new task's before its first send. */
+export type TaskDraftKey = WorkKey | 'new';
+
 /**
  * The composers of the task panes the user left, by work, so a draft, its staged attachments and
  * a send waiting for a retry are there again on return. One store belongs to one owner.
  */
 export type TaskComposerDrafts = {
-  read: (work: WorkKey) => ComposerState | undefined;
-  forget: (work: WorkKey) => void;
-  keep: (work: WorkKey, state: ComposerState) => void;
+  read: (work: TaskDraftKey) => ComposerState | undefined;
+  forget: (work: TaskDraftKey) => void;
+  keep: (work: TaskDraftKey, state: ComposerState) => void;
   /** The owner's pages are gone: drafts never sent are discarded, now and from late keeps. */
   close: () => void;
   open: () => void;
@@ -47,7 +50,7 @@ const unsentAttachments = (state: ComposerState) =>
 export function createTaskComposerDrafts(
   actions: AttachmentActions | undefined
 ): TaskComposerDrafts {
-  const drafts = new Map<WorkKey, ComposerState>();
+  const drafts = new Map<TaskDraftKey, ComposerState>();
   let closed = false;
   return {
     read: (work) => drafts.get(work),
@@ -84,7 +87,7 @@ export function useKeptTaskComposer({
   composerGenerationRef,
 }: {
   drafts: TaskComposerDrafts;
-  work: WorkKey;
+  work: TaskDraftKey;
   composer: ComposerState;
   keepable: boolean;
   composerGenerationRef: MutableRefObject<number>;

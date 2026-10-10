@@ -290,7 +290,7 @@ test('the chat pane: bubbles, cards with latest-only status, no event bubbles', 
   ).toHaveAttribute('aria-current', 'true');
 });
 
-test('the sidebar holds New task, search, the chat row and the tasks by day', async ({
+test('the sidebar holds search, the chat row, and the tasks by day under their New task', async ({
   page,
 }, info) => {
   await installBridge(page);
@@ -298,7 +298,8 @@ test('the sidebar holds New task, search, the chat row and the tasks by day', as
   await expect(sidebar.getByRole('button', { name: '新しい作業' })).toBeVisible();
   await expect(sidebar.getByRole('searchbox', { name: '作業を検索' })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('heading', { level: 2, name: '今日' })).toBeVisible();
+  await expect(sidebar.getByRole('heading', { level: 2, name: '作業' })).toBeVisible();
+  await expect(sidebar.getByRole('heading', { level: 3, name: '今日' })).toBeVisible();
   const row = sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ });
   // A running task shows its title alone, with no badge and no dot, and is heard as running.
   await expect(row).toHaveAccessibleName('見積書のたたき台を作る 実行中');

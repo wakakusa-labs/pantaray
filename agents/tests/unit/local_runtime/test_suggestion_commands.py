@@ -126,18 +126,21 @@ def allowed_db(tmp_path: Path) -> Path:
     [
         ("always_allow", ("scoped_write", "process_exec_local"), True),
         ("prompt_each_time", (), False),
-        # The broker does not auto-approve always_allow without its grants.
+        # The broker does not auto-approve a saved always_allow without its grants.
         ("always_allow", (), False),
+        # Nothing saved: the built-in always_allow default needs no grants.
+        (None, (), True),
     ],
 )
 def test_commands_are_offered_only_while_they_run_without_asking(
-    tmp_path: Path, mode: str, capabilities: tuple[str, ...], offered: bool
+    tmp_path: Path, mode: str | None, capabilities: tuple[str, ...], offered: bool
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
     root = tmp_path / "repo"
     root.mkdir()
     _register_workspace(db_path=db_path, root=root)
-    _set_command_approval(db_path, mode=mode, capabilities=capabilities)
+    if mode is not None:
+        _set_command_approval(db_path, mode=mode, capabilities=capabilities)
 
     definitions = LocalSuggestionResearchTools(
         db_path=db_path,

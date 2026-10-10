@@ -138,7 +138,7 @@ async def test_requested_folder_asks_and_opens_for_the_approved_call_only(
     # The command still runs in the workspace; only the write roots grow.
     assert command.cwd == str(context.workspace_path.resolve())
     assert str(outside) in command.real_write_roots
-    if mode == "always_allow":
+    if mode != "prompt_each_time":
         await _run(
             db_path=db_path,
             context=context,

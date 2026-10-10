@@ -26,8 +26,6 @@ from .executions import (
     _record_tool_invocation_start_in_connection,
 )
 
-_WORKSPACE_EDIT_AND_COMMAND_SCOPE = "workspace_edit_and_command"
-
 
 class _ApprovalExecutionClaimConflict(RuntimeError):
     """Atomic execution claim failed and the transaction must roll back."""

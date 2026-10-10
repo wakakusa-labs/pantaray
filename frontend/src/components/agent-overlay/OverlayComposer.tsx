@@ -175,6 +175,8 @@ type OverlayComposerProps = {
   resumeFailed: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
+  /** The @-mention list's "Add project" option; the host decides where projects are added. */
+  onAddProject: () => void;
   onDraftChange: (value: string, mentions: ComposerMention[]) => void;
   onAttachFiles: (files: readonly File[]) => void;
   onRemoveAttachment: (attachment: ComposerAttachment) => void;
@@ -277,6 +279,7 @@ export function OverlayComposer({
   resumeFailed,
   canResume,
   textareaRef,
+  onAddProject,
   onDraftChange,
   onAttachFiles,
   onRemoveAttachment,
@@ -316,7 +319,7 @@ export function OverlayComposer({
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
-        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
+        onAddProject={onAddProject}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
           // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。

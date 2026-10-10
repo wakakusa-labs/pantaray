@@ -25,6 +25,7 @@ import { useActionApprovalDecisionController } from './agent-overlay/useActionAp
 import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
+import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -112,15 +113,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
   const approval = useActionApprovalDecisionController({ t });
   const { approvalBlockers, approvalUiState, setApprovalBlockers } = approval;
-  useEffect(() => {
-    if (entryMode === 'standalone') standaloneComposerRef.current?.focus();
-  }, [entryMode]);
-  useEffect(() => {
-    if (entryMode !== 'standalone') return;
-    return window.electron?.ipcRenderer.on('overlay:focusComposer', () => {
-      standaloneComposerRef.current?.focus();
-    });
-  }, [entryMode]);
+  useStandaloneComposerFocus(entryMode === 'standalone', standaloneComposerRef);
   useEffect(() => {
     submissionRefreshScopeRef.current += 1;
     setApprovalBlockers([]);
@@ -482,6 +475,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
         }
         textareaRef={standaloneComposerRef}
+        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={(draft, mentions) =>
           setComposer((current) => ({
             ...current,

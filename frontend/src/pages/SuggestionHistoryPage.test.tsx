@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -63,6 +63,16 @@ vi.mock('@/components/task/SuggestionTaskPane', () => ({
       <h1>{title}</h1>
       <button type="button" onClick={() => onStarted('A9')}>
         accept
+      </button>
+    </section>
+  ),
+}));
+
+vi.mock('@/components/task/NewTaskPane', () => ({
+  NewTaskPane: ({ onStarted }: { onStarted: (actionId: string) => void }) => (
+    <section aria-label="new task">
+      <button type="button" onClick={() => onStarted('A7')}>
+        send
       </button>
     </section>
   ),
@@ -173,7 +183,11 @@ it('shows what `?item=` names, and the chat for a missing or malformed item', as
 
   // A task the list does not hold is still shown, under a plain title.
   renderPage(['/history?item=action:OLD']);
-  expect(screen.getByRole('heading', { name: '作業' })).toBeInTheDocument();
+  expect(
+    within(screen.getByRole('region', { name: 'action OLD' })).getByRole('heading', {
+      name: '作業',
+    })
+  ).toBeInTheDocument();
   cleanup();
 
   for (const entry of [
@@ -227,6 +241,15 @@ it('replaces an accepted suggestion with its Action in the same history entry', 
   expect(location()).toHaveTextContent('/history?item=chat');
 });
 
+it('opens a new task from ✎ and replaces it with the Action its send opened', async () => {
+  renderPage(['/history?item=chat']);
+  await userEvent.click(await screen.findByRole('button', { name: NEW_TASK }));
+  expect(location()).toHaveTextContent('/history?item=new');
+  expect(parseHistorySelection('?item=new')).toBe('new');
+  await userEvent.click(screen.getByRole('button', { name: 'send' }));
+  expect(location()).toHaveTextContent('/history?item=action:A7');
+});
+
 it('moves the selection off a deleted task in place of its history entry', async () => {
   renderPage(['/history?item=chat', '/history?item=action:A1']);
   await userEvent.click(await screen.findByRole('button', { name: '削除 見積書を直す' }));
@@ -239,6 +262,7 @@ it('moves the selection off a deleted task in place of its history entry', async
 });
 
 const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;
+const NEW_TASK = /^(新しい作業|New task)$/u;
 
 it('the Action pane shows its card in the chat and starts naming a project in place', async () => {
   renderPage(['/history?item=action:A1']);

@@ -29,6 +29,33 @@
   padding: 0 8px;
 }
 
+.history-tasks {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 4px;
+}
+
+.history-tasks > .history-projects__head {
+  margin-right: 12px;
+  margin-left: 16px;
+}
+
+/* Quiet, like the projects' heading: it says what the shortcut does and is not a control. */
+.history-shortcut-hint {
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
+.history-shortcut-hint .shortcut-keycap {
+  background: transparent;
+  border-color: rgba(214, 226, 248, 0.12);
+  color: var(--fog-text-3);
+  font-weight: var(--weight-regular);
+}
+
 .history-sidebar__tasks {
   display: flex;
   flex: 1;
@@ -126,46 +153,6 @@
   background-color: var(--text-primary);
 }
 
-.history-new-conversation-button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--fog-text);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.history-new-conversation-button:hover {
-  background: var(--fog-mist-strong);
-}
-
-.history-new-conversation-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* Dimmed keycaps at the far end, the way menus show a shortcut. */
-.history-new-conversation-keys {
-  display: inline-flex;
-  margin-left: auto;
-}
-
-.history-new-conversation-keys .shortcut-keycap {
-  min-width: 20px;
-  height: 20px;
-  background: transparent;
-  border-color: rgba(214, 226, 248, 0.12);
-  color: var(--fog-text-3);
-  font-weight: var(--weight-regular);
-}
-
 .history-chat-row {
   display: flex;
   align-items: center;
@@ -221,11 +208,6 @@
   font-size: 13px;
 }
 
-.history-empty-hint {
-  margin: 0;
-  text-align: center;
-}
-
 .history-list {
   display: flex;
   flex-direction: column;
@@ -235,7 +217,7 @@
   list-style: none;
 }
 
-.history-day h2 {
+.history-day h3 {
   margin: 14px 8px 6px;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);

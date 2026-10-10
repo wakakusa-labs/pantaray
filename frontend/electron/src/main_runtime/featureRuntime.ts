@@ -337,6 +337,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         },
         actionFiles: {
           open: ({ path }) => shell.showItemInFolder(path),
+          openInApp: (realPath) => shell.openPath(realPath),
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {
@@ -463,6 +464,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getGlobalShortcutState: shortcutController.getState,
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
+    readActionConversationPage: actions.readConversationPage,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,
     startScreenshots,

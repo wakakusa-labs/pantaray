@@ -66,10 +66,24 @@ test('CSP allows the stored-image scheme for images only', () => {
   }
 });
 
+test('CSP allows the Action file scheme for frames only', () => {
+  for (const isDev of [false, true]) {
+    const csp = buildContentSecurityPolicy({ isDev, apiOrigin: null });
+
+    assert.ok(csp.includes("frame-src 'self' pantaray-action-file:;"));
+    assert.ok(csp.includes("object-src 'none';"));
+    for (const directive of csp.split(';').filter((part) => !part.includes('frame-src'))) {
+      assert.ok(!directive.includes('pantaray-action-file'), directive);
+    }
+  }
+});
+
 test('connect-src names Supabase only while account login is enabled', () => {
   for (const isDev of [false, true]) {
     const params = { isDev, apiOrigin: 'http://127.0.0.1:8005' };
-    assert.ok(!buildContentSecurityPolicy({ ...params, accountLoginEnabled: false }).includes('supabase'));
+    assert.ok(
+      !buildContentSecurityPolicy({ ...params, accountLoginEnabled: false }).includes('supabase')
+    );
     assert.ok(
       buildContentSecurityPolicy({ ...params, accountLoginEnabled: true }).includes(
         'https://*.supabase.co wss://*.supabase.co;'

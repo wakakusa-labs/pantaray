@@ -113,6 +113,9 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
   for (const channel of [
     'action:openConversation',
     'suggestion:read',
+    // Reads and opens workspace files: the main window's preview only.
+    'actionFile:read',
+    'actionFile:openInApp',
     'history:openNewConversation',
     'history:deleteItem',
   ]) {

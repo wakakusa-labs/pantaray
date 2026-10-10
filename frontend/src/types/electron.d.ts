@@ -45,6 +45,11 @@ import type {
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
+import type {
+  ActionFileOpenResult,
+  ActionFileReadResult,
+  ActionFileRequest,
+} from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
 import type { ActionCompletionViewedRequest } from '../../electron/src/history/actionReadState';
@@ -235,7 +240,12 @@ declare global {
         onSnapshot: (callback: (payload: ElectronOverlaySnapshotPayload) => void) => () => void;
       };
       actionFiles?: {
+        /** Selects the file in Finder. */
         open: (params: { path: string }) => Promise<void>;
+        /** Main window only: a file the Action's conversation names, as text or an image. */
+        read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
+        /** Main window only: opens a file the Action names in its default app. */
+        openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
       };
       clipboard?: {
         writeText: (text: string) => Promise<void>;

@@ -39,7 +39,14 @@ import { startDesktopBackgroundRuntime } from './main_runtime/backgroundStartup'
 import { createDesktopRuntime, loadDevelopmentEnvironment } from './main_runtime/desktopRuntime';
 import { createDesktopFeatureRuntime } from './main_runtime/featureRuntime';
 import { applyDevUserDataDirOverride } from './runtime/userDataOverride';
-import { registerActionImageProtocol, registerActionImageScheme } from './protocol/imageProtocol';
+import {
+  ACTION_IMAGE_PRIVILEGED_SCHEME,
+  registerActionImageProtocol,
+} from './protocol/imageProtocol';
+import {
+  ACTION_FILE_PRIVILEGED_SCHEME,
+  registerActionFileProtocol,
+} from './protocol/actionFileProtocol';
 
 type LoggerLike = {
   isPackaged?: boolean;
@@ -78,9 +85,13 @@ function normalizeNodeEnv(value: string | undefined): 'development' | 'productio
 }
 process.env.NODE_ENV = app.isPackaged ? 'production' : normalizeNodeEnv(process.env.NODE_ENV);
 applyDevUserDataDirOverride({ app });
-// Chromium freezes the scheme registry when the app becomes ready, so `pantaray-image://`
-// has to be declared here rather than alongside its handler.
-registerActionImageScheme(protocol);
+// Chromium freezes the scheme registry when the app becomes ready, so the schemes have to be
+// declared here rather than alongside their handlers, and in one call: Electron keeps only
+// the last registration.
+protocol.registerSchemesAsPrivileged([
+  ACTION_IMAGE_PRIVILEGED_SCHEME,
+  ACTION_FILE_PRIVILEGED_SCHEME,
+]);
 
 const { createLogger, disableConsoleForRelease } = loadNodeModule('../logger') as {
   createLogger: () => LoggerLike;
@@ -517,6 +528,9 @@ installDesktopApplicationLifecycle({
     registerActionImageProtocol(protocol, {
       localArtifactRoot: LOCAL_BACKEND_ARTIFACT_ROOT,
       getCurrentSubjectId: featureRuntime.getCurrentSubjectId,
+    });
+    registerActionFileProtocol(protocol, {
+      readConversationPage: featureRuntime.readActionConversationPage,
     });
   },
   createMainWindow: createWindow,

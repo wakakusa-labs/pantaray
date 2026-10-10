@@ -5,7 +5,7 @@ import {
   ActionResumeRequestSchema,
 } from '../../actions/actionContracts';
 
-const ACTION_CONVERSATION_MAX_PAGE_SIZE = 100;
+export const ACTION_CONVERSATION_MAX_PAGE_SIZE = 100;
 const ACTION_TOOL_OUTPUT_MIN_PAGE_BYTES = 4;
 const ACTION_TOOL_OUTPUT_MAX_PAGE_BYTES = 65_536;
 

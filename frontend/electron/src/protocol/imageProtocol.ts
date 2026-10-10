@@ -127,33 +127,23 @@ export function createActionImageProtocolHandler(
   };
 }
 
-type PrivilegedSchemeRegistrar = {
-  registerSchemesAsPrivileged: (
-    schemes: { scheme: string; privileges: Record<string, boolean> }[]
-  ) => void;
-};
-
 type ProtocolHandlerRegistrar = {
   handle: (scheme: string, handler: (request: { url: string }) => Response) => void;
 };
 
-/** Must run before `app.whenReady()`; Chromium freezes the scheme registry at ready. */
-export function registerActionImageScheme(registrar: PrivilegedSchemeRegistrar): void {
-  registrar.registerSchemesAsPrivileged([
-    {
-      scheme: ACTION_IMAGE_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: false,
-        corsEnabled: false,
-        stream: false,
-        // Images stay subject to the window CSP, which names the scheme explicitly.
-        bypassCSP: false,
-      },
-    },
-  ]);
-}
+/** Declared with every other privileged scheme in one call before `app.whenReady()`. */
+export const ACTION_IMAGE_PRIVILEGED_SCHEME = {
+  scheme: ACTION_IMAGE_SCHEME,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: false,
+    corsEnabled: false,
+    stream: false,
+    // Images stay subject to the window CSP, which names the scheme explicitly.
+    bypassCSP: false,
+  },
+};
 
 /** Must run after `app.whenReady()`. */
 export function registerActionImageProtocol(

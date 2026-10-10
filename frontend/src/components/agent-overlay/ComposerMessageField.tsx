@@ -141,7 +141,7 @@ export function ComposerMessageField({
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Files pasted instead of text; a read-only field takes none. */
   onPasteFiles: (files: File[]) => void;
-  /** "Add project": the Overlay brings the main window to Settings; the main window adds it. */
+  /** "Add project": the main window names a new project in the History sidebar. */
   onAddProject: () => void;
 }) {
   const listId = useId();

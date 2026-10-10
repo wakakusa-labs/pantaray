@@ -238,7 +238,9 @@ it('moves the selection off a deleted task in place of its history entry', async
   expect(location()).toHaveTextContent('/history?item=chat');
 });
 
-it('the Action pane shows its card in the chat and adds a project in place', async () => {
+const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;
+
+it('the Action pane shows its card in the chat and starts naming a project in place', async () => {
   renderPage(['/history?item=action:A1']);
   await userEvent.click(screen.getByRole('button', { name: 'show in chat' }));
   expect(location()).toHaveTextContent('/history?item=chat');
@@ -246,8 +248,15 @@ it('the Action pane shows its card in the chat and adds a project in place', asy
 
   await userEvent.click(screen.getByRole('button', { name: 'back' }));
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
-  expect(selectFolder).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox', { name: PROJECT_NAME })).toHaveFocus();
+  expect(selectFolder).not.toHaveBeenCalled();
   expect(location()).toHaveTextContent('/history?item=action:A1');
+});
+
+it('starts naming a project when the Overlay asks for a new one', async () => {
+  renderPage(['/history?project=new']);
+  expect(await screen.findByRole('textbox', { name: PROJECT_NAME })).toHaveFocus();
+  expect(location()).not.toHaveTextContent('project=new');
 });
 
 it('writes the selection as `?item=kind:id`, encoding only the id', () => {

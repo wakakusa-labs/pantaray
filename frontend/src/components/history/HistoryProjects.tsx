@@ -16,7 +16,7 @@ import {
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjectOrganizationDialog } from './HistoryProjectOrganizationDialog';
-import { HistoryProjectRow } from './HistoryProjectRow';
+import { HistoryProjectRow, ProjectNameField } from './HistoryProjectRow';
 import './historyProjects.css';
 
 export type WorkspaceProjects = Pick<
@@ -24,7 +24,7 @@ export type WorkspaceProjects = Pick<
   | 'settings'
   | 'errorMessage'
   | 'pending'
-  | 'addProjectFromFolder'
+  | 'createProject'
   | 'removeProject'
   | 'renameProject'
   | 'addFolderToProject'
@@ -41,21 +41,37 @@ type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject 
 const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
- * The sidebar's projects, managed in place: ＋ adds a folder as a project, each row's menu
- * renames it, adds folders, sets its organization, opens it in Finder or deletes it, and rows
- * are dragged into order. They do not filter or group the tasks below.
+ * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders,
+ * each row's menu renames it, adds folders, sets its organization, opens it in Finder or deletes
+ * it, and rows are dragged into order. They do not filter or group the tasks below.
  */
 export function HistoryProjects({
   projects,
+  creating,
+  onCreatingChange,
   t,
 }: {
   projects: WorkspaceProjects;
+  /** Whether the new project's name field shows; the composers' add opens it as well. */
+  creating: boolean;
+  onCreatingChange: (creating: boolean) => void;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { settings, errorMessage, pending, dragController } = projects;
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const create = async (name: string) => {
+    const project = await projects.createProject(name);
+    if (!project) return;
+    setCreatedId(project.project_id);
+    onCreatingChange(false);
+  };
+  const cancelCreate = () => {
+    flushSync(() => onCreatingChange(false));
+    addButtonRef.current?.focus();
+  };
   // A rename answers after the user may have started renaming another project.
   const renamingIdRef = useRef(renamingId);
   useEffect(() => {
@@ -115,7 +131,7 @@ export function HistoryProjects({
           title={t('history.projects.add')}
           aria-busy={pending.has(workspacePendingKey.projectCreate)}
           disabled={settings === null}
-          onClick={() => void projects.addProjectFromFolder()}
+          onClick={() => onCreatingChange(true)}
         >
           <Plus size={15} aria-hidden="true" />
         </button>
@@ -125,7 +141,7 @@ export function HistoryProjects({
           {errorMessage}
         </div>
       ) : null}
-      {settings && settings.projects.length > 0 ? (
+      {settings && (settings.projects.length > 0 || creating) ? (
         <DndContext
           sensors={dragController.sensors}
           accessibility={dragController.accessibility}
@@ -139,6 +155,17 @@ export function HistoryProjects({
             strategy={verticalListSortingStrategy}
           >
             <ul className="history-projects__list">
+              {creating ? (
+                <li className="history-item history-project history-project--new">
+                  <ProjectNameField
+                    initialName=""
+                    label={t('history.projects.nameLabel')}
+                    saveOnBlur={false}
+                    onSave={create}
+                    onCancel={cancelCreate}
+                  />
+                </li>
+              ) : null}
               {settings.projects.map((project) => (
                 <HistoryProjectRow
                   key={project.project_id}
@@ -156,6 +183,8 @@ export function HistoryProjects({
                     projects.removeFolderFromProject(folderId, project.project_id)
                   }
                   isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
+                  onAddFolder={() => void projects.addFolderToProject(project.project_id)}
+                  initiallyExpanded={createdId === project.project_id}
                 />
               ))}
             </ul>

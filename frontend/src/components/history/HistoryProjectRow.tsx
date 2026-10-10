@@ -36,6 +36,8 @@ export function HistoryProjectRow({
   onRenameEnd,
   onRemoveFolder,
   isFolderPending,
+  onAddFolder,
+  initiallyExpanded,
 }: {
   project: WorkspaceProject;
   folders: WorkspaceFolder[];
@@ -51,8 +53,11 @@ export function HistoryProjectRow({
   onRemoveFolder: (folderId: string) => Promise<boolean>;
   /** A folder being added or removed elsewhere cannot be removed until that settles. */
   isFolderPending: (folderId: string) => boolean;
+  onAddFolder: () => void;
+  /** A project just created opens on its empty folder list, with its add button focused. */
+  initiallyExpanded: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
     useSortable({ id: project.project_id, disabled: dragDisabled });
   const detailsId = `history-project-details:${project.project_id}`;
@@ -92,9 +97,10 @@ export function HistoryProjectRow({
         <GripVertical size={13} aria-hidden="true" />
       </button>
       {renaming ? (
-        <RenameField
+        <ProjectNameField
           initialName={project.display_name}
           label={t('history.projects.nameLabel')}
+          saveOnBlur
           onSave={async (name) => {
             if (await onRename(name)) endRename();
           }}
@@ -148,6 +154,17 @@ export function HistoryProjectRow({
             );
           })}
         </ul>
+        {folders.length === 0 ? (
+          <button
+            type="button"
+            className="history-filter-button history-project__add-folder"
+            // Only a project just created opens here; focus follows it from the name field.
+            autoFocus={initiallyExpanded}
+            onClick={onAddFolder}
+          >
+            {t('history.projects.addFolder')}
+          </button>
+        ) : null}
         {organizations.length > 0 ? (
           <p className="history-project__organization">
             {t('history.projects.organization')}:{' '}
@@ -162,15 +179,20 @@ export function HistoryProjectRow({
 /** The keyCode of a key the IME processed, sent for the Enter that ends a composition. */
 const IME_PROCESS_KEY_CODE = 229;
 
-/** Enter saves and Escape cancels; leaving the field saves, as a file name field does. */
-function RenameField({
+/**
+ * A project's name, being renamed or created. Enter saves and Escape cancels; leaving the field
+ * saves a rename, as a file name field does, and cancels a new name left empty.
+ */
+export function ProjectNameField({
   initialName,
   label,
+  saveOnBlur,
   onSave,
   onCancel,
 }: {
   initialName: string;
   label: string;
+  saveOnBlur: boolean;
   onSave: (name: string) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -188,14 +210,18 @@ function RenameField({
       type="text"
       className="history-project__rename"
       aria-label={label}
+      placeholder={label}
       value={name}
-      // Opened from the menu on purpose, so taking focus here is what the user asked for.
+      // Opened from ＋ or the menu on purpose, so taking focus here is what the user asked for.
       autoFocus
       onFocus={(event) => event.currentTarget.select()}
       onChange={(event) => setName(event.target.value)}
       // Selecting text with the pointer must not pick up the row.
       onPointerDown={(event) => event.stopPropagation()}
-      onBlur={() => void save()}
+      onBlur={() => {
+        if (saveOnBlur) void save();
+        else if (!name.trim() && !settledRef.current) onCancel();
+      }}
       onKeyDown={(event) => {
         // Enter and Escape while an IME is composing belong to the IME.
         if (event.nativeEvent.isComposing || event.keyCode === IME_PROCESS_KEY_CODE) return;

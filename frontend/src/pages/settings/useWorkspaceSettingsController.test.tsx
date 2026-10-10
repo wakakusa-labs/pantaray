@@ -112,55 +112,6 @@ describe('useWorkspaceSettingsController', () => {
     expect(getCachedWorkspaceSettings(OWNER.id)).toBeNull();
   });
 
-  it('adds a chosen folder as a project of its own, and takes the project back if the folder fails', async () => {
-    const project = {
-      project_id: 'project-a',
-      display_name: 'aurora',
-      organization_ids: [],
-      sort_order: 0,
-    };
-    const createProject = vi.fn(async () => project);
-    const createFolder = vi.fn(async () => ({
-      folder_id: 'folder-a',
-      display_name: 'aurora',
-      real_path: '/Users/me/aurora',
-      canonical_real_path: '/Users/me/aurora',
-      organization_ids: [],
-      project_ids: ['project-a'],
-    }));
-    const deleteProject = vi.fn(async () => undefined);
-    installWorkspaceApi({
-      get: async () => emptySettings,
-      selectFolder: vi
-        .fn()
-        .mockResolvedValueOnce({ canceled: false, path: '/Users/me/aurora' })
-        .mockResolvedValueOnce({ canceled: false, path: '/Users/me/billing' }),
-      createProject,
-      createFolder,
-      deleteProject,
-    });
-    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
-    await waitFor(() => expect(result.current.settings).not.toBeNull());
-
-    await act(async () => result.current.addProjectFromFolder());
-    expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
-    expect(createFolder).toHaveBeenCalledWith({
-      displayName: 'aurora',
-      realPath: '/Users/me/aurora',
-      organizationIds: [],
-      projectIds: ['project-a'],
-    });
-    expect(result.current.settings?.projects).toEqual([project]);
-    expect(result.current.settings?.folders).toHaveLength(1);
-
-    createFolder.mockRejectedValueOnce(new Error('not a directory'));
-    createProject.mockResolvedValueOnce({ ...project, project_id: 'project-b' });
-    await act(async () => result.current.addProjectFromFolder());
-    expect(deleteProject).toHaveBeenCalledWith('project-b');
-    expect(result.current.settings?.projects).toEqual([project]);
-    expect(result.current.errorMessage).toBe('settings.workspace.saveFailed');
-  });
-
   it('never creates a registered folder again, whose upsert would replace its links', async () => {
     // As create_workspace_folder does: a folder is keyed by its canonical path, and creating it
     // again replaces every project and organization link it had.
@@ -180,7 +131,6 @@ describe('useWorkspaceSettingsController', () => {
       organization_ids: [],
       sort_order: sortOrder,
     });
-    const createProject = vi.fn(async () => project('new', 3));
     const createFolder = vi.fn(
       async (input: { displayName: string; realPath: string; projectIds: string[] }) => {
         const existing = folders.find((folder) => folder.canonical_real_path === input.realPath);
@@ -204,24 +154,11 @@ describe('useWorkspaceSettingsController', () => {
         folders: folders.map((folder) => ({ ...folder })),
       }),
       selectFolder: async () => ({ canceled: false, path: '/Users/me/shared' }),
-      createProject,
       createFolder,
       updateFolderLinks,
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await waitFor(() => expect(result.current.settings).not.toBeNull());
-
-    // The sidebar's ＋ on it: nothing is created, its links stay, and the user is told why.
-    await act(async () => result.current.addProjectFromFolder());
-    expect(createProject).not.toHaveBeenCalled();
-    expect(createFolder).not.toHaveBeenCalled();
-    expect(folders[0].project_ids).toEqual(['a', 'b']);
-    expect(result.current.settings?.projects.map((item) => item.project_id)).toEqual([
-      'a',
-      'b',
-      'c',
-    ]);
-    expect(result.current.errorMessage).toBe('settings.workspace.folderAlreadyRegistered');
 
     // Add folder on project c: the folder joins c and keeps a and b.
     await act(async () => {
@@ -350,13 +287,16 @@ describe('useWorkspaceSettingsController', () => {
     await act(async () => {
       expect(await result.current.removeProject('p-1')).toBe(true);
     });
-    await act(async () => result.current.addProjectFromFolder());
+    await act(async () => {
+      const project = await result.current.createProject('aurora');
+      expect(await result.current.addFolderToProject(project!.project_id)).toBe(true);
+    });
 
     expect(result.current.errorMessage).toBeNull();
     expect(result.current.settings).toEqual(server);
   });
 
-  it('refuses a second ＋ while the first add is still in flight, and is busy until it ends', async () => {
+  it('refuses a second add while the first is still in flight, and is busy until it ends', async () => {
     const folderRequest = createDeferred<{
       folder_id: string;
       display_name: string;
@@ -366,32 +306,29 @@ describe('useWorkspaceSettingsController', () => {
       project_ids: string[];
     }>();
     const selectFolder = vi.fn(async () => ({ canceled: false, path: '/Users/me/aurora' }));
-    const createProject = vi.fn(async () => ({
-      project_id: 'p-1',
-      display_name: 'aurora',
-      sort_order: 0,
-      organization_ids: [],
-    }));
     const createFolder = vi.fn(() => folderRequest.promise);
     installWorkspaceApi({
-      get: async () => emptySettings,
+      get: async () => ({
+        ...emptySettings,
+        projects: [{ project_id: 'p-1', display_name: 'a', sort_order: 0, organization_ids: [] }],
+      }),
       selectFolder,
-      createProject,
       createFolder,
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await waitFor(() => expect(result.current.settings).not.toBeNull());
 
-    let first!: Promise<void | undefined>;
+    let first!: Promise<boolean>;
     act(() => {
-      first = result.current.addProjectFromFolder();
+      first = result.current.addFolderToProject('p-1');
     });
     await waitFor(() => expect(createFolder).toHaveBeenCalledOnce());
     expect(result.current.busy).toBe(true);
-    await act(async () => result.current.addProjectFromFolder());
+    await act(async () => {
+      expect(await result.current.addFolderToProject('p-1')).toBe(false);
+    });
 
     expect(selectFolder).toHaveBeenCalledOnce();
-    expect(createProject).toHaveBeenCalledOnce();
     await act(async () => {
       folderRequest.resolve({
         folder_id: 'f-1',
@@ -455,47 +392,46 @@ describe('useWorkspaceSettingsController', () => {
     expect(result.current.settings).toEqual(server);
   });
 
-  it('never takes back a project it did not create when the name was taken', async () => {
-    // As workspace_settings.py does since names conflict: a taken name is refused.
+  it('creates a project by name with no folder, and refuses a taken name with an error', async () => {
     const existing = {
       project_id: 'p-1',
       display_name: 'aurora',
-      organization_ids: ['org-1'],
       sort_order: 0,
+      organization_ids: [],
     };
-    const projects = [existing];
-    const createProject = vi.fn(async ({ displayName }: { displayName: string }) => {
-      if (projects.some((item) => item.display_name === displayName))
-        return { errorCode: 'PROJECT_NAME_TAKEN' as const };
-      const created = { ...existing, project_id: 'p-new', display_name: displayName };
-      projects.push(created);
-      return created;
-    });
-    const deleteProject = vi.fn(async () => undefined);
+    const createProject = vi
+      .fn()
+      .mockResolvedValueOnce({ errorCode: 'PROJECT_NAME_TAKEN' })
+      .mockResolvedValueOnce({
+        ...existing,
+        project_id: 'p-2',
+        display_name: 'billing',
+        sort_order: 1,
+      });
     installWorkspaceApi({
-      // The sidebar has not seen the project yet: it was created after the last read.
-      get: async () => emptySettings,
-      selectFolder: async () => ({ canceled: false, path: '/Volumes/work/aurora' }),
+      get: async () => ({ ...emptySettings, projects: [existing] }),
       createProject,
-      createFolder: async () => {
-        throw new Error('not a directory');
-      },
-      deleteProject,
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await waitFor(() => expect(result.current.settings).not.toBeNull());
 
-    await act(async () => result.current.addProjectFromFolder());
+    // Taken here: refused before anything is sent.
+    await act(async () => expect(await result.current.createProject(' aurora ')).toBeNull());
+    expect(createProject).not.toHaveBeenCalled();
+    expect(result.current.errorMessage).toBe('history.projects.nameTaken');
+    // Taken on the backend since the last read: its refusal says the same.
+    await act(async () => expect(await result.current.createProject('billing')).toBeNull());
+    expect(result.current.errorMessage).toBe('history.projects.nameTaken');
 
-    expect(createProject.mock.calls.map(([input]) => input.displayName)).toEqual([
+    await act(async () => {
+      expect((await result.current.createProject('billing'))?.project_id).toBe('p-2');
+    });
+    expect(createProject).toHaveBeenLastCalledWith({ displayName: 'billing', organizationIds: [] });
+    expect(result.current.settings?.projects.map((item) => item.display_name)).toEqual([
       'aurora',
-      'aurora 2',
+      'billing',
     ]);
-    expect(deleteProject).toHaveBeenCalledOnce();
-    expect(deleteProject).toHaveBeenCalledWith('p-new');
-    expect(projects[0]).toEqual(existing);
-    expect(result.current.settings?.projects).toEqual([]);
-    expect(result.current.errorMessage).toBe('settings.workspace.saveFailed');
+    expect(result.current.settings?.folders).toEqual([]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
@@ -53,7 +53,16 @@ const SuggestionHistoryPage = () => {
   };
   const showInChat = (actionId: string) =>
     navigate({ search: historySelectionSearch('chat') }, { state: showChatState(actionId) });
-  const addProject = () => void workspace.addProjectFromFolder();
+  // The composers' Add project starts naming one in the sidebar, as its ＋ does.
+  const [creatingProject, setCreatingProject] = useState(false);
+  const addProject = () => setCreatingProject(true);
+  // The Overlay's Add project brings the main window here with `?project=new`; the request is
+  // taken while rendering, and the address then drops it.
+  const projectRequested = new URLSearchParams(location.search).get('project') === 'new';
+  if (projectRequested && !creatingProject) setCreatingProject(true);
+  useEffect(() => {
+    if (projectRequested) navigate({ search: '' }, { replace: true });
+  }, [projectRequested, navigate]);
 
   const renderDetail = () => {
     if (selection === 'chat')
@@ -101,6 +110,8 @@ const SuggestionHistoryPage = () => {
       <HistorySidebar
         history={history}
         projects={workspace}
+        creatingProject={creatingProject}
+        onCreatingProjectChange={setCreatingProject}
         selected={selection}
         onSelect={select}
       />

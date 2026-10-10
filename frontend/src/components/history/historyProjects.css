@@ -1,0 +1,85 @@
+/* The project rows' menu, name field and organization dialog. */
+.history-project__rename {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  font-size: 13px;
+}
+
+.history-project__menu-button:hover:not(:disabled) {
+  color: var(--fog-text);
+}
+
+.history-project__menu-button[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.history-project-menu__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.history-project-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #20252d;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.history-project-menu__item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.history-project-menu__item:hover:not(:disabled) {
+  background: var(--fog-mist);
+}
+
+.history-project-menu__item:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.history-project-organizations__choices {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.history-project-organizations__choices legend {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.history-project-organizations__choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.history-project-organizations__new {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: 14px;
+}
+
+.history-project-organizations__new input {
+  flex: 1;
+  min-width: 0;
+}

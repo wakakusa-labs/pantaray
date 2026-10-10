@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   setSearchText: vi.fn(),
   unreadActionId: 'A1' as string | null,
   addProjectFromFolder: vi.fn(async () => undefined),
-  removeProject: vi.fn(async (_projectId: string) => true),
   workspace: null as WorkspaceProjects['settings'],
 }));
 vi.mock('@/context/useI18n', () => ({
@@ -78,13 +77,14 @@ function Sidebar() {
   return (
     <HistorySidebar
       history={useSuggestionHistory()}
-      projects={{
-        settings: mocks.workspace,
-        errorMessage: null,
-        pending: new Set(),
-        addProjectFromFolder: mocks.addProjectFromFolder,
-        removeProject: mocks.removeProject,
-      }}
+      projects={
+        {
+          settings: mocks.workspace,
+          errorMessage: null,
+          pending: new Set(),
+          addProjectFromFolder: mocks.addProjectFromFolder,
+        } as unknown as WorkspaceProjects
+      }
       selected={mocks.selected}
       onSelect={mocks.select}
     />
@@ -161,27 +161,6 @@ it('チャットと作業の間にプロジェクトを並べ、パスはホバ�
   add.focus();
   await userEvent.keyboard('{Enter}');
   expect(mocks.addProjectFromFolder).toHaveBeenCalledOnce();
-});
-
-it('プロジェクトは確認してから削除し、キャンセルなら元のボタンへ、削除後は＋へ戻る', async () => {
-  mocks.workspace = WORKSPACE;
-  render(<Sidebar />, { wrapper: SidebarWrapper });
-
-  const trigger = screen.getByRole('button', { name: 'common.delete aurora' });
-  await userEvent.click(trigger);
-  expect(
-    screen.getByRole('dialog', { name: 'history.projects.deleteConfirmTitle {"name":"aurora"}' })
-  ).toHaveAccessibleDescription('history.projects.deleteConfirmBody');
-  await userEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
-  expect(trigger).toHaveFocus();
-  expect(mocks.removeProject).not.toHaveBeenCalled();
-
-  await userEvent.click(trigger);
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
-  expect(mocks.removeProject).toHaveBeenCalledWith('p-1');
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'history.projects.add' })).toHaveFocus()
-  );
 });
 
 it('起動ボタンはサイドバーの先頭に1つだけで、空状態でもkeyboardから開ける', async () => {

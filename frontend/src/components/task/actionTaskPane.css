@@ -216,3 +216,22 @@
   margin-bottom: 8px;
   overflow-y: auto;
 }
+
+/* The window's drag strip (.app-titlebar) lies over the top 40px, where these headers sit. Each
+   header rises above it so its controls take the click, and is itself a drag region so the
+   window still moves from its empty space. */
+.action-task__header,
+.suggestion-task__header,
+.task-file-preview__header {
+  position: relative;
+  z-index: 3;
+  -webkit-app-region: drag;
+}
+
+.action-task__header button,
+.action-task__header a,
+.suggestion-task__header button,
+.task-file-preview__header button,
+.task-file-menu__list {
+  -webkit-app-region: no-drag;
+}

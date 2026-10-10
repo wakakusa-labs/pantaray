@@ -1,8 +1,9 @@
+import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 
-import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
 import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
+import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import {
   ComposerSubmissionStatus,
   OverlayComposer,
@@ -11,6 +12,7 @@ import { useI18n } from '@/context/useI18n';
 
 import type { TaskComposerDrafts } from './taskComposerDrafts';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
+import './actionTaskPane.css';
 import './suggestionTaskPane.css';
 
 const COPY = {
@@ -22,6 +24,7 @@ const COPY = {
     notStarted: 'This could not be started. Try again.',
     dismissFailed: 'Could not dismiss this suggestion. Try again.',
     supplementPlaceholder: 'Add conditions and approve (optional)',
+    copySuggestion: 'Copy suggestion',
   },
   ja: {
     loading: '提案を読み込んでいます',
@@ -31,6 +34,7 @@ const COPY = {
     notStarted: '開始できませんでした。もう一度お試しください。',
     dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
     supplementPlaceholder: '条件を足して承認する（任意）',
+    copySuggestion: '提案をコピー',
   },
 } as const;
 
@@ -42,6 +46,8 @@ type SuggestionTaskPaneProps = {
   title: string;
   /** Called once an Action exists for the suggestion: accepted, or replied to. */
   onStarted: (actionId: string) => void;
+  /** Opens the chat, as the task pane's header button does. */
+  onShowInChat: () => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
   /** Where the composer waits while the pane is not shown. */
@@ -57,6 +63,7 @@ export function SuggestionTaskPane({
   suggestionId,
   title,
   onStarted,
+  onShowInChat,
   onAddProject,
   drafts,
 }: SuggestionTaskPaneProps) {
@@ -67,6 +74,8 @@ export function SuggestionTaskPane({
   const submissionControlRef = useRef<HTMLButtonElement>(null);
   const task = useSuggestionTask(suggestionId, drafts);
   const { snapshot, phase, failure, composer, approvalMode } = task;
+  const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
+  const suggestionText = snapshot?.suggestionText ?? '';
   const { composer: draft, setComposer } = composer;
 
   const onStartedRef = useRef(onStarted);
@@ -77,10 +86,6 @@ export function SuggestionTaskPane({
     if (task.actionId !== null) onStartedRef.current(task.actionId);
   }, [task.actionId]);
 
-  const badge = getHistoryItemStatusMeta({
-    kind: 'suggestion',
-    status: phase === 'actionable' ? 'approval_pending' : 'idle',
-  });
   const isOffer = snapshot?.interactionContract === 'action_offer';
   const dismissed = phase === 'dismissed';
   // An offer takes the composer as the approval's extra instruction until it is dismissed.
@@ -99,7 +104,33 @@ export function SuggestionTaskPane({
     <section className="suggestion-task" aria-labelledby={titleId}>
       <header className="suggestion-task__header">
         <h1 id={titleId}>{title}</h1>
-        {badge ? <span className={badgeClassName(badge.tone)}>{t(badge.labelKey)}</span> : null}
+        <div className="action-task__header-actions">
+          <button
+            type="button"
+            className="action-task__icon-button"
+            aria-label={t('overlay.showInChat')}
+            title={t('overlay.showInChat')}
+            onClick={onShowInChat}
+          >
+            <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="action-task__icon-button"
+            aria-label={copy.copySuggestion}
+            title={copy.copySuggestion}
+            disabled={suggestionText === ''}
+            onClick={() => void copyToClipboard(() => suggestionText)}
+          >
+            {copyStatus === 'copied' ? (
+              <Check size={17} strokeWidth={1.8} aria-hidden />
+            ) : copyStatus === 'failed' ? (
+              <CircleAlert size={17} strokeWidth={1.8} aria-hidden />
+            ) : (
+              <Clipboard size={17} strokeWidth={1.8} aria-hidden />
+            )}
+          </button>
+        </div>
       </header>
       <div className="suggestion-task__scroll">
         <div className="suggestion-task__column">

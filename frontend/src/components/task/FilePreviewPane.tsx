@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
@@ -7,7 +7,7 @@ import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useI18n } from '@/context/useI18n';
 
 import { FileOpenMenu, type FileOpenMenuItem } from './FileOpenMenu';
-import type { TaskFile } from './taskFiles';
+import { offersQuickLook, type TaskFile } from './taskFiles';
 import './taskFiles.css';
 
 const COPY = {
@@ -46,7 +46,16 @@ const COPY = {
 } as const;
 
 /** Quick Look draws these; a text file already reads in the preview itself. */
-const QUICK_LOOK_KINDS = new Set<TaskFile['kind']>(['document', 'image', 'pdf', 'app_only']);
+
+// The path is what the button copies, so it stays readable: the folders in the middle give way
+// first, and the name it ends with stays.
+const PATH_DISPLAY_MAX_CHARS = 64;
+
+function middleEllipsis(path: string): string {
+  if (path.length <= PATH_DISPLAY_MAX_CHARS) return path;
+  const tail = Math.ceil(PATH_DISPLAY_MAX_CHARS * 0.6);
+  return `${path.slice(0, PATH_DISPLAY_MAX_CHARS - tail - 1)}…${path.slice(-tail)}`;
+}
 
 type OpenWay = 'reveal' | 'quickLook' | 'openInApp' | 'openWithApp';
 
@@ -158,7 +167,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   });
   const openItems = [
     item(copy.reveal, 'reveal'),
-    ...(QUICK_LOOK_KINDS.has(file.kind) ? [item(copy.quickLook, 'quickLook')] : []),
+    ...(offersQuickLook(file) ? [item(copy.quickLook, 'quickLook')] : []),
     item(copy.openInApp, 'openInApp'),
     item(copy.openWithApp, 'openWithApp'),
   ];
@@ -174,23 +183,30 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   return (
     <section className="task-file-preview" aria-labelledby={nameId}>
       <header className="task-file-preview__header">
-        <h2 id={nameId} title={file.path}>
-          {file.name}
-        </h2>
-        <button
-          type="button"
-          className="task-file-preview__open"
-          title={file.path}
-          onClick={() => void copyToClipboard(() => file.path)}
-        >
-          <span aria-live="polite">
+        <div className="task-file-preview__title">
+          <h2 id={nameId}>{file.name}</h2>
+          <button
+            type="button"
+            className="task-file-preview__path"
+            aria-label={`${copy.copyPath}: ${file.path}`}
+            title={file.path}
+            onClick={() => void copyToClipboard(() => file.path)}
+          >
+            <span className="task-file-preview__path-text">{middleEllipsis(file.path)}</span>
+            {copyStatus === 'copied' ? (
+              <Check size={12} strokeWidth={1.8} aria-hidden />
+            ) : (
+              <Copy size={12} strokeWidth={1.8} aria-hidden />
+            )}
+          </button>
+          <span className="action-conversation__sr-only" aria-live="polite">
             {copyStatus === 'copied'
               ? copy.pathCopied
               : copyStatus === 'failed'
                 ? copy.copyFailed
-                : copy.copyPath}
+                : ''}
           </span>
-        </button>
+        </div>
         <FileOpenMenu label={copy.open} items={openItems} />
         <button
           type="button"

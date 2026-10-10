@@ -1046,3 +1046,112 @@ def test_resume_is_refused_when_the_action_is_not_stopped(
     refused = _resume(client, str(started["action_id"]), "message-resume")
     assert refused.status_code == 409, refused.text
     assert refused.json()["type"] == "ExpectedProcessConflict"
+
+
+def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """Stop → queued message → new message: both run, in the order sent.
+
+    Stop records the queued message as not executed rather than starting a run
+    for it. The next run the user starts takes it first, so it is never left
+    behind the newer message, unrun.
+    """
+
+    client, db_path = runtime_client
+    started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
+    action_id = str(started["action_id"])
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:first")
+    # The running turn's checkpoint, on its USER step as adoption writes it.
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
+               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
+            (
+                json.dumps(
+                    _terminal_checkpoint(preparation, action_id, now_utc_iso(), "")
+                ),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                started["step_id"],
+            ),
+        )
+    queued = client.post(
+        MESSAGES_PATH,
+        json=_message(
+            "message-queued",
+            "実行中に送った指示",
+            action_id=action_id,
+            expected_process_id=str(started["process_id"]),
+        ),
+    ).json()
+    assert queued["disposition"] == "pending"
+    stopped = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={"reason": "user_stop"},
+    )
+    assert stopped.status_code == 202, stopped.text
+    assert [
+        (message["message_id"], message["status"])
+        for message in _all_unadopted(client, action_id)
+    ] == [("message-queued", "not_executed")]
+
+    followup = client.post(
+        MESSAGES_PATH,
+        json=_message("message-next", "次の指示", action_id=action_id),
+    ).json()
+    assert followup["disposition"] == "started", followup
+
+    assert _all_unadopted(client, action_id) == []
+    new_run = _read_state(client, action_id)["runs"][0]
+    assert new_run["run_id"] == followup["process_id"]
+    # Newest first, as pages list them: the queued message comes before.
+    assert [
+        (entry["message_id"], entry["step_number"], entry["status"])
+        for entry in new_run["entries"]
+        if entry["step_kind"] == "user"
+    ] == [("message-next", 3, "adopted"), ("message-queued", 2, "adopted")]
+    # A retry of the queued send now answers with the run that took it.
+    replay = client.post(
+        MESSAGES_PATH,
+        json=_message(
+            "message-queued",
+            "実行中に送った指示",
+            action_id=action_id,
+            expected_process_id=str(started["process_id"]),
+        ),
+    ).json()
+    assert (replay["disposition"], replay["process_id"]) == (
+        "started",
+        followup["process_id"],
+    )
+
+    # The new run continues from a checkpoint that already holds the queued
+    # message, at exactly the step its own message opens.
+    payload, next_preparation = _claim_and_prepare(db_path, claimed_by="worker:next")
+    assert payload["process_id"] == followup["process_id"]
+    assert next_preparation.context.user_message.message_id == "message-next"
+    with sqlite3.connect(db_path) as connection:
+        (checkpoint_json,) = connection.execute(
+            """SELECT runtime_state_checkpoint FROM agent_action_steps
+               WHERE action_id = ? AND runtime_state_checkpoint IS NOT NULL
+               ORDER BY step_number DESC LIMIT 1""",
+            (action_id,),
+        ).fetchone()
+    checkpoint = json.loads(checkpoint_json)
+    assert checkpoint["step"] == next_preparation.context.user_step_number == 3
+    assert [
+        entry.get("user_request_text")
+        for entry in checkpoint["history_by_scope"]["S"]
+        if entry["step_type"] == "user_request"
+    ] == ["最初", "実行中に送った指示"]
+
+
+def _all_unadopted(client: TestClient, action_id: str) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    cursor: str | None = None
+    while True:
+        page = _read_state(client, action_id, cursor)
+        messages.extend(page["unadopted_messages"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return messages

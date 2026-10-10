@@ -60,6 +60,9 @@ from .action_prepare_failure_followup import (
     require_prepare_failure_followup_authority,
 )
 from .action_queue import build_local_action_enqueue_request
+from .action_queued_message_adoption import (
+    adopt_not_executed_messages_into_new_run_in_connection,
+)
 from .action_resumability import action_latest_run_has_restorable_checkpoint
 from .action_suggestion_adapter import (
     project_suggestion_action_start,
@@ -148,6 +151,16 @@ def submit_action_message(
                         suggestion_id=command.target.reply_to_suggestion_id,
                     )
 
+            if starts_run and isinstance(command.target, ExistingActionTarget):
+                assert process_id is not None
+                adopt_not_executed_messages_into_new_run_in_connection(
+                    connection=connection,
+                    user_id=command.user_id,
+                    action_id=action_id,
+                    suggestion_id=suggestion_id,
+                    process_id=process_id,
+                    adopted_at=created_at,
+                )
             position = (
                 _next_user_step_position(connection=connection, action_id=action_id)
                 if starts_run

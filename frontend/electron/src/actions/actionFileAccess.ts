@@ -43,7 +43,12 @@ export type ActionFileRequest = Readonly<{ actionId: string; path: string }>;
 export type ActionFileReadResult =
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
   | Readonly<{ kind: 'image'; bytes: Uint8Array<ArrayBuffer>; mime: ActionImageMimeType }>
-  | Readonly<{ kind: 'unavailable'; reason: 'not_found' | 'binary' | 'too_large' }>;
+  /** A word-processor document converted to a web page by macOS `textutil`. */
+  | Readonly<{ kind: 'html'; html: string }>
+  | Readonly<{
+      kind: 'unavailable';
+      reason: 'not_found' | 'binary' | 'too_large' | 'conversion_failed';
+    }>;
 
 export type ActionFileOpenResult =
   | Readonly<{ kind: 'opened' }>

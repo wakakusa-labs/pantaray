@@ -91,6 +91,7 @@ export const validInvokeChannels = [
   // Main window: preview a file an Action names, or open it in its default app
   'actionFile:read',
   'actionFile:openInApp',
+  'actionFile:quickLook',
   // Overlay copy buttons: written by main, so a window without focus still copies.
   'clipboard:writeText',
   'action:submitMessage',

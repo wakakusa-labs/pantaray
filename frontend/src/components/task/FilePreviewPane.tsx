@@ -11,17 +11,21 @@ import './taskFiles.css';
 const COPY = {
   en: {
     openInApp: 'Open in default app',
+    quickLook: 'Quick Look',
     close: 'Close preview',
     loading: 'Loading…',
     truncated: 'Showing the beginning only.',
+    appOnly: 'Look at this file in Quick Look or open it in its app.',
     unavailable: "This file can't be shown here.",
     openFailed: "Couldn't open the file.",
   },
   ja: {
     openInApp: 'いつものアプリで開く',
+    quickLook: 'Quick Look で見る',
     close: 'プレビューを閉じる',
     loading: '読み込んでいます…',
     truncated: '途中まで表示しています。',
+    appOnly: 'このファイルは Quick Look かいつものアプリで見られます。',
     unavailable: 'このファイルはここでは表示できません。',
     openFailed: 'ファイルを開けませんでした。',
   },
@@ -54,10 +58,11 @@ function pdfUrl(actionId: string, filePath: string, revision: string | null): st
 type Content =
   | Readonly<{ kind: 'loading' }>
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
+  | Readonly<{ kind: 'page'; html: string }>
   | Readonly<{ kind: 'image'; url: string }>
   | Readonly<{ kind: 'unavailable' }>;
 
-const READ_KINDS = new Set<TaskFile['kind']>(['markdown', 'html', 'text', 'image']);
+const READ_KINDS = new Set<TaskFile['kind']>(['markdown', 'html', 'text', 'document', 'image']);
 
 /**
  * Reads the file, and again for each new revision; the old content stays until the new one
@@ -77,6 +82,8 @@ function useFileContent(actionId: string, file: TaskFile, revision: string | nul
         if (!active) return;
         if (result.kind === 'text') {
           setContent({ kind: 'text', text: result.text, truncated: result.truncated });
+        } else if (result.kind === 'html') {
+          setContent({ kind: 'page', html: result.html });
         } else if (result.kind === 'image') {
           imageUrl = URL.createObjectURL(new Blob([result.bytes], { type: result.mime }));
           setContent({ kind: 'image', url: imageUrl });
@@ -124,10 +131,33 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
       setOpenFailed(true);
     }
   };
-  const openButton = (
-    <button type="button" className="task-file-preview__open" onClick={() => void openInApp()}>
-      {copy.openInApp}
-    </button>
+  const quickLook = async () => {
+    setOpenFailed(false);
+    try {
+      const result = await window.electron?.actionFiles?.quickLook({ actionId, path: file.path });
+      if (result?.kind !== 'shown') setOpenFailed(true);
+    } catch (error) {
+      console.error('Failed to show an Action file in Quick Look', error);
+      setOpenFailed(true);
+    }
+  };
+  const openButtons = (
+    <>
+      <button type="button" className="task-file-preview__open" onClick={() => void quickLook()}>
+        {copy.quickLook}
+      </button>
+      <button type="button" className="task-file-preview__open" onClick={() => void openInApp()}>
+        {copy.openInApp}
+      </button>
+    </>
+  );
+  const page = (html: string) => (
+    <iframe
+      className="task-file-preview__frame"
+      title={file.name}
+      sandbox=""
+      srcDoc={htmlPreviewDocument(html)}
+    />
   );
 
   return (
@@ -136,7 +166,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
         <h2 id={nameId} title={file.path}>
           {file.name}
         </h2>
-        {openButton}
+        {openButtons}
         <button
           type="button"
           className="task-file-preview__close"
@@ -167,9 +197,11 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
           </p>
         ) : content.kind === 'unavailable' ? (
           <div className="task-file-preview__notice">
-            <p>{copy.unavailable}</p>
-            {openButton}
+            <p>{file.kind === 'app_only' ? copy.appOnly : copy.unavailable}</p>
+            {openButtons}
           </div>
+        ) : content.kind === 'page' ? (
+          page(content.html)
         ) : content.kind === 'image' ? (
           <img className="task-file-preview__image" src={content.url} alt={file.name} />
         ) : (
@@ -177,16 +209,11 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
             {content.truncated ? (
               <div className="task-file-preview__notice">
                 <p>{copy.truncated}</p>
-                {openButton}
+                {openButtons}
               </div>
             ) : null}
             {file.kind === 'html' ? (
-              <iframe
-                className="task-file-preview__frame"
-                title={file.name}
-                sandbox=""
-                srcDoc={htmlPreviewDocument(content.text)}
-              />
+              page(content.text)
             ) : file.kind === 'markdown' ? (
               <div className="task-file-preview__document">
                 <MarkdownBlock text={content.text} isStreamFinished />

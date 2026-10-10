@@ -3,9 +3,10 @@ import { pantarayFilePaths } from '../../../electron/src/actions/pantarayFileLin
 
 /**
  * How the preview shows a file: rendered from its text (Markdown, a web page, or plain text),
- * drawn as an image or by the PDF viewer, or only opened in its app.
+ * as a web page converted from a word-processor document, drawn as an image or by the PDF
+ * viewer, or left to Quick Look and its app.
  */
-export type TaskFileKind = 'markdown' | 'html' | 'text' | 'image' | 'pdf' | 'app_only';
+export type TaskFileKind = 'markdown' | 'html' | 'text' | 'document' | 'image' | 'pdf' | 'app_only';
 
 export type TaskFile = Readonly<{
   path: string;
@@ -26,16 +27,17 @@ const KIND_BY_EXTENSION: Readonly<Record<string, TaskFileKind>> = {
   gif: 'image',
   webp: 'image',
   pdf: 'pdf',
-  docx: 'app_only',
+  docx: 'document',
+  doc: 'document',
+  rtf: 'document',
+  odt: 'document',
   xlsx: 'app_only',
-  pptx: 'app_only',
-  doc: 'app_only',
   xls: 'app_only',
+  pptx: 'app_only',
   ppt: 'app_only',
   key: 'app_only',
   pages: 'app_only',
   numbers: 'app_only',
-  rtf: 'app_only',
   zip: 'app_only',
 };
 

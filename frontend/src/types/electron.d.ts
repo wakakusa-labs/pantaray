@@ -246,6 +246,10 @@ declare global {
         read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
         /** Main window only: opens a file the Action names in its default app. */
         openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
+        /** Main window only: shows the file in macOS Quick Look over the main window. */
+        quickLook: (
+          request: ActionFileRequest
+        ) => Promise<{ kind: 'shown' } | { kind: 'unavailable'; reason: 'not_found' }>;
       };
       clipboard?: {
         writeText: (text: string) => Promise<void>;

@@ -8,7 +8,9 @@ import {
   nativeImage,
   shell,
 } from 'electron';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
 import type { createLocalBackendAuthContextController } from '../auth/localBackendAuthContextController';
 import type { LocalOwner } from '../auth/localRuntimeState';
@@ -92,6 +94,7 @@ type FeatureRuntimeParams = {
   logger: LoggerLike | null;
 };
 const ACTION_CONVERSATION_LATEST_PAGE_LIMIT = 25;
+const execFileAsync = promisify(execFile);
 
 function safely<T>(operation: () => T, fallback: T): T {
   try {
@@ -338,6 +341,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         actionFiles: {
           open: ({ path }) => shell.showItemInFolder(path),
           openInApp: (realPath) => shell.openPath(realPath),
+          runFile: async (file, args, options) =>
+            (await execFileAsync(file, [...args], { ...options, encoding: 'utf8' })).stdout,
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {

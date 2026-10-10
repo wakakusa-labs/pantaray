@@ -101,9 +101,22 @@
   box-shadow: var(--focus-ring);
 }
 
+.history-sidebar__tasks {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
 .history-empty {
   flex-direction: column;
   gap: var(--space-sm);
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .history-empty-hint {
@@ -114,42 +127,24 @@
 .history-list {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /* The rows fade out at the bottom edge by masking the list itself: a coloured overlay
-     cannot match the window's gradient and haze, and showed as a band. */
-  mask-image: linear-gradient(180deg, #000 calc(100% - 56px), transparent);
-  padding-bottom: 64px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.history-day {
-  margin: 18px 0 4px;
-  padding: 0 12px;
+.history-day h2 {
+  margin: 14px 8px 6px;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.08em;
   line-height: 1.4;
-  text-transform: var(--ui-label-transform);
-}
-
-.history-day:first-child {
-  margin-top: 4px;
-}
-
-html:lang(ja) .history-day {
-  letter-spacing: 0;
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--fog-line);
-  border-radius: 10px;
-  transition: background 0.15s ease;
+  border-radius: 9px;
 }
 
 .history-item:hover {
@@ -157,15 +152,19 @@ html:lang(ja) .history-day {
 }
 
 .history-item-button {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  padding: 11px 12px;
+  padding: 8px 4px 8px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: 9px;
   background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
+  font-size: 13px;
   text-align: left;
 }
 
@@ -174,84 +173,74 @@ html:lang(ja) .history-day {
   box-shadow: var(--focus-ring);
 }
 
-.history-item-body {
+.history-item-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.history-item-text {
-  flex: 1;
-  min-width: 0;
+  gap: 8px;
+  width: 100%;
 }
 
 .history-item-title {
-  margin: 0;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: var(--fog-text);
-  font-size: 14px;
-  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.history-item-meta {
-  margin-top: 2px;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-  letter-spacing: var(--text-meta-tracking);
+.history-item-unread {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7dabdc;
 }
 
 .history-item-live {
-  margin: 2px 0 0;
   overflow: hidden;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);
-  letter-spacing: var(--text-meta-tracking);
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-item-status {
-  display: flex;
-  align-items: center;
-  gap: 12px;
   white-space: nowrap;
 }
 
 .badge {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: 1px 7px;
+  border-radius: 6px;
   background: var(--fog-mist);
   color: var(--fog-text-2);
   font-size: var(--text-meta-size);
   font-weight: var(--weight-medium);
+  white-space: nowrap;
 }
 
 .badge--warning {
-  background: rgba(232, 239, 250, 0.11);
-  color: #eef2f9;
+  background: rgba(233, 201, 139, 0.14);
+  color: #e9c98b;
 }
 
 .badge--info {
-  color: #cfe0f7;
+  background: rgba(125, 171, 220, 0.16);
+  color: #9cc3ec;
 }
 
-.history-list > .history-filter-button {
+.history-load-more {
   align-self: center;
   margin-top: 14px;
 }
 
+/* Shown while the row is pointed at or holds focus, so titles keep the sidebar's width. */
 .history-item-delete {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   margin-right: 4px;
   padding: 0;
   background: transparent;
@@ -259,6 +248,18 @@ html:lang(ja) .history-day {
   border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
+  opacity: 0;
+}
+
+.history-item:hover .history-item-delete,
+.history-item:focus-within .history-item-delete {
+  opacity: 1;
+}
+
+.history-item:hover .history-item-delete:disabled,
+.history-item:focus-within .history-item-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .history-item-delete:hover:not(:disabled) {
@@ -269,11 +270,6 @@ html:lang(ja) .history-day {
 .history-item-delete:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-
-.history-item-delete:disabled {
-  cursor: not-allowed;
-  opacity: 0.35;
 }
 
 .history-delete-dialog {

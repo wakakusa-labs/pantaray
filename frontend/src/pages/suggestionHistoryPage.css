@@ -335,7 +335,8 @@
   margin-top: 14px;
 }
 
-/* Shown while the row is pointed at or holds focus, so titles keep the sidebar's width. */
+/* Shown while the row is pointed at or holds keyboard focus, so titles keep the sidebar's width.
+   Not on focus alone: a clicked row keeps focus while its Overlay is open in another window. */
 .history-item-delete {
   flex: 0 0 auto;
   display: inline-flex;
@@ -354,12 +355,12 @@
 }
 
 .history-item:hover .history-item-delete,
-.history-item:focus-within .history-item-delete {
+.history-item:has(:focus-visible) .history-item-delete {
   opacity: 1;
 }
 
 .history-item:hover .history-item-delete:disabled,
-.history-item:focus-within .history-item-delete:disabled {
+.history-item:has(:focus-visible) .history-item-delete:disabled {
   cursor: not-allowed;
   opacity: 0.35;
 }

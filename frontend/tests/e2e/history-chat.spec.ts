@@ -294,9 +294,24 @@ test('the sidebar holds New task, search, the chat row and the tasks by day', as
   await expect(sidebar.getByRole('heading', { level: 2, name: '今日' })).toBeVisible();
   const row = sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ });
   await expect(row.getByText('実行中')).toBeVisible();
-  // The delete button shows while its row is pointed at.
+  // The delete button shows while its row is pointed at; a running task's stays disabled.
+  const trash = sidebar.getByRole('button', { name: '削除 見積書のたたき台を作る' });
+  await expect(trash).toHaveCSS('opacity', '0');
   await row.hover();
-  await expect(sidebar.getByRole('button', { name: '削除 見積書のたたき台を作る' })).toBeVisible();
+  await expect(trash).toHaveCSS('opacity', '0.35');
+  // A clicked row keeps focus while its Overlay is open, which must not keep the button shown.
+  await row.click();
+  await page.mouse.move(900, 400);
+  await expect(row).toBeFocused();
+  await expect(trash).toHaveCSS('opacity', '0');
+  // Keyboard focus shows it.
+  await page.keyboard.press('Tab');
+  await expect(
+    sidebar.getByRole('button', { name: /^登壇資料のスライドを下書きする/ })
+  ).toBeFocused();
+  await expect(
+    sidebar.getByRole('button', { name: '削除 登壇資料のスライドを下書きする' })
+  ).toHaveCSS('opacity', '0.35');
   expect((await sidebar.boundingBox())!.width).toBeCloseTo(300, -1);
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('sidebar.png') });

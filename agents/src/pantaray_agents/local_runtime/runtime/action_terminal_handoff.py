@@ -157,7 +157,6 @@ def apply_action_terminal_handoff_in_connection(
         connection=connection,
         user_id=command.user_id,
         action_id=command.action_id,
-        expected_process_id=root_process_id,
         adopted_process_id=successor_process_id,
         state=successor_state,
         adopted_at=successor_at,

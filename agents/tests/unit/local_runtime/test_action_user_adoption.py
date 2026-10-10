@@ -297,10 +297,15 @@ def test_in_connection_adoption_projects_pending_users_to_a_distinct_process(
             connection=connection,
             user_id=USER_ID,
             action_id=ACTION_ID,
-            expected_process_id=PROCESS_ID,
             adopted_process_id=SUCCESSOR_PROCESS_ID,
             state=reset_state,
             adopted_at="2026-08-29T00:04:00Z",
+            pending_steps=adoption.load_pending_action_user_steps_in_connection(
+                connection=connection,
+                user_id=USER_ID,
+                action_id=ACTION_ID,
+                expected_process_id=PROCESS_ID,
+            ),
         )
         ownership = connection.execute(
             """SELECT expected_process_id,adopted_process_id,runtime_state_checkpoint

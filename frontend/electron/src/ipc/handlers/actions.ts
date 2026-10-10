@@ -8,7 +8,7 @@ import type {
   ActionMessageSubmitResult,
 } from '../../actions/actionContracts';
 import { LocalBackendRequestError } from '../../localBackend/client';
-import type { TaskSendOutcome } from '../../actions/taskDraftStore';
+import { sendWork, type TaskSendOutcome } from '../../actions/taskDraftStore';
 import {
   ActionConversationOverlayRequestSchema,
   ActionConversationPageRequestSchema,
@@ -133,14 +133,8 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
       parsed.target.kind === 'new' ? (parsed.target.reply_to_suggestion_id ?? null) : null;
     // A composer shares nothing while its send is out; how the send ends settles the task's draft.
     const owner = ctx.actions.getCurrentSubjectId();
-    const work =
-      parsed.target.kind === 'existing'
-        ? (`action:${parsed.target.action_id}` as const)
-        : replyTo !== null
-          ? (`suggestion:${replyTo}` as const)
-          : ('new' as const);
     const settle = (outcome: TaskSendOutcome) => {
-      if (owner !== null) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
+      if (owner !== null) ctx.taskDrafts.settleSend(owner, sendWork(parsed), parsed, outcome);
     };
     try {
       const result = await openUserTurn(

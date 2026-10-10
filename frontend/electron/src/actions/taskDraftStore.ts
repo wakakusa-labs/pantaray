@@ -25,6 +25,13 @@ const isEmpty = (draft: TaskDraft) =>
 /** How a send ended, as main heard it from the backend. */
 export type TaskSendOutcome = 'sent' | 'refused' | 'unknown';
 
+/** The task whose draft a send went out from. */
+export function sendWork(request: ActionMessageRequest): TaskDraftWork {
+  const { target } = request;
+  if (target.kind === 'existing') return `action:${target.action_id}`;
+  return target.reply_to_suggestion_id ? `suggestion:${target.reply_to_suggestion_id}` : 'new';
+}
+
 /**
  * The unsent draft of each task, shared by every window whose composer shows it: the main
  * window's task pane and the small windows. The writer wins, and each change reaches the other

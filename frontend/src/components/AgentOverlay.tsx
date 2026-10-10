@@ -66,6 +66,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   );
   const {
     composer,
+    conversationActionId,
     images,
     files,
     canAttach,
@@ -93,6 +94,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       conversation?.update(page);
       setLiveState((current) => (current === liveState ? null : current));
     },
+    fallbackActionId: entryMode === 'overlay' ? state.currentActionId : null,
   });
   const standaloneComposerRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
@@ -100,14 +102,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     () => (actions ? createActionToolOutputLoader(actions.readToolOutputPage) : null),
     [actions]
   );
-  const submittedActionId =
-    composer.submission?.request.target.kind === 'existing'
-      ? composer.submission.request.target.action_id
-      : null;
-  const conversationActionId =
-    entryMode === 'standalone'
-      ? composer.initialActionId
-      : (submittedActionId ?? composer.initialActionId ?? state.currentActionId);
   const approvalMode = useActionApprovalMode(
     conversationActionId,
     entryMode === 'overlay' ? state.suggestionId : null

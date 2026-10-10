@@ -5,7 +5,6 @@ import { OpenFileLinkContext } from '@/components/agent-overlay/openFileLinkCont
 import { ActionTaskPane } from './ActionTaskPane';
 import { FileChips } from './FileChips';
 import { FilePreviewPane } from './FilePreviewPane';
-import type { TaskComposerDrafts } from './taskComposerDrafts';
 import { deriveTaskFiles, latestCompletion, taskFileAt, type TaskFile } from './taskFiles';
 
 type TaskWorkspaceProps = {
@@ -14,7 +13,6 @@ type TaskWorkspaceProps = {
   title: string;
   onShowInChat: () => void;
   onAddProject: () => void;
-  drafts: TaskComposerDrafts;
 };
 
 /**
@@ -22,13 +20,7 @@ type TaskWorkspaceProps = {
  * on the left with the conversation narrowed to a column on the right. A file link in an answer
  * opens its preview, as its chip does.
  */
-export function TaskWorkspace({
-  actionId,
-  title,
-  onShowInChat,
-  onAddProject,
-  drafts,
-}: TaskWorkspaceProps) {
+export function TaskWorkspace({ actionId, title, onShowInChat, onAddProject }: TaskWorkspaceProps) {
   const [previewFile, setPreviewFile] = useState<TaskFile | null>(null);
   const pane = (
     <ActionTaskPane
@@ -36,7 +28,6 @@ export function TaskWorkspace({
       title={title}
       onShowInChat={onShowInChat}
       onAddProject={onAddProject}
-      drafts={drafts}
       renderPreview={(view) =>
         previewFile ? (
           <FilePreviewPane

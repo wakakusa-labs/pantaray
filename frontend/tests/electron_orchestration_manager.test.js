@@ -1379,3 +1379,54 @@ test('a persisted suggestion read never replaces newer live state or a pending c
   assert.equal(accepted.sentMessages.length, 2);
   assert.deepEqual(accepted.sentMessages[1], accepted.sentMessages[0]);
 });
+
+test('a suggestion read that left before a dismissal does not answer it again', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  // The read is in flight when a panel dismisses the suggestion main holds no record of.
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+
+  assert.equal(read.reactionState, 'rejected');
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness), []);
+  assert.equal(harness.overlayPayloads.has('sug-1'), false);
+
+  // The dismissal belongs to the owner it happened under.
+  harness.manager.resetActionLive();
+  assert.equal(harness.manager.adoptSuggestionSnapshot(persistedSnapshot()).reactionState, null);
+});
+
+test('a same-sequence read fills the body of a suggestion accepted in a History panel', async () => {
+  const harness = createManagerHarness();
+  // The History panel kept its bootstrap to itself, so main's record starts without a body.
+  const accepted = await harness.manager.acceptAction(actionRequest());
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'action_requested',
+    sequence: 5,
+    data: {
+      suggestion_id: 'sug-1',
+      command_id: accepted.commandId,
+      accepted_at: '2026-10-10T00:00:00Z',
+      committed_at: '2026-10-10T00:00:00Z',
+    },
+    meta: { suggestion_id: 'sug-1', kind: 'action', command_id: accepted.commandId },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 5 }));
+
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(read.interactionContract, 'action_offer');
+  assert.equal(read.reactionState, 'accepted');
+  assert.equal(read.actionPhase, 'accepted_pending_start');
+  assert.equal(read.commandId, accepted.commandId);
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness).at(-1), read);
+});

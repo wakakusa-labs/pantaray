@@ -7,6 +7,7 @@ from typing import Literal, cast
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.tasks.types import ActionContinuationRef
 
+from .action_checkpoint_retention import load_tool_approval_resume_anchor_in_connection
 from .action_message_process_fence import (
     ActionLogicalRunLineage,
     resolve_action_process_lineage_in_connection,
@@ -42,26 +43,36 @@ class ActionStartupRecoveryEnvelope:
     anchor: ActionStartupRecoveryAnchor
 
 
-def list_action_startup_recovery_envelopes_in_connection(
+@dataclass(frozen=True, slots=True)
+class InterruptedActionJob:
+    job_id: str
+    user_id: str
+    action_id: str
+
+
+def list_interrupted_action_jobs_in_connection(
     *, connection: sqlite3.Connection
-) -> tuple[ActionStartupRecoveryEnvelope, ...]:
-    """Bind interrupted Action envelopes in the caller's read snapshot."""
+) -> tuple[InterruptedActionJob, ...]:
+    """List the running Action jobs a dead worker left, without binding them."""
 
-    job_ids = connection.execute(
-        "SELECT job_id FROM jobs WHERE job_type = 'execute_action' "
-        "AND status = 'running' ORDER BY scheduled_at, job_id"
+    rows = connection.execute(
+        "SELECT job_id, user_id, logical_key FROM jobs "
+        "WHERE job_type = 'execute_action' AND status = 'running' "
+        "ORDER BY scheduled_at, job_id"
     ).fetchall()
-    envelopes = tuple(
-        _load_envelope(connection=connection, job_id=str(row[0])) for row in job_ids
+    return tuple(
+        InterruptedActionJob(
+            job_id=str(row[0]), user_id=str(row[1]), action_id=str(row[2])
+        )
+        for row in rows
     )
-    if len({(item.user_id, item.action_id) for item in envelopes}) != len(envelopes):
-        raise MigrationError("Action has multiple interrupted running jobs")
-    return envelopes
 
 
-def _load_envelope(
+def load_action_startup_recovery_envelope_in_connection(
     *, connection: sqlite3.Connection, job_id: str
 ) -> ActionStartupRecoveryEnvelope:
+    """Bind one interrupted Action envelope in the caller's read snapshot."""
+
     row = connection.execute(
         """
         SELECT job.user_id AS job_user_id, job.job_type, job.process_id,
@@ -196,32 +207,18 @@ def _load_anchor(
             ),
         ).fetchone()
     else:
-        row = connection.execute(
-            """
-            SELECT step_id, step_number FROM agent_action_steps AS step
-            WHERE step.user_id = ? AND step.action_id = ?
-              AND step.runtime_state_checkpoint IS NOT NULL
-              AND ((json_extract(step.runtime_state_checkpoint,
-                    '$.pending_approval_request.approval_session_id') = ?
-                AND json_extract(step.runtime_state_checkpoint,
-                    '$.pending_approval_request.tool_request_id') = ?)
-                OR EXISTS (SELECT 1 FROM json_each(step.runtime_state_checkpoint,
-                    '$.current_approval_blockers') AS blocker
-                    WHERE json_extract(blocker.value, '$.approval_session_id') = ?
-                      AND json_extract(blocker.value, '$.tool_request_id') = ?))
-            ORDER BY step.step_number DESC, step.completed_at IS NULL ASC,
-                     step.completed_at DESC, step.created_at DESC, step.step_id DESC
-            LIMIT 1
-            """,
-            (
-                user_id,
-                action_id,
-                continuation["approval_session_id"],
-                continuation["tool_request_id"],
-                continuation["approval_session_id"],
-                continuation["tool_request_id"],
-            ),
-        ).fetchone()
+        anchor = load_tool_approval_resume_anchor_in_connection(
+            connection,
+            user_id=user_id,
+            action_id=action_id,
+            approval_session_id=continuation["approval_session_id"],
+            tool_request_id=continuation["tool_request_id"],
+        )
+        if anchor is None:
+            raise MigrationError("interrupted Action recovery anchor was not found")
+        return ActionStartupRecoveryAnchor(
+            step_id=anchor.step_id, step_number=anchor.step_number
+        )
     if row is None:
         raise MigrationError("interrupted Action recovery anchor was not found")
     step_id = _text(row["step_id"], field="anchor step_id")
@@ -241,5 +238,7 @@ __all__ = [
     "ActionStartupRecoveryActionStatus",
     "ActionStartupRecoveryAnchor",
     "ActionStartupRecoveryEnvelope",
-    "list_action_startup_recovery_envelopes_in_connection",
+    "InterruptedActionJob",
+    "list_interrupted_action_jobs_in_connection",
+    "load_action_startup_recovery_envelope_in_connection",
 ]

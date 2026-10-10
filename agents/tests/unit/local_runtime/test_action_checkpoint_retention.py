@@ -244,3 +244,57 @@ async def test_settled_approval_pause_is_superseded_like_any_step(
     await _save_step(repo, step_id="step-3", step_number=3, checkpoint={"step": 4})
 
     assert _checkpoint_rows(db_path) == {"step-3": {"step": 4}}
+
+
+# An approved tool that never claimed its session never ran, so its
+# continuation must not skip past it.
+@pytest.mark.parametrize(("claimed", "resumes_from"), [(True, "step-3"), (False, None)])
+@pytest.mark.asyncio
+async def test_consumed_approval_continuation_resumes_from_the_newest_checkpoint(
+    tmp_path: Path, claimed: bool, resumes_from: str | None
+) -> None:
+    db_path, repo = await _repository(tmp_path)
+    await _save_step(
+        repo,
+        step_id="paused-tool",
+        step_number=2,
+        checkpoint=PAUSED_CHECKPOINT,
+        step_type=StepType.TOOL_EXECUTION,
+        status=StepStatusType.PROCESSING,
+    )
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """INSERT INTO approval_sessions(
+                approval_session_id,user_id,action_id,tool_request_id,
+                tool_invocation_id,tool_id,intent_class,approval_source,status,
+                approved_capabilities_json,command_summary_json,requested_at,
+                decided_at,claimed_at,created_at
+            ) VALUES (?,?,?,?,?,'shell','read_only','prompt','approved_once',
+                      '{}','{}','now','now',?,'now')""",
+            (
+                APPROVAL["approval_session_id"],
+                USER_ID,
+                ACTION_ID,
+                APPROVAL["tool_request_id"],
+                "invocation-1" if claimed else None,
+                "now" if claimed else None,
+            ),
+        )
+    await _save_step(
+        repo,
+        step_id="paused-tool",
+        step_number=2,
+        checkpoint={"step": 3},
+        step_type=StepType.TOOL_EXECUTION,
+    )
+    await _save_step(repo, step_id="step-3", step_number=3, checkpoint={"step": 4})
+
+    continuation = await repo.get_runtime_checkpoint_for_approval_resume(
+        user_id=USER_ID, action_id=ACTION_ID, **APPROVAL
+    )
+    if resumes_from is None:
+        assert continuation.data is None
+        return
+    assert continuation.data is not None
+    assert continuation.data["step_id"] == resumes_from
+    assert continuation.metadata == {"approval_anchor_step_id": None}

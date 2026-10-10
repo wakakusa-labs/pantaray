@@ -183,7 +183,7 @@ class ActionCancelRepository:
                     action_id=action_id,
                     process_id=runtime.process_id,
                 )
-                command_id, accepted_at = _load_current_action_user_turn(
+                command_id, accepted_at = load_current_action_user_turn_in_connection(
                     connection=connection,
                     user_id=user_id,
                     action_id=action_id,
@@ -478,7 +478,7 @@ def _load_active_action_runtime(
     return _ActiveActionRuntime(job_id=job_id, process_id=process_id)
 
 
-def _load_current_action_user_turn(
+def load_current_action_user_turn_in_connection(
     *,
     connection: sqlite3.Connection,
     user_id: str,
@@ -540,4 +540,5 @@ __all__ = [
     "ActionCancelResult",
     "ActionCancelStateConflictError",
     "action_stop_fence_is_recorded",
+    "load_current_action_user_turn_in_connection",
 ]

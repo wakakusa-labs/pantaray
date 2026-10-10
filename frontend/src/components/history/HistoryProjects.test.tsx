@@ -49,6 +49,9 @@ function createApi() {
       return { ...renamed };
     }),
     createFolder: vi.fn(),
+    reorderProjects: vi.fn(async ({ projectIds }: { projectIds: string[] }) => ({
+      project_ids: projectIds,
+    })),
     deleteProject: vi.fn(async () => undefined),
     deleteFolder: vi.fn(async (folderId: string) => {
       store.folders = store.folders.filter((f) => f.folder_id !== folderId);

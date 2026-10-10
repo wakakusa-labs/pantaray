@@ -11,6 +11,7 @@
 import type { BrowserWindow } from 'electron';
 
 import type { ActionConversationPage } from '../actions/actionContracts';
+import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
@@ -69,7 +70,7 @@ export type OrchestrationManager = {
   getOverlaySnapshot: (suggestionId: string) => OverlaySnapshot | null;
   adoptSuggestionSnapshot: (persisted: OverlaySnapshot) => OverlaySnapshot;
   refreshActionConversation: (actionId: string) => void;
-  refreshAndResumeActionConversation: (actionId: string) => void;
+  refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   handleApprovalDecisionSettled: (identity: {
     actionId: string;
     processId: string;

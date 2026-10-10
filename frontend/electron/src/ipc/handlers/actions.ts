@@ -19,6 +19,14 @@ import { parseInput } from '../schemas/error';
 
 type TurnSender = { kind: 'main' } | { kind: 'panel'; overlayId: string };
 
+/** The Action's page could not be read, so its unfinished run was not resumed either. */
+export class ActionConversationOpenError extends Error {
+  constructor() {
+    super('The Action conversation could not be read.');
+    this.name = 'ActionConversationOpenError';
+  }
+}
+
 /**
  * The window a turn is opened from. Sender trust admitted the window's role; this pins which
  * window it is. An Overlay panel is a target of its own (events reach it by the Action↔panel
@@ -101,11 +109,16 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     )
   );
   // The main window shows an Action in place: its page, and its live run if one is unfinished.
-  registrar.handle('action:openConversation', (_event, request) => {
-    ctx.actions.refreshAndResumeActionConversation(
-      parseInput(ActionConversationOverlayRequestSchema, 'action:openConversation', request)
-        .actionId
+  // Without the page no run is resumed, so the window must hear of the failure to retry.
+  registrar.handle('action:openConversation', async (_event, request) => {
+    const { actionId } = parseInput(
+      ActionConversationOverlayRequestSchema,
+      'action:openConversation',
+      request
     );
+    if ((await ctx.actions.refreshAndResumeActionConversation(actionId)) === 'failed') {
+      throw new ActionConversationOpenError();
+    }
   });
   registrar.handle('action:readConversationPage', async (_event, request) => {
     const parsed = parseInput(

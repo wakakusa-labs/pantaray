@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useI18n } from '@/context/useI18n';
 import { projectActionConversationView } from '../../../electron/src/actions/actionConversationModel';
@@ -53,7 +53,17 @@ export function useActionTask(actionId: string) {
     []
   );
   const appliedPageVersionRef = useRef(0);
-  const [openFailed, setOpenFailed] = useState(false);
+  // Main resumes the Action's unfinished run only after reading its page, so a failed open leaves
+  // no live updates at all; only another open recovers them.
+  const [openState, setOpenState] = useState<'opening' | 'open' | 'failed'>('opening');
+  const open = useCallback(
+    () =>
+      actions.openConversation({ actionId }).then(
+        () => setOpenState('open'),
+        () => setOpenState('failed')
+      ),
+    [actions, actionId]
+  );
   // A canonical read made here supersedes the lifecycle notification it was read after.
   const settleLive = (readAfter: Live | null) =>
     setLive((current) => (current === readAfter ? null : current));
@@ -88,7 +98,6 @@ export function useActionTask(actionId: string) {
         setLive(null);
         setTransientToolSteps([]);
         setApprovalBlockers([]);
-        setOpenFailed(false);
         composerGenerationRef.current += 1;
         setComposer(initialComposerState(actionId));
         return;
@@ -121,14 +130,8 @@ export function useActionTask(actionId: string) {
 
   // Subscribed first, so the refresh this starts reaches the listener above.
   useEffect(() => {
-    let current = true;
-    actions.openConversation({ actionId }).catch(() => {
-      if (current) setOpenFailed(true);
-    });
-    return () => {
-      current = false;
-    };
-  }, [actions, actionId]);
+    void open();
+  }, [open]);
 
   const visiblePages = paging.pages?.[0].action.action_id === actionId ? paging.pages : null;
   const canonicalPage =
@@ -196,13 +199,10 @@ export function useActionTask(actionId: string) {
     if (page) setComposer((current) => reconcileCanonicalSubmission(current, page));
     return page;
   };
-  // The recovery when the open's refresh never arrives or the open itself failed.
-  const reload = async () => {
-    const readAfter = live;
-    const page = await conversation.loadBound(actionId);
-    if (!page) return;
-    settleLive(readAfter);
-    setOpenFailed(false);
+  const reopen = async () => {
+    if (openState === 'opening') return;
+    setOpenState('opening');
+    await open();
   };
 
   return {
@@ -212,12 +212,11 @@ export function useActionTask(actionId: string) {
     status,
     conversation: {
       olderPageState: paging.olderPageState,
-      boundPageState: paging.boundPageState,
       /** No conversation page has been read for this Action yet. */
       awaitingPage: canonicalPage === null && composer.submission === null,
-      openFailed,
+      openState,
       loadOlder,
-      reload,
+      reopen,
     },
     approval: {
       blockers: approval.approvalBlockers,

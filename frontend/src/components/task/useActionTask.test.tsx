@@ -254,14 +254,19 @@ describe('useActionTask', () => {
     expect(listeners.size).toBe(0);
   });
 
-  it('reports a failed open so the pane can read the conversation itself', async () => {
-    openConversation.mockRejectedValue(new Error('ipc failed'));
-    readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
+  it('reopens after a failed open, and then hears the run it resumed', async () => {
+    openConversation.mockRejectedValueOnce(new Error('page read failed'));
     const { result } = await renderTask();
-    await waitFor(() => expect(result.current.conversation.openFailed).toBe(true));
+    await waitFor(() => expect(result.current.conversation.openState).toBe('failed'));
 
-    await act(() => result.current.conversation.reload());
-    expect(result.current.conversation.openFailed).toBe(false);
-    expect(result.current.view?.action?.status).toBe('success');
+    await act(() => result.current.conversation.reopen());
+    expect(openConversation).toHaveBeenCalledTimes(2);
+    expect(result.current.conversation.openState).toBe('open');
+
+    // The reopen resumed the run, so its page and pause reach the pane.
+    emit(update(createActionPage('act-1', 'processing'), 1));
+    emit(update(createActionPage('act-1', 'processing'), 1, { approvalBlockers: [blocker] }));
+    expect(result.current.status.kind).toBe('approval_pending');
+    expect(result.current.approval.blockers).toEqual([blocker]);
   });
 });

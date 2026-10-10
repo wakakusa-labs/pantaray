@@ -23,7 +23,7 @@ function register(overrides, overlayOverrides, mainWindow = null) {
     resolveOverlayIdForSender: () => 'overlay-1',
     registerActionAssociation: () => {},
     refreshActionConversation: () => {},
-    refreshAndResumeActionConversation: () => {},
+    refreshAndResumeActionConversation: async () => 'refreshed',
     ...overrides,
   };
   const overlay = { resumeLiveProcess: () => {}, ...overlayOverrides };
@@ -368,7 +368,10 @@ test('A turn from a WebContents that is neither the main window nor a panel is r
 test('Opening an Action in the main window refreshes and resumes it, and opens no window', async () => {
   const opened = [];
   const invoke = register({
-    refreshAndResumeActionConversation: (actionId) => opened.push(actionId),
+    refreshAndResumeActionConversation: async (actionId) => {
+      opened.push(actionId);
+      return 'refreshed';
+    },
   });
 
   assert.equal(await invoke('action:openConversation', { actionId: 'action-1' }), undefined);
@@ -379,6 +382,18 @@ test('Opening an Action in the main window refreshes and resumes it, and opens n
     );
   }
   assert.deepEqual(opened, ['action-1']);
+});
+
+test('Opening an Action rejects when its page could not be read, so the window can retry', async () => {
+  const invoke = register({ refreshAndResumeActionConversation: async () => 'failed' });
+  await assert.rejects(
+    async () => invoke('action:openConversation', { actionId: 'action-1' }),
+    (error) => error?.name === 'ActionConversationOpenError'
+  );
+
+  // A read dropped by an owner change is not this window's failure: main resets it instead.
+  const superseded = register({ refreshAndResumeActionConversation: async () => 'superseded' });
+  assert.equal(await superseded('action:openConversation', { actionId: 'action-1' }), undefined);
 });
 
 function validSubmit() {

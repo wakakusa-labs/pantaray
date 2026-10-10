@@ -459,6 +459,33 @@ export function useWorkspaceSettingsController(t: Translate) {
     });
   });
 
+  /**
+   * Takes a folder out of one project. A folder no other project holds is unregistered with
+   * it: a registered folder stays inside the agent's boundary, so it must stay in a project.
+   */
+  const removeFolderFromProject = async (folderId: string, projectId: string) => {
+    const folder = settings?.folders.find((candidate) => candidate.folder_id === folderId);
+    if (!folder) return false;
+    const otherProjectIds = folder.project_ids.filter((candidate) => candidate !== projectId);
+    const removed =
+      otherProjectIds.length === 0
+        ? await commitMutation(
+            workspacePendingKey.folderDelete(folderId),
+            async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
+            () => ({ type: 'folderDeleted', folderId })
+          )
+        : await commitMutation(
+            workspacePendingKey.folderLinks(folderId),
+            async () =>
+              await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
+                organizationIds: folder.organization_ids,
+                projectIds: otherProjectIds,
+              }),
+            (updated) => ({ type: 'folderLinksUpdated', folder: updated })
+          );
+    return removed !== null;
+  };
+
   const openFolder = async (folderId: string): Promise<void> => {
     setErrorMessage(null);
     try {
@@ -528,6 +555,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     openFolder,
     pending,
     clearFocusRequest,
+    removeFolderFromProject,
     removeProject,
     renameProject,
     selectFolder,

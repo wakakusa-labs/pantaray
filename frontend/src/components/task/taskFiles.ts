@@ -61,6 +61,25 @@ function extensionOf(name: string): string {
 }
 
 /** How the preview shows the file at a path an answer links. */
+// Quick Look adds nothing over the preview for text the pane already shows, so it is offered for
+// every other file, including formats the pane cannot show at all (TIFF, HEIC, .xlsm, ...).
+const TEXT_EXTENSIONS = new Set([
+  'md',
+  'markdown',
+  'html',
+  'htm',
+  'txt',
+  'csv',
+  'tsv',
+  'json',
+  'log',
+]);
+
+export function offersQuickLook(file: TaskFile): boolean {
+  const dot = file.name.lastIndexOf('.');
+  return !TEXT_EXTENSIONS.has(dot < 0 ? '' : file.name.slice(dot + 1).toLowerCase());
+}
+
 export function taskFileAt(path: string): TaskFile {
   const name = path.split('/').pop() ?? '';
   const extension = extensionOf(name);

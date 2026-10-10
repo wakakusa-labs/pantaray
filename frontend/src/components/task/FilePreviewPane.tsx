@@ -7,7 +7,7 @@ import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useI18n } from '@/context/useI18n';
 
 import { FileOpenMenu, type FileOpenMenuItem } from './FileOpenMenu';
-import type { TaskFile } from './taskFiles';
+import { offersQuickLook, type TaskFile } from './taskFiles';
 import './taskFiles.css';
 
 const COPY = {
@@ -46,7 +46,6 @@ const COPY = {
 } as const;
 
 /** Quick Look draws these; a text file already reads in the preview itself. */
-const QUICK_LOOK_KINDS = new Set<TaskFile['kind']>(['document', 'image', 'pdf', 'app_only']);
 
 type OpenWay = 'reveal' | 'quickLook' | 'openInApp' | 'openWithApp';
 
@@ -158,7 +157,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   });
   const openItems = [
     item(copy.reveal, 'reveal'),
-    ...(QUICK_LOOK_KINDS.has(file.kind) ? [item(copy.quickLook, 'quickLook')] : []),
+    ...(offersQuickLook(file) ? [item(copy.quickLook, 'quickLook')] : []),
     item(copy.openInApp, 'openInApp'),
     item(copy.openWithApp, 'openWithApp'),
   ];

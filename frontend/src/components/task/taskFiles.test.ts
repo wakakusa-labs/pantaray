@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActionConversationPage } from '../../../electron/src/actions/actionContracts';
 import { projectActionConversationView } from '../../../electron/src/actions/actionConversationModel';
 import { createActionPage } from './actionTaskFixtures';
-import { deriveTaskFiles } from './taskFiles';
+import { deriveTaskFiles, offersQuickLook, taskFileAt } from './taskFiles';
 
 type Entry = ActionConversationPage['runs'][number]['entries'][number];
 type ToolEntry = Extract<Entry, { step_kind: 'tool' }>;
@@ -79,5 +79,23 @@ describe('deriveTaskFiles', () => {
     expect(deriveTaskFiles(projectActionConversationView([page])).map((file) => file.path)).toEqual(
       ['/work/見積書  v3.md']
     );
+  });
+});
+
+describe('offersQuickLook', () => {
+  it('leaves Quick Look out only for text the preview already shows', () => {
+    for (const name of ['mail.md', 'page.html', 'run.log', 'rows.csv', 'data.json']) {
+      expect(offersQuickLook(taskFileAt(`/work/${name}`))).toBe(false);
+    }
+    for (const name of [
+      'scan.tiff',
+      'photo.heic',
+      'macro.xlsm',
+      'deck.pptm',
+      'quote.pdf',
+      'a.png',
+    ]) {
+      expect(offersQuickLook(taskFileAt(`/work/${name}`))).toBe(true);
+    }
   });
 });

@@ -1,8 +1,10 @@
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import type { WorkKey } from '@/components/chat/chatTimeline';
 
-/** What History's detail pane shows: the chat, or one Action or suggestion. */
-export type HistorySelection = 'chat' | WorkKey;
+/** What History's detail pane shows: the chat, a new task's composer, or one Action or suggestion. */
+export type HistorySelection = 'chat' | 'new' | WorkKey;
+
+const NEW_TASK = 'new';
 
 const SELECTION_PARAM = 'item';
 const WORK_KEY = /^(action|suggestion):(.+)$/;
@@ -10,6 +12,7 @@ const WORK_KEY = /^(action|suggestion):(.+)$/;
 /** The selection a `?item=` value names. A missing or malformed value shows the chat. */
 export function parseHistorySelection(search: string): HistorySelection {
   const value = new URLSearchParams(search).get(SELECTION_PARAM);
+  if (value === NEW_TASK) return NEW_TASK;
   const match = value === null ? null : WORK_KEY.exec(value);
   // Ids are canonical: never blank, never padded.
   if (!match || match[2] !== match[2].trim()) return 'chat';

@@ -5,6 +5,7 @@ import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HistorySidebar } from '@/components/history/HistorySidebar';
+import { NewTaskPane } from '@/components/task/NewTaskPane';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import { useI18n } from '@/context/useI18n';
@@ -75,6 +76,14 @@ const SuggestionHistoryPage = () => {
           reveal={reveal}
           onOpenWork={select}
           onAddProject={addProject}
+        />
+      );
+    if (selection === 'new')
+      return (
+        <NewTaskPane
+          onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+          onAddProject={addProject}
+          drafts={taskDrafts}
         />
       );
     const { kind, id } = splitWorkKey(selection);

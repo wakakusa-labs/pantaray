@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -79,6 +79,7 @@ const acceptAction = vi.fn<NonNullable<ElectronBridge['orchestration']>['acceptA
 const send = vi.fn();
 const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
 const onStarted = vi.fn();
+const onShowInChat = vi.fn();
 
 const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
@@ -91,6 +92,7 @@ async function renderPane(suggestionId = 'sug-1', drafts = createTaskComposerDra
         suggestionId={suggestionId}
         title="Invoice draft"
         onStarted={onStarted}
+        onShowInChat={onShowInChat}
         onAddProject={() => undefined}
         drafts={drafts}
       />
@@ -183,6 +185,22 @@ describe('SuggestionTaskPane', () => {
     expect(bar?.closest('.suggestion-task__column')).toBeNull();
     // The composer follows the bar.
     expect(bar?.nextElementSibling?.matches('form.overlay-composer')).toBe(true);
+  });
+
+  it('offers the same header buttons as a task: show in chat, and copy the suggestion', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { ...window.electron, clipboard: { writeText } },
+    });
+    await renderPane();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show in chat' }));
+    expect(onShowInChat).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy suggestion' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('Draft the invoice before month end?')
+    );
   });
 
   it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {
@@ -514,7 +532,9 @@ describe('SuggestionTaskPane', () => {
     await renderPane();
 
     expect(onStarted).toHaveBeenCalledWith('act-9');
-    expect(screen.queryByRole('button')).toBeNull();
+    // No decision is offered; only the header's buttons remain.
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
   });
 
   it('ignores snapshots and errors of other suggestions', async () => {

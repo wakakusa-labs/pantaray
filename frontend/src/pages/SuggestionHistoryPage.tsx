@@ -86,6 +86,7 @@ const SuggestionHistoryPage = () => {
         suggestionId={id}
         title={title}
         onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+        onShowInChat={() => select('chat')}
         onAddProject={addProject}
         drafts={taskDrafts}
       />

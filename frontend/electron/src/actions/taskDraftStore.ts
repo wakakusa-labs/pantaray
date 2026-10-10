@@ -93,6 +93,19 @@ export function createTaskDraftStore(params: {
       }
     },
 
+    /**
+     * A send that failed gives its words and attachments back, unless the task has a newer draft
+     * or the owner changed. Every composer of the task hears it, the sender's included: the
+     * window that sent may be gone.
+     */
+    restore(owner: string, work: TaskDraftWork, draft: TaskDraft): void {
+      if (owner !== ownerId || drafts.has(work)) return;
+      drafts.set(work, draft);
+      for (const subscriber of subscribers.get(work)?.values() ?? []) {
+        subscriber.send('action:draftChanged', { work, draft });
+      }
+    },
+
     /** A composer removed a staged file: it goes once no draft lists it. */
     discard(owner: string, attachmentId: string): void {
       useOwner(owner);

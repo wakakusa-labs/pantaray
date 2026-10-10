@@ -86,6 +86,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.modelLabel': 'Model',
     'settings.aiConnection.modelPlaceholder': 'Model name',
     'settings.aiConnection.modelSelectPlaceholder': 'Select a Codex model',
+    'settings.aiConnection.modelOther': 'Enter another model…',
     'settings.aiConnection.chatgptModelHint': 'Choose a model available in Codex.',
     'settings.aiConnection.modelHint': 'Pick a suggestion or type any model the provider accepts.',
     'settings.aiConnection.key.label': 'API key',
@@ -376,6 +377,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.modelLabel': 'モデル',
     'settings.aiConnection.modelPlaceholder': 'モデル名',
     'settings.aiConnection.modelSelectPlaceholder': 'Codex のモデルを選択',
+    'settings.aiConnection.modelOther': 'ほかのモデル名を入力…',
     'settings.aiConnection.chatgptModelHint': 'Codex で利用できるモデルから選択してください。',
     'settings.aiConnection.modelHint':
       '候補から選ぶか、プロバイダーが受け付ける名前を直接入力できます。',

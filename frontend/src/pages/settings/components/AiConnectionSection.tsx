@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Translate } from '../types';
 import {
   API_KEY_PROVIDERS,
+  PROVIDER_MODELS,
   modelCandidates,
   type AiConnectionMethod,
   type AiConnectionState,
@@ -417,6 +418,7 @@ export function AiConnectionSection({
               key={`${state.method}:${state.apiKey.provider}`}
               model={state.model}
               candidates={candidates}
+              allowsOther={PROVIDER_MODELS[state.apiKey.provider].allowsOther}
               onSave={actions.saveModel}
               t={t}
             />

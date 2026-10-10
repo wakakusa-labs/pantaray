@@ -15,18 +15,30 @@ export type ApiKeyProvider = ConnectionSettings['preferences']['provider'];
 
 export const API_KEY_PROVIDERS: readonly ApiKeyProvider[] = ['openai', 'anthropic', 'fireworks'];
 
-/** 候補モデル。ここに無い名前もそのまま入力できる（カスタム）。先頭がその宛先の既定。 */
-export const PROVIDER_MODEL_CANDIDATES: Record<ApiKeyProvider, readonly string[]> = {
-  openai: ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-luna'],
-  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
-  fireworks: [],
+/**
+ * 宛先ごとのモデル。`candidates` の先頭がその宛先の既定。`allowsOther` の宛先では
+ * 候補に無い名前も入力できる。候補の無い宛先は入力だけになる。
+ */
+export const PROVIDER_MODELS: Record<
+  ApiKeyProvider,
+  { candidates: readonly string[]; allowsOther: boolean }
+> = {
+  openai: {
+    candidates: ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-luna'],
+    allowsOther: true,
+  },
+  anthropic: {
+    candidates: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+    allowsOther: false,
+  },
+  fireworks: { candidates: [], allowsOther: true },
 };
 
 export function modelCandidates(
   method: AiConnectionMethod,
   provider: ApiKeyProvider
 ): readonly string[] {
-  return method === 'chatgpt' ? CHATGPT_MODEL_CANDIDATES : PROVIDER_MODEL_CANDIDATES[provider];
+  return method === 'chatgpt' ? CHATGPT_MODEL_CANDIDATES : PROVIDER_MODELS[provider].candidates;
 }
 
 /**

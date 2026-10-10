@@ -115,7 +115,7 @@ it('shows a connected ChatGPT account without asking for a new sign-in', () => {
   expect(actions.disconnectChatgpt).toHaveBeenCalled();
 });
 
-it('offers only selectable Codex models for ChatGPT and keeps API key custom input', () => {
+it('offers only selectable Codex models for ChatGPT', () => {
   const actions = renderSection({ method: 'chatgpt', model: 'gpt-6-luna' });
   const picker = screen.getByRole('combobox', { name: 'settings.aiConnection.modelLabel' });
   expect([...picker.querySelectorAll('option')].map((option) => option.value)).toEqual([
@@ -132,15 +132,81 @@ it('offers only selectable Codex models for ChatGPT and keeps API key custom inp
   expect(screen.queryByRole('button', { name: /model/ })).toBeNull();
   fireEvent.change(picker, { target: { value: 'gpt-6-sol' } });
   expect(actions.saveModel).toHaveBeenCalledWith('gpt-6-sol');
+});
 
-  cleanup();
-  renderSection({ method: 'api_key' });
-  expect(screen.getByLabelText('settings.aiConnection.modelLabel')).toHaveAttribute('type', 'text');
-  expect(
-    [...document.querySelectorAll('#ai-model-candidates option')].map((option) =>
-      option.getAttribute('value')
-    )
-  ).toEqual(['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-luna']);
+const MODEL_PICKER = { name: 'settings.aiConnection.modelLabel' };
+const OTHER_MODEL_INPUT = { name: 'settings.aiConnection.modelOther' };
+
+function optionLabels(picker: HTMLElement): (string | null)[] {
+  return [...picker.querySelectorAll('option')].map((option) => option.textContent);
+}
+
+it('lists every Anthropic model while one is saved and saves the one chosen', async () => {
+  const actions = renderSection({
+    model: 'claude-opus-5-5',
+    apiKey: { provider: 'anthropic', hasSavedKey: true },
+  });
+  const picker = screen.getByRole('combobox', MODEL_PICKER);
+  expect(picker).toHaveValue('claude-opus-5-5');
+  expect(optionLabels(picker)).toEqual([
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
+    'claude-haiku-5-5',
+    'claude-fable-5-1',
+  ]);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
+  expect(actions.saveModel).toHaveBeenCalledWith('claude-sonnet-5-5');
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+});
+
+it('shows a saved Anthropic model that is no longer offered until another is chosen', () => {
+  const actions = renderSection({
+    model: 'claude-opus-5',
+    apiKey: { provider: 'anthropic', hasSavedKey: true },
+  });
+  const picker = screen.getByRole('combobox', MODEL_PICKER);
+  expect(picker).toHaveValue('claude-opus-5');
+  expect(optionLabels(picker)).toContain('claude-opus-5');
+  expect(actions.saveModel).not.toHaveBeenCalled();
+  fireEvent.change(picker, { target: { value: 'claude-haiku-5-5' } });
+  expect(actions.saveModel).toHaveBeenCalledWith('claude-haiku-5-5');
+});
+
+it('lists every OpenAI model and offers to type another, saved on Enter', async () => {
+  const actions = renderSection({ model: 'gpt-5.6' });
+  const picker = screen.getByRole('combobox', MODEL_PICKER);
+  expect(optionLabels(picker)).toEqual([
+    'gpt-5.6',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-6-luna',
+    'settings.aiConnection.modelOther',
+  ]);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.change(picker, { target: { value: '' } });
+  expect(actions.saveModel).not.toHaveBeenCalled();
+  const input = screen.getByRole('textbox', OTHER_MODEL_INPUT);
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: 'gpt-6-preview' } });
+  fireEvent.submit(input);
+  expect(actions.saveModel).toHaveBeenCalledWith('gpt-6-preview');
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+});
+
+it('shows a saved OpenAI model that is not a suggestion as another model', () => {
+  renderSection({ model: 'gpt-6-preview' });
+  expect(screen.getByRole('combobox', MODEL_PICKER)).toHaveValue('');
+  expect(screen.getByRole('textbox', OTHER_MODEL_INPUT)).toHaveValue('gpt-6-preview');
+});
+
+it('types the model name where the provider has no suggestions', () => {
+  renderSection({
+    model: 'accounts/x/models/y',
+    apiKey: { provider: 'fireworks', hasSavedKey: true },
+  });
+  expect(screen.queryByRole('combobox', MODEL_PICKER)).toBeNull();
+  expect(screen.getByRole('textbox', MODEL_PICKER)).toHaveValue('accounts/x/models/y');
 });
 
 it('requires a new choice when the stored ChatGPT model is no longer offered', () => {
@@ -415,7 +481,7 @@ it('focuses Replace after a newly saved key hides the input', async () => {
 it('saves a typed model when the field is committed and never saves a blank name', async () => {
   const actions = renderSection({ model: 'saved-model', runtime: runtime({ llmRoute: 'direct' }) });
   const save = actions.saveModel as ReturnType<typeof vi.fn>;
-  const input = screen.getByLabelText('settings.aiConnection.modelLabel');
+  const input = screen.getByRole('textbox', OTHER_MODEL_INPUT);
   fireEvent.change(input, { target: { value: '  ' } });
   fireEvent.blur(input);
   // Clearing the model would disconnect the route and stop running work.
@@ -435,7 +501,7 @@ it('edits a model as a draft and preserves it when applying fails', async () => 
   const actions = renderSection({ model: 'saved-model', runtime: runtime({ llmRoute: 'direct' }) });
   const save = actions.saveModel as ReturnType<typeof vi.fn>;
   save.mockRejectedValueOnce(new Error('provider details'));
-  const input = screen.getByLabelText('settings.aiConnection.modelLabel');
+  const input = screen.getByRole('textbox', OTHER_MODEL_INPUT);
   fireEvent.change(input, { target: { value: ' new-model ' } });
   expect(save).not.toHaveBeenCalled();
   fireEvent.blur(input);
@@ -517,7 +583,7 @@ it('can reapply the same model after persistence succeeds but runtime synchroniz
     );
   }
   render(<Fixture />);
-  const input = screen.getByLabelText('settings.aiConnection.modelLabel');
+  const input = screen.getByRole('textbox', OTHER_MODEL_INPUT);
   fireEvent.change(input, { target: { value: 'new-model' } });
   fireEvent.blur(input);
   expect(await screen.findByText('settings.aiConnection.model.saveFailed')).toBeInTheDocument();

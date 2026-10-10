@@ -11,6 +11,7 @@ import {
 import { applyWorkspaceMutation, displayNameFromPath } from './components/workspaceSettingsModel';
 import type {
   WorkspaceMutationEvent,
+  WorkspaceProject,
   WorkspaceSettings,
 } from './components/workspaceSettingsModel';
 
@@ -37,9 +38,6 @@ export const workspacePendingKey = {
   // One key for every change to a folder; it marks that folder's controls as busy.
   folder: (folderId: string): WorkspacePendingKey => `folder:${folderId}`,
 };
-
-/** Names taken between reading the settings and creating the project are rare; a few suffice. */
-const MAX_PROJECT_NAME_ATTEMPTS = 5;
 
 /**
  * Owner scope is this hook's life: the owner boundary mounts it for one confirmed owner and
@@ -181,69 +179,36 @@ export function useWorkspaceSettingsController(t: Translate) {
     }
   };
 
-  /** The sidebar's ＋: a chosen folder becomes a project of its own, named after the folder. */
-  const addProjectFromFolder = locked(undefined, async (): Promise<void> => {
-    // Without the current folders a registered one could not be told apart.
-    if (!settings) return;
-    const realPath = await selectFolder();
-    if (!realPath) return;
-    if (findRegisteredFolder(realPath)) {
-      setErrorMessage(t('settings.workspace.folderAlreadyRegistered'));
-      return;
-    }
-    const displayName = displayNameFromPath(realPath);
-    const project = await createNumberedProject(displayName);
-    if (!project) return;
-    const folder = await commitMutation(
-      workspacePendingKey.folderCreate(project.project_id),
-      async () =>
-        await requireWorkspaceSettingsApi().createFolder({
-          displayName,
-          realPath,
-          organizationIds: [],
-          projectIds: [project.project_id],
-        }),
-      (created) => ({ type: 'folderCreated', folder: created })
-    );
-    if (folder) return;
-    // A project without its folder would be listed with nothing behind it.
-    await commitMutation(
-      workspacePendingKey.projectDelete(project.project_id),
-      async () => await requireWorkspaceSettingsApi().deleteProject(project.project_id),
-      () => ({ type: 'projectDeleted', projectId: project.project_id }),
-      true
-    );
-    setErrorMessage(t('settings.workspace.saveFailed'));
-  });
+  // The backend refuses a taken name too; this says so before anything is sent.
+  const refuseTakenName = (name: string): boolean => {
+    if (!settings?.projects.some((project) => project.display_name === name)) return false;
+    setErrorMessage(t('history.projects.nameTaken', { name }));
+    return true;
+  };
 
-  /**
-   * Creates a project under the folder's name, numbered past names that are taken (" 2", " 3",
-   * …). The backend refuses a taken name rather than answering with that project, so what this
-   * returns was created here and is safe to take back.
-   */
-  const createNumberedProject = async (displayName: string) => {
-    const knownNames = new Set(settings?.projects.map((project) => project.display_name));
-    let copy = 1;
-    for (let attempt = 0; attempt < MAX_PROJECT_NAME_ATTEMPTS; attempt += 1) {
-      let projectName = displayName;
-      while (knownNames.has(projectName)) projectName = `${displayName} ${++copy}`;
-      knownNames.add(projectName);
+  /** The sidebar's ＋: a project of this name with no folder yet; null when it was refused. */
+  const createProject = locked(
+    null,
+    async (displayName: string): Promise<WorkspaceProject | null> => {
+      const name = displayName.trim();
+      if (!settings || !name || refuseTakenName(name)) return null;
       const created = await commitMutation(
         workspacePendingKey.projectCreate,
         async () =>
           await requireWorkspaceSettingsApi().createProject({
-            displayName: projectName,
+            displayName: name,
             organizationIds: [],
           }),
         (result) => ('errorCode' in result ? null : { type: 'projectCreated', project: result }),
         true
       );
-      if (created === null) return null;
-      if (!('errorCode' in created)) return created;
+      if (created && 'errorCode' in created) {
+        setErrorMessage(t('history.projects.nameTaken', { name }));
+        return null;
+      }
+      return created;
     }
-    setErrorMessage(t('settings.workspace.saveFailed'));
-    return null;
-  };
+  );
 
   /** The sidebar's remove; the backend unregisters the folders only this project holds. */
   const removeProject = locked(false, async (projectId: string): Promise<boolean> => {
@@ -262,10 +227,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     const project = settings?.projects.find((candidate) => candidate.project_id === projectId);
     if (!settings || !project || !name) return false;
     if (name === project.display_name) return true;
-    if (settings.projects.some((candidate) => candidate.display_name === name)) {
-      setErrorMessage(t('history.projects.nameTaken', { name }));
-      return false;
-    }
+    if (refuseTakenName(name)) return false;
     const renamed = await commitMutation(
       workspacePendingKey.projectRename(projectId),
       async () =>
@@ -386,8 +348,8 @@ export function useWorkspaceSettingsController(t: Translate) {
   return {
     addFolderToProject,
     addOrganization,
-    addProjectFromFolder,
     busy,
+    createProject,
     dragController,
     errorMessage,
     openFolder,

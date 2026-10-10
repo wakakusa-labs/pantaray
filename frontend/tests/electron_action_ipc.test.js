@@ -292,45 +292,54 @@ test('Action submit maps only typed conflicts and never delivers a failed HTTP c
   }
 });
 
-test('A failed send gives its words back as the task draft; a sent one does not', async () => {
+test('How a send ends settles the task draft, also with its window gone', async () => {
   const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
   const heard = [];
   taskDrafts.open('user-1', 'action:action-1', { id: 7, send: (_c, change) => heard.push(change) });
+  const request = {
+    ...validSubmit(),
+    message: {
+      ...validSubmit().message,
+      images: [{ kind: 'image', storage_path: 'user-1/2026-10-11/a.png' }],
+    },
+  };
   const send = (submitMessage) =>
-    register(
-      { submitMessage },
-      {},
-      null,
-      taskDrafts
-    )('action:submitMessage', {
-      ...validSubmit(),
-      message: {
-        ...validSubmit().message,
-        images: [{ kind: 'image', storage_path: 'user-1/2026-10-11/a.png' }],
-      },
-    });
+    register({ submitMessage }, {}, null, taskDrafts)('action:submitMessage', request);
+  const words = {
+    text: 'hello',
+    mentions: [],
+    attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
+  };
 
   await send(async () => MESSAGE_RESPONSE);
   assert.deepEqual(heard, []);
 
+  // The response was lost: only this exact request, deduped by its message_id, may follow.
   await assert.rejects(
     send(async () => {
       throw new LocalBackendRequestError('backend failed', 500, 'InternalError');
     })
   );
-  const restored = {
-    text: 'hello',
-    mentions: [],
-    attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
-  };
-  assert.deepEqual(heard, [{ work: 'action:action-1', draft: restored }]);
+  assert.equal(heard.at(-1).draft.retry.message.message_id, 'message-1');
+  assert.deepEqual({ ...heard.at(-1).draft, retry: null }, { ...words, retry: null });
 
-  // A newer draft written meanwhile is not overwritten.
-  taskDrafts.update('user-1', 'action:action-1', { ...restored, text: 'newer' }, 7);
+  // Its retry went through: no window offers it any more.
+  await send(async () => MESSAGE_RESPONSE);
+  assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
+
+  // Refused: the words come back as a plain draft, unless a newer one was written meanwhile.
   await send(async () => {
     throw new LocalBackendRequestError('stale process', 409, 'ExpectedProcessConflict');
   });
-  assert.equal(heard.length, 1);
+  assert.deepEqual(heard.at(-1).draft, { ...words, retry: null });
+  taskDrafts.update('user-1', 'action:action-1', { ...words, text: 'newer', retry: null }, 7);
+  const count = heard.length;
+  await assert.rejects(
+    send(async () => {
+      throw new Error('socket hang up');
+    })
+  );
+  assert.equal(heard.length, count);
 });
 
 function mainWindowOf(webContents) {

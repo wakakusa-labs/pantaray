@@ -6,7 +6,11 @@
 
 import { z } from 'zod';
 
-import { ACTION_MESSAGE_MAX_FILES, CanonicalIdentitySchema } from '../../actions/actionContracts';
+import {
+  ACTION_MESSAGE_MAX_FILES,
+  ActionMessageRequestSchema,
+  CanonicalIdentitySchema,
+} from '../../actions/actionContracts';
 import { ACTION_IMAGE_MAX_PER_MESSAGE } from './actionImages';
 
 // Design limit: drafts live in memory per task; these caps keep one renderer from growing it.
@@ -61,6 +65,9 @@ export const TaskDraftSchema = z
         ])
       )
       .max(ACTION_IMAGE_MAX_PER_MESSAGE + ACTION_MESSAGE_MAX_FILES),
+    // A send whose outcome is unknown. The backend dedupes on its message_id, so it is retried
+    // as this exact request, never as a new message that could run a second time.
+    retry: ActionMessageRequestSchema.nullable(),
   })
   .strict();
 

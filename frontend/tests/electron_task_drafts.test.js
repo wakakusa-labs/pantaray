@@ -14,7 +14,7 @@ const FILE = {
   byteSize: 12,
 };
 const IMAGE = { kind: 'image', storagePath: 'user-1/2026-10-11/a.png' };
-const draft = (text, attachments = []) => ({ text, mentions: [], attachments });
+const draft = (text, attachments = []) => ({ text, mentions: [], attachments, retry: null });
 
 // A store behind the real handlers, with two windows: the main window (1) and a small one (2).
 function harness() {
@@ -163,4 +163,23 @@ test('draft requests are checked at the boundary', async () => {
   const stale = app.windowOf(9);
   stale.registered = false;
   assert.throws(() => app.open(9, 'action:a1'), IpcSenderRejectedError);
+});
+
+test('a file an unresolved send carries is not discarded while that send may be retried', () => {
+  const app = harness();
+  app.open(1, 'action:a1');
+  const retry = {
+    target: { kind: 'existing', action_id: 'a1', expected_process_id: null },
+    message: {
+      version: 1,
+      message_id: 'm-1',
+      content: 'read this',
+      images: [],
+      files: [{ attachment_id: FILE.attachmentId, name: FILE.name, byte_size: FILE.byteSize }],
+    },
+  };
+  app.update(1, 'action:a1', { ...draft('read this', [FILE]), retry });
+
+  app.discard(FILE.attachmentId);
+  assert.deepEqual(app.discarded, []);
 });

@@ -103,6 +103,10 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     methods: new Set(['PUT']),
   },
   {
+    path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/projects\/[^/]+\/name$/,
+    methods: new Set(['PUT']),
+  },
+  {
     path: /^\/v1\/agents\/users\/[^/]+\/approval-preferences\/workspace-edit-and-command$/,
     methods: new Set(['GET', 'PUT']),
   },

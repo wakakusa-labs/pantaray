@@ -77,6 +77,7 @@ export const validInvokeChannels = [
   'workspaceSettings:updateCommandNetwork',
   'workspaceSettings:createOrganization',
   'workspaceSettings:createProject',
+  'workspaceSettings:renameProject',
   'workspaceSettings:createFolder',
   'workspaceSettings:reorderProjects',
   'workspaceSettings:deleteOrganization',
@@ -86,6 +87,7 @@ export const validInvokeChannels = [
   'workspaceSettings:updateFolderLinks',
   'workspaceSettings:updateReadAccessScope',
   'workspaceSettings:selectFolder',
+  'workspaceSettings:openFolder',
   'actionFile:open',
   // Main window: preview a file an Action names, or open it in its default app or another
   'actionFile:read',

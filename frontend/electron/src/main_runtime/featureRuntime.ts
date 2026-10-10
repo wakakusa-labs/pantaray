@@ -57,6 +57,7 @@ import {
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
+import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
@@ -419,6 +420,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         workspaceSettingsUpdateCommandNetwork: workspaceSettingsFetch.updateCommandNetwork,
         workspaceSettingsCreateOrganization: workspaceSettingsFetch.createOrganization,
         workspaceSettingsCreateProject: workspaceSettingsFetch.createProject,
+        workspaceSettingsRenameProject: workspaceSettingsFetch.renameProject,
         workspaceSettingsCreateFolder: workspaceSettingsFetch.createFolder,
         workspaceSettingsReorderProjects: workspaceSettingsFetch.reorderProjects,
         workspaceSettingsDeleteOrganization: workspaceSettingsFetch.deleteOrganization,
@@ -428,6 +430,11 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         workspaceSettingsUpdateFolderLinks: workspaceSettingsFetch.updateFolderLinks,
         workspaceSettingsUpdateReadAccessScope: workspaceSettingsFetch.updateReadAccessScope,
         workspaceSettingsSelectFolder: selectWorkspaceFolder,
+        workspaceSettingsOpenFolder: (folderId) =>
+          openRegisteredWorkspaceFolder(folderId, {
+            getSettings: workspaceSettingsFetch.get,
+            openPath: (realPath) => shell.openPath(realPath),
+          }),
         screenshotSync,
         startScreenshots,
         readCaptureGateState: conversationOverlay.readGateState,

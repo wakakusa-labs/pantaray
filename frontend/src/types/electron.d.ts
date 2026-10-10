@@ -337,10 +337,15 @@ declare global {
         createOrganization: (input: {
           displayName: string;
         }) => Promise<ElectronWorkspaceOrganization>;
+        /** A name another project has is refused with `PROJECT_NAME_TAKEN`. */
         createProject: (input: {
           displayName: string;
           organizationIds: string[];
-        }) => Promise<ElectronWorkspaceProject>;
+        }) => Promise<ElectronWorkspaceProject | { errorCode: 'PROJECT_NAME_TAKEN' }>;
+        renameProject: (
+          projectId: string,
+          input: { displayName: string }
+        ) => Promise<ElectronWorkspaceProject>;
         createFolder: (input: {
           displayName: string;
           realPath: string;
@@ -363,6 +368,7 @@ declare global {
           readAccessScope: 'workspace' | 'full_access'
         ) => Promise<{ read_access_scope: 'workspace' | 'full_access' }>;
         selectFolder: () => Promise<{ canceled: boolean; path: string | null }>;
+        openFolder: (folderId: string) => Promise<void>;
       };
       privacy?: {
         getCaptureSettings: () => Promise<CapturePrivacySettings>;

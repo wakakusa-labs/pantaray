@@ -229,6 +229,7 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/v1/agents/users/user-1/workspace-settings/folders/folder-1', 'DELETE'],
     ['/v1/agents/users/user-1/workspace-settings/projects/project-1/links', 'PUT'],
     ['/v1/agents/users/user-1/workspace-settings/folders/folder-1/links', 'PUT'],
+    ['/v1/agents/users/user-1/workspace-settings/projects/project-1/name', 'PUT'],
     [
       '/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command',
       'GET',
@@ -329,6 +330,49 @@ test('local backend client は本文のない 204 を成功として返す', asy
       }),
       undefined
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('workspace settings の名前変更と同名の作成は allowlist を通って backend に届く', async () => {
+  const {
+    createWorkspaceSettingsFetcher,
+  } = require('../electron/dist/settings/workspaceSettingsFetch.js');
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url, options) => {
+    requested.push({ url: String(url), method: options.method, body: options.body });
+    if (options.method === 'POST')
+      return new Response(JSON.stringify({ detail: 'taken' }), { status: 409 });
+    return new Response(
+      JSON.stringify({
+        project_id: 'project 1',
+        display_name: 'Aurora',
+        sort_order: 0,
+        organization_ids: [],
+      })
+    );
+  };
+  const fetcher = createWorkspaceSettingsFetcher({
+    requestJson: readyClient.requestJson,
+    getUserId: () => 'user-1',
+  });
+
+  try {
+    const renamed = await fetcher.renameProject('project 1', { displayName: 'Aurora' });
+    const taken = await fetcher.createProject({ displayName: 'Aurora', organizationIds: [] });
+
+    assert.equal(renamed.display_name, 'Aurora');
+    assert.deepEqual(taken, { errorCode: 'PROJECT_NAME_TAKEN' });
+    assert.deepEqual(
+      requested.map(({ url, method }) => [method, new URL(url).pathname]),
+      [
+        ['PUT', '/v1/agents/users/user-1/workspace-settings/projects/project%201/name'],
+        ['POST', '/v1/agents/users/user-1/workspace-settings/projects'],
+      ]
+    );
+    assert.deepEqual(JSON.parse(requested[0].body), { display_name: 'Aurora' });
   } finally {
     globalThis.fetch = originalFetch;
   }

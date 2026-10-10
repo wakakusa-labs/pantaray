@@ -1,4 +1,4 @@
-import type { createLocalBackendClient } from '../localBackend/client';
+import { LocalBackendRequestError, type createLocalBackendClient } from '../localBackend/client';
 
 export type WorkspaceOrganization = {
   organization_id: string;
@@ -20,6 +20,14 @@ export type WorkspaceFolder = {
   organization_ids: string[];
   project_ids: string[];
 };
+
+/**
+ * A name another project has is refused, not answered with that project. The refusal crosses
+ * IPC as data because an Error thrown across `invoke` loses its status.
+ */
+export type WorkspaceProjectCreateResult = WorkspaceProject | { errorCode: 'PROJECT_NAME_TAKEN' };
+
+const HTTP_CONFLICT = 409;
 
 export type ReadAccessScope = 'workspace' | 'full_access';
 
@@ -205,7 +213,8 @@ export function createWorkspaceSettingsFetcher(params: {
   getCommandNetwork: () => Promise<CommandNetworkSettings>;
   updateCommandNetwork: (enabled: boolean) => Promise<CommandNetworkSettings>;
   createOrganization: (input: unknown) => Promise<WorkspaceOrganization>;
-  createProject: (input: unknown) => Promise<WorkspaceProject>;
+  createProject: (input: unknown) => Promise<WorkspaceProjectCreateResult>;
+  renameProject: (projectId: string, input: { displayName: string }) => Promise<WorkspaceProject>;
   createFolder: (input: unknown) => Promise<WorkspaceFolder>;
   reorderProjects: (input: { projectIds: string[] }) => Promise<WorkspaceProjectOrder>;
   deleteOrganization: (organizationId: string) => Promise<void>;
@@ -266,19 +275,33 @@ export function createWorkspaceSettingsFetcher(params: {
         })
       );
     },
-    createProject: async (input: unknown): Promise<WorkspaceProject> => {
+    createProject: async (input: unknown): Promise<WorkspaceProjectCreateResult> => {
       const normalized = normalizeCreateInput(input);
-      return parseWorkspaceProject(
-        await params.requestJson<unknown>({
-          path: `${buildUrl()}/projects`,
-          method: 'POST',
-          body: {
-            display_name: normalized.displayName,
-            organization_ids: normalized.organizationIds,
-          },
-        })
-      );
+      try {
+        return parseWorkspaceProject(
+          await params.requestJson<unknown>({
+            path: `${buildUrl()}/projects`,
+            method: 'POST',
+            body: {
+              display_name: normalized.displayName,
+              organization_ids: normalized.organizationIds,
+            },
+          })
+        );
+      } catch (error) {
+        if (error instanceof LocalBackendRequestError && error.status === HTTP_CONFLICT)
+          return { errorCode: 'PROJECT_NAME_TAKEN' };
+        throw error;
+      }
     },
+    renameProject: async (projectId, input): Promise<WorkspaceProject> =>
+      parseWorkspaceProject(
+        await params.requestJson<unknown>({
+          path: `${buildUrl()}/projects/${encodeURIComponent(projectId)}/name`,
+          method: 'PUT',
+          body: { display_name: input.displayName },
+        })
+      ),
     createFolder: async (input: unknown): Promise<WorkspaceFolder> => {
       const normalized = normalizeCreateInput(input);
       return parseWorkspaceFolder(

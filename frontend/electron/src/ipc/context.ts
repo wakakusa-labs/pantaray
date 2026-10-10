@@ -35,6 +35,7 @@ import type {
   WorkspaceFolder,
   WorkspaceOrganization,
   WorkspaceProject,
+  WorkspaceProjectCreateResult,
   WorkspaceSettings,
 } from '../settings/workspaceSettingsFetch';
 import type { IpcMainLike } from './registrar';
@@ -49,6 +50,7 @@ import type {
   CreateFolderInput,
   CreateOrganizationInput,
   CreateProjectInput,
+  RenameProjectInput,
   ReorderProjectsInput,
   UpdateFolderLinksInput,
   UpdateProjectLinksInput,
@@ -225,7 +227,8 @@ export type MainContext = {
     getCommandNetwork: () => Promise<CommandNetworkSettings>;
     updateCommandNetwork: (enabled: boolean) => Promise<CommandNetworkSettings>;
     createOrganization: (input: CreateOrganizationInput) => Promise<WorkspaceOrganization>;
-    createProject: (input: CreateProjectInput) => Promise<WorkspaceProject>;
+    createProject: (input: CreateProjectInput) => Promise<WorkspaceProjectCreateResult>;
+    renameProject: (projectId: string, input: RenameProjectInput) => Promise<WorkspaceProject>;
     createFolder: (input: CreateFolderInput) => Promise<WorkspaceFolder>;
     reorderProjects: (input: ReorderProjectsInput) => Promise<{ project_ids: string[] }>;
     deleteOrganization: (organizationId: string) => Promise<void>;
@@ -243,6 +246,8 @@ export type MainContext = {
       readAccessScope: ReadAccessScope
     ) => Promise<{ read_access_scope: ReadAccessScope }>;
     selectFolder: () => Promise<{ canceled: boolean; path: string | null }>;
+    /** Opens a registered folder, named by id, in Finder. */
+    openFolder: (folderId: string) => Promise<void>;
   };
 
   screenshot: {

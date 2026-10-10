@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
@@ -10,17 +10,33 @@ import {
 import type { WorkspaceProject } from '@/pages/settings/components/workspaceSettingsModel';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
+import { HistoryProjectOrganizationDialog } from './HistoryProjectOrganizationDialog';
+import { HistoryProjectRow } from './HistoryProjectRow';
+import './historyProjects.css';
 
 export type WorkspaceProjects = Pick<
   ReturnType<typeof useWorkspaceSettingsController>,
-  'settings' | 'errorMessage' | 'pending' | 'addProjectFromFolder' | 'removeProject'
+  | 'settings'
+  | 'errorMessage'
+  | 'pending'
+  | 'addProjectFromFolder'
+  | 'removeProject'
+  | 'renameProject'
+  | 'addFolderToProject'
+  | 'openFolder'
+  | 'addOrganization'
+  | 'updateProjectOrganizations'
+  | 'busy'
 >;
 
-const deleteButtonId = (projectId: string) => `history-project-delete:${projectId}`;
+type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject };
+
+const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
- * The sidebar's projects: the workspace's registered folders, added with ＋ and removed per row.
- * They do not filter or group the tasks below.
+ * The sidebar's projects, managed in place: ＋ adds a folder as a project, and each row's menu
+ * renames it, adds folders, sets its organization, opens it in Finder or deletes it. They do
+ * not filter or group the tasks below.
  */
 export function HistoryProjects({
   projects,
@@ -29,27 +45,45 @@ export function HistoryProjects({
   projects: WorkspaceProjects;
   t: ReturnType<typeof useI18n>['t'];
 }) {
-  const { settings, errorMessage, pending, addProjectFromFolder, removeProject } = projects;
+  const { settings, errorMessage, pending } = projects;
   const addButtonRef = useRef<HTMLButtonElement>(null);
-  const [confirming, setConfirming] = useState<WorkspaceProject | null>(null);
-  const focusDeleteButton = (projectId: string) =>
-    document.getElementById(deleteButtonId(projectId))?.focus();
+  const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const focusMenuButton = (projectId: string) =>
+    document.getElementById(menuButtonId(projectId))?.focus();
 
-  const folderPaths = (projectId: string) =>
-    (settings?.folders ?? [])
-      .filter((folder) => folder.project_ids.includes(projectId))
-      .map((folder) => folder.real_path)
-      .join('\n');
-
-  // The modal dialog holds focus until it is gone, so it closes before focus moves.
-  const cancelDelete = (project: WorkspaceProject) => {
-    flushSync(() => setConfirming(null));
-    focusDeleteButton(project.project_id);
+  // A modal dialog holds focus until it is gone, so it closes before focus moves.
+  const closeDialog = (project: WorkspaceProject) => {
+    flushSync(() => setDialog(null));
+    focusMenuButton(project.project_id);
   };
   const confirmDelete = async (project: WorkspaceProject) => {
-    setConfirming(null);
-    if (await removeProject(project.project_id)) addButtonRef.current?.focus();
-    else focusDeleteButton(project.project_id);
+    setDialog(null);
+    if (await projects.removeProject(project.project_id)) addButtonRef.current?.focus();
+    else focusMenuButton(project.project_id);
+  };
+
+  const foldersOf = (projectId: string) =>
+    (settings?.folders ?? []).filter((folder) => folder.project_ids.includes(projectId));
+  const menuItems = (project: WorkspaceProject) => {
+    const firstFolder = foldersOf(project.project_id)[0];
+    return [
+      { label: t('history.projects.rename'), onSelect: () => setRenamingId(project.project_id) },
+      {
+        label: t('history.projects.addFolder'),
+        onSelect: () => void projects.addFolderToProject(project.project_id),
+      },
+      {
+        label: t('history.projects.setOrganization'),
+        onSelect: () => setDialog({ kind: 'organizations', project }),
+      },
+      {
+        label: t('history.projects.openInFinder'),
+        disabled: !firstFolder,
+        onSelect: () => firstFolder && void projects.openFolder(firstFolder.folder_id),
+      },
+      { label: t('common.delete'), onSelect: () => setDialog({ kind: 'delete', project }) },
+    ];
   };
 
   return (
@@ -63,8 +97,8 @@ export function HistoryProjects({
           aria-label={t('history.projects.add')}
           title={t('history.projects.add')}
           aria-busy={pending.has(workspacePendingKey.projectCreate)}
-          disabled={settings === null}
-          onClick={() => void addProjectFromFolder()}
+          disabled={settings === null || projects.busy}
+          onClick={() => void projects.addProjectFromFolder()}
         >
           <Plus size={15} aria-hidden="true" />
         </button>
@@ -77,32 +111,43 @@ export function HistoryProjects({
       {settings && settings.projects.length > 0 ? (
         <ul className="history-projects__list">
           {settings.projects.map((project) => (
-            <li key={project.project_id} className="history-item history-project">
-              <span className="history-project__name" title={folderPaths(project.project_id)}>
-                {project.display_name}
-              </span>
-              <button
-                type="button"
-                id={deleteButtonId(project.project_id)}
-                className="history-item-delete"
-                aria-label={`${t('common.delete')} ${project.display_name}`}
-                title={t('common.delete')}
-                aria-busy={pending.has(workspacePendingKey.projectDelete(project.project_id))}
-                onClick={() => setConfirming(project)}
-              >
-                <Trash2 size={15} aria-hidden="true" />
-              </button>
-            </li>
+            <HistoryProjectRow
+              key={project.project_id}
+              project={project}
+              folders={foldersOf(project.project_id)}
+              menuItems={menuItems(project)}
+              menuButtonId={menuButtonId(project.project_id)}
+              menuDisabled={projects.busy}
+              renaming={renamingId === project.project_id}
+              t={t}
+              onRename={(name) => projects.renameProject(project.project_id, name)}
+              onRenameEnd={() => setRenamingId(null)}
+            />
           ))}
         </ul>
       ) : null}
-      {confirming ? (
+      {dialog?.kind === 'delete' ? (
         <HistoryDeleteDialog
           t={t}
-          title={t('history.projects.deleteConfirmTitle', { name: confirming.display_name })}
+          title={t('history.projects.deleteConfirmTitle', { name: dialog.project.display_name })}
           body={t('history.projects.deleteConfirmBody')}
-          onCancel={() => cancelDelete(confirming)}
-          onConfirm={() => void confirmDelete(confirming)}
+          onCancel={() => closeDialog(dialog.project)}
+          onConfirm={() => void confirmDelete(dialog.project)}
+        />
+      ) : null}
+      {dialog?.kind === 'organizations' && settings ? (
+        <HistoryProjectOrganizationDialog
+          project={dialog.project}
+          organizations={settings.organizations}
+          t={t}
+          onAddOrganization={projects.addOrganization}
+          onSave={(organizationId) =>
+            projects.updateProjectOrganizations(
+              dialog.project.project_id,
+              organizationId ? [organizationId] : []
+            )
+          }
+          onClose={() => closeDialog(dialog.project)}
         />
       ) : null}
     </section>

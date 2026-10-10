@@ -105,4 +105,27 @@ describe('MarkdownBlock', () => {
     await waitFor(() => expect(container.textContent).toContain('次に pantaray-file:///'));
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['a.md']);
   });
+
+  it('breaks a paragraph and a list item at each single newline, and leaves code as written', () => {
+    const { container } = render(
+      <MarkdownBlock
+        isStreamFinished
+        text={
+          'よろしくお願いいたします。\n株式会社サンプル  \n山田 太郎\n\n' +
+          '- 住所\n  東京都\n\n' +
+          '```\nconst a = 1;\nconst b = 2;\n```'
+        }
+      />
+    );
+
+    const [signature] = container.querySelectorAll('p');
+    // A hard break (two trailing spaces) stays one break, not two.
+    expect(signature.innerHTML).toBe(
+      'よろしくお願いいたします。<br>\n株式会社サンプル<br>\n山田 太郎'
+    );
+    expect(container.querySelector('li')?.innerHTML).toBe('住所<br>\n東京都');
+    const code = container.querySelector('pre code');
+    expect(code?.textContent).toBe('const a = 1;\nconst b = 2;\n');
+    expect(code?.querySelector('br')).toBeNull();
+  });
 });

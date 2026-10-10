@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 
 import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
+import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import {
   ComposerSubmissionStatus,
@@ -118,27 +119,6 @@ export function SuggestionTaskPane({
               isStreamFinished={snapshot.interactionContract !== null}
             />
           ) : null}
-          {showsDecision ? (
-            <div className="suggestion-task__decision">
-              <button
-                type="button"
-                className="suggestion-task__button suggestion-task__button--primary"
-                disabled={!task.canAccept}
-                onClick={() => void task.accept()}
-              >
-                {t('overlay.accept')}
-              </button>
-              <button
-                type="button"
-                className="suggestion-task__button"
-                disabled={!task.canDismiss}
-                title={t('overlay.dismissTitle')}
-                onClick={task.dismiss}
-              >
-                {t('overlay.dismissSuggestion')}
-              </button>
-            </div>
-          ) : null}
           {phase === 'starting' ? (
             <p className="suggestion-task__status" role="status">
               {copy.starting}
@@ -159,8 +139,30 @@ export function SuggestionTaskPane({
           ) : null}
         </div>
       </div>
-      {phase === 'actionable' || dismissed ? (
-        <div className="suggestion-task__composer">
+      <div className="suggestion-task__dock">
+        {/* One row above the composer, as an approval asks: decline, then the way forward. */}
+        {showsDecision ? (
+          <div className="suggestion-task__decision">
+            <ApprovalDecisionButton
+              type="button"
+              $variant="secondary"
+              disabled={!task.canDismiss}
+              title={t('overlay.dismissTitle')}
+              onClick={task.dismiss}
+            >
+              {t('overlay.dismissSuggestion')}
+            </ApprovalDecisionButton>
+            <ApprovalDecisionButton
+              type="button"
+              $variant="primary"
+              disabled={!task.canAccept}
+              onClick={() => void task.accept()}
+            >
+              {t('overlay.accept')}
+            </ApprovalDecisionButton>
+          </div>
+        ) : null}
+        {phase === 'actionable' || dismissed ? (
           <OverlayComposer
             approvalMode={approvalMode}
             draft={draft.draft}
@@ -207,8 +209,8 @@ export function SuggestionTaskPane({
             onStop={noop}
             onResume={noop}
           />
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </section>
   );
 }

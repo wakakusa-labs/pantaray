@@ -4,6 +4,7 @@ import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
 import type { ActionConversationView as ActionConversationViewModel } from '../../../electron/src/actions/actionConversationModel';
 import { ActionConversationView } from '@/components/action-conversation/ActionConversationView';
 import { ApprovalPanel } from '@/components/agent-overlay/ApprovalPanel';
+import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import {
   ComposerSubmissionStatus,
   OverlayComposer,
@@ -118,6 +119,9 @@ export function ActionTaskPane({
   };
 
   const preview = renderPreview?.(view) ?? null;
+  // An Action started from a suggestion opens with it, as the Overlay does.
+  const approvedSuggestion = view?.action?.approved_suggestion ?? null;
+  const suggestionLabel = t('history.status.suggestion');
 
   return (
     <section
@@ -172,6 +176,14 @@ export function ActionTaskPane({
       <div className="action-task__scroll" ref={scrollRef}>
         <div className="action-task__column" ref={contentRef}>
           <div className="action-task__conversation" ref={answerRef} tabIndex={-1}>
+            {approvedSuggestion ? (
+              <section className="action-task__suggestion" aria-label={suggestionLabel}>
+                <span className="action-task__suggestion-label" aria-hidden="true">
+                  {suggestionLabel}
+                </span>
+                <MarkdownBlock text={approvedSuggestion.content} isStreamFinished />
+              </section>
+            ) : null}
             {view?.action &&
             (view.nextCursor !== null || conversation.olderPageState === 'failed') ? (
               <button

@@ -176,6 +176,29 @@ function remarkBareFileLinks(options: { streaming: boolean }) {
   };
 }
 
+/**
+ * Shows a single newline in prose as a line break, as the writer laid it out (a signature, an
+ * address). Markdown would join the lines with a space. Code holds no text node, so it is kept.
+ */
+function remarkSoftLineBreaks() {
+  const visit = (node: MarkdownNode): void => {
+    if (!node.children) return;
+    node.children = node.children.flatMap((child) => {
+      if (child.type !== 'text' || !child.value?.includes('\n')) {
+        visit(child);
+        return [child];
+      }
+      return child.value
+        .split(/[ \t]*\r?\n/)
+        .flatMap((line, index) => [
+          ...(index > 0 ? [{ type: 'break' }] : []),
+          ...(line ? [{ type: 'text', value: line }] : []),
+        ]);
+    });
+  };
+  return visit;
+}
+
 function markdownUrlTransform(url: string): string {
   if (url.startsWith('pantaray-file:///')) return url;
   return defaultUrlTransform(url);
@@ -215,7 +238,12 @@ export const MarkdownBlock: React.FC<{
   const markdownFallbackBlock: LLMOutputFallbackBlock = {
     component: ({ blockMatch }: { blockMatch: BlockMatch }) => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkBareFileLinks, { streaming: !isStreamFinished }]]}
+        // The breaks come last: the file-link pass reads text positions, which a split drops.
+        remarkPlugins={[
+          remarkGfm,
+          [remarkBareFileLinks, { streaming: !isStreamFinished }],
+          remarkSoftLineBreaks,
+        ]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

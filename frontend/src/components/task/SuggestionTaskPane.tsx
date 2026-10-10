@@ -8,6 +8,7 @@ import {
 } from '@/components/agent-overlay/OverlayComposer';
 import { useI18n } from '@/context/useI18n';
 
+import type { TaskComposerDrafts } from './taskComposerDrafts';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
 import './suggestionTaskPane.css';
 
@@ -42,6 +43,8 @@ type SuggestionTaskPaneProps = {
   onStarted: (actionId: string) => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
+  /** Where the composer waits while the pane is not shown. */
+  drafts: TaskComposerDrafts;
 };
 
 /**
@@ -54,13 +57,14 @@ export function SuggestionTaskPane({
   title,
   onStarted,
   onAddProject,
+  drafts,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
   const copy = COPY[language];
   const titleId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
-  const task = useSuggestionTask(suggestionId);
+  const task = useSuggestionTask(suggestionId, drafts);
   const { snapshot, phase, failure, composer, approvalMode } = task;
   const { composer: draft, setComposer } = composer;
 

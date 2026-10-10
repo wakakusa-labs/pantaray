@@ -23,14 +23,31 @@ import { ChatUnreadContext } from './chatUnread';
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 // The task panes have their own tests; here they only stand for the selected work.
+const panes = vi.hoisted(() => ({ drafts: [] as unknown[] }));
 vi.mock('@/components/task/TaskWorkspace', () => ({
-  TaskWorkspace: ({ actionId, onShowInChat }: { actionId: string; onShowInChat: () => void }) => (
-    <section aria-label={`action ${actionId}`}>
-      <button type="button" onClick={onShowInChat}>
-        show in chat
-      </button>
-    </section>
-  ),
+  TaskWorkspace: ({
+    actionId,
+    onShowInChat,
+    onAddProject,
+    drafts,
+  }: {
+    actionId: string;
+    onShowInChat: () => void;
+    onAddProject: () => void;
+    drafts: unknown;
+  }) => {
+    panes.drafts.push(drafts);
+    return (
+      <section aria-label={`action ${actionId}`}>
+        <button type="button" onClick={onShowInChat}>
+          show in chat
+        </button>
+        <button type="button" onClick={onAddProject}>
+          add project
+        </button>
+      </section>
+    );
+  },
 }));
 vi.mock('@/components/task/SuggestionTaskPane', () => ({
   SuggestionTaskPane: ({ suggestionId }: { suggestionId: string }) => (
@@ -322,6 +339,17 @@ it('a card selects its work for the detail pane, without opening an Overlay', as
   await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
   await userEvent.click(await screen.findByRole('button', { name: '提案の要約 を開く' }));
   expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
+});
+
+it('a task pane’s left composers outlive a trip to Workspace for a project', async () => {
+  pages = [{ items: [], next_cursor: null }];
+  panes.drafts = [];
+  renderPage({ pathname: '/history', search: '?item=action:A1' });
+  await userEvent.click(screen.getByRole('button', { name: 'add project' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Back to History' }));
+  await userEvent.click(await screen.findByRole('button', { name: /^見積書のたたき台を作る/ }));
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(new Set(panes.drafts).size).toBe(1);
 });
 
 it('the Action pane’s show-in-chat opens the chat on that Action’s latest card', async () => {

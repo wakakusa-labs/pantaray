@@ -6,6 +6,7 @@ import { isErrorEvent } from '../../../electron/src/orchestration/eventContracts
 import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
 import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
+import { useKeptTaskComposer, type TaskComposerDrafts } from './taskComposerDrafts';
 
 /**
  * Why the last answer did not go through. `accept_failed` is the accept call itself failing (main
@@ -75,7 +76,7 @@ function scoped<T>(state: Scoped<T> | null, suggestionId: string): T | null {
  * `dismiss_suggestion` on `ws:send`; replying to a message-only suggestion opens a new Action
  * with `reply_to_suggestion_id` through the Overlay's composer controller.
  */
-export function useSuggestionTask(suggestionId: string) {
+export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDrafts) {
   const { language } = useI18n();
   const electron = window.electron;
   const suggestions = electron?.suggestions;
@@ -156,6 +157,7 @@ export function useSuggestionTask(suggestionId: string) {
     language,
     // Refreshing belongs to a conversation; once a reply starts one, the Action pane shows it.
     onRefreshedPage: () => undefined,
+    restored: drafts.read(`suggestion:${suggestionId}`),
   });
   const approvalMode = useActionApprovalMode(null, suggestionId);
   const { submission } = composer.composer;
@@ -168,6 +170,14 @@ export function useSuggestionTask(suggestionId: string) {
     failure,
     replyActionId,
     replying: submission !== null && submission.state !== 'failed',
+  });
+  useKeptTaskComposer({
+    drafts,
+    work: `suggestion:${suggestionId}`,
+    composer: composer.composer,
+    // An accepted draft went to main with the approval; a reply in flight is kept for its retry.
+    keepable: phase === 'actionable' || (phase === 'starting' && submission !== null),
+    composerGenerationRef: composer.composerGenerationRef,
   });
   const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
 

@@ -21,6 +21,7 @@ import {
   useOverlayComposerController,
 } from '../agent-overlay/useOverlayComposerController';
 import { deriveActionTaskStatus } from './actionTaskStatus';
+import { useKeptTaskComposer, type TaskComposerDrafts } from './taskComposerDrafts';
 
 type Live = Pick<ActionLiveSnapshot, 'actionId' | 'lifecycle'>;
 
@@ -35,7 +36,7 @@ export type ActionTask = ReturnType<typeof useActionTask>;
  * composer. Its state belongs to one Action, so the pane is keyed by `actionId`. Main broadcasts every Action's updates to this
  * window, so only the ones for `actionId` are read.
  */
-export function useActionTask(actionId: string) {
+export function useActionTask(actionId: string, drafts: TaskComposerDrafts) {
   const { language, t } = useI18n();
   const actions = window.electron?.actions;
   const orchestration = window.electron?.orchestration;
@@ -78,9 +79,17 @@ export function useActionTask(actionId: string) {
       conversation.update(page);
       settleLive(live);
     },
+    restored: drafts.read(`action:${actionId}`),
   });
   const { composer, setComposer, composerGenerationRef, submissionRefreshScopeRef } =
     composerControl;
+  useKeptTaskComposer({
+    drafts,
+    work: `action:${actionId}`,
+    composer,
+    keepable: true,
+    composerGenerationRef,
+  });
   const approvalMode = useActionApprovalMode(actionId, null);
   const { reset: resetApprovalMode } = approvalMode;
   const approval = useActionApprovalDecisionController({ t });

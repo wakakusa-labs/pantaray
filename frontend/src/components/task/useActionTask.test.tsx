@@ -9,6 +9,7 @@ import type {
   ActionLiveUpdate,
 } from '../../../electron/src/actions/actionLiveCore';
 import { createActionPage } from './actionTaskFixtures';
+import { createTaskComposerDrafts } from './taskComposerDrafts';
 import { useActionTask } from './useActionTask';
 
 type ElectronBridge = NonNullable<Window['electron']>;
@@ -59,7 +60,8 @@ describe('useActionTask', () => {
   const emit = (next: ActionLiveUpdate) =>
     act(() => listeners.forEach((listener) => listener(next)));
   const renderTask = async (actionId = 'act-1') => {
-    const rendered = renderHook(({ id }) => useActionTask(id), {
+    const drafts = createTaskComposerDrafts(undefined);
+    const rendered = renderHook(({ id }) => useActionTask(id, drafts), {
       wrapper,
       initialProps: { id: actionId },
     });

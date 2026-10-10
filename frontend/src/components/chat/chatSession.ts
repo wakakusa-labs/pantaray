@@ -2,10 +2,19 @@ import { createContext, useContext } from 'react';
 
 import type { ChatItemsResult } from '@/hooks/useChatItems';
 
+import type { TaskComposerDrafts } from '@/components/task/taskComposerDrafts';
+
 import type { ChatComposerControl } from './useChatComposer';
 
-/** The owner's chat and its composer, kept while History and Workspace swap places. */
-export type ChatSession = { chat: ChatItemsResult; composer: ChatComposerControl };
+/**
+ * The owner's chat and its composer, and the composers of the task panes left unsent, kept while
+ * History and Workspace swap places.
+ */
+export type ChatSession = {
+  chat: ChatItemsResult;
+  composer: ChatComposerControl;
+  taskDrafts: TaskComposerDrafts;
+};
 
 export const ChatSessionContext = createContext<ChatSession | null>(null);
 

@@ -10,6 +10,8 @@ import type {
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 
 import { ChatUnreadContext } from '@/components/chat/chatUnread';
+import type { HistorySelection } from '@/history/historySelection';
+import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import { t as translate } from '@/i18n/translate';
@@ -17,7 +19,8 @@ import { HistorySidebar } from './HistorySidebar';
 
 const mocks = vi.hoisted(() => ({
   chatUnread: 0,
-  showChat: vi.fn(),
+  select: vi.fn(),
+  selected: 'chat' as HistorySelection,
   error: 'history.error.fetchFailed' as string | null,
   itemsOverride: null as ConversationHistoryListItem[] | null,
   loading: false,
@@ -67,6 +70,16 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
   }),
 }));
 
+function Sidebar() {
+  return (
+    <HistorySidebar
+      history={useSuggestionHistory()}
+      selected={mocks.selected}
+      onSelect={mocks.select}
+    />
+  );
+}
+
 function SidebarWrapper({ children }: { children: ReactNode }) {
   return (
     <ChatUnreadContext.Provider value={mocks.chatUnread}>{children}</ChatUnreadContext.Provider>
@@ -96,13 +109,14 @@ afterEach(() => {
   mocks.loading = false;
   mocks.unreadActionId = 'A1';
   mocks.chatUnread = 0;
+  mocks.selected = 'chat';
   vi.clearAllMocks();
 });
 
 it('起動ボタンはサイドバーの先頭に1つだけで、空状態でもkeyboardから開ける', async () => {
   const openNewConversation = vi.fn(async () => undefined);
   window.electron = { history: { openNewConversation } } as unknown as Window['electron'];
-  const { rerender } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { rerender } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
@@ -118,7 +132,7 @@ it('起動ボタンはサイドバーの先頭に1つだけで、空状態でも
 
   mocks.error = null;
   mocks.itemsOverride = [];
-  rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+  rerender(<Sidebar />);
   expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'history.newConversation' })).toBe(cta);
   expect(cta).toHaveFocus();
@@ -138,7 +152,7 @@ it('設定中のショートカットはCTAの中に薄いキーキャップで�
     history: { openNewConversation: vi.fn(async () => undefined) },
     shortcut: { getState },
   } as unknown as Window['electron'];
-  const { container, rerender } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { container, rerender } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
@@ -159,7 +173,7 @@ it('設定中のショートカットはCTAの中に薄いキーキャップで�
 
   mocks.error = null;
   mocks.itemsOverride = [];
-  rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+  rerender(<Sidebar />);
   // The empty state names the shortcut inside the sentence instead of repeating the button.
   const hint = container.querySelector('.history-empty-hint');
   expect(hint?.querySelector('.shortcut-keycaps')).not.toBeNull();
@@ -181,7 +195,7 @@ it('ショートカットが登録できていないときはキーキャップ�
       })),
     },
   } as unknown as Window['electron'];
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const cta = screen.getByRole('button', { name: 'history.newConversation' });
   await waitFor(() => expect(cta).toHaveAttribute('title', 'shortcut.hint.unavailable'));
@@ -210,7 +224,7 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
     row('O1', new Date(2026, 8, 29, 8)),
   ];
   try {
-    render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+    render(<Sidebar />, { wrapper: SidebarWrapper });
 
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'history.day.today',
@@ -226,38 +240,46 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
   }
 });
 
-it('Conversation行はOverlayを開き、実際の表示前に既読にしない', async () => {
+it('行は選ぶだけでOverlayを開かず、実際の表示前に既読にしない。選んだ行を表示中として示す', async () => {
   const openConversation = vi.fn(async () => 'created' as const);
   const showHistory = vi.fn();
   window.electron = {
     agentOverlay: { showHistory },
     history: { openConversation, markCompletionViewed: mocks.markCompletionViewed },
   } as unknown as Window['electron'];
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const conversation = screen.getByRole('button', { name: /^Conversation/ });
+  const chat = screen.getByRole('button', { name: 'history.chat.title' });
   expect(conversation).not.toHaveAttribute('aria-expanded');
+  expect(conversation).not.toHaveAttribute('aria-current');
   // Only the conversation with an unseen completion has the dot, inside its own row.
   expect(screen.getAllByRole('img', { name: 'history.unread' })).toHaveLength(1);
   expect(conversation).toHaveAccessibleName(/history\.unread/);
   conversation.focus();
   await userEvent.keyboard('{Enter}');
-  expect(openConversation).toHaveBeenCalledWith({ actionId: 'A1' });
-  expect(mocks.markCompletionViewed).not.toHaveBeenCalled();
-  expect(screen.queryByRole('region', { name: 'history.detail.conversation' })).toBeNull();
+  expect(mocks.select).toHaveBeenLastCalledWith('action:A1');
 
   fireEvent.click(screen.getByRole('button', { name: /^Suggestion/ }));
-  expect(showHistory).toHaveBeenCalledWith({
-    suggestionId: 'S1',
-    initialUiState: { expand: true },
-    fromStart: true,
-  });
+  expect(mocks.select).toHaveBeenLastCalledWith('suggestion:S1');
+  fireEvent.click(chat);
+  expect(mocks.select).toHaveBeenLastCalledWith('chat');
+  expect(openConversation).not.toHaveBeenCalled();
+  expect(showHistory).not.toHaveBeenCalled();
+  expect(mocks.markCompletionViewed).not.toHaveBeenCalled();
+
+  mocks.selected = 'action:A1';
+  rerender(<Sidebar />);
+  expect(conversation).toHaveAttribute('aria-current', 'true');
+  expect(chat).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('button', { name: /^Suggestion/ })).not.toHaveAttribute('aria-current');
+  expect(conversation.closest('.history-item')).toBeInstanceOf(HTMLLIElement);
 });
 
 it('履歴の取得失敗は読み上げソフトに届くalertとして出す', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.unreadActionId = null;
-  const { rerender } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { rerender } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
@@ -265,21 +287,15 @@ it('履歴の取得失敗は読み上げソフトに届くalertとして出す',
 
   // 1件も出せなかったときの取得失敗。
   mocks.itemsOverride = [];
-  rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+  rerender(<Sidebar />);
   expect(screen.getByRole('alert')).toHaveTextContent('history.error.fetchFailed');
 });
 
-it('Overlay起動失敗を通知し、追加読み込みと検索に応答する', async () => {
-  const openConversation = vi.fn(async () => 'focused' as const);
-  window.electron = { history: { openConversation } } as unknown as Window['electron'];
+it('追加読み込みと検索に応答する', async () => {
+  window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = null;
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
-
-  await userEvent.click(screen.getByRole('button', { name: /^Conversation/ }));
-  openConversation.mockRejectedValueOnce(new Error('unavailable'));
-  await userEvent.click(screen.getByRole('button', { name: /^Conversation/ }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.openOverlayFailed');
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   fireEvent.click(screen.getByRole('button', { name: 'history.loadMore' }));
   expect(mocks.loadMore).toHaveBeenCalledOnce();
@@ -341,7 +357,7 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       status: 'idle',
     },
   ];
-  const { container } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { container } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
@@ -379,7 +395,7 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
 it('チャットの行は表示中として示し、未読の件数を数字と説明で伝える', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
-  const { rerender } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { rerender } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
@@ -389,13 +405,13 @@ it('チャットの行は表示中として示し、未読の件数を数字と�
   expect(chat).toHaveTextContent(/^history\.chat\.title$/);
 
   mocks.chatUnread = 4;
-  rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+  rerender(<Sidebar />);
   expect(chat).toHaveTextContent(/^history\.chat\.title4$/);
   expect(chat).toHaveAccessibleName('history.chat.title');
   expect(chat).toHaveAccessibleDescription('history.chat.unread {"count":4}');
 
   mocks.chatUnread = 120;
-  rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+  rerender(<Sidebar />);
   expect(chat).toHaveTextContent(/99\+$/);
   expect(chat).toHaveAccessibleDescription('history.chat.unread {"count":120}');
   expect(HISTORY_MESSAGES.ja['history.chat.title']).toBe('チャット');
@@ -470,7 +486,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
     latest_completion_event_id: null,
   });
   mocks.itemsOverride = [conversation('A1'), conversation('A2')];
-  const { container } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+  const { container } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
   const lines = () =>
@@ -558,7 +574,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     row('O2', new Date(2026, 8, 29, 7)),
   ];
   try {
-    const { rerender } = render(<HistorySidebar onShowChat={mocks.showChat} />, {
+    const { rerender } = render(<Sidebar />, {
       wrapper: SidebarWrapper,
     });
     const older = screen.getByRole('button', { name: /^O1/ });
@@ -571,7 +587,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
       row('Y1', new Date(2026, 9, 1, 8)),
       row('O1', new Date(2026, 8, 29, 8)),
     ];
-    rerender(<HistorySidebar onShowChat={mocks.showChat} />);
+    rerender(<Sidebar />);
 
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'history.day.today',
@@ -595,7 +611,7 @@ function installDeleteBridge(result: { ok: true } | { ok: false; errorCode: stri
 
 it('削除の確認はキャンセルが初期フォーカスで、キャンセルもEscも削除せず元のボタンへ戻る', async () => {
   const deleteItem = installDeleteBridge({ ok: true });
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
@@ -616,7 +632,7 @@ it('削除の確認はキャンセルが初期フォーカスで、キャンセ�
 
 it('削除すると行を一覧から外し、次の行へフォーカスを移す', async () => {
   const deleteItem = installDeleteBridge({ ok: true });
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
   await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
@@ -624,6 +640,8 @@ it('削除すると行を一覧から外し、次の行へフォーカスを移�
   expect(mocks.removeItem).toHaveBeenCalledWith('conversation:A1');
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.getByRole('button', { name: /^Suggestion/ })).toHaveFocus();
+  // The row was not the one shown, so the selection stays.
+  expect(mocks.select).not.toHaveBeenCalled();
 
   // A Suggestion row is deleted the same way, by its own id.
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Suggestion' }));
@@ -631,15 +649,43 @@ it('削除すると行を一覧から外し、次の行へフォーカスを移�
   expect(deleteItem).toHaveBeenLastCalledWith({ kind: 'suggestion', id: 'S1' });
 });
 
+it('表示中の行を削除すると、選択を次の行へ、無ければチャットへ置き換えで移す', async () => {
+  installDeleteBridge({ ok: true });
+  mocks.selected = 'action:A1';
+  const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  expect(mocks.select).toHaveBeenCalledExactlyOnceWith('suggestion:S1', { replace: true });
+
+  mocks.selected = 'suggestion:S1';
+  mocks.itemsOverride = [
+    {
+      kind: 'suggestion',
+      suggestion_id: 'S1',
+      title: 'Suggestion',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'idle',
+    },
+  ];
+  rerender(<Sidebar />);
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete Suggestion' }));
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  expect(mocks.select).toHaveBeenLastCalledWith('chat', { replace: true });
+});
+
 it('実行中で断られたら短い通知を出し、行を残して削除ボタンへ戻る', async () => {
   installDeleteBridge({ ok: false, errorCode: 'CONVERSATION_BUSY' });
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  mocks.selected = 'action:A1';
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
   await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.busy');
   expect(mocks.removeItem).not.toHaveBeenCalled();
+  // The row stays, and so does the selection.
+  expect(mocks.select).not.toHaveBeenCalled();
   expect(trigger).toHaveFocus();
   expect(HISTORY_MESSAGES.ja['history.delete.busy']).toBe(
     'この会話は実行中のため、いまは削除できません。'
@@ -651,7 +697,7 @@ it('ほかの失敗は削除失敗として通知する', async () => {
     ok: false,
     errorCode: 'CONVERSATION_HISTORY_DELETE_FAILED',
   });
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
   await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
@@ -691,7 +737,7 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       status: 'approval_pending',
     },
   ];
-  render(<HistorySidebar onShowChat={mocks.showChat} />, { wrapper: SidebarWrapper });
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
   expect(screen.getByRole('button', { name: 'common.delete Running' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'common.delete Approval' })).toBeDisabled();

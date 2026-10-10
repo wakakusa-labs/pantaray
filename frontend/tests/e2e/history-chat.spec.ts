@@ -126,8 +126,6 @@ async function installBridge(
     ({ chat, history }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
       const noop = () => {};
-      const opened: string[] = [];
-      Object.defineProperty(window, 'e2eOpened', { value: opened });
       let sequence = 100;
       Object.defineProperty(window, 'electron', {
         value: {
@@ -211,19 +209,14 @@ async function installBridge(
             }),
             onChanged: () => noop,
             openNewConversation: async () => undefined,
-            openConversation: async ({ actionId }: { actionId: string }) => {
-              opened.push(actionId);
-              return 'focused';
-            },
             deleteItem: async () => ({ ok: true }),
             onShowChat: (callback: (payload: { actionId: string }) => void) => {
               Object.defineProperty(window, 'e2eShowChat', { value: callback, configurable: true });
               return noop;
             },
           },
-          agentOverlay: {
-            showHistory: (payload: { suggestionId: string }) => opened.push(payload.suggestionId),
-          },
+          // The detail pane's reads stay pending: these tests look at what selects it.
+          suggestions: { read: () => new Promise(() => {}), onSnapshot: () => noop },
           actions: {
             attachFile: async ({ name, bytes }: { name: string; bytes: ArrayBuffer }) => ({
               attachmentId: '00000000-0000-4000-8000-000000000001',
@@ -232,6 +225,7 @@ async function installBridge(
             }),
             attachImage: async () => ({ kind: 'rejected', reason: 'failed' }),
             discardAttachment: async () => undefined,
+            openConversation: () => new Promise(() => {}),
             onConversationUpdated: () => noop,
           },
         },
@@ -269,18 +263,22 @@ test('the chat pane: bubbles, cards with latest-only status, no event bubbles', 
   // The newest message is in view without scrolling.
   await expect(chat.getByText('納期を直しますね。')).toBeInViewport();
 
-  await estimate.nth(1).focus();
-  await page.keyboard.press('Enter');
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { e2eOpened: string[] }).e2eOpened))
-    .toEqual(['estimate']);
-  await expect(estimate.nth(2)).toHaveAttribute('aria-current', 'true');
-
   for (const scheme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await waitForAnimationsToSettle(page);
     await page.screenshot({ path: info.outputPath(`chat-${scheme}.png`) });
   }
+
+  // A card selects its work: the detail pane shows it, and its row is the current one.
+  await estimate.nth(1).focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#\/history\?item=action:estimate$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: '見積書のたたき台を作る' })
+  ).toBeVisible();
+  await expect(
+    sidebarOf(page).getByRole('button', { name: /^見積書のたたき台を作る/ })
+  ).toHaveAttribute('aria-current', 'true');
 });
 
 test('the sidebar holds New task, search, the chat row and the tasks by day', async ({
@@ -301,7 +299,7 @@ test('the sidebar holds New task, search, the chat row and the tasks by day', as
   await expect(trash).toHaveCSS('opacity', '0');
   await row.hover();
   await expect(trash).toHaveCSS('opacity', '0.35');
-  // A clicked row keeps focus while its Overlay is open, which must not keep the button shown.
+  // A clicked row keeps focus while its task is shown, which must not keep the button shown.
   await row.click();
   await page.mouse.move(900, 400);
   await expect(row).toBeFocused();
@@ -578,7 +576,7 @@ test('a first run marks the existing chat read instead of showing it all as unre
   await expect(page.getByRole('button', { name: '履歴' })).not.toHaveAccessibleDescription(/未読/);
 });
 
-test('a suggestion the user has not answered has a dot and reopens its Overlay', async ({
+test('a suggestion the user has not answered has a dot and opens in the detail pane', async ({
   page,
 }, info) => {
   await installBridge(page, CHAT, [
@@ -604,7 +602,12 @@ test('a suggestion the user has not answered has a dot and reopens its Overlay',
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('tasks-suggestion.png') });
   await row.click();
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { e2eOpened: string[] }).e2eOpened))
-    .toEqual(['suggestion-1']);
+  await expect(page).toHaveURL(/#\/history\?item=suggestion:suggestion-1$/);
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？',
+    })
+  ).toBeVisible();
 });

@@ -253,6 +253,10 @@
   background: var(--fog-mist);
 }
 
+.history-item:has(> .history-item-button[aria-current='true']) {
+  background: var(--fog-mist-strong);
+}
+
 .history-item-button {
   display: flex;
   flex: 1;

@@ -1,33 +1,100 @@
 import { useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HistorySidebar } from '@/components/history/HistorySidebar';
-import { readShowChatState } from '@/history/historyViewMode';
+import { ActionTaskPane } from '@/components/task/ActionTaskPane';
+import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
+import { useI18n } from '@/context/useI18n';
+import {
+  historyItemSelection,
+  historySelectionSearch,
+  parseHistorySelection,
+  splitWorkKey,
+  type HistorySelection,
+} from '@/history/historySelection';
+import { readShowChatState, showChatState } from '@/history/historyViewMode';
+import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 
 import './suggestionHistoryPage.css';
 
-/** History: the sidebar of the chat and the user's tasks, and the chat beside it. */
+// A task the loaded list does not hold yet (still loading, filtered out, or older than its pages).
+const UNLISTED_TITLE = {
+  en: { action: 'Task', suggestion: 'Suggestion' },
+  ja: { action: '作業', suggestion: '提案' },
+} as const;
+
+/**
+ * History: the sidebar of the chat and the user's tasks, and the detail pane of the one selected.
+ * The selection is the URL's `?item=`, so it survives a reload and the back button returns to it.
+ */
 const SuggestionHistoryPage = () => {
   const { chat, composer } = useChatSession();
-  // `Layout` brings the page here with the Action the Overlay asked to show in the chat.
+  const history = useSuggestionHistory();
+  const { language } = useI18n();
   const location = useLocation();
+  const navigate = useNavigate();
+  const selection = parseHistorySelection(location.search);
+  // `Layout` and the task pane bring the page here with the Action to show in the chat.
   const reveal = readShowChatState(location.state, location.key);
   const chatView = useRef<ChatViewHandle>(null);
-  return (
-    <div className="history-page">
-      <HistorySidebar onShowChat={() => chatView.current?.showNewest()} />
-      <div className="history-detail">
+
+  const select = (next: HistorySelection, options?: { replace: true }) => {
+    // The chat already shown goes back to its newest message instead.
+    if (next === 'chat' && selection === 'chat') {
+      chatView.current?.showNewest();
+      return;
+    }
+    navigate({ search: historySelectionSearch(next) }, options);
+  };
+  const showInChat = (actionId: string) =>
+    navigate({ search: historySelectionSearch('chat') }, { state: showChatState(actionId) });
+  const addProject = () => navigate('/workspace');
+
+  const renderDetail = () => {
+    if (selection === 'chat')
+      return (
         <ChatView
           ref={chatView}
           notice={<AiConnectionNotice />}
           chat={chat}
           composer={composer}
           reveal={reveal}
+          onOpenWork={select}
         />
-      </div>
+      );
+    const { kind, id } = splitWorkKey(selection);
+    const title =
+      history.items.find((item) => historyItemSelection(item) === selection)?.title ??
+      UNLISTED_TITLE[language][kind];
+    if (kind === 'action')
+      return (
+        <ActionTaskPane
+          key={id}
+          actionId={id}
+          title={title}
+          layout="full"
+          onShowInChat={() => showInChat(id)}
+          onAddProject={addProject}
+        />
+      );
+    return (
+      <SuggestionTaskPane
+        key={id}
+        suggestionId={id}
+        title={title}
+        onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+        onAddProject={addProject}
+      />
+    );
+  };
+
+  return (
+    <div className="history-page">
+      <HistorySidebar history={history} selected={selection} onSelect={select} />
+      <div className="history-detail">{renderDetail()}</div>
     </div>
   );
 };

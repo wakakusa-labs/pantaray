@@ -22,6 +22,21 @@ import { ChatUnreadContext } from './chatUnread';
 
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
+// The task panes have their own tests; here they only stand for the selected work.
+vi.mock('@/components/task/ActionTaskPane', () => ({
+  ActionTaskPane: ({ actionId, onShowInChat }: { actionId: string; onShowInChat: () => void }) => (
+    <section aria-label={`action ${actionId}`}>
+      <button type="button" onClick={onShowInChat}>
+        show in chat
+      </button>
+    </section>
+  ),
+}));
+vi.mock('@/components/task/SuggestionTaskPane', () => ({
+  SuggestionTaskPane: ({ suggestionId }: { suggestionId: string }) => (
+    <section aria-label={`suggestion ${suggestionId}`} />
+  ),
+}));
 
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
 
@@ -132,7 +147,9 @@ function WorkspaceStub() {
 
 const OWNER = { id: 'user-1', kind: 'account' } as const;
 
-const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
+const renderPage = (
+  entry: { pathname: string; search?: string; state?: unknown } = { pathname: '/history' }
+) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
       <UiLanguageProvider initialLanguage="ja">
@@ -279,16 +296,50 @@ it('merges live items once and reads the newest page again when the session star
   expect(screen.getAllByText('おはようございます。')).toHaveLength(1);
 });
 
-it('opens a card’s work in the Overlay and outlines it', async () => {
+it('a card selects its work for the detail pane, without opening an Overlay', async () => {
   pages = [
-    { items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '要約' }])], next_cursor: null },
+    {
+      items: [
+        reply(1, '始めます。', [{ action_id: 'A1', summary: '要約' }]),
+        item(2, {
+          kind: 'assistant_message',
+          text: '提案もあります。',
+          quote_item_id: null,
+          cards: [{ kind: 'suggestion', suggestion_id: 'S1', summary: '提案の要約' }],
+        }),
+      ],
+      next_cursor: null,
+    },
   ];
   renderPage();
   const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
   card.focus();
   await userEvent.keyboard('{Enter}');
-  expect(openConversation).toHaveBeenCalledWith({ actionId: 'A1' });
-  expect(card).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: 'Pantaray とのチャット' })).not.toBeInTheDocument();
+  expect(openConversation).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  await userEvent.click(await screen.findByRole('button', { name: '提案の要約 を開く' }));
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
+});
+
+it('the Action pane’s show-in-chat opens the chat on that Action’s latest card', async () => {
+  pages = [
+    {
+      items: [
+        reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }]),
+        reply(2, '直しました。', [{ action_id: 'A1', summary: '最新のカード' }]),
+        userMessage(3, 'ありがとう'),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage({ pathname: '/history', search: '?item=action:A1' });
+  await userEvent.click(screen.getByRole('button', { name: 'show in chat' }));
+  const cards = await screen.findAllByRole('button', { name: '見積書のたたき台を作る を開く' });
+  await waitFor(() => expect(cards[1]).toHaveFocus());
+  expect(cards[1]).toHaveAttribute('aria-current', 'true');
 });
 
 it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {

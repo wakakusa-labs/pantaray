@@ -19,6 +19,7 @@ const COPY = {
     dismissed: 'You dismissed this suggestion.',
     notStarted: 'This could not be started. Try again.',
     dismissFailed: 'Could not dismiss this suggestion. Try again.',
+    supplementPlaceholder: 'Add conditions and approve (optional)',
   },
   ja: {
     loading: '提案を読み込んでいます',
@@ -27,6 +28,7 @@ const COPY = {
     dismissed: 'この提案は見送りました。',
     notStarted: '開始できませんでした。もう一度お試しください。',
     dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
+    supplementPlaceholder: '条件を足して承認する（任意）',
   },
 } as const;
 
@@ -176,6 +178,7 @@ export function SuggestionTaskPane({
             resumeFailed={false}
             canResume={false}
             textareaRef={textareaRef}
+            placeholder={isOffer ? copy.supplementPlaceholder : undefined}
             onAddProject={onAddProject}
             onDraftChange={(value, mentions) =>
               setComposer((current) => ({

@@ -11,34 +11,12 @@ import {
 import { useConversationCopy } from '@/components/agent-overlay/conversationCopy';
 import { useCompletionViewed } from '@/components/agent-overlay/useCompletionViewed';
 import { useConversationScroll } from '@/components/agent-overlay/useConversationScroll';
-import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
 import { useI18n } from '@/context/useI18n';
-import type { HistoryLiveStage } from '@/history/historyLiveStage';
+import { liveStageText } from '@/components/history/liveStageText';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
-import type { MessageKey } from '@/i18n/types';
 
 import { useActionTask } from './useActionTask';
 import './actionTaskPane.css';
-
-// Same wording as the history list's live line.
-function liveStageText(
-  stage: HistoryLiveStage,
-  language: 'en' | 'ja',
-  t: (key: MessageKey) => string
-): string {
-  switch (stage.kind) {
-    case 'tool':
-      return resolveToolLine(stage.label, language, {
-        subject: stage.subject,
-        running: true,
-        outcome: stage.outcome,
-      }).text;
-    case 'message':
-      return stage.text;
-    case 'thinking':
-      return t('overlay.thinking');
-  }
-}
 
 type ActionTaskPaneProps = {
   /** The pane holds one Action's state, so the page keys it by this id. */

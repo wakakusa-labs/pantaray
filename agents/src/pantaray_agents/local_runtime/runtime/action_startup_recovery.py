@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -47,10 +48,15 @@ from .action_startup_recovery_authority import (
 )
 from .action_startup_recovery_envelope import (
     ActionStartupRecoveryEnvelope,
-    list_action_startup_recovery_envelopes_in_connection,
+    InterruptedActionJob,
+    list_interrupted_action_jobs_in_connection,
+    load_action_startup_recovery_envelope_in_connection,
 )
+from .action_startup_recovery_failure import fail_unrecoverable_interrupted_action
 from .action_subagent_startup_recovery import ActionRootIdentity
 from .utc_timestamps import now_utc_iso
+
+logger = logging.getLogger(__name__)
 
 _RECOVERY_ERROR_MESSAGE = "Worker restart re-queued the in-flight job"
 _TOOL_FAILURE_MESSAGE = "tool invocation was interrupted during startup recovery"
@@ -66,119 +72,126 @@ def recover_interrupted_action_runs_for_startup(
 
     A preserved root keeps its manifest, session, temp root and checkpoint
     execution context; the generic in-flight repair re-queues its job instead.
+    An Action whose interrupted state breaks a recovery invariant ends as an
+    error, so it never keeps the runtime from starting.
     """
 
     recovered_count = 0
-    for envelope, authority in _load_recovery_snapshots(
+    for job in _list_interrupted_jobs(db_path=db_path, busy_timeout_ms=busy_timeout_ms):
+        if (job.user_id, job.action_id) in preserved_roots:
+            continue
+        try:
+            recovered = _recover_interrupted_action(
+                db_path=db_path, busy_timeout_ms=busy_timeout_ms, job_id=job.job_id
+            )
+        except MigrationError:
+            logger.exception(
+                "Interrupted Action cannot be recovered; ending it as an error: "
+                "job_id=%s action_id=%s",
+                job.job_id,
+                job.action_id,
+            )
+            fail_unrecoverable_interrupted_action(
+                db_path=db_path, busy_timeout_ms=busy_timeout_ms, job=job
+            )
+            continue
+        recovered_count += int(recovered)
+    return recovered_count
+
+
+def _list_interrupted_jobs(
+    *, db_path: Path, busy_timeout_ms: int
+) -> tuple[InterruptedActionJob, ...]:
+    database_uri = f"{db_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        return list_interrupted_action_jobs_in_connection(connection=connection)
+
+
+def _recover_interrupted_action(
+    *, db_path: Path, busy_timeout_ms: int, job_id: str
+) -> bool:
+    envelope, authority = _load_recovery_snapshot(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, job_id=job_id
+    )
+    if authority is None or authority.pending_approval_outcome == "retain":
+        return False
+    if authority.session_status == "running":
+        complete_execution_session(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            execution_session_id=authority.context.execution_session_id,
+            status="expired",
+            completed_at=now_utc_iso(),
+        )
+        reloaded = _load_recovery_snapshot(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, job_id=job_id
+        )
+        if reloaded[0] != envelope or reloaded[1] is None:
+            raise MigrationError("interrupted Action recovery authority changed")
+        authority = reloaded[1]
+    _settle_session_children(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
-    ):
-        if (envelope.user_id, envelope.action_id) in preserved_roots:
-            continue
-        if authority is None or authority.pending_approval_outcome == "retain":
-            continue
-        if authority.session_status == "running":
-            complete_execution_session(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                execution_session_id=authority.context.execution_session_id,
-                status="expired",
-                completed_at=now_utc_iso(),
-            )
-            authority = _reload_exact_authority(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                envelope=envelope,
-            )
-        _settle_session_children(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            authority=authority,
+        authority=authority,
+    )
+    receipt = load_action_session_temp_cleanup_receipt(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=envelope.user_id,
+        action_id=envelope.action_id,
+        execution_session_id=authority.context.execution_session_id,
+    )
+    if receipt is None:
+        raise MigrationError(
+            "interrupted Action session has no terminal cleanup authority"
         )
-        receipt = load_action_session_temp_cleanup_receipt(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=envelope.user_id,
-            action_id=envelope.action_id,
-            execution_session_id=authority.context.execution_session_id,
-        )
-        if receipt is None:
-            raise MigrationError(
-                "interrupted Action session has no terminal cleanup authority"
-            )
-        _require_receipt_matches_authority(receipt=receipt, authority=authority)
-        resource = load_tool_runtime_resource(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            resource_id=receipt.root_resource_id,
-        )
-        try:
-            remove_action_session_temp_leaf(resource=resource, receipt=receipt)
-        except (
-            OSError,
-            DescriptorPathError,
-            DescriptorSafeRemovalUnavailableError,
-        ) as exc:
-            _persist_root_cleanup_failure(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                authority=authority,
-                resource=resource,
-                cleanup_error=str(exc) or type(exc).__name__,
-            )
-            raise MigrationError(
-                "interrupted Action session temp cleanup failed"
-            ) from exc
-        _persist_requeue(
+    _require_receipt_matches_authority(receipt=receipt, authority=authority)
+    resource = load_tool_runtime_resource(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        resource_id=receipt.root_resource_id,
+    )
+    try:
+        remove_action_session_temp_leaf(resource=resource, receipt=receipt)
+    except (
+        OSError,
+        DescriptorPathError,
+        DescriptorSafeRemovalUnavailableError,
+    ) as exc:
+        _persist_root_cleanup_failure(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             authority=authority,
             resource=resource,
+            cleanup_error=str(exc) or type(exc).__name__,
         )
-        recovered_count += 1
-    return recovered_count
+        raise MigrationError("interrupted Action session temp cleanup failed") from exc
+    _persist_requeue(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        authority=authority,
+        resource=resource,
+    )
+    return True
 
 
-def _load_recovery_snapshots(
-    *, db_path: Path, busy_timeout_ms: int
-) -> tuple[
-    tuple[ActionStartupRecoveryEnvelope, ActionStartupRecoveryAuthority | None], ...
-]:
+def _load_recovery_snapshot(
+    *, db_path: Path, busy_timeout_ms: int, job_id: str
+) -> tuple[ActionStartupRecoveryEnvelope, ActionStartupRecoveryAuthority | None]:
     database_uri = f"{db_path.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(database_uri, uri=True) as connection:
         configure_connection(connection, busy_timeout_ms)
         connection.execute("PRAGMA query_only = ON")
         connection.execute("BEGIN")
-        envelopes = list_action_startup_recovery_envelopes_in_connection(
-            connection=connection
+        envelope = load_action_startup_recovery_envelope_in_connection(
+            connection=connection, job_id=job_id
         )
-        return tuple(
-            (
-                envelope,
-                load_action_startup_recovery_authority_in_connection(
-                    connection=connection,
-                    db_path=db_path,
-                    envelope=envelope,
-                ),
-            )
-            for envelope in envelopes
+        return envelope, load_action_startup_recovery_authority_in_connection(
+            connection=connection,
+            db_path=db_path,
+            envelope=envelope,
         )
-
-
-def _reload_exact_authority(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    envelope: ActionStartupRecoveryEnvelope,
-) -> ActionStartupRecoveryAuthority:
-    snapshots = _load_recovery_snapshots(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-    )
-    matches = [item for item in snapshots if item[0].job_id == envelope.job_id]
-    if len(matches) != 1 or matches[0][0] != envelope or matches[0][1] is None:
-        raise MigrationError("interrupted Action recovery authority changed")
-    return matches[0][1]
 
 
 def _settle_session_children(
@@ -342,16 +355,15 @@ def _require_unchanged_authority(
     db_path: Path,
     authority: ActionStartupRecoveryAuthority,
 ) -> None:
-    envelopes = list_action_startup_recovery_envelopes_in_connection(
-        connection=connection
+    envelope = load_action_startup_recovery_envelope_in_connection(
+        connection=connection, job_id=authority.envelope.job_id
     )
-    matches = [item for item in envelopes if item.job_id == authority.envelope.job_id]
-    if len(matches) != 1 or matches[0] != authority.envelope:
+    if envelope != authority.envelope:
         raise MigrationError("interrupted Action recovery envelope changed")
     current = load_action_startup_recovery_authority_in_connection(
         connection=connection,
         db_path=db_path,
-        envelope=matches[0],
+        envelope=envelope,
     )
     if current != authority:
         raise MigrationError("interrupted Action recovery authority changed")

@@ -16,6 +16,8 @@ from pantaray_agents.agents.action_agent.runtime.models.execution_context import
 from pantaray_agents.local_runtime.runtime.action_startup_recovery import (
     recover_interrupted_action_runs_for_startup,
 )
+from pantaray_agents.local_runtime.runtime.job_claim import claim_next_pending_job
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import (
     repair_inflight_jobs_for_startup,
 )
@@ -168,3 +170,73 @@ def test_pending_approval_requeues_job_without_cleaning_session(tmp_path: Path) 
         ).fetchone()
     assert states == ("queued", "running", "active")
     assert context.action_temp_dir.exists()
+
+
+def test_resumed_approval_run_past_its_approval_is_requeued(tmp_path: Path) -> None:
+    db_path, context = _seed_interrupted_run(tmp_path)
+    # The resumed run claimed the approval and moved on: its newest checkpoint
+    # no longer names the approval its job payload still continues from.
+    _insert_checkpoint(db_path, context)
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """INSERT INTO approval_sessions(approval_session_id,user_id,action_id,manifest_id,tool_request_id,tool_invocation_id,tool_id,intent_class,approval_source,status,approved_capabilities_json,command_summary_json,requested_at,decided_at,claimed_at,created_at)
+               VALUES ('approval-1','user-1','action-1',?,'request-1','invocation-1','read','read_only','prompt','approved_once','[]','{}',?,?,?,?)""",
+            (context.manifest_id, TIMESTAMP, TIMESTAMP, TIMESTAMP, TIMESTAMP),
+        )
+        connection.execute(
+            "UPDATE job_payloads SET payload_json=json_set(payload_json,"
+            "'$.continuation_ref',json(?)) WHERE job_id='job-1'",
+            (
+                json.dumps(
+                    {
+                        "kind": "tool_approval",
+                        "approval_session_id": "approval-1",
+                        "tool_request_id": "request-1",
+                    }
+                ),
+            ),
+        )
+
+    assert (
+        recover_interrupted_action_runs_for_startup(
+            db_path=db_path, busy_timeout_ms=1_000
+        )
+        == 1
+    )
+    with sqlite3.connect(db_path) as connection:
+        states = connection.execute(
+            """SELECT (SELECT status FROM jobs WHERE job_id='job-1'), (SELECT status FROM execution_sessions WHERE execution_session_id=?),
+                      (SELECT status FROM tool_runtime_resources WHERE action_id='action-1' AND tool_invocation_id IS NULL)""",
+            (context.execution_session_id,),
+        ).fetchone()
+    assert states == ("queued", "expired", "cleaned")
+
+    # The re-claimed run opens a new session and stops again before it saves a
+    # checkpoint, so the newest one still has no execution context.
+    assert claim_next_pending_job(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        job_type="execute_action",
+        owner_user_id="user-1",
+        claimed_by="worker-2",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        action_id="action-1",
+        started_at=now_utc_iso(),
+        allowed_tool_ids=("read",),
+    )
+    assert (
+        recover_interrupted_action_runs_for_startup(
+            db_path=db_path, busy_timeout_ms=1_000
+        )
+        == 1
+    )
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT status FROM jobs WHERE job_id='job-1'"
+        ).fetchone() == ("queued",)

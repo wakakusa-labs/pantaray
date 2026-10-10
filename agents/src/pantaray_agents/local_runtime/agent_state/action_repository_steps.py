@@ -34,7 +34,10 @@ from pantaray_agents.schema.repositories.repository import (
     RepositoryResult,
 )
 
-from ..runtime.action_checkpoint_retention import prune_action_checkpoints_in_connection
+from ..runtime.action_checkpoint_retention import (
+    load_tool_approval_resume_anchor_in_connection,
+    prune_action_checkpoints_in_connection,
+)
 from .action_llm_turn_commit import (
     ActionLlmTurnCommitError,
     save_action_llm_turn_in_connection,
@@ -509,92 +512,48 @@ class LocalActionRepositoryStepsMixin:
         if ownership_result.error:
             return self._propagate_repository_failure(ownership_result)
         with self._connect() as connection:
+            anchor = load_tool_approval_resume_anchor_in_connection(
+                connection,
+                user_id=user_id,
+                action_id=action_id,
+                approval_session_id=approval_session_id,
+                tool_request_id=tool_request_id,
+            )
+            if anchor is None:
+                return RepositoryResult(data=None)
             row = connection.execute(
                 """
-                WITH approval_anchor AS (
                 SELECT
                     step_id,
-                    step_number
-                FROM agent_action_steps AS steps
-                WHERE steps.user_id = ?
-                  AND steps.action_id = ?
-                  AND steps.runtime_state_checkpoint IS NOT NULL
-                  AND (
-                    (
-                        json_extract(
-                            steps.runtime_state_checkpoint,
-                            '$.pending_approval_request.approval_session_id'
-                        ) = ?
-                        AND json_extract(
-                            steps.runtime_state_checkpoint,
-                            '$.pending_approval_request.tool_request_id'
-                        ) = ?
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                        FROM json_each(
-                            steps.runtime_state_checkpoint,
-                            '$.current_approval_blockers'
-                        ) AS blocker
-                        WHERE json_extract(
-                            blocker.value,
-                            '$.approval_session_id'
-                        ) = ?
-                          AND json_extract(
-                            blocker.value,
-                            '$.tool_request_id'
-                        ) = ?
-                    )
-                  )
+                    step_number,
+                    step_name,
+                    completed_at,
+                    created_at,
+                    runtime_state_checkpoint,
+                    runtime_state_checkpoint_version
+                FROM agent_action_steps
+                WHERE user_id = ?
+                  AND action_id = ?
+                  AND runtime_state_checkpoint IS NOT NULL
+                  AND step_number >= ?
                 ORDER BY
-                    steps.step_number DESC,
-                    steps.completed_at IS NULL ASC,
-                    steps.completed_at DESC,
-                    steps.created_at DESC,
-                    steps.step_id DESC
-                LIMIT 1
-                )
-                SELECT
-                    steps.step_id,
-                    steps.step_number,
-                    steps.step_name,
-                    steps.completed_at,
-                    steps.created_at,
-                    steps.runtime_state_checkpoint,
-                    steps.runtime_state_checkpoint_version,
-                    approval_anchor.step_id AS approval_anchor_step_id
-                FROM approval_anchor
-                JOIN agent_action_steps AS steps
-                  ON steps.user_id = ?
-                 AND steps.action_id = ?
-                 AND steps.runtime_state_checkpoint IS NOT NULL
-                 AND steps.step_number >= approval_anchor.step_number
-                ORDER BY
-                    steps.step_number DESC,
-                    steps.completed_at IS NULL ASC,
-                    steps.completed_at DESC,
-                    steps.created_at DESC,
-                    steps.step_id DESC
+                    step_number DESC,
+                    completed_at IS NULL ASC,
+                    completed_at DESC,
+                    created_at DESC,
+                    step_id DESC
                 LIMIT 1
                 """,
-                (
-                    user_id,
-                    action_id,
-                    approval_session_id,
-                    tool_request_id,
-                    approval_session_id,
-                    tool_request_id,
-                    user_id,
-                    action_id,
-                ),
+                (user_id, action_id, anchor.step_number),
             ).fetchone()
-        if row is None:
-            return RepositoryResult(data=None)
-        data = normalize_row(row, json_columns=_ACTION_STEP_JSON_COLUMNS)
-        approval_anchor_step_id = str(data.pop("approval_anchor_step_id"))
         return RepositoryResult(
-            data=data,
-            metadata={"approval_anchor_step_id": approval_anchor_step_id},
+            data=normalize_row(row, json_columns=_ACTION_STEP_JSON_COLUMNS),
+            # No anchor step means the resumed run already consumed the approval.
+            metadata={
+                "approval_anchor_step_id": (
+                    anchor.step_id if anchor.names_approval else None
+                )
+            },
         )
 
 

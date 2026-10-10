@@ -293,7 +293,9 @@ test('the sidebar holds New task, search, the chat row and the tasks by day', as
   await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('heading', { level: 2, name: '今日' })).toBeVisible();
   const row = sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ });
-  await expect(row.getByText('実行中')).toBeVisible();
+  // A running task shows its title alone, with no badge and no dot, and is heard as running.
+  await expect(row).toHaveAccessibleName('見積書のたたき台を作る 実行中');
+  await expect(row.getByRole('img')).toHaveCount(0);
   // The delete button shows while its row is pointed at; a running task's stays disabled.
   const trash = sidebar.getByRole('button', { name: '削除 見積書のたたき台を作る' });
   await expect(trash).toHaveCSS('opacity', '0');
@@ -576,7 +578,7 @@ test('a first run marks the existing chat read instead of showing it all as unre
   await expect(page.getByRole('button', { name: '履歴' })).not.toHaveAccessibleDescription(/未読/);
 });
 
-test('a suggestion the user has not answered is listed as 提案 and reopens its Overlay', async ({
+test('a suggestion the user has not answered has a dot and reopens its Overlay', async ({
   page,
 }, info) => {
   await installBridge(page, CHAT, [
@@ -591,11 +593,14 @@ test('a suggestion the user has not answered is listed as 提案 and reopens its
   ]);
   const sidebar = sidebarOf(page);
   const row = sidebar.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
-  await expect(row.getByText('提案', { exact: true })).toBeVisible();
-  // A running Action keeps its own label.
-  await expect(sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ })).toContainText(
-    '実行中'
+  await expect(row.getByRole('img', { name: '返事待ちの提案' })).toBeVisible();
+  await expect(row).toHaveText(
+    '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？'
   );
+  // A running Action needs nothing from the user, so it has no dot.
+  await expect(
+    sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ }).getByRole('img')
+  ).toHaveCount(0);
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('tasks-suggestion.png') });
   await row.click();

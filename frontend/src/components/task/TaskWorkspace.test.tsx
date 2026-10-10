@@ -305,7 +305,7 @@ describe('TaskWorkspace', () => {
     fireEvent.click(chip('mail.md'));
 
     fireEvent.click(await screen.findByRole('button', { name: 'パスをコピー' }));
-    expect(await screen.findByRole('button', { name: 'コピーしました' })).toBeTruthy();
+    expect(await screen.findByText('コピーしました')).toBeTruthy();
     expect(writeText).toHaveBeenCalledWith('/work/quote/mail.md');
   });
 

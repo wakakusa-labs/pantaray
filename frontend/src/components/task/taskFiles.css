@@ -94,6 +94,7 @@
   cursor: pointer;
 }
 
+.task-file-preview__icon,
 .task-file-preview__close {
   display: inline-flex;
   align-items: center;
@@ -109,6 +110,7 @@
 }
 
 .task-file-preview__open:hover,
+.task-file-preview__icon:hover,
 .task-file-preview__close:hover {
   background: var(--fog-mist-strong);
 }

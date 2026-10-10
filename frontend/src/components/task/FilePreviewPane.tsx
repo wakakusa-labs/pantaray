@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { Copy, X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
@@ -178,19 +178,24 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
         </h2>
         <button
           type="button"
-          className="task-file-preview__open"
-          title={file.path}
+          className="task-file-preview__icon"
+          aria-label={copy.copyPath}
+          title={copy.copyPath}
           onClick={() => void copyToClipboard(() => file.path)}
         >
-          <Copy size={13} strokeWidth={1.8} aria-hidden />
-          <span aria-live="polite">
-            {copyStatus === 'copied'
-              ? copy.pathCopied
-              : copyStatus === 'failed'
-                ? copy.copyFailed
-                : copy.copyPath}
-          </span>
+          {copyStatus === 'copied' ? (
+            <Check size={15} strokeWidth={1.8} aria-hidden />
+          ) : (
+            <Copy size={15} strokeWidth={1.8} aria-hidden />
+          )}
         </button>
+        <span className="action-conversation__sr-only" aria-live="polite">
+          {copyStatus === 'copied'
+            ? copy.pathCopied
+            : copyStatus === 'failed'
+              ? copy.copyFailed
+              : ''}
+        </span>
         <FileOpenMenu label={copy.open} items={openItems} />
         <button
           type="button"

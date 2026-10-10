@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MarkdownBlock } from './MarkdownRenderer';
+import { OpenFileLinkContext } from './openFileLinkContext';
 
 describe('MarkdownBlock', () => {
   afterEach(() => {
@@ -73,6 +74,49 @@ describe('MarkdownBlock', () => {
       'https://example.com/a',
     ]);
     expect(screen.getByText('pantaray-file:///Users/name/a.md')).toBeTruthy();
+  });
+
+  it('hands a file link to the host that previews files, instead of Finder', () => {
+    const open = vi.fn(async () => undefined);
+    const onOpenFile = vi.fn();
+    window.electron = { actionFiles: { open } } as unknown as Window['electron'];
+
+    render(
+      <OpenFileLinkContext.Provider value={onOpenFile}>
+        <MarkdownBlock
+          isStreamFinished
+          text="[見積](pantaray-file:///Users/name/My%20Docs/a.html)"
+        />
+      </OpenFileLinkContext.Provider>
+    );
+
+    expect(fireEvent.click(screen.getByRole('link', { name: '見積' }))).toBe(false);
+    expect(onOpenFile).toHaveBeenCalledWith('/Users/name/My Docs/a.html');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens a web link in a new window, which main sends to the browser', () => {
+    render(<MarkdownBlock isStreamFinished text="[docs](https://example.com/a)" />);
+
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(link.getAttribute('href')).toBe('https://example.com/a');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('keeps any other link as text, so it cannot load a page over the app', () => {
+    const { container } = render(
+      <MarkdownBlock
+        isStreamFinished
+        text={
+          '[顧客提示版HTML](AIサイバー攻撃/Xer_提案.html)、[脚注](#note)、' +
+          '[ファイル](file:///etc/hosts)、[実行](javascript:alert(1))'
+        }
+      />
+    );
+
+    expect(screen.queryAllByRole('link')).toEqual([]);
+    expect(container.textContent).toBe('顧客提示版HTML、脚注、ファイル、実行');
   });
 
   it('ends a bare file URL where the sentence around it goes on', () => {

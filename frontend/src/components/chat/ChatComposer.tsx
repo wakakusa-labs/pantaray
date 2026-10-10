@@ -131,12 +131,7 @@ export function ChatComposer({
               event.preventDefault();
               if (composer.canSend) onSend();
             }}
-            onPaste={(event) => {
-              const files = Array.from(event.clipboardData.files);
-              if (readOnly || files.length === 0) return;
-              event.preventDefault();
-              void composer.attachFiles(files);
-            }}
+            onPasteFiles={(files) => void composer.attachFiles(files)}
           />
         </div>
         <button

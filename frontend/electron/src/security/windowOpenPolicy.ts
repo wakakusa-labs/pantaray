@@ -1,4 +1,4 @@
-import type { App } from 'electron';
+import type { App, WebContents } from 'electron';
 
 type LoggerLike = { warn?: (name: string, payload?: unknown) => void };
 
@@ -30,5 +30,29 @@ export function openNewWindowsInDefaultBrowser(params: {
       }
       return { action: 'deny' };
     });
+  });
+}
+
+/** The document a URL loads: everything but the hash, which the app routes by. */
+function documentOf(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a window on the document main loaded. A link in its content that would load another
+ * one is dropped: a relative link resolves against the app's own address and would replace
+ * the app with whatever that address serves. Main's own loads, reloads and hash routes stay
+ * on the same document (main's loadURL and loadFile emit no will-navigate at all).
+ */
+export function keepWindowOnItsDocument(contents: Pick<WebContents, 'on' | 'getURL'>): void {
+  contents.on('will-navigate', (event, url) => {
+    const current = documentOf(contents.getURL());
+    if (current === null || documentOf(url) !== current) event.preventDefault();
   });
 }

@@ -3,6 +3,7 @@ import fs from 'fs';
 import { documentHtmlFormat, readDocumentAsHtml } from '../../actions/actionDocumentHtml';
 import {
   openActionFileInApp,
+  openActionFileWithApp,
   readActionFile,
   resolveActionFile,
   type ActionFileRequest,
@@ -45,6 +46,24 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
     return await openActionFileInApp(realPath, ctx.actionFiles.openInApp);
+  });
+  registrar.handle('actionFile:openWithApp', async (_event, params) => {
+    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:openWithApp', params);
+    const realPath = await resolve(parsed);
+    if (realPath === null) return NOT_FOUND;
+    return await openActionFileWithApp(
+      realPath,
+      ctx.actionFiles.chooseApp,
+      ctx.actionFiles.runFile
+    );
+  });
+  registrar.handle('actionFile:reveal', async (_event, params) => {
+    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:reveal', params);
+    const realPath = await resolve(parsed);
+    if (realPath === null) return NOT_FOUND;
+    // Finder selects the file; it never opens or runs it.
+    ctx.actionFiles.open({ path: realPath });
+    return { kind: 'revealed' } as const;
   });
   registrar.handle('actionFile:quickLook', async (_event, params) => {
     const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:quickLook', params);

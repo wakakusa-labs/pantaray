@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import styled from 'styled-components';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +12,7 @@ import {
   bareFileUrlAt,
   localPathFromPantarayFileHref,
 } from '../../../electron/src/actions/pantarayFileLinks';
+import { OpenFileLinkContext } from './openFileLinkContext';
 
 const MarkdownWrapper = styled.div`
   font-family: var(--font-sans);
@@ -204,32 +205,52 @@ function markdownUrlTransform(url: string): string {
   return defaultUrlTransform(url);
 }
 
-const markdownComponents = {
-  a: ({ href, children, ...props }: ComponentPropsWithoutRef<'a'>) => {
-    const localPath = typeof href === 'string' ? localPathFromPantarayFileHref(href) : null;
-    if (localPath) {
-      return (
-        <a
-          href={href}
-          {...props}
-          onClick={(event) => {
-            event.preventDefault();
-            void window.electron?.actionFiles?.open({ path: localPath }).catch((error: unknown) => {
-              console.error('Failed to reveal local file link', error);
-            });
-          }}
-        >
-          {children}
-        </a>
-      );
-    }
+function isWebUrl(href: string): boolean {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<'a'>) {
+  const openFile = useContext(OpenFileLinkContext);
+  const localPath = typeof href === 'string' ? localPathFromPantarayFileHref(href) : null;
+  if (localPath) {
+    return (
+      <a
+        href={href}
+        {...props}
+        onClick={(event) => {
+          event.preventDefault();
+          if (openFile) {
+            openFile(localPath);
+            return;
+          }
+          void window.electron?.actionFiles?.open({ path: localPath }).catch((error: unknown) => {
+            console.error('Failed to reveal local file link', error);
+          });
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  // A new window becomes the default browser (main's window-open handler).
+  if (typeof href === 'string' && isWebUrl(href)) {
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
         {children}
       </a>
     );
-  },
-};
+  }
+  // Any other link (relative, a hash, another scheme) would resolve against the app's own
+  // address and replace the app, so it stays text.
+  return <span>{children}</span>;
+}
+
+const markdownComponents = { a: MarkdownLink };
 
 export const MarkdownBlock: React.FC<{
   text: string;

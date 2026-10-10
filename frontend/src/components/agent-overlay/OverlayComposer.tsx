@@ -330,14 +330,7 @@ export function OverlayComposer({
           event.preventDefault();
           if (canSend) onSubmit();
         }}
-        onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files);
-          if (isReadOnly || files.length === 0) return;
-          // A pasted screenshot also arrives as text/plain noise in some apps; taking the
-          // files means the textarea must not additionally insert that text.
-          event.preventDefault();
-          onAttachFiles(files);
-        }}
+        onPasteFiles={onAttachFiles}
       />
       <ComposerAttachments
         attachments={attachments}

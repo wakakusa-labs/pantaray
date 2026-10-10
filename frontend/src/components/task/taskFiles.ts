@@ -55,13 +55,15 @@ const LABEL_BY_EXTENSION: Readonly<Record<string, string>> = {
   jpeg: 'JPG',
 };
 
-/** A document chip for the path, or null for code and for a name without an extension. */
-function taskFile(path: string): TaskFile | null {
-  const name = path.split('/').pop() ?? '';
+function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
-  if (dot <= 0) return null;
-  const extension = name.slice(dot + 1).toLowerCase();
-  if (CODE_EXTENSIONS.has(extension)) return null;
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/** How the preview shows the file at a path an answer links. */
+export function taskFileAt(path: string): TaskFile {
+  const name = path.split('/').pop() ?? '';
+  const extension = extensionOf(name);
   return {
     path,
     name,
@@ -69,6 +71,12 @@ function taskFile(path: string): TaskFile | null {
     kind: KIND_BY_EXTENSION[extension] ?? 'text',
     label: LABEL_BY_EXTENSION[extension] ?? extension.toUpperCase(),
   };
+}
+
+/** Whether the path gets a chip: not code, and not a name without an extension. */
+function isDocumentPath(path: string): boolean {
+  const extension = extensionOf(path.split('/').pop() ?? '');
+  return extension !== '' && !CODE_EXTENSIONS.has(extension);
 }
 
 /**
@@ -82,8 +90,7 @@ export function deriveTaskFiles(view: ActionConversationView): TaskFile[] {
     for (const line of item.lines) {
       if (line.kind !== 'final_output') continue;
       for (const path of pantarayFilePaths(line.text)) {
-        const file = files.has(path) ? null : taskFile(path);
-        if (file) files.set(path, file);
+        if (!files.has(path) && isDocumentPath(path)) files.set(path, taskFileAt(path));
       }
     }
   }

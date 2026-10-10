@@ -161,8 +161,10 @@ export type MainContext = {
     open: (params: ActionFileOpenInput) => void;
     /** `shell.openPath` for a vetted Action file: the error message, empty on success. */
     openInApp: (realPath: string) => Promise<string>;
-    /** `execFile` without a shell, for `textutil`'s document conversion. */
+    /** `execFile` without a shell, for `textutil`'s conversion and `open -a`. */
     runFile: RunFile;
+    /** Asks for an app in /Applications over the main window: its path, or null if cancelled. */
+    chooseApp: () => Promise<string | null>;
   };
 
   clipboard: {

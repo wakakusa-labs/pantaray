@@ -34,6 +34,8 @@ function createAuthHistoryApi({ ipcRenderer }) {
       open: (params) => ipcRenderer.invoke('actionFile:open', params),
       read: (params) => ipcRenderer.invoke('actionFile:read', params),
       openInApp: (params) => ipcRenderer.invoke('actionFile:openInApp', params),
+      openWithApp: (params) => ipcRenderer.invoke('actionFile:openWithApp', params),
+      reveal: (params) => ipcRenderer.invoke('actionFile:reveal', params),
       quickLook: (params) => ipcRenderer.invoke('actionFile:quickLook', params),
     },
   };

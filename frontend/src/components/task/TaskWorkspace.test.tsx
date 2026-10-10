@@ -13,6 +13,10 @@ let listeners: Set<(update: ActionLiveUpdate) => void>;
 const read = vi.fn<ActionFiles['read']>();
 const openInApp = vi.fn<ActionFiles['openInApp']>();
 const quickLook = vi.fn<ActionFiles['quickLook']>();
+const reveal = vi.fn<ActionFiles['reveal']>();
+const openWithApp = vi.fn<ActionFiles['openWithApp']>();
+const revealLink = vi.fn<ActionFiles['open']>();
+const writeText = vi.fn(async (_text: string) => {});
 
 const ANSWER = [
   'Rebuilt the quote: [quote_v3.html](pantaray-file:///work/quote/quote_v3.html)',
@@ -71,11 +75,22 @@ async function renderFinishedTask() {
 
 const chip = (name: string) => screen.getByRole('button', { name: new RegExp(name) });
 
+/** Opens the preview's 開く menu and lists its items. */
+function openMenu(): HTMLElement[] {
+  fireEvent.click(screen.getByRole('button', { name: '開く' }));
+  return screen.getAllByRole('menuitem');
+}
+const menuItem = (name: string) => screen.getByRole('menuitem', { name });
+
 beforeEach(() => {
   listeners = new Set();
   read.mockReset();
   openInApp.mockReset().mockResolvedValue({ kind: 'opened' });
   quickLook.mockReset().mockResolvedValue({ kind: 'shown' });
+  reveal.mockReset().mockResolvedValue({ kind: 'revealed' });
+  openWithApp.mockReset().mockResolvedValue({ kind: 'opened' });
+  revealLink.mockReset().mockResolvedValue(undefined);
+  writeText.mockReset();
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -92,7 +107,8 @@ beforeEach(() => {
         },
       },
       orchestration: { send: vi.fn() },
-      actionFiles: { open: vi.fn(), read, openInApp, quickLook },
+      actionFiles: { open: revealLink, read, openInApp, quickLook, reveal, openWithApp },
+      clipboard: { writeText },
       agentOverlay: {
         getActionApprovalMode: vi.fn(async (actionId: string) => ({
           action_id: actionId,
@@ -157,7 +173,12 @@ describe('TaskWorkspace', () => {
     fireEvent.click(chip('mail.md'));
     expect(await screen.findByRole('heading', { level: 1, name: '送付メール' })).toBeTruthy();
     expect(screen.getByText('途中まで表示しています。')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'いつものアプリで開く' })).toHaveLength(2);
+    // Text reads here already, so Quick Look is not offered.
+    expect(openMenu().map((item) => item.textContent)).toEqual([
+      'Finder で表示',
+      '既定のアプリで開く',
+      'アプリを選んで開く…',
+    ]);
 
     // Its chip again closes the preview.
     fireEvent.click(chip('mail.md'));
@@ -190,39 +211,102 @@ describe('TaskWorkspace', () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
-  it('offers the default app for a file it cannot show, and opens it there', async () => {
+  it('opens a file it cannot show from the 開く menu, each way through its own call', async () => {
     read.mockResolvedValue({ kind: 'unavailable', reason: 'binary' });
     await renderFinishedTask();
     fireEvent.click(chip('run.log'));
     const preview = await screen.findByRole('region', { name: 'run.log' });
     expect(await screen.findByText('このファイルはここでは表示できません。')).toBeTruthy();
 
-    // A spreadsheet is never read here; Quick Look or its app shows it.
+    // A spreadsheet is never read here; the menu offers Quick Look for it.
     fireEvent.click(chip('rates.xlsx'));
     expect(preview.isConnected).toBe(false);
     expect(read).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByText('このファイルは Quick Look かいつものアプリで見られます。')
-    ).toBeTruthy();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Quick Look で見る' })[1]);
-    await waitFor(() =>
-      expect(quickLook).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/rates.xlsx' })
-    );
+    expect(screen.getByText('このファイルは「開く」から見られます。')).toBeTruthy();
+    expect(openMenu().map((item) => item.textContent)).toEqual([
+      'Finder で表示',
+      'Quick Look で見る',
+      '既定のアプリで開く',
+      'アプリを選んで開く…',
+    ]);
 
-    const [headerButton, fallbackButton] = screen.getAllByRole('button', {
-      name: 'いつものアプリで開く',
-    });
-    fireEvent.click(fallbackButton);
-    await waitFor(() =>
-      expect(openInApp).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/rates.xlsx' })
-    );
+    const request = { actionId: 'act-1', path: '/work/quote/rates.xlsx' };
+    const calls = [
+      ['Finder で表示', reveal],
+      ['Quick Look で見る', quickLook],
+      ['既定のアプリで開く', openInApp],
+      ['アプリを選んで開く…', openWithApp],
+    ] as const;
+    for (const [name, call] of calls) {
+      fireEvent.click(menuItem(name));
+      // Choosing closes the menu.
+      expect(screen.queryByRole('menu')).toBeNull();
+      await waitFor(() => expect(call).toHaveBeenCalledWith(request));
+      if (name !== 'アプリを選んで開く…') openMenu();
+    }
+    for (const [, call] of calls) expect(call).toHaveBeenCalledTimes(1);
+    expect(revealLink).not.toHaveBeenCalled();
+
+    // Cancelling the app picker is no failure; an app that fails to open the file is.
+    openWithApp.mockResolvedValueOnce({ kind: 'cancelled' });
+    openMenu();
+    fireEvent.click(menuItem('アプリを選んで開く…'));
+    await waitFor(() => expect(openWithApp).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alert')).toBeNull();
 
     openInApp.mockResolvedValue({ kind: 'unavailable', reason: 'open_failed' });
-    fireEvent.click(headerButton);
+    openMenu();
+    fireEvent.click(menuItem('既定のアプリで開く'));
     expect(await screen.findByRole('alert')).toHaveProperty(
       'textContent',
       'ファイルを開けませんでした。'
     );
+  });
+
+  it('moves through the 開く menu by keyboard and returns focus when it closes', async () => {
+    read.mockResolvedValue({ kind: 'text', text: '# 送付メール', truncated: false });
+    await renderFinishedTask();
+    fireEvent.click(chip('mail.md'));
+    const trigger = await screen.findByRole('button', { name: '開く' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    const items = openMenu();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger.getAttribute('aria-controls')).toBe(screen.getByRole('menu').id);
+    expect(document.activeElement).toBe(items[0]);
+    const menu = screen.getByRole('menu');
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('opens a file an answer links in the preview, as its chip does', async () => {
+    read.mockResolvedValue({ kind: 'text', text: '# 送付メール', truncated: false });
+    await renderFinishedTask();
+
+    fireEvent.click(screen.getByRole('link', { name: 'mail.md' }));
+    expect(await screen.findByRole('region', { name: 'mail.md' })).toBeTruthy();
+    expect(read).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/mail.md' });
+    expect(chip('mail.md').getAttribute('aria-pressed')).toBe('true');
+    // Not Finder: the link stays in the app.
+    expect(revealLink).not.toHaveBeenCalled();
+  });
+
+  it('copies the absolute path of the file and says so', async () => {
+    read.mockResolvedValue({ kind: 'text', text: '# 送付メール', truncated: false });
+    await renderFinishedTask();
+    fireEvent.click(chip('mail.md'));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'パスをコピー' }));
+    expect(await screen.findByRole('button', { name: 'コピーしました' })).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith('/work/quote/mail.md');
   });
 
   it('reads the open file again when a later run finishes, as it may have rewritten it', async () => {
@@ -257,21 +341,21 @@ describe('TaskWorkspace', () => {
     );
 
     quickLook.mockResolvedValue({ kind: 'unavailable', reason: 'not_found' });
-    fireEvent.click(screen.getByRole('button', { name: 'Quick Look で見る' }));
+    openMenu();
+    fireEvent.click(menuItem('Quick Look で見る'));
     expect(await screen.findByRole('alert')).toHaveProperty(
       'textContent',
       'ファイルを開けませんでした。'
     );
   });
 
-  it('falls back to Quick Look and the default app when a document will not convert', async () => {
+  it('offers Quick Look for a document that will not convert', async () => {
     read.mockResolvedValue({ kind: 'unavailable', reason: 'conversion_failed' });
     await renderFinishedTask();
     fireEvent.click(chip('memo.docx'));
     expect(await screen.findByText('このファイルはここでは表示できません。')).toBeTruthy();
     expect(screen.queryByTitle('memo.docx')).toBeNull();
-    // The header's pair and the fallback's pair.
-    expect(screen.getAllByRole('button', { name: 'Quick Look で見る' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'いつものアプリで開く' })).toHaveLength(2);
+    openMenu();
+    expect(menuItem('Quick Look で見る')).toBeTruthy();
   });
 });

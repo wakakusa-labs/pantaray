@@ -3,33 +3,52 @@ import { X } from 'lucide-react';
 
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
+import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useI18n } from '@/context/useI18n';
 
+import { FileOpenMenu, type FileOpenMenuItem } from './FileOpenMenu';
 import type { TaskFile } from './taskFiles';
 import './taskFiles.css';
 
 const COPY = {
   en: {
-    openInApp: 'Open in default app',
+    open: 'Open',
+    reveal: 'Show in Finder',
     quickLook: 'Quick Look',
+    openInApp: 'Open in default app',
+    openWithApp: 'Open with…',
+    copyPath: 'Copy path',
+    pathCopied: 'Copied',
+    copyFailed: "Couldn't copy",
     close: 'Close preview',
     loading: 'Loading…',
     truncated: 'Showing the beginning only.',
-    appOnly: 'Look at this file in Quick Look or open it in its app.',
+    appOnly: 'Open this file from the Open menu.',
     unavailable: "This file can't be shown here.",
     openFailed: "Couldn't open the file.",
   },
   ja: {
-    openInApp: 'いつものアプリで開く',
+    open: '開く',
+    reveal: 'Finder で表示',
     quickLook: 'Quick Look で見る',
+    openInApp: '既定のアプリで開く',
+    openWithApp: 'アプリを選んで開く…',
+    copyPath: 'パスをコピー',
+    pathCopied: 'コピーしました',
+    copyFailed: 'コピーできませんでした',
     close: 'プレビューを閉じる',
     loading: '読み込んでいます…',
     truncated: '途中まで表示しています。',
-    appOnly: 'このファイルは Quick Look かいつものアプリで見られます。',
+    appOnly: 'このファイルは「開く」から見られます。',
     unavailable: 'このファイルはここでは表示できません。',
     openFailed: 'ファイルを開けませんでした。',
   },
 } as const;
+
+/** Quick Look draws these; a text file already reads in the preview itself. */
+const QUICK_LOOK_KINDS = new Set<TaskFile['kind']>(['document', 'image', 'pdf', 'app_only']);
+
+type OpenWay = 'reveal' | 'quickLook' | 'openInApp' | 'openWithApp';
 
 /*
  * The document is untrusted content. The empty sandbox runs no script and gives the frame an
@@ -120,37 +139,29 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   const nameId = useId();
   const content = useFileContent(actionId, file, revision);
   const [openFailed, setOpenFailed] = useState(false);
+  const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
 
-  const openInApp = async () => {
+  const run = async (way: OpenWay) => {
     setOpenFailed(false);
     try {
-      const result = await window.electron?.actionFiles?.openInApp({ actionId, path: file.path });
-      if (result?.kind !== 'opened') setOpenFailed(true);
+      const result = await window.electron?.actionFiles?.[way]({ actionId, path: file.path });
+      // A cancelled app picker is no failure.
+      if (result === undefined || result.kind === 'unavailable') setOpenFailed(true);
     } catch (error) {
-      console.error('Failed to open an Action file in its app', error);
+      console.error('Failed to open an Action file', error);
       setOpenFailed(true);
     }
   };
-  const quickLook = async () => {
-    setOpenFailed(false);
-    try {
-      const result = await window.electron?.actionFiles?.quickLook({ actionId, path: file.path });
-      if (result?.kind !== 'shown') setOpenFailed(true);
-    } catch (error) {
-      console.error('Failed to show an Action file in Quick Look', error);
-      setOpenFailed(true);
-    }
-  };
-  const openButtons = (
-    <>
-      <button type="button" className="task-file-preview__open" onClick={() => void quickLook()}>
-        {copy.quickLook}
-      </button>
-      <button type="button" className="task-file-preview__open" onClick={() => void openInApp()}>
-        {copy.openInApp}
-      </button>
-    </>
-  );
+  const item = (label: string, way: OpenWay): FileOpenMenuItem => ({
+    label,
+    onSelect: () => void run(way),
+  });
+  const openItems = [
+    item(copy.reveal, 'reveal'),
+    ...(QUICK_LOOK_KINDS.has(file.kind) ? [item(copy.quickLook, 'quickLook')] : []),
+    item(copy.openInApp, 'openInApp'),
+    item(copy.openWithApp, 'openWithApp'),
+  ];
   const page = (html: string) => (
     <iframe
       className="task-file-preview__frame"
@@ -166,7 +177,21 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
         <h2 id={nameId} title={file.path}>
           {file.name}
         </h2>
-        {openButtons}
+        <button
+          type="button"
+          className="task-file-preview__open"
+          title={file.path}
+          onClick={() => void copyToClipboard(() => file.path)}
+        >
+          <span aria-live="polite">
+            {copyStatus === 'copied'
+              ? copy.pathCopied
+              : copyStatus === 'failed'
+                ? copy.copyFailed
+                : copy.copyPath}
+          </span>
+        </button>
+        <FileOpenMenu label={copy.open} items={openItems} />
         <button
           type="button"
           className="task-file-preview__close"
@@ -196,10 +221,9 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
             {copy.loading}
           </p>
         ) : content.kind === 'unavailable' ? (
-          <div className="task-file-preview__notice">
-            <p>{file.kind === 'app_only' ? copy.appOnly : copy.unavailable}</p>
-            {openButtons}
-          </div>
+          <p className="task-file-preview__status">
+            {file.kind === 'app_only' ? copy.appOnly : copy.unavailable}
+          </p>
         ) : content.kind === 'page' ? (
           page(content.html)
         ) : content.kind === 'image' ? (
@@ -207,10 +231,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
         ) : (
           <>
             {content.truncated ? (
-              <div className="task-file-preview__notice">
-                <p>{copy.truncated}</p>
-                {openButtons}
-              </div>
+              <p className="task-file-preview__status">{copy.truncated}</p>
             ) : null}
             {file.kind === 'html' ? (
               page(content.text)

@@ -55,6 +55,7 @@ function harness({
   patched = [],
   openPathResult = '',
   runFile = async () => '<p>converted</p>',
+  chooseApp = async () => null,
 } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-action-files-')));
   const reads = [];
@@ -65,6 +66,7 @@ function harness({
     return page({ finalOutput: links(olderLinked), patched });
   };
   const opened = [];
+  const revealed = [];
   const previewed = [];
   const handlers = new Map();
   const mainWindow = {
@@ -76,12 +78,13 @@ function harness({
       windows: { getMainWindow: () => mainWindow },
       actions: { readConversationPage },
       actionFiles: {
-        open: () => {},
+        open: ({ path: revealedPath }) => revealed.push(revealedPath),
         openInApp: async (realPath) => {
           opened.push(realPath);
           return openPathResult;
         },
         runFile,
+        chooseApp,
       },
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
@@ -91,6 +94,7 @@ function harness({
     dir,
     reads,
     opened,
+    revealed,
     previewed,
     runFile,
     file: (name, content, mode = 0o644) => {
@@ -102,6 +106,10 @@ function harness({
       handlers.get('actionFile:read')({}, { actionId, path: file }),
     openInApp: (file, actionId = 'act-1') =>
       handlers.get('actionFile:openInApp')({}, { actionId, path: file }),
+    openWithApp: (file, actionId = 'act-1') =>
+      handlers.get('actionFile:openWithApp')({}, { actionId, path: file }),
+    reveal: (file, actionId = 'act-1') =>
+      handlers.get('actionFile:reveal')({}, { actionId, path: file }),
     quickLook: (file, actionId = 'act-1') =>
       handlers.get('actionFile:quickLook')({}, { actionId, path: file }),
     fetch: (file, actionId = 'act-1') => protocol({ url: buildActionFileUrl(actionId, file) }),
@@ -424,3 +432,103 @@ test(
     });
   }
 );
+
+/** An app bundle as macOS lays one out, or a bare folder with that name. */
+function appBundle(dir, name, { infoPlist = true } = {}) {
+  const bundle = path.join(dir, name);
+  fs.mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  if (infoPlist) fs.writeFileSync(path.join(bundle, 'Contents', 'Info.plist'), '<plist/>');
+  return bundle;
+}
+
+test('open with an app runs open -a with the chosen bundle and the real path, as argv', async () => {
+  const probe = harness();
+  const memo = probe.file('memo.md', 'x');
+  const editor = appBundle(probe.dir, 'Editor.app');
+  const calls = [];
+  const app = harness({
+    linked: [memo],
+    chooseApp: async () => editor,
+    runFile: async (...args) => {
+      calls.push(args);
+      return '';
+    },
+  });
+
+  assert.deepEqual(await app.openWithApp(memo), { kind: 'opened' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '/usr/bin/open');
+  assert.deepEqual(calls[0][1], ['-a', editor, memo]);
+});
+
+test('open with an app asks for no app for a file the Action does not name or that runs', async () => {
+  const probe = harness();
+  const other = probe.file('other.md', 'x');
+  const script = probe.file('run.command', 'x');
+  let asked = 0;
+  const calls = [];
+  const app = harness({
+    linked: [script],
+    chooseApp: async () => {
+      asked += 1;
+      return appBundle(probe.dir, 'Editor.app');
+    },
+    runFile: async (...args) => calls.push(args),
+  });
+
+  assert.deepEqual(await app.openWithApp(other), NOT_FOUND);
+  assert.deepEqual(await app.openWithApp(script), { kind: 'unavailable', reason: 'executable' });
+  await assert.rejects(app.openWithApp(other, 'act-2'));
+  assert.equal(asked, 0);
+  assert.deepEqual(calls, []);
+});
+
+test('open with an app does nothing when the picker is cancelled or the choice is no app', async () => {
+  const probe = harness();
+  const memo = probe.file('memo.md', 'x');
+  const choices = [
+    null,
+    probe.file('notes.txt', 'x'),
+    appBundle(probe.dir, 'Hollow.app', { infoPlist: false }),
+    // A bundle without the .app name: `open -a` would look an app up by that name.
+    appBundle(probe.dir, 'Editor'),
+    path.join(probe.dir, 'Missing.app'),
+  ];
+  const calls = [];
+  const app = harness({
+    linked: [memo],
+    chooseApp: async () => choices.shift(),
+    runFile: async (...args) => calls.push(args),
+  });
+
+  assert.deepEqual(await app.openWithApp(memo), { kind: 'cancelled' });
+  for (let index = 0; index < 4; index += 1) {
+    assert.deepEqual(await app.openWithApp(memo), { kind: 'unavailable', reason: 'not_an_app' });
+  }
+  assert.deepEqual(calls, []);
+});
+
+test('open with an app reports an app that could not open the file', async () => {
+  const probe = harness();
+  const memo = probe.file('memo.md', 'x');
+  const app = harness({
+    linked: [memo],
+    chooseApp: async () => appBundle(probe.dir, 'Editor.app'),
+    runFile: async () => {
+      throw new Error('open exited with 1');
+    },
+  });
+  assert.deepEqual(await app.openWithApp(memo), { kind: 'unavailable', reason: 'open_failed' });
+});
+
+test('reveal selects a named file in Finder by its real path, and nothing else', async () => {
+  const probe = harness();
+  const deck = probe.file('deck.pptx', 'x');
+  const other = probe.file('other.pptx', 'x');
+  const app = harness({ linked: [deck] });
+
+  assert.deepEqual(await app.reveal(deck), { kind: 'revealed' });
+  assert.deepEqual(await app.reveal(other), NOT_FOUND);
+  await assert.rejects(app.reveal(deck, 'act-2'));
+  assert.deepEqual(app.revealed, [deck]);
+});

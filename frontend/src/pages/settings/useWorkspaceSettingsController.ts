@@ -86,6 +86,11 @@ export function useWorkspaceSettingsController(t: Translate) {
     workspaceSettingsReducer,
     getCachedWorkspaceSettings(ownerId)
   );
+  // A folder dialog answers after other changes may have landed; what it acts on is read then.
+  const latestSettingsRef = useRef(settings);
+  useEffect(() => {
+    latestSettingsRef.current = settings;
+  });
   const [projectGeneration, setProjectGeneration] = useState(0);
   const [isLoading, setIsLoading] = useState(settings === null);
   const [pending, setPending] = useState<ReadonlySet<WorkspacePendingKey>>(new Set());
@@ -213,7 +218,7 @@ export function useWorkspaceSettingsController(t: Translate) {
   // The picker answers with the canonical path (featureRuntime.ts), the form the backend keys
   // folders by. Creating a registered folder again would replace all of its links.
   const findRegisteredFolder = (realPath: string) =>
-    settings?.folders.find((folder) => folder.canonical_real_path === realPath);
+    latestSettingsRef.current?.folders.find((folder) => folder.canonical_real_path === realPath);
 
   const createFolder = locked(false, (input: WorkspaceFolderCreateInput) =>
     linkOrCreateFolder(input)
@@ -230,11 +235,17 @@ export function useWorkspaceSettingsController(t: Translate) {
         return true;
       const linked = await commitMutation(
         workspacePendingKey.folder(registered.folder_id),
-        async () =>
-          await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
-            organizationIds: registered.organization_ids,
-            projectIds: [...new Set([...registered.project_ids, ...input.projectIds])],
-          }),
+        async () => {
+          // Read under the folder's key, so links another change just settled are kept.
+          const current = latestSettingsRef.current?.folders.find(
+            (folder) => folder.folder_id === registered.folder_id
+          );
+          if (!current) throw new Error('The folder was unregistered meanwhile.');
+          return await requireWorkspaceSettingsApi().updateFolderLinks(current.folder_id, {
+            organizationIds: current.organization_ids,
+            projectIds: [...new Set([...current.project_ids, ...input.projectIds])],
+          });
+        },
         (updated) => ({ type: 'folderLinksUpdated', folder: updated })
       );
       return linked !== null;

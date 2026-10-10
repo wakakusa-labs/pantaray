@@ -296,6 +296,36 @@ it('フォルダの追加を待っている間は、そのフォルダを外せ�
   });
 });
 
+it('フォルダ選択の間に外したリンクは、別のプロジェクトへの追加で戻らない', async () => {
+  store.projects.push(project('c', 2));
+  store.folders = [folder('shared', ['a', 'c'])];
+  installApi();
+  let choose!: (answer: { canceled: boolean; path: string }) => void;
+  api.selectFolder.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        choose = resolve;
+      })
+  );
+  await renderProjects();
+
+  await chooseFromMenu('b', 'history.projects.addFolder');
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+  await userEvent.click(
+    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
+  );
+  await waitFor(() => expect(store.folders[0].project_ids).toEqual(['c']));
+  await act(async () => choose({ canceled: false, path: '/Users/me/shared' }));
+
+  await waitFor(() =>
+    expect(api.updateFolderLinks).toHaveBeenLastCalledWith('shared', {
+      organizationIds: [],
+      projectIds: ['c', 'b'],
+    })
+  );
+  expect(store.folders[0].project_ids).toEqual(['b', 'c']);
+});
+
 it('Finder で開くは最初のフォルダを開き、フォルダのないプロジェクトでは押せない', async () => {
   store.folders = [folder('own', ['a'])];
   installApi();

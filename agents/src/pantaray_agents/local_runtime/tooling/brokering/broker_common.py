@@ -319,15 +319,22 @@ def ensure_tool_authorization(
         if approval_scope == APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND
         else None
     )
-    approval_mode = (
-        action_approval_mode
-        or load_effective_approval_preference(
+    if action_approval_mode is None:
+        user_default = load_effective_approval_preference(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
             user_id=context.execution_session.user_id,
             applies_to=approval_scope,
-        ).approval_mode
-    )
+        )
+        approval_mode = user_default.approval_mode
+        # A saved always_allow auto-approves only against the durable capability
+        # grants written with it. The unsaved built-in default has no row to grant
+        # from, and an Action-level override carries its own consent record and is
+        # scoped to this one conversation.
+        requires_global_grants = user_default.preference_id is not None
+    else:
+        approval_mode = action_approval_mode
+        requires_global_grants = False
     latest_session = load_latest_approval_session(
         db_path=context.db_path,
         busy_timeout_ms=context.busy_timeout_ms,
@@ -366,11 +373,7 @@ def ensure_tool_authorization(
     }:
         raise MigrationError("unsupported approval mode")
     if approval_mode == APPROVAL_MODE_ALWAYS_ALLOW and not require_user_prompt:
-        # The user-level default auto-approves only against durable capability
-        # grants written with it. An Action-level override carries its own
-        # consent record and is scoped to this one conversation, so it does not
-        # read - or need - the global grants.
-        if action_approval_mode is None:
+        if requires_global_grants:
             active_grants = load_active_capability_grants(
                 db_path=context.db_path,
                 busy_timeout_ms=context.busy_timeout_ms,

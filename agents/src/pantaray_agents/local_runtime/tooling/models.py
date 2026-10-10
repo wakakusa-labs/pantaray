@@ -267,7 +267,8 @@ class StoredExecutionSession:
 
 @dataclass(frozen=True, slots=True)
 class StoredApprovalPreference:
-    preference_id: str
+    # None for the built-in default, which the user has not saved.
+    preference_id: str | None
     scope_type: Literal["global"]
     scope_ref: str | None
     approval_mode: ApprovalMode

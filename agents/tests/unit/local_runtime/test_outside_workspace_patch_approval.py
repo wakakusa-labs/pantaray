@@ -49,13 +49,14 @@ from .broker_test_support import (
 )
 from .test_tool_broker_approval import _set_prompt_preference
 
-APPROVAL_MODES = ("prompt_each_time", "always_allow")
+# "unsaved_default" saves nothing, so the built-in always_allow default applies.
+APPROVAL_MODES = ("prompt_each_time", "always_allow", "unsaved_default")
 
 
 def _set_approval_mode(db_path: Path, mode: str) -> None:
     if mode == "always_allow":
         _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
-    else:
+    elif mode == "prompt_each_time":
         _set_prompt_preference(db_path)
 
 
@@ -167,7 +168,7 @@ async def test_inside_workspace_patch_keeps_its_approval_behavior(
     db_path, context = _bootstrap_runtime_db(tmp_path)
     _set_approval_mode(db_path, mode)
 
-    if mode == "always_allow":
+    if mode != "prompt_each_time":
         await _patch(
             db_path=db_path,
             context=context,

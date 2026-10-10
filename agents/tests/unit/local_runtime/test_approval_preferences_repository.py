@@ -22,6 +22,7 @@ from pantaray_agents.local_runtime.tooling.repository import (
     apply_approval_preference_setting,
     create_capability_grant,
     load_active_capability_grants,
+    load_effective_approval_preference,
     upsert_approval_preference,
 )
 
@@ -300,6 +301,51 @@ def test_load_active_capability_grants_ignores_unowned_global_grants(
             applies_to="workspace_edit_and_command",
         )
         == ()
+    )
+
+
+def test_unsaved_default_auto_approves_only_workspace_edits_and_commands(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+
+    workspace, screen = (
+        load_effective_approval_preference(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            user_id="user-1",
+            applies_to=applies_to,
+        )
+        for applies_to in ("workspace_edit_and_command", "screen_capture")
+    )
+
+    assert (workspace.preference_id, workspace.approval_mode) == (None, "always_allow")
+    assert (screen.preference_id, screen.approval_mode) == (None, "prompt_each_time")
+
+
+def test_a_saved_prompt_each_time_replaces_the_default(tmp_path: Path) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    preference_id = _workspace_edit_preference_id()
+    apply_approval_preference_setting(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        preference=_workspace_edit_preference(
+            preference_id=preference_id,
+            approval_mode="prompt_each_time",
+            timestamp="2026-03-22T00:00:00Z",
+        ),
+    )
+
+    preference = load_effective_approval_preference(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        applies_to="workspace_edit_and_command",
+    )
+
+    assert (preference.preference_id, preference.approval_mode) == (
+        preference_id,
+        "prompt_each_time",
     )
 
 

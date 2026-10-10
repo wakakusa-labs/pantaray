@@ -33,7 +33,7 @@ export type WorkspaceProjects = Pick<
   | 'addOrganization'
   | 'updateProjectOrganizations'
   | 'dragController'
-  | 'isProjectStructurePending'
+  | 'busy'
 >;
 
 type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject };
@@ -148,13 +148,14 @@ export function HistoryProjects({
                   menuItems={menuItems(project)}
                   menuButtonId={menuButtonId(project.project_id)}
                   renaming={renamingId === project.project_id}
-                  dragDisabled={projects.isProjectStructurePending}
+                  dragDisabled={projects.busy}
                   t={t}
                   onRename={(name) => projects.renameProject(project.project_id, name)}
                   onRenameEnd={() => endRename(project.project_id)}
                   onRemoveFolder={(folderId) =>
                     projects.removeFolderFromProject(folderId, project.project_id)
                   }
+                  isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
                 />
               ))}
             </ul>

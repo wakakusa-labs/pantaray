@@ -175,7 +175,12 @@
   cursor: pointer;
 }
 
-.history-project__folder-remove:hover {
+.history-project__folder-remove:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.history-project__folder-remove:hover:not(:disabled) {
   background: var(--fog-mist);
   color: var(--fog-text);
 }

@@ -35,6 +35,7 @@ export function HistoryProjectRow({
   onRename,
   onRenameEnd,
   onRemoveFolder,
+  isFolderPending,
 }: {
   project: WorkspaceProject;
   folders: WorkspaceFolder[];
@@ -48,6 +49,8 @@ export function HistoryProjectRow({
   /** False when another row's rename has begun since, which keeps its field and its focus. */
   onRenameEnd: () => boolean;
   onRemoveFolder: (folderId: string) => Promise<boolean>;
+  /** A folder being added or removed elsewhere cannot be removed until that settles. */
+  isFolderPending: (folderId: string) => boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
@@ -135,6 +138,8 @@ export function HistoryProjectRow({
                   className="history-project__folder-remove"
                   aria-label={t('history.projects.removeFolder', { name: folder.display_name })}
                   title={t('history.projects.removeFolder', { name: folder.display_name })}
+                  aria-busy={isFolderPending(folder.folder_id)}
+                  disabled={isFolderPending(folder.folder_id)}
                   onClick={() => void removeFolder(folder.folder_id)}
                 >
                   <X size={13} aria-hidden="true" />

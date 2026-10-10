@@ -262,6 +262,40 @@ it('フォルダを外すと、ほかのプロジェクトにもあるものは�
   await waitFor(() => expect(screen.getByRole('button', { name: 'a' })).toHaveFocus());
 });
 
+it('フォルダの追加を待っている間は、そのフォルダを外せず、終わった後の内容で外す', async () => {
+  let finishLink!: () => void;
+  api.updateFolderLinks.mockImplementationOnce(
+    async (folderId: string, links: { projectIds: string[] }) => {
+      await new Promise<void>((resolve) => {
+        finishLink = resolve;
+      });
+      const updated = store.folders.find((candidate) => candidate.folder_id === folderId)!;
+      updated.project_ids = [...links.projectIds].sort();
+      return structuredClone(updated);
+    }
+  );
+  api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/own' });
+  await renderProjects();
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+
+  await chooseFromMenu('b', 'history.projects.addFolder');
+  const remove = screen.getByRole('button', {
+    name: 'history.projects.removeFolder {"name":"own"}',
+  });
+  await waitFor(() => expect(remove).toBeDisabled());
+  await userEvent.click(remove);
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+
+  await act(async () => finishLink());
+  await waitFor(() => expect(remove).toBeEnabled());
+  await userEvent.click(remove);
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+  expect(api.updateFolderLinks).toHaveBeenLastCalledWith('own', {
+    organizationIds: [],
+    projectIds: ['b'],
+  });
+});
+
 it('Finder で開くは最初のフォルダを開き、フォルダのないプロジェクトでは押せない', async () => {
   store.folders = [folder('own', ['a'])];
   installApi();

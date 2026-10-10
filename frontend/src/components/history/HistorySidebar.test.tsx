@@ -84,7 +84,7 @@ function Sidebar() {
           pending: new Set(),
           addProjectFromFolder: mocks.addProjectFromFolder,
           dragController: {},
-          isProjectStructurePending: false,
+          busy: false,
         } as unknown as WorkspaceProjects
       }
       selected={mocks.selected}

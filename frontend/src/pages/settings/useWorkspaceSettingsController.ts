@@ -46,8 +46,7 @@ export type WorkspacePendingKey =
   | `project:links:${string}`
   | `project:rename:${string}`
   | `folder:create:${string}`
-  | `folder:delete:${string}`
-  | `folder:links:${string}`;
+  | `folder:${string}`;
 
 export const workspacePendingKey = {
   organizationCreate: 'organization:create' as WorkspacePendingKey,
@@ -58,8 +57,8 @@ export const workspacePendingKey = {
   projectLinks: (projectId: string): WorkspacePendingKey => `project:links:${projectId}`,
   projectRename: (projectId: string): WorkspacePendingKey => `project:rename:${projectId}`,
   folderCreate: (projectId: string): WorkspacePendingKey => `folder:create:${projectId}`,
-  folderDelete: (folderId: string): WorkspacePendingKey => `folder:delete:${folderId}`,
-  folderLinks: (folderId: string): WorkspacePendingKey => `folder:links:${folderId}`,
+  // One key for every change to a folder; it marks that folder's controls as busy.
+  folder: (folderId: string): WorkspacePendingKey => `folder:${folderId}`,
 };
 
 /** Names taken between reading the settings and creating the project are rare; a few suffice. */
@@ -230,7 +229,7 @@ export function useWorkspaceSettingsController(t: Translate) {
       if (input.projectIds.every((projectId) => registered.project_ids.includes(projectId)))
         return true;
       const linked = await commitMutation(
-        workspacePendingKey.folderLinks(registered.folder_id),
+        workspacePendingKey.folder(registered.folder_id),
         async () =>
           await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
             organizationIds: registered.organization_ids,
@@ -316,7 +315,7 @@ export function useWorkspaceSettingsController(t: Translate) {
 
   const deleteFolder = locked(undefined, async (folderId: string, focus: FocusRequest) => {
     await commitMutation(
-      workspacePendingKey.folderDelete(folderId),
+      workspacePendingKey.folder(folderId),
       async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
       () => ({ type: 'folderDeleted', folderId }),
       false,
@@ -328,7 +327,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     false,
     async (folderId: string, projectId: string, focus: FocusRequest): Promise<boolean> => {
       const folder = await commitMutation(
-        workspacePendingKey.folderLinks(folderId),
+        workspacePendingKey.folder(folderId),
         async () =>
           await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
             organizationIds: [],
@@ -470,12 +469,12 @@ export function useWorkspaceSettingsController(t: Translate) {
     const removed =
       otherProjectIds.length === 0
         ? await commitMutation(
-            workspacePendingKey.folderDelete(folderId),
+            workspacePendingKey.folder(folderId),
             async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
             () => ({ type: 'folderDeleted', folderId })
           )
         : await commitMutation(
-            workspacePendingKey.folderLinks(folderId),
+            workspacePendingKey.folder(folderId),
             async () =>
               await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
                 organizationIds: folder.organization_ids,

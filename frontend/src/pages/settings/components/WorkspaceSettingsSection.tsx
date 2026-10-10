@@ -154,9 +154,7 @@ export function WorkspaceSettingsSection({ t }: WorkspaceSettingsSectionProps) {
                 deleteProjectBusy={isPending(
                   workspacePendingKey.projectDelete(selectedProject.project_id)
                 )}
-                isDeleteFolderBusy={(folderId) =>
-                  isPending(workspacePendingKey.folderDelete(folderId))
-                }
+                isDeleteFolderBusy={(folderId) => isPending(workspacePendingKey.folder(folderId))}
                 isOrganizationDeleteBusy={isOrganizationDeleteBusy}
                 organizationCreateBusy={isPending(workspacePendingKey.organizationCreate)}
                 projectLinksBusy={isPending(
@@ -171,10 +169,8 @@ export function WorkspaceSettingsSection({ t }: WorkspaceSettingsSectionProps) {
                 t={t}
                 onAssign={controller.assignFolderToProject}
                 onDeleteFolder={controller.deleteFolder}
-                isAssignBusy={(folderId) => isPending(workspacePendingKey.folderLinks(folderId))}
-                isDeleteFolderBusy={(folderId) =>
-                  isPending(workspacePendingKey.folderDelete(folderId))
-                }
+                isAssignBusy={(folderId) => isPending(workspacePendingKey.folder(folderId))}
+                isDeleteFolderBusy={(folderId) => isPending(workspacePendingKey.folder(folderId))}
               />
             ) : null}
           </>

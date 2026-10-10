@@ -61,6 +61,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
 from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalMode,
     ApprovalPreferenceUpsertInput,
     CapabilityGrantCreateInput,
 )
@@ -254,6 +255,9 @@ def _running_child(
                 scheduled_at=TIMESTAMP,
             )
     bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
+    # Gated tools pause until a test opts into always_allow, which replaces this
+    # row through its shared preference_id.
+    _save_workspace_approval_mode(db_path, "prompt_each_time")
     context = ensure_action_scratch_execution_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -1025,7 +1029,7 @@ def test_wait_reports_an_approval_paused_child_as_nonterminal(
     assert snapshot.terminal_child_process_ids == ()
 
 
-def _allow_workspace_commands(db_path: Path) -> None:
+def _save_workspace_approval_mode(db_path: Path, mode: ApprovalMode) -> None:
     upsert_approval_preference(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -1034,12 +1038,16 @@ def _allow_workspace_commands(db_path: Path) -> None:
             user_id="user-1",
             scope_type="global",
             scope_ref=None,
-            approval_mode="always_allow",
+            approval_mode=mode,
             applies_to=("workspace_edit_and_command",),
             created_at=TIMESTAMP,
             updated_at=TIMESTAMP,
         ),
     )
+
+
+def _allow_workspace_commands(db_path: Path) -> None:
+    _save_workspace_approval_mode(db_path, "always_allow")
     create_capability_grant(
         db_path=db_path,
         busy_timeout_ms=1_000,

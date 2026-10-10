@@ -25,7 +25,6 @@ from pantaray_agents.local_runtime.tooling.repository import (
 router = APIRouter(prefix="/v1/agents/users", tags=["Approval Preferences"])
 
 _APPLIES_TO_WORKSPACE_EDIT_AND_COMMAND = "workspace_edit_and_command"
-_APPROVAL_MODE_PROMPT_EACH_TIME = "prompt_each_time"
 _APPROVAL_MODE_ALWAYS_ALLOW = "always_allow"
 _GLOBAL_SCOPE_TYPE = "global"
 _GLOBAL_REQUIRED_CAPABILITIES = ("scoped_write", "process_exec_local")

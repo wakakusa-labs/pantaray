@@ -59,8 +59,9 @@ def commands_run_without_asking(
 ) -> bool:
     """Whether the user's default lets Actions run commands without asking.
 
-    The broker's rule for that default: always_allow counts only together with
-    the durable capability grants the setting writes with it.
+    The broker's rule for that default: a saved always_allow counts only together
+    with the durable capability grants the setting writes with it; the unsaved
+    built-in default needs none.
     """
 
     preference = load_effective_approval_preference(
@@ -71,6 +72,8 @@ def commands_run_without_asking(
     )
     if preference.approval_mode != APPROVAL_MODE_ALWAYS_ALLOW:
         return False
+    if preference.preference_id is None:
+        return True
     grants = load_active_capability_grants(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,

@@ -13,7 +13,7 @@ from ..models import (
     StoredApprovalPreference,
 )
 from .common import (
-    DEFAULT_PROMPT_EACH_TIME_PREFERENCE_ID,
+    WORKSPACE_EDIT_AND_COMMAND_SCOPE,
     _configure_connection,
     _deserialize_string_list,
     _serialize_json,
@@ -306,11 +306,17 @@ def _load_effective_approval_preference_in_connection(
             approval_mode=cast(ApprovalMode, str(row["approval_mode"])),
             applies_to=applies_to_raw,
         )
+    # Until the user saves a choice, edits and commands inside the workspace run
+    # without asking; every other kind of approval asks each time.
     return StoredApprovalPreference(
-        preference_id=DEFAULT_PROMPT_EACH_TIME_PREFERENCE_ID,
+        preference_id=None,
         scope_type="global",
         scope_ref=None,
-        approval_mode="prompt_each_time",
+        approval_mode=(
+            "always_allow"
+            if applies_to == WORKSPACE_EDIT_AND_COMMAND_SCOPE
+            else "prompt_each_time"
+        ),
         applies_to=(applies_to,),
     )
 

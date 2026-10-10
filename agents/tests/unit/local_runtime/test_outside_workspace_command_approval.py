@@ -68,7 +68,8 @@ from .broker_test_support import (
 )
 from .test_tool_broker_approval import _set_prompt_preference
 
-APPROVAL_MODES = ("prompt_each_time", "always_allow")
+# "unsaved_default" saves nothing, so the built-in always_allow default applies.
+APPROVAL_MODES = ("prompt_each_time", "always_allow", "unsaved_default")
 COMMAND_TOOLS = ("bash", "run_python")
 PYTHON_CODE = "open('made.txt', 'w').write('x')"
 
@@ -79,7 +80,7 @@ def _setup(tmp_path: Path, mode: str) -> tuple[Path, ActionExecutionContext]:
     )
     if mode == "always_allow":
         _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
-    else:
+    elif mode == "prompt_each_time":
         _set_prompt_preference(db_path)
     assert isinstance(context, ActionExecutionContext)
     return db_path, context
@@ -314,7 +315,7 @@ async def test_inside_workspace_command_keeps_its_approval_behavior(
     db_path, context = _setup(tmp_path, mode)
     args = _args(tool_id, ".")
 
-    if mode == "always_allow":
+    if mode != "prompt_each_time":
         await _run(
             db_path=db_path,
             context=context,

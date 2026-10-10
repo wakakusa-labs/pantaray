@@ -37,20 +37,22 @@ function page({ finalOutput = null, patched = [], nextCursor = null }) {
   };
 }
 
-/** An Action whose newest page links `linked` and whose older page patched `patched`. */
-function harness({ linked = [], patched = [], openPathResult = '' } = {}) {
+const links = (files) =>
+  files.map((file) => `[${path.basename(file)}](pantaray-file://${encodeURI(file)})`).join('\n') ||
+  null;
+
+/**
+ * An Action whose newest page's answer links `linked`, and whose older page's answer links
+ * `olderLinked` after apply_patch steps whose subjects are `patched`.
+ */
+function harness({ linked = [], olderLinked = [], patched = [], openPathResult = '' } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-action-files-')));
   const reads = [];
   const readConversationPage = async (request) => {
     reads.push(request);
     if (request.actionId !== 'act-1') throw new Error('Action not found');
-    if (request.cursor === null) {
-      const links = linked.map(
-        (file) => `[${path.basename(file)}](pantaray-file://${encodeURI(file)})`
-      );
-      return page({ finalOutput: links.join('\n') || null, nextCursor: 'older' });
-    }
-    return page({ patched });
+    if (request.cursor === null) return page({ finalOutput: links(linked), nextCursor: 'older' });
+    return page({ finalOutput: links(olderLinked), patched });
   };
   const opened = [];
   const handlers = new Map();
@@ -100,19 +102,32 @@ test('a file the final answer links reads as text; one it does not name is not f
   assert.deepEqual(app.opened, []);
 });
 
-test('a file an older page patched is named; a cut-short or relative subject is not', async () => {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-patched-')));
-  const notes = path.join(dir, 'notes.txt');
-  fs.writeFileSync(notes, 'notes');
-  const app = harness({ patched: [notes, `${path.join(dir, 'long')}…`, 'relative.txt'] });
+test('an older answer link names a file; a patch step subject alone does not', async () => {
+  const probe = harness();
+  const notes = probe.file('notes.txt', 'notes');
+  const patched = probe.file('patched.txt', 'patched');
+  const app = harness({ olderLinked: [notes], patched: [patched] });
 
   assert.deepEqual(await app.read(notes), { kind: 'text', text: 'notes', truncated: false });
   assert.deepEqual(
     app.reads.map((request) => request.cursor),
     [null, 'older']
   );
-  fs.writeFileSync(path.join(dir, 'long'), 'x');
-  assert.deepEqual(await app.read(path.join(dir, 'long')), NOT_FOUND);
+  // A subject is display text, not a path: it never authorizes a file.
+  assert.deepEqual(await app.read(patched), NOT_FOUND);
+  assert.deepEqual(await app.openInApp(patched), NOT_FOUND);
+  assert.equal((await app.fetch(patched)).status, 404);
+});
+
+test('a linked path is matched exactly, whitespace included', async () => {
+  const probe = harness();
+  const spaced = probe.file('見積書  v3.md', 'two spaces');
+  const sibling = probe.file('見積書 v3.md', 'one space');
+  // The patch step's subject collapses the run of spaces, so it spells the sibling.
+  const app = harness({ linked: [spaced], patched: [sibling] });
+
+  assert.deepEqual(await app.read(spaced), { kind: 'text', text: 'two spaces', truncated: false });
+  assert.deepEqual(await app.read(sibling), NOT_FOUND);
 });
 
 test('text is cut at the cap on a character boundary and says so; binary is refused', async () => {

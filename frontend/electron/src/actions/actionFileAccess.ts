@@ -1,10 +1,10 @@
 /**
  * Files an Action names, read or opened for the main window's preview.
  *
- * The renderer asks for a file by Action and absolute path. Main serves it only when that
- * Action's own conversation names the path: a `pantaray-file:///` link in a final answer, or
- * the target of an `apply_patch` step. A compromised renderer therefore reaches only what an
- * Action of the signed-in user already put in front of them, never an arbitrary file.
+ * The renderer asks for a file by Action and absolute path. Main serves it only when one of
+ * that Action's final answers links the path with `pantaray-file:///`. A compromised renderer
+ * therefore reaches only what an Action of the signed-in user already put in front of them,
+ * never an arbitrary file.
  */
 
 import fs from 'fs';
@@ -54,26 +54,14 @@ export type ReadActionConversationPage = (
 ) => Promise<ActionConversationPage>;
 
 /**
- * The absolute paths one conversation page names. A patch's subject is the path its call gave,
- * cut at 120 characters with an ellipsis, so only an absolute, uncut one names a file.
+ * The paths one conversation page names: the `pantaray-file:///` links in its final answers,
+ * decoded exactly. A tool step's subject is display text (whitespace collapsed, cut at 120
+ * characters), not a path, so it never authorizes a file.
  */
 export function actionNamedPaths(page: ActionConversationPage): string[] {
-  const paths: string[] = [];
-  for (const run of page.runs) {
-    if (run.final_output !== null) paths.push(...pantarayFilePaths(run.final_output));
-    for (const entry of run.entries) {
-      if (
-        entry.step_kind === 'tool' &&
-        entry.label === 'apply_patch' &&
-        entry.subject !== null &&
-        path.isAbsolute(entry.subject) &&
-        !entry.subject.endsWith('…')
-      ) {
-        paths.push(entry.subject);
-      }
-    }
-  }
-  return paths;
+  return page.runs.flatMap((run) =>
+    run.final_output === null ? [] : pantarayFilePaths(run.final_output)
+  );
 }
 
 // The OS realpath resolves `..` after the symlink before it, as open() does; Node's own
@@ -123,6 +111,8 @@ export async function resolveActionFile(
 export function openRegularFile(realPath: string): { fd: number; size: number } | null {
   let fd: number;
   try {
+    // Threat model: a process of this user could swap a parent folder between realpath and open,
+    // but it could read the file itself, so this window gives it no reach it lacks.
     fd = fs.openSync(
       realPath,
       fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW

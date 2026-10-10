@@ -111,7 +111,7 @@ export const OVERLAY_MESSAGES = defineMessages({
       'Add this folder to your workspace folders and this check won’t appear next time.',
     'overlay.approvalRequired.outsideWorkspace.hintMultipleFolders':
       'Add these folders to your workspace folders and this check won’t appear next time.',
-    'overlay.approvalRequired.outsideWorkspace.openSettings': 'Open workspace folder settings',
+    'overlay.approvalRequired.outsideWorkspace.openSettings': 'Add a workspace folder',
     'overlay.approvalRequired.outsideSandbox.title':
       'This runs outside Pantaray’s protected environment',
     'overlay.approvalRequired.outsideSandbox.purpose': 'What it does',
@@ -229,7 +229,7 @@ export const OVERLAY_MESSAGES = defineMessages({
       'このフォルダを作業フォルダに登録すると、次からはこの確認は出なくなります。',
     'overlay.approvalRequired.outsideWorkspace.hintMultipleFolders':
       'これらのフォルダを作業フォルダに登録すると、次からはこの確認は出なくなります。',
-    'overlay.approvalRequired.outsideWorkspace.openSettings': '作業フォルダの設定を開く',
+    'overlay.approvalRequired.outsideWorkspace.openSettings': '作業フォルダを追加',
     'overlay.approvalRequired.outsideSandbox.title':
       'この操作は、Pantaray の安全な実行環境の外で動かします',
     'overlay.approvalRequired.outsideSandbox.purpose': '何をするか',

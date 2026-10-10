@@ -57,8 +57,10 @@ export const ChatView = forwardRef<
     reveal: ChatReveal | null;
     /** A card selects its work for the detail pane. */
     onOpenWork: (work: WorkKey) => void;
+    /** The composer's "Add project". */
+    onAddProject: () => void;
   }
->(function ChatView({ notice: pageNotice, chat, composer, reveal, onOpenWork }, ref) {
+>(function ChatView({ notice: pageNotice, chat, composer, reveal, onOpenWork, onAddProject }, ref) {
   const { t, language } = useI18n();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
@@ -295,6 +297,7 @@ export const ChatView = forwardRef<
         composer={composer}
         textareaRef={textareaRef}
         t={t}
+        onAddProject={onAddProject}
         onSend={() => {
           setJump(null);
           scroll.followNewest();

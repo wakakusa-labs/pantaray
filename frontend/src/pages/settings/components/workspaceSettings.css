@@ -1,4 +1,43 @@
-/* Master-detail: the project list on a darker band, the selection beside it. */
+/* Master-detail inside the Settings content: the project list, the selection beside it. */
+.workspace-settings {
+  align-items: flex-start;
+  display: flex;
+  gap: 28px;
+  min-width: 0;
+  padding-top: var(--space-xl);
+}
+
+.workspace-master {
+  display: flex;
+  flex: 0 0 240px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workspace-detail {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .workspace-settings {
+    flex-direction: column;
+  }
+
+  .workspace-master {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+
+.workspace-master-header .dashboard-section-title {
+  margin: 0;
+}
+
 .workspace-master-header {
   align-items: center;
   display: flex;

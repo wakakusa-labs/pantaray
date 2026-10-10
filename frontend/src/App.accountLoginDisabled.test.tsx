@@ -7,7 +7,6 @@ import { UiLanguageProvider } from './context/UiLanguageContext';
 
 vi.mock('./pages/SuggestionHistoryPage', () => ({ default: () => <h1>Local history</h1> }));
 vi.mock('./pages/SettingsPage', () => ({ default: () => <h1>Local settings</h1> }));
-vi.mock('./pages/WorkspacePage', () => ({ default: () => <h1>Local workspace</h1> }));
 vi.mock('./components/RecordingIntroDialog', () => ({ RecordingIntroDialog: () => null }));
 // The real Supabase module loads here: with account login off it needs no Supabase setting.
 

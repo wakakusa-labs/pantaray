@@ -8,6 +8,7 @@ import { HistorySidebar } from '@/components/history/HistorySidebar';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import { useI18n } from '@/context/useI18n';
+import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
 import {
   historyItemSelection,
   historySelectionSearch,
@@ -33,7 +34,8 @@ const UNLISTED_TITLE = {
 const SuggestionHistoryPage = () => {
   const { chat, composer, taskDrafts } = useChatSession();
   const history = useSuggestionHistory();
-  const { language } = useI18n();
+  const { language, t } = useI18n();
+  const workspace = useWorkspaceSettingsController(t);
   const location = useLocation();
   const navigate = useNavigate();
   const selection = parseHistorySelection(location.search);
@@ -51,7 +53,7 @@ const SuggestionHistoryPage = () => {
   };
   const showInChat = (actionId: string) =>
     navigate({ search: historySelectionSearch('chat') }, { state: showChatState(actionId) });
-  const addProject = () => navigate('/workspace');
+  const addProject = () => void workspace.addProjectFromFolder();
 
   const renderDetail = () => {
     if (selection === 'chat')
@@ -63,6 +65,7 @@ const SuggestionHistoryPage = () => {
           composer={composer}
           reveal={reveal}
           onOpenWork={select}
+          onAddProject={addProject}
         />
       );
     const { kind, id } = splitWorkKey(selection);
@@ -95,7 +98,12 @@ const SuggestionHistoryPage = () => {
 
   return (
     <div className="history-page">
-      <HistorySidebar history={history} selected={selection} onSelect={select} />
+      <HistorySidebar
+        history={history}
+        projects={workspace}
+        selected={selection}
+        onSelect={select}
+      />
       <div className="history-detail">{renderDetail()}</div>
     </div>
   );

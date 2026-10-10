@@ -12,6 +12,11 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.delete.confirmBody': 'The conversation will be removed and can’t be restored.',
     'history.delete.busy': 'This conversation is running, so it can’t be deleted right now.',
     'history.delete.failed': 'Failed to delete the conversation.',
+    'history.projects.title': 'Projects',
+    'history.projects.add': 'Add project',
+    'history.projects.deleteConfirmTitle': 'Delete {name}?',
+    'history.projects.deleteConfirmBody':
+      'It leaves this list. The files in its folder stay as they are.',
     'history.loadFailedPrefix': 'Failed to load history:',
     'history.error.bridgeUnavailable': 'The desktop history bridge is unavailable.',
     'history.error.runtimeUnavailable': 'The local runtime is unavailable.',
@@ -113,6 +118,11 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.delete.confirmBody': '会話の内容が消え、元に戻せません。',
     'history.delete.busy': 'この会話は実行中のため、いまは削除できません。',
     'history.delete.failed': '会話を削除できませんでした。',
+    'history.projects.title': 'プロジェクト',
+    'history.projects.add': 'プロジェクトを追加',
+    'history.projects.deleteConfirmTitle': '{name} を削除しますか？',
+    'history.projects.deleteConfirmBody':
+      '一覧から外れます。フォルダのファイルはそのまま残ります。',
     'history.loadFailedPrefix': '履歴の読み込みに失敗しました:',
     'history.error.bridgeUnavailable': '提案履歴の取得に必要なブリッジが利用できません。',
     'history.error.runtimeUnavailable': 'ローカル実行基盤が利用できません。',

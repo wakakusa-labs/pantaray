@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type {
@@ -108,6 +108,23 @@ const attachFile = vi.fn(async ({ name }: { name: string }) => ({
   byteSize: 15,
 }));
 const discardAttachment = vi.fn(async () => undefined);
+const selectFolder = vi.fn(async () => ({ canceled: false, path: '/Users/me/aurora' }));
+const createProject = vi.fn(async ({ displayName }: { displayName: string }) => ({
+  project_id: 'p-1',
+  display_name: displayName,
+  sort_order: 0,
+  organization_ids: [],
+}));
+const createFolder = vi.fn(
+  async (input: { displayName: string; realPath: string; projectIds: string[] }) => ({
+    folder_id: 'f-1',
+    display_name: input.displayName,
+    real_path: input.realPath,
+    canonical_real_path: input.realPath,
+    organization_ids: [],
+    project_ids: input.projectIds,
+  })
+);
 const historyFetch = vi.fn(async () => ({
   data: [work('A1', '見積書のたたき台を作る', 'running')] as ConversationHistoryListItem[],
   nextCursor: null,
@@ -144,6 +161,17 @@ beforeEach(() => {
     },
     history: { fetch: historyFetch, openConversation, openNewConversation: vi.fn() },
     actions: { attachFile, attachImage: vi.fn(), discardAttachment },
+    workspaceSettings: {
+      get: async () => ({
+        read_access_scope: 'workspace',
+        organizations: [],
+        projects: [],
+        folders: [],
+      }),
+      selectFolder,
+      createProject,
+      createFolder,
+    },
     process: { platform: 'darwin', env: { NODE_ENV: 'test' } },
   } as unknown as Window['electron'];
 });
@@ -152,15 +180,6 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
-
-function WorkspaceStub() {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate('/history')}>
-      Back to History
-    </button>
-  );
-}
 
 const OWNER = { id: 'user-1', kind: 'account' } as const;
 
@@ -174,7 +193,6 @@ const renderPage = (
           <ChatSessionProvider>
             <Routes>
               <Route path="/history" element={<SuggestionHistoryPage />} />
-              <Route path="/workspace" element={<WorkspaceStub />} />
             </Routes>
           </ChatSessionProvider>
         </LocalOwnerContext.Provider>
@@ -341,15 +359,16 @@ it('a card selects its work for the detail pane, without opening an Overlay', as
   expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
-it('a task pane’s left composers outlive a trip to Workspace for a project', async () => {
+it('a task pane’s Add project adds the chosen folder as a project in the sidebar', async () => {
   pages = [{ items: [], next_cursor: null }];
-  panes.drafts = [];
   renderPage({ pathname: '/history', search: '?item=action:A1' });
+  const projects = await screen.findByRole('region', { name: 'プロジェクト' });
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
-  await userEvent.click(screen.getByRole('button', { name: 'Back to History' }));
-  await userEvent.click(await screen.findByRole('button', { name: /^見積書のたたき台を作る/ }));
+  expect(await within(projects).findByText('aurora')).toHaveAttribute('title', '/Users/me/aurora');
+  expect(createFolder).toHaveBeenCalledWith(
+    expect.objectContaining({ realPath: '/Users/me/aurora', projectIds: ['p-1'] })
+  );
   expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
-  expect(new Set(panes.drafts).size).toBe(1);
 });
 
 it('the Action pane’s show-in-chat opens the chat on that Action’s latest card', async () => {
@@ -861,15 +880,7 @@ it('names a workspace project with @ and sends it the way an Action message name
   expect(within(mine).getByText('Aurora Web')).toHaveClass('action-conversation__project-ref');
 });
 
-it('keeps the draft and its document through a trip to Workspace to add a project', async () => {
-  (window.electron as unknown as { workspaceSettings: unknown }).workspaceSettings = {
-    get: async () => ({
-      read_access_scope: 'workspace',
-      organizations: [],
-      projects: [],
-      folders: [],
-    }),
-  };
+it('adds a project from @ in place, keeping the draft and its document', async () => {
   pages = [{ items: [], next_cursor: null }];
   renderPage();
   const input = (await screen.findByRole('textbox', { name: 'メッセージ' })) as HTMLTextAreaElement;
@@ -882,10 +893,12 @@ it('keeps the draft and its document through a trip to Workspace to add a projec
   await screen.findByRole('button', { name: '議事録.pdf を削除' });
   fireEvent.change(input, { target: { value: 'これを @', selectionStart: 5 } });
   await userEvent.click(await screen.findByRole('option', { name: 'プロジェクトを追加' }));
-  await userEvent.click(await screen.findByRole('button', { name: 'Back to History' }));
 
+  const projects = screen.getByRole('region', { name: 'プロジェクト' });
+  expect(await within(projects).findByText('aurora')).toBeInTheDocument();
+  expect(selectFolder).toHaveBeenCalledOnce();
   // The draft, @ included, and the staged file are as they were left.
-  expect(await screen.findByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
   expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
   expect(discardAttachment).not.toHaveBeenCalled();
 });

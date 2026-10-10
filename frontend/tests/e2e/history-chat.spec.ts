@@ -131,6 +131,15 @@ async function installBridge(
         value: {
           ipcRenderer: { on: () => noop, send: noop },
           process: { platform: 'darwin', env: { NODE_ENV: 'test' } },
+          // The sidebar lists the workspace's projects; this page has none.
+          workspaceSettings: {
+            get: async () => ({
+              read_access_scope: 'workspace',
+              organizations: [],
+              projects: [],
+              folders: [],
+            }),
+          },
           auth: {
             getState: async () => ({
               authStatus: 'authenticated',

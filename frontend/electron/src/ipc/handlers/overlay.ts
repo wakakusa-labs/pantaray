@@ -49,7 +49,7 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
   });
 
   registrar.on('overlay:openWorkspaceSettings', () => {
-    ctx.windows.showMainRoute('/workspace');
+    ctx.windows.showMainRoute('/settings?section=workspace');
   });
 
   registrar.handle('overlay:showChat', (_event, request) =>

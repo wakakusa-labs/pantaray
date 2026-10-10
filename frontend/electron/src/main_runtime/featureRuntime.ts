@@ -9,6 +9,7 @@ import {
   shell,
 } from 'electron';
 import { execFile } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
@@ -225,7 +226,9 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       : await dialog.showOpenDialog(options);
     if (result.canceled || result.filePaths.length === 0) return { canceled: true, path: null };
     lastWorkspaceFolderParent = path.dirname(result.filePaths[0]);
-    return { canceled: false, path: result.filePaths[0] };
+    // Resolved as the local backend resolves a folder's canonical_real_path, so the renderer can
+    // tell a folder that is already registered: registering it again replaces its links.
+    return { canceled: false, path: await realpath(result.filePaths[0]) };
   };
   const chooseApp = async (): Promise<string | null> => {
     const mainWindow = params.getMainWindow();

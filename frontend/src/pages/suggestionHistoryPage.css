@@ -68,6 +68,9 @@
 }
 
 .history-detail {
+  /* The conversations read like the small window's: a size up with looser lines. */
+  --text-body-size: 15px;
+  --text-body-leading: 1.75;
   display: flex;
   flex: 1;
   flex-direction: column;

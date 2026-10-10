@@ -39,6 +39,9 @@ from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import 
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
 )
+from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
+    resolve_action_process_lineage_in_connection,
+)
 from pantaray_agents.local_runtime.runtime.action_terminal_repository import (
     ActionTerminalRepository,
 )
@@ -1125,11 +1128,25 @@ def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
         followup["process_id"],
     )
 
-    # The new run continues from a checkpoint that already holds the queued
-    # message, at exactly the step its own message opens.
+    # As a hand-off does, the run starts at its earliest message and continues
+    # from a checkpoint that already holds every message of its turn.
     payload, next_preparation = _claim_and_prepare(db_path, claimed_by="worker:next")
     assert payload["process_id"] == followup["process_id"]
-    assert next_preparation.context.user_message.message_id == "message-next"
+    assert next_preparation.context.user_message.message_id == "message-queued"
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        lineage = resolve_action_process_lineage_in_connection(
+            connection=connection,
+            user_id=USER_ID,
+            action_id=action_id,
+            process_id=str(followup["process_id"]),
+        )
+        (queued_sequence,) = connection.execute(
+            "SELECT accepted_sequence FROM agent_action_steps WHERE step_id = ?",
+            (queued["step_id"],),
+        ).fetchone()
+    # Its root is the message it continues from, which recovery anchors on.
+    assert lineage.root_accepted_sequence == queued_sequence
     with sqlite3.connect(db_path) as connection:
         (checkpoint_json,) = connection.execute(
             """SELECT runtime_state_checkpoint FROM agent_action_steps
@@ -1138,12 +1155,12 @@ def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
             (action_id,),
         ).fetchone()
     checkpoint = json.loads(checkpoint_json)
-    assert checkpoint["step"] == next_preparation.context.user_step_number == 3
+    assert checkpoint["step"] == 4
     assert [
         entry.get("user_request_text")
         for entry in checkpoint["history_by_scope"]["S"]
         if entry["step_type"] == "user_request"
-    ] == ["最初", "実行中に送った指示"]
+    ] == ["最初", "実行中に送った指示", "次の指示"]
 
 
 def _all_unadopted(client: TestClient, action_id: str) -> list[dict[str, object]]:

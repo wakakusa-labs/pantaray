@@ -355,6 +355,7 @@ def load_not_executed_action_user_steps_in_connection(
     connection: sqlite3.Connection,
     user_id: str,
     action_id: str,
+    after_accepted_sequence: int,
 ) -> tuple[PendingActionUserStep, ...]:
     """The USER turns a stopped or failed run left untaken, in sending order."""
 
@@ -363,6 +364,7 @@ def load_not_executed_action_user_steps_in_connection(
         user_id=user_id,
         action_id=action_id,
         expected_process_id=None,
+        after_accepted_sequence=after_accepted_sequence,
     )
 
 
@@ -372,6 +374,7 @@ def _load_unadopted_user_steps(
     user_id: str,
     action_id: str,
     expected_process_id: str | None,
+    after_accepted_sequence: int = 0,
 ) -> tuple[PendingActionUserStep, ...]:
     """Pending turns of one run, or (``None``) the not-executed ones of any run."""
 
@@ -385,9 +388,10 @@ def _load_unadopted_user_steps(
         FROM agent_action_steps
         WHERE user_id = ? AND action_id = ? AND step_type = 'user_request'
           AND step_number IS NULL AND (adoption_canceled_at IS NOT NULL) = ?
+          AND accepted_sequence > ?
         ORDER BY accepted_sequence, step_id
         """,
-        (user_id, action_id, not_executed),
+        (user_id, action_id, not_executed, after_accepted_sequence),
     ).fetchall()
     pending: list[PendingActionUserStep] = []
     for row in rows:

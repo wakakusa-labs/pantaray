@@ -8,6 +8,7 @@ import type {
   ActionMessageSubmitResult,
 } from '../../actions/actionContracts';
 import { LocalBackendRequestError } from '../../localBackend/client';
+import type { TaskSendOutcome } from '../../actions/taskDraftStore';
 import {
   ActionConversationOverlayRequestSchema,
   ActionConversationPageRequestSchema,
@@ -130,7 +131,36 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     const parsed = parseInput(ActionMessageRequestSchema, 'action:submitMessage', request);
     const replyTo =
       parsed.target.kind === 'new' ? (parsed.target.reply_to_suggestion_id ?? null) : null;
-    return openUserTurn(ctx, event, () => ctx.actions.submitMessage(parsed), replyTo);
+    // A composer shares nothing while its send is out; how the send ends settles the task's draft.
+    const owner = ctx.actions.getCurrentSubjectId();
+    const work =
+      parsed.target.kind === 'existing'
+        ? (`action:${parsed.target.action_id}` as const)
+        : replyTo !== null
+          ? (`suggestion:${replyTo}` as const)
+          : null;
+    const settle = (outcome: TaskSendOutcome) => {
+      if (owner !== null && work !== null) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
+    };
+    try {
+      const result = await openUserTurn(
+        ctx,
+        event,
+        () => ctx.actions.submitMessage(parsed),
+        replyTo
+      );
+      settle(result.kind === 'submitted' || result.kind === 'reply_exists' ? 'sent' : 'refused');
+      return result;
+    } catch (error) {
+      // The backend answered with a refusal, or the outcome is unknown and only a retry of
+      // this exact request, which it dedupes, may follow.
+      settle(
+        error instanceof LocalBackendRequestError && error.status !== null && error.status < 500
+          ? 'refused'
+          : 'unknown'
+      );
+      throw error;
+    }
   });
   registrar.handle('action:resume', async (event, request) =>
     openUserTurn(

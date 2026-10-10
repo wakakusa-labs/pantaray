@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const { registerActionHandlers } = require('../electron/dist/ipc/handlers/actions.js');
 const { LocalBackendRequestError } = require('../electron/dist/localBackend/client.js');
 const { IpcSenderRejectedError } = require('../electron/dist/ipc/senderTrust.js');
+const { createTaskDraftStore } = require('../electron/dist/actions/taskDraftStore.js');
 
 const MESSAGE_RESPONSE = {
   action_id: 'action-1',
@@ -16,7 +17,12 @@ const MESSAGE_RESPONSE = {
 
 const MAIN_SENDER = { id: 100 };
 
-function register(overrides, overlayOverrides, mainWindow = null) {
+function register(
+  overrides,
+  overlayOverrides,
+  mainWindow = null,
+  taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} })
+) {
   const handlers = new Map();
   const actions = {
     getCurrentSubjectId: () => 'user-1',
@@ -29,7 +35,7 @@ function register(overrides, overlayOverrides, mainWindow = null) {
   const overlay = { resumeLiveProcess: () => {}, ...overlayOverrides };
   const windows = { getMainWindow: () => mainWindow };
   registerActionHandlers(
-    { actions, overlay, windows },
+    { actions, overlay, windows, taskDrafts },
     { handle: (channel, handler) => handlers.set(channel, handler) }
   );
   return (channel, payload, sender = { id: 1 }) => handlers.get(channel)({ sender }, payload);
@@ -176,6 +182,8 @@ test('Action submit binds the same Overlay before starting canonical refresh', a
     response,
   });
   assert.deepEqual(calls, [
+    // The owner whose draft a failed send would give its words back to.
+    'subject',
     'resolve_sender',
     'subject',
     'submit',
@@ -282,6 +290,56 @@ test('Action submit maps only typed conflicts and never delivers a failed HTTP c
     else await assert.rejects(submission, (error) => error === current.error);
     assert.deepEqual(delivered, []);
   }
+});
+
+test('How a send ends settles the task draft, also with its window gone', async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const heard = [];
+  taskDrafts.open('user-1', 'action:action-1', { id: 7, send: (_c, change) => heard.push(change) });
+  const request = {
+    ...validSubmit(),
+    message: {
+      ...validSubmit().message,
+      images: [{ kind: 'image', storage_path: 'user-1/2026-10-11/a.png' }],
+    },
+  };
+  const send = (submitMessage) =>
+    register({ submitMessage }, {}, null, taskDrafts)('action:submitMessage', request);
+  const words = {
+    text: 'hello',
+    mentions: [],
+    attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
+  };
+
+  await send(async () => MESSAGE_RESPONSE);
+  assert.deepEqual(heard, []);
+
+  // The response was lost: only this exact request, deduped by its message_id, may follow.
+  await assert.rejects(
+    send(async () => {
+      throw new LocalBackendRequestError('backend failed', 500, 'InternalError');
+    })
+  );
+  assert.equal(heard.at(-1).draft.retry.message.message_id, 'message-1');
+  assert.deepEqual({ ...heard.at(-1).draft, retry: null }, { ...words, retry: null });
+
+  // Its retry went through: no window offers it any more.
+  await send(async () => MESSAGE_RESPONSE);
+  assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
+
+  // Refused: the words come back as a plain draft, unless a newer one was written meanwhile.
+  await send(async () => {
+    throw new LocalBackendRequestError('stale process', 409, 'ExpectedProcessConflict');
+  });
+  assert.deepEqual(heard.at(-1).draft, { ...words, retry: null });
+  taskDrafts.update('user-1', 'action:action-1', { ...words, text: 'newer', retry: null }, 7);
+  const count = heard.length;
+  await assert.rejects(
+    send(async () => {
+      throw new Error('socket hang up');
+    })
+  );
+  assert.equal(heard.length, count);
 });
 
 function mainWindowOf(webContents) {

@@ -24,6 +24,8 @@ import type {
 import { buildFrontendDevOrigin } from '../runtime/devFrontendEnv';
 import { createIpcSenderSecurity } from './senderTrust';
 import { restoreAndFocusWindow } from '../windows/windowVisibility';
+import { createTaskDraftStore } from '../actions/taskDraftStore';
+import { discardStagedAttachment } from './handlers/actionAttachments';
 
 export function buildMainContext(params: {
   ipcMain: MainContext['ipcMain'];
@@ -284,6 +286,10 @@ export function buildMainContext(params: {
     chat: params.chat,
 
     actionImages: params.actionImages,
+    taskDrafts: createTaskDraftStore({
+      discardStagedFile: (ownerId, attachmentId) =>
+        discardStagedAttachment(params.actionImages.localArtifactRoot, ownerId, attachmentId),
+    }),
 
     ui: {
       getLanguage: () => normalizeUiLanguage(params.getUiLanguage()),

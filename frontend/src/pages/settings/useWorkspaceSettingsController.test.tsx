@@ -380,6 +380,57 @@ describe('useWorkspaceSettingsController', () => {
     expect(result.current.settings).toEqual(server);
   });
 
+  it('refuses a second ＋ while the first add is still in flight, and is busy until it ends', async () => {
+    const folderRequest = createDeferred<{
+      folder_id: string;
+      display_name: string;
+      real_path: string;
+      canonical_real_path: string;
+      organization_ids: string[];
+      project_ids: string[];
+    }>();
+    const selectFolder = vi.fn(async () => ({ canceled: false, path: '/Users/me/aurora' }));
+    const createProject = vi.fn(async () => ({
+      project_id: 'p-1',
+      display_name: 'aurora',
+      sort_order: 0,
+      organization_ids: [],
+    }));
+    const createFolder = vi.fn(() => folderRequest.promise);
+    installWorkspaceApi({
+      get: async () => emptySettings,
+      selectFolder,
+      createProject,
+      createFolder,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    let first!: Promise<void | undefined>;
+    act(() => {
+      first = result.current.addProjectFromFolder();
+    });
+    await waitFor(() => expect(createFolder).toHaveBeenCalledOnce());
+    expect(result.current.busy).toBe(true);
+    await act(async () => result.current.addProjectFromFolder());
+
+    expect(selectFolder).toHaveBeenCalledOnce();
+    expect(createProject).toHaveBeenCalledOnce();
+    await act(async () => {
+      folderRequest.resolve({
+        folder_id: 'f-1',
+        display_name: 'aurora',
+        real_path: '/Users/me/aurora',
+        canonical_real_path: '/Users/me/aurora',
+        organization_ids: [],
+        project_ids: ['p-1'],
+      });
+      await first;
+    });
+    expect(result.current.busy).toBe(false);
+    expect(result.current.settings?.folders.map((folder) => folder.project_ids)).toEqual([['p-1']]);
+  });
+
   it('never takes back a project it did not create when the name was taken', async () => {
     // As workspace_settings.py does since names conflict: a taken name is refused.
     const existing = {

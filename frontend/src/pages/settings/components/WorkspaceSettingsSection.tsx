@@ -79,7 +79,7 @@ export function WorkspaceSettingsSection({ t }: WorkspaceSettingsSectionProps) {
               <WorkspaceProjectList
                 projects={settings.projects}
                 folders={settings.folders}
-                disabled={controller.isProjectStructurePending}
+                disabled={controller.busy}
                 dragController={controller.dragController}
                 selectedProjectId={selectedProject?.project_id ?? null}
                 t={t}

@@ -1479,6 +1479,10 @@ describe('AgentOverlay broader E2E', () => {
     });
     await act(async () => snapshotListener?.(offer));
     const field = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
+    expect(field).toHaveAttribute(
+      'placeholder',
+      "Conditions to approve with, or why you're passing (optional)"
+    );
     fireEvent.change(field, { target: { value: 'Only the summary, please' } });
 
     // Enter decides nothing; only the buttons do.

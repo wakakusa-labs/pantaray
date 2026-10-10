@@ -170,7 +170,7 @@ describe('SuggestionTaskPane', () => {
     expect(dismissButton()).toBeEnabled();
     expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
       'placeholder',
-      'Add conditions and approve (optional)'
+      "Conditions to approve with, or why you're passing (optional)"
     );
   });
 

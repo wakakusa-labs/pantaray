@@ -75,7 +75,7 @@ it.each([
   window.history.replaceState(null, '', `/#${path}`);
   render(subject());
   expect(await screen.findByRole('heading', { name: heading })).toBeVisible();
-  // Projects live in History's sidebar and the workspace in Settings; the rail has no page for them.
+  // Projects live in History's sidebar; the rail has no page for them.
   expect(
     within(screen.getByRole('navigation')).getAllByRole('button', {
       name: /^(履歴|設定|ワークスペース)$/,

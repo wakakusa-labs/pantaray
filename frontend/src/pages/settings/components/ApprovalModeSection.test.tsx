@@ -121,10 +121,8 @@ describe('ApprovalModeSection', () => {
     expect(getCachedWorkspaceSettings('user-1')).toBeNull();
     expect(approval.setWorkspaceEditCommandPreference).not.toHaveBeenCalled();
 
-    // The workspace it reads from is managed in Settings' own Workspace section.
+    // The workspace it reads from is the projects in the History page's sidebar.
     fireEvent.click(screen.getByRole('button', { name: 'settings.readAccessScope.openWorkspace' }));
-    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent(
-      '/settings?section=workspace'
-    );
+    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent('/history');
   });
 });

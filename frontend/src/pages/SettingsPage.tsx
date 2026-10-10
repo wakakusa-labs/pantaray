@@ -12,7 +12,6 @@ import { OverlayPositionSection } from './settings/components/OverlayPositionSec
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
 import { ShortcutSection } from './settings/components/ShortcutSection';
-import { WorkspaceSettingsSection } from './settings/components/WorkspaceSettingsSection';
 import type { Translate } from './settings/types';
 import { useSettingsPageController } from './settings/useSettingsPageController';
 import './settings/settingsPage.css';
@@ -21,7 +20,6 @@ type SettingsSectionId =
   | 'ai_connection'
   | 'language'
   | 'execution'
-  | 'workspace'
   | 'shortcuts'
   | 'overlay_position'
   | 'screenshots';
@@ -30,18 +28,17 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
   'language',
   'execution',
-  'workspace',
   'shortcuts',
   'overlay_position',
   'screenshots',
 ];
 
 /**
- * Recording, execution and the workspace act on the local owner's own data. The AI connection, the
+ * Recording and execution act on the local owner's own data. The AI connection, the
  * language, the shortcut and the overlay position belong to the installation, and the connection section owns a
  * browser sign-in that its unmount cancels, so none of them may hang off the owner.
  */
-const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'workspace', 'screenshots'];
+const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
 
 function getSectionFromSearch(value: string | null): SettingsSectionId {
   return SETTINGS_SECTIONS.includes(value as SettingsSectionId)
@@ -64,7 +61,6 @@ const SettingsPage: React.FC = () => {
     ai_connection: t('settings.aiConnection.title'),
     language: t('settings.language.title'),
     execution: t('settings.approvalMode.title'),
-    workspace: t('settings.workspace.title'),
     shortcuts: t('settings.shortcut.title'),
     overlay_position: t('settings.overlayPosition.title'),
     screenshots: t('settings.screenshotCapture.title'),
@@ -131,7 +127,6 @@ function OwnerScopedSections({
   return (
     <>
       {activeSection === 'execution' ? <ApprovalModeSection t={t} /> : null}
-      {activeSection === 'workspace' ? <WorkspaceSettingsSection t={t} /> : null}
       {activeSection === 'screenshots' ? (
         <ScreenshotSections controller={controller} t={t} />
       ) : null}

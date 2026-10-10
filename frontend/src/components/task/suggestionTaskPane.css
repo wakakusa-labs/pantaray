@@ -48,48 +48,6 @@
   color: var(--fog-text);
 }
 
-.suggestion-task__decision {
-  display: flex;
-  gap: 8px;
-}
-
-.suggestion-task__button {
-  height: 34px;
-  padding: 0 16px;
-  border: 1px solid var(--border-color-hover);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--fog-text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.suggestion-task__button:hover:not(:disabled) {
-  background: var(--surface-bg-hover);
-}
-
-/* The one filled control: the hue of the focus ring, so "approve" reads as the way forward. */
-.suggestion-task__button--primary {
-  border-color: transparent;
-  background: #7dabdc;
-  color: #0b0e14;
-  font-weight: var(--weight-semibold);
-}
-
-.suggestion-task__button--primary:hover:not(:disabled) {
-  background: #94bbe4;
-}
-
-.suggestion-task__button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.suggestion-task__button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .suggestion-task__status {
   margin: 0;
   color: var(--fog-text-2);
@@ -102,12 +60,20 @@
   font-size: var(--text-meta-size);
 }
 
-.suggestion-task__composer {
+.suggestion-task__dock {
   flex: none;
   padding: 0 28px 20px;
 }
 
-.suggestion-task__composer > form {
+.suggestion-task__dock > * {
   max-width: 720px;
-  margin: 0 auto;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.suggestion-task__decision {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
 }

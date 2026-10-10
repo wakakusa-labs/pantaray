@@ -172,6 +172,19 @@ describe('SuggestionTaskPane', () => {
     );
   });
 
+  it('puts dismiss, then accept, in one row above the composer, outside the text column', async () => {
+    await renderPane();
+
+    const bar = dismissButton().parentElement;
+    expect(bar).toBe(acceptButton().parentElement);
+    expect(
+      Array.from(bar?.querySelectorAll('button') ?? [], (button) => button.textContent)
+    ).toEqual(['Dismiss suggestion', 'Accept']);
+    expect(bar?.closest('.suggestion-task__column')).toBeNull();
+    // The composer follows the bar.
+    expect(bar?.nextElementSibling?.matches('form.overlay-composer')).toBe(true);
+  });
+
   it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {
     const drafts = createTaskComposerDrafts(undefined);
     const field = () => screen.getByLabelText('Additional instructions (optional)');

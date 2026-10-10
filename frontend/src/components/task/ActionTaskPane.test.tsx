@@ -168,6 +168,24 @@ describe('ActionTaskPane', () => {
     expect(writeText.mock.calls[0][0]).toContain('answer of run-1');
   });
 
+  it("opens with the suggestion the Action started from, as Pantaray's message", async () => {
+    await renderPane();
+    const page = createActionPage('act-1', 'success');
+    page.action.suggestion_id = 'sug-1';
+    page.action.approved_suggestion = {
+      suggestion_id: 'sug-1',
+      content: 'Draft the **invoice** before month end?',
+    };
+    emit(update(page, 1));
+
+    const suggestion = screen.getByRole('region', { name: 'Suggestion' });
+    const conversation = document.querySelector('.action-task__conversation');
+    expect(conversation?.firstElementChild).toBe(suggestion);
+    expect(suggestion.querySelector('strong')?.textContent).toBe('invoice');
+    expect(suggestion.textContent).toContain('before month end?');
+    expect(screen.getByText('answer of run-1')).toBeInTheDocument();
+  });
+
   it('turns the composer button into Stop, Resume and Send by the run and the draft', async () => {
     await renderPane();
     emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));

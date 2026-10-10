@@ -131,6 +131,17 @@
   outline: none;
 }
 
+/* Pantaray's suggestion the Action started from, named the way the task list names it. */
+.action-task__suggestion {
+  display: grid;
+  gap: 4px;
+}
+
+.action-task__suggestion-label {
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
 .action-task__conversation > .action-conversation__retry {
   align-self: flex-end;
 }

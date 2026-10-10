@@ -205,6 +205,10 @@ export function ActionTaskPane({
                   {suggestionLabel}
                 </span>
                 <MarkdownBlock text={approvedSuggestion.content} isStreamFinished />
+                <span className="action-task__suggestion-status">
+                  <Check size={14} aria-hidden="true" />
+                  {t('overlay.suggestionAccepted')}
+                </span>
               </section>
             ) : null}
             {view?.action &&

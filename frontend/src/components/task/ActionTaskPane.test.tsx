@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -202,6 +202,8 @@ describe('ActionTaskPane', () => {
     expect(conversation?.firstElementChild).toBe(suggestion);
     expect(suggestion.querySelector('strong')?.textContent).toBe('invoice');
     expect(suggestion.textContent).toContain('before month end?');
+    // Marked approved, as the small window marks it.
+    expect(within(suggestion).getByText('Approved')).toBeInTheDocument();
     expect(screen.getByText('answer of run-1')).toBeInTheDocument();
   });
 

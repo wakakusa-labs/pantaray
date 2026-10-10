@@ -142,6 +142,16 @@
   font-size: var(--text-meta-size);
 }
 
+/* The same mark the small window puts under an approved suggestion. */
+.action-task__suggestion-status {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: var(--space-xs);
+  color: var(--text-secondary);
+  font-size: var(--text-meta-size);
+}
+
 .action-task__conversation > .action-conversation__retry {
   align-self: flex-end;
 }

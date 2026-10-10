@@ -86,7 +86,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     workspaceSettingsReducer,
     getCachedWorkspaceSettings(ownerId)
   );
-  // A folder dialog answers after other changes may have landed; what it acts on is read then.
+  // A folder dialog can answer after the first read has landed; what it acts on is read then.
   const latestSettingsRef = useRef(settings);
   useEffect(() => {
     latestSettingsRef.current = settings;
@@ -235,17 +235,11 @@ export function useWorkspaceSettingsController(t: Translate) {
         return true;
       const linked = await commitMutation(
         workspacePendingKey.folder(registered.folder_id),
-        async () => {
-          // Read under the folder's key, so links another change just settled are kept.
-          const current = latestSettingsRef.current?.folders.find(
-            (folder) => folder.folder_id === registered.folder_id
-          );
-          if (!current) throw new Error('The folder was unregistered meanwhile.');
-          return await requireWorkspaceSettingsApi().updateFolderLinks(current.folder_id, {
-            organizationIds: current.organization_ids,
-            projectIds: [...new Set([...current.project_ids, ...input.projectIds])],
-          });
-        },
+        async () =>
+          await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
+            organizationIds: registered.organization_ids,
+            projectIds: [...new Set([...registered.project_ids, ...input.projectIds])],
+          }),
         (updated) => ({ type: 'folderLinksUpdated', folder: updated })
       );
       return linked !== null;
@@ -473,7 +467,7 @@ export function useWorkspaceSettingsController(t: Translate) {
    * Takes a folder out of one project. A folder no other project holds is unregistered with
    * it: a registered folder stays inside the agent's boundary, so it must stay in a project.
    */
-  const removeFolderFromProject = async (folderId: string, projectId: string) => {
+  const removeFolderFromProject = locked(false, async (folderId: string, projectId: string) => {
     const folder = settings?.folders.find((candidate) => candidate.folder_id === folderId);
     if (!folder) return false;
     const otherProjectIds = folder.project_ids.filter((candidate) => candidate !== projectId);
@@ -494,7 +488,7 @@ export function useWorkspaceSettingsController(t: Translate) {
             (updated) => ({ type: 'folderLinksUpdated', folder: updated })
           );
     return removed !== null;
-  };
+  });
 
   const openFolder = async (folderId: string): Promise<void> => {
     setErrorMessage(null);

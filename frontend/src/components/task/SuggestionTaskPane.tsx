@@ -181,12 +181,17 @@ export function SuggestionTaskPane({
             validationFailed={accepts ? composer.supplementInvalid : draft.validationFailed}
             canAttach={composer.canAttach}
             action={accepts ? 'accept' : 'send'}
-            placeholder={dismissed ? t('overlay.composer.dismissedPlaceholder') : undefined}
             canSend={accepts ? task.canAccept : task.canReply}
             resumeFailed={false}
             canResume={false}
             textareaRef={textareaRef}
-            placeholder={isOffer ? copy.supplementPlaceholder : undefined}
+            placeholder={
+              dismissed
+                ? t('overlay.composer.dismissedPlaceholder')
+                : accepts
+                  ? copy.supplementPlaceholder
+                  : undefined
+            }
             onAddProject={onAddProject}
             onDraftChange={(value, mentions) =>
               setComposer((current) => ({

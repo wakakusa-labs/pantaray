@@ -207,6 +207,27 @@ describe('SuggestionTaskPane', () => {
     expect(field()).toHaveValue('Use the new unit price');
   });
 
+  it('keeps a draft written around a dismissal, since a reply may still follow it', async () => {
+    const drafts = createTaskComposerDrafts(undefined);
+    const first = await renderPane('sug-1', drafts);
+    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
+      target: { value: 'Only the summary' },
+    });
+    fireEvent.click(dismissButton());
+    first.unmount();
+
+    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
+    const second = await renderPane('sug-1', drafts);
+    const message = () => screen.getByRole('textbox', { name: 'Message' });
+    expect(message()).toHaveValue('Only the summary');
+    fireEvent.change(message(), { target: { value: 'Only the summary, please' } });
+    second.unmount();
+
+    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
+    await renderPane('sug-1', drafts);
+    expect(message()).toHaveValue('Only the summary, please');
+  });
+
   it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {
     let settle: (value: null) => void = () => undefined;
     acceptAction.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));

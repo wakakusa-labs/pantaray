@@ -177,14 +177,13 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
     drafts,
     work: `suggestion:${suggestionId}`,
     composer: composer.composer,
-    // A draft that went out with an approval, or whose suggestion is answered, is not the user's
-    // to come back to. A reply in flight is kept for its retry, and a draft written while the
-    // record loads, or after its read failed, stays.
+    // A draft that went out with an approval, or whose suggestion has its Action, is not the
+    // user's to come back to. A reply in flight is kept for its retry, and a draft written while
+    // the record loads, after its read failed, or around a dismissal (a reply may still follow
+    // it) stays.
     keepable: !(
       phase === 'started' ||
       phase === 'start_failed' ||
-      phase === 'dismissed' ||
-      phase === 'dismissing' ||
       (phase === 'starting' && submission === null)
     ),
     composerGenerationRef: composer.composerGenerationRef,

@@ -35,6 +35,8 @@ export const validReceiveChannels = [
   'overlay:snapshot',
   'overlay:focusComposer',
   'action:conversationUpdated',
+  // Main window only: a suggestion record main holds changed, or is about to be cleared
+  'suggestion:snapshot',
   // Main window only: an item appended to the user's chat, and the overlay's "show in chat"
   'chat:itemAppended',
   'chat:turnState',
@@ -90,6 +92,8 @@ export const validInvokeChannels = [
   'clipboard:writeText',
   'action:submitMessage',
   'action:resume',
+  // Main window: show an Action in place (refresh and live resume, no window)
+  'action:openConversation',
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',
   'actionImage:reveal',
@@ -103,6 +107,8 @@ export const validInvokeChannels = [
   'chat:listItems',
   'chat:retryTurn',
   'chat:getTurnState',
+  // Main window: read a suggestion into main's record without opening a panel
+  'suggestion:read',
   // Suggestion history (main SSOT)
   'history:fetch',
   'history:markCompletionViewed',

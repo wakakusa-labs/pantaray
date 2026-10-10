@@ -106,7 +106,18 @@ export function createOrchestrationRendererBridge(params: {
   });
   notificationWindow.setActionLiveSnapshotGetter(actionLive.getSnapshot);
 
-  function storeOverlayRecord(record: OverlayRecord): void {
+  // The main window shows a suggestion from this record, so it hears every change to it.
+  function sendSuggestionSnapshotToMain(snapshot: OverlaySnapshot): void {
+    const mainWin = params.getMainWindow();
+    if (!mainWin || mainWin.isDestroyed()) return;
+    try {
+      mainWin.webContents.send('suggestion:snapshot', toOverlaySnapshotPayload(snapshot));
+    } catch (error) {
+      console.error('Failed to deliver suggestion snapshot to main window:', error);
+    }
+  }
+
+  function storeOverlayRecord(record: OverlayRecord): OverlaySnapshot {
     const normalized = {
       ...record.snapshot,
       updatedAt: record.snapshot.updatedAt ?? new Date().toISOString(),
@@ -115,6 +126,7 @@ export function createOrchestrationRendererBridge(params: {
       snapshot: normalized,
       executeEnvelope: record.executeEnvelope,
     });
+    sendSuggestionSnapshotToMain(normalized);
     try {
       notificationWindow.setOverlaySnapshot(
         String(normalized.suggestionId),
@@ -124,11 +136,12 @@ export function createOrchestrationRendererBridge(params: {
       // no-op
     }
     syncPrestartReplayLoop();
+    return normalized;
   }
 
-  function storeOverlaySnapshot(snapshot: OverlaySnapshot): void {
+  function storeOverlaySnapshot(snapshot: OverlaySnapshot): OverlaySnapshot {
     const current = overlayRecords.get(String(snapshot.suggestionId));
-    storeOverlayRecord({
+    return storeOverlayRecord({
       snapshot,
       executeEnvelope:
         snapshot.actionPhase !== 'terminal' && current?.snapshot.commandId === snapshot.commandId
@@ -139,6 +152,26 @@ export function createOrchestrationRendererBridge(params: {
 
   function getOverlaySnapshot(suggestionId: string): OverlaySnapshot | null {
     return overlayRecords.get(String(suggestionId))?.snapshot ?? null;
+  }
+
+  // A persisted read seeds the record the live stream keeps current. A read no newer than the
+  // record is stale, and a command the backend may not have recorded yet stays with its envelope:
+  // dropping it would stop its replay and offer the accept again.
+  function adoptSuggestionSnapshot(persisted: OverlaySnapshot): OverlaySnapshot {
+    const current = overlayRecords.get(String(persisted.suggestionId));
+    if (current && current.snapshot.lastSequence >= persisted.lastSequence) return current.snapshot;
+    if (
+      current?.executeEnvelope &&
+      isReplayableActionPhase(current.snapshot.actionPhase) &&
+      persisted.commandId !== current.snapshot.commandId
+    ) {
+      const { commandId, actionPhase, isLive } = current.snapshot;
+      return storeOverlayRecord({
+        snapshot: { ...persisted, commandId, actionPhase, isLive },
+        executeEnvelope: current.executeEnvelope,
+      });
+    }
+    return storeOverlaySnapshot(persisted);
   }
 
   function clearOverlaySnapshot(suggestionId: string): void {
@@ -164,11 +197,13 @@ export function createOrchestrationRendererBridge(params: {
       meta?.suggestion_id ?? (data as Record<string, unknown>).suggestion_id
     );
     if (!suggestionId) return;
+    const current = getOverlaySnapshot(suggestionId);
     if (isSuggestionReactionCommittedEvent(stateEvent) && stateEvent.data.reaction === 'rejected') {
+      // The main window sees the dismissal before the record it reads from is gone.
+      if (current) sendSuggestionSnapshotToMain(applyOverlayServerEvent(current, stateEvent));
       clearOverlaySnapshot(suggestionId);
       return;
     }
-    const current = getOverlaySnapshot(suggestionId);
     storeOverlaySnapshot(applyOverlayServerEvent(current, stateEvent));
   }
 
@@ -528,6 +563,7 @@ export function createOrchestrationRendererBridge(params: {
 
   return {
     acceptAction,
+    adoptSuggestionSnapshot,
     forwardEventToRenderers,
     forwardStatusToRenderers,
     getOverlaySnapshot,

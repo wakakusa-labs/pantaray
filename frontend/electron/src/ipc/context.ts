@@ -181,6 +181,8 @@ export type MainContext = {
     resolveOverlayIdForSender: (sender: IpcSenderIdentity) => string | null;
     registerActionAssociation: (actionId: string, overlayId: string) => void;
     refreshActionConversation: (actionId: string) => void;
+    /** Refreshes the Action's page and attaches its live run if one is unfinished. */
+    refreshAndResumeActionConversation: (actionId: string) => void;
   };
 
   ui: {
@@ -275,6 +277,8 @@ export type MainContext = {
   overlay: {
     resumeLiveProcess: (payload: ResumeProcessRequest) => void;
     resolveOverlayBootstrap: (suggestionId: string) => Promise<OverlayBootstrapResponse | null>;
+    /** Stores a persisted suggestion snapshot in main's record; returns what the record holds. */
+    adoptSuggestionSnapshot: (snapshot: OverlaySnapshot) => OverlaySnapshot;
     submitApprovalDecision: (payload: SubmitApprovalDecisionPayload) => Promise<void>;
     getActionApprovalMode: (actionId: string) => Promise<ActionApprovalModeResponse>;
     setActionApprovalMode: (

@@ -1305,3 +1305,77 @@ test('main keeps the chat turn state for a main window that loads again mid-turn
   hooks.forwardStatusToRenderers({ status: 'closed' });
   assert.equal(harness.manager.getChatTurnState(), null);
 });
+
+function persistedSnapshot(overrides = {}) {
+  return {
+    suggestionId: 'sug-1',
+    commandId: null,
+    interactionContract: 'action_offer',
+    suggestionText: 'Draft the reply',
+    reactionState: null,
+    reactionTimestamp: null,
+    actionPhase: 'idle',
+    actionStatus: null,
+    actionErrorCode: null,
+    actionFailureStage: null,
+    actionFailureMessagePublic: null,
+    processId: null,
+    actionId: null,
+    updatedAt: '2026-10-10T00:00:00Z',
+    lastSequence: 3,
+    isLive: false,
+    ...overrides,
+  };
+}
+
+function suggestionSnapshotsSentToMain(harness) {
+  return harness.mainWindowMessages
+    .filter((message) => message.channel === 'suggestion:snapshot')
+    .map((message) => message.payload.snapshot);
+}
+
+test('the main window hears each suggestion record change, and the dismissal before it is cleared', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  const stored = harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness), [stored]);
+  // The Overlay gets the same payload shape from the same store.
+  assert.deepEqual(harness.overlayPayloads.get('sug-1').snapshot, stored);
+
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+
+  const dismissed = suggestionSnapshotsSentToMain(harness).at(-1);
+  assert.equal(dismissed.reactionState, 'rejected');
+  assert.equal(dismissed.suggestionText, 'Draft the reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+});
+
+test('a persisted suggestion read never replaces newer live state or a pending command', async () => {
+  const harness = createManagerHarness();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+  const stale = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ lastSequence: 2, suggestionText: 'older' })
+  );
+  assert.equal(stale.suggestionText, 'Draft the reply');
+  assert.equal(stale.lastSequence, 3);
+
+  // Accepted from the chat before main read it: the record has no text and an unsent command.
+  const accepted = createManagerHarness();
+  const pending = await accepted.manager.acceptAction(actionRequest());
+  const read = accepted.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 5 }));
+  assert.equal(read.commandId, pending.commandId);
+  assert.equal(read.actionPhase, 'requesting');
+  assert.equal(read.suggestionText, 'Draft the reply');
+
+  // The command is still replayed on the next session, so the accept is not lost.
+  const hooks = accepted.getWsHooks();
+  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'sess-1' });
+  assert.equal(accepted.sentMessages.length, 2);
+  assert.deepEqual(accepted.sentMessages[1], accepted.sentMessages[0]);
+});

@@ -353,6 +353,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           resolveOverlayIdForSender: params.notificationWindow.resolveOverlayIdForSender,
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
+          refreshAndResumeActionConversation: orchestration.refreshAndResumeActionConversation,
         },
         chat: {
           ...createChatFetcher({ requestJson, getUserId }),
@@ -418,6 +419,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         wsGetStatus: () => ({ status: orchestration.isConnected() ? 'connected' : 'disconnected' }),
         enqueueResumeRequest: (payload) => orchestration.enqueueResumeRequest(payload),
         resolveOverlayBootstrap,
+        adoptSuggestionSnapshot: orchestration.adoptSuggestionSnapshot,
         submitApprovalDecision: async (payload) => {
           const subjectId = getUserId();
           if (subjectId === null) throw new Error('Missing authenticated user id.');

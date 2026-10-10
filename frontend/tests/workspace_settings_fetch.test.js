@@ -137,3 +137,25 @@ test('command network settings propagate timeout and storage errors without assu
   await assert.rejects(fetcher.getCommandNetwork(), /request failed/);
   await assert.rejects(fetcher.updateCommandNetwork(false), /request failed/);
 });
+
+test('workspace settings fetcher answers a taken project name as data, not as the project', async () => {
+  const { LocalBackendRequestError } = require('../electron/dist/localBackend/client.js');
+  const answers = [
+    new LocalBackendRequestError('taken', 409),
+    new LocalBackendRequestError('bad', 400),
+  ];
+  const fetcher = createWorkspaceSettingsFetcher({
+    getUserId: () => 'user-1',
+    requestJson: async () => {
+      throw answers.shift();
+    },
+  });
+
+  assert.deepStrictEqual(
+    await fetcher.createProject({ displayName: 'Core', organizationIds: [] }),
+    {
+      errorCode: 'PROJECT_NAME_TAKEN',
+    }
+  );
+  await assert.rejects(fetcher.createProject({ displayName: 'Core', organizationIds: [] }), /bad/);
+});

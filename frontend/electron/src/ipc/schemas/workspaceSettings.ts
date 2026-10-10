@@ -31,6 +31,10 @@ export const CreateProjectInputSchema = z.object({
   organizationIds: IdArraySchema,
 });
 
+export const RenameProjectInputSchema = z.object({
+  displayName: DisplayNameSchema,
+});
+
 export const CreateFolderInputSchema = z.object({
   displayName: DisplayNameSchema,
   realPath: RealPathSchema,
@@ -52,6 +56,7 @@ export const CommandNetworkEnabledSchema = z.boolean();
 
 export type CreateOrganizationInput = z.infer<typeof CreateOrganizationInputSchema>;
 export type CreateProjectInput = z.infer<typeof CreateProjectInputSchema>;
+export type RenameProjectInput = z.infer<typeof RenameProjectInputSchema>;
 export type CreateFolderInput = z.infer<typeof CreateFolderInputSchema>;
 export type UpdateProjectLinksInput = z.infer<typeof UpdateProjectLinksInputSchema>;
 export type UpdateFolderLinksInput = z.infer<typeof UpdateFolderLinksInputSchema>;

@@ -256,7 +256,7 @@ describe('useWorkspaceSettingsController', () => {
     expect(result.current.settings?.folders[0].project_ids).toEqual(['a', 'b', 'c']);
   });
 
-  it('removes a project with the folders only it holds, keeping a folder another project shares', async () => {
+  it('removes a project in one call, and drops the folders only it held as the backend does', async () => {
     const folder = (folderId: string, projectIds: string[]) => ({
       folder_id: folderId,
       display_name: folderId,
@@ -285,21 +285,58 @@ describe('useWorkspaceSettingsController', () => {
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await waitFor(() => expect(result.current.settings).not.toBeNull());
 
-    deleteFolder.mockRejectedValueOnce(new Error('offline'));
-    await act(async () => {
-      expect(await result.current.removeProject('a')).toBe(false);
-    });
-    // The project stays while its folder could not go, so nothing is left registered unseen.
-    expect(deleteProject).not.toHaveBeenCalled();
-
     await act(async () => {
       expect(await result.current.removeProject('a')).toBe(true);
     });
-    expect(deleteFolder).toHaveBeenLastCalledWith('own');
-    expect(deleteFolder).toHaveBeenCalledTimes(2);
+
+    expect(deleteProject).toHaveBeenCalledOnce();
     expect(deleteProject).toHaveBeenCalledWith('a');
+    expect(deleteFolder).not.toHaveBeenCalled();
     expect(result.current.settings?.projects.map((item) => item.project_id)).toEqual(['b']);
-    expect(result.current.settings?.folders.map((item) => item.folder_id)).toEqual(['shared']);
+    expect(result.current.settings?.folders).toEqual([folder('shared', ['b'])]);
+  });
+
+  it('never takes back a project it did not create when the name was taken', async () => {
+    // As workspace_settings.py does since names conflict: a taken name is refused.
+    const existing = {
+      project_id: 'p-1',
+      display_name: 'aurora',
+      organization_ids: ['org-1'],
+      sort_order: 0,
+    };
+    const projects = [existing];
+    const createProject = vi.fn(async ({ displayName }: { displayName: string }) => {
+      if (projects.some((item) => item.display_name === displayName))
+        return { errorCode: 'PROJECT_NAME_TAKEN' as const };
+      const created = { ...existing, project_id: 'p-new', display_name: displayName };
+      projects.push(created);
+      return created;
+    });
+    const deleteProject = vi.fn(async () => undefined);
+    installWorkspaceApi({
+      // The sidebar has not seen the project yet: it was created after the last read.
+      get: async () => emptySettings,
+      selectFolder: async () => ({ canceled: false, path: '/Volumes/work/aurora' }),
+      createProject,
+      createFolder: async () => {
+        throw new Error('not a directory');
+      },
+      deleteProject,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    await act(async () => result.current.addProjectFromFolder());
+
+    expect(createProject.mock.calls.map(([input]) => input.displayName)).toEqual([
+      'aurora',
+      'aurora 2',
+    ]);
+    expect(deleteProject).toHaveBeenCalledOnce();
+    expect(deleteProject).toHaveBeenCalledWith('p-new');
+    expect(projects[0]).toEqual(existing);
+    expect(result.current.settings?.projects).toEqual([]);
+    expect(result.current.errorMessage).toBe('settings.workspace.saveFailed');
   });
 });
 

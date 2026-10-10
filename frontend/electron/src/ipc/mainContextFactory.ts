@@ -74,6 +74,7 @@ export function buildMainContext(params: {
   workspaceSettingsUpdateCommandNetwork: MainContext['workspaceSettings']['updateCommandNetwork'];
   workspaceSettingsCreateOrganization: MainContext['workspaceSettings']['createOrganization'];
   workspaceSettingsCreateProject: MainContext['workspaceSettings']['createProject'];
+  workspaceSettingsRenameProject: MainContext['workspaceSettings']['renameProject'];
   workspaceSettingsCreateFolder: MainContext['workspaceSettings']['createFolder'];
   workspaceSettingsReorderProjects: MainContext['workspaceSettings']['reorderProjects'];
   workspaceSettingsDeleteOrganization: MainContext['workspaceSettings']['deleteOrganization'];
@@ -83,6 +84,7 @@ export function buildMainContext(params: {
   workspaceSettingsUpdateFolderLinks: MainContext['workspaceSettings']['updateFolderLinks'];
   workspaceSettingsUpdateReadAccessScope: MainContext['workspaceSettings']['updateReadAccessScope'];
   workspaceSettingsSelectFolder: MainContext['workspaceSettings']['selectFolder'];
+  workspaceSettingsOpenFolder: MainContext['workspaceSettings']['openFolder'];
 
   // screenshot & privacy
   screenshotSync: ScreenshotSyncManager;
@@ -286,6 +288,8 @@ export function buildMainContext(params: {
         params.workspaceSettingsUpdateCommandNetwork(enabled),
       createOrganization: async (input) => params.workspaceSettingsCreateOrganization(input),
       createProject: async (input) => params.workspaceSettingsCreateProject(input),
+      renameProject: async (projectId, input) =>
+        params.workspaceSettingsRenameProject(projectId, input),
       createFolder: async (input) => params.workspaceSettingsCreateFolder(input),
       reorderProjects: async (input) => params.workspaceSettingsReorderProjects(input),
       deleteOrganization: async (organizationId) =>
@@ -299,6 +303,7 @@ export function buildMainContext(params: {
       updateReadAccessScope: async (readAccessScope) =>
         params.workspaceSettingsUpdateReadAccessScope(readAccessScope),
       selectFolder: async () => params.workspaceSettingsSelectFolder(),
+      openFolder: async (folderId) => params.workspaceSettingsOpenFolder(folderId),
     },
 
     screenshot: {

@@ -114,7 +114,7 @@ describe('a task draft shared by its composers', () => {
     expect(bridge.store.open('user-1', 'action:act-2', probe)).toBeNull();
   });
 
-  it('empties the other window while a send is out, and gives a failed one back', async () => {
+  it('empties the other window while a send is out, and offers one lost there for its exact retry', async () => {
     const task = { suggestionId: 'sug-1' };
     const panel = await opened(composerIn(bridge.window(), task));
     const main = await opened(composerIn(bridge.window(), task));
@@ -126,18 +126,134 @@ describe('a task draft shared by its composers', () => {
     act(() => panel.result.current.submitDraft(null, true, null, 0, 'prompt_each_time', 'sug-1'));
     await waitFor(() => expect(main.result.current.composer.draft).toBe(''));
 
+    // No answer came: the other window offers the same request, as the sender does.
     await act(async () => fail(new Error('offline')));
-    await waitFor(() => expect(main.result.current.composer.draft).toBe('Only the summary'));
+    await waitFor(() => expect(main.result.current.composer.submission?.state).toBe('failed'));
+    expect(main.result.current.composer.draft).toBe('Only the summary');
 
-    // Sent this time: nothing is left to offer, in either window.
     submitMessage.mockResolvedValueOnce(submitted('act-9'));
-    act(() => panel.result.current.retrySubmission());
-    await waitFor(() => expect(main.result.current.composer.draft).toBe(''));
-    expect(bridge.store.open('user-1', 'suggestion:sug-1', probe)).toBeNull();
+    act(() => main.result.current.retrySubmission());
+    expect(submitMessage.mock.calls[1][0]).toEqual(submitMessage.mock.calls[0][0]);
+    // It went through: neither window offers it any more.
+    await waitFor(() => expect(panel.result.current.composer.submission).toBeNull());
+    expect(panel.result.current.composer.draft).toBe('');
+  });
+
+  it('drops a read that answers after the composer moved to another task', async () => {
+    const window = bridge.window();
+    let answer!: (draft: unknown) => void;
+    const slow = {
+      ...window,
+      openDraft: vi.fn(() => new Promise<never>((resolve) => (answer = resolve as never))),
+    };
+    bridge.store.update('user-1', 'suggestion:sug-a', draftOf('for A'), 99);
+    const actions = { ...slow, submitMessage } as unknown as Actions;
+    const composer = renderHook(
+      ({ suggestionId }) =>
+        useOverlayComposerController({
+          actions,
+          initialActionId: null,
+          suggestionId,
+          suggestionAccepted: false,
+          language: 'en',
+          onRefreshedPage: () => undefined,
+        }),
+      { initialProps: { suggestionId: 'sug-a' } }
+    );
+    const readA = answer;
+    composer.rerender({ suggestionId: 'sug-b' });
+    await act(async () => readA(draftOf('for A')));
+
+    expect(composer.result.current.composer.draft).toBe('');
+    expect(bridge.store.open('user-1', 'suggestion:sug-b', probe)).toBeNull();
+  });
+
+  it('drops the read after a send that answers once the composer shows the next task', async () => {
+    const window = bridge.window();
+    const reads: ((draft: unknown) => void)[] = [];
+    let opened9 = 0;
+    const slow = {
+      ...window,
+      // The read after the send, the second of the Action it opened, is held back.
+      openDraft: vi.fn((request: { work: string }) =>
+        request.work === 'action:act-9' && ++opened9 === 2
+          ? new Promise((resolve) => reads.push(resolve))
+          : window.openDraft(request as never)
+      ),
+    };
+    const actions = { ...slow, submitMessage } as unknown as Actions;
+    const composer = renderHook(
+      ({ suggestionId }) =>
+        useOverlayComposerController({
+          actions,
+          initialActionId: null,
+          suggestionId,
+          suggestionAccepted: false,
+          language: 'en',
+          onRefreshedPage: () => undefined,
+        }),
+      { initialProps: { suggestionId: 'sug-a' } }
+    );
+    await act(async () => {});
+    act(() => composer.result.current.changeDraft('Do it', []));
+    submitMessage.mockResolvedValueOnce(submitted('act-9'));
+    await act(async () =>
+      composer.result.current.submitDraft(null, true, null, 0, 'prompt_each_time', 'sug-a')
+    );
+    // The conversation page shows the message: the send has gone through.
+    await act(async () =>
+      composer.result.current.setComposer((current) => ({
+        ...current,
+        submission: null,
+        draft: '',
+      }))
+    );
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    composer.rerender({ suggestionId: 'sug-b' });
+    await act(async () => reads[0](draftOf('for act-9')));
+    expect(composer.result.current.composer.draft).toBe('');
+    expect(bridge.store.open('user-1', 'suggestion:sug-b', probe)).toBeNull();
+  });
+
+  it('keeps words typed while the read is out over what the read brings', async () => {
+    const window = bridge.window();
+    let answer!: (draft: unknown) => void;
+    const slow = {
+      ...window,
+      openDraft: vi.fn((request: { work: 'action:act-1' }) =>
+        new Promise((resolve) => (answer = resolve)).then(() => window.openDraft(request))
+      ),
+    };
+    bridge.store.update('user-1', 'action:act-1', draftOf('older'), 99);
+    const composer = composerIn(slow as unknown as ReturnType<typeof bridge.window>);
+    act(() => composer.result.current.changeDraft('newer', []));
+    await act(async () => answer(null));
+
+    expect(composer.result.current.composer.draft).toBe('newer');
+    await waitFor(() =>
+      expect(bridge.store.open('user-1', 'action:act-1', probe)?.text).toBe('newer')
+    );
+  });
+
+  it('shares nothing when the words go back to what the task holds, as an undo does', async () => {
+    const window = bridge.window();
+    const updates = vi.spyOn(window, 'updateDraft');
+    const composer = await opened(composerIn(window));
+
+    act(() => composer.result.current.changeDraft('B', []));
+    act(() => composer.result.current.changeDraft('', []));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    expect(updates).not.toHaveBeenCalled();
   });
 });
 
 const probe = { id: 999, send: () => undefined };
+
+function draftOf(text: string) {
+  return { text, mentions: [], attachments: [], retry: null };
+}
 
 function submitted(actionId: string): ActionMessageSubmitResult {
   return {

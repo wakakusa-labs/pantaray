@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AgentOverlayState } from './model/overlayTypes';
 
@@ -7,21 +7,29 @@ type DecisionState = Pick<
   'suggestionId' | 'reactionState' | 'currentActionId' | 'actionFailureStage'
 >;
 
-/** Closes this panel; main brings the main window forward with the Action selected. */
-export function openTaskInMainWindow(actionId: string): void {
-  void window.electron?.agentOverlay?.openTask?.({ actionId }).catch((error: unknown) => {
-    console.error('Failed to open the task in the main window:', error);
-  });
-}
-
 /**
  * Once work starts in a panel the panel closes and the main window opens the task. A decision
  * made here waits for its outcome: 承認 for the Action's start, 見送る without words for the
- * dismissal's record. A start that fails keeps the panel, which shows the failure.
+ * dismissal's record. A start that fails keeps the panel, which shows the failure; so does a
+ * main window that cannot be shown, since main closes the panel only once it holds the task.
  */
 export function usePanelHandoff(state: DecisionState, acceptFailed: boolean) {
   const awaitingRef = useRef<{ suggestionId: string; decision: 'accept' | 'dismiss' } | null>(null);
+  // The suggestion (none for a new-task panel) whose task the main window could not show.
+  const [failedFor, setFailedFor] = useState<{ suggestionId: string | null } | null>(null);
   const { suggestionId, reactionState, currentActionId, actionFailureStage } = state;
+  const openTask = useCallback(
+    (actionId: string) => {
+      void window.electron?.agentOverlay?.openTask?.({ actionId }).then(
+        () => setFailedFor(null),
+        (error: unknown) => {
+          console.error('Failed to open the task in the main window:', error);
+          setFailedFor({ suggestionId });
+        }
+      );
+    },
+    [suggestionId]
+  );
   useEffect(() => {
     const awaiting = awaitingRef.current;
     if (awaiting === null) return;
@@ -35,10 +43,18 @@ export function usePanelHandoff(state: DecisionState, acceptFailed: boolean) {
       awaitingRef.current = null;
     } else if (currentActionId !== null) {
       awaitingRef.current = null;
-      openTaskInMainWindow(currentActionId);
+      openTask(currentActionId);
     }
-  }, [suggestionId, reactionState, currentActionId, actionFailureStage, acceptFailed]);
-  return useCallback((suggestionId: string, decision: 'accept' | 'dismiss') => {
-    awaitingRef.current = { suggestionId, decision };
-  }, []);
+  }, [suggestionId, reactionState, currentActionId, actionFailureStage, acceptFailed, openTask]);
+  const awaitDecisionOutcome = useCallback(
+    (suggestionId: string, decision: 'accept' | 'dismiss') => {
+      awaitingRef.current = { suggestionId, decision };
+    },
+    []
+  );
+  return {
+    awaitDecisionOutcome,
+    openTask,
+    openTaskFailed: failedFor !== null && failedFor.suggestionId === suggestionId,
+  };
 }

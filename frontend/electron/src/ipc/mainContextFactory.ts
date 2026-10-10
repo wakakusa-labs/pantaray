@@ -29,6 +29,8 @@ export function buildMainContext(params: {
   ipcMain: MainContext['ipcMain'];
   aiConnection: MainContext['aiConnection'];
   getMainWindow: () => BrowserWindow | null;
+  /** Creates the main window on a hash route; `getMainWindow` returns it afterwards. */
+  createMainWindow: (hashRoute: string) => void;
   openNewConversationOverlay: MainContext['windows']['openNewConversationOverlay'];
   openActionConversationOverlay: MainContext['windows']['openActionConversationOverlay'];
   getAllWindows: () => BrowserWindow[];
@@ -181,6 +183,11 @@ export function buildMainContext(params: {
     return result.value;
   }
 
+  const mainWindowUrl = (route: string): string =>
+    params.isDevRuntime()
+      ? `${buildFrontendDevOrigin()}/#${route}`
+      : `file://${params.frontendDistIndex}#${route}`;
+
   return {
     ipcMain: params.ipcMain,
     aiConnection: params.aiConnection,
@@ -193,9 +200,7 @@ export function buildMainContext(params: {
         const mainWindow = params.getMainWindow();
         if (!mainWindow) return;
         try {
-          const url = params.isDevRuntime()
-            ? `${buildFrontendDevOrigin()}/#${route}`
-            : `file://${params.frontendDistIndex}#${route}`;
+          const url = mainWindowUrl(route);
           // A failed load is reported and retried by the window's own did-fail-load listener.
           void mainWindow.loadURL(url).catch(() => undefined);
           restoreAndFocusWindow(mainWindow);
@@ -209,11 +214,25 @@ export function buildMainContext(params: {
         if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
         mainWindow.webContents.send('history:showChat', { actionId });
       },
-      // An in-app navigation, not a load: a load would drop the window's chat and task drafts.
       showTask: (actionId) => {
+        // The same `?item=` the renderer writes (historySelectionSearch).
+        const route = `/history?item=action:${encodeURIComponent(actionId)}`;
         const mainWindow = params.getMainWindow();
-        if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
-        mainWindow.webContents.send('history:showItem', { item: `action:${actionId}` });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          // A loaded page selects it in place: a load would drop its chat and task drafts. A page
+          // still loading has none yet and may not listen yet, so it loads on the task instead.
+          if (mainWindow.webContents.isLoading()) {
+            void mainWindow.loadURL(mainWindowUrl(route)).catch(() => undefined);
+          } else {
+            mainWindow.webContents.send('history:showItem', { item: `action:${actionId}` });
+          }
+          restoreAndFocusWindow(mainWindow);
+          return;
+        }
+        params.createMainWindow(route);
+        if (!restoreAndFocusWindow(params.getMainWindow())) {
+          throw new Error('The main window could not be opened.');
+        }
       },
     },
 

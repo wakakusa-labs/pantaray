@@ -328,7 +328,8 @@ function runWindowStartupStepWithRetry(name, fn, options = {}) {
 
 function createMainWindow(options = {}) {
   const isDev = isDevRuntime();
-  const hashRoute = '/';
+  // A window opened to show something starts on it, e.g. "/history?item=action:<id>".
+  const hashRoute = options.hashRoute ?? '/';
 
   const win = createBrowserWindowWithRetry({
     // Room for the rail, the History sidebar and a readable detail column.

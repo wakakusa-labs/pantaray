@@ -10,15 +10,39 @@ const {
 } = require('../electron/dist/ipc/senderTrust.js');
 const { createNotificationIpcHandlerFactory } = require('../electron/notification_window_ipc.js');
 
-// Work a panel started continues in the main window: the panel closes, the main window comes
-// forward, and its renderer is told which task to select.
+// Work a panel started continues in the main window: the main window comes forward on the task,
+// and only then does the panel close.
 
-function registerWithPanels(steps) {
-  const panels = new Map([
-    [2, { id: 'sug-1', isDestroyed: () => false }],
-    [3, { id: 'standalone:new', isDestroyed: () => false }],
-  ]);
-  // The real hide path the panel's close button takes, over fake windows.
+function createMainWindow(steps, { loading = false } = {}) {
+  return {
+    isDestroyed: () => false,
+    isMinimized: () => true,
+    restore: () => steps.push('restore'),
+    isVisible: () => false,
+    show: () => steps.push('show'),
+    focus: () => steps.push('focus'),
+    loadURL: async (url) => steps.push(['loadURL', url]),
+    webContents: {
+      isLoading: () => loading,
+      send: (channel, payload) => steps.push([channel, payload]),
+    },
+  };
+}
+
+/** The real `showTask` and the real hide path of the panel's close button, over fake windows. */
+function createHandoff(steps, { mainWindow = null, createMainWindow: create } = {}) {
+  let current = mainWindow;
+  const context = buildMainContext({
+    getMainWindow: () => current,
+    createMainWindow: (hashRoute) => {
+      steps.push(['createMainWindow', hashRoute]);
+      current = create ? create() : null;
+    },
+    isDevRuntime: () => false,
+    frontendDistIndex: '/tmp/index.html',
+    recordSecurityEvent: () => {},
+  });
+  const panels = new Map([[2, { id: 'sug-1', isDestroyed: () => false }]]);
   const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
     BrowserWindow: { fromWebContents: (webContents) => panels.get(webContents.id) ?? null },
     screen: {},
@@ -31,35 +55,79 @@ function registerWithPanels(steps) {
   });
   const handlers = new Map();
   registerOverlayHandlers(
-    {
-      windows: { showTask: (actionId) => steps.push(['showTask', actionId]) },
-      overlay: { createNotificationIpcHandlers },
-      actions: {},
-    },
+    { windows: context.windows, overlay: { createNotificationIpcHandlers }, actions: {} },
     { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} }
   );
-  return (senderId, payload) =>
-    handlers.get('overlay:openTask')({ sender: { id: senderId } }, payload);
+  return async (payload) => handlers.get('overlay:openTask')({ sender: { id: 2 } }, payload);
 }
 
-test('overlay:openTask hides the sending panel, then brings the main window to the task', async () => {
+test('a loaded main window selects the task in place, then the panel closes', async () => {
   const steps = [];
-  const openTask = registerWithPanels(steps);
+  const openTask = createHandoff(steps, { mainWindow: createMainWindow(steps) });
 
-  await openTask(2, { actionId: 'act-1' });
-  await openTask(3, { actionId: 'act-2' });
+  await openTask({ actionId: 'act-1' });
+
+  // A message to the loaded page, never a load that would drop its drafts.
+  assert.deepEqual(steps, [
+    ['history:showItem', { item: 'action:act-1' }],
+    'restore',
+    'show',
+    'focus',
+    ['hide', 'sug-1'],
+  ]);
+});
+
+test('a main window still loading loads on the task, then the panel closes', async () => {
+  const steps = [];
+  const openTask = createHandoff(steps, {
+    mainWindow: createMainWindow(steps, { loading: true }),
+  });
+
+  await openTask({ actionId: 'act-1' });
 
   assert.deepEqual(steps, [
+    ['loadURL', 'file:///tmp/index.html#/history?item=action:act-1'],
+    'restore',
+    'show',
+    'focus',
     ['hide', 'sug-1'],
-    ['showTask', 'act-1'],
-    ['hide', 'standalone:new'],
-    ['showTask', 'act-2'],
   ]);
+});
+
+test('without a main window one is created on the task, then the panel closes', async () => {
+  const steps = [];
+  const openTask = createHandoff(steps, { createMainWindow: () => createMainWindow(steps) });
+
+  await openTask({ actionId: 'act 1' });
+
+  assert.deepEqual(steps, [
+    ['createMainWindow', '/history?item=action:act%201'],
+    'restore',
+    'show',
+    'focus',
+    ['hide', 'sug-1'],
+  ]);
+});
+
+test('the panel stays, and the request fails, when no main window can be shown', async () => {
+  const steps = [];
+  const openTask = createHandoff(steps);
+  await assert.rejects(openTask({ actionId: 'act-1' }), /main window could not be opened/);
+  assert.deepEqual(steps, [['createMainWindow', '/history?item=action:act-1']]);
+
+  const failing = [];
+  const openTaskThrough = createHandoff(failing, {
+    createMainWindow: () => {
+      throw new Error('window create failed');
+    },
+  });
+  await assert.rejects(openTaskThrough({ actionId: 'act-1' }), /window create failed/);
+  assert.deepEqual(failing, [['createMainWindow', '/history?item=action:act-1']]);
 });
 
 test('overlay:openTask moves nothing for a malformed request', async () => {
   const steps = [];
-  const openTask = registerWithPanels(steps);
+  const openTask = createHandoff(steps, { mainWindow: createMainWindow(steps) });
 
   for (const payload of [
     { actionId: ' act-1' },
@@ -68,51 +136,9 @@ test('overlay:openTask moves nothing for a malformed request', async () => {
     'act-1',
     null,
   ]) {
-    await assert.rejects(async () => openTask(2, payload), IpcValidationError);
+    await assert.rejects(openTask(payload), IpcValidationError);
   }
   assert.deepEqual(steps, []);
-});
-
-function createHiddenMinimizedMainWindow(steps) {
-  return {
-    isDestroyed: () => false,
-    isMinimized: () => true,
-    restore: () => steps.push('restore'),
-    isVisible: () => false,
-    show: () => steps.push('show'),
-    focus: () => steps.push('focus'),
-    loadURL: async () => steps.push('loadURL'),
-    webContents: { send: (channel, payload) => steps.push([channel, payload]) },
-  };
-}
-
-function buildContext(getMainWindow) {
-  return buildMainContext({
-    getMainWindow,
-    isDevRuntime: () => false,
-    frontendDistIndex: '/tmp/index.html',
-    recordSecurityEvent: () => {},
-  });
-}
-
-test('showTask shows a hidden or minimized main window, focuses it, and selects the task in place', () => {
-  const steps = [];
-  const context = buildContext(() => createHiddenMinimizedMainWindow(steps));
-
-  context.windows.showTask('act-1');
-
-  // Selected by a message to the loaded page, never a load that would drop its drafts.
-  assert.deepEqual(steps, [
-    'restore',
-    'show',
-    'focus',
-    ['history:showItem', { item: 'action:act-1' }],
-  ]);
-});
-
-test('showTask does nothing without a main window', () => {
-  const context = buildContext(() => null);
-  assert.doesNotThrow(() => context.windows.showTask('act-1'));
 });
 
 test('Only a panel asks main to open its task in the main window', () => {

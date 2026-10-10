@@ -28,7 +28,6 @@ import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclo
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
 import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
 import { useReplyAfterDismissal } from './agent-overlay/useReplyAfterDismissal';
-import { openTaskInMainWindow } from './agent-overlay/usePanelHandoff';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -94,7 +93,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       conversation?.update(page);
       setLiveState((current) => (current === liveState ? null : current));
     },
-    onConversationStarted: openTaskInMainWindow,
+    onConversationStarted: ctrl.openTask,
   });
   const standaloneComposerRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
@@ -580,6 +579,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           : undefined
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
+      openTaskFailed={ctrl.openTaskFailed}
       chatActionId={currentView?.action?.action_id ?? null}
       onShowChat={window.electron?.agentOverlay?.showChat}
       conversationCopy={conversationCopy}

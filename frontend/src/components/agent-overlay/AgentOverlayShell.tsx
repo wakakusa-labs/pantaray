@@ -119,6 +119,8 @@ type AgentOverlayShellProps = {
   showBusyIndicator: boolean;
   showThinking?: boolean;
   /** The Action the main window's chat can show; null until one exists. */
+  /** The task this panel started could not be shown in the main window. */
+  openTaskFailed?: boolean;
   chatActionId?: string | null;
   onShowChat?: (request: { actionId: string }) => Promise<void>;
   fadeDurationMs?: number;
@@ -159,6 +161,7 @@ const AgentOverlayShell = ({
   approvalErrorMessage = null,
   showBusyIndicator,
   showThinking = false,
+  openTaskFailed = false,
   chatActionId = null,
   onShowChat,
   fadeDurationMs = 600,
@@ -374,6 +377,7 @@ const AgentOverlayShell = ({
             ))}
           </ApprovalDock>
         ) : null}
+        {openTaskFailed ? <p role="alert">{t('overlay.openTaskFailed')}</p> : null}
         {composer}
       </ComposerDock>
     </PopupContainer>

@@ -1755,6 +1755,28 @@ describe('AgentOverlay broader E2E', () => {
       );
     });
 
+    it('keeps the panel, saying so, when the main window cannot show the task', async () => {
+      const messageId = '00000000-0000-4000-8000-0000000000a3';
+      vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+      submitMessage.mockResolvedValueOnce(createStartedResult('act-new', messageId));
+      openTask.mockRejectedValueOnce(new Error('The main window could not be opened.'));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay entryMode="standalone" />
+        </UiLanguageProvider>
+      );
+      await screen.findByRole('button', { name: /permissions: Ask every time/ });
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Tidy the notes' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Could not open this task in the main window.'
+      );
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-new' });
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
     it('opens nothing from a panel that continues a task', async () => {
       const messageId = '00000000-0000-4000-8000-0000000000a2';
       vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);

@@ -27,6 +27,10 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
+  /** Hands a task this panel started to the main window, which closes the panel. */
+  openTask: (actionId: string) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed: boolean;
   /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
   onReject: (withReply: boolean) => void;
   onStop: (processId?: string) => void;
@@ -63,7 +67,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
   const acceptFailed = failedSuggestionId !== null && failedSuggestionId === state.suggestionId;
-  const awaitDecisionOutcome = usePanelHandoff(state, acceptFailed);
+  const handoff = usePanelHandoff(state, acceptFailed);
+  const { awaitDecisionOutcome } = handoff;
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
 
@@ -399,6 +404,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onClose,
     onAccept,
     acceptFailed,
+    openTask: handoff.openTask,
+    openTaskFailed: handoff.openTaskFailed,
     onReject,
     onStop,
   };

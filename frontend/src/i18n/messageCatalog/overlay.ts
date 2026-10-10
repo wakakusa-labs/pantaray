@@ -72,6 +72,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.accept': 'Accept',
     'overlay.suggestionAccepted': 'Approved',
     'overlay.acceptFailed': 'Could not confirm this action. Try approving again.',
+    'overlay.openTaskFailed': 'Could not open this task in the main window.',
     'overlay.supplement.label': 'Additional instructions (optional)',
     'overlay.supplement.placeholder':
       "Conditions to approve with, or why you're passing (optional)",
@@ -193,6 +194,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.accept': '承認',
     'overlay.suggestionAccepted': '承認済み',
     'overlay.acceptFailed': '承認を確認できませんでした。もう一度承認してください。',
+    'overlay.openTaskFailed': 'メイン画面でこの作業を開けませんでした。',
     'overlay.supplement.label': '追加の指示（任意）',
     'overlay.supplement.placeholder': '承認の条件や、見送る理由を書く（任意）',
     'overlay.supplement.invalid': '追加の指示は8,000文字以内で入力してください。',

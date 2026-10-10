@@ -1,4 +1,12 @@
 function createAuthHistoryApi({ ipcRenderer }) {
+  // Main may ask to show a History item before the page's shell subscribes (it mounts after the
+  // auth state is read), so the latest unanswered request waits for that subscriber.
+  let showItemSubscriber = null;
+  let pendingShowItem = null;
+  ipcRenderer.on('history:showItem', (_event, payload) => {
+    if (showItemSubscriber) showItemSubscriber(payload);
+    else pendingShowItem = payload;
+  });
   return {
     auth: {
       confirmationComplete: () => ipcRenderer.invoke('auth:confirmationComplete'),
@@ -30,9 +38,15 @@ function createAuthHistoryApi({ ipcRenderer }) {
         return () => ipcRenderer.removeListener('history:showChat', listener);
       },
       onShowItem: (callback) => {
-        const listener = (_event, payload) => callback(payload);
-        ipcRenderer.on('history:showItem', listener);
-        return () => ipcRenderer.removeListener('history:showItem', listener);
+        showItemSubscriber = callback;
+        if (pendingShowItem !== null) {
+          const payload = pendingShowItem;
+          pendingShowItem = null;
+          callback(payload);
+        }
+        return () => {
+          if (showItemSubscriber === callback) showItemSubscriber = null;
+        };
       },
     },
     actionFiles: {

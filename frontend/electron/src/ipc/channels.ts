@@ -9,7 +9,6 @@
 export const validSendChannels = [
   'resize-notification-window',
   'notification-action-accept',
-  'notification-action-reject',
   'notification-hide',
   'notification-stop-action',
   'overlay:recordInteraction',

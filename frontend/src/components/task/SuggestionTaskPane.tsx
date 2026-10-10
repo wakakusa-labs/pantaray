@@ -50,7 +50,7 @@ type SuggestionTaskPaneProps = {
 /**
  * An unanswered suggestion in the main window's detail pane: its text, 承認 / 見送る, and an
  * optional extra instruction that goes with the approval. A message-only suggestion is answered
- * by a reply, which starts a new Action.
+ * by a reply, which starts a new Action; so is a dismissed one, if the user writes after all.
  */
 export function SuggestionTaskPane({
   suggestionId,
@@ -81,6 +81,9 @@ export function SuggestionTaskPane({
     status: phase === 'actionable' ? 'approval_pending' : 'idle',
   });
   const isOffer = snapshot?.interactionContract === 'action_offer';
+  const dismissed = phase === 'dismissed';
+  // An offer takes the composer as the approval's extra instruction until it is dismissed.
+  const accepts = isOffer && !dismissed;
   const showsDecision =
     isOffer && (phase === 'actionable' || phase === 'starting' || phase === 'dismissing');
   const failureText = (current: SuggestionStartFailure) =>
@@ -149,14 +152,14 @@ export function SuggestionTaskPane({
               {failureText(failure)}
             </p>
           ) : null}
-          {phase === 'actionable' && approvalMode.errorKey ? (
+          {(phase === 'actionable' || dismissed) && approvalMode.errorKey ? (
             <p className="suggestion-task__alert" role="alert">
               {t(approvalMode.errorKey)}
             </p>
           ) : null}
         </div>
       </div>
-      {phase === 'actionable' ? (
+      {phase === 'actionable' || dismissed ? (
         <div className="suggestion-task__composer">
           <OverlayComposer
             approvalMode={approvalMode}
@@ -175,10 +178,11 @@ export function SuggestionTaskPane({
             retryAcceptance={failure?.stage === 'accept_failed'}
             attachments={draft.attachments}
             attachmentFailure={draft.attachmentFailure}
-            validationFailed={isOffer ? composer.supplementInvalid : draft.validationFailed}
+            validationFailed={accepts ? composer.supplementInvalid : draft.validationFailed}
             canAttach={composer.canAttach}
-            action={isOffer ? 'accept' : 'send'}
-            canSend={isOffer ? task.canAccept : task.canReply}
+            action={accepts ? 'accept' : 'send'}
+            placeholder={dismissed ? t('overlay.composer.dismissedPlaceholder') : undefined}
+            canSend={accepts ? task.canAccept : task.canReply}
             resumeFailed={false}
             canResume={false}
             textareaRef={textareaRef}
@@ -194,7 +198,7 @@ export function SuggestionTaskPane({
             }
             onAttachFiles={(files) => void composer.attachFiles(files)}
             onRemoveAttachment={composer.removeAttachment}
-            onSubmit={isOffer ? () => void task.accept() : task.reply}
+            onSubmit={accepts ? () => void task.accept() : task.reply}
             onStop={noop}
             onResume={noop}
           />

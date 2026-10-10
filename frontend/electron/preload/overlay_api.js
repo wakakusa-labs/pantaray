@@ -103,11 +103,6 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
           ipcRenderer.send('overlay:openWorkspaceSettings');
         }
       },
-      rejectAction: (data) => {
-        if (isValidSendChannel('notification-action-reject')) {
-          ipcRenderer.send('notification-action-reject', data);
-        }
-      },
       hide: () => {
         if (isValidSendChannel('notification-hide')) ipcRenderer.send('notification-hide');
       },

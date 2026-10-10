@@ -29,6 +29,7 @@ export type SuggestionTaskPhase =
   | 'start_failed'
   /** An Action exists for it; the Action pane takes over. */
   | 'started'
+  /** Dismissed. A reply may still follow it and start an Action. */
   | 'dismissed';
 
 type Scoped<T> = { suggestionId: string; value: T };
@@ -49,8 +50,8 @@ export function deriveSuggestionTaskPhase({
   replying: boolean;
 }): SuggestionTaskPhase {
   if (snapshot === null) return loadFailed ? 'load_failed' : 'loading';
-  if (snapshot.reactionState === 'rejected') return 'dismissed';
   if (snapshot.actionId !== null || replyActionId !== null) return 'started';
+  if (snapshot.reactionState === 'rejected') return replying ? 'starting' : 'dismissed';
   if (failure?.stage === 'start_failed') return 'start_failed';
   if (pending === 'dismiss') return 'dismissing';
   if (
@@ -73,8 +74,9 @@ function scoped<T>(state: Scoped<T> | null, suggestionId: string): T | null {
  *
  * Every answer goes the way the Overlay sends it. Accepting is `ws:acceptAction` with no command id,
  * so main reuses the command it already holds for this suggestion; dismissing is
- * `dismiss_suggestion` on `ws:send`; replying to a message-only suggestion opens a new Action
- * with `reply_to_suggestion_id` through the Overlay's composer controller.
+ * `dismiss_suggestion` on `ws:send`; replying to a message-only suggestion, or to one the user
+ * dismissed, opens a new Action with `reply_to_suggestion_id` through the Overlay's composer
+ * controller.
  */
 export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDrafts) {
   const { language } = useI18n();
@@ -228,8 +230,7 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
   };
 
   const canReply =
-    phase === 'actionable' &&
-    contract === 'message_only' &&
+    ((phase === 'actionable' && contract === 'message_only') || phase === 'dismissed') &&
     permissionsReady &&
     submission === null &&
     composer.composer.draft.trim() !== '' &&

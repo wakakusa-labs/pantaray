@@ -180,13 +180,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     visiblePages ? transientToolSteps : []
   );
   const currentView = view.action !== null || composer.submission !== null ? view : null;
+  // A message-only suggestion has no start of its own, and a dismissed offer has none left: a
+  // reply to either starts a new conversation that opens with the suggestion.
+  const repliesToSuggestion =
+    state.interactionContract === 'message_only' || state.reactionState === 'rejected';
   const approvedSuggestion = currentView?.action?.approved_suggestion ?? null;
   const suggestionDisplay = {
     suggestionText:
       approvedSuggestion?.content ??
-      (state.interactionContract === 'message_only' && currentView?.action
-        ? ''
-        : state.suggestionText),
+      (repliesToSuggestion && currentView?.action ? '' : state.suggestionText),
     isSuggestionStreamFinished: approvedSuggestion !== null || state.isSuggestionStreamFinished,
     isSuggestionAccepted:
       approvedSuggestion !== null ||
@@ -313,9 +315,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         : null;
   const canStop =
     approvalUiState === 'hidden' && actionStatus === 'processing' && Boolean(stopProcessId);
-  // 提案オーバーレイから新規会話を始められるのは、開始経路を持たないコメントのみの提案で、
-  // まだアクションも要求も存在しないときだけ。コメントのみの提案は execute_action を受け付け
-  // ないため、提案を最初のアシスタント発言とする新規会話として開始する。
+  // 提案オーバーレイから新規会話を始められるのは、開始経路を持たないコメントのみの提案か
+  // 見送った提案で、まだアクションも要求も存在しないときだけ。どちらも execute_action では
+  // 始まらないため、提案を最初のアシスタント発言とする新規会話として開始する。
   // アクションが既にある場合（採用直後の accepted_pending_start / processing / 終了直後で
   // 会話ページがまだ届いていない間を含む）は入力欄を出さない。別アクションを作ってしまうため、
   // ページが届いてから既存会話への追記として送る。
@@ -323,11 +325,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     composer.initialActionId === null &&
     visiblePages === null &&
     (entryMode === 'standalone' ||
-      (state.interactionContract === 'message_only' &&
+      (repliesToSuggestion &&
         Boolean(state.suggestionId) &&
         state.isSuggestionStreamFinished &&
         state.currentActionId === null &&
         state.requestState === 'idle'));
+  // A reply to a message-only suggestion opens on request. After a dismissal the composer stays
+  // open, to say why or to ask for something else.
+  const startsReply = entryMode === 'overlay' && canStartConversation;
+  const answersDismissal = startsReply && state.reactionState === 'rejected';
   const canCompose = Boolean(
     actions &&
     composer.submission === null &&
@@ -476,6 +482,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
         }
         textareaRef={standaloneComposerRef}
+        placeholder={answersDismissal ? t('overlay.composer.dismissedPlaceholder') : undefined}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}
@@ -492,9 +499,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
               stopProcessId,
               state.lastSequence,
               approvalMode.mode,
-              entryMode === 'overlay' && state.interactionContract === 'message_only'
-                ? state.suggestionId
-                : null
+              entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
             );
         }}
         onStop={() => ctrl.onStop(stopProcessId ?? undefined)}
@@ -520,7 +525,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       actionText={operationalError}
       conversationContent={conversationContent}
       composer={
-        canDecide ? null : entryMode === 'overlay' && canStartConversation && composerContent ? (
+        canDecide ? null : startsReply && !answersDismissal && composerContent ? (
           <SuggestionInputDisclosure
             key={state.suggestionId}
             label={t('overlay.composer.open')}

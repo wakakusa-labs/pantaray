@@ -268,7 +268,7 @@ describe('SuggestionTaskPane', () => {
     expect(acceptAction.mock.calls[1][0].commandId).toBeNull();
   });
 
-  it('dismisses through dismiss_suggestion and then shows no actions', async () => {
+  it('dismisses through dismiss_suggestion and then keeps only the composer', async () => {
     await renderPane();
 
     fireEvent.click(dismissButton());
@@ -284,8 +284,15 @@ describe('SuggestionTaskPane', () => {
     await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
+    // Nothing written: the dismissal stands.
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
+      'placeholder',
+      'Add a reason, or what you would like instead (optional)'
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(submitMessage).not.toHaveBeenCalled();
+    expect(onStarted).not.toHaveBeenCalled();
   });
 
   it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {
@@ -391,16 +398,57 @@ describe('SuggestionTaskPane', () => {
     expect(onStarted).toHaveBeenCalledWith('act-reply');
   });
 
-  it('shows no actions for a suggestion that was already answered', async () => {
+  it('answers a dismissed suggestion with a reply that starts a new Action', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000043';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
     read.mockResolvedValueOnce(
       suggestion({ reactionState: 'rejected', reactionTimestamp: '2026-10-10T00:01:00Z' })
     );
+    let settle: (result: ActionMessageSubmitResult) => void = () => undefined;
+    submitMessage.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
     await renderPane();
 
     expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
-    expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.queryByRole('textbox')).toBeNull();
-    expect(onStarted).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Only the summary, please' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(submitMessage).toHaveBeenCalledWith({
+      target: {
+        kind: 'new',
+        approval_mode: 'prompt_each_time',
+        reply_to_suggestion_id: 'sug-1',
+      },
+      message: {
+        version: 1,
+        message_id: messageId,
+        content: 'Only the summary, please',
+        images: [],
+        language: 'en',
+        project_refs: [],
+        files: [],
+      },
+    });
+    expect(acceptAction).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+
+    await act(async () =>
+      settle({
+        kind: 'submitted',
+        response: {
+          action_id: 'act-reply',
+          message_id: messageId,
+          step_id: 'step-1',
+          action_status: 'processing',
+          disposition: 'started',
+          process_id: 'run-1',
+        },
+      })
+    );
+    expect(onStarted).toHaveBeenCalledWith('act-reply');
   });
 
   it('hands over at once when the suggestion already has an Action', async () => {

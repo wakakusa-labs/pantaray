@@ -72,14 +72,6 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
       onNotificationActionAccept: (_event, data) => {
         console.log('Notification Accepted:', data);
       },
-      onNotificationActionReject: (event, data) => {
-        const suggestionId = data?.suggestion_id ? String(data.suggestion_id) : null;
-        if (suggestionId) {
-          windows.hide(suggestionId);
-          return;
-        }
-        if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
-      },
       onNotificationHide: (event) => {
         if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
       },

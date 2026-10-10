@@ -366,6 +366,8 @@ def test_reply_snapshots_assistant_before_user_and_replays_without_reading_sourc
         "UPDATE agent_suggestions SET status='processing'",
         "UPDATE agent_suggestions SET has_suggestion=0",
         "UPDATE agent_suggestions SET interaction_contract='action_offer'",
+        """UPDATE agent_suggestions
+           SET interaction_contract='action_offer',user_reaction='accepted'""",
         "UPDATE agent_suggestions SET answer='   '",
     ],
 )
@@ -383,6 +385,41 @@ def test_reply_rejects_unavailable_source_atomically(
             assert (
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
             )
+
+
+def test_reply_to_a_dismissed_offer_starts_an_action_and_keeps_the_dismissal(
+    creation_db: Path,
+) -> None:
+    _insert_reply_source(creation_db)
+    with sqlite3.connect(creation_db) as connection:
+        connection.execute(
+            """UPDATE agent_suggestions
+               SET interaction_contract='action_offer',user_reaction='rejected',
+                   rejected_at='2026-08-16T01:01:00.000Z'"""
+        )
+    result = submit_action_message(_reply_command())
+    assert isinstance(result, StartedActionMessageResult)
+    with sqlite3.connect(creation_db) as connection:
+        assert connection.execute(
+            """SELECT step_type,source_suggestion_id,llm_response_text,adopted_process_id
+               FROM agent_action_steps WHERE step_number=1"""
+        ).fetchone() == (
+            "assistant_message",
+            "comment-1",
+            "元の発言",
+            result.process_id,
+        )
+        assert connection.execute(
+            "SELECT suggestion_id FROM agent_actions"
+        ).fetchone() == (None,)
+        assert connection.execute(
+            "SELECT status FROM jobs WHERE job_id=?", (result.job_id,)
+        ).fetchone() == ("queued",)
+        assert connection.execute(
+            """SELECT user_reaction,rejected_at,accepted_at,action_status,
+                      action_process_id
+               FROM agent_suggestions"""
+        ).fetchone() == ("rejected", "2026-08-16T01:01:00.000Z", None, None, None)
 
 
 def test_reply_cannot_also_approve_a_suggestion() -> None:

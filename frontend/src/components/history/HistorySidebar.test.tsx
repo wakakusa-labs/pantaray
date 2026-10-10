@@ -23,16 +23,13 @@ const mocks = vi.hoisted(() => ({
   setSearchText: vi.fn(),
   unreadActionId: 'A1' as string | null,
 }));
-vi.mock('@/context/useI18n', async () => {
-  const { formatDateTime } = await import('@/i18n/translate');
-  return {
-    useI18n: () => ({
-      language: 'ja',
-      t: (key: string) => key,
-      formatDateTime: (date: Date) => formatDateTime('ja', date),
-    }),
-  };
-});
+vi.mock('@/context/useI18n', () => ({
+  useI18n: () => ({
+    language: 'ja',
+    t: (key: string, vars?: Record<string, string | number>) =>
+      vars ? `${key} ${JSON.stringify(vars)}` : key,
+  }),
+}));
 vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/useSuggestionHistory')>()),
   useSuggestionHistory: () => ({
@@ -205,11 +202,10 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
       'history.day.yesterday',
       '9月29日',
     ]);
-    // Under today and yesterday a row shows its time; older rows keep the full date.
+    // A row is its title and badge; the day heading carries the date.
     expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(
-      /^T108:00history.status.suggestion$/
+      /^T1history.status.suggestion$/
     );
-    expect(screen.getByRole('button', { name: /^O1/ })).toHaveTextContent('2026年9月29日 08:00');
     expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
     expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');
   } finally {
@@ -228,8 +224,9 @@ it('Conversation行はOverlayを開き、実際の表示前に既読にしない
 
   const conversation = screen.getByRole('button', { name: /^Conversation/ });
   expect(conversation).not.toHaveAttribute('aria-expanded');
-  expect(screen.getByLabelText('history.unread')).toBeInTheDocument();
-  expect(screen.getAllByText((text) => text.endsWith(':02'))).toHaveLength(2);
+  // Only the conversation with an unseen completion has the dot, inside its own row.
+  expect(screen.getAllByRole('img', { name: 'history.unread' })).toHaveLength(1);
+  expect(conversation).toHaveAccessibleName(/history\.unread/);
   conversation.focus();
   await userEvent.keyboard('{Enter}');
   expect(openConversation).toHaveBeenCalledWith({ actionId: 'A1' });
@@ -277,7 +274,7 @@ it('Overlay起動失敗を通知し、追加読み込みと検索に応答する
   await waitFor(() => expect(mocks.setSearchText).toHaveBeenCalledWith('😀'.repeat(256)));
 });
 
-it('バッジは running / approval_pending だけに出し、idle には出さない', () => {
+it('バッジは実行中・確認待ち・提案に出し、終わった会話には出さない', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = null;
@@ -306,12 +303,23 @@ it('バッジは running / approval_pending だけに出し、idle には出さ�
       status: 'idle',
       latest_completion_event_id: null,
     },
+    {
+      kind: 'suggestion',
+      suggestion_id: 'S-offer',
+      title: 'Offer',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'approval_pending',
+    },
   ];
   const { container } = render(<HistorySidebar modeSwitch={null} />);
 
-  expect([...container.querySelectorAll('.badge')].map((badge) => badge.textContent)).toEqual([
-    'history.status.running',
-    'history.status.approvalPending',
+  // Blue while running; amber while it waits on the user, for an approval or an answer.
+  expect(
+    [...container.querySelectorAll('.badge')].map((badge) => [badge.textContent, badge.className])
+  ).toEqual([
+    ['history.status.running', 'badge badge--info'],
+    ['history.status.approvalPending', 'badge badge--warning'],
+    ['history.status.suggestion', 'badge badge--warning'],
   ]);
 });
 

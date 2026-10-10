@@ -22,7 +22,7 @@ import {
 } from '../agent-overlay/useOverlayComposerController';
 import { deriveActionTaskStatus } from './actionTaskStatus';
 
-type Live = { lifecycle: ActionLiveSnapshot['lifecycle'] };
+type Live = Pick<ActionLiveSnapshot, 'actionId' | 'lifecycle'>;
 
 // The submission start fence orders the Overlay's suggestion stream, which the main window does
 // not read; every main-window send shares this one position.
@@ -104,7 +104,7 @@ export function useActionTask(actionId: string) {
       }
       const { snapshot } = update;
       if (snapshot.actionId !== actionId) return;
-      setLive({ lifecycle: snapshot.lifecycle });
+      setLive({ actionId, lifecycle: snapshot.lifecycle });
       // A snapshot rebuilt after its Action finished carries version 0 and no page; it must not
       // replace a page this pane already read.
       const { page } = snapshot;
@@ -211,6 +211,9 @@ export function useActionTask(actionId: string) {
     toolOutputLoader,
     status,
     conversation: {
+      /** What the pane's scroll keeping follows: the pages read and the latest live update. */
+      paging,
+      liveUpdate: live,
       olderPageState: paging.olderPageState,
       /** No conversation page has been read for this Action yet. */
       awaitingPage: canonicalPage === null && composer.submission === null,

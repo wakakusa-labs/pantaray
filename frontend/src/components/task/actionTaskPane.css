@@ -1,0 +1,180 @@
+.action-task {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--fog-text);
+}
+
+/* Beside a file preview the conversation keeps a narrow column of its own. */
+.action-task--column {
+  flex: none;
+  width: 400px;
+  border-left: 1px solid var(--fog-line);
+}
+
+.action-task__header {
+  flex: none;
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.action-task__header h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-task__header .badge {
+  flex-shrink: 0;
+}
+
+.action-task__header-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.action-task__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.action-task__icon-button:hover {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.action-task__icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.action-task__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.action-task__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.action-task__column {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 28px;
+}
+
+.action-task--column .action-task__column {
+  padding: 20px 16px;
+}
+
+.action-task__conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.action-task__conversation:focus {
+  outline: none;
+}
+
+.action-task__conversation > .action-conversation__retry {
+  align-self: flex-end;
+}
+
+.action-task__status,
+.action-task__thinking {
+  margin: 0;
+  color: var(--fog-text-2);
+}
+
+.action-task__status {
+  font-size: var(--text-meta-size);
+}
+
+.action-task__thinking {
+  animation: action-task-thinking 1.6s ease-in-out infinite;
+}
+
+@keyframes action-task-thinking {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-task__thinking {
+    animation: none;
+  }
+}
+
+.action-task__alert {
+  margin: 0;
+  color: var(--danger-color);
+  font-size: var(--text-meta-size);
+}
+
+/*
+ * The completion marker sits at the answer's end: the negative margin takes back the column's
+ * gap, and the offset keeps the 1px inside the answer through scrollIntoView's rounding.
+ */
+.action-task__end {
+  position: relative;
+  top: -2px;
+  height: 1px;
+  margin-top: -16px;
+}
+
+.action-task__dock {
+  flex: none;
+  padding: 0 28px 20px;
+}
+
+.action-task--column .action-task__dock {
+  padding: 0 16px 16px;
+}
+
+.action-task__dock > * {
+  max-width: 720px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* A long command scrolls inside the dock instead of pushing the conversation away. */
+.action-task__approvals {
+  display: grid;
+  gap: 8px;
+  max-height: 45vh;
+  margin-bottom: 8px;
+  overflow-y: auto;
+}

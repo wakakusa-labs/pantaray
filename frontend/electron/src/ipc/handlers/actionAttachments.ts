@@ -45,6 +45,19 @@ function stagedAttachmentsDirectory(localArtifactRoot: string, userId: string): 
   return directory;
 }
 
+/** Deletes a staged document; a file already gone (sent, or never written) is not an error. */
+export function discardStagedAttachment(
+  localArtifactRoot: string,
+  userId: string,
+  attachmentId: string
+): void {
+  const directory = stagedAttachmentsDirectory(localArtifactRoot, userId);
+  // Only names `action:attachFile` could have written.
+  for (const extension of ACTION_DOCUMENT_EXTENSIONS) {
+    fs.rmSync(path.join(directory, `${attachmentId}${extension}`), { force: true });
+  }
+}
+
 export function registerActionAttachmentHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   registrar.handle('action:attachFile', async (event, request) => {
     const userId = requireComposerUser(ctx, event.sender);
@@ -80,11 +93,7 @@ export function registerActionAttachmentHandlers(ctx: MainContext, registrar: Ip
       'action:discardAttachment',
       request
     );
-    const directory = stagedAttachmentsDirectory(ctx.actionImages.localArtifactRoot, userId);
-    // Only names this handler could have written; a file already gone (sent, or never
-    // written) is not an error.
-    for (const extension of ACTION_DOCUMENT_EXTENSIONS) {
-      fs.rmSync(path.join(directory, `${attachmentId}${extension}`), { force: true });
-    }
+    // A file a task's draft still lists, in this window or another, waits until none does.
+    ctx.taskDrafts.discard(userId, attachmentId);
   });
 }

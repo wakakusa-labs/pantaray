@@ -60,6 +60,7 @@ import type { RunFile } from '../actions/actionDocumentHtml';
 import type { createActionFetcher } from '../actions/actionFetch';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
+import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
 import type {
   CreateNotificationIpcHandlers,
@@ -177,6 +178,9 @@ export type MainContext = {
   clipboard: {
     writeText: (text: string) => void;
   };
+
+  /** Each task's unsent draft, shared by the windows whose composers show it. */
+  taskDrafts: TaskDraftStore;
 
   actionImages: {
     /** `LOCAL_ARTIFACT_ROOT`; images live under `{root}/generated/images`. */

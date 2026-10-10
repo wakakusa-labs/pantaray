@@ -1,0 +1,113 @@
+.suggestion-task {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.suggestion-task__header {
+  flex: none;
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.suggestion-task__header h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fog-text);
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-task__header .badge {
+  flex-shrink: 0;
+}
+
+.suggestion-task__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.suggestion-task__column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 28px;
+  color: var(--fog-text);
+}
+
+.suggestion-task__decision {
+  display: flex;
+  gap: 8px;
+}
+
+.suggestion-task__button {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--border-color-hover);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.suggestion-task__button:hover:not(:disabled) {
+  background: var(--surface-bg-hover);
+}
+
+/* The one filled control: the hue of the focus ring, so "approve" reads as the way forward. */
+.suggestion-task__button--primary {
+  border-color: transparent;
+  background: #7dabdc;
+  color: #0b0e14;
+  font-weight: var(--weight-semibold);
+}
+
+.suggestion-task__button--primary:hover:not(:disabled) {
+  background: #94bbe4;
+}
+
+.suggestion-task__button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.suggestion-task__button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.suggestion-task__status {
+  margin: 0;
+  color: var(--fog-text-2);
+  font-size: var(--text-meta-size);
+}
+
+.suggestion-task__alert {
+  margin: 0;
+  color: var(--danger-color);
+  font-size: var(--text-meta-size);
+}
+
+.suggestion-task__composer {
+  flex: none;
+  padding: 0 28px 20px;
+}
+
+.suggestion-task__composer > form {
+  max-width: 720px;
+  margin: 0 auto;
+}

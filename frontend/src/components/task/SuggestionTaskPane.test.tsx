@@ -1,0 +1,388 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import type { ActionMessageSubmitResult } from '../../../electron/src/actions/actionContracts';
+import type {
+  OrchestrationServerEvent,
+  OverlaySnapshot,
+  OverlaySnapshotPayload,
+} from '../../../electron/src/orchestration/contracts';
+import { SuggestionTaskPane } from './SuggestionTaskPane';
+
+type ElectronBridge = NonNullable<Window['electron']>;
+
+function suggestion(overrides: Partial<OverlaySnapshot> = {}): OverlaySnapshot {
+  return {
+    suggestionId: 'sug-1',
+    commandId: null,
+    interactionContract: 'action_offer',
+    suggestionText: 'Draft the invoice before month end?',
+    reactionState: null,
+    reactionTimestamp: null,
+    actionPhase: 'idle',
+    actionStatus: null,
+    actionErrorCode: null,
+    actionFailureStage: null,
+    actionFailureMessagePublic: null,
+    processId: null,
+    actionId: null,
+    updatedAt: '2026-10-10T00:00:00Z',
+    lastSequence: 4,
+    isLive: false,
+    ...overrides,
+  };
+}
+
+function actionError(
+  stage: 'preflight_rejected' | 'start_failed',
+  message: string,
+  suggestionId = 'sug-1'
+): OrchestrationServerEvent {
+  return {
+    event: 'error',
+    data: { error_type: 'action', error_code: 'E', error_message: message, severity: 'error' },
+    meta: {
+      kind: 'action',
+      suggestion_id: suggestionId,
+      command_id: 'cmd-1',
+      stage,
+      error_code: 'E',
+    },
+  };
+}
+
+// The shape the backend's dismiss handler sends when it cannot read or save the suggestion.
+function suggestionError(stage: string, suggestionId = 'sug-1'): OrchestrationServerEvent {
+  return {
+    event: 'error',
+    data: {
+      error_type: 'internal_error',
+      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+      error_message: 'Failed to persist suggestion state.',
+      severity: 'error',
+    },
+    meta: {
+      kind: 'suggestion',
+      suggestion_id: suggestionId,
+      stage,
+      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+    },
+  };
+}
+
+let snapshotListener: ((payload: OverlaySnapshotPayload) => void) | null;
+let eventListener: ((event: OrchestrationServerEvent) => void) | null;
+const read = vi.fn<NonNullable<ElectronBridge['suggestions']>['read']>();
+const acceptAction = vi.fn<NonNullable<ElectronBridge['orchestration']>['acceptAction']>();
+const send = vi.fn();
+const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
+const onStarted = vi.fn();
+
+const publish = (snapshot: OverlaySnapshot) =>
+  act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
+const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
+
+async function renderPane(suggestionId = 'sug-1') {
+  render(
+    <UiLanguageProvider initialLanguage="en">
+      <SuggestionTaskPane
+        suggestionId={suggestionId}
+        title="Invoice draft"
+        onStarted={onStarted}
+        onAddProject={() => undefined}
+      />
+    </UiLanguageProvider>
+  );
+  await act(async () => {});
+}
+
+const acceptButton = () => screen.getByRole('button', { name: 'Accept' });
+const dismissButton = () => screen.getByRole('button', { name: 'Dismiss suggestion' });
+
+beforeEach(() => {
+  snapshotListener = null;
+  eventListener = null;
+  read.mockReset().mockResolvedValue(suggestion());
+  acceptAction.mockReset().mockResolvedValue(null);
+  send.mockReset();
+  submitMessage.mockReset();
+  onStarted.mockReset();
+  Object.defineProperty(window, 'electron', {
+    configurable: true,
+    value: {
+      approval: {
+        getWorkspaceEditCommandPreference: vi.fn(async () => ({
+          scope_type: 'global',
+          scope_ref: null,
+          approval_mode: 'prompt_each_time',
+          applies_to: ['workspace_edit_and_command'],
+        })),
+      },
+      suggestions: {
+        read,
+        onSnapshot: (callback: typeof snapshotListener) => {
+          snapshotListener = callback;
+          return () => {
+            snapshotListener = null;
+          };
+        },
+      },
+      orchestration: {
+        send,
+        acceptAction,
+        onEvent: (callback: typeof eventListener) => {
+          eventListener = callback;
+          return () => {
+            eventListener = null;
+          };
+        },
+      },
+      actions: {
+        submitMessage,
+        attachImage: vi.fn(),
+        attachFile: vi.fn(),
+        discardAttachment: vi.fn(async () => undefined),
+        readConversationPage: vi.fn(),
+      },
+    },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('SuggestionTaskPane', () => {
+  it('shows the suggestion with its title, badge and decision', async () => {
+    await renderPane();
+
+    expect(read).toHaveBeenCalledWith({ suggestionId: 'sug-1' });
+    expect(screen.getByRole('heading', { name: 'Invoice draft' })).toBeInTheDocument();
+    expect(screen.getByText('Suggestion')).toBeInTheDocument();
+    expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
+    expect(acceptButton()).toBeEnabled();
+    expect(dismissButton()).toBeEnabled();
+    expect(screen.getByLabelText('Additional instructions (optional)')).toBeInTheDocument();
+  });
+
+  it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {
+    let settle: (value: null) => void = () => undefined;
+    acceptAction.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
+    await renderPane();
+
+    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
+      target: { value: ' Use the new unit price ' },
+    });
+    fireEvent.click(acceptButton());
+
+    // main reuses the command it holds for this suggestion when no command id is given.
+    expect(acceptAction).toHaveBeenCalledWith({
+      suggestionId: 'sug-1',
+      commandId: null,
+      supplement: 'Use the new unit price',
+      supplementProjectRefs: [],
+      approvalMode: 'prompt_each_time',
+      images: [],
+      files: [],
+    });
+    expect(acceptButton()).toBeDisabled();
+    expect(dismissButton()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+
+    await publish(suggestion({ commandId: 'cmd-1', actionPhase: 'requesting', isLive: true }));
+    await act(async () => settle(null));
+    expect(acceptButton()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+    fireEvent.click(acceptButton());
+    expect(acceptAction).toHaveBeenCalledTimes(1);
+    expect(onStarted).not.toHaveBeenCalled();
+
+    await publish(
+      suggestion({
+        commandId: 'cmd-1',
+        reactionState: 'accepted',
+        actionPhase: 'processing',
+        actionId: 'act-1',
+        processId: 'run-1',
+      })
+    );
+    expect(onStarted).toHaveBeenCalledWith('act-1');
+    expect(onStarted).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the user accept again when the accept call fails', async () => {
+    acceptAction.mockRejectedValueOnce(new Error('ipc'));
+    await renderPane();
+
+    fireEvent.click(acceptButton());
+    await act(async () => {});
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not confirm this action. Try approving again.'
+    );
+    expect(acceptButton()).toBeEnabled();
+    fireEvent.click(acceptButton());
+    expect(acceptAction).toHaveBeenCalledTimes(2);
+    expect(acceptAction.mock.calls[1][0].commandId).toBeNull();
+  });
+
+  it('dismisses through dismiss_suggestion and then shows no actions', async () => {
+    await renderPane();
+
+    fireEvent.click(dismissButton());
+
+    expect(send).toHaveBeenCalledWith({
+      event: 'dismiss_suggestion',
+      data: { suggestion_id: 'sug-1' },
+    });
+    expect(acceptAction).not.toHaveBeenCalled();
+    expect(acceptButton()).toBeDisabled();
+    expect(dismissButton()).toBeDisabled();
+
+    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
+  });
+
+  it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {
+    await renderPane();
+    // A suggestion error the pane did not cause leaves it as it is.
+    await emit(suggestionError('load_state_failed'));
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(dismissButton());
+    await emit(suggestionError('load_state_failed', 'sug-2'));
+    expect(dismissButton()).toBeDisabled();
+    await emit(suggestionError('persist_status_failed'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not dismiss this suggestion. Try again.'
+    );
+    expect(acceptButton()).toBeEnabled();
+    expect(dismissButton()).toBeEnabled();
+    expect(screen.getByLabelText('Additional instructions (optional)')).toBeInTheDocument();
+    fireEvent.click(dismissButton());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('returns to actionable with the error after preflight_rejected', async () => {
+    await renderPane();
+    fireEvent.click(acceptButton());
+    await publish(suggestion({ commandId: 'cmd-1', actionPhase: 'requesting', isLive: true }));
+    expect(acceptButton()).toBeDisabled();
+
+    // main resets its record before it forwards the event.
+    await publish(suggestion({ lastSequence: 6 }));
+    await emit(actionError('preflight_rejected', 'No AI connection is set up.'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('No AI connection is set up.');
+    expect(acceptButton()).toBeEnabled();
+    expect(dismissButton()).toBeEnabled();
+    expect(screen.queryByText('Starting')).toBeNull();
+  });
+
+  it('shows the public message when the start fails', async () => {
+    await renderPane();
+    fireEvent.click(acceptButton());
+    await publish(
+      suggestion({
+        commandId: 'cmd-1',
+        reactionState: 'accepted',
+        actionPhase: 'accepted_pending_start',
+      })
+    );
+
+    await emit(actionError('start_failed', 'The Action could not start.'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The Action could not start.');
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByText('Starting')).toBeNull();
+  });
+
+  it('answers a message-only suggestion with a reply that starts a new Action', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000042';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
+    read.mockResolvedValueOnce(suggestion({ interactionContract: 'message_only' }));
+    let settle: (result: ActionMessageSubmitResult) => void = () => undefined;
+    submitMessage.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
+    await renderPane();
+
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Yes, please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(submitMessage).toHaveBeenCalledWith({
+      target: {
+        kind: 'new',
+        approval_mode: 'prompt_each_time',
+        reply_to_suggestion_id: 'sug-1',
+      },
+      message: {
+        version: 1,
+        message_id: messageId,
+        content: 'Yes, please',
+        images: [],
+        language: 'en',
+        project_refs: [],
+        files: [],
+      },
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+
+    await act(async () =>
+      settle({
+        kind: 'submitted',
+        response: {
+          action_id: 'act-reply',
+          message_id: messageId,
+          step_id: 'step-1',
+          action_status: 'processing',
+          disposition: 'started',
+          process_id: 'run-1',
+        },
+      })
+    );
+    expect(onStarted).toHaveBeenCalledWith('act-reply');
+  });
+
+  it('shows no actions for a suggestion that was already answered', async () => {
+    read.mockResolvedValueOnce(
+      suggestion({ reactionState: 'rejected', reactionTimestamp: '2026-10-10T00:01:00Z' })
+    );
+    await renderPane();
+
+    expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  it('hands over at once when the suggestion already has an Action', async () => {
+    read.mockResolvedValueOnce(
+      suggestion({ reactionState: 'accepted', actionPhase: 'terminal', actionId: 'act-9' })
+    );
+    await renderPane();
+
+    expect(onStarted).toHaveBeenCalledWith('act-9');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('ignores snapshots and errors of other suggestions', async () => {
+    await renderPane();
+
+    await publish(
+      suggestion({ suggestionId: 'sug-2', reactionState: 'rejected', lastSequence: 9 })
+    );
+    await publish(suggestion({ suggestionId: 'sug-2', actionId: 'act-2', lastSequence: 9 }));
+    await emit(actionError('preflight_rejected', 'Not this one.', 'sug-2'));
+
+    expect(acceptButton()).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+});

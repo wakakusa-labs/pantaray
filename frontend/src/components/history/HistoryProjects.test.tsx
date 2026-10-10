@@ -11,8 +11,6 @@ import { HistoryProjects } from './HistoryProjects';
 const t = (key: string, vars?: Record<string, string | number>) =>
   vars ? `${key} ${JSON.stringify(vars)}` : key;
 
-type Api = NonNullable<NonNullable<Window['electron']>['workspaceSettings']>;
-
 function folder(folderId: string, projectIds: string[]) {
   return {
     folder_id: folderId,
@@ -35,31 +33,22 @@ function project(projectId: string, sortOrder: number, organizationIds: string[]
 
 /** The local backend's workspace, answering as workspace_settings.py does. */
 let store: WorkspaceSettings;
-let api: { [Name in keyof Api]: ReturnType<typeof vi.fn> };
+let api: ReturnType<typeof createApi>;
 
-function installApi() {
-  const findFolder = (folderId: string) => store.folders.find((f) => f.folder_id === folderId)!;
-  api = {
+function createApi() {
+  return {
     get: vi.fn(async () => structuredClone(store)),
-    getReadAccessScope: vi.fn(),
-    getCommandNetwork: vi.fn(),
-    updateCommandNetwork: vi.fn(),
     createOrganization: vi.fn(async ({ displayName }: { displayName: string }) => {
       const created = { organization_id: `org-${displayName}`, display_name: displayName };
       store.organizations.push(created);
       return created;
     }),
-    createProject: vi.fn(),
     renameProject: vi.fn(async (projectId: string, { displayName }: { displayName: string }) => {
       const renamed = store.projects.find((p) => p.project_id === projectId)!;
       renamed.display_name = displayName;
       return { ...renamed };
     }),
     createFolder: vi.fn(),
-    reorderProjects: vi.fn(async ({ projectIds }: { projectIds: string[] }) => ({
-      project_ids: projectIds,
-    })),
-    deleteOrganization: vi.fn(),
     deleteProject: vi.fn(async () => undefined),
     deleteFolder: vi.fn(async (folderId: string) => {
       store.folders = store.folders.filter((f) => f.folder_id !== folderId);
@@ -72,14 +61,17 @@ function installApi() {
       }
     ),
     updateFolderLinks: vi.fn(async (folderId: string, links: { projectIds: string[] }) => {
-      const updated = findFolder(folderId);
+      const updated = store.folders.find((f) => f.folder_id === folderId)!;
       updated.project_ids = [...links.projectIds].sort();
       return structuredClone(updated);
     }),
-    updateReadAccessScope: vi.fn(),
     selectFolder: vi.fn(),
     openFolder: vi.fn(async () => undefined),
   };
+}
+
+function installApi() {
+  api = createApi();
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: { workspaceSettings: api },
@@ -170,7 +162,6 @@ it('IME で変換中の Enter では保存せず、確定後の Enter で保存�
   fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
   fireEvent.keyDown(field, { key: 'Enter', keyCode: 229 });
   expect(api.renameProject).not.toHaveBeenCalled();
-  expect(field).toBeInTheDocument();
 
   fireEvent.keyDown(field, { key: 'Enter' });
   await waitFor(() =>

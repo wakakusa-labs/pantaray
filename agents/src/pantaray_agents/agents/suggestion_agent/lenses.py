@@ -1,9 +1,8 @@
 """Look for a Suggestion through sampled patterns in parallel runs, then pick one.
 
-Each Suggestion samples three patterns of help ("lenses"): two from the
-time-sensitive pool and one from the exploration pool. Every lens gets its own
-decision run on the shared prompt plus that lens; a selector call then picks the
-single best candidate, or none.
+Each Suggestion samples three distinct patterns of help ("lenses") by weight from
+one pool. Every lens gets its own decision run on the shared prompt plus that
+lens; a selector call then picks the single best candidate, or none.
 """
 
 from __future__ import annotations
@@ -30,15 +29,12 @@ from .research import SuggestionResearchTools
 SUGGESTION_LENS_PROMPT_NAME = "suggestion/suggestion_lenses"
 SUGGESTION_SELECTOR_PROMPT_NAME = "suggestion/suggestion_selector"
 SELECT_SUGGESTION_TOOL_NAME = "select_suggestion"
-URGENT_LENSES = (
-    "research_and_tell",
-    "external_change",
-    "take_over",
-    "prepare_next_step",
-    "likely_forgotten",
-)
-URGENT_LENSES_PER_SUGGESTION = 2
-EXPLORATION_LENS_WEIGHTS = {
+LENS_WEIGHTS = {
+    "research_and_tell": 1,
+    "external_change": 1,
+    "take_over": 1,
+    "prepare_next_step": 1,
+    "likely_forgotten": 1,
     "easier_way": 1,
     "worth_building": 2,
     "step_toward_aim": 2,
@@ -49,6 +45,7 @@ EXPLORATION_LENS_WEIGHTS = {
     "perspective": 1,
     "new_approach": 1,
 }
+LENSES_PER_SUGGESTION = 3
 # Lens runs share one Suggestion's step numbers: run i records from i * stride, and
 # a number taken twice overwrites a step. A turn records itself, each call that comes
 # back (max_parallel_tool_calls at most) and up to two failed sends per repair.
@@ -70,12 +67,13 @@ class LensDecision:
 
 
 def sample_lenses(rng: random.Random) -> tuple[str, ...]:
-    urgent = rng.sample(URGENT_LENSES, URGENT_LENSES_PER_SUGGESTION)
-    (exploration,) = rng.choices(
-        tuple(EXPLORATION_LENS_WEIGHTS),
-        weights=tuple(EXPLORATION_LENS_WEIGHTS.values()),
-    )
-    return (*urgent, exploration)
+    remaining = dict(LENS_WEIGHTS)
+    lenses = []
+    for _ in range(LENSES_PER_SUGGESTION):
+        (lens,) = rng.choices(tuple(remaining), weights=tuple(remaining.values()))
+        del remaining[lens]
+        lenses.append(lens)
+    return tuple(lenses)
 
 
 def _lens_section(lens_config: PromptConfig, lens: str) -> str:
@@ -235,12 +233,11 @@ def _declined(extraction: SuggestionExtraction) -> SuggestionExtraction:
 
 
 __all__ = [
-    "EXPLORATION_LENS_WEIGHTS",
+    "LENS_WEIGHTS",
     "LensCandidate",
     "LensDecision",
     "SUGGESTION_LENS_PROMPT_NAME",
     "SUGGESTION_SELECTOR_PROMPT_NAME",
-    "URGENT_LENSES",
     "decide_with_lenses",
     "sample_lenses",
 ]

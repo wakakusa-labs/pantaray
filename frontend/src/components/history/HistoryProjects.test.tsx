@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -158,6 +158,52 @@ it('名前の変更は Enter で保存し、Esc で取り消し、ほかのプ�
       screen.getByRole('button', { name: 'history.projects.menu {"name":"Aurora"}' })
     ).toHaveFocus()
   );
+});
+
+it('IME で変換中の Enter では保存せず、確定後の Enter で保存する', async () => {
+  await renderProjects();
+
+  await chooseFromMenu('a', 'history.projects.rename');
+  const field = screen.getByRole('textbox', { name: 'history.projects.nameLabel' });
+  await userEvent.clear(field);
+  await userEvent.type(field, 'あおば');
+  fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+  fireEvent.keyDown(field, { key: 'Enter', keyCode: 229 });
+  expect(api.renameProject).not.toHaveBeenCalled();
+  expect(field).toBeInTheDocument();
+
+  fireEvent.keyDown(field, { key: 'Enter' });
+  await waitFor(() =>
+    expect(api.renameProject).toHaveBeenCalledWith('a', { displayName: 'あおば' })
+  );
+});
+
+it('前の名前の保存が遅れて終わっても、いま変更中の別のプロジェクトの欄は閉じない', async () => {
+  let finishA!: () => void;
+  api.renameProject.mockImplementationOnce(
+    async (projectId: string, { displayName }: { displayName: string }) => {
+      await new Promise<void>((resolve) => {
+        finishA = resolve;
+      });
+      const renamed = store.projects.find((item) => item.project_id === projectId)!;
+      renamed.display_name = displayName;
+      return { ...renamed };
+    }
+  );
+  await renderProjects();
+
+  await chooseFromMenu('a', 'history.projects.rename');
+  await userEvent.clear(screen.getByRole('textbox', { name: 'history.projects.nameLabel' }));
+  await userEvent.keyboard('Alpha{Enter}');
+  await chooseFromMenu('b', 'history.projects.rename');
+  const fieldB = screen.getByRole('textbox', { name: 'history.projects.nameLabel' });
+  expect(fieldB).toHaveValue('b');
+
+  await act(async () => finishA());
+
+  await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
+  expect(screen.getByRole('textbox', { name: 'history.projects.nameLabel' })).toBe(fieldB);
+  expect(fieldB).toHaveFocus();
 });
 
 it('フォルダの追加は選んだフォルダをこのプロジェクトに加え、登録済みならほかのリンクを残す', async () => {

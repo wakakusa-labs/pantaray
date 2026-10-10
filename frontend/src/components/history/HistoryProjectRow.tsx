@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 
 import type { useI18n } from '@/context/useI18n';
 import type {
@@ -29,11 +28,11 @@ export function HistoryProjectRow({
   renaming: boolean;
   t: ReturnType<typeof useI18n>['t'];
   onRename: (displayName: string) => Promise<boolean>;
-  onRenameEnd: () => void;
+  /** False when another row's rename has begun since, which keeps its field and its focus. */
+  onRenameEnd: () => boolean;
 }) {
   const endRename = () => {
-    flushSync(onRenameEnd);
-    document.getElementById(menuButtonId)?.focus();
+    if (onRenameEnd()) document.getElementById(menuButtonId)?.focus();
   };
 
   return (
@@ -64,6 +63,9 @@ export function HistoryProjectRow({
     </li>
   );
 }
+
+/** The keyCode of a key the IME processed, sent for the Enter that ends a composition. */
+const IME_PROCESS_KEY_CODE = 229;
 
 /** Enter saves and Escape cancels; leaving the field saves, as a file name field does. */
 function RenameField({
@@ -98,6 +100,8 @@ function RenameField({
       onChange={(event) => setName(event.target.value)}
       onBlur={() => void save()}
       onKeyDown={(event) => {
+        // Enter and Escape while an IME is composing belong to the IME.
+        if (event.nativeEvent.isComposing || event.keyCode === IME_PROCESS_KEY_CODE) return;
         if (event.key === 'Enter') {
           event.preventDefault();
           void save();

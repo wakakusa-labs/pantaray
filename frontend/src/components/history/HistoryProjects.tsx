@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import type { useI18n } from '@/context/useI18n';
@@ -49,6 +49,16 @@ export function HistoryProjects({
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // A rename answers after the user may have started renaming another project.
+  const renamingIdRef = useRef(renamingId);
+  useEffect(() => {
+    renamingIdRef.current = renamingId;
+  });
+  const endRename = (projectId: string) => {
+    if (renamingIdRef.current !== projectId) return false;
+    flushSync(() => setRenamingId(null));
+    return true;
+  };
   const focusMenuButton = (projectId: string) =>
     document.getElementById(menuButtonId(projectId))?.focus();
 
@@ -121,7 +131,7 @@ export function HistoryProjects({
               renaming={renamingId === project.project_id}
               t={t}
               onRename={(name) => projects.renameProject(project.project_id, name)}
-              onRenameEnd={() => setRenamingId(null)}
+              onRenameEnd={() => endRename(project.project_id)}
             />
           ))}
         </ul>

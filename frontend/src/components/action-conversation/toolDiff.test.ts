@@ -73,6 +73,12 @@ describe('parseUnifiedDiff', () => {
     expect(parseUnifiedDiff('--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n a\n-b+c')).toBeNull();
   });
 
+  it('rejects a hunk after the rows that follow the counted ones', () => {
+    expect(
+      parseUnifiedDiff('--- f.txt\n+++ f.txt\n@@ -1 +1 @@\n-a\n+b\nnote\n@@ -5 +5 @@\n-c\n+d\n')
+    ).toBeNull();
+  });
+
   it('numbers a created file from its first line', () => {
     expect(numbered('--- n.txt\n+++ n.txt\n@@ -0,0 +1,2 @@\n+x\n+y\n')).toEqual([
       [
@@ -143,6 +149,53 @@ describe('parseMultiFileDiff', () => {
       ['a.txt', ['removed:x', 'added:y']],
       ['b.txt', ['added:z']],
     ]);
+  });
+
+  it('reads a format-patch file, leaving out its mail header and its signature', () => {
+    const patch = [
+      'From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001',
+      'From: Someone <someone@example.com>',
+      'Subject: [PATCH] Drop the dash item',
+      '',
+      '---',
+      ' list.md | 1 -',
+      ' 1 file changed, 1 deletion(-)',
+      '',
+      'diff --git a/list.md b/list.md',
+      'index 1111111..2222222 100644',
+      '--- a/list.md',
+      '+++ b/list.md',
+      '@@ -1,2 +1 @@',
+      ' keep',
+      // A removed "- " line inside the counted range, not the signature.
+      '-- ',
+      '-- ',
+      '2.47.0',
+      '',
+    ].join('\n');
+
+    expect(summary(patch)).toEqual([['list.md', ['context:keep', 'removed:- ']]]);
+  });
+
+  it('reads a git show, leaving out its commit header', () => {
+    const show = [
+      'commit 1111111111111111111111111111111111111111',
+      'Author: Someone <someone@example.com>',
+      'Date:   Sun Oct 11 09:00:00 2026 +0900',
+      '',
+      '    Rename the greeting',
+      '',
+      '    --- not a header',
+      '',
+      'diff --git a/hello.txt b/hello.txt',
+      '--- a/hello.txt',
+      '+++ b/hello.txt',
+      '@@ -1 +1 @@',
+      '-hi',
+      '+hello',
+    ].join('\n');
+
+    expect(summary(show)).toEqual([['hello.txt', ['removed:hi', 'added:hello']]]);
   });
 
   it('reads nothing that is not a diff, or a diff one part of which does not read', () => {

@@ -60,10 +60,13 @@ export function parseUnifiedDiff(diff: string): FileDiff | null {
   let newLeft = 0;
   let oldNumber = 0;
   let newNumber = 0;
+  // Rows after the last hunk's counted lines, such as format-patch's `-- ` signature, are not
+  // part of the diff. A row inside a counted range never is one, however it looks.
+  let trailer = false;
   for (const row of rows) {
     const header = HUNK_HEADER.exec(row);
     if (header !== null) {
-      if (oldLeft !== 0 || newLeft !== 0) return null;
+      if (trailer || oldLeft !== 0 || newLeft !== 0) return null;
       oldNumber = Number(header[1]);
       newNumber = Number(header[3]);
       // 行数を省いた範囲は 1 行。
@@ -78,10 +81,15 @@ export function parseUnifiedDiff(diff: string): FileDiff | null {
       if (row.startsWith(NEW_FILE_HEADER)) path = row.slice(NEW_FILE_HEADER.length);
       continue;
     }
+    if (trailer) continue;
     if (row.startsWith(NO_NEWLINE_MARKER)) {
       const previous = hunk.pop();
       if (previous === undefined) return null;
       hunk.push({ ...previous, noNewlineAtEnd: true });
+      continue;
+    }
+    if (oldLeft === 0 && newLeft === 0) {
+      trailer = true;
       continue;
     }
     const kind = LINE_KINDS.get(row.charAt(0));

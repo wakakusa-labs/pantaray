@@ -5,7 +5,6 @@ import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
-import { usePanelHandoff } from './usePanelHandoff';
 
 const RESIZE_EXPAND_THRESHOLD_PX = 4;
 const ACTION_RESIZE_BUFFER_PX = 32;
@@ -27,12 +26,12 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  /** Hands a task this panel started to the main window, which closes the panel. */
+  /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
+  onReject: (withReply: boolean) => void;
+  /** Shows this panel's task in the main window, which then closes the panel. */
   openTask: (actionId: string) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed: boolean;
-  /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
-  onReject: (withReply: boolean) => void;
   onStop: (processId?: string) => void;
 };
 
@@ -66,9 +65,12 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
-  const acceptFailed = failedSuggestionId !== null && failedSuggestionId === state.suggestionId;
-  const handoff = usePanelHandoff(state, acceptFailed);
-  const { awaitDecisionOutcome } = handoff;
+  // The suggestion (none in a new-task panel) whose task the main window could not show.
+  const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
+    suggestionId: string | null;
+  } | null>(null);
+  // A suggestion dismissed here without words, whose panel closes once the dismissal is recorded.
+  const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
 
@@ -327,50 +329,63 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  const onReject = useCallback(
-    (withReply: boolean) => {
-      if (decisionLockedRef.current) return;
-      if (interactionContractRef.current !== 'action_offer') return;
-      if (reactionStateRef.current !== null) return;
-      dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-      const sid = suggestionIdRef.current;
-      if (sid) {
-        // A reply keeps the panel open until it starts its conversation.
-        if (!withReply) awaitDecisionOutcome(sid, 'dismiss');
-        window.electron?.orchestration?.send({
-          event: 'dismiss_suggestion',
-          data: { suggestion_id: sid },
-        });
-      }
-    },
-    [awaitDecisionOutcome]
-  );
+  // A decided suggestion keeps no panel; one that says why, or asks for something else, stays.
+  useEffect(() => {
+    const dismissed = closeAfterDismissalRef.current;
+    if (dismissed === null) return;
+    if (dismissed === state.suggestionId && state.reactionState !== 'rejected') return;
+    closeAfterDismissalRef.current = null;
+    if (dismissed === state.suggestionId) window.electron?.agentOverlay?.hide();
+  }, [state.suggestionId, state.reactionState]);
 
-  const onAccept = useCallback(
-    async (options: SuggestionAcceptance) => {
-      if (decisionLockedRef.current) return;
-      if (interactionContractRef.current !== 'action_offer') return;
-      if (reactionStateRef.current !== null) return;
-      const sid = suggestionIdRef.current;
-      const acceptAction = window.electron?.orchestration?.acceptAction;
-      if (!sid || !acceptAction) return;
-      awaitDecisionOutcome(sid, 'accept');
-      decisionLockedRef.current = true;
-      setFailedSuggestionId(null);
-      dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-      dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_REQUESTING });
-      try {
-        await acceptAction({ suggestionId: sid, commandId: null, ...options });
-      } catch {
-        if (suggestionIdRef.current !== sid) return;
-        decisionLockedRef.current = false;
-        dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_IDLE });
-        dispatch({ type: 'SET_DECISION_LOCKED', value: false });
-        setFailedSuggestionId(sid);
+  const onReject = useCallback((withReply: boolean) => {
+    if (decisionLockedRef.current) return;
+    if (interactionContractRef.current !== 'action_offer') return;
+    if (reactionStateRef.current !== null) return;
+    dispatch({ type: 'SET_DECISION_LOCKED', value: true });
+    const sid = suggestionIdRef.current;
+    if (sid) {
+      if (!withReply) closeAfterDismissalRef.current = sid;
+      window.electron?.orchestration?.send({
+        event: 'dismiss_suggestion',
+        data: { suggestion_id: sid },
+      });
+    }
+  }, []);
+
+  const onAccept = useCallback(async (options: SuggestionAcceptance) => {
+    if (decisionLockedRef.current) return;
+    if (interactionContractRef.current !== 'action_offer') return;
+    if (reactionStateRef.current !== null) return;
+    const sid = suggestionIdRef.current;
+    const acceptAction = window.electron?.orchestration?.acceptAction;
+    if (!sid || !acceptAction) return;
+    decisionLockedRef.current = true;
+    setFailedSuggestionId(null);
+    dispatch({ type: 'SET_DECISION_LOCKED', value: true });
+    dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_REQUESTING });
+    try {
+      await acceptAction({ suggestionId: sid, commandId: null, ...options });
+    } catch {
+      if (suggestionIdRef.current !== sid) return;
+      decisionLockedRef.current = false;
+      dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_IDLE });
+      dispatch({ type: 'SET_DECISION_LOCKED', value: false });
+      setFailedSuggestionId(sid);
+    }
+  }, []);
+
+  // Main closes the panel once the main window shows the task; a failure keeps it, saying so.
+  const openTask = useCallback((actionId: string) => {
+    const suggestionId = suggestionIdRef.current;
+    void window.electron?.agentOverlay?.openTask?.({ actionId }).then(
+      () => setOpenTaskFailedFor(null),
+      (error: unknown) => {
+        console.error('Failed to open the task in the main window:', error);
+        setOpenTaskFailedFor({ suggestionId });
       }
-    },
-    [awaitDecisionOutcome]
-  );
+    );
+  }, []);
 
   const onClose = useCallback(() => {
     try {
@@ -403,10 +418,11 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onToggleExpand,
     onClose,
     onAccept,
-    acceptFailed,
-    openTask: handoff.openTask,
-    openTaskFailed: handoff.openTaskFailed,
+    acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
     onReject,
+    openTask,
+    openTaskFailed:
+      openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,
     onStop,
   };
 }

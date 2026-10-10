@@ -93,7 +93,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       conversation?.update(page);
       setLiveState((current) => (current === liveState ? null : current));
     },
-    onConversationStarted: ctrl.openTask,
   });
   const standaloneComposerRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
@@ -579,8 +578,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           : undefined
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
-      openTaskFailed={ctrl.openTaskFailed}
       chatActionId={currentView?.action?.action_id ?? null}
+      onOpenInMainWindow={ctrl.openTask}
+      openTaskFailed={ctrl.openTaskFailed}
       onShowChat={window.electron?.agentOverlay?.showChat}
       conversationCopy={conversationCopy}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}

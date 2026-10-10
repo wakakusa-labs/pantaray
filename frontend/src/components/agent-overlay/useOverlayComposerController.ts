@@ -116,7 +116,6 @@ export function useOverlayComposerController({
   suggestionAccepted,
   language,
   onRefreshedPage,
-  onConversationStarted,
   restored,
 }: {
   actions: ComposerActions | undefined;
@@ -125,8 +124,6 @@ export function useOverlayComposerController({
   suggestionAccepted: boolean;
   language: 'en' | 'ja';
   onRefreshedPage: (page: ActionConversationPage) => void;
-  /** A send that started a new conversation: the Action it created. */
-  onConversationStarted?: (actionId: string) => void;
   /** The main window's task pane brings back the composer it had when the user left it. */
   restored?: ComposerState;
 }) {
@@ -172,7 +169,6 @@ export function useOverlayComposerController({
   const sendRequest = (request: ActionMessageRequest) => {
     if (!actions) return;
     const messageId = request.message.message_id;
-    const generation = composerGenerationRef.current;
     void actions
       .submitMessage(request)
       .then((result) => {
@@ -228,10 +224,6 @@ export function useOverlayComposerController({
                 : null,
           };
         });
-        // A reset composer no longer stands for the conversation this send started.
-        if (request.target.kind === 'new' && generation === composerGenerationRef.current) {
-          onConversationStarted?.(response.action_id);
-        }
       })
       .catch(() => {
         setComposer((current) => {

@@ -18,6 +18,7 @@ import {
 import { MarkdownBlock } from './MarkdownRenderer';
 import { HeaderIconButton } from './IconButton';
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   ChevronUp,
@@ -119,10 +120,12 @@ type AgentOverlayShellProps = {
   showBusyIndicator: boolean;
   showThinking?: boolean;
   /** The Action the main window's chat can show; null until one exists. */
-  /** The task this panel started could not be shown in the main window. */
-  openTaskFailed?: boolean;
   chatActionId?: string | null;
   onShowChat?: (request: { actionId: string }) => Promise<void>;
+  /** Moves that Action to the main window, which then closes this panel. */
+  onOpenInMainWindow?: (actionId: string) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
   onClose?: () => void;
@@ -161,9 +164,10 @@ const AgentOverlayShell = ({
   approvalErrorMessage = null,
   showBusyIndicator,
   showThinking = false,
-  openTaskFailed = false,
   chatActionId = null,
   onShowChat,
+  onOpenInMainWindow,
+  openTaskFailed = false,
   fadeDurationMs = 600,
   onToggleExpand,
   onClose,
@@ -263,6 +267,16 @@ const AgentOverlayShell = ({
           </ShowChatButton>
         )}
         <HeaderButtonGroup>
+          {chatActionId !== null && onOpenInMainWindow && (
+            <HeaderIconButton
+              $visible={isVisible}
+              onClick={() => onOpenInMainWindow(chatActionId)}
+              aria-label={t('overlay.openInMainWindow')}
+              title={t('overlay.openInMainWindow')}
+            >
+              <ArrowUpRight strokeWidth={1.75} aria-hidden />
+            </HeaderIconButton>
+          )}
           {conversationCopy && (
             <>
               <HeaderIconButton

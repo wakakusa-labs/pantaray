@@ -79,9 +79,6 @@ const acceptAction = vi.fn<NonNullable<ElectronBridge['orchestration']>['acceptA
 const send = vi.fn();
 const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
 const onStarted = vi.fn();
-// The panel's handoff, present in this bridge so a main-window decision that used it would show.
-const openTask = vi.fn();
-const hideOverlay = vi.fn();
 const onShowInChat = vi.fn();
 
 const publish = (snapshot: OverlaySnapshot) =>
@@ -116,8 +113,6 @@ beforeEach(() => {
   send.mockReset();
   submitMessage.mockReset();
   onStarted.mockReset();
-  openTask.mockReset();
-  hideOverlay.mockReset();
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -129,7 +124,6 @@ beforeEach(() => {
           applies_to: ['workspace_edit_and_command'],
         })),
       },
-      agentOverlay: { openTask, hide: hideOverlay },
       suggestions: {
         read,
         onSnapshot: (callback: typeof snapshotListener) => {
@@ -324,8 +318,6 @@ describe('SuggestionTaskPane', () => {
     );
     expect(onStarted).toHaveBeenCalledWith('act-1');
     expect(onStarted).toHaveBeenCalledTimes(1);
-    // The main window shows the task in place; nothing moves windows.
-    expect(openTask).not.toHaveBeenCalled();
   });
 
   it('lets the user accept again when the accept call fails', async () => {
@@ -369,7 +361,6 @@ describe('SuggestionTaskPane', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(onStarted).not.toHaveBeenCalled();
-    expect(hideOverlay).not.toHaveBeenCalled();
   });
 
   it('dismisses with the words, then sends them as a reply once the dismissal is recorded', async () => {
@@ -525,7 +516,6 @@ describe('SuggestionTaskPane', () => {
       })
     );
     expect(onStarted).toHaveBeenCalledWith('act-reply');
-    expect(openTask).not.toHaveBeenCalled();
   });
 
   it('answers a dismissed suggestion with a reply that starts a new Action', async () => {

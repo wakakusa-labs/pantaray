@@ -49,14 +49,10 @@ test('a document picked in the composer reaches the Action workspace when sent',
     ).toBe(true);
 
     await input.fill('この議事録を読んで');
-    const panelClosed = overlay.waitForEvent('close');
     await input.press('Enter');
-    // The first send starts a task: the panel closes and the main window opens it.
-    await panelClosed;
-    await page.waitForURL(/#\/history\?item=action:[^&]+$/);
-    const sent = page.getByRole('article', { name: 'あなた' });
-    await expect(sent).toContainText('この議事録を読んで');
+    const sent = overlay.getByRole('article', { name: 'あなた' });
     await expect(sent.getByRole('list', { name: '添付ファイル 1 件' })).toContainText('議事録.pdf');
+    await expect(input).toHaveValue('');
 
     // The backend links the staged file into the Action workspace and removes the staged copy.
     const workspaces = path.join(path.dirname(localArtifactRoot), 'local_runtime_workspaces');

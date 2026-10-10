@@ -8,6 +8,7 @@ import type {
   ActionMessageSubmitResult,
 } from '../../actions/actionContracts';
 import { LocalBackendRequestError } from '../../localBackend/client';
+import { sendWork, type TaskSendOutcome } from '../../actions/taskDraftStore';
 import {
   ActionConversationOverlayRequestSchema,
   ActionConversationPageRequestSchema,
@@ -130,7 +131,37 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     const parsed = parseInput(ActionMessageRequestSchema, 'action:submitMessage', request);
     const replyTo =
       parsed.target.kind === 'new' ? (parsed.target.reply_to_suggestion_id ?? null) : null;
-    return openUserTurn(ctx, event, () => ctx.actions.submitMessage(parsed), replyTo);
+    // The task's draft is cleared as its words go out and settled by how the send ends. The new
+    // task's draft is the main window's: the small New task window keeps its own.
+    const owner = ctx.actions.getCurrentSubjectId();
+    const mainWindow = ctx.windows.getMainWindow();
+    const fromMainWindow =
+      mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.webContents === event.sender;
+    const work = sendWork(parsed);
+    const drafted = owner !== null && (work !== 'new' || fromMainWindow);
+    if (drafted) ctx.taskDrafts.clearForSend(owner, work);
+    const settle = (outcome: TaskSendOutcome) => {
+      if (drafted) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
+    };
+    try {
+      const result = await openUserTurn(
+        ctx,
+        event,
+        () => ctx.actions.submitMessage(parsed),
+        replyTo
+      );
+      settle(result.kind === 'submitted' || result.kind === 'reply_exists' ? 'sent' : 'refused');
+      return result;
+    } catch (error) {
+      // The backend answered with a refusal, or the outcome is unknown and only a retry of
+      // this exact request, which it dedupes, may follow.
+      settle(
+        error instanceof LocalBackendRequestError && error.status !== null && error.status < 500
+          ? 'refused'
+          : 'unknown'
+      );
+      throw error;
+    }
   });
   registrar.handle('action:resume', async (event, request) =>
     openUserTurn(

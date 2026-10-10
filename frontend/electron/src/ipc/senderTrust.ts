@@ -33,6 +33,10 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'action:attachImage',
   'action:attachFile',
   'action:discardAttachment',
+  // A task's draft is shared by its composers in both windows.
+  'action:openDraft',
+  'action:updateDraft',
+  'action:closeDraft',
   'actionImage:reveal',
   'ui:getLanguage',
   'ws:send',

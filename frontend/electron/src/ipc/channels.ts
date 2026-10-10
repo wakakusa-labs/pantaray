@@ -42,6 +42,8 @@ export const validReceiveChannels = [
   'history:showChat',
   // Main window only: select this work in History (a task a panel started)
   'history:showItem',
+  // A task's shared draft as another window changed it
+  'action:draftChanged',
   // Screenshot status change notification
   'screenshot:statusChanged',
   // Capture allowlist settings update
@@ -156,6 +158,10 @@ export const validInvokeChannels = [
   'overlay:showChat',
   // Overlay → main window: the panel closes and the main window opens the task it started
   'overlay:openTask',
+  // Shared task drafts, for every composer that shows a task
+  'action:openDraft',
+  'action:updateDraft',
+  'action:closeDraft',
 ] as const;
 
 export type ValidSendChannel = (typeof validSendChannels)[number];

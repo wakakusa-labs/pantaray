@@ -16,6 +16,7 @@ import type { ImageGridCopy } from './AttachedImages';
 import { UserItem } from './UserMessage';
 import { CopyAnswerButton } from './CopyAnswerButton';
 import { ToolRow, type ToolRowStatus } from './ToolRow';
+import { terminalOutcomeText } from './terminalOutcomeText';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
 import {
   foldsCommentary,
@@ -175,7 +176,7 @@ export function StepItem({
   toolOutputLoader: ActionToolOutputLoader;
   onFocusedContentUnmount: (key: string) => void;
 }) {
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const copy = COPY[language];
 
   const contentRef = useRef<HTMLElement>(null);
@@ -251,7 +252,7 @@ export function StepItem({
       {line.kind === 'assistant' || line.kind === 'final_output' ? (
         <MarkdownBlock text={line.text} isStreamFinished />
       ) : (
-        <p>{line.text}</p>
+        <p>{terminalOutcomeText(line.text, t)}</p>
       )}
       {line.kind === 'final_output' ? <CopyAnswerButton markdown={line.text} /> : null}
     </section>

@@ -157,12 +157,12 @@ afterEach(() => {
 });
 
 describe('SuggestionTaskPane', () => {
-  it('shows the suggestion with its title, badge and decision', async () => {
+  it('shows the suggestion with its title and decision, without a badge', async () => {
     await renderPane();
 
     expect(read).toHaveBeenCalledWith({ suggestionId: 'sug-1' });
     expect(screen.getByRole('heading', { name: 'Invoice draft' })).toBeInTheDocument();
-    expect(screen.getByText('Suggestion')).toBeInTheDocument();
+    expect(screen.queryByText('Suggestion')).not.toBeInTheDocument();
     expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
     expect(acceptButton()).toBeEnabled();
     expect(dismissButton()).toBeEnabled();

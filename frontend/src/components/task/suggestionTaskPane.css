@@ -28,10 +28,6 @@
   white-space: nowrap;
 }
 
-.suggestion-task__header .badge {
-  flex-shrink: 0;
-}
-
 .suggestion-task__scroll {
   flex: 1;
   min-height: 0;

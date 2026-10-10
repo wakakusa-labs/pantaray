@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
 
-import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
 import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import {
@@ -77,10 +76,6 @@ export function SuggestionTaskPane({
     if (task.actionId !== null) onStartedRef.current(task.actionId);
   }, [task.actionId]);
 
-  const badge = getHistoryItemStatusMeta({
-    kind: 'suggestion',
-    status: phase === 'actionable' ? 'approval_pending' : 'idle',
-  });
   const isOffer = snapshot?.interactionContract === 'action_offer';
   const dismissed = phase === 'dismissed';
   // An offer takes the composer as the approval's extra instruction until it is dismissed.
@@ -99,7 +94,6 @@ export function SuggestionTaskPane({
     <section className="suggestion-task" aria-labelledby={titleId}>
       <header className="suggestion-task__header">
         <h1 id={titleId}>{title}</h1>
-        {badge ? <span className={badgeClassName(badge.tone)}>{t(badge.labelKey)}</span> : null}
       </header>
       <div className="suggestion-task__scroll">
         <div className="suggestion-task__column">

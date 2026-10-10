@@ -95,16 +95,16 @@ export function createSuggestionRecords(params: {
     clear(suggestionId);
   }
 
-  // A persisted read seeds the record the live stream keeps current. A read older than the
-  // record is stale, and a command the backend may not have recorded yet stays with its envelope:
-  // dropping it would stop its replay and offer the accept again.
+  // A persisted read seeds the record the live stream keeps current. A read no newer than the
+  // record only fills the body it lacks (Action events never carry one), and a command the backend
+  // may not have recorded yet stays with its envelope: dropping it would stop its replay and offer
+  // the accept again.
   function adoptPersisted(persisted: OverlaySnapshot): OverlaySnapshot {
     const suggestionId = String(persisted.suggestionId);
     const dismissedSnapshot = dismissed.get(suggestionId);
     if (dismissedSnapshot) return fillFromPersisted(dismissedSnapshot, persisted);
     const current = records.get(suggestionId);
-    if (current && current.snapshot.lastSequence > persisted.lastSequence) return current.snapshot;
-    if (current && current.snapshot.lastSequence === persisted.lastSequence) {
+    if (current && current.snapshot.lastSequence >= persisted.lastSequence) {
       const filled = fillFromPersisted(current.snapshot, persisted);
       if (filled === current.snapshot) return filled;
       return store({ snapshot: filled, executeEnvelope: current.executeEnvelope });

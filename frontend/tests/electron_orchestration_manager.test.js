@@ -1430,3 +1430,30 @@ test('a same-sequence read fills the body of a suggestion accepted in a History 
   assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
   assert.deepEqual(suggestionSnapshotsSentToMain(harness).at(-1), read);
 });
+
+test('an older read still fills the body of an accepted suggestion the events never carry', async () => {
+  const harness = createManagerHarness();
+  const accepted = await harness.manager.acceptAction(actionRequest());
+  // The read fetched its bootstrap at sequence 3; action_requested at 5 reaches main first.
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'action_requested',
+    sequence: 5,
+    data: {
+      suggestion_id: 'sug-1',
+      command_id: accepted.commandId,
+      accepted_at: '2026-10-10T00:00:00Z',
+      committed_at: '2026-10-10T00:00:00Z',
+    },
+    meta: { suggestion_id: 'sug-1', kind: 'action', command_id: accepted.commandId },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(read.interactionContract, 'action_offer');
+  assert.equal(read.reactionState, 'accepted');
+  assert.equal(read.actionPhase, 'accepted_pending_start');
+  assert.equal(read.commandId, accepted.commandId);
+  assert.equal(read.lastSequence, 5);
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
+});

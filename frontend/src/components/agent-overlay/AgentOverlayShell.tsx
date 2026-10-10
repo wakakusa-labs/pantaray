@@ -30,7 +30,6 @@ import styled, { keyframes } from 'styled-components';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
-import { SuggestionDecisionControls, type SuggestionDecision } from './SuggestionDecisionControls';
 
 const SuggestionAcceptedStatus = styled.span`
   display: flex;
@@ -102,7 +101,6 @@ type AgentOverlayShellProps = {
   isExpanded: boolean;
   content: string | null;
   suggestionText: string;
-  suggestionId?: string | null;
   isSuggestionStreamFinished: boolean;
   isSuggestionAccepted?: boolean;
   actionText: string;
@@ -123,12 +121,9 @@ type AgentOverlayShellProps = {
   /** The Action the main window's chat can show; null until one exists. */
   chatActionId?: string | null;
   onShowChat?: (request: { actionId: string }) => Promise<void>;
-  showFooterActions?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
   onClose?: () => void;
-  suggestionDecision?: SuggestionDecision;
-  onReject?: () => void;
   onDecideApproval?: (decision: ApprovalDecision, blocker: ActionApprovalBlocker) => void;
   onOpenWorkspaceSettings?: () => void;
   /** Present while a conversation is shown; copies the whole conversation. */
@@ -141,14 +136,12 @@ type AgentOverlayShellProps = {
   scrollableRef?: RefObject<HTMLDivElement>;
   contentInnerRef?: RefObject<HTMLDivElement>;
   answerAreaRef?: RefObject<HTMLDivElement>;
-  footerRef?: RefObject<HTMLDivElement>;
   composerRef?: RefObject<HTMLDivElement>;
   containerRef?: RefObject<HTMLDivElement>;
 };
 
 /** Electron通知とWebモーダルで共有するAgentOverlayの表示・操作シェル。 */
 const AgentOverlayShell = ({
-  suggestionId,
   isVisible,
   isContentVisible,
   isExpanded,
@@ -168,12 +161,9 @@ const AgentOverlayShell = ({
   showThinking = false,
   chatActionId = null,
   onShowChat,
-  showFooterActions = true,
   fadeDurationMs = 600,
   onToggleExpand,
   onClose,
-  suggestionDecision,
-  onReject,
   onDecideApproval,
   onOpenWorkspaceSettings,
   conversationCopy,
@@ -185,7 +175,6 @@ const AgentOverlayShell = ({
   scrollableRef,
   contentInnerRef,
   answerAreaRef,
-  footerRef,
   composerRef,
   containerRef,
 }: AgentOverlayShellProps) => {
@@ -321,7 +310,6 @@ const AgentOverlayShell = ({
         <ScrollableContent
           ref={resolvedScrollableRef}
           $collapsed={!isExpanded}
-          $hasFooter={Boolean(showFooterActions)}
           onScroll={handleScrollableContentScroll}
           data-overlay-scroll="true"
         >
@@ -388,18 +376,6 @@ const AgentOverlayShell = ({
         ) : null}
         {composer}
       </ComposerDock>
-
-      {showFooterActions && suggestionDecision && (
-        <SuggestionDecisionControls
-          key={suggestionId}
-          isVisible={isVisible}
-          isBusy={showBusyIndicator}
-          compact={!isExpanded}
-          footerRef={footerRef}
-          decision={suggestionDecision}
-          onReject={onReject}
-        />
-      )}
     </PopupContainer>
   );
 };

@@ -26,6 +26,8 @@ import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
+import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
+import { useReplyAfterDismissal } from './agent-overlay/useReplyAfterDismissal';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -287,12 +289,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       setComposer((current) => visiblePages.reduce(reconcileCanonicalSubmission, current));
   }, [visiblePages, setComposer]);
   const conversationCopy = useConversationCopy(actions, currentView?.action?.action_id ?? null);
-  const canDecide =
+  // An unanswered offer's composer holds 承認 / 見送る; while one is under way both stay, disabled.
+  const offersDecision =
     state.interactionContract === 'action_offer' &&
     state.reactionState === null &&
-    !state.decisionLocked &&
     Boolean(state.suggestionId) &&
     Boolean(state.suggestionText);
+  const canDecide = offersDecision && !state.decisionLocked;
   const showBusyIndicator =
     approvalUiState === 'hidden' &&
     (lifecycle
@@ -444,6 +447,23 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   ) : null;
   const canAcceptSuggestion =
     permissionsReady && composer.attachmentsInFlight === 0 && !supplementInvalid;
+  const sendDraft = () => {
+    if (permissionsReady)
+      submitDraft(
+        visiblePages,
+        canStartConversation,
+        stopProcessId,
+        state.lastSequence,
+        approvalMode.mode,
+        entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
+      );
+  };
+  const replyAfterDismissal = useReplyAfterDismissal(
+    state.suggestionId,
+    answersDismissal,
+    sendDraft
+  );
+  const hasWords = composer.draft.trim() !== '';
   const acceptSuggestion = () => {
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
     ctrl.onAccept({
@@ -457,25 +477,39 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const composerContent =
     toolOutputLoader &&
     (!operationalError || composer.submission) &&
-    (canCompose || canDecide || composer.submission) ? (
+    (canCompose || offersDecision || composer.submission) ? (
       <OverlayComposer
         approvalMode={approvalMode}
         draft={composer.draft}
         mentions={composer.mentions}
         submissionControls={submissionControls}
-        retryAcceptance={canDecide && ctrl.acceptFailed}
+        retryAcceptance={offersDecision && ctrl.acceptFailed}
         attachments={composer.attachments}
         attachmentFailure={composer.attachmentFailure}
-        validationFailed={canDecide ? supplementInvalid : composer.validationFailed}
+        validationFailed={offersDecision ? supplementInvalid : composer.validationFailed}
         canAttach={canAttach}
-        action={canDecide ? 'accept' : composerAction}
+        action={
+          offersDecision
+            ? {
+                decision: (
+                  <SuggestionDecisionButtons
+                    canDismiss={
+                      canDecide &&
+                      (!hasWords || (permissionsReady && composer.attachmentsInFlight === 0))
+                    }
+                    canAccept={canDecide && canAcceptSuggestion}
+                    onDismiss={() => {
+                      replyAfterDismissal(hasWords);
+                      ctrl.onReject();
+                    }}
+                    onAccept={acceptSuggestion}
+                  />
+                ),
+              }
+            : composerAction
+        }
         canSend={
-          canDecide
-            ? canAcceptSuggestion
-            : !composer.submission &&
-              composer.draft.trim() !== '' &&
-              composer.attachmentsInFlight === 0 &&
-              permissionsReady
+          !composer.submission && hasWords && composer.attachmentsInFlight === 0 && permissionsReady
         }
         resumeFailed={composer.resume?.state === 'failed'}
         canResume={
@@ -487,21 +521,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}
         onRemoveAttachment={removeAttachment}
-        onSubmit={() => {
-          if (canDecide) {
-            acceptSuggestion();
-            return;
-          }
-          if (permissionsReady)
-            submitDraft(
-              visiblePages,
-              canStartConversation,
-              stopProcessId,
-              state.lastSequence,
-              approvalMode.mode,
-              entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
-            );
-        }}
+        onSubmit={sendDraft}
         onStop={() => ctrl.onStop(stopProcessId ?? undefined)}
         onResume={() => {
           if (permissionsReady) requestResume(visiblePages);
@@ -525,7 +545,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       actionText={operationalError}
       conversationContent={conversationContent}
       composer={
-        canDecide ? null : startsReply && !answersDismissal && composerContent ? (
+        startsReply && !answersDismissal && composerContent ? (
           <SuggestionInputDisclosure
             key={state.suggestionId}
             label={t('overlay.composer.open')}
@@ -533,11 +553,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           >
             {composerContent}
           </SuggestionInputDisclosure>
+        ) : offersDecision && ctrl.acceptFailed ? (
+          <>
+            <p role="alert">{t('overlay.acceptFailed')}</p>
+            {composerContent}
+          </>
         ) : (
           composerContent
         )
       }
-      suggestionId={state.suggestionId}
       isActionStreamFinished={state.isActionStreamFinished}
       approvalUiState={approvalUiState}
       approvalBlockers={approvalBlockers}
@@ -545,26 +569,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       approvalErrorMessage={approval.approvalErrorMessage}
       showBusyIndicator={showBusyIndicator}
       showThinking={showThinking}
-      showFooterActions={approvalUiState === 'hidden' && canDecide}
       fadeDurationMs={600}
       onToggleExpand={ctrl.onToggleExpand}
       onClose={ctrl.onClose}
-      suggestionDecision={
-        canDecide
-          ? {
-              input: composerContent,
-              inputRef: standaloneComposerRef,
-              canAccept: canAcceptSuggestion,
-              accept: acceptSuggestion,
-              errorMessage: ctrl.acceptFailed
-                ? t('overlay.acceptFailed')
-                : approvalMode.errorKey
-                  ? t(approvalMode.errorKey)
-                  : null,
-            }
-          : undefined
-      }
-      onReject={canDecide ? ctrl.onReject : undefined}
       onDecideApproval={
         approvalUiState === 'approval_pending'
           ? (decision, blocker) => void approval.submitApprovalDecision(decision, blocker)
@@ -582,7 +589,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       scrollableRef={ctrl.scrollableContentRef}
       contentInnerRef={ctrl.contentInnerRef}
       answerAreaRef={ctrl.answerAreaRef}
-      footerRef={ctrl.footerRef}
       composerRef={ctrl.composerRef}
       containerRef={ctrl.containerRef}
     />

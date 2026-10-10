@@ -318,7 +318,6 @@ for (const language of ['ja', 'en'] as const) {
     await expect(badge).toHaveCount(0);
     const instructionLabel =
       language === 'ja' ? '追加の指示（任意）' : 'Additional instructions (optional)';
-    await page.getByRole('button', { name: instructionLabel }).click();
     const comment = language === 'ja' ? '変更のリスクも教えて' : 'Include the risks.';
     await page.getByRole('textbox', { name: instructionLabel }).fill(comment);
     await page

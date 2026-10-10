@@ -47,11 +47,22 @@ const ComposerForm = styled.form`
   }
 `;
 
-/** 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。 */
+/**
+ * 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。
+ * 決定ボタンの並びは送信の円より幅を取るので、狭い枠では次の行の右端へ折り返す。
+ */
 const ComposerActions = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+`;
+
+/** 送信の円の代わりに右端へ寄せる、ホスト側の決定ボタンの並び。 */
+const ComposerDecision = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 `;
 
 /**
@@ -167,9 +178,10 @@ type OverlayComposerProps = {
   canAttach: boolean;
   /**
    * 右端のボタンが担う操作。本文があれば送信、空でエージェントが動いていれば
-   * 停止、空で直前に止めたままなら再開。
+   * 停止、空で直前に止めたままなら再開。`decision` はホストのボタン（承認の可否など）が
+   * 送信の代わりに右端へ並び、本文はそのボタンが使う。Enter ではどれも押さない。
    */
-  action: 'send' | 'stop' | 'resume' | 'accept';
+  action: 'send' | 'stop' | 'resume' | { decision: ReactNode };
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
@@ -293,13 +305,14 @@ export function OverlayComposer({
   const { t } = useI18n();
   const attachInputRef = useRef<HTMLInputElement>(null);
   const isReadOnly = retryAcceptance || Boolean(submissionControls);
+  const decides = typeof action === 'object';
 
   return (
     <ComposerForm
       className="overlay-composer"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSend) onSubmit();
+        if (canSend && !decides) onSubmit();
       }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
@@ -308,7 +321,7 @@ export function OverlayComposer({
       }}
     >
       <ScreenReaderOnly htmlFor={MESSAGE_FIELD_ID}>
-        {t(action === 'accept' ? 'overlay.supplement.label' : 'overlay.composer.label')}
+        {t(decides ? 'overlay.supplement.label' : 'overlay.composer.label')}
       </ScreenReaderOnly>
       <ComposerMessageField
         id={MESSAGE_FIELD_ID}
@@ -318,7 +331,7 @@ export function OverlayComposer({
         readOnly={isReadOnly}
         placeholder={
           placeholder ??
-          t(action === 'accept' ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')
+          t(decides ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')
         }
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
@@ -326,9 +339,10 @@ export function OverlayComposer({
         onAddProject={onAddProject}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
-          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。
+          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。決定は
+          // どちらを選ぶかを本人が押して決めるので、Enter は何もしない。
           event.preventDefault();
-          if (canSend) onSubmit();
+          if (canSend && !decides) onSubmit();
         }}
         onPasteFiles={onAttachFiles}
       />
@@ -341,14 +355,20 @@ export function OverlayComposer({
       />
       {validationFailed ? (
         <ComposerAlert id={MESSAGE_ERROR_ID} role="alert">
-          {t(action === 'accept' ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
+          {t(decides ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
         </ComposerAlert>
       ) : null}
       {resumeFailed ? (
         <ComposerAlert role="alert">{t('overlay.composer.resumeFailed')}</ComposerAlert>
       ) : null}
       {submissionControls ??
-        (!retryAcceptance && (
+        (retryAcceptance ? (
+          typeof action === 'object' && (
+            <ComposerActions>
+              <ComposerDecision>{action.decision}</ComposerDecision>
+            </ComposerActions>
+          )
+        ) : (
           <ComposerActions>
             <input
               ref={attachInputRef}
@@ -373,7 +393,9 @@ export function OverlayComposer({
               <Plus strokeWidth={1.75} aria-hidden />
             </ComposerIconButton>
             <ApprovalModeMenu approvalMode={approvalMode} />
-            {action === 'send' ? (
+            {typeof action === 'object' ? (
+              <ComposerDecision>{action.decision}</ComposerDecision>
+            ) : action === 'send' ? (
               <ComposerPrimaryButton
                 type="submit"
                 disabled={!canSend}
@@ -384,7 +406,7 @@ export function OverlayComposer({
               </ComposerPrimaryButton>
             ) : action === 'stop' ? (
               <ComposerStopButton onStop={onStop} />
-            ) : action === 'resume' ? (
+            ) : (
               <ComposerPrimaryButton
                 type="button"
                 disabled={!canResume}
@@ -394,7 +416,7 @@ export function OverlayComposer({
               >
                 <Play strokeWidth={2.25} fill="currentColor" aria-hidden />
               </ComposerPrimaryButton>
-            ) : null}
+            )}
           </ComposerActions>
         ))}
     </ComposerForm>

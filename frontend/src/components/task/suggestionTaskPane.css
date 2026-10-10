@@ -66,10 +66,3 @@
   margin-right: auto;
   margin-left: auto;
 }
-
-.suggestion-task__decision {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 8px;
-}

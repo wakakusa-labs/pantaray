@@ -6,6 +6,7 @@ import { isErrorEvent } from '../../../electron/src/orchestration/eventContracts
 import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
 import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
+import { useReplyAfterDismissal } from '../agent-overlay/useReplyAfterDismissal';
 import { useKeptTaskComposer, type TaskComposerDrafts } from './taskComposerDrafts';
 
 /**
@@ -218,25 +219,32 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
     }
   };
 
-  const canDismiss = phase === 'actionable' && contract === 'action_offer';
+  const hasWords = composer.composer.draft.trim() !== '';
+  const canReply =
+    ((phase === 'actionable' && contract === 'message_only') || phase === 'dismissed') &&
+    permissionsReady &&
+    submission === null &&
+    hasWords &&
+    composer.composer.attachmentsInFlight === 0;
+  const reply = () => {
+    if (!canReply || snapshot === null) return;
+    composer.submitDraft(null, true, null, snapshot.lastSequence, approvalMode.mode, suggestionId);
+  };
+  const replyAfterDismissal = useReplyAfterDismissal(suggestionId, phase === 'dismissed', reply);
+
+  // Words go out as a reply after the dismissal, so they wait for what a reply waits for.
+  const canDismiss =
+    phase === 'actionable' &&
+    contract === 'action_offer' &&
+    (!hasWords || (permissionsReady && composer.composer.attachmentsInFlight === 0));
   const dismiss = () => {
     if (!canDismiss || !orchestration) return;
+    replyAfterDismissal(hasWords);
     // ws:send is fire-and-forget: a transport failure in main never reaches this window.
     dismissingRef.current = suggestionId;
     setPending({ suggestionId, value: 'dismiss' });
     setFailure(null);
     orchestration.send({ event: 'dismiss_suggestion', data: { suggestion_id: suggestionId } });
-  };
-
-  const canReply =
-    ((phase === 'actionable' && contract === 'message_only') || phase === 'dismissed') &&
-    permissionsReady &&
-    submission === null &&
-    composer.composer.draft.trim() !== '' &&
-    composer.composer.attachmentsInFlight === 0;
-  const reply = () => {
-    if (!canReply || snapshot === null) return;
-    composer.submitDraft(null, true, null, snapshot.lastSequence, approvalMode.mode, suggestionId);
   };
 
   return {

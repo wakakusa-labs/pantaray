@@ -19,7 +19,6 @@ export type AgentOverlayController = {
   scrollableContentRef: React.RefObject<HTMLDivElement>;
   contentInnerRef: React.RefObject<HTMLDivElement>;
   answerAreaRef: React.RefObject<HTMLDivElement>;
-  footerRef: React.RefObject<HTMLDivElement>;
   composerRef: React.RefObject<HTMLDivElement>;
   containerRef: React.RefObject<HTMLDivElement>;
   // handlers
@@ -57,7 +56,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const scrollableContentRef = useRef<HTMLDivElement>(null);
   const contentInnerRef = useRef<HTMLDivElement>(null);
   const answerAreaRef = useRef<HTMLDivElement>(null);
-  const footerRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -108,7 +106,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     //   ウィンドウが伸びない（=スクロールが残る）根本原因になる。
     // - ここでは scrollHeight を使って「必要な内容高さ」を推定し、その分だけウィンドウをリサイズする。
     const headerEl = headerRef.current;
-    const footerEl = footerRef.current;
     const composerEl = composerRef.current;
     const scrollableEl = scrollableContentRef.current;
     const contentInnerEl = contentInnerRef.current;
@@ -122,12 +119,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       return px(cs.marginTop) + px(cs.marginBottom);
     };
 
-    // Header/Footer は「見える分 + 外側余白」
+    // Header は「見える分 + 外側余白」
     const headerH = headerEl
       ? Math.ceil(headerEl.getBoundingClientRect().height + outerMarginY(headerEl))
-      : 0;
-    const footerH = footerEl
-      ? Math.ceil(footerEl.getBoundingClientRect().height + outerMarginY(footerEl))
       : 0;
     // composer はスクロール領域の外にあるので、その分の高さを別に確保する。
     const composerH = composerEl
@@ -149,7 +143,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     const containerPad =
       px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth);
 
-    const needed = Math.ceil(containerPad + headerH + footerH + composerH + scrollNeeded);
+    const needed = Math.ceil(containerPad + headerH + composerH + scrollNeeded);
     if (!needed) return;
 
     const mode = isActionPhaseRef.current ? 'action' : 'suggestion';
@@ -268,7 +262,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       contentInnerRef.current,
       scrollableContentRef.current,
       headerRef.current,
-      footerRef.current,
       composerRef.current,
     ].filter((element): element is HTMLDivElement => Boolean(element));
 
@@ -388,7 +381,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     scrollableContentRef,
     contentInnerRef,
     answerAreaRef,
-    footerRef,
     composerRef,
     containerRef,
     onToggleExpand,

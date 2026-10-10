@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
-import { NewWorkButton } from '@/components/history/NewWorkButton';
-import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupByLocalDay } from '@/history/historyDayGroups';
-import { openNewWork } from '@/history/newWork';
 import type { ChatItemsResult } from '@/hooks/useChatItems';
 import { useChatWorkStates } from '@/hooks/useChatWorkStates';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
@@ -51,24 +48,24 @@ async function openCard(card: ChatCardData): Promise<void> {
 type ChatJump = Readonly<{ key: string; itemId: string; returnTo: string | null; shown: boolean }>;
 
 /**
- * The single chat in the History page: messages with their cards, read newest first and
- * scrolled up for older pages.
+ * The single chat in the History page's detail pane: messages with their cards, read newest first
+ * and scrolled up for older pages.
  */
 export function ChatView({
-  modeSwitch,
+  notice: pageNotice,
   chat,
   composer,
   reveal,
 }: {
-  modeSwitch: ReactNode;
-  /** The chat and its composer outlive this view, so switching to the list loses neither. */
+  /** Shown under the pane's title (the app's AI-connection notice). */
+  notice: ReactNode;
+  /** The chat and its composer outlive this view, so leaving the page loses neither. */
   chat: ChatItemsResult;
   composer: ChatComposerControl;
   /** The Action whose latest card the Overlay asked to show, or null. */
   reveal: ChatReveal | null;
 }) {
   const { t, language } = useI18n();
-  const shortcutHint = useGlobalShortcutHint();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
   const [openWork, setOpenWork] = useState<WorkKey | null>(null);
@@ -147,14 +144,6 @@ export function ChatView({
   const returnTo = jump?.shown ? jump.returnTo : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleNewWork = async (): Promise<void> => {
-    setNotice(null);
-    try {
-      await openNewWork();
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
   const handleRetryTurn = async (failureItemId: string): Promise<void> => {
     setNotice(null);
     setRetrying(true);
@@ -284,18 +273,15 @@ export function ChatView({
 
   return (
     <div className="history-container chat-view">
-      <div className="history-header">
-        <div className="history-toolbar">
-          {modeSwitch}
-          <span className="history-toolbar__spacer" />
-          <NewWorkButton shortcutHint={shortcutHint} t={t} onClick={() => void handleNewWork()} />
+      <header className="history-pane-header">
+        <h1>{t('history.chat.title')}</h1>
+      </header>
+      {pageNotice}
+      {notice ? (
+        <div className="history-error history-pane-notice" role="alert">
+          {notice}
         </div>
-        {notice ? (
-          <div className="history-error" role="alert">
-            {notice}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
       {renderBody()}
       {returnTo !== null ? (
         <button

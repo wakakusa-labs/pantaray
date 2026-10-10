@@ -1,8 +1,9 @@
-import { Trash2 } from 'lucide-react';
-import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { MessageCircle, Trash2 } from 'lucide-react';
+import { useLayoutEffect, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
+import { useChatUnreadCount } from '@/components/chat/chatUnread';
 import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
 import {
   useGlobalShortcutHint,
@@ -24,6 +25,8 @@ import { badgeClassName, getHistoryItemStatusMeta } from './statusTokens';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
+const CHAT_UNREAD_ID = 'history-chat-unread';
+const MAX_SHOWN_UNREAD = 99;
 
 /**
  * A running or approval-waiting conversation is one whose own run the backend refuses to delete
@@ -82,8 +85,8 @@ function liveStageText(
 }
 
 /**
- * Points at the header button, naming the shortcut only while it is registered. The sentence stays
- * one translatable string; `{shortcut}` marks where the keycaps replace it.
+ * Points at the New task button, naming the shortcut only while it is registered. The sentence
+ * stays one translatable string; `{shortcut}` marks where the keycaps replace it.
  */
 function EmptyStateHint({
   state,
@@ -104,8 +107,43 @@ function EmptyStateHint({
   );
 }
 
-/** The History page's task list, with the mode switch at the head of its toolbar. */
-export function HistorySidebar({ modeSwitch }: { modeSwitch: ReactNode }) {
+/** The chat's row: always the one shown for now, with Pantaray's unread messages counted. */
+function ChatRow({
+  t,
+}: {
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+}) {
+  const unread = useChatUnreadCount();
+  return (
+    <div className="history-sidebar__chat">
+      <button
+        type="button"
+        className="history-chat-row"
+        aria-current="true"
+        aria-describedby={unread > 0 ? CHAT_UNREAD_ID : undefined}
+      >
+        <MessageCircle size={16} strokeWidth={1.8} aria-hidden="true" />
+        <span className="history-chat-row__label">{t('history.chat.title')}</span>
+        {unread > 0 ? (
+          <span className="history-chat-row__count" aria-hidden="true">
+            {unread > MAX_SHOWN_UNREAD ? `${MAX_SHOWN_UNREAD}+` : unread}
+          </span>
+        ) : null}
+      </button>
+      {unread > 0 ? (
+        <span id={CHAT_UNREAD_ID} hidden>
+          {t('history.chat.unread', { count: unread })}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The History page's sidebar: New task, search, the chat, and the user's tasks by day. A task
+ * row opens its Overlay.
+ */
+export function HistorySidebar() {
   const {
     items,
     loading,
@@ -306,27 +344,25 @@ export function HistorySidebar({ modeSwitch }: { modeSwitch: ReactNode }) {
   };
 
   return (
-    <div className="history-container">
-      <div className="history-header">
-        <div className="history-toolbar">
-          {modeSwitch}
-          <HistorySearchField searchText={searchText} onSearch={setSearchText} />
-          <NewWorkButton
-            shortcutHint={shortcutHint}
-            t={t}
-            onClick={() => void handleNewConversation()}
-          />
-        </div>
+    <aside className="history-sidebar" aria-label={t('history.sidebar.label')}>
+      <div className="history-sidebar__head">
+        <NewWorkButton
+          shortcutHint={shortcutHint}
+          t={t}
+          onClick={() => void handleNewConversation()}
+        />
+        <HistorySearchField searchText={searchText} onSearch={setSearchText} />
         {notice ? (
           <div className="history-error" role="alert">
             {notice}
           </div>
         ) : null}
       </div>
+      <ChatRow t={t} />
       <div className="history-sidebar__tasks">{renderContent()}</div>
       {confirmingDelete ? (
         <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
       ) : null}
-    </div>
+    </aside>
   );
 }

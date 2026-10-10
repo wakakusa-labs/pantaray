@@ -17,6 +17,9 @@ import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
 
+// The AI-connection notice reads the account; its own tests cover it.
+vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
+
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
 
 function item(sequence: number, content: ChatItem['content']): ChatItem {
@@ -282,22 +285,23 @@ it('opens a card’s work in the Overlay and outlines it', async () => {
   expect(card).toHaveAttribute('aria-current', 'true');
 });
 
-it('remembers the chosen view and keeps focus on the switch', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  const { unmount } = renderPage();
-  const chatMode = await screen.findByRole('button', { name: 'チャット', pressed: true });
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole('button', { name: '作業', pressed: false }));
-  const listMode = screen.getByRole('button', { name: '作業', pressed: true });
-  expect(listMode).toHaveFocus();
-  expect(screen.getByRole('searchbox')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-  expect(chatMode).not.toBeInTheDocument();
-
-  unmount();
+it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
+  pages = [{ items: [reply(1, '始めます。')], next_cursor: null }];
   renderPage();
-  expect(await screen.findByRole('button', { name: '作業', pressed: true })).toBeInTheDocument();
+  const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
+  const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
+  expect(chatRow).toHaveAttribute('aria-current', 'true');
+  expect(within(sidebar).getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
+  expect(within(sidebar).getByRole('searchbox', { name: '作業を検索' })).toBeInTheDocument();
+  expect(
+    await within(sidebar).findByRole('button', { name: /^見積書のたたき台を作る/ })
+  ).toHaveTextContent('実行中');
+
+  const chat = await screen.findByRole('list', { name: 'Pantaray とのチャット' });
+  expect(sidebar).not.toContainElement(chat);
+  expect(screen.getByRole('heading', { level: 1, name: 'チャット' })).toBeInTheDocument();
+  expect(within(chat).getByText('始めます。')).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toBeInTheDocument();
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
@@ -425,7 +429,6 @@ it('resends a failed message with the same message_id and points at a refused fi
 });
 
 it('opens on the chat at the Action’s latest card when the Overlay asks, reading older pages', async () => {
-  localStorage.setItem('pantaray.history-view-mode', 'list');
   pages = [
     { items: [userMessage(3, 'ほかの話'), userMessage(2, 'まだほかの話')], next_cursor: 2 },
     {
@@ -437,25 +440,7 @@ it('opens on the chat at the Action’s latest card when the Overlay asks, readi
   const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
   await waitFor(() => expect(card).toHaveFocus());
   expect(card).toHaveAttribute('aria-current', 'true');
-  expect(screen.getByRole('button', { name: 'チャット', pressed: true })).toBeInTheDocument();
   expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
-});
-
-it('keeps the draft and a failed request across a switch to the list', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  renderPage();
-  const input = await screen.findByRole('textbox', { name: 'メッセージ' });
-  sendMessage.mockRejectedValueOnce(new Error('response lost'));
-  await userEvent.type(input, '届いたかわからない{Enter}');
-  await screen.findByRole('button', { name: '同じメッセージを再送' });
-
-  await userEvent.click(screen.getByRole('button', { name: '作業' }));
-  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
-  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('届いたかわからない');
-
-  sendMessage.mockResolvedValueOnce({ kind: 'rejected', field: 'body' });
-  await userEvent.click(screen.getByRole('button', { name: '同じメッセージを再送' }));
-  expect(sendMessage.mock.calls[1][0].message_id).toBe(sendMessage.mock.calls[0][0].message_id);
 });
 
 it('discards a document whose write finishes after the page closed', async () => {

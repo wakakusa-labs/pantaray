@@ -55,6 +55,7 @@ import type {
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { createActionFetcher } from '../actions/actionFetch';
+import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
 import type { createChatFetcher } from '../chat/chatFetch';
 import type {
@@ -182,7 +183,7 @@ export type MainContext = {
     registerActionAssociation: (actionId: string, overlayId: string) => void;
     refreshActionConversation: (actionId: string) => void;
     /** Refreshes the Action's page and attaches its live run if one is unfinished. */
-    refreshAndResumeActionConversation: (actionId: string) => void;
+    refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   };
 
   ui: {

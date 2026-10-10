@@ -76,6 +76,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     restoreComposerFocusRef,
     submitDraft,
     requestResume,
+    changeDraft,
     attachFiles,
     removeAttachment,
     refreshSubmission,
@@ -476,15 +477,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         }
         textareaRef={standaloneComposerRef}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
-        onDraftChange={(draft, mentions) =>
-          setComposer((current) => ({
-            ...current,
-            draft,
-            mentions,
-            validationFailed: false,
-            resume: current.resume?.state === 'failed' ? null : current.resume,
-          }))
-        }
+        onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}
         onRemoveAttachment={removeAttachment}
         onSubmit={() => {

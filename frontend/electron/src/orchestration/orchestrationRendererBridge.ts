@@ -6,6 +6,7 @@ import type { ActionConversationPage } from '../actions/actionContracts';
 import {
   createActionLiveCoordinator,
   type ActionLiveEventRoute,
+  type ActionLiveRefreshOutcome,
   type ActionLiveUpdate,
 } from '../actions/actionLiveCore';
 import type {
@@ -395,20 +396,21 @@ export function createOrchestrationRendererBridge(params: {
   // would deliver no lifecycle, step, or approval events. A nonterminal page
   // therefore resumes the Action root process the latest run names: the backend
   // resolves that resume from durable process events, not from the WS session
-  // that started the run.
-  function refreshAndResumeActionConversation(actionId: string): void {
-    void (async () => {
-      await actionLive.refresh(actionId);
-      const action = actionLive.getSnapshot(actionId)?.page?.action;
-      if (action?.status !== 'queued' && action?.status !== 'processing') return;
-      if (action.latest_run_id === null || hasLiveActionProcess(actionId)) return;
-      params.requestResume({
-        kind: 'action',
-        actionId,
-        processId: action.latest_run_id,
-        fromStart: true,
-      });
-    })();
+  // that started the run. A failed read resumes nothing, so the caller learns of it.
+  async function refreshAndResumeActionConversation(
+    actionId: string
+  ): Promise<ActionLiveRefreshOutcome> {
+    const outcome = await actionLive.refresh(actionId);
+    const action = actionLive.getSnapshot(actionId)?.page?.action;
+    if (action?.status !== 'queued' && action?.status !== 'processing') return outcome;
+    if (action.latest_run_id === null || hasLiveActionProcess(actionId)) return outcome;
+    params.requestResume({
+      kind: 'action',
+      actionId,
+      processId: action.latest_run_id,
+      fromStart: true,
+    });
+    return outcome;
   }
 
   function handleApprovalDecisionSettled(identity: {

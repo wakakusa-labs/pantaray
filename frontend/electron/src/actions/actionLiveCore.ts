@@ -66,6 +66,9 @@ export type ActionLiveUpdate =
   | { kind: 'action_updated'; snapshot: ActionLiveSnapshot }
   | { kind: 'reset' };
 
+/** How a canonical read ended: published, failed (and surfaced), or dropped by a reset. */
+export type ActionLiveRefreshOutcome = 'refreshed' | 'failed' | 'superseded';
+
 export class ActionLiveIdentityError extends Error {
   constructor(boundary: 'event' | 'page') {
     super(`Action live ${boundary} identity is inconsistent.`);
@@ -306,9 +309,9 @@ export function createActionLiveCoordinator(params: {
 }): {
   handleEvent: (event: OrchestrationServerEvent) => {
     route: ActionLiveEventRoute;
-    refreshDone: Promise<void> | null;
+    refreshDone: Promise<ActionLiveRefreshOutcome> | null;
   };
-  refresh: (actionId: string) => Promise<void>;
+  refresh: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   // Returns the Action's root relay process id, which the caller must resume
   // instead of the settled blocker's own process.
   handleApprovalDecisionSettled: (identity: {
@@ -320,7 +323,7 @@ export function createActionLiveCoordinator(params: {
   handleStreamBoundary: (boundary: {
     kind: 'gap' | 'reconnect';
     actionId: string;
-  }) => Promise<void>;
+  }) => Promise<ActionLiveRefreshOutcome>;
   getSnapshot: (actionId: string) => ActionLiveSnapshot | null;
   clearAll: () => void;
 } {
@@ -328,7 +331,7 @@ export function createActionLiveCoordinator(params: {
   // Action id -> root relay process id, so an approval resume can reattach to the
   // root stream even after a reconnect dropped the transport's own registries.
   const rootProcessIds = new Map<string, string>();
-  const flights = new Map<string, Promise<void>>();
+  const flights = new Map<string, Promise<ActionLiveRefreshOutcome>>();
   let generation = 0;
   let pageVersion = 0;
 
@@ -342,7 +345,7 @@ export function createActionLiveCoordinator(params: {
     params.publish({ kind: 'action_updated', snapshot: next });
   };
 
-  const refresh = (actionId: string): Promise<void> => {
+  const refresh = (actionId: string): Promise<ActionLiveRefreshOutcome> => {
     const existing = flights.get(actionId);
     if (existing) {
       void params.readLatestPage(actionId);
@@ -355,10 +358,10 @@ export function createActionLiveCoordinator(params: {
         .map(transientToolStepKey)
     );
     const pagePromise = params.readLatestPage(actionId);
-    const promise = (async () => {
+    const promise = (async (): Promise<ActionLiveRefreshOutcome> => {
       try {
         const page = await pagePromise;
-        if (startedGeneration !== generation) return;
+        if (startedGeneration !== generation) return 'superseded';
         if (page.action.action_id !== actionId) throw new ActionLiveIdentityError('page');
         const current = snapshots.get(actionId);
         const actionIsTerminal = ['success', 'error', 'canceled'].includes(page.action.status);
@@ -386,9 +389,11 @@ export function createActionLiveCoordinator(params: {
           snapshots.delete(actionId);
           rootProcessIds.delete(actionId);
         }
+        return 'refreshed';
       } catch (error) {
-        if (startedGeneration !== generation) return;
+        if (startedGeneration !== generation) return 'superseded';
         params.surfaceRefreshError(actionId, error);
+        return 'failed';
       }
     })().finally(() => {
       if (flights.get(actionId) === promise) flights.delete(actionId);

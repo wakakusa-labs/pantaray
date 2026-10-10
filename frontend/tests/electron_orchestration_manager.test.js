@@ -1105,6 +1105,21 @@ test('OrchestrationManager: 履歴から開いた未終了の会話は root proc
   assert.equal(resumed.length, 1);
 });
 
+test('OrchestrationManager: 会話の読み込みに失敗したら resume せず失敗を返す', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const resumed = [];
+  const harness = createManagerHarness({
+    onResumeProcess: (request) => resumed.push(request),
+    readLatestActionConversationPage: async () => {
+      throw new Error('backend unavailable');
+    },
+  });
+  harness.manager.ensureConnected();
+
+  assert.equal(await harness.manager.refreshAndResumeActionConversation('action-1'), 'failed');
+  assert.deepEqual(resumed, []);
+});
+
 test('OrchestrationManager: すでに live 中の Action は再 resume しない', async () => {
   const resumed = [];
   const harness = createManagerHarness({

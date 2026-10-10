@@ -216,3 +216,12 @@
   margin-bottom: 8px;
   overflow-y: auto;
 }
+
+/* The window's drag strip (.app-titlebar) spans the top 40px, where this header sits; its controls
+   opt out so clicks reach them instead of starting a window drag. */
+.action-task__header button,
+.action-task__header a,
+.suggestion-task__header button,
+.task-file-preview__header button {
+  -webkit-app-region: no-drag;
+}

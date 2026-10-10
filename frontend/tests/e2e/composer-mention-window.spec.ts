@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { launchElectronE2E } from './harness';
 
 // The composer frame's position on screen and the overlay window's height.
@@ -37,11 +37,11 @@ test('opening and closing the project list never moves the composer on screen', 
       .toBe(true);
     const overlay = app.windows().find((w) => w.url().includes('mode=standalone'))!;
     const input = overlay.getByRole('textbox', { name: 'メッセージ', exact: true });
-    const listbox = overlay.getByRole('listbox', { name: 'プロジェクト' });
     await expect(input).toBeVisible();
     await overlay.waitForTimeout(500);
 
-    const check = async (placement: 'above' | 'below') => {
+    const check = async (overlay: Page, input: Locator, placement: 'above' | 'below') => {
+      const listbox = overlay.getByRole('listbox', { name: 'プロジェクト' });
       const before = await measure(overlay);
       await input.click();
       await input.press('End');
@@ -68,19 +68,39 @@ test('opening and closing the project list never moves the composer on screen', 
 
     // A new conversation is a small window: the list opens below and the window grows downward.
     await input.fill('最初の依頼');
-    await check('below');
+    await check(overlay, input, 'below');
 
-    // Sending starts a real conversation; its tall message leaves room above, so the list floats
-    // over it and the window keeps its size.
+    // Sending starts a real conversation, which the main window opens as the panel closes.
     const lines = Array.from({ length: 12 }, (_, index) => `${index + 1}. 確認したいこと`);
     await input.fill(lines.join('\n'));
+    const panelClosed = overlay.waitForEvent('close');
     await input.press('Enter');
-    await expect(overlay.getByLabel('あなた')).toContainText('12. 確認したいこと');
-    await expect(input).toHaveValue('');
-    await expect(input).not.toHaveAttribute('readonly', '');
-    await overlay.waitForTimeout(1000);
-    await input.fill('続き');
-    await check('above');
+    await panelClosed;
+    await page.waitForURL(/#\/history\?item=action:[^&]+$/);
+    await expect(page.getByLabel('あなた')).toContainText('12. 確認したいこと');
+    const actionId = decodeURIComponent(page.url().match(/item=action:([^&]+)$/)![1]);
+
+    // Opened in a panel, its tall message leaves room above, so the list floats over it and the
+    // window keeps its size.
+    await page.evaluate(
+      (id) => window.electron!.history!.openConversation({ actionId: id }),
+      actionId
+    );
+    await expect
+      .poll(() =>
+        app.windows().some((w) => w.url().includes(`actionId=${encodeURIComponent(actionId)}`))
+      )
+      .toBe(true);
+    const conversation = app
+      .windows()
+      .find((w) => w.url().includes(`actionId=${encodeURIComponent(actionId)}`))!;
+    const reply = conversation.getByRole('textbox', { name: 'メッセージ', exact: true });
+    await expect(conversation.getByLabel('あなた')).toContainText('12. 確認したいこと');
+    await expect(reply).toHaveValue('');
+    await expect(reply).not.toHaveAttribute('readonly', '');
+    await conversation.waitForTimeout(1000);
+    await reply.fill('続き');
+    await check(conversation, reply, 'above');
   } finally {
     await stop({ keepArtifacts: testInfo.status !== testInfo.expectedStatus });
   }

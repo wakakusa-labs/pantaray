@@ -23,8 +23,8 @@ import { ChatUnreadContext } from './chatUnread';
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 // The task panes have their own tests; here they only stand for the selected work.
-vi.mock('@/components/task/ActionTaskPane', () => ({
-  ActionTaskPane: ({ actionId, onShowInChat }: { actionId: string; onShowInChat: () => void }) => (
+vi.mock('@/components/task/TaskWorkspace', () => ({
+  TaskWorkspace: ({ actionId, onShowInChat }: { actionId: string; onShowInChat: () => void }) => (
     <section aria-label={`action ${actionId}`}>
       <button type="button" onClick={onShowInChat}>
         show in chat

@@ -5,8 +5,8 @@ import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HistorySidebar } from '@/components/history/HistorySidebar';
-import { ActionTaskPane } from '@/components/task/ActionTaskPane';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
+import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import { useI18n } from '@/context/useI18n';
 import {
   historyItemSelection,
@@ -71,11 +71,10 @@ const SuggestionHistoryPage = () => {
       UNLISTED_TITLE[language][kind];
     if (kind === 'action')
       return (
-        <ActionTaskPane
+        <TaskWorkspace
           key={id}
           actionId={id}
           title={title}
-          layout="full"
           onShowInChat={() => showInChat(id)}
           onAddProject={addProject}
         />

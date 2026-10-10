@@ -25,8 +25,8 @@ vi.mock('@/components/chat/ChatView', () => ({
     return <section aria-label="chat">{reveal ? `reveal ${reveal.actionId}` : null}</section>;
   }),
 }));
-vi.mock('@/components/task/ActionTaskPane', () => ({
-  ActionTaskPane: ({
+vi.mock('@/components/task/TaskWorkspace', () => ({
+  TaskWorkspace: ({
     actionId,
     title,
     onShowInChat,

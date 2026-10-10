@@ -76,12 +76,29 @@ export function actionNamedPaths(page: ActionConversationPage): string[] {
   return paths;
 }
 
-/** Reads the Action's pages, newest first, until one names the path. */
-export async function isActionFile(
+// The OS realpath resolves `..` after the symlink before it, as open() does; Node's own
+// realpathSync normalizes the string first and would resolve a different file.
+function realpathOrNull(filePath: string): string | null {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The real path of the requested file when the Action names that file, or null. Paths are
+ * compared after every symlink is resolved, never as strings: `/work/link/../a.txt` normalizes
+ * to `/work/a.txt` but opens whatever `link/..` reaches. Callers use only the path this returns.
+ * Reads the Action's pages, newest first, until one names the file.
+ */
+export async function resolveActionFile(
   readPage: ReadActionConversationPage,
   request: ActionFileRequest
-): Promise<boolean> {
-  const wanted = path.normalize(request.path);
+): Promise<string | null> {
+  const wanted = realpathOrNull(request.path);
+  if (wanted === null) return null;
+  const resolved = new Map<string, string | null>();
   let cursor: string | null = null;
   do {
     const page = await readPage({
@@ -89,17 +106,27 @@ export async function isActionFile(
       cursor,
       limit: ACTION_CONVERSATION_MAX_PAGE_SIZE,
     });
-    if (actionNamedPaths(page).some((named) => path.normalize(named) === wanted)) return true;
+    for (const named of actionNamedPaths(page)) {
+      if (!resolved.has(named)) resolved.set(named, realpathOrNull(named));
+      if (resolved.get(named) === wanted) return wanted;
+    }
     cursor = page.next_cursor;
   } while (cursor !== null);
-  return false;
+  return null;
 }
 
-/** The open regular file, or null when the path names nothing readable. */
-export function openRegularFile(filePath: string): { fd: number; size: number } | null {
+/**
+ * The open regular file at a resolved real path, or null. O_NONBLOCK keeps a FIFO with no
+ * writer from blocking the main process in open(); fstat then turns it, a socket or a device
+ * away before anything is read.
+ */
+export function openRegularFile(realPath: string): { fd: number; size: number } | null {
   let fd: number;
   try {
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY);
+    fd = fs.openSync(
+      realPath,
+      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW
+    );
   } catch {
     return null;
   }
@@ -122,9 +149,9 @@ function readAt(fd: number, length: number): Buffer {
   return buffer.subarray(0, filled);
 }
 
-/** Reads a file the caller already checked with `isActionFile`. */
-export function readActionFile(filePath: string): ActionFileReadResult {
-  const file = openRegularFile(filePath);
+/** Reads the real path `resolveActionFile` returned. */
+export function readActionFile(realPath: string): ActionFileReadResult {
+  const file = openRegularFile(realPath);
   if (file === null) return { kind: 'unavailable', reason: 'not_found' };
   try {
     // The bytes decide: an image by its signature, text by decoding as UTF-8.
@@ -154,29 +181,28 @@ export function readActionFile(filePath: string): ActionFileReadResult {
   }
 }
 
-function isExecutable(requestedPath: string, realPath: string, stats: fs.Stats): boolean {
-  const named = [requestedPath, realPath].map((candidate) => path.extname(candidate).toLowerCase());
-  if (named.some((extension) => EXECUTABLE_EXTENSIONS.has(extension))) return true;
+function isExecutable(realPath: string, stats: fs.Stats): boolean {
+  if (EXECUTABLE_EXTENSIONS.has(path.extname(realPath).toLowerCase())) return true;
   if (stats.isDirectory()) {
     return fs.existsSync(path.join(realPath, 'Contents', 'Info.plist'));
   }
   return (stats.mode & EXECUTABLE_MODE_BITS) !== 0;
 }
 
-/** Opens a file the caller already checked with `isActionFile` in its default app. */
+/** Opens the real path `resolveActionFile` returned in its default app. */
 export async function openActionFileInApp(
-  filePath: string,
+  realPath: string,
   openPath: (realPath: string) => Promise<string>
 ): Promise<ActionFileOpenResult> {
-  let realPath: string;
   let stats: fs.Stats;
   try {
-    realPath = fs.realpathSync(filePath);
     stats = fs.statSync(realPath);
   } catch {
     return { kind: 'unavailable', reason: 'not_found' };
   }
-  if (isExecutable(filePath, realPath, stats)) return { kind: 'unavailable', reason: 'executable' };
+  // A FIFO, socket or device is no document, and handing one to another app could stall it.
+  if (!stats.isFile() && !stats.isDirectory()) return { kind: 'unavailable', reason: 'not_found' };
+  if (isExecutable(realPath, stats)) return { kind: 'unavailable', reason: 'executable' };
   // shell.openPath resolves to an error message, empty on success.
   const failure = await openPath(realPath);
   return failure === '' ? { kind: 'opened' } : { kind: 'unavailable', reason: 'open_failed' };

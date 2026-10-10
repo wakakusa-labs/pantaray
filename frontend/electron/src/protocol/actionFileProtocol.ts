@@ -13,8 +13,8 @@ import path from 'path';
 import { Readable } from 'stream';
 
 import {
-  isActionFile,
   openRegularFile,
+  resolveActionFile,
   type ActionFileRequest,
   type ReadActionConversationPage,
 } from '../actions/actionFileAccess';
@@ -43,13 +43,15 @@ export function createActionFileProtocolHandler(deps: {
   return async (request) => {
     const fileRequest = parseActionFileUrl(request.url);
     if (fileRequest === null) return notFound();
+    let realPath: string | null;
     try {
-      if (!(await isActionFile(deps.readConversationPage, fileRequest))) return notFound();
+      realPath = await resolveActionFile(deps.readConversationPage, fileRequest);
     } catch (error) {
       console.error('Failed to read the Action for a file request', error);
       return notFound();
     }
-    const file = openRegularFile(fileRequest.path);
+    if (realPath === null) return notFound();
+    const file = openRegularFile(realPath);
     if (file === null) return notFound();
     const head = Buffer.alloc(PDF_SIGNATURE.length);
     const headLength = fs.readSync(file.fd, head, 0, head.length, 0);

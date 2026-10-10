@@ -219,3 +219,64 @@ test('the protocol streams a named PDF and nothing else', async () => {
     404
   );
 });
+
+test('a path is authorized by the file it reaches, not by its spelling', async () => {
+  const probe = harness();
+  const work = path.join(probe.dir, 'work');
+  const secrets = path.join(probe.dir, 'secrets');
+  fs.mkdirSync(path.join(secrets, 'subdir'), { recursive: true });
+  fs.mkdirSync(work);
+  fs.writeFileSync(path.join(work, 'report.txt'), 'public');
+  fs.writeFileSync(path.join(secrets, 'report.txt'), '%PDF-secret');
+  fs.symlinkSync(path.join(secrets, 'subdir'), path.join(work, 'link'));
+  const app = harness({ linked: [path.join(work, 'report.txt')] });
+
+  // Normalized, this spells the named work/report.txt; opened, it reaches secrets/report.txt.
+  const escape = `${work}/link/../report.txt`;
+  assert.deepEqual(await app.read(escape), NOT_FOUND);
+  assert.deepEqual(await app.openInApp(escape), NOT_FOUND);
+  assert.equal((await app.fetch(escape)).status, 404);
+  assert.deepEqual(app.opened, []);
+});
+
+test('a named path that is a symlink serves the file it points to', async () => {
+  const probe = harness();
+  const target = probe.file('quote_v3.md', '# v3');
+  const latest = path.join(probe.dir, 'latest.md');
+  fs.symlinkSync(target, latest);
+  const app = harness({ linked: [latest] });
+
+  assert.deepEqual(await app.read(latest), { kind: 'text', text: '# v3', truncated: false });
+  assert.deepEqual(await app.openInApp(latest), { kind: 'opened' });
+  assert.deepEqual(app.opened, [target]);
+});
+
+test('a FIFO with no writer is refused without blocking the main process', () => {
+  const { execFileSync, spawnSync } = require('child_process');
+  const probe = harness();
+  const fifo = path.join(probe.dir, 'pipe.txt');
+  execFileSync('mkfifo', [fifo]);
+  // A blocking open() would hang the event loop itself, so the read runs in a child process
+  // that is killed if it does not finish in time.
+  const script = `
+    const access = require(${JSON.stringify(require.resolve('../electron/dist/actions/actionFileAccess.js'))});
+    process.stdout.write(JSON.stringify([
+      access.readActionFile(${JSON.stringify(fifo)}),
+      access.openRegularFile(${JSON.stringify(fifo)}),
+    ]));
+  `;
+  const child = spawnSync(process.execPath, ['-e', script], { timeout: 5000, encoding: 'utf8' });
+  assert.equal(child.signal, null, 'reading a FIFO blocked');
+  assert.deepEqual(JSON.parse(child.stdout), [NOT_FOUND, null]);
+});
+
+test('open in app refuses a FIFO', async () => {
+  const { execFileSync } = require('child_process');
+  const probe = harness();
+  const fifo = path.join(probe.dir, 'pipe.pdf');
+  execFileSync('mkfifo', [fifo]);
+  const app = harness({ linked: [fifo] });
+  assert.deepEqual(await app.openInApp(fifo), NOT_FOUND);
+  assert.equal((await app.fetch(fifo)).status, 404);
+  assert.deepEqual(app.opened, []);
+});

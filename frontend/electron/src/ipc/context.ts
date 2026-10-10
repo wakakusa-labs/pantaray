@@ -136,9 +136,9 @@ export type MainContext = {
     showChat: (actionId: string) => void;
     /**
      * Brings the main window forward on History with this Action selected, creating the window
-     * when there is none. Throws when no main window could be shown.
+     * when there is none. Rejects when no main window could be shown or its load failed.
      */
-    showTask: (actionId: string) => void;
+    showTask: (actionId: string) => Promise<void>;
   };
 
   auth: {

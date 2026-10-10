@@ -214,21 +214,26 @@ export function buildMainContext(params: {
         if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
         mainWindow.webContents.send('history:showChat', { actionId });
       },
-      showTask: (actionId) => {
+      showTask: async (actionId) => {
         // The same `?item=` the renderer writes (historySelectionSearch).
         const route = `/history?item=action:${encodeURIComponent(actionId)}`;
         const mainWindow = params.getMainWindow();
         if (mainWindow && !mainWindow.isDestroyed()) {
           // A loaded page selects it in place: a load would drop its chat and task drafts. A page
           // still loading has none yet and may not listen yet, so it loads on the task instead.
+          // A load that fails rejects, so the panel is kept.
           if (mainWindow.webContents.isLoading()) {
-            void mainWindow.loadURL(mainWindowUrl(route)).catch(() => undefined);
+            const loaded = mainWindow.loadURL(mainWindowUrl(route));
+            restoreAndFocusWindow(mainWindow);
+            await loaded;
           } else {
             mainWindow.webContents.send('history:showItem', { item: `action:${actionId}` });
+            restoreAndFocusWindow(mainWindow);
           }
-          restoreAndFocusWindow(mainWindow);
           return;
         }
+        // A created window owns its first load: a failure is reported and retried by its own
+        // did-fail-load listener, on the window now in front of the user.
         params.createMainWindow(route);
         if (!restoreAndFocusWindow(params.getMainWindow())) {
           throw new Error('The main window could not be opened.');

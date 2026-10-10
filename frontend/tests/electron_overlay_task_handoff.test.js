@@ -13,7 +13,7 @@ const { createNotificationIpcHandlerFactory } = require('../electron/notificatio
 // Work a panel started continues in the main window: the main window comes forward on the task,
 // and only then does the panel close.
 
-function createMainWindow(steps, { loading = false } = {}) {
+function createMainWindow(steps, { loading = false, loadError = null } = {}) {
   return {
     isDestroyed: () => false,
     isMinimized: () => true,
@@ -21,7 +21,10 @@ function createMainWindow(steps, { loading = false } = {}) {
     isVisible: () => false,
     show: () => steps.push('show'),
     focus: () => steps.push('focus'),
-    loadURL: async (url) => steps.push(['loadURL', url]),
+    loadURL: async (url) => {
+      steps.push(['loadURL', url]);
+      if (loadError) throw loadError;
+    },
     webContents: {
       isLoading: () => loading,
       send: (channel, payload) => steps.push([channel, payload]),
@@ -92,6 +95,22 @@ test('a main window still loading loads on the task, then the panel closes', asy
     'focus',
     ['hide', 'sug-1'],
   ]);
+});
+
+test('the panel stays, and the request fails, when the loading main window fails to load', async () => {
+  const steps = [];
+  const openTask = createHandoff(steps, {
+    mainWindow: createMainWindow(steps, {
+      loading: true,
+      loadError: new Error('ERR_FILE_NOT_FOUND (-6) loading the page'),
+    }),
+  });
+
+  await assert.rejects(openTask({ actionId: 'act-1' }), /ERR_FILE_NOT_FOUND/);
+  assert.equal(
+    steps.some((step) => Array.isArray(step) && step[0] === 'hide'),
+    false
+  );
 });
 
 test('without a main window one is created on the task, then the panel closes', async () => {

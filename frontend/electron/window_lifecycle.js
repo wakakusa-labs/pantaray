@@ -385,6 +385,9 @@ function createMainWindow(options = {}) {
   }
 
   let hasRetried = false;
+  // A window created on a task retries its first load there; once a page has loaded, a failed
+  // later load falls back to the app's start, not to that task again.
+  let retryRoute = hashRoute;
   runWindowStartupStepWithRetry(
     'did-fail-load-listener',
     () => {
@@ -397,7 +400,7 @@ function createMainWindow(options = {}) {
           });
           if (hasRetried) return;
           hasRetried = true;
-          loadPackagedIndex(win, hashRoute);
+          loadPackagedIndex(win, retryRoute);
         }
       });
     },
@@ -408,7 +411,7 @@ function createMainWindow(options = {}) {
     'did-finish-load-listener',
     () => {
       win.webContents.on('did-finish-load', () => {
-        // noop
+        retryRoute = '/';
       });
     },
     { optional: true }

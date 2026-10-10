@@ -14,6 +14,10 @@ const {
   createActionFileProtocolHandler,
 } = require('../electron/dist/protocol/actionFileProtocol.js');
 const { buildActionFileUrl } = require('../electron/dist/protocol/actionFileUrl.js');
+const {
+  DOCUMENT_HTML_MAX_OUTPUT_BYTES,
+  DOCUMENT_HTML_TIMEOUT_MS,
+} = require('../electron/dist/actions/actionDocumentHtml.js');
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
 const NOT_FOUND = { kind: 'unavailable', reason: 'not_found' };
@@ -45,7 +49,13 @@ const links = (files) =>
  * An Action whose newest page's answer links `linked`, and whose older page's answer links
  * `olderLinked` after apply_patch steps whose subjects are `patched`.
  */
-function harness({ linked = [], olderLinked = [], patched = [], openPathResult = '' } = {}) {
+function harness({
+  linked = [],
+  olderLinked = [],
+  patched = [],
+  openPathResult = '',
+  runFile = async () => '<p>converted</p>',
+} = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-action-files-')));
   const reads = [];
   const readConversationPage = async (request) => {
@@ -55,9 +65,15 @@ function harness({ linked = [], olderLinked = [], patched = [], openPathResult =
     return page({ finalOutput: links(olderLinked), patched });
   };
   const opened = [];
+  const previewed = [];
   const handlers = new Map();
+  const mainWindow = {
+    isDestroyed: () => false,
+    previewFile: (file) => previewed.push(file),
+  };
   registerActionFileHandlers(
     {
+      windows: { getMainWindow: () => mainWindow },
       actions: { readConversationPage },
       actionFiles: {
         open: () => {},
@@ -65,6 +81,7 @@ function harness({ linked = [], olderLinked = [], patched = [], openPathResult =
           opened.push(realPath);
           return openPathResult;
         },
+        runFile,
       },
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
@@ -74,6 +91,8 @@ function harness({ linked = [], olderLinked = [], patched = [], openPathResult =
     dir,
     reads,
     opened,
+    previewed,
+    runFile,
     file: (name, content, mode = 0o644) => {
       const file = path.join(dir, name);
       fs.writeFileSync(file, content, { mode });
@@ -83,6 +102,8 @@ function harness({ linked = [], olderLinked = [], patched = [], openPathResult =
       handlers.get('actionFile:read')({}, { actionId, path: file }),
     openInApp: (file, actionId = 'act-1') =>
       handlers.get('actionFile:openInApp')({}, { actionId, path: file }),
+    quickLook: (file, actionId = 'act-1') =>
+      handlers.get('actionFile:quickLook')({}, { actionId, path: file }),
     fetch: (file, actionId = 'act-1') => protocol({ url: buildActionFileUrl(actionId, file) }),
   };
 }
@@ -295,3 +316,111 @@ test('open in app refuses a FIFO', async () => {
   assert.equal((await app.fetch(fifo)).status, 404);
   assert.deepEqual(app.opened, []);
 });
+
+test('Quick Look shows a named file over the main window, and nothing else', async () => {
+  const probe = harness();
+  const deck = probe.file('deck.pptx', 'x');
+  const other = probe.file('other.pptx', 'x');
+  const app = harness({ linked: [deck] });
+
+  assert.deepEqual(await app.quickLook(deck), { kind: 'shown' });
+  assert.deepEqual(await app.quickLook(other), NOT_FOUND);
+  assert.deepEqual(await app.quickLook(deck, 'act-2').catch(() => 'rejected'), 'rejected');
+  assert.deepEqual(app.previewed, [deck]);
+});
+
+test('a named Word document is converted by textutil, as argv with a time limit', async () => {
+  const probe = harness();
+  const memo = probe.file('memo.docx', 'x');
+  const notes = probe.file('notes.RTF', 'x');
+  const other = probe.file('other.docx', 'x');
+  const calls = [];
+  const app = harness({
+    linked: [memo, notes],
+    runFile: async (...args) => {
+      calls.push(args);
+      return '<p>御見積書</p>';
+    },
+  });
+  // The input format comes from the name, never from sniffing, and nothing is loaded or stored.
+  const argv = (format, file) => [
+    '/usr/bin/textutil',
+    [
+      '-format',
+      format,
+      '-convert',
+      'html',
+      '-encoding',
+      'UTF-8',
+      '-noload',
+      '-nostore',
+      '-stdout',
+      file,
+    ],
+    { timeout: DOCUMENT_HTML_TIMEOUT_MS, maxBuffer: DOCUMENT_HTML_MAX_OUTPUT_BYTES },
+  ];
+
+  assert.deepEqual(await app.read(memo), { kind: 'html', html: '<p>御見積書</p>' });
+  assert.deepEqual(await app.read(notes), { kind: 'html', html: '<p>御見積書</p>' });
+  assert.deepEqual(calls, [argv('docx', memo), argv('rtf', notes)]);
+  assert.deepEqual(await app.read(other), NOT_FOUND);
+  assert.equal(calls.length, 2);
+});
+
+test('a conversion that fails or overflows says so', async () => {
+  const probe = harness();
+  const memo = probe.file('memo.rtf', 'x');
+  const overflow = harness({
+    linked: [memo],
+    runFile: async () => {
+      throw Object.assign(new Error('stdout maxBuffer length exceeded'), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      });
+    },
+  });
+  assert.deepEqual(await overflow.read(memo), { kind: 'unavailable', reason: 'too_large' });
+  const broken = harness({
+    linked: [memo],
+    runFile: async () => {
+      throw Object.assign(new Error('Command failed'), { code: 1 });
+    },
+  });
+  assert.deepEqual(await broken.read(memo), { kind: 'unavailable', reason: 'conversion_failed' });
+  // textutil exits 0 and writes nothing for a file it cannot read.
+  const empty = harness({ linked: [memo], runFile: async () => ' \n' });
+  assert.deepEqual(await empty.read(memo), { kind: 'unavailable', reason: 'conversion_failed' });
+});
+
+test(
+  'textutil really converts a .docx on macOS',
+  { skip: process.platform !== 'darwin' },
+  async () => {
+    const { execFileSync, execFile } = require('child_process');
+    const { promisify } = require('util');
+    const probe = harness();
+    const source = probe.file('memo.txt', '御見積書 <b>not markup</b>\n');
+    const docx = path.join(probe.dir, 'memo.docx');
+    execFileSync('/usr/bin/textutil', ['-convert', 'docx', source, '-output', docx]);
+    const app = harness({
+      linked: [docx],
+      runFile: async (file, args, options) =>
+        (await promisify(execFile)(file, [...args], { ...options, encoding: 'utf8' })).stdout,
+    });
+
+    const result = await app.read(docx);
+    assert.equal(result.kind, 'html');
+    assert.match(result.html, /御見積書 &lt;b&gt;not markup&lt;\/b&gt;/);
+
+    // A broken .docx, here a web page that would load a remote image if read as HTML, is not
+    // sniffed into HTML: textutil reads it as docx, writes nothing, and the preview falls back.
+    const corrupt = probe.file(
+      'broken.docx',
+      '<html><img src="https://example.com/x.png">hi</html>'
+    );
+    const broken = harness({ linked: [corrupt], runFile: app.runFile });
+    assert.deepEqual(await broken.read(corrupt), {
+      kind: 'unavailable',
+      reason: 'conversion_failed',
+    });
+  }
+);

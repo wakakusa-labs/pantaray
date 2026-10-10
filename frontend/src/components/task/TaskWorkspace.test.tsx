@@ -11,11 +11,13 @@ type ActionFiles = NonNullable<NonNullable<Window['electron']>['actionFiles']>;
 let listeners: Set<(update: ActionLiveUpdate) => void>;
 const read = vi.fn<ActionFiles['read']>();
 const openInApp = vi.fn<ActionFiles['openInApp']>();
+const quickLook = vi.fn<ActionFiles['quickLook']>();
 
 const ANSWER = [
   'Rebuilt the quote: [quote_v3.html](pantaray-file:///work/quote/quote_v3.html)',
   'and the mail pantaray-file:///work/quote/mail.md , the summary pantaray-file:///work/quote/summary.pdf',
   'with pantaray-file:///work/quote/run.log , pantaray-file:///work/quote/chart.png and pantaray-file:///work/quote/rates.xlsx',
+  'and the memo pantaray-file:///work/quote/memo.docx',
 ].join('\n');
 
 function emitPage(page: ReturnType<typeof createActionPage>, pageVersion: number) {
@@ -71,6 +73,7 @@ beforeEach(() => {
   listeners = new Set();
   read.mockReset();
   openInApp.mockReset().mockResolvedValue({ kind: 'opened' });
+  quickLook.mockReset().mockResolvedValue({ kind: 'shown' });
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -87,7 +90,7 @@ beforeEach(() => {
         },
       },
       orchestration: { send: vi.fn() },
-      actionFiles: { open: vi.fn(), read, openInApp },
+      actionFiles: { open: vi.fn(), read, openInApp, quickLook },
       agentOverlay: {
         getActionApprovalMode: vi.fn(async (actionId: string) => ({
           action_id: actionId,
@@ -192,11 +195,17 @@ describe('TaskWorkspace', () => {
     const preview = await screen.findByRole('region', { name: 'run.log' });
     expect(await screen.findByText('このファイルはここでは表示できません。')).toBeTruthy();
 
-    // A spreadsheet is never read here; it goes straight to the default app.
+    // A spreadsheet is never read here; Quick Look or its app shows it.
     fireEvent.click(chip('rates.xlsx'));
     expect(preview.isConnected).toBe(false);
     expect(read).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('このファイルはここでは表示できません。')).toBeTruthy();
+    expect(
+      screen.getByText('このファイルは Quick Look かいつものアプリで見られます。')
+    ).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quick Look で見る' })[1]);
+    await waitFor(() =>
+      expect(quickLook).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/rates.xlsx' })
+    );
 
     const [headerButton, fallbackButton] = screen.getAllByRole('button', {
       name: 'いつものアプリで開く',
@@ -229,5 +238,38 @@ describe('TaskWorkspace', () => {
     // The PDF frame's URL changes with the run, so it loads the file again.
     fireEvent.click(chip('summary.pdf'));
     expect(screen.getByTitle('summary.pdf').getAttribute('src')).toContain('revision=run-2');
+  });
+
+  it('shows a Word document as the page textutil made of it, without scripts', async () => {
+    read.mockResolvedValue({
+      kind: 'html',
+      html: '<p>御見積書</p><script>parent.alert(1)</script>',
+    });
+    await renderFinishedTask();
+    fireEvent.click(chip('memo.docx'));
+    const frame = await waitFor(() => screen.getByTitle('memo.docx'));
+    expect(read).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/memo.docx' });
+    expect(frame.getAttribute('sandbox')).toBe('');
+    expect(frame.getAttribute('srcdoc')).toMatch(
+      /^<meta http-equiv="Content-Security-Policy" content="default-src 'none';.*<p>御見積書<\/p>/
+    );
+
+    quickLook.mockResolvedValue({ kind: 'unavailable', reason: 'not_found' });
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Look で見る' }));
+    expect(await screen.findByRole('alert')).toHaveProperty(
+      'textContent',
+      'ファイルを開けませんでした。'
+    );
+  });
+
+  it('falls back to Quick Look and the default app when a document will not convert', async () => {
+    read.mockResolvedValue({ kind: 'unavailable', reason: 'conversion_failed' });
+    await renderFinishedTask();
+    fireEvent.click(chip('memo.docx'));
+    expect(await screen.findByText('このファイルはここでは表示できません。')).toBeTruthy();
+    expect(screen.queryByTitle('memo.docx')).toBeNull();
+    // The header's pair and the fallback's pair.
+    expect(screen.getAllByRole('button', { name: 'Quick Look で見る' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'いつものアプリで開く' })).toHaveLength(2);
   });
 });

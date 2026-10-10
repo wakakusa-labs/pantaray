@@ -54,6 +54,7 @@ import type {
   UpdateProjectLinksInput,
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
+import type { RunFile } from '../actions/actionDocumentHtml';
 import type { createActionFetcher } from '../actions/actionFetch';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
@@ -160,6 +161,8 @@ export type MainContext = {
     open: (params: ActionFileOpenInput) => void;
     /** `shell.openPath` for a vetted Action file: the error message, empty on success. */
     openInApp: (realPath: string) => Promise<string>;
+    /** `execFile` without a shell, for `textutil`'s document conversion. */
+    runFile: RunFile;
   };
 
   clipboard: {

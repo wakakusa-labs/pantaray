@@ -307,7 +307,7 @@ describe('workspaceSettingsModel', () => {
     );
   });
 
-  it('mirrors link-table cascades while preserving folders deleted with a project', () => {
+  it('mirrors link-table cascades and drops folders only a deleted project held', () => {
     const withoutOrganization = applyWorkspaceMutation(settings, {
       type: 'organizationDeleted',
       organizationId: 'org-a',
@@ -325,10 +325,13 @@ describe('workspaceSettingsModel', () => {
       type: 'projectDeleted',
       projectId: 'project-b',
     });
-    expect(withoutProject.folders).toHaveLength(2);
-    expect(
-      withoutProject.folders.find((folder) => folder.folder_id === 'folder-z')?.project_ids
-    ).toEqual([]);
+    expect(withoutProject.folders.map((folder) => folder.folder_id)).toEqual(['folder-a']);
+
+    const shared = applyWorkspaceMutation(
+      { ...settings, folders: [{ ...folders[0], project_ids: ['project-b', 'project-c'] }] },
+      { type: 'projectDeleted', projectId: 'project-b' }
+    );
+    expect(shared.folders.map((folder) => folder.project_ids)).toEqual([['project-c']]);
   });
 
   it('reorders current project values during preview without rolling back concurrent link updates', () => {

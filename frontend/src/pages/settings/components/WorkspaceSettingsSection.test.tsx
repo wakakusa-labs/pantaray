@@ -1846,59 +1846,6 @@ describe('WorkspaceSettingsSection', () => {
     expect(trigger).not.toHaveFocus();
   });
 
-  it('moves a project folder to unassigned locally when its project is deleted', async () => {
-    const user = userEvent.setup();
-    const workspaceSettings = {
-      get: vi.fn(async () => ({
-        read_access_scope: 'workspace' as const,
-        organizations: [],
-        projects: [
-          {
-            project_id: 'project-a',
-            display_name: 'Project A',
-            sort_order: 0,
-            organization_ids: [],
-          },
-        ],
-        folders: [
-          {
-            folder_id: 'folder-a',
-            display_name: 'Folder A',
-            real_path: '/Users/example/folder-a',
-            canonical_real_path: '/Users/example/folder-a',
-            organization_ids: [],
-            project_ids: ['project-a'],
-          },
-        ],
-      })),
-      createOrganization: vi.fn(),
-      createProject: vi.fn(),
-      createFolder: vi.fn(),
-      deleteOrganization: vi.fn(),
-      deleteProject: vi.fn(async () => undefined),
-      deleteFolder: vi.fn(),
-      updateProjectLinks: vi.fn(),
-      updateFolderLinks: vi.fn(),
-      updateReadAccessScope: vi.fn(),
-      selectFolder: vi.fn(),
-    };
-    window.electron = { workspaceSettings } as unknown as Window['electron'];
-
-    renderWorkspaceSettingsSection();
-    await user.click(await screen.findByRole('button', { name: 'common.delete Project A' }));
-
-    // With no project left, the folders it held are what the detail column shows.
-    expect(
-      await screen.findByRole('button', { name: 'settings.workspace.unassigned.title' })
-    ).toHaveAttribute('aria-current', 'true');
-    expect(screen.getByText('Folder A')).toBeInTheDocument();
-    expect(workspaceSettings.deleteProject).toHaveBeenCalledOnce();
-    expect(workspaceSettings.get).toHaveBeenCalledOnce();
-    expect(workspaceSettings.createFolder).not.toHaveBeenCalled();
-    expect(workspaceSettings.deleteFolder).not.toHaveBeenCalled();
-    expect(workspaceSettings.updateFolderLinks).not.toHaveBeenCalled();
-  });
-
   it('shows and assigns only folders without a valid project link', async () => {
     const settings = {
       read_access_scope: 'workspace' as const,

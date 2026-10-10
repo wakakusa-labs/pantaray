@@ -104,13 +104,20 @@ export function applyWorkspaceMutation(
         ),
       };
     case 'projectDeleted':
+      // The backend unregisters the folders only this project held (workspace_settings_deletion).
       return {
         ...settings,
         projects: settings.projects.filter((project) => project.project_id !== event.projectId),
-        folders: settings.folders.map((folder) => ({
-          ...folder,
-          project_ids: folder.project_ids.filter((projectId) => projectId !== event.projectId),
-        })),
+        folders: settings.folders
+          .filter(
+            (folder) =>
+              !folder.project_ids.includes(event.projectId) ||
+              folder.project_ids.some((projectId) => projectId !== event.projectId)
+          )
+          .map((folder) => ({
+            ...folder,
+            project_ids: folder.project_ids.filter((projectId) => projectId !== event.projectId),
+          })),
       };
     case 'folderCreated':
     case 'folderLinksUpdated':

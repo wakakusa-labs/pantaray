@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseToolDiff, parseUnifiedDiff } from './toolDiff';
+import { parseMultiFileDiff, parseToolDiff, parseUnifiedDiff } from './toolDiff';
 
 const numbered = (diff: string) =>
   parseUnifiedDiff(diff)?.hunks.map((hunk) =>
@@ -73,6 +73,12 @@ describe('parseUnifiedDiff', () => {
     expect(parseUnifiedDiff('--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n a\n-b+c')).toBeNull();
   });
 
+  it('rejects a hunk after the rows that follow the counted ones', () => {
+    expect(
+      parseUnifiedDiff('--- f.txt\n+++ f.txt\n@@ -1 +1 @@\n-a\n+b\nnote\n@@ -5 +5 @@\n-c\n+d\n')
+    ).toBeNull();
+  });
+
   it('numbers a created file from its first line', () => {
     expect(numbered('--- n.txt\n+++ n.txt\n@@ -0,0 +1,2 @@\n+x\n+y\n')).toEqual([
       [
@@ -91,5 +97,122 @@ describe('parseToolDiff', () => {
     expect(parseToolDiff(JSON.stringify({ status: 'needs_read', text: 'x' }))).toBeNull();
     expect(parseToolDiff('{"status": "success", "diff": "--- a')).toBeNull();
     expect(parseToolDiff(JSON.stringify({ diff: '' }))).toBeNull();
+  });
+});
+
+describe('parseMultiFileDiff', () => {
+  const summary = (text: string) =>
+    parseMultiFileDiff(text)?.map((diff) => [
+      diff.path,
+      diff.hunks.flat().map((line) => `${line.kind}:${line.text}`),
+    ]);
+
+  it('splits a git diff at each file, naming a deleted file by its old path', () => {
+    const diff = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -1,2 +1,2 @@',
+      ' keep',
+      '-old',
+      '+new',
+      'diff --git a/old.md b/old.md',
+      'deleted file mode 100644',
+      '--- a/old.md',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+      '-gone',
+      '',
+    ].join('\n');
+
+    expect(summary(diff)).toEqual([
+      ['src/app.ts', ['context:keep', 'removed:old', 'added:new']],
+      ['old.md', ['removed:gone']],
+    ]);
+  });
+
+  it('splits a plain unified diff at each --- and +++ pair, dropping the file times', () => {
+    const diff = [
+      '--- a.txt\t2026-10-11 09:00:00 +0900',
+      '+++ a.txt\t2026-10-11 09:05:00 +0900',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      '--- b.txt',
+      '+++ b.txt',
+      '@@ -0,0 +1 @@',
+      '+z',
+    ].join('\r\n');
+
+    expect(summary(diff)).toEqual([
+      ['a.txt', ['removed:x', 'added:y']],
+      ['b.txt', ['added:z']],
+    ]);
+  });
+
+  it('reads a format-patch file, leaving out its mail header and its signature', () => {
+    const patch = [
+      'From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001',
+      'From: Someone <someone@example.com>',
+      'Subject: [PATCH] Drop the dash item',
+      '',
+      '---',
+      ' list.md | 1 -',
+      ' 1 file changed, 1 deletion(-)',
+      '',
+      'diff --git a/list.md b/list.md',
+      'index 1111111..2222222 100644',
+      '--- a/list.md',
+      '+++ b/list.md',
+      '@@ -1,2 +1 @@',
+      ' keep',
+      // A removed "- " line inside the counted range, not the signature.
+      '-- ',
+      '-- ',
+      '2.47.0',
+      '',
+    ].join('\n');
+
+    expect(summary(patch)).toEqual([['list.md', ['context:keep', 'removed:- ']]]);
+  });
+
+  it('reads a git show, leaving out its commit header', () => {
+    const show = [
+      'commit 1111111111111111111111111111111111111111',
+      'Author: Someone <someone@example.com>',
+      'Date:   Sun Oct 11 09:00:00 2026 +0900',
+      '',
+      '    Rename the greeting',
+      '',
+      '    --- not a header',
+      '',
+      'diff --git a/hello.txt b/hello.txt',
+      '--- a/hello.txt',
+      '+++ b/hello.txt',
+      '@@ -1 +1 @@',
+      '-hi',
+      '+hello',
+    ].join('\n');
+
+    expect(summary(show)).toEqual([['hello.txt', ['removed:hi', 'added:hello']]]);
+  });
+
+  it('reads nothing that is not a diff, or a diff one part of which does not read', () => {
+    expect(parseMultiFileDiff('just some notes\n--- not a header\n')).toBeNull();
+    expect(
+      parseMultiFileDiff(
+        [
+          'diff --git a/a.txt b/a.txt',
+          '--- a/a.txt',
+          '+++ b/a.txt',
+          '@@ -1 +1 @@',
+          '-x',
+          '+y',
+          'diff --git a/logo.png b/logo.png',
+          'Binary files a/logo.png and b/logo.png differ',
+        ].join('\n')
+      )
+    ).toBeNull();
   });
 });

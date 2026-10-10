@@ -1,7 +1,9 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { Check, Copy, X } from 'lucide-react';
 
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
+import { ToolDiffView } from '@/components/action-conversation/ToolDiffView';
+import { parseMultiFileDiff } from '@/components/action-conversation/toolDiff';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useI18n } from '@/context/useI18n';
@@ -90,7 +92,14 @@ type Content =
   | Readonly<{ kind: 'image'; url: string }>
   | Readonly<{ kind: 'unavailable' }>;
 
-const READ_KINDS = new Set<TaskFile['kind']>(['markdown', 'html', 'text', 'document', 'image']);
+const READ_KINDS = new Set<TaskFile['kind']>([
+  'markdown',
+  'html',
+  'diff',
+  'text',
+  'document',
+  'image',
+]);
 
 /**
  * Reads the file, and again for each new revision; the old content stays until the new one
@@ -147,6 +156,12 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   const copy = COPY[language];
   const nameId = useId();
   const content = useFileContent(actionId, file, revision);
+  // Text that does not read as a diff stays plain text rather than becoming unreadable.
+  const diffs = useMemo(
+    () =>
+      file.kind === 'diff' && content.kind === 'text' ? parseMultiFileDiff(content.text) : null,
+    [file.kind, content]
+  );
   const [openFailed, setOpenFailed] = useState(false);
   const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
 
@@ -251,6 +266,12 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
             ) : null}
             {file.kind === 'html' ? (
               page(content.text)
+            ) : diffs !== null ? (
+              <div className="task-file-preview__diffs">
+                {diffs.map((diff, index) => (
+                  <ToolDiffView key={index} diff={diff} label={diff.path} />
+                ))}
+              </div>
             ) : file.kind === 'markdown' ? (
               <div className="task-file-preview__document">
                 <MarkdownBlock text={content.text} isStreamFinished />

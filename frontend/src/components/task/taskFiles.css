@@ -237,6 +237,16 @@
   overflow-wrap: anywhere;
 }
 
+/* The steps' diff, without their height limit: here it scrolls with the preview. */
+.task-file-preview__diffs {
+  display: grid;
+  gap: 8px;
+}
+
+.task-file-preview__diffs .action-conversation__diff-body {
+  max-height: none;
+}
+
 .task-file-preview__image {
   max-width: 100%;
   height: auto;

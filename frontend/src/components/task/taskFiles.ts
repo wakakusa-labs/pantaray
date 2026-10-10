@@ -2,11 +2,19 @@ import type { ActionConversationView } from '../../../electron/src/actions/actio
 import { pantarayFilePaths } from '../../../electron/src/actions/pantarayFileLinks';
 
 /**
- * How the preview shows a file: rendered from its text (Markdown, a web page, or plain text),
- * as a web page converted from a word-processor document, drawn as an image or by the PDF
+ * How the preview shows a file: rendered from its text (Markdown, a web page, a diff, or plain
+ * text), as a web page converted from a word-processor document, drawn as an image or by the PDF
  * viewer, or left to Quick Look and its app.
  */
-export type TaskFileKind = 'markdown' | 'html' | 'text' | 'document' | 'image' | 'pdf' | 'app_only';
+export type TaskFileKind =
+  | 'markdown'
+  | 'html'
+  | 'diff'
+  | 'text'
+  | 'document'
+  | 'image'
+  | 'pdf'
+  | 'app_only';
 
 export type TaskFile = Readonly<{
   path: string;
@@ -21,6 +29,8 @@ const KIND_BY_EXTENSION: Readonly<Record<string, TaskFileKind>> = {
   markdown: 'markdown',
   html: 'html',
   htm: 'html',
+  patch: 'diff',
+  diff: 'diff',
   png: 'image',
   jpg: 'image',
   jpeg: 'image',
@@ -68,6 +78,8 @@ const TEXT_EXTENSIONS = new Set([
   'markdown',
   'html',
   'htm',
+  'patch',
+  'diff',
   'txt',
   'csv',
   'tsv',

@@ -250,3 +250,20 @@ test('notification orchestration consumes buffered events across StrictMode resu
   assert.deepEqual(secondSetup, [{ event_id: 'during-second-setup' }]);
   assert.deepEqual(thirdSetup, [{ event_id: 'between-setups' }]);
 });
+
+test('History preload keeps a show-item request sent before the shell subscribes', () => {
+  const { createAuthHistoryApi } = require('../electron/preload/auth_history_api');
+  const ipcRenderer = createIpcRenderer();
+  const { history } = createAuthHistoryApi({ ipcRenderer });
+  ipcRenderer.emit('history:showItem', { item: 'action:a1' });
+  ipcRenderer.emit('history:showItem', { item: 'action:a2' });
+
+  const received = [];
+  const unsubscribe = history.onShowItem((payload) => received.push(payload));
+  ipcRenderer.emit('history:showItem', { item: 'action:a3' });
+  unsubscribe();
+  // A request answered once is not answered again by the next subscriber.
+  history.onShowItem((payload) => received.push(payload));
+
+  assert.deepEqual(received, [{ item: 'action:a2' }, { item: 'action:a3' }]);
+});

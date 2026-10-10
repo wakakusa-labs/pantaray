@@ -7,13 +7,17 @@ export type HistorySelection = 'chat' | WorkKey;
 const SELECTION_PARAM = 'item';
 const WORK_KEY = /^(action|suggestion):(.+)$/;
 
+/** The work a value names, or null when it is not a well-formed key. */
+export function parseWorkKey(value: unknown): WorkKey | null {
+  const match = typeof value === 'string' ? WORK_KEY.exec(value) : null;
+  // Ids are canonical: never blank, never padded.
+  if (!match || match[2] !== match[2].trim()) return null;
+  return `${match[1] as 'action' | 'suggestion'}:${match[2]}`;
+}
+
 /** The selection a `?item=` value names. A missing or malformed value shows the chat. */
 export function parseHistorySelection(search: string): HistorySelection {
-  const value = new URLSearchParams(search).get(SELECTION_PARAM);
-  const match = value === null ? null : WORK_KEY.exec(value);
-  // Ids are canonical: never blank, never padded.
-  if (!match || match[2] !== match[2].trim()) return 'chat';
-  return `${match[1] as 'action' | 'suggestion'}:${match[2]}`;
+  return parseWorkKey(new URLSearchParams(search).get(SELECTION_PARAM)) ?? 'chat';
 }
 
 export function historySelectionSearch(selection: HistorySelection): string {

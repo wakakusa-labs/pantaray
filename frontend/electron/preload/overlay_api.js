@@ -98,6 +98,7 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
         if (isValidSendChannel('overlay:dragEnd')) ipcRenderer.send('overlay:dragEnd');
       },
       showChat: (request) => ipcRenderer.invoke('overlay:showChat', request),
+      openTask: (request) => ipcRenderer.invoke('overlay:openTask', request),
       openWorkspaceSettings: () => {
         if (isValidSendChannel('overlay:openWorkspaceSettings')) {
           ipcRenderer.send('overlay:openWorkspaceSettings');

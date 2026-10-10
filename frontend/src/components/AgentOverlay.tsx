@@ -500,7 +500,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
                     canAccept={canDecide && canAcceptSuggestion}
                     onDismiss={() => {
                       replyAfterDismissal(hasWords);
-                      ctrl.onReject();
+                      ctrl.onReject(hasWords);
                     }}
                     onAccept={acceptSuggestion}
                   />
@@ -579,6 +579,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
       chatActionId={currentView?.action?.action_id ?? null}
+      onOpenInMainWindow={ctrl.openTask}
+      openTaskFailed={ctrl.openTaskFailed}
       onShowChat={window.electron?.agentOverlay?.showChat}
       conversationCopy={conversationCopy}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}

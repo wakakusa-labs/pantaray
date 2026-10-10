@@ -52,6 +52,8 @@ const sendOrchestration = vi.fn();
 const submitApprovalDecision = vi.fn();
 const writeText = vi.fn<(text: string) => Promise<void>>();
 const onShowInChat = vi.fn();
+// The history → small window path, which opens or focuses the one that shows an Action.
+const openSmall = vi.fn<(request: { actionId: string }) => Promise<void>>();
 const onAddProject = vi.fn();
 let drafts = createTaskComposerDrafts(undefined);
 
@@ -88,6 +90,7 @@ beforeEach(() => {
   writeText.mockReset().mockResolvedValue(undefined);
   onShowInChat.mockReset();
   onAddProject.mockReset();
+  openSmall.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -104,6 +107,7 @@ beforeEach(() => {
         },
       },
       orchestration: { send: sendOrchestration },
+      history: { openConversation: openSmall },
       clipboard: { writeText },
       agentOverlay: {
         submitApprovalDecision,
@@ -166,6 +170,21 @@ describe('ActionTaskPane', () => {
       expect.objectContaining({ actionId: 'act-1' })
     );
     expect(writeText.mock.calls[0][0]).toContain('answer of run-1');
+  });
+
+  it('opens the task small on request, and says so when it cannot', async () => {
+    readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await renderPane();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open small' }));
+    expect(openSmall).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
+
+    openSmall.mockRejectedValueOnce(new Error('Local runtime is unavailable.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open small' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not open this task in a small window.'
+    );
   });
 
   it("opens with the suggestion the Action started from, as Pantaray's message", async () => {

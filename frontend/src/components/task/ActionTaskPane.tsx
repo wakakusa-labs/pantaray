@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
+import { Check, CircleAlert, Clipboard, MessageCircle, PictureInPicture2 } from 'lucide-react';
 
 import type { ActionConversationView as ActionConversationViewModel } from '../../../electron/src/actions/actionConversationModel';
 import { ActionConversationView } from '@/components/action-conversation/ActionConversationView';
@@ -62,6 +62,14 @@ export function ActionTaskPane({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
   const [reopenRequested, setReopenRequested] = useState(false);
+  const [openSmallFailed, setOpenSmallFailed] = useState(false);
+  const openSmall = () => {
+    setOpenSmallFailed(false);
+    window.electron?.history?.openConversation({ actionId }).catch((error: unknown) => {
+      console.error('Failed to open the task in a small window:', error);
+      setOpenSmallFailed(true);
+    });
+  };
 
   const task = useActionTask(actionId, drafts);
   const { view, lifecycle, status, conversation, approval, composer } = task;
@@ -148,6 +156,16 @@ export function ActionTaskPane({
           >
             <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
           </button>
+          {/* The small window follows the task while the user works elsewhere; this one stays. */}
+          <button
+            type="button"
+            className="action-task__icon-button"
+            aria-label={t('history.openSmall')}
+            title={t('history.openSmall')}
+            onClick={openSmall}
+          >
+            <PictureInPicture2 size={17} strokeWidth={1.8} aria-hidden />
+          </button>
           {conversationCopy ? (
             <button
               type="button"
@@ -169,6 +187,11 @@ export function ActionTaskPane({
             <span className="action-task__sr-only" role="alert">
               {copyFailed}
             </span>
+          ) : null}
+          {openSmallFailed ? (
+            <p className="action-task__state" role="alert">
+              {t('history.openSmallFailed')}
+            </p>
           ) : null}
         </div>
       </header>

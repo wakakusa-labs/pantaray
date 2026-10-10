@@ -251,6 +251,8 @@ describe('AgentOverlay broader E2E', () => {
   const observeOverlaySize = vi.fn();
   const getActionApprovalMode = vi.fn();
   const openWorkspaceSettings = vi.fn();
+  const hideOverlay = vi.fn();
+  const openTask = vi.fn(async () => undefined);
   const setActionApprovalMode =
     vi.fn<NonNullable<NonNullable<ElectronBridge['agentOverlay']>['setActionApprovalMode']>>();
   const getWorkspaceEditCommandPreference =
@@ -319,6 +321,8 @@ describe('AgentOverlay broader E2E', () => {
     setActionApprovalMode.mockReset();
     getWorkspaceEditCommandPreference.mockReset().mockResolvedValue(defaultPermissions);
     openWorkspaceSettings.mockReset();
+    hideOverlay.mockReset();
+    openTask.mockReset().mockResolvedValue(undefined);
     getActionApprovalMode.mockReset();
     getActionApprovalMode.mockResolvedValue({
       action_id: 'act-1',
@@ -365,7 +369,8 @@ describe('AgentOverlay broader E2E', () => {
           },
           submitApprovalDecision,
           resize: resizeOverlay,
-          hide: vi.fn(),
+          hide: hideOverlay,
+          openTask,
           stopAction,
           getActionApprovalMode,
           setActionApprovalMode,
@@ -1389,7 +1394,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByText('Just a comment, nothing to approve')).toBeNull();
   });
 
-  it('keeps the composer after a dismissal, and a message replies to the dismissed suggestion', async () => {
+  it('closes the panel once a dismissal is recorded; the composer of a dismissed suggestion replies to it', async () => {
     const messageId = '00000000-0000-4000-8000-000000000043';
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
     submitMessage.mockResolvedValueOnce(createStartedResult('act-after-dismissal', messageId));
@@ -1416,6 +1421,8 @@ describe('AgentOverlay broader E2E', () => {
       event: 'dismiss_suggestion',
       data: { suggestion_id: 'sug-offer' },
     });
+    // The panel waits for the dismissal to be recorded; one that fails stays to be decided again.
+    expect(hideOverlay).not.toHaveBeenCalled();
     await act(async () =>
       eventListener?.({
         event: 'suggestion_reaction_committed',
@@ -1428,6 +1435,9 @@ describe('AgentOverlay broader E2E', () => {
         sequence: 4,
       })
     );
+
+    // A decided suggestion keeps no panel.
+    expect(hideOverlay).toHaveBeenCalledTimes(1);
 
     // Nothing written yet: the dismissal stands, and the composer waits for words.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
@@ -1530,6 +1540,8 @@ describe('AgentOverlay broader E2E', () => {
       },
     });
     expect(acceptAction).not.toHaveBeenCalled();
+    // The words make it a reply, which keeps the panel.
+    expect(hideOverlay).not.toHaveBeenCalled();
   });
 
   it('follows a reply to a dismissed suggestion, sent here or found already open', async () => {
@@ -1656,6 +1668,77 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => conversationListener?.(createConversationUpdate()));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
     expect(screen.queryByRole('img', { name: 'Attached image 1 of 1' })).toBeNull();
+  });
+
+  describe('moves a task to the main window only when asked', () => {
+    const offer = () => {
+      const snapshot = createCommentOnlySnapshot();
+      snapshot.snapshot.interactionContract = 'action_offer';
+      return snapshot;
+    };
+    const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
+    const actionMeta = { suggestion_id: 'sug-comment', command_id: 'cmd-9', kind: 'action' };
+    const renderPanel = (props: Parameters<typeof AgentOverlay>[0] = {}) =>
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay {...props} />
+        </UiLanguageProvider>
+      );
+    const openInMain = () => screen.queryByRole('button', { name: 'Open in main window' });
+
+    it('keeps an approved suggestion in the panel, which then offers to move it', async () => {
+      renderPanel();
+      await act(async () => snapshotListener?.(offer()));
+      // Nothing to move before an Action exists.
+      expect(openInMain()).toBeNull();
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Accept' })));
+      // prettier-ignore
+      await emit({ event: 'process_started', data: { kind: 'action', process_id: 'run-9', suggestion_id: 'sug-comment', action_id: 'act-1', command_id: 'cmd-9', accepted_at: '2026-10-10T00:00:01Z', started_at: '2026-10-10T00:00:02Z' }, meta: { ...actionMeta, process_id: 'run-9', action_id: 'act-1' }, sequence: 5 } as OrchestrationServerEvent);
+      await act(async () => conversationListener?.(createConversationUpdate(null, true)));
+
+      expect(openTask).not.toHaveBeenCalled();
+      expect(hideOverlay).not.toHaveBeenCalled();
+      fireEvent.click(openInMain()!);
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
+      // Main closes the panel once the main window shows the task; the panel does not hide itself.
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
+    it('keeps the task a new-task panel or a reply starts in that panel', async () => {
+      const messageId = '00000000-0000-4000-8000-0000000000a1';
+      vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+      submitMessage.mockResolvedValue(createStartedResult('act-new', messageId));
+      renderPanel({ entryMode: 'standalone' });
+      await screen.findByRole('button', { name: /permissions: Ask every time/ });
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Tidy the notes' } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+      cleanup();
+
+      renderPanel();
+      await act(async () => snapshotListener?.(createCommentOnlySnapshot()));
+      fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Do it then' } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+
+      expect(submitMessage).toHaveBeenCalledTimes(2);
+      expect(openTask).not.toHaveBeenCalled();
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
+    it('keeps the panel, saying so, when the main window cannot show the task', async () => {
+      openTask.mockRejectedValueOnce(new Error('The main window could not be opened.'));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      renderPanel({ entryMode: 'standalone', initialActionId: 'act-1' });
+      await act(async () => conversationListener?.(createConversationUpdate()));
+
+      fireEvent.click(openInMain()!);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Could not open this task in the main window.'
+      );
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps a reply open on snapshot refresh and collapses it for the next Suggestion', async () => {

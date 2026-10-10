@@ -370,7 +370,9 @@ test('development main window opens the app root', async (t) => {
     else process.env.FRONTEND_PORT = originalPort;
   });
   let markLoaded;
-  const loaded = new Promise((resolve) => { markLoaded = resolve; });
+  const loaded = new Promise((resolve) => {
+    markLoaded = resolve;
+  });
   function BrowserWindow() {
     const win = createEntryWindow();
     win.loadURL = (url) => {
@@ -412,4 +414,40 @@ test('packaged main window opens the app root on initial load and recovery', (t)
     { file: indexPath, options: { hash: '/' } },
     { file: indexPath, options: { hash: '/' } },
   ]);
+});
+
+test('packaged main window created on a task retries its first load there, and later loads at the root', (t) => {
+  const appPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-entry-'));
+  t.after(() => fs.rmSync(appPath, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(appPath, 'dist'));
+  const indexPath = path.join(appPath, 'dist', 'index.html');
+  fs.writeFileSync(indexPath, '<!doctype html>');
+  const originalEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  t.after(() => {
+    if (originalEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalEnv;
+  });
+  const loads = [];
+  function BrowserWindow() {
+    const win = createEntryWindow();
+    win.loadFile = (file, options) => loads.push(options.hash);
+    return win;
+  }
+  const { createMainWindow } = loadWindowLifecycleWithBrowserWindow(BrowserWindow, {
+    isPackaged: true,
+    getAppPath: () => appPath,
+  });
+  const task = '/history?item=action:act-1';
+  const failFirst = createMainWindow({ initialUiLanguage: 'ja', hashRoute: task });
+  withMutedConsole(() =>
+    failFirst.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath)
+  );
+  const failLater = createMainWindow({ initialUiLanguage: 'ja', hashRoute: task });
+  failLater.webContents.emit('did-finish-load');
+  withMutedConsole(() =>
+    failLater.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath)
+  );
+
+  assert.deepEqual(loads, [task, task, task, '/']);
 });

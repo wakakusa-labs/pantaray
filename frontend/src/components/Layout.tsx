@@ -12,6 +12,7 @@ import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
 import { showChatState } from '@/history/historyViewMode';
+import { useShowHistoryItem } from '@/history/useShowHistoryItem';
 import './Layout.css';
 
 /**
@@ -37,6 +38,7 @@ const Layout: React.FC = () => {
       navigate('/history', { state: showChatState(actionId) });
     });
   }, [navigate]);
+  useShowHistoryItem();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -201,7 +201,10 @@ const { createOrchestrationWS } = require('../ws_orchestration') as {
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createMainWindow } = require('../window_lifecycle') as {
-  createMainWindow: (options: { initialUiLanguage: UiLanguage }) => BrowserWindow;
+  createMainWindow: (options: {
+    initialUiLanguage: UiLanguage;
+    hashRoute?: string;
+  }) => BrowserWindow;
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createClient } = require('@supabase/supabase-js') as {
@@ -471,8 +474,8 @@ const deepLinkAuth = createDeepLinkAuthManager({
 });
 deepLinkAuth.installAppHandlers();
 
-function createWindow(): void {
-  mainWindow = createMainWindow({ initialUiLanguage: uiLanguage });
+function createWindow(hashRoute?: string): void {
+  mainWindow = createMainWindow({ initialUiLanguage: uiLanguage, hashRoute });
   deepLinkAuth.onMainWindowCreated();
 }
 

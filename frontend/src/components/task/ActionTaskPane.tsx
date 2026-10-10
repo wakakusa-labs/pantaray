@@ -45,8 +45,12 @@ type ActionTaskPaneProps = {
   actionId: string;
   /** The history row's title for this Action. */
   title: string;
-  /** `column`: the narrow right column beside a file preview. */
-  layout: 'full' | 'column';
+  /**
+   * A file's preview, shown left of the conversation, which narrows to a column. It sits below
+   * the header and beside the conversation, so opening and closing it keeps the conversation
+   * mounted with its scroll position and draft.
+   */
+  preview?: ReactNode;
   onShowInChat: () => void;
   /** Where projects are added: the composer's @-mention option and an approval's folder hint. */
   onAddProject: () => void;
@@ -61,7 +65,7 @@ type ActionTaskPaneProps = {
 export function ActionTaskPane({
   actionId,
   title,
-  layout,
+  preview,
   onShowInChat,
   onAddProject,
   renderFileChips,
@@ -131,7 +135,10 @@ export function ActionTaskPane({
   };
 
   return (
-    <section className={`action-task action-task--${layout}`} aria-labelledby={titleId}>
+    <section
+      className={preview ? 'action-task action-task--split' : 'action-task'}
+      aria-labelledby={titleId}
+    >
       <header className="action-task__header">
         <h1 id={titleId}>{title}</h1>
         {status.kind === 'approval_pending' ? (
@@ -176,6 +183,7 @@ export function ActionTaskPane({
           ) : null}
         </div>
       </header>
+      {preview}
       <div className="action-task__scroll" ref={scrollRef}>
         <div className="action-task__column" ref={contentRef}>
           <div className="action-task__conversation" ref={answerRef} tabIndex={-1}>

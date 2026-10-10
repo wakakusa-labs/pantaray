@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import { t as translate } from '@/i18n/translate';
+import type { WorkspaceProjects } from './HistoryProjects';
 import { HistorySidebar } from './HistorySidebar';
 
 const mocks = vi.hoisted(() => ({
@@ -29,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   removeItem: vi.fn(),
   setSearchText: vi.fn(),
   unreadActionId: 'A1' as string | null,
+  addProjectFromFolder: vi.fn(async () => undefined),
+  removeProject: vi.fn(async (_projectId: string) => true),
+  workspace: null as WorkspaceProjects['settings'],
 }));
 vi.mock('@/context/useI18n', () => ({
   useI18n: () => ({
@@ -74,6 +78,13 @@ function Sidebar() {
   return (
     <HistorySidebar
       history={useSuggestionHistory()}
+      projects={{
+        settings: mocks.workspace,
+        errorMessage: null,
+        pending: new Set(),
+        addProjectFromFolder: mocks.addProjectFromFolder,
+        removeProject: mocks.removeProject,
+      }}
       selected={mocks.selected}
       onSelect={mocks.select}
     />
@@ -110,7 +121,67 @@ afterEach(() => {
   mocks.unreadActionId = 'A1';
   mocks.chatUnread = 0;
   mocks.selected = 'chat';
+  mocks.workspace = null;
   vi.clearAllMocks();
+});
+
+const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
+  read_access_scope: 'workspace',
+  organizations: [],
+  projects: [
+    { project_id: 'p-1', display_name: 'aurora', sort_order: 0, organization_ids: [] },
+    { project_id: 'p-2', display_name: 'billing', sort_order: 1, organization_ids: [] },
+  ],
+  folders: [
+    {
+      folder_id: 'f-1',
+      display_name: 'aurora',
+      real_path: '/Users/me/aurora',
+      canonical_real_path: '/Users/me/aurora',
+      organization_ids: [],
+      project_ids: ['p-1'],
+    },
+  ],
+};
+
+it('チャットと作業の間にプロジェクトを並べ、パスはホバーで見せ、＋で追加の流れを呼ぶ', async () => {
+  mocks.workspace = WORKSPACE;
+  render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  const section = screen.getByRole('region', { name: 'history.projects.title' });
+  const chatRow = screen.getByRole('button', { name: 'history.chat.title' });
+  const firstTask = screen.getByRole('button', { name: /^Conversation/ });
+  expect(chatRow.compareDocumentPosition(section)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(section.compareDocumentPosition(firstTask)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  const rows = within(within(section).getByRole('list')).getAllByRole('listitem');
+  expect(rows.map((row) => row.textContent)).toEqual(['aurora', 'billing']);
+  expect(within(section).getByText('aurora')).toHaveAttribute('title', '/Users/me/aurora');
+
+  const add = within(section).getByRole('button', { name: 'history.projects.add' });
+  add.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(mocks.addProjectFromFolder).toHaveBeenCalledOnce();
+});
+
+it('プロジェクトは確認してから削除し、キャンセルなら元のボタンへ、削除後は＋へ戻る', async () => {
+  mocks.workspace = WORKSPACE;
+  render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  const trigger = screen.getByRole('button', { name: 'common.delete aurora' });
+  await userEvent.click(trigger);
+  expect(
+    screen.getByRole('dialog', { name: 'history.projects.deleteConfirmTitle {"name":"aurora"}' })
+  ).toHaveAccessibleDescription('history.projects.deleteConfirmBody');
+  await userEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+  expect(trigger).toHaveFocus();
+  expect(mocks.removeProject).not.toHaveBeenCalled();
+
+  await userEvent.click(trigger);
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  expect(mocks.removeProject).toHaveBeenCalledWith('p-1');
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'history.projects.add' })).toHaveFocus()
+  );
 });
 
 it('起動ボタンはサイドバーの先頭に1つだけで、空状態でもkeyboardから開ける', async () => {
@@ -227,6 +298,7 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
     render(<Sidebar />, { wrapper: SidebarWrapper });
 
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'history.projects.title',
       'history.day.today',
       'history.day.yesterday',
       '9月29日',
@@ -590,6 +662,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     rerender(<Sidebar />);
 
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'history.projects.title',
       'history.day.today',
       'history.day.yesterday',
       '9月29日',

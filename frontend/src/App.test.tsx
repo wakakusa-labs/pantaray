@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -12,7 +12,6 @@ vi.mock('../electron/src/auth/accountLoginFeature', () => ({
 
 vi.mock('./pages/SuggestionHistoryPage', () => ({ default: () => <h1>Local history</h1> }));
 vi.mock('./pages/SettingsPage', () => ({ default: () => <h1>Local settings</h1> }));
-vi.mock('./pages/WorkspacePage', () => ({ default: () => <h1>Local workspace</h1> }));
 vi.mock('./components/RecordingIntroDialog', () => ({ RecordingIntroDialog: () => null }));
 vi.mock('./lib/supabase', () => ({
   getSupabase: () => ({
@@ -72,11 +71,16 @@ it.each([
   ['/', 'Local history'],
   ['/history', 'Local history'],
   ['/settings', 'Local settings'],
-  ['/workspace', 'Local workspace'],
 ])('opens desktop %s without a Pantaray account', async (path, heading) => {
   window.history.replaceState(null, '', `/#${path}`);
   render(subject());
   expect(await screen.findByRole('heading', { name: heading })).toBeVisible();
+  // Projects live in History's sidebar and the workspace in Settings; the rail has no page for them.
+  expect(
+    within(screen.getByRole('navigation')).getAllByRole('button', {
+      name: /^(履歴|設定|ワークスペース)$/,
+    })
+  ).toHaveLength(2);
   expect(startBrowserLogin).not.toHaveBeenCalled();
 });
 
@@ -159,18 +163,15 @@ it('closes the account disclosure with Escape and restores its trigger focus', a
   expect(screen.queryByRole('link', { name: 'Pantarayにログイン' })).not.toBeInTheDocument();
 });
 
-it.each(['/history', '/settings', '/workspace'])(
-  'keeps browser %s behind the desktop boundary',
-  async (path) => {
-    delete window.electron;
-    window.history.replaceState(null, '', path);
-    render(subject());
-    expect(
-      await screen.findByRole('heading', { name: 'デスクトップアプリが必要です' })
-    ).toBeVisible();
-    expect(screen.queryByRole('heading', { name: /^Local / })).not.toBeInTheDocument();
-  }
-);
+it.each(['/history', '/settings'])('keeps browser %s behind the desktop boundary', async (path) => {
+  delete window.electron;
+  window.history.replaceState(null, '', path);
+  render(subject());
+  expect(
+    await screen.findByRole('heading', { name: 'デスクトップアプリが必要です' })
+  ).toBeVisible();
+  expect(screen.queryByRole('heading', { name: /^Local / })).not.toBeInTheDocument();
+});
 
 it('does not expose the desktop app to an authenticated browser user', async () => {
   delete window.electron;

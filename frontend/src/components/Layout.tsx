@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Folder, Settings, UserRound } from 'lucide-react';
+import { Clock, Settings, UserRound } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/context/useI18n';
@@ -18,7 +18,7 @@ import './Layout.css';
  * The main window's shell: an icon rail on the left on every page, and the page beside it.
  */
 const Layout: React.FC = () => {
-  const { user, signOut, authStatus, runtimeState } = useAuth();
+  const { user, signOut, authStatus } = useAuth();
   const needsLogin = authStatus === 'expired';
   const hasAccount = authStatus === 'authenticated' || needsLogin;
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -80,18 +80,11 @@ const Layout: React.FC = () => {
     return email[0].toUpperCase();
   };
 
-  // A page with its own columns shows the AI-connection notice in its right column. Workspace
-  // has those columns only once the local owner it belongs to is published.
-  const isSplitPage =
-    location.pathname === '/history' ||
-    location.pathname === '/settings' ||
-    (location.pathname === '/workspace' &&
-      runtimeState.status === 'ready' &&
-      runtimeState.owner !== null);
+  // A page with its own columns shows the AI-connection notice in its right column.
+  const isSplitPage = location.pathname === '/history' || location.pathname === '/settings';
 
   const navItems = [
     { path: '/history', label: t('nav.history'), Icon: Clock },
-    { path: '/workspace', label: t('settings.workspace.title'), Icon: Folder },
     { path: '/settings', label: t('nav.settings'), Icon: Settings },
   ];
 

@@ -18,6 +18,7 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
+import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
 import HistorySearchField from './HistorySearchField';
 import { liveStageText } from './liveStageText';
 import { NewWorkButton } from './NewWorkButton';
@@ -128,16 +129,19 @@ function ChatRow({
 }
 
 /**
- * The History page's sidebar: New task, search, the chat, and the user's tasks by day. A row
- * selects what the detail pane shows; the selected one is marked current.
+ * The History page's sidebar: New task, search, the chat, the projects, and the user's tasks by
+ * day. A task row selects what the detail pane shows; the selected one is marked current.
  */
 export function HistorySidebar({
   history,
+  projects,
   selected,
   onSelect,
 }: {
   /** The page reads the list too, for the selected task's title. */
   history: ReturnType<typeof useSuggestionHistory>;
+  /** The page's composers add projects too. */
+  projects: WorkspaceProjects;
   selected: HistorySelection;
   onSelect: (selection: HistorySelection, options?: { replace: true }) => void;
 }) {
@@ -348,9 +352,16 @@ export function HistorySidebar({
         ) : null}
       </div>
       <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
+      <HistoryProjects projects={projects} t={t} />
       <div className="history-sidebar__tasks">{renderContent()}</div>
       {confirmingDelete ? (
-        <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
+        <HistoryDeleteDialog
+          t={t}
+          title={t('history.delete.confirmTitle')}
+          body={t('history.delete.confirmBody')}
+          onCancel={cancelDelete}
+          onConfirm={() => void confirmDelete()}
+        />
       ) : null}
     </aside>
   );

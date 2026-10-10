@@ -29,6 +29,71 @@
   padding: 0 8px;
 }
 
+/* The registered projects, between the chat and the tasks; they scroll on their own when many. */
+.history-projects {
+  padding: 4px 8px 0;
+}
+
+.history-projects__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 4px 2px 8px;
+}
+
+.history-projects__head h2 {
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+}
+
+.history-projects__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.history-projects__add:hover:not(:disabled) {
+  background: var(--fog-mist);
+  color: var(--fog-text);
+}
+
+.history-projects__add:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.history-projects__list {
+  max-height: 30vh;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.history-project__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 4px 6px 10px;
+  color: var(--fog-text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .history-sidebar__tasks {
   display: flex;
   flex: 1;

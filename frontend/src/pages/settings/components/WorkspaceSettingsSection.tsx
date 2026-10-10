@@ -1,4 +1,4 @@
-import { useLayoutEffect, type ReactNode } from 'react';
+import { useLayoutEffect } from 'react';
 
 import type { Translate } from '../types';
 import {
@@ -22,14 +22,12 @@ import './workspaceOrganizations.css';
 import './workspaceProjectDnd.css';
 
 type WorkspaceSettingsSectionProps = {
-  /** Shown at the top of the detail column (the app's AI-connection notice). */
-  notice?: ReactNode;
   t: Translate;
 };
 
-/** Master-detail: projects (and the folders no project holds) on the left, the selection on
- * the right. */
-export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSectionProps) {
+/** Settings' workspace section. Master-detail: projects (and the folders no project holds) on
+ * the left, the selection on the right. */
+export function WorkspaceSettingsSection({ t }: WorkspaceSettingsSectionProps) {
   const controller = useWorkspaceSettingsController(t);
   const { clearFocusRequest, focusRequest, settings } = controller;
   const isPending = (key: WorkspacePendingKey) => controller.pending.has(key);
@@ -53,10 +51,10 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
   }, [clearFocusRequest, focusRequest]);
 
   return (
-    <div className="app-split">
-      <aside className="app-split-master workspace-master">
+    <div className="workspace-settings">
+      <aside className="workspace-master">
         <div className="workspace-master-header">
-          <h2 className="app-split-title">{t('settings.workspace.title')}</h2>
+          <h3 className="dashboard-section-title">{t('settings.workspace.title')}</h3>
           {settings ? (
             <WorkspaceListToolbar
               organizations={settings.organizations}
@@ -105,8 +103,7 @@ export function WorkspaceSettingsSection({ notice, t }: WorkspaceSettingsSection
         ) : null}
       </aside>
 
-      <section className="app-split-detail">
-        {notice}
+      <section className="workspace-detail">
         {settings === null ? (
           controller.showLoading ? (
             <div className="history-loading">{t('common.loading')}</div>

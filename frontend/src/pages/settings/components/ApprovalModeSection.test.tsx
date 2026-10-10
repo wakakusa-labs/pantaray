@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { ApprovalModeSection } from './ApprovalModeSection';
 import type { MessageKey } from '@/i18n/types';
@@ -22,10 +22,16 @@ const workspaceSettings = {
   folders: [],
 };
 
+function LocationProbe() {
+  const location = useLocation();
+  return <output aria-label="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderApprovalModeSection() {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={['/settings?section=execution']}>
       <ApprovalModeSection t={translate} />
+      <LocationProbe />
     </MemoryRouter>
   );
 }
@@ -107,9 +113,6 @@ describe('ApprovalModeSection', () => {
     const toggle = screen.getByRole('switch', { name: 'settings.readAccessScope.title' });
     await waitFor(() => expect(toggle).toBeEnabled());
     expect(screen.getByText('settings.readAccessScope.workspaceBoundary')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'settings.readAccessScope.openWorkspace' })
-    ).toBeInTheDocument();
     fireEvent.click(toggle);
 
     await waitFor(() => {
@@ -117,5 +120,11 @@ describe('ApprovalModeSection', () => {
     });
     expect(getCachedWorkspaceSettings('user-1')).toBeNull();
     expect(approval.setWorkspaceEditCommandPreference).not.toHaveBeenCalled();
+
+    // The workspace it reads from is managed in Settings' own Workspace section.
+    fireEvent.click(screen.getByRole('button', { name: 'settings.readAccessScope.openWorkspace' }));
+    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent(
+      '/settings?section=workspace'
+    );
   });
 });

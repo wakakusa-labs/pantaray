@@ -1,6 +1,5 @@
 import { ArrowUp, Plus, X } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
@@ -31,16 +30,17 @@ export function ChatComposer({
   composer,
   textareaRef,
   t,
+  onAddProject,
   onSend,
 }: {
   composer: ReturnType<typeof useChatComposer>;
+  onAddProject: () => void;
   /** Sends the draft; the chat also scrolls to the newest message for it. */
   onSend: () => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
   const { state } = composer;
   const readOnly = state.pending !== null;
   return (
@@ -125,7 +125,7 @@ export function ChatComposer({
             invalid={state.problem === 'text' || state.problem === 'project_refs'}
             describedBy={state.problem ? PROBLEM_ID : undefined}
             onChange={composer.setDraft}
-            onAddProject={() => navigate('/workspace')}
+            onAddProject={onAddProject}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey) return;
               event.preventDefault();

@@ -8,6 +8,7 @@ import type { ConversationHistoryListItem } from '../../electron/src/history/his
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSession';
 import type { ChatReveal } from '@/components/chat/useChatReveal';
+import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { historySelectionSearch, parseHistorySelection } from '@/history/historySelection';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
@@ -85,6 +86,7 @@ const ITEMS: ConversationHistoryListItem[] = [
   },
 ];
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
+const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
 
 beforeEach(() => {
   window.electron = {
@@ -100,6 +102,15 @@ beforeEach(() => {
       openConversation: vi.fn(),
     },
     agentOverlay: { showHistory: vi.fn() },
+    workspaceSettings: {
+      get: vi.fn(async () => ({
+        read_access_scope: 'workspace',
+        organizations: [],
+        projects: [],
+        folders: [],
+      })),
+      selectFolder,
+    },
   } as unknown as Window['electron'];
   const originalShowModal = HTMLDialogElement.prototype.showModal;
   HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
@@ -132,13 +143,14 @@ const renderPage = (entries: string[]) =>
   render(
     <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
       <UiLanguageProvider initialLanguage="ja">
-        <ChatSessionContext.Provider value={{} as ChatSession}>
-          <Routes>
-            <Route path="/history" element={<SuggestionHistoryPage />} />
-            <Route path="/workspace" element={<p>workspace</p>} />
-          </Routes>
-          <LocationProbe />
-        </ChatSessionContext.Provider>
+        <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
+          <ChatSessionContext.Provider value={{} as ChatSession}>
+            <Routes>
+              <Route path="/history" element={<SuggestionHistoryPage />} />
+            </Routes>
+            <LocationProbe />
+          </ChatSessionContext.Provider>
+        </LocalOwnerContext.Provider>
       </UiLanguageProvider>
     </MemoryRouter>
   );
@@ -226,7 +238,7 @@ it('moves the selection off a deleted task in place of its history entry', async
   expect(location()).toHaveTextContent('/history?item=chat');
 });
 
-it('the Action pane shows its card in the chat and adds projects in Workspace', async () => {
+it('the Action pane shows its card in the chat and adds a project in place', async () => {
   renderPage(['/history?item=action:A1']);
   await userEvent.click(screen.getByRole('button', { name: 'show in chat' }));
   expect(location()).toHaveTextContent('/history?item=chat');
@@ -234,7 +246,8 @@ it('the Action pane shows its card in the chat and adds projects in Workspace', 
 
   await userEvent.click(screen.getByRole('button', { name: 'back' }));
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
-  expect(location()).toHaveTextContent(/^\/workspace$/);
+  expect(selectFolder).toHaveBeenCalledOnce();
+  expect(location()).toHaveTextContent('/history?item=action:A1');
 });
 
 it('writes the selection as `?item=kind:id`, encoding only the id', () => {

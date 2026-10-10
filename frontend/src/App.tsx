@@ -23,7 +23,6 @@ import Layout from './components/Layout';
 import { LocalOwnerBoundary } from './components/LocalOwnerBoundary';
 import SuggestionHistoryPage from './pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './components/chat/ChatSessionProvider';
-import WorkspacePage from './pages/WorkspacePage';
 import DesktopAppOnlyPage from './pages/DesktopAppOnlyPage';
 import { useI18n } from '@/context/useI18n';
 import { BrandWordmark } from '@/components/BrandWordmark';
@@ -243,7 +242,6 @@ const MainAppRoutes: React.FC = () => {
               }
             >
               <Route path="/history" element={<SuggestionHistoryPage />} />
-              <Route path="/workspace" element={<WorkspacePage />} />
             </Route>
           </Route>
         ) : (
@@ -251,7 +249,6 @@ const MainAppRoutes: React.FC = () => {
             {/* Browser からはアプリ本体ページを見せない */}
             <Route path="/settings" element={<DesktopAppOnlyPage />} />
             <Route path="/history" element={<DesktopAppOnlyPage />} />
-            <Route path="/workspace" element={<DesktopAppOnlyPage />} />
           </>
         )}
 

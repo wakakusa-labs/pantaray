@@ -184,7 +184,7 @@ export function ApprovalModeSection({ t }: ApprovalModeSectionProps) {
             <button
               type="button"
               className="settings-inline-link"
-              onClick={() => navigate('/workspace')}
+              onClick={() => navigate({ search: '?section=workspace' })}
             >
               <Settings2 size={13} aria-hidden="true" />
               <span>{t('settings.readAccessScope.openWorkspace')}</span>

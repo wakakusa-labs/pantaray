@@ -11,6 +11,7 @@ import {
 import {
   applyWorkspaceMutation,
   countOrganizationUsage,
+  displayNameFromPath,
   workspaceFocusId,
 } from './components/workspaceSettingsModel';
 import type {
@@ -287,6 +288,67 @@ export function useWorkspaceSettingsController(t: Translate) {
     }
   };
 
+  /** The sidebar's ＋: a chosen folder becomes a project of its own, named after the folder. */
+  const addProjectFromFolder = async (): Promise<void> => {
+    const realPath = await selectFolder();
+    if (!realPath) return;
+    const displayName = displayNameFromPath(realPath);
+    const project = await commitMutation(
+      workspacePendingKey.projectCreate,
+      async () =>
+        await requireWorkspaceSettingsApi().createProject({ displayName, organizationIds: [] }),
+      (created) => ({ type: 'projectCreated', project: created }),
+      true
+    );
+    if (!project) return;
+    const folder = await commitMutation(
+      workspacePendingKey.folderCreate(project.project_id),
+      async () =>
+        await requireWorkspaceSettingsApi().createFolder({
+          displayName,
+          realPath,
+          organizationIds: [],
+          projectIds: [project.project_id],
+        }),
+      (created) => ({ type: 'folderCreated', folder: created })
+    );
+    if (folder) return;
+    // A project without its folder would be listed with nothing behind it.
+    await commitMutation(
+      workspacePendingKey.projectDelete(project.project_id),
+      async () => await requireWorkspaceSettingsApi().deleteProject(project.project_id),
+      () => ({ type: 'projectDeleted', projectId: project.project_id }),
+      true
+    );
+    setErrorMessage(t('settings.workspace.saveFailed'));
+  };
+
+  /**
+   * The sidebar's remove. Folders only this project holds go with it: a folder left registered
+   * would stay inside the workspace boundary with no row that shows it.
+   */
+  const removeProject = async (projectId: string): Promise<boolean> => {
+    if (!settings) return false;
+    const ownFolderIds = settings.folders
+      .filter((folder) => folder.project_ids.length === 1 && folder.project_ids[0] === projectId)
+      .map((folder) => folder.folder_id);
+    for (const folderId of ownFolderIds) {
+      const removed = await commitMutation(
+        workspacePendingKey.folderDelete(folderId),
+        async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
+        () => ({ type: 'folderDeleted', folderId })
+      );
+      if (removed === null) return false;
+    }
+    const removed = await commitMutation(
+      workspacePendingKey.projectDelete(projectId),
+      async () => await requireWorkspaceSettingsApi().deleteProject(projectId),
+      () => ({ type: 'projectDeleted', projectId }),
+      true
+    );
+    return removed !== null;
+  };
+
   const previewProjectOrder = (projects: WorkspaceSettings['projects']) => {
     dispatchSettings({
       type: 'projectsOrderPreview',
@@ -337,6 +399,7 @@ export function useWorkspaceSettingsController(t: Translate) {
 
   return {
     addOrganization,
+    addProjectFromFolder,
     assignFolderToProject,
     createFolder,
     createProject,
@@ -349,6 +412,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     isProjectStructurePending,
     pending,
     clearFocusRequest,
+    removeProject,
     selectFolder,
     settings,
     showLoading,

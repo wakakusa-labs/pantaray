@@ -128,6 +128,98 @@ describe('useWorkspaceSettingsController', () => {
     expect(result.current.settings).toBeNull();
     expect(getCachedWorkspaceSettings(OWNER.id)).toBeNull();
   });
+
+  it('adds a chosen folder as a project of its own, and takes the project back if the folder fails', async () => {
+    const project = {
+      project_id: 'project-a',
+      display_name: 'aurora',
+      organization_ids: [],
+      sort_order: 0,
+    };
+    const createProject = vi.fn(async () => project);
+    const createFolder = vi.fn(async () => ({
+      folder_id: 'folder-a',
+      display_name: 'aurora',
+      real_path: '/Users/me/aurora',
+      canonical_real_path: '/Users/me/aurora',
+      organization_ids: [],
+      project_ids: ['project-a'],
+    }));
+    const deleteProject = vi.fn(async () => undefined);
+    installWorkspaceApi({
+      get: async () => emptySettings,
+      selectFolder: async () => ({ canceled: false, path: '/Users/me/aurora/' }),
+      createProject,
+      createFolder,
+      deleteProject,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.showLoading).toBe(false));
+
+    await act(async () => result.current.addProjectFromFolder());
+    expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
+    expect(createFolder).toHaveBeenCalledWith({
+      displayName: 'aurora',
+      realPath: '/Users/me/aurora/',
+      organizationIds: [],
+      projectIds: ['project-a'],
+    });
+    expect(result.current.settings?.projects).toEqual([project]);
+    expect(result.current.settings?.folders).toHaveLength(1);
+
+    createFolder.mockRejectedValueOnce(new Error('already registered'));
+    createProject.mockResolvedValueOnce({ ...project, project_id: 'project-b' });
+    await act(async () => result.current.addProjectFromFolder());
+    expect(deleteProject).toHaveBeenCalledWith('project-b');
+    expect(result.current.settings?.projects).toEqual([project]);
+    expect(result.current.errorMessage).toBe('settings.workspace.saveFailed');
+  });
+
+  it('removes a project with the folders only it holds, keeping a folder another project shares', async () => {
+    const folder = (folderId: string, projectIds: string[]) => ({
+      folder_id: folderId,
+      display_name: folderId,
+      real_path: `/Users/me/${folderId}`,
+      canonical_real_path: `/Users/me/${folderId}`,
+      organization_ids: [],
+      project_ids: projectIds,
+    });
+    const project = (projectId: string, sortOrder: number) => ({
+      project_id: projectId,
+      display_name: projectId,
+      organization_ids: [],
+      sort_order: sortOrder,
+    });
+    const deleteFolder = vi.fn(async () => undefined);
+    const deleteProject = vi.fn(async () => undefined);
+    installWorkspaceApi({
+      get: async () => ({
+        ...emptySettings,
+        projects: [project('a', 0), project('b', 1)],
+        folders: [folder('own', ['a']), folder('shared', ['a', 'b'])],
+      }),
+      deleteFolder,
+      deleteProject,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    deleteFolder.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      expect(await result.current.removeProject('a')).toBe(false);
+    });
+    // The project stays while its folder could not go, so nothing is left registered unseen.
+    expect(deleteProject).not.toHaveBeenCalled();
+
+    await act(async () => {
+      expect(await result.current.removeProject('a')).toBe(true);
+    });
+    expect(deleteFolder).toHaveBeenLastCalledWith('own');
+    expect(deleteFolder).toHaveBeenCalledTimes(2);
+    expect(deleteProject).toHaveBeenCalledWith('a');
+    expect(result.current.settings?.projects.map((item) => item.project_id)).toEqual(['b']);
+    expect(result.current.settings?.folders.map((item) => item.folder_id)).toEqual(['shared']);
+  });
 });
 
 function createDeferred<T>() {

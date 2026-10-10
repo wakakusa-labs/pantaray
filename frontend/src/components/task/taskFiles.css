@@ -59,23 +59,63 @@
 
 .task-file-preview__header {
   flex: none;
-  height: 44px;
+  min-height: 52px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 16px;
+  padding: 6px 10px 6px 16px;
   border-bottom: 1px solid var(--fog-line);
 }
 
-.task-file-preview__header h2 {
+.task-file-preview__title {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.task-file-preview__title h2 {
+  max-width: 100%;
   margin: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The path itself is the copy control, so what gets copied is what it shows. */
+.task-file-preview__path {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 4px;
+  margin-left: -4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fog-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  cursor: pointer;
+}
+
+.task-file-preview__path:hover {
+  background: var(--fog-mist);
+  color: var(--fog-text-2);
+}
+
+.task-file-preview__path:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.task-file-preview__path-text {
+  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -94,7 +134,6 @@
   cursor: pointer;
 }
 
-.task-file-preview__icon,
 .task-file-preview__close {
   display: inline-flex;
   align-items: center;
@@ -110,7 +149,6 @@
 }
 
 .task-file-preview__open:hover,
-.task-file-preview__icon:hover,
 .task-file-preview__close:hover {
   background: var(--fog-mist-strong);
 }

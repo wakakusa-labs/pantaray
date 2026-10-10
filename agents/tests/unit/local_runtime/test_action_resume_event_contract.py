@@ -60,6 +60,7 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     reset_desktop_session_store,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
+    MigrationError,
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.tooling.bootstrap import (
@@ -1034,10 +1035,14 @@ async def test_action_approval_resume_uses_the_checkpoint_owning_followup_user_s
     assert "pending_approval_request" not in resolved
 
 
-@pytest.mark.parametrize("decision", ["approved_once", "denied"])
+@pytest.mark.parametrize(
+    ("decision", "tool_claimed"),
+    [("approved_once", True), ("denied", False), ("approved_once", False)],
+)
 async def test_resumed_run_past_its_consumed_approval_continues_from_newest_checkpoint(
     pending_approval: PendingApprovalFixture,
     decision: str,
+    tool_claimed: bool,
 ) -> None:
     db_path = pending_approval.db_path
     action_id = pending_approval.action_id
@@ -1084,7 +1089,7 @@ async def test_resumed_run_past_its_consumed_approval_continues_from_newest_chec
     # The resumed run consumed the approval and settled the paused step without
     # it, so no checkpoint names the approval while the payload still does.
     with sqlite3.connect(db_path) as connection, connection:
-        if decision == "approved_once":
+        if tool_claimed:
             connection.execute(
                 "UPDATE approval_sessions SET claimed_at = ?, "
                 "tool_invocation_id = 'invocation-1' "
@@ -1101,9 +1106,17 @@ async def test_resumed_run_past_its_consumed_approval_continues_from_newest_chec
             ),
         )
 
-    preparation = action_job_runtime_repository.ActionJobRuntimeRepository(
+    repository = action_job_runtime_repository.ActionJobRuntimeRepository(
         db_path, BUSY_TIMEOUT_MS
-    ).prepare_execution(payload=payload, started_at="2026-08-16T00:01:00Z")
+    )
+    if decision == "approved_once" and not tool_claimed:
+        # An approved tool that never claimed its session never ran.
+        with pytest.raises(MigrationError, match="checkpoint was not found"):
+            repository.prepare_execution(payload=payload, started_at="now")
+        return
+    preparation = repository.prepare_execution(
+        payload=payload, started_at="2026-08-16T00:01:00Z"
+    )
     checkpoint_row = await build_action_repository(
         db_path
     ).get_runtime_checkpoint_for_approval_resume(

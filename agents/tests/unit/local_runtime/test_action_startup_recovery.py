@@ -16,6 +16,8 @@ from pantaray_agents.agents.action_agent.runtime.models.execution_context import
 from pantaray_agents.local_runtime.runtime.action_startup_recovery import (
     recover_interrupted_action_runs_for_startup,
 )
+from pantaray_agents.local_runtime.runtime.job_claim import claim_next_pending_job
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import (
     repair_inflight_jobs_for_startup,
 )
@@ -208,3 +210,33 @@ def test_resumed_approval_run_past_its_approval_is_requeued(tmp_path: Path) -> N
             (context.execution_session_id,),
         ).fetchone()
     assert states == ("queued", "expired", "cleaned")
+
+    # The re-claimed run opens a new session and stops again before it saves a
+    # checkpoint, so the newest one still has no execution context.
+    assert claim_next_pending_job(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        job_type="execute_action",
+        owner_user_id="user-1",
+        claimed_by="worker-2",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        action_id="action-1",
+        started_at=now_utc_iso(),
+        allowed_tool_ids=("read",),
+    )
+    assert (
+        recover_interrupted_action_runs_for_startup(
+            db_path=db_path, busy_timeout_ms=1_000
+        )
+        == 1
+    )
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT status FROM jobs WHERE job_id='job-1'"
+        ).fetchone() == ("queued",)

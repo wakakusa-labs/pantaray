@@ -22,7 +22,6 @@ from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
 )
 
 from .action_startup_recovery_envelope import ActionStartupRecoveryEnvelope
-from .job_payload_models import parse_action_job_payload_json
 from .utc_timestamps import parse_utc_iso
 
 type ActionStartupRecoverySessionStatus = Literal[
@@ -257,13 +256,10 @@ def _is_current_run_session(
     session_started_at: str,
     session_completed_at: str | None,
 ) -> bool:
+    # A previous recovery strips the context, so any continuation, approval
+    # included, binds the session by attempt ownership until the next checkpoint.
     if checkpoint_context is not None:
         return True
-    continuation = parse_action_job_payload_json(envelope.payload_json)[
-        "continuation_ref"
-    ]
-    if continuation["kind"] != "user_step":
-        raise MigrationError("approval recovery requires a bound execution context")
     attempt_started = parse_utc_iso(envelope.attempt_started_at)
     session_started = parse_utc_iso(session_started_at)
     session_completed = (

@@ -119,6 +119,9 @@ export function createTaskDraftStore(params: {
       const current = drafts.get(work);
       const offersThisSend = current?.retry?.message.message_id === request.message.message_id;
       if (current !== undefined && !offersThisSend) return;
+      // The new task's draft is the main window's: a send from the small New task window, which
+      // keeps its own, settles it only when the draft offers that very send.
+      if (work === 'new' && !offersThisSend) return;
       if (outcome === 'sent' && !offersThisSend) return;
       const { content, images, files } = request.message;
       const draft: TaskDraft | null =

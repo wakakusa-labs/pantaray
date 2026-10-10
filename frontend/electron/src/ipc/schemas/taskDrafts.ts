@@ -21,14 +21,18 @@ const TASK_DRAFT_MAX_REF_LENGTH = 1_024;
 
 const WORK_KEY = /^(action|suggestion):(.+)$/s;
 
-/** The task a draft belongs to, as History names it: `action:<id>` or `suggestion:<id>`. */
+/**
+ * The task a draft belongs to, as History names it: `action:<id>`, `suggestion:<id>`, or `new`
+ * for the main window's new task before its first send opens an Action.
+ */
 export const TaskDraftWorkSchema = z
   .string()
   .refine((value) => {
+    if (value === 'new') return true;
     const match = WORK_KEY.exec(value);
     return match !== null && match[2] === match[2].trim();
-  }, 'work key must be action:<id> or suggestion:<id>')
-  .transform((value) => value as `action:${string}` | `suggestion:${string}`);
+  }, 'work key must be action:<id>, suggestion:<id> or new')
+  .transform((value) => value as `action:${string}` | `suggestion:${string}` | 'new');
 
 const RefSchema = z.string().min(1).max(TASK_DRAFT_MAX_REF_LENGTH);
 

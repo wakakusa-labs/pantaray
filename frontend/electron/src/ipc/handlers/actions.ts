@@ -138,9 +138,9 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
         ? (`action:${parsed.target.action_id}` as const)
         : replyTo !== null
           ? (`suggestion:${replyTo}` as const)
-          : null;
+          : ('new' as const);
     const settle = (outcome: TaskSendOutcome) => {
-      if (owner !== null && work !== null) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
+      if (owner !== null) ctx.taskDrafts.settleSend(owner, work, parsed, outcome);
     };
     try {
       const result = await openUserTurn(

@@ -57,6 +57,7 @@ function harness() {
     update: (id, work, value) => invoke('action:updateDraft', id, { work, draft: value }),
     close: (id, work) => invoke('action:closeDraft', id, { work }),
     discard: (attachmentId) => taskDrafts.discard(owner, attachmentId),
+    settle: (work, request, outcome) => taskDrafts.settleSend(owner, work, request, outcome),
     invoke,
   };
 }
@@ -145,6 +146,7 @@ test('draft requests are checked at the boundary', async () => {
     { work: 'action: a1' },
     { work: 'conversation:a1' },
     { work: 'action:' },
+    { work: 'new ' },
     { work: 'action:a1', extra: 1 },
   ]) {
     assert.throws(() => app.invoke('action:openDraft', 1, payload), IpcValidationError);
@@ -182,4 +184,23 @@ test('a file an unresolved send carries is not discarded while that send may be 
 
   app.discard(FILE.attachmentId);
   assert.deepEqual(app.discarded, []);
+});
+
+test("the new task's draft is settled only by the send it offers", () => {
+  const app = harness();
+  const heard = [];
+  app.open(1, 'new');
+  app.windowOf(1).send = (_c, change) => heard.push(change);
+  const request = (messageId) => ({
+    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    message: { version: 1, message_id: messageId, content: 'Tidy the notes', images: [] },
+  });
+  // A send from the small New task window, which keeps its own draft, starts none here.
+  app.settle('new', request('m-1'), 'unknown');
+  assert.equal(app.open(2, 'new'), null);
+
+  app.update(2, 'new', { ...draft('Tidy the notes'), retry: request('m-2') });
+  app.settle('new', request('m-2'), 'sent');
+  assert.equal(app.open(3, 'new'), null);
+  assert.deepEqual(heard.at(-1), { work: 'new', draft: null });
 });

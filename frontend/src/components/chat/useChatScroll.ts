@@ -125,9 +125,13 @@ export function useChatScroll({
     if (scrollRef.current) followingRef.current = isAtBottom(scrollRef.current);
   }, []);
 
-  /** Back to the newest message, and the next items scroll into view, as after a send. */
+  /**
+   * Back to the newest message, and the next items scroll into view, as after a send. An older
+   * page still on its way lands above without taking the reader back to where it was asked for.
+   */
   const followNewest = useCallback(() => {
     followingRef.current = true;
+    anchorRef.current = null;
     if (scrollRef.current) pinToBottom(scrollRef.current);
   }, [pinToBottom]);
 

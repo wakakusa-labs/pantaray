@@ -81,6 +81,8 @@ export const ChatView = forwardRef<
   // The Overlay that asked to show its Action is the one open now.
   const [revealSeen, setRevealSeen] = useState<string | null>(null);
   const [jump, setJump] = useState<ChatJump | null>(null);
+  // An Overlay request the reader left for the newest message; only a new request shows a card.
+  const [revealDropped, setRevealDropped] = useState<string | null>(null);
   if (reveal && reveal.key !== revealSeen) {
     setRevealSeen(reveal.key);
     setOpenWork(`action:${reveal.actionId}`);
@@ -132,10 +134,13 @@ export const ChatView = forwardRef<
   const revealCard = reveal ? latestCards.get(`action:${reveal.actionId}`) : undefined;
   useChatReveal({
     ...reading,
-    target: reveal && {
-      key: reveal.key,
-      elementId: revealCard === undefined ? null : cardElementId(revealCard),
-    },
+    target:
+      reveal && reveal.key !== revealDropped
+        ? {
+            key: reveal.key,
+            elementId: revealCard === undefined ? null : cardElementId(revealCard),
+          }
+        : null,
   });
   const jumpCount = useRef(0);
   const jumpTo = (itemId: string, returnTo: string | null) => {
@@ -156,6 +161,7 @@ export const ChatView = forwardRef<
   useImperativeHandle(ref, () => ({
     showNewest: () => {
       setJump(null);
+      setRevealDropped(reveal?.key ?? null);
       scroll.followNewest();
       markRead();
     },

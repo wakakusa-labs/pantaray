@@ -362,6 +362,53 @@ it('the Chat row takes a reader who scrolled up back to the newest message, whic
   expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('3');
 });
 
+it('the Chat row keeps the chat at the newest message when an older page lands after it', async () => {
+  pages = [{ items: [reply(5, '最新の返信')], next_cursor: 5 }];
+  renderPage();
+  await screen.findByText('最新の返信');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+  let landOlder!: (page: ChatItemPage) => void;
+  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
+  await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  expect(scroll.scrollTop).toBe(1000);
+  await act(async () => landOlder({ items: [userMessage(4, '以前')], next_cursor: null }));
+  expect(screen.getByText('以前')).toBeInTheDocument();
+  expect(scroll.scrollTop).toBe(1000);
+
+  // Still following: a reply that arrives is at the bottom, so it is read.
+  act(() => appendItem(reply(6, '次の返信')));
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('6');
+});
+
+it('the Chat row drops an Overlay request still reading older pages for its card', async () => {
+  pages = [{ items: [userMessage(3, 'ほかの話')], next_cursor: 3 }];
+  let landOlder!: (page: ChatItemPage) => void;
+  listItems.mockImplementationOnce(async () => pages.shift()!);
+  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
+  renderPage({ pathname: '/history', state: showChatState('A1') });
+  await waitFor(() => expect(listItems).toHaveBeenLastCalledWith({ before: 3, limit: 50 }));
+
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  await userEvent.click(chatRow);
+  await act(async () =>
+    landOlder({
+      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
+      next_cursor: null,
+    })
+  );
+  const card = screen.getByRole('button', { name: '見積書のたたき台を作る を開く' });
+  expect(card).not.toHaveFocus();
+  expect(chatRow).toHaveFocus();
+});
+
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
   // The older-page button is always in view here, as on a chat shorter than the window.
   const observed: (() => void)[] = [];

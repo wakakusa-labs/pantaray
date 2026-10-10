@@ -1,3 +1,5 @@
+import { DndContext } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -7,7 +9,10 @@ import {
   workspacePendingKey,
   type useWorkspaceSettingsController,
 } from '@/pages/settings/useWorkspaceSettingsController';
-import type { WorkspaceProject } from '@/pages/settings/components/workspaceSettingsModel';
+import {
+  resolveProjectOrganizations,
+  type WorkspaceProject,
+} from '@/pages/settings/components/workspaceSettingsModel';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjectOrganizationDialog } from './HistoryProjectOrganizationDialog';
@@ -23,9 +28,12 @@ export type WorkspaceProjects = Pick<
   | 'removeProject'
   | 'renameProject'
   | 'addFolderToProject'
+  | 'removeFolderFromProject'
   | 'openFolder'
   | 'addOrganization'
   | 'updateProjectOrganizations'
+  | 'dragController'
+  | 'busy'
 >;
 
 type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject };
@@ -33,9 +41,9 @@ type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject 
 const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
- * The sidebar's projects, managed in place: ＋ adds a folder as a project, and each row's menu
- * renames it, adds folders, sets its organization, opens it in Finder or deletes it. They do
- * not filter or group the tasks below.
+ * The sidebar's projects, managed in place: ＋ adds a folder as a project, each row's menu
+ * renames it, adds folders, sets its organization, opens it in Finder or deletes it, and rows
+ * are dragged into order. They do not filter or group the tasks below.
  */
 export function HistoryProjects({
   projects,
@@ -44,7 +52,7 @@ export function HistoryProjects({
   projects: WorkspaceProjects;
   t: ReturnType<typeof useI18n>['t'];
 }) {
-  const { settings, errorMessage, pending } = projects;
+  const { settings, errorMessage, pending, dragController } = projects;
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -118,21 +126,41 @@ export function HistoryProjects({
         </div>
       ) : null}
       {settings && settings.projects.length > 0 ? (
-        <ul className="history-projects__list">
-          {settings.projects.map((project) => (
-            <HistoryProjectRow
-              key={project.project_id}
-              project={project}
-              folders={foldersOf(project.project_id)}
-              menuItems={menuItems(project)}
-              menuButtonId={menuButtonId(project.project_id)}
-              renaming={renamingId === project.project_id}
-              t={t}
-              onRename={(name) => projects.renameProject(project.project_id, name)}
-              onRenameEnd={() => endRename(project.project_id)}
-            />
-          ))}
-        </ul>
+        <DndContext
+          sensors={dragController.sensors}
+          accessibility={dragController.accessibility}
+          onDragStart={dragController.onDragStart}
+          onDragOver={dragController.onDragOver}
+          onDragEnd={dragController.onDragEnd}
+          onDragCancel={dragController.onDragCancel}
+        >
+          <SortableContext
+            items={settings.projects.map((project) => project.project_id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="history-projects__list">
+              {settings.projects.map((project) => (
+                <HistoryProjectRow
+                  key={project.project_id}
+                  project={project}
+                  folders={foldersOf(project.project_id)}
+                  organizations={resolveProjectOrganizations(project, settings.organizations)}
+                  menuItems={menuItems(project)}
+                  menuButtonId={menuButtonId(project.project_id)}
+                  renaming={renamingId === project.project_id}
+                  dragDisabled={projects.busy}
+                  t={t}
+                  onRename={(name) => projects.renameProject(project.project_id, name)}
+                  onRenameEnd={() => endRename(project.project_id)}
+                  onRemoveFolder={(folderId) =>
+                    projects.removeFolderFromProject(folderId, project.project_id)
+                  }
+                  isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       ) : null}
       {dialog?.kind === 'delete' ? (
         <HistoryDeleteDialog

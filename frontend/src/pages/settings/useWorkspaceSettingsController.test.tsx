@@ -431,6 +431,54 @@ describe('useWorkspaceSettingsController', () => {
     expect(result.current.settings?.folders.map((folder) => folder.project_ids)).toEqual([['p-1']]);
   });
 
+  it('refuses a project delete while an unlink is in flight, so no folder comes back', async () => {
+    const server = {
+      ...emptySettings,
+      projects: [
+        { project_id: 'a', display_name: 'a', sort_order: 0, organization_ids: [] },
+        { project_id: 'b', display_name: 'b', sort_order: 1, organization_ids: [] },
+      ],
+      folders: [
+        {
+          folder_id: 'shared',
+          display_name: 'shared',
+          real_path: '/Users/me/shared',
+          canonical_real_path: '/Users/me/shared',
+          organization_ids: [] as string[],
+          project_ids: ['a', 'b'],
+        },
+      ],
+    };
+    const unlink = createDeferred<void>();
+    const deleteProject = vi.fn(async () => undefined);
+    installWorkspaceApi({
+      get: async () => structuredClone(server),
+      updateFolderLinks: async (_folderId: string, links: { projectIds: string[] }) => {
+        await unlink.promise;
+        server.folders[0].project_ids = links.projectIds;
+        return structuredClone(server.folders[0]);
+      },
+      deleteProject,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    let unlinking!: Promise<boolean>;
+    act(() => {
+      unlinking = result.current.removeFolderFromProject('shared', 'b');
+    });
+    await act(async () => {
+      expect(await result.current.removeProject('a')).toBe(false);
+    });
+    expect(deleteProject).not.toHaveBeenCalled();
+
+    await act(async () => {
+      unlink.resolve();
+      expect(await unlinking).toBe(true);
+    });
+    expect(result.current.settings).toEqual(server);
+  });
+
   it('never takes back a project it did not create when the name was taken', async () => {
     // As workspace_settings.py does since names conflict: a taken name is refused.
     const existing = {

@@ -49,6 +49,9 @@ function createApi() {
       return { ...renamed };
     }),
     createFolder: vi.fn(),
+    reorderProjects: vi.fn(async ({ projectIds }: { projectIds: string[] }) => ({
+      project_ids: projectIds,
+    })),
     deleteProject: vi.fn(async () => undefined),
     deleteFolder: vi.fn(async (folderId: string) => {
       store.folders = store.folders.filter((f) => f.folder_id !== folderId);
@@ -88,7 +91,7 @@ async function renderProjects() {
       <Projects />
     </LocalOwnerContext.Provider>
   );
-  await screen.findByText('a');
+  await screen.findByRole('button', { name: 'a' });
 }
 
 async function chooseFromMenu(projectName: string, item: string) {
@@ -137,7 +140,7 @@ it('名前の変更は Enter で保存し、Esc で取り消し、ほかのプ�
   expect(screen.getByRole('alert')).toHaveTextContent('history.projects.nameTaken {"name":"b"}');
 
   await userEvent.keyboard('{Escape}');
-  expect(screen.getByRole('button', { name: 'history.projects.menu {"name":"a"}' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'a' })).toHaveFocus();
   expect(api.renameProject).not.toHaveBeenCalled();
 
   await chooseFromMenu('a', 'history.projects.rename');
@@ -145,11 +148,7 @@ it('名前の変更は Enter で保存し、Esc で取り消し、ほかのプ�
   await userEvent.keyboard('Aurora{Enter}');
   expect(api.renameProject).toHaveBeenCalledOnce();
   expect(api.renameProject).toHaveBeenCalledWith('a', { displayName: 'Aurora' });
-  await waitFor(() =>
-    expect(
-      screen.getByRole('button', { name: 'history.projects.menu {"name":"Aurora"}' })
-    ).toHaveFocus()
-  );
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Aurora' })).toHaveFocus());
 });
 
 it('IME で変換中の Enter では保存せず、確定後の Enter で保存する', async () => {
@@ -208,9 +207,12 @@ it('フォルダの追加は選んだフォルダをこのプロジェクトに�
     organizationIds: [],
     projectIds: ['a', 'b'],
   });
-  await waitFor(() =>
-    expect(screen.getByText('b')).toHaveAttribute('title', '/Users/me/own\n/Users/me/shared')
-  );
+  await userEvent.click(screen.getByRole('button', { name: 'b' }));
+  const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
+  expect(folders.getAllByRole('listitem').map((row) => row.textContent)).toEqual([
+    '/Users/me/own',
+    '/Users/me/shared',
+  ]);
 });
 
 it('組織はなしを含めて一つを選んで保存し、新しい組織も名前で足せる', async () => {
@@ -241,6 +243,91 @@ it('組織はなしを含めて一つを選んで保存し、新しい組織も�
   expect(api.updateProjectLinks).toHaveBeenLastCalledWith('b', {
     organizationIds: ['org-Wakakusa'],
   });
+});
+
+it('フォルダを外すと、ほかのプロジェクトにもあるものはリンクだけ、このプロジェクトだけのものは登録ごと外す', async () => {
+  await renderProjects();
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+
+  await userEvent.click(
+    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
+  );
+  expect(api.updateFolderLinks).toHaveBeenCalledWith('shared', {
+    organizationIds: [],
+    projectIds: ['b'],
+  });
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+
+  await userEvent.click(
+    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"own"}' })
+  );
+  expect(api.deleteFolder).toHaveBeenCalledWith('own');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'a' })).toHaveFocus());
+});
+
+it('フォルダの追加を待っている間は、そのフォルダを外せず、終わった後の内容で外す', async () => {
+  let finishLink!: () => void;
+  api.updateFolderLinks.mockImplementationOnce(
+    async (folderId: string, links: { projectIds: string[] }) => {
+      await new Promise<void>((resolve) => {
+        finishLink = resolve;
+      });
+      const updated = store.folders.find((candidate) => candidate.folder_id === folderId)!;
+      updated.project_ids = [...links.projectIds].sort();
+      return structuredClone(updated);
+    }
+  );
+  api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/own' });
+  await renderProjects();
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+
+  await chooseFromMenu('b', 'history.projects.addFolder');
+  const remove = screen.getByRole('button', {
+    name: 'history.projects.removeFolder {"name":"own"}',
+  });
+  await waitFor(() => expect(remove).toBeDisabled());
+  await userEvent.click(remove);
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+
+  await act(async () => finishLink());
+  await waitFor(() => expect(remove).toBeEnabled());
+  await userEvent.click(remove);
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+  expect(api.updateFolderLinks).toHaveBeenLastCalledWith('own', {
+    organizationIds: [],
+    projectIds: ['b'],
+  });
+});
+
+it('フォルダ選択の間はほかの変更を受け付けず、選んだ後はその時点のリンクに足す', async () => {
+  store.projects.push(project('c', 2));
+  store.folders = [folder('shared', ['a', 'c'])];
+  installApi();
+  let choose!: (answer: { canceled: boolean; path: string }) => void;
+  api.selectFolder.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        choose = resolve;
+      })
+  );
+  await renderProjects();
+
+  await chooseFromMenu('b', 'history.projects.addFolder');
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+  await userEvent.click(
+    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
+  );
+  expect(api.updateFolderLinks).not.toHaveBeenCalled();
+  expect(api.deleteFolder).not.toHaveBeenCalled();
+  await act(async () => choose({ canceled: false, path: '/Users/me/shared' }));
+
+  await waitFor(() =>
+    expect(api.updateFolderLinks).toHaveBeenCalledWith('shared', {
+      organizationIds: [],
+      projectIds: ['a', 'c', 'b'],
+    })
+  );
+  expect(api.updateFolderLinks).toHaveBeenCalledOnce();
 });
 
 it('Finder で開くは最初のフォルダを開き、フォルダのないプロジェクトでは押せない', async () => {
@@ -276,3 +363,42 @@ it('プロジェクトは確認してから削除し、キャンセルならメ�
     expect(screen.getByRole('button', { name: 'history.projects.add' })).toHaveFocus()
   );
 });
+
+it('キーボードで持ち上げて動かすと、並べ替えた順番を保存する', async () => {
+  const { container } = render(
+    <LocalOwnerContext.Provider value={{ kind: 'account', id: 'user-1' }}>
+      <Projects />
+    </LocalOwnerContext.Provider>
+  );
+  await screen.findByRole('button', { name: 'a' });
+  const rows = () => Array.from(container.querySelectorAll<HTMLElement>('[data-project-id]'));
+  const [first, second] = rows();
+  vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(rectAt(0));
+  vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(rectAt(40));
+  const handle = screen.getByRole('button', { name: /settings\.workspace\.drag\.handle.*"a"/u });
+  handle.focus();
+
+  fireEvent.keyDown(handle, { key: ' ', code: 'Space' });
+  await waitFor(() => expect(handle).toHaveAttribute('aria-pressed', 'true'));
+  fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' });
+  await waitFor(() => expect(rows().map((row) => row.dataset.projectId)).toEqual(['b', 'a']));
+  await act(async () => {
+    fireEvent.keyDown(document, { key: ' ', code: 'Space' });
+  });
+
+  await waitFor(() => expect(api.reorderProjects).toHaveBeenCalledWith({ projectIds: ['b', 'a'] }));
+});
+
+function rectAt(top: number): DOMRect {
+  return {
+    bottom: top + 32,
+    height: 32,
+    left: 0,
+    right: 240,
+    top,
+    width: 240,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  };
+}

@@ -46,8 +46,7 @@ export type WorkspacePendingKey =
   | `project:links:${string}`
   | `project:rename:${string}`
   | `folder:create:${string}`
-  | `folder:delete:${string}`
-  | `folder:links:${string}`;
+  | `folder:${string}`;
 
 export const workspacePendingKey = {
   organizationCreate: 'organization:create' as WorkspacePendingKey,
@@ -58,8 +57,8 @@ export const workspacePendingKey = {
   projectLinks: (projectId: string): WorkspacePendingKey => `project:links:${projectId}`,
   projectRename: (projectId: string): WorkspacePendingKey => `project:rename:${projectId}`,
   folderCreate: (projectId: string): WorkspacePendingKey => `folder:create:${projectId}`,
-  folderDelete: (folderId: string): WorkspacePendingKey => `folder:delete:${folderId}`,
-  folderLinks: (folderId: string): WorkspacePendingKey => `folder:links:${folderId}`,
+  // One key for every change to a folder; it marks that folder's controls as busy.
+  folder: (folderId: string): WorkspacePendingKey => `folder:${folderId}`,
 };
 
 /** Names taken between reading the settings and creating the project are rare; a few suffice. */
@@ -87,6 +86,11 @@ export function useWorkspaceSettingsController(t: Translate) {
     workspaceSettingsReducer,
     getCachedWorkspaceSettings(ownerId)
   );
+  // A folder dialog can answer after the first read has landed; what it acts on is read then.
+  const latestSettingsRef = useRef(settings);
+  useEffect(() => {
+    latestSettingsRef.current = settings;
+  });
   const [projectGeneration, setProjectGeneration] = useState(0);
   const [isLoading, setIsLoading] = useState(settings === null);
   const [pending, setPending] = useState<ReadonlySet<WorkspacePendingKey>>(new Set());
@@ -214,7 +218,7 @@ export function useWorkspaceSettingsController(t: Translate) {
   // The picker answers with the canonical path (featureRuntime.ts), the form the backend keys
   // folders by. Creating a registered folder again would replace all of its links.
   const findRegisteredFolder = (realPath: string) =>
-    settings?.folders.find((folder) => folder.canonical_real_path === realPath);
+    latestSettingsRef.current?.folders.find((folder) => folder.canonical_real_path === realPath);
 
   const createFolder = locked(false, (input: WorkspaceFolderCreateInput) =>
     linkOrCreateFolder(input)
@@ -230,7 +234,7 @@ export function useWorkspaceSettingsController(t: Translate) {
       if (input.projectIds.every((projectId) => registered.project_ids.includes(projectId)))
         return true;
       const linked = await commitMutation(
-        workspacePendingKey.folderLinks(registered.folder_id),
+        workspacePendingKey.folder(registered.folder_id),
         async () =>
           await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
             organizationIds: registered.organization_ids,
@@ -316,7 +320,7 @@ export function useWorkspaceSettingsController(t: Translate) {
 
   const deleteFolder = locked(undefined, async (folderId: string, focus: FocusRequest) => {
     await commitMutation(
-      workspacePendingKey.folderDelete(folderId),
+      workspacePendingKey.folder(folderId),
       async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
       () => ({ type: 'folderDeleted', folderId }),
       false,
@@ -328,7 +332,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     false,
     async (folderId: string, projectId: string, focus: FocusRequest): Promise<boolean> => {
       const folder = await commitMutation(
-        workspacePendingKey.folderLinks(folderId),
+        workspacePendingKey.folder(folderId),
         async () =>
           await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
             organizationIds: [],
@@ -459,6 +463,33 @@ export function useWorkspaceSettingsController(t: Translate) {
     });
   });
 
+  /**
+   * Takes a folder out of one project. A folder no other project holds is unregistered with
+   * it: a registered folder stays inside the agent's boundary, so it must stay in a project.
+   */
+  const removeFolderFromProject = locked(false, async (folderId: string, projectId: string) => {
+    const folder = settings?.folders.find((candidate) => candidate.folder_id === folderId);
+    if (!folder) return false;
+    const otherProjectIds = folder.project_ids.filter((candidate) => candidate !== projectId);
+    const removed =
+      otherProjectIds.length === 0
+        ? await commitMutation(
+            workspacePendingKey.folder(folderId),
+            async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
+            () => ({ type: 'folderDeleted', folderId })
+          )
+        : await commitMutation(
+            workspacePendingKey.folder(folderId),
+            async () =>
+              await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
+                organizationIds: folder.organization_ids,
+                projectIds: otherProjectIds,
+              }),
+            (updated) => ({ type: 'folderLinksUpdated', folder: updated })
+          );
+    return removed !== null;
+  });
+
   const openFolder = async (folderId: string): Promise<void> => {
     setErrorMessage(null);
     try {
@@ -528,6 +559,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     openFolder,
     pending,
     clearFocusRequest,
+    removeFolderFromProject,
     removeProject,
     renameProject,
     selectFolder,

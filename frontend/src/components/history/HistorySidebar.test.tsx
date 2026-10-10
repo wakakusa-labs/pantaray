@@ -83,6 +83,8 @@ function Sidebar() {
           errorMessage: null,
           pending: new Set(),
           addProjectFromFolder: mocks.addProjectFromFolder,
+          dragController: {},
+          busy: false,
         } as unknown as WorkspaceProjects
       }
       selected={mocks.selected}
@@ -144,7 +146,7 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('チャットと作業の間にプロジェクトを並べ、パスはホバーで見せ、＋で追加の流れを呼ぶ', async () => {
+it('チャットと作業の間にプロジェクトを並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
@@ -153,9 +155,8 @@ it('チャットと作業の間にプロジェクトを並べ、パスはホバ�
   const firstTask = screen.getByRole('button', { name: /^Conversation/ });
   expect(chatRow.compareDocumentPosition(section)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   expect(section.compareDocumentPosition(firstTask)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-  const rows = within(within(section).getByRole('list')).getAllByRole('listitem');
-  expect(rows.map((row) => row.textContent)).toEqual(['aurora', 'billing']);
-  expect(within(section).getByText('aurora')).toHaveAttribute('title', '/Users/me/aurora');
+  const projectRows = within(section).getAllByRole('button', { name: /^(aurora|billing)$/u });
+  expect(projectRows.map((row) => row.textContent)).toEqual(['aurora', 'billing']);
 
   const add = within(section).getByRole('button', { name: 'history.projects.add' });
   add.focus();

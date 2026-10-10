@@ -364,7 +364,7 @@ it('a task pane’s Add project adds the chosen folder as a project in the sideb
   renderPage({ pathname: '/history', search: '?item=action:A1' });
   const projects = await screen.findByRole('region', { name: 'プロジェクト' });
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
-  expect(await within(projects).findByText('aurora')).toHaveAttribute('title', '/Users/me/aurora');
+  expect(await within(projects).findByRole('button', { name: 'aurora' })).toBeInTheDocument();
   expect(createFolder).toHaveBeenCalledWith(
     expect.objectContaining({ realPath: '/Users/me/aurora', projectIds: ['p-1'] })
   );

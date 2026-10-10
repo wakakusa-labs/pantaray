@@ -248,6 +248,7 @@ describe('AgentOverlay broader E2E', () => {
   const resizeOverlay = vi.fn();
   const observeOverlaySize = vi.fn();
   const getActionApprovalMode = vi.fn();
+  const openWorkspaceSettings = vi.fn();
   const setActionApprovalMode =
     vi.fn<NonNullable<NonNullable<ElectronBridge['agentOverlay']>['setActionApprovalMode']>>();
   const getWorkspaceEditCommandPreference =
@@ -315,6 +316,7 @@ describe('AgentOverlay broader E2E', () => {
     observeOverlaySize.mockReset();
     setActionApprovalMode.mockReset();
     getWorkspaceEditCommandPreference.mockReset().mockResolvedValue(defaultPermissions);
+    openWorkspaceSettings.mockReset();
     getActionApprovalMode.mockReset();
     getActionApprovalMode.mockResolvedValue({
       action_id: 'act-1',
@@ -364,6 +366,7 @@ describe('AgentOverlay broader E2E', () => {
           stopAction,
           getActionApprovalMode,
           setActionApprovalMode,
+          openWorkspaceSettings,
         },
         orchestration: {
           onEvent: () => () => {},
@@ -1924,6 +1927,14 @@ describe('AgentOverlay broader E2E', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     return screen.getByLabelText('Message');
   }
+
+  it("opens workspace settings from the @-mention list's Add project option", async () => {
+    const composer = await openComposer();
+    fireEvent.change(composer, { target: { value: '@', selectionStart: 1 } });
+    fireEvent.click(await screen.findByRole('option', { name: 'Add project' }));
+    expect(openWorkspaceSettings).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
 
   it('sends pasted and dropped images as storage-path references and can drop one first', async () => {
     const messageId = '00000000-0000-4000-8000-000000000011';

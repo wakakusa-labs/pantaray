@@ -130,7 +130,44 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     const parsed = parseInput(ActionMessageRequestSchema, 'action:submitMessage', request);
     const replyTo =
       parsed.target.kind === 'new' ? (parsed.target.reply_to_suggestion_id ?? null) : null;
-    return openUserTurn(ctx, event, () => ctx.actions.submitMessage(parsed), replyTo);
+    // A composer shares nothing while its send is out; a send that fails comes back as the draft.
+    const owner = ctx.actions.getCurrentSubjectId();
+    const work =
+      parsed.target.kind === 'existing'
+        ? (`action:${parsed.target.action_id}` as const)
+        : replyTo !== null
+          ? (`suggestion:${replyTo}` as const)
+          : null;
+    const restoreDraft = () => {
+      if (owner === null || work === null) return;
+      const { content, images, files } = parsed.message;
+      ctx.taskDrafts.restore(owner, work, {
+        text: content,
+        mentions: [],
+        attachments: [
+          ...images.map((image) => ({ kind: 'image' as const, storagePath: image.storage_path })),
+          ...(files ?? []).map((file) => ({
+            kind: 'file' as const,
+            attachmentId: file.attachment_id,
+            name: file.name,
+            byteSize: file.byte_size,
+          })),
+        ],
+      });
+    };
+    try {
+      const result = await openUserTurn(
+        ctx,
+        event,
+        () => ctx.actions.submitMessage(parsed),
+        replyTo
+      );
+      if (result.kind !== 'submitted' && result.kind !== 'reply_exists') restoreDraft();
+      return result;
+    } catch (error) {
+      restoreDraft();
+      throw error;
+    }
   });
   registrar.handle('action:resume', async (event, request) =>
     openUserTurn(

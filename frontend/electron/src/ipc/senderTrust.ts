@@ -62,6 +62,7 @@ const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
   'overlay:showChat',
+  'overlay:openTask',
 ]);
 
 export class IpcSenderRejectedError extends Error {

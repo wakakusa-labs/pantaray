@@ -50,6 +50,20 @@ function hideSenderWindow(BrowserWindow, windows, event) {
   return true;
 }
 
+/**
+ * The panel that sent this event, held so it can be closed later: the closer hides that exact
+ * window while it is still registered, and nothing at all once it is gone. Unlike a close
+ * button's hide, it never falls back to another panel.
+ */
+function captureSenderOverlay(BrowserWindow, windows, event) {
+  const win = findSenderWindow(BrowserWindow, event);
+  const overlayId = win && !win.isDestroyed() ? windows.findOverlayIdByWindow(win) : null;
+  return () => {
+    if (!overlayId || win.isDestroyed() || windows.getOverlay(overlayId) !== win) return;
+    windows.hide(overlayId);
+  };
+}
+
 function hideLastWindow(windows) {
   const lastOverlayId = windows.getLastOverlayId();
   if (lastOverlayId) windows.hide(lastOverlayId);
@@ -75,6 +89,7 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
       onNotificationHide: (event) => {
         if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
       },
+      captureSenderOverlay: (event) => captureSenderOverlay(BrowserWindow, windows, event),
       onNotificationStopAction: () => {},
       onOverlayInteraction: (event) => {
         const win = findSenderWindow(BrowserWindow, event);

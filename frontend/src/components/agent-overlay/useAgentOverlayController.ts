@@ -26,7 +26,12 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  onReject: () => void;
+  /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
+  onReject: (withReply: boolean) => void;
+  /** Shows this panel's task in the main window, which then closes the panel. */
+  openTask: (actionId: string) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed: boolean;
   onStop: (processId?: string) => void;
 };
 
@@ -60,6 +65,12 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
+  // The suggestion (none in a new-task panel) whose task the main window could not show.
+  const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
+    suggestionId: string | null;
+  } | null>(null);
+  // A suggestion dismissed here without words, whose panel closes once the dismissal is recorded.
+  const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
 
@@ -318,14 +329,23 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  const onReject = useCallback(() => {
+  // A decided suggestion keeps no panel; one that says why, or asks for something else, stays.
+  useEffect(() => {
+    const dismissed = closeAfterDismissalRef.current;
+    if (dismissed === null) return;
+    if (dismissed === state.suggestionId && state.reactionState !== 'rejected') return;
+    closeAfterDismissalRef.current = null;
+    if (dismissed === state.suggestionId) window.electron?.agentOverlay?.hide();
+  }, [state.suggestionId, state.reactionState]);
+
+  const onReject = useCallback((withReply: boolean) => {
     if (decisionLockedRef.current) return;
     if (interactionContractRef.current !== 'action_offer') return;
     if (reactionStateRef.current !== null) return;
     dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    // The Overlay stays open: the user may still say why, or ask for something else.
     const sid = suggestionIdRef.current;
     if (sid) {
+      if (!withReply) closeAfterDismissalRef.current = sid;
       window.electron?.orchestration?.send({
         event: 'dismiss_suggestion',
         data: { suggestion_id: sid },
@@ -353,6 +373,18 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       dispatch({ type: 'SET_DECISION_LOCKED', value: false });
       setFailedSuggestionId(sid);
     }
+  }, []);
+
+  // Main closes the panel once the main window shows the task; a failure keeps it, saying so.
+  const openTask = useCallback((actionId: string) => {
+    const suggestionId = suggestionIdRef.current;
+    void window.electron?.agentOverlay?.openTask?.({ actionId }).then(
+      () => setOpenTaskFailedFor(null),
+      (error: unknown) => {
+        console.error('Failed to open the task in the main window:', error);
+        setOpenTaskFailedFor({ suggestionId });
+      }
+    );
   }, []);
 
   const onClose = useCallback(() => {
@@ -388,6 +420,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onAccept,
     acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
     onReject,
+    openTask,
+    openTaskFailed:
+      openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,
     onStop,
   };
 }

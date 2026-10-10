@@ -89,7 +89,8 @@ type FeatureRuntimeParams = {
   getLocalApiToken: () => string | null;
   updateUi: ReturnType<typeof createUpdateUiManager>;
   getMainWindow: () => BrowserWindow | null;
-  createMainWindow: () => void;
+  /** Creates the main window, on `hashRoute` when given. */
+  createMainWindow: (hashRoute?: string) => void;
   resolveUiSettingsPath: (userId: string | null) => string;
   getUiLanguage: () => UiLanguage;
   setUiLanguage: (language: UiLanguage) => void;
@@ -336,6 +337,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         ipcMain,
         aiConnection: params.aiConnection,
         getMainWindow: params.getMainWindow,
+        createMainWindow: params.createMainWindow,
         openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
         openActionConversationOverlay: conversationOverlay.openActionConversationOverlay,
         getAllWindows: () => BrowserWindow.getAllWindows(),

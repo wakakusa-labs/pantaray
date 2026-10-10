@@ -18,6 +18,7 @@ import {
 import { MarkdownBlock } from './MarkdownRenderer';
 import { HeaderIconButton } from './IconButton';
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   ChevronUp,
@@ -121,6 +122,10 @@ type AgentOverlayShellProps = {
   /** The Action the main window's chat can show; null until one exists. */
   chatActionId?: string | null;
   onShowChat?: (request: { actionId: string }) => Promise<void>;
+  /** Moves that Action to the main window, which then closes this panel. */
+  onOpenInMainWindow?: (actionId: string) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
   onClose?: () => void;
@@ -161,6 +166,8 @@ const AgentOverlayShell = ({
   showThinking = false,
   chatActionId = null,
   onShowChat,
+  onOpenInMainWindow,
+  openTaskFailed = false,
   fadeDurationMs = 600,
   onToggleExpand,
   onClose,
@@ -260,6 +267,16 @@ const AgentOverlayShell = ({
           </ShowChatButton>
         )}
         <HeaderButtonGroup>
+          {chatActionId !== null && onOpenInMainWindow && (
+            <HeaderIconButton
+              $visible={isVisible}
+              onClick={() => onOpenInMainWindow(chatActionId)}
+              aria-label={t('overlay.openInMainWindow')}
+              title={t('overlay.openInMainWindow')}
+            >
+              <ArrowUpRight strokeWidth={1.75} aria-hidden />
+            </HeaderIconButton>
+          )}
           {conversationCopy && (
             <>
               <HeaderIconButton
@@ -374,6 +391,7 @@ const AgentOverlayShell = ({
             ))}
           </ApprovalDock>
         ) : null}
+        {openTaskFailed ? <p role="alert">{t('overlay.openTaskFailed')}</p> : null}
         {composer}
       </ComposerDock>
     </PopupContainer>

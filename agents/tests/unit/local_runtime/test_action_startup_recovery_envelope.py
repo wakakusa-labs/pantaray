@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.runtime.action_startup_recovery_envelope import (
-    list_action_startup_recovery_envelopes_in_connection,
+    load_action_startup_recovery_envelope_in_connection,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.resources.resource_db_support import (
@@ -131,8 +131,8 @@ def test_user_run_binds_exact_envelope_and_anchor_without_writes(
 ) -> None:
     db_path = _seed_user_run(tmp_path, action_status=action_status)
     with _connect(db_path) as connection:
-        (envelope,) = list_action_startup_recovery_envelopes_in_connection(
-            connection=connection
+        envelope = load_action_startup_recovery_envelope_in_connection(
+            connection=connection, job_id=JOB_ID
         )
         assert connection.total_changes == 0
 
@@ -161,7 +161,9 @@ def test_envelope_rejects_current_attempt_or_strict_payload_mismatch(
         _connect(db_path) as connection,
         pytest.raises(MigrationError, match="envelope"),
     ):
-        list_action_startup_recovery_envelopes_in_connection(connection=connection)
+        load_action_startup_recovery_envelope_in_connection(
+            connection=connection, job_id=JOB_ID
+        )
 
 
 def test_approval_run_uses_exact_latest_matching_anchor(tmp_path: Path) -> None:
@@ -198,8 +200,8 @@ def test_approval_run_uses_exact_latest_matching_anchor(tmp_path: Path) -> None:
         )
 
     with _connect(db_path) as connection:
-        (envelope,) = list_action_startup_recovery_envelopes_in_connection(
-            connection=connection
+        envelope = load_action_startup_recovery_envelope_in_connection(
+            connection=connection, job_id=JOB_ID
         )
     assert envelope.lineage.root_process_id == PROCESS_ID
     assert envelope.anchor.step_id == "anchor-2"

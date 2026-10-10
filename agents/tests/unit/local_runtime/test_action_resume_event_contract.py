@@ -10,6 +10,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from pantaray_agents.agents.action_agent.runtime.checkpoint import (
+    RUNTIME_STATE_CHECKPOINT_VERSION,
+    build_runtime_state_checkpoint,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
     project_persisted_user_request_step,
 )
@@ -38,6 +42,9 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
     NewActionTarget,
     SubmitActionMessageCommand,
     submit_action_message,
+)
+from pantaray_agents.local_runtime.runtime.action_startup_recovery import (
+    recover_interrupted_action_runs_for_startup,
 )
 from pantaray_agents.local_runtime.runtime.action_user_adoption import (
     adopt_pending_action_user_steps_at_parent_think,
@@ -1025,3 +1032,189 @@ async def test_action_approval_resume_uses_the_checkpoint_owning_followup_user_s
     assert checkpoint_row.metadata == {"approval_anchor_step_id": "user-step-2"}
     assert [entry["step_id"] for entry in history].count(pending.user_step_id) == 1
     assert "pending_approval_request" not in resolved
+
+
+@pytest.mark.parametrize("decision", ["approved_once", "denied"])
+async def test_resumed_run_past_its_consumed_approval_continues_from_newest_checkpoint(
+    pending_approval: PendingApprovalFixture,
+    decision: str,
+) -> None:
+    db_path = pending_approval.db_path
+    action_id = pending_approval.action_id
+    apply_action_approval_decision(
+        ActionApprovalDecisionCommand(
+            user_id="user-1",
+            action_id=action_id,
+            process_id=pending_approval.predecessor_process_id,
+            tool_request_id="tool-request-1",
+            approval_session_id="approval-1",
+            decision=decision,
+        )
+    )
+    claimed = claim_next_pending_job(
+        db_path=str(db_path),
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        job_type="execute_action",
+        owner_user_id="user-1",
+        claimed_by="worker-2",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    assert claimed is not None
+    payload = job_payload_models.parse_action_job_payload_json(claimed["payload_json"])
+    state = project_persisted_user_request_step(
+        create_initial_state(
+            user_id="user-1",
+            suggestion_id=None,
+            action_id=action_id,
+            started_at="2026-08-16T00:00:00Z",
+            max_steps=25,
+            max_tool_steps=25,
+            token_budget=None,
+        ),
+        step_id=pending_approval.user_step_id,
+        step_number=1,
+        local_step_number=1,
+        short_step_id="S-1-USER",
+        request_text="Continue after tool approval",
+        occurred_at="2026-08-16T00:00:00Z",
+        history_phase="executing",
+    )
+    state["phase"] = "executing"
+    # The resumed run consumed the approval and settled the paused step without
+    # it, so no checkpoint names the approval while the payload still does.
+    with sqlite3.connect(db_path) as connection, connection:
+        if decision == "approved_once":
+            connection.execute(
+                "UPDATE approval_sessions SET claimed_at = ?, "
+                "tool_invocation_id = 'invocation-1' "
+                "WHERE approval_session_id = 'approval-1'",
+                ("2026-08-16T00:00:25Z",),
+            )
+        connection.execute(
+            "UPDATE agent_action_steps SET runtime_state_checkpoint = ?, "
+            "runtime_state_checkpoint_version = ? WHERE step_id = ?",
+            (
+                json.dumps(build_runtime_state_checkpoint(state)),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                pending_approval.user_step_id,
+            ),
+        )
+
+    preparation = action_job_runtime_repository.ActionJobRuntimeRepository(
+        db_path, BUSY_TIMEOUT_MS
+    ).prepare_execution(payload=payload, started_at="2026-08-16T00:01:00Z")
+    checkpoint_row = await build_action_repository(
+        db_path
+    ).get_runtime_checkpoint_for_approval_resume(
+        user_id="user-1",
+        action_id=action_id,
+        approval_session_id="approval-1",
+        tool_request_id="tool-request-1",
+    )
+    resolved = ActionResumeService(
+        ResumeDeps(
+            logger=logging.getLogger(__name__),
+            load_approval_session_by_request=lambda _user_id, _request_id: None,
+            build_agent_error=lambda **values: AgentError(severity="error", **values),
+            now_provider=lambda: "2026-08-16T00:01:00Z",
+        )
+    ).resolve_initial_state(
+        request=ActionAgentRequest(
+            user_id="user-1",
+            suggestion_id=None,
+            action_id=action_id,
+            user_step_id=preparation.context.user_step_id,
+            user_step_number=preparation.context.user_step_number,
+            user_step_local_step_number=1,
+            user_step_short_id="S-1-USER",
+            user_step_created_at=preparation.context.user_step_created_at,
+            user_message=preparation.context.user_message,
+            approval_resume_session_id="approval-1",
+            approval_resume_tool_request_id="tool-request-1",
+        ),
+        started_at="2026-08-16T00:01:00Z",
+        state_config={
+            "max_steps": 25,
+            "max_tool_steps": 25,
+            "token_budget": None,
+            "prompt_name": "action/executing",
+            "prompt_version": "1.0",
+            "cancel_check_max_consecutive_failures": 3,
+            "cancel_check_failure_grace_seconds": 60,
+        },
+        token_budget=None,
+        checkpoint_row=checkpoint_row,
+    )
+
+    assert preparation.context.approval_session_id == "approval-1"
+    assert checkpoint_row.metadata == {"approval_anchor_step_id": None}
+    assert resolved["status"] != "error"
+    assert resolved["phase"] == "executing"
+    assert "pending_approval_request" not in resolved
+
+
+def test_unrecoverable_interrupted_action_ends_as_error_without_blocking_startup(
+    pending_approval: PendingApprovalFixture,
+) -> None:
+    db_path = pending_approval.db_path
+    action_id = pending_approval.action_id
+    apply_action_approval_decision(
+        ActionApprovalDecisionCommand(
+            user_id="user-1",
+            action_id=action_id,
+            process_id=pending_approval.predecessor_process_id,
+            tool_request_id="tool-request-1",
+            approval_session_id="approval-1",
+            decision="approved_once",
+        )
+    )
+    assert (
+        claim_next_pending_job(
+            db_path=str(db_path),
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            job_type="execute_action",
+            owner_user_id="user-1",
+            claimed_by="worker-2",
+            process_running_status="running",
+            expected_process_pending_status="enqueued",
+        )
+        is not None
+    )
+    # Nothing the run left can anchor its approval continuation any more.
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            "UPDATE agent_action_steps SET runtime_state_checkpoint = NULL, "
+            "runtime_state_checkpoint_version = NULL WHERE action_id = ?",
+            (action_id,),
+        )
+
+    assert (
+        recover_interrupted_action_runs_for_startup(
+            db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS
+        )
+        == 0
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        runtime = connection.execute(
+            """
+            SELECT actions.status, jobs.status, processes.status
+            FROM agent_actions AS actions
+            JOIN processes ON processes.action_id = actions.action_id
+            JOIN jobs ON jobs.process_id = processes.process_id
+            WHERE actions.action_id = ?
+            """,
+            (action_id,),
+        ).fetchone()
+        completed = connection.execute(
+            """
+            SELECT json_extract(payload, '$.data.status'),
+                   json_extract(payload, '$.data.failure_message_public') IS NOT NULL
+            FROM agent_process_events
+            WHERE action_id = ? AND event_name = 'process_completed'
+            """,
+            (action_id,),
+        ).fetchall()
+    assert runtime == ("error", "failed", "failed")
+    assert completed == [("error", 1)]

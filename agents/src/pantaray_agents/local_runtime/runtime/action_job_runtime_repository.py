@@ -38,6 +38,7 @@ from pantaray_agents.tasks.types import (
 )
 
 from .action_assistant_messages import read_preceding_assistant_messages
+from .action_checkpoint_retention import load_tool_approval_resume_anchor_in_connection
 from .action_job_recovery import is_recovered_user_step_resume
 from .action_suggestion_adapter import project_suggestion_action_started
 from .job_payload_models import parse_action_job_payload_json
@@ -382,40 +383,14 @@ def _prepare_tool_approval(
         )
     if approval_row["status"] not in {"approved_once", "denied"}:
         raise MigrationError("Tool approval continuation requires a decided approval")
-    checkpoint_row = connection.execute(
-        """
-        SELECT step_id, step_number
-        FROM agent_action_steps AS steps
-        WHERE steps.action_id = ? AND steps.user_id = ?
-          AND steps.runtime_state_checkpoint IS NOT NULL
-          AND (
-            (
-              json_extract(steps.runtime_state_checkpoint,
-                           '$.pending_approval_request.approval_session_id') = ?
-              AND json_extract(steps.runtime_state_checkpoint,
-                               '$.pending_approval_request.tool_request_id') = ?
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM json_each(steps.runtime_state_checkpoint,
-                             '$.current_approval_blockers') AS blocker
-              WHERE json_extract(blocker.value, '$.approval_session_id') = ?
-                AND json_extract(blocker.value, '$.tool_request_id') = ?
-            )
-          )
-        ORDER BY steps.step_number DESC, steps.created_at DESC, steps.step_id DESC
-        LIMIT 1
-        """,
-        (
-            payload["action_id"],
-            payload["user_id"],
-            continuation_ref["approval_session_id"],
-            continuation_ref["tool_request_id"],
-            continuation_ref["approval_session_id"],
-            continuation_ref["tool_request_id"],
-        ),
-    ).fetchone()
-    if checkpoint_row is None:
+    anchor = load_tool_approval_resume_anchor_in_connection(
+        connection,
+        user_id=payload["user_id"],
+        action_id=payload["action_id"],
+        approval_session_id=continuation_ref["approval_session_id"],
+        tool_request_id=continuation_ref["tool_request_id"],
+    )
+    if anchor is None:
         raise MigrationError("Tool approval continuation checkpoint was not found")
     step_row = connection.execute(
         """
@@ -428,7 +403,7 @@ def _prepare_tool_approval(
         ORDER BY step_number DESC, created_at DESC, step_id DESC
         LIMIT 1
         """,
-        (payload["action_id"], payload["user_id"], checkpoint_row["step_number"]),
+        (payload["action_id"], payload["user_id"], anchor.step_number),
     ).fetchone()
     if step_row is None:
         raise MigrationError("Tool approval checkpoint has no owning USER step")
@@ -438,7 +413,7 @@ def _prepare_tool_approval(
         execution_target=execution_target,
         approval_session_id=continuation_ref["approval_session_id"],
         approval_tool_request_id=continuation_ref["tool_request_id"],
-        checkpoint_step_id=str(checkpoint_row["step_id"]),
+        checkpoint_step_id=anchor.step_id,
     )
     return ActionJobPreparation(context=context)
 

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import type { ActionLiveUpdate } from '../../../electron/src/actions/actionLiveCore';
 import { createActionPage } from './actionTaskFixtures';
+import { createTaskComposerDrafts } from './taskComposerDrafts';
 import { TaskWorkspace } from './TaskWorkspace';
 
 type ActionFiles = NonNullable<NonNullable<Window['electron']>['actionFiles']>;
@@ -57,6 +58,7 @@ async function renderFinishedTask() {
         title="見積書を作り直す"
         onShowInChat={() => {}}
         onAddProject={() => {}}
+        drafts={createTaskComposerDrafts(undefined)}
       />
     </UiLanguageProvider>
   );

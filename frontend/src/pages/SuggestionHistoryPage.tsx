@@ -31,7 +31,7 @@ const UNLISTED_TITLE = {
  * The selection is the URL's `?item=`, so it survives a reload and the back button returns to it.
  */
 const SuggestionHistoryPage = () => {
-  const { chat, composer } = useChatSession();
+  const { chat, composer, taskDrafts } = useChatSession();
   const history = useSuggestionHistory();
   const { language } = useI18n();
   const location = useLocation();
@@ -77,6 +77,7 @@ const SuggestionHistoryPage = () => {
           title={title}
           onShowInChat={() => showInChat(id)}
           onAddProject={addProject}
+          drafts={taskDrafts}
         />
       );
     return (
@@ -86,6 +87,7 @@ const SuggestionHistoryPage = () => {
         title={title}
         onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
         onAddProject={addProject}
+        drafts={taskDrafts}
       />
     );
   };

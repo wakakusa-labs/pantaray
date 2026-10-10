@@ -9,6 +9,7 @@ import type {
   OverlaySnapshotPayload,
 } from '../../../electron/src/orchestration/contracts';
 import { SuggestionTaskPane } from './SuggestionTaskPane';
+import { createTaskComposerDrafts } from './taskComposerDrafts';
 
 type ElectronBridge = NonNullable<Window['electron']>;
 
@@ -83,18 +84,20 @@ const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
 const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
 
-async function renderPane(suggestionId = 'sug-1') {
-  render(
+async function renderPane(suggestionId = 'sug-1', drafts = createTaskComposerDrafts(undefined)) {
+  const rendered = render(
     <UiLanguageProvider initialLanguage="en">
       <SuggestionTaskPane
         suggestionId={suggestionId}
         title="Invoice draft"
         onStarted={onStarted}
         onAddProject={() => undefined}
+        drafts={drafts}
       />
     </UiLanguageProvider>
   );
   await act(async () => {});
+  return rendered;
 }
 
 const acceptButton = () => screen.getByRole('button', { name: 'Accept' });
@@ -167,6 +170,41 @@ describe('SuggestionTaskPane', () => {
       'placeholder',
       'Add conditions and approve (optional)'
     );
+  });
+
+  it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {
+    const drafts = createTaskComposerDrafts(undefined);
+    const field = () => screen.getByLabelText('Additional instructions (optional)');
+    const first = await renderPane('sug-1', drafts);
+    fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
+    first.unmount();
+
+    const second = await renderPane('sug-1', drafts);
+    expect(field()).toHaveValue('Use the new unit price');
+    acceptAction.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(acceptButton());
+    second.unmount();
+
+    await renderPane('sug-1', drafts);
+    expect(field()).toHaveValue('');
+  });
+
+  it('keeps a draft when the pane is left while the suggestion loads or after its read failed', async () => {
+    const drafts = createTaskComposerDrafts(undefined);
+    const field = () => screen.getByLabelText('Additional instructions (optional)');
+    const first = await renderPane('sug-1', drafts);
+    fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
+    first.unmount();
+
+    read.mockReturnValueOnce(new Promise(() => {}));
+    (await renderPane('sug-1', drafts)).unmount();
+    read.mockRejectedValueOnce(new Error('unavailable'));
+    const failed = await renderPane('sug-1', drafts);
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load this suggestion.');
+    failed.unmount();
+
+    await renderPane('sug-1', drafts);
+    expect(field()).toHaveValue('Use the new unit price');
   });
 
   it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {

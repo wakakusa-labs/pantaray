@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -10,6 +11,7 @@ import type {
 } from '../../../electron/src/actions/actionLiveCore';
 import { ActionTaskPane } from './ActionTaskPane';
 import { createActionPage } from './actionTaskFixtures';
+import { createTaskComposerDrafts } from './taskComposerDrafts';
 
 type Actions = NonNullable<NonNullable<Window['electron']>['actions']>;
 
@@ -51,6 +53,7 @@ const submitApprovalDecision = vi.fn();
 const writeText = vi.fn<(text: string) => Promise<void>>();
 const onShowInChat = vi.fn();
 const onAddProject = vi.fn();
+let drafts = createTaskComposerDrafts(undefined);
 
 const emit = (next: ActionLiveUpdate) => act(() => listeners.forEach((listener) => listener(next)));
 
@@ -62,6 +65,7 @@ async function renderPane(props: Partial<Parameters<typeof ActionTaskPane>[0]> =
         title="Rebuild the quote"
         onShowInChat={onShowInChat}
         onAddProject={onAddProject}
+        drafts={drafts}
         {...props}
       />
     </UiLanguageProvider>
@@ -74,6 +78,7 @@ async function renderPane(props: Partial<Parameters<typeof ActionTaskPane>[0]> =
 const primaryButton = (name: string) => screen.getByRole('button', { name });
 
 beforeEach(() => {
+  drafts = createTaskComposerDrafts(undefined);
   listeners = new Set();
   openConversation.mockReset().mockResolvedValue(undefined);
   readConversationPage.mockReset();
@@ -264,4 +269,112 @@ describe('ActionTaskPane', () => {
       expect.objectContaining({ action: expect.objectContaining({ action_id: 'act-1' }) })
     );
   });
+
+  it('keeps the draft, its attachments and a failed send for the next time it is shown', async () => {
+    const actions = window.electron!.actions!;
+    Object.assign(actions, {
+      attachFile: vi.fn(async ({ name }: { name: string }) => ({
+        attachmentId: '00000000-0000-4000-8000-000000000001',
+        name,
+        byteSize: 9,
+      })),
+    });
+    const message = () => screen.getByRole('textbox', { name: 'Message' });
+    const first = await renderPane();
+    emit(update(createActionPage('act-1', 'success'), 1));
+    fireEvent.change(message(), { target: { value: 'add the totals' } });
+    await userEvent.upload(
+      first.container.querySelector<HTMLInputElement>('input[type="file"]')!,
+      new File(['%PDF-1.4\n'], 'quote.pdf', { type: 'application/pdf' })
+    );
+    await screen.findByText('quote.pdf');
+
+    // Another row, the chat or Workspace takes the pane's place, and the user comes back.
+    first.unmount();
+    const second = await renderPane();
+    expect(message()).toHaveValue('add the totals');
+    expect(screen.getByText('quote.pdf')).toBeInTheDocument();
+    expect(actions.discardAttachment).not.toHaveBeenCalled();
+
+    emit(update(createActionPage('act-1', 'success'), 1));
+    submitMessage.mockRejectedValueOnce(new Error('connection lost'));
+    fireEvent.click(primaryButton('Send'));
+    await screen.findByRole('button', { name: 'Retry sending' });
+    const failed = submitMessage.mock.calls[0][0];
+
+    second.unmount();
+    // The failed send holds the composer, so the permission control waits behind it.
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <ActionTaskPane
+          actionId="act-1"
+          title="Rebuild the quote"
+          onShowInChat={onShowInChat}
+          onAddProject={onAddProject}
+          drafts={drafts}
+        />
+      </UiLanguageProvider>
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry sending' }));
+    expect(submitMessage).toHaveBeenCalledTimes(2);
+    expect(submitMessage.mock.calls[1][0]).toEqual(failed);
+    expect(actions.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'a lost connection offers the retry again',
+      () => Promise.reject(new Error('offline')),
+      'Retry sending',
+    ],
+    [
+      'an accepted send waits for the conversation',
+      () =>
+        Promise.resolve({
+          kind: 'submitted' as const,
+          response: {
+            action_id: 'act-1',
+            message_id: 'm',
+            step_id: 'step-9',
+            action_status: 'processing' as const,
+            disposition: 'pending' as const,
+            process_id: null,
+          },
+        }),
+      'Refresh conversation',
+    ],
+    [
+      'a conflict says the message was not sent',
+      () => Promise.resolve({ kind: 'action_conflict' as const }),
+      'This conversation cannot accept another message. Your message was not sent.',
+    ],
+  ])(
+    'a retry of a send kept while the pane was away hears its answer: %s',
+    async (_, answer, shown) => {
+      const first = await renderPane();
+      emit(update(createActionPage('act-1', 'success'), 1));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'add the totals' },
+      });
+      // Left while the send is still out: its answer goes to a pane that is gone.
+      fireEvent.click(primaryButton('Send'));
+      first.unmount();
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <ActionTaskPane
+            actionId="act-1"
+            title="Rebuild the quote"
+            onShowInChat={onShowInChat}
+            onAddProject={onAddProject}
+            drafts={drafts}
+          />
+        </UiLanguageProvider>
+      );
+      submitMessage.mockImplementationOnce(answer as Actions['submitMessage']);
+      fireEvent.click(await screen.findByRole('button', { name: 'Retry sending' }));
+      expect(submitMessage.mock.calls[1][0]).toEqual(submitMessage.mock.calls[0][0]);
+      expect(await screen.findByText(shown)).toBeInTheDocument();
+      expect(screen.queryByText('Sending…')).toBeNull();
+    }
+  );
 });

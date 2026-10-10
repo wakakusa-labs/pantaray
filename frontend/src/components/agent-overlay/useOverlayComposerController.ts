@@ -116,6 +116,7 @@ export function useOverlayComposerController({
   suggestionAccepted,
   language,
   onRefreshedPage,
+  restored,
 }: {
   actions: ComposerActions | undefined;
   initialActionId: string | null;
@@ -123,9 +124,11 @@ export function useOverlayComposerController({
   suggestionAccepted: boolean;
   language: 'en' | 'ja';
   onRefreshedPage: (page: ActionConversationPage) => void;
+  /** The main window's task pane brings back the composer it had when the user left it. */
+  restored?: ComposerState;
 }) {
-  const [composer, setComposer] = useState<ComposerState>(() =>
-    initialComposerState(initialActionId)
+  const [composer, setComposer] = useState<ComposerState>(
+    () => restored ?? initialComposerState(initialActionId)
   );
   // These fences belong to the composer lifetime, not to live conversation updates.
   const composerGenerationRef = useRef(0);

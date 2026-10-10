@@ -9,7 +9,7 @@ import type {
   ActionLiveUpdate,
 } from '../../../electron/src/actions/actionLiveCore';
 import { createActionPage } from './actionTaskFixtures';
-import { createTaskComposerDrafts } from './taskComposerDrafts';
+import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 import { useActionTask } from './useActionTask';
 
 type ElectronBridge = NonNullable<Window['electron']>;
@@ -60,8 +60,7 @@ describe('useActionTask', () => {
   const emit = (next: ActionLiveUpdate) =>
     act(() => listeners.forEach((listener) => listener(next)));
   const renderTask = async (actionId = 'act-1') => {
-    const drafts = createTaskComposerDrafts(undefined);
-    const rendered = renderHook(({ id }) => useActionTask(id, drafts), {
+    const rendered = renderHook(({ id }) => useActionTask(id), {
       wrapper,
       initialProps: { id: actionId },
     });
@@ -77,15 +76,17 @@ describe('useActionTask', () => {
     readConversationPage.mockReset();
     sendOrchestration.mockReset();
     submitApprovalDecision.mockReset().mockResolvedValue(undefined);
+    const bridge = createTaskDraftBridge();
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: {
         actions: {
           openConversation,
-          submitMessage,
+          submitMessage: bridge.sending(submitMessage),
           resumeAction,
           readConversationPage,
           readToolOutputPage: vi.fn(),
+          ...bridge.window(),
           discardAttachment: vi.fn(),
           onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {
             listeners.add(callback);

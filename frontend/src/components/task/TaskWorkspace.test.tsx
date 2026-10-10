@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import type { ActionLiveUpdate } from '../../../electron/src/actions/actionLiveCore';
 import { createActionPage } from './actionTaskFixtures';
-import { createTaskComposerDrafts } from './taskComposerDrafts';
+import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 import { TaskWorkspace } from './TaskWorkspace';
 
 type ActionFiles = NonNullable<NonNullable<Window['electron']>['actionFiles']>;
@@ -62,7 +62,6 @@ async function renderFinishedTask() {
         title="見積書を作り直す"
         onShowInChat={() => {}}
         onAddProject={() => {}}
-        drafts={createTaskComposerDrafts(undefined)}
       />
     </UiLanguageProvider>
   );
@@ -103,6 +102,7 @@ beforeEach(() => {
         resumeAction: vi.fn(() => new Promise(() => {})),
         readConversationPage: vi.fn(),
         readToolOutputPage: vi.fn(),
+        ...createTaskDraftBridge().window(),
         discardAttachment: vi.fn(),
         onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {
           listeners.add(callback);

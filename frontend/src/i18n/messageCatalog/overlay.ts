@@ -18,6 +18,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.stop': 'Stop',
     'overlay.composer.resume': 'Resume',
     'overlay.composer.resumeFailed': 'The conversation could not be resumed. Try again.',
+    'overlay.composer.sendSuperseded':
+      'Your message may not have been sent. The newer draft from another window is shown instead.',
     'overlay.composer.retry': 'Retry sending',
     'overlay.composer.actionConflict':
       'This conversation cannot accept another message. Your message was not sent.',
@@ -142,6 +144,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.stop': '停止',
     'overlay.composer.resume': '再開',
     'overlay.composer.resumeFailed': '会話を再開できませんでした。再度お試しください。',
+    'overlay.composer.sendSuperseded':
+      'メッセージは送れていない可能性があります。別の画面で書いた新しい下書きを表示しています。',
     'overlay.composer.retry': '同じメッセージを再送',
     'overlay.composer.actionConflict':
       'この会話にはこれ以上メッセージを送信できません。メッセージは送信されていません。',

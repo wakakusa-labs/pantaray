@@ -8,7 +8,6 @@ import { useActionApprovalMode } from '@/components/agent-overlay/useActionAppro
 import { useOverlayComposerController } from '@/components/agent-overlay/useOverlayComposerController';
 import { useI18n } from '@/context/useI18n';
 
-import { useKeptTaskComposer, type TaskComposerDrafts } from './taskComposerDrafts';
 import './actionTaskPane.css';
 import './suggestionTaskPane.css';
 
@@ -21,14 +20,11 @@ const noop = () => undefined;
 export function NewTaskPane({
   onStarted,
   onAddProject,
-  drafts,
 }: {
   /** Called once the send has opened its Action. */
   onStarted: (actionId: string) => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
-  /** Where the composer waits while the pane is not shown. */
-  drafts: TaskComposerDrafts;
 }) {
   const { language, t } = useI18n();
   const titleId = useId();
@@ -43,19 +39,12 @@ export function NewTaskPane({
     language,
     // Refreshing belongs to a conversation; once the send opens one, the Action pane shows it.
     onRefreshedPage: noop,
-    restored: drafts.read('new'),
+    // The unsent draft stays with the owner's new task while the pane is away.
+    newTask: true,
   });
   const approvalMode = useActionApprovalMode(null, null);
   const { composer, setComposer } = controller;
   const actionId = composer.initialActionId;
-  useKeptTaskComposer({
-    drafts,
-    work: 'new',
-    composer,
-    // Once the send has opened its Action, the draft went out with it.
-    keepable: actionId === null,
-    composerGenerationRef: controller.composerGenerationRef,
-  });
 
   const onStartedRef = useRef(onStarted);
   useEffect(() => {
@@ -112,6 +101,7 @@ export function NewTaskPane({
           action="send"
           canSend={canSend}
           resumeFailed={false}
+          sendSuperseded={composer.failureKind === 'superseded'}
           canResume={false}
           textareaRef={textareaRef}
           onAddProject={onAddProject}

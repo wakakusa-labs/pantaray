@@ -33,7 +33,7 @@ const UNLISTED_TITLE = {
  * The selection is the URL's `?item=`, so it survives a reload and the back button returns to it.
  */
 const SuggestionHistoryPage = () => {
-  const { chat, composer, taskDrafts } = useChatSession();
+  const { chat, composer } = useChatSession();
   const history = useSuggestionHistory();
   const { language, t } = useI18n();
   const workspace = useWorkspaceSettingsController(t);
@@ -83,7 +83,6 @@ const SuggestionHistoryPage = () => {
         <NewTaskPane
           onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
           onAddProject={addProject}
-          drafts={taskDrafts}
         />
       );
     const { kind, id } = splitWorkKey(selection);
@@ -98,7 +97,6 @@ const SuggestionHistoryPage = () => {
           title={title}
           onShowInChat={() => showInChat(id)}
           onAddProject={addProject}
-          drafts={taskDrafts}
         />
       );
     return (
@@ -109,7 +107,6 @@ const SuggestionHistoryPage = () => {
         onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
         onShowInChat={() => select('chat')}
         onAddProject={addProject}
-        drafts={taskDrafts}
       />
     );
   };

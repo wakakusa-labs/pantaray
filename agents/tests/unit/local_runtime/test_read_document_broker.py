@@ -1622,6 +1622,47 @@ async def test_pdf_past_one_of_pypdfs_own_limits_is_refused_as_unreadable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("filter_count", [16, 17])
+async def test_pdf_stream_filter_count_is_bounded(
+    tmp_path: Path, filter_count: int
+) -> None:
+    """GHSA-7mh2-4gg2-979f: reject excess filters before decoding the stream."""
+
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    writer = PdfWriter()
+    page = write_pdf_page(writer, [])
+    data = b"BT /F1 12 Tf 72 720 Td (Filtered text) Tj ET"
+    for _ in range(filter_count):
+        data = zlib.compress(data)
+    stream = StreamObject()
+    stream.set_data(data)
+    stream[NameObject("/Filter")] = ArrayObject(
+        [NameObject("/FlateDecode")] * filter_count
+    )
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    source_path = context.workspace_path / "filters.pdf"
+    writer.write(source_path)
+    # No large payload or expansion: the filter count alone must cause refusal.
+    assert source_path.stat().st_size < 4_096
+
+    if filter_count == 17:
+        with pytest.raises(BrokerPolicyError) as exc_info:
+            await execute_read_tool(
+                db_path=db_path, context=context, args={"path": "filters.pdf"}
+            )
+        assert exc_info.value.code == "READ_DOCUMENT_UNREADABLE"
+        assert "Maximum filter count 16 exceeded: 17" in str(exc_info.value)
+        assert exc_info.value.fix_hint
+    else:
+        outcome = await execute_read_tool(
+            db_path=db_path, context=context, args={"path": "filters.pdf"}
+        )
+        assert outcome.status == "success"
+        assert "Filtered text" in str(outcome.output["content"])
+        assert outcome.output["truncated"] is False
+
+
+@pytest.mark.asyncio
 async def test_extraction_out_of_memory_is_refused_as_too_large(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

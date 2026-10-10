@@ -85,6 +85,7 @@ from .suggestion_reaction_text_domain import (
 )
 from .tool_output_storage_kind import apply_tool_output_storage_kind_migration
 from .unified_memory_triggers import apply_unified_memory_trigger_migration
+from .workspace_folders_in_projects import apply_workspace_folders_in_projects_migration
 
 logger = logging.getLogger(__name__)
 MANIFEST_RUNTIME_AUTHORITY_VERSION = 37
@@ -465,6 +466,9 @@ def _execute_migration(
         apply_source_records_memory_migration(
             connection, migration_statements=prepared_script.statements
         )
+        return
+    if migration.version == 125:
+        apply_workspace_folders_in_projects_migration(connection)
         return
     if migration.version == 102:
         apply_screenshot_era_agent_cutover(connection)

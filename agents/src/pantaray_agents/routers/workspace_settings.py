@@ -34,6 +34,12 @@ from pantaray_agents.local_runtime.tooling.repository.command_network_settings i
     load_command_network_enabled,
     update_command_network_enabled,
 )
+from pantaray_agents.local_runtime.tooling.repository.workspace_project_rename import (
+    rename_workspace_project,
+)
+from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
+    WorkspaceProjectNameTakenError,
+)
 
 router = APIRouter(prefix="/v1/agents/users", tags=["Workspace Settings"])
 
@@ -78,11 +84,19 @@ class WorkspaceProjectCreateRequest(BaseModel):
     organization_ids: WorkspaceProjectOrganizationIds = ()
 
 
+# A registered folder is inside the agent's boundary, so a project must show it.
+WorkspaceFolderProjectIds = Annotated[tuple[str, ...], Field(min_length=1)]
+
+
 class WorkspaceFolderCreateRequest(BaseModel):
     display_name: str = Field(min_length=1)
     real_path: str = Field(min_length=1)
     organization_ids: tuple[str, ...] = ()
-    project_ids: tuple[str, ...] = ()
+    project_ids: WorkspaceFolderProjectIds
+
+
+class WorkspaceProjectNameUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=1)
 
 
 class WorkspaceProjectLinksUpdateRequest(BaseModel):
@@ -91,7 +105,7 @@ class WorkspaceProjectLinksUpdateRequest(BaseModel):
 
 class WorkspaceFolderLinksUpdateRequest(BaseModel):
     organization_ids: tuple[str, ...] = ()
-    project_ids: tuple[str, ...] = ()
+    project_ids: WorkspaceFolderProjectIds
 
 
 WorkspaceProjectId = Annotated[
@@ -343,6 +357,11 @@ async def post_workspace_project(
                 now=now_utc_iso(),
             )
         )
+    except WorkspaceProjectNameTakenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Failed to create workspace project: {exc}",
+        ) from exc
     except MigrationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -481,6 +500,41 @@ async def post_workspace_folder(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to create workspace folder: {exc}",
+        ) from exc
+
+
+@router.put(
+    "/{user_id}/workspace-settings/projects/{project_id}/name",
+    response_model=WorkspaceProjectResponse,
+)
+async def put_workspace_project_name(
+    user_id: str,
+    project_id: str,
+    body: WorkspaceProjectNameUpdateRequest,
+    resolved_user_id: str = Depends(get_current_user_id_from_token),
+) -> WorkspaceProjectResponse:
+    _assert_user_allowed(user_id=user_id, resolved_user_id=resolved_user_id)
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    try:
+        return _project_response(
+            rename_workspace_project(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+                project_id=project_id,
+                display_name=body.display_name,
+                now=now_utc_iso(),
+            )
+        )
+    except WorkspaceProjectNameTakenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Failed to rename workspace project: {exc}",
+        ) from exc
+    except MigrationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to rename workspace project: {exc}",
         ) from exc
 
 

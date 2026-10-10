@@ -1,0 +1,2 @@
+-- Every registered folder belongs to a project; implemented by the migration runner
+-- (storage/migrations/workspace_folders_in_projects.py).

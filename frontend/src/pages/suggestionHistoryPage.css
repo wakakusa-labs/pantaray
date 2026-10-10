@@ -250,10 +250,6 @@
   background: var(--fog-mist);
 }
 
-.history-chat-row[aria-current='true'] {
-  background: var(--fog-mist-strong);
-}
-
 .history-chat-row:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);

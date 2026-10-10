@@ -32,6 +32,8 @@ import type {
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type { TaskDraftChange } from '../../electron/src/actions/taskDraftStore';
+import type { TaskDraft, TaskDraftWork } from '../../electron/src/ipc/schemas/taskDrafts';
 import type {
   ChatItem,
   ChatItemPage,
@@ -279,6 +281,12 @@ declare global {
           name: string;
         }) => Promise<ActionAttachFileResult>;
         discardAttachment: (request: { attachmentId: string }) => Promise<void>;
+        /** Subscribes this composer to a task's shared draft and returns it. */
+        openDraft: (request: { work: TaskDraftWork }) => Promise<TaskDraft | null>;
+        updateDraft: (request: { work: TaskDraftWork; draft: TaskDraft }) => Promise<void>;
+        closeDraft: (request: { work: TaskDraftWork }) => Promise<void>;
+        /** Another window changed a task's draft; `draft` is null once it is cleared. */
+        onDraftChanged: (callback: (change: TaskDraftChange) => void) => () => void;
         readConversationPage: (
           request: ActionConversationPageRequest
         ) => Promise<ActionConversationPageReadResult>;

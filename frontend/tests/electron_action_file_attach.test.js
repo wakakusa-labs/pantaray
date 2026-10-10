@@ -5,8 +5,10 @@ const path = require('path');
 const { test } = require('node:test');
 
 const {
+  discardStagedAttachment,
   registerActionAttachmentHandlers,
 } = require('../electron/dist/ipc/handlers/actionAttachments.js');
+const { createTaskDraftStore } = require('../electron/dist/actions/taskDraftStore.js');
 const { IpcSenderRejectedError } = require('../electron/dist/ipc/senderTrust.js');
 const { IpcValidationError } = require('../electron/dist/ipc/schemas/error.js');
 const { ACTION_DOCUMENT_MAX_BYTES } = require('../electron/dist/ipc/schemas/actionAttachments.js');
@@ -28,6 +30,9 @@ function harness(overrides = {}) {
       ...overrides.actions,
     },
     actionImages: { localArtifactRoot },
+    taskDrafts: createTaskDraftStore({
+      discardStagedFile: (owner, id) => discardStagedAttachment(localArtifactRoot, owner, id),
+    }),
   };
   registerActionAttachmentHandlers(ctx, {
     handle: (channel, handler) => handlers.set(channel, handler),

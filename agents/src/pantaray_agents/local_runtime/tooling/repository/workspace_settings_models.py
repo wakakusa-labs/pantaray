@@ -4,6 +4,12 @@ from dataclasses import dataclass
 
 from pantaray_agents.schema.read_access import ReadAccessScope
 
+from ...storage.migrations import MigrationError
+
+
+class WorkspaceProjectNameTakenError(MigrationError):
+    """Another project of this user already has the name."""
+
 
 @dataclass(frozen=True)
 class WorkspaceOrganization:
@@ -41,5 +47,6 @@ __all__ = [
     "WorkspaceFolder",
     "WorkspaceOrganization",
     "WorkspaceProject",
+    "WorkspaceProjectNameTakenError",
     "WorkspaceSettings",
 ]

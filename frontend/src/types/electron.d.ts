@@ -47,6 +47,7 @@ import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/acti
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
 import type {
   ActionFileOpenResult,
+  ActionFileOpenWithResult,
   ActionFileReadResult,
   ActionFileRequest,
 } from '../../electron/src/actions/actionFileAccess';
@@ -246,6 +247,12 @@ declare global {
         read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
         /** Main window only: opens a file the Action names in its default app. */
         openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
+        /** Main window only: asks for an app in /Applications and opens the file in it. */
+        openWithApp: (request: ActionFileRequest) => Promise<ActionFileOpenWithResult>;
+        /** Main window only: selects a file the Action names in Finder. */
+        reveal: (
+          request: ActionFileRequest
+        ) => Promise<{ kind: 'revealed' } | { kind: 'unavailable'; reason: 'not_found' }>;
         /** Main window only: shows the file in macOS Quick Look over the main window. */
         quickLook: (
           request: ActionFileRequest

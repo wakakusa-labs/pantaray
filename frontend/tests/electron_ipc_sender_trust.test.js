@@ -116,6 +116,8 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     // Reads and opens workspace files: the main window's preview only.
     'actionFile:read',
     'actionFile:openInApp',
+    'actionFile:openWithApp',
+    'actionFile:reveal',
     'actionFile:quickLook',
     'history:openNewConversation',
     'history:deleteItem',

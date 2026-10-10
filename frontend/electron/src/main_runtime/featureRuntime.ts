@@ -227,6 +227,19 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     lastWorkspaceFolderParent = path.dirname(result.filePaths[0]);
     return { canceled: false, path: result.filePaths[0] };
   };
+  const chooseApp = async (): Promise<string | null> => {
+    const mainWindow = params.getMainWindow();
+    // An app is a bundle macOS shows as one file; the filter lists nothing else.
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      defaultPath: '/Applications',
+      filters: [{ name: 'Applications', extensions: ['app'] }],
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  };
   const openExternalUrl = createExternalUrlOpener({
     isDevRuntime: params.isDevRuntime,
     webAppOrigin: params.desktopRuntime.config?.web_app_origin ?? null,
@@ -343,6 +356,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           openInApp: (realPath) => shell.openPath(realPath),
           runFile: async (file, args, options) =>
             (await execFileAsync(file, [...args], { ...options, encoding: 'utf8' })).stdout,
+          chooseApp,
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {

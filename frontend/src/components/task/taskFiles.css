@@ -81,6 +81,9 @@
 
 .task-file-preview__open {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 26px;
   padding: 0 9px;
   border: 1px solid var(--border-color-hover);
@@ -110,6 +113,45 @@
   background: var(--fog-mist-strong);
 }
 
+.task-file-menu {
+  position: relative;
+  flex: none;
+}
+
+/* Opaque, so the preview does not show through. */
+.task-file-menu__list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border-color-hover);
+  border-radius: 8px;
+  background: rgb(32, 36, 42);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+.task-file-menu__item {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.task-file-menu__item:hover,
+.task-file-menu__item:focus-visible {
+  background: var(--fog-mist-strong);
+}
+
 .task-file-preview__alert {
   margin: 8px 16px 0;
   color: var(--danger-color);
@@ -127,19 +169,6 @@
 }
 
 .task-file-preview__status {
-  margin: 0;
-  color: var(--fog-text-2);
-  font-size: var(--text-meta-size);
-}
-
-.task-file-preview__notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-
-.task-file-preview__notice p {
   margin: 0;
   color: var(--fog-text-2);
   font-size: var(--text-meta-size);

@@ -2061,6 +2061,8 @@ describe('AgentOverlay broader E2E', () => {
 
   const pngFile = (name: string, size = 4) =>
     new File([new Uint8Array(size)], name, { type: 'image/png' });
+  // A paste of files alone: no text comes with them.
+  const fileClipboard = (files: File[]) => ({ files, getData: () => '' });
 
   async function openComposer() {
     render(
@@ -2089,7 +2091,7 @@ describe('AgentOverlay broader E2E', () => {
     const composer = await openComposer();
 
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [pngFile('pasted.png')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([pngFile('pasted.png')]) });
     });
     await act(async () => {
       fireEvent.drop(composer.closest('form')!, {
@@ -2131,7 +2133,7 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: { files: [new File(['x'], 'notes.txt', { type: 'text/plain' })] },
+        clipboardData: fileClipboard([new File(['x'], 'notes.txt', { type: 'text/plain' })]),
       });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -2142,7 +2144,7 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: { files: [pngFile('huge.png', 8_000_001)] },
+        clipboardData: fileClipboard([pngFile('huge.png', 8_000_001)]),
       });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -2152,7 +2154,7 @@ describe('AgentOverlay broader E2E', () => {
 
     attachImage.mockResolvedValueOnce({ kind: 'rejected', reason: 'decode_failed' });
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [pngFile('broken.png')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([pngFile('broken.png')]) });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent('That image could not be read.');
     expect(screen.queryByRole('list', { name: /^Attachments/ })).toBeNull();
@@ -2163,7 +2165,9 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: { files: Array.from({ length: 11 }, (_, index) => pngFile(`${index}.png`)) },
+        clipboardData: fileClipboard(
+          Array.from({ length: 11 }, (_, index) => pngFile(`${index}.png`))
+        ),
       });
     });
 
@@ -2233,7 +2237,7 @@ describe('AgentOverlay broader E2E', () => {
     Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 });
 
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [oversized] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([oversized]) });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Each PDF, Word, Excel, PowerPoint, or notebook file must be 20 MB or smaller.'
@@ -2242,9 +2246,9 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: {
-          files: Array.from({ length: 11 }, (_, index) => documentFile(`${index}.docx`)),
-        },
+        clipboardData: fileClipboard(
+          Array.from({ length: 11 }, (_, index) => documentFile(`${index}.docx`))
+        ),
       });
     });
     expect(await screen.findByRole('list', { name: 'Attachments, 10' })).toBeVisible();
@@ -2256,7 +2260,7 @@ describe('AgentOverlay broader E2E', () => {
     attachFile.mockRejectedValueOnce(new Error('ipc failed'));
     fireEvent.click(screen.getByRole('button', { name: 'Remove 0.docx' }));
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [documentFile('broken.xlsx')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([documentFile('broken.xlsx')]) });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The file could not be attached. Try again.'
@@ -2375,10 +2379,10 @@ describe('AgentOverlay broader E2E', () => {
       Array.from({ length: 6 }, (_, index) => documentFile(`${prefix}${index}.pdf`));
 
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: batch('first-') } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard(batch('first-')) });
     });
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: batch('second-') } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard(batch('second-')) });
     });
     expect(await screen.findByRole('list', { name: 'Attachments, 6' })).toBeVisible();
     await act(async () =>
@@ -2411,7 +2415,7 @@ describe('AgentOverlay broader E2E', () => {
     const composer = await openComposer();
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: { files: [documentFile('a.pdf'), documentFile('b.pptx')] },
+        clipboardData: fileClipboard([documentFile('a.pdf'), documentFile('b.pptx')]),
       });
     });
 
@@ -2446,7 +2450,7 @@ describe('AgentOverlay broader E2E', () => {
 
     fireEvent.change(composer, { target: { value: 'Look at this' } });
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [pngFile('slow.png')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([pngFile('slow.png')]) });
     });
 
     // Sending now would clear the attachments and silently move this image onto the next message.
@@ -2489,7 +2493,7 @@ describe('AgentOverlay broader E2E', () => {
     const composer = await openComposer();
 
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [pngFile('slow.png')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([pngFile('slow.png')]) });
     });
     // A subject change clears the conversation and the composer with it.
     await act(async () => conversationListener?.({ kind: 'reset' }));
@@ -2528,7 +2532,7 @@ describe('AgentOverlay broader E2E', () => {
     const composer = await openComposer();
 
     await act(async () => {
-      fireEvent.paste(composer, { clipboardData: { files: [pngFile('slow.png')] } });
+      fireEvent.paste(composer, { clipboardData: fileClipboard([pngFile('slow.png')]) });
     });
     // Queueing onto a running Action is a supported flow, and every tool step it emits updates
     // the conversation. That must not be mistaken for the composer being replaced.

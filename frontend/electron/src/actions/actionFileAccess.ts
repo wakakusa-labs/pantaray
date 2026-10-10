@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import type { RunFile } from './actionDocumentHtml';
 import type { ActionConversationPageRequest } from './actionFetch';
 import type { ActionConversationPage } from './actionContracts';
 import { pantarayFilePaths } from './pantarayFileLinks';
@@ -38,6 +39,10 @@ const EXECUTABLE_EXTENSIONS = new Set([
 ]);
 const EXECUTABLE_MODE_BITS = 0o111;
 
+const OPEN_COMMAND = '/usr/bin/open';
+/** `open` returns once Launch Services has the request; it never waits for the app. */
+const OPEN_WITH_LIMITS = { timeout: 30_000, maxBuffer: 64 * 1024 } as const;
+
 export type ActionFileRequest = Readonly<{ actionId: string; path: string }>;
 
 export type ActionFileReadResult =
@@ -50,9 +55,17 @@ export type ActionFileReadResult =
       reason: 'not_found' | 'binary' | 'too_large' | 'conversion_failed';
     }>;
 
-export type ActionFileOpenResult =
-  | Readonly<{ kind: 'opened' }>
-  | Readonly<{ kind: 'unavailable'; reason: 'not_found' | 'executable' | 'open_failed' }>;
+type ActionFileUnavailable = Readonly<{
+  kind: 'unavailable';
+  reason: 'not_found' | 'executable' | 'open_failed';
+}>;
+
+export type ActionFileOpenResult = Readonly<{ kind: 'opened' }> | ActionFileUnavailable;
+
+export type ActionFileOpenWithResult =
+  | ActionFileOpenResult
+  | Readonly<{ kind: 'cancelled' }>
+  | Readonly<{ kind: 'unavailable'; reason: 'not_an_app' }>;
 
 export type ReadActionConversationPage = (
   request: ActionConversationPageRequest
@@ -184,11 +197,8 @@ function isExecutable(realPath: string, stats: fs.Stats): boolean {
   return (stats.mode & EXECUTABLE_MODE_BITS) !== 0;
 }
 
-/** Opens the real path `resolveActionFile` returned in its default app. */
-export async function openActionFileInApp(
-  realPath: string,
-  openPath: (realPath: string) => Promise<string>
-): Promise<ActionFileOpenResult> {
+/** Why the real path `resolveActionFile` returned must not go to an app, or null when it may. */
+function refuseToOpen(realPath: string): ActionFileUnavailable | null {
   let stats: fs.Stats;
   try {
     stats = fs.statSync(realPath);
@@ -198,7 +208,53 @@ export async function openActionFileInApp(
   // A FIFO, socket or device is no document, and handing one to another app could stall it.
   if (!stats.isFile() && !stats.isDirectory()) return { kind: 'unavailable', reason: 'not_found' };
   if (isExecutable(realPath, stats)) return { kind: 'unavailable', reason: 'executable' };
+  return null;
+}
+
+/** Opens the real path `resolveActionFile` returned in its default app. */
+export async function openActionFileInApp(
+  realPath: string,
+  openPath: (realPath: string) => Promise<string>
+): Promise<ActionFileOpenResult> {
+  const refusal = refuseToOpen(realPath);
+  if (refusal !== null) return refusal;
   // shell.openPath resolves to an error message, empty on success.
   const failure = await openPath(realPath);
   return failure === '' ? { kind: 'opened' } : { kind: 'unavailable', reason: 'open_failed' };
+}
+
+function isAppBundle(appPath: string): boolean {
+  if (path.extname(appPath).toLowerCase() !== '.app') return false;
+  try {
+    return (
+      fs.statSync(appPath).isDirectory() &&
+      fs.statSync(path.join(appPath, 'Contents', 'Info.plist')).isFile()
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Opens the real path `resolveActionFile` returned in an app the user picks. The file is
+ * vetted before the user is asked, and the app must be an existing `.app` bundle: `open -a`
+ * would otherwise search for an app by that name.
+ */
+export async function openActionFileWithApp(
+  realPath: string,
+  chooseApp: () => Promise<string | null>,
+  runFile: RunFile
+): Promise<ActionFileOpenWithResult> {
+  const refusal = refuseToOpen(realPath);
+  if (refusal !== null) return refusal;
+  const appPath = await chooseApp();
+  if (appPath === null) return { kind: 'cancelled' };
+  if (!isAppBundle(appPath)) return { kind: 'unavailable', reason: 'not_an_app' };
+  try {
+    await runFile(OPEN_COMMAND, ['-a', appPath, realPath], OPEN_WITH_LIMITS);
+    return { kind: 'opened' };
+  } catch {
+    // `open` exits non-zero when the app cannot open the file; the user sees the failure.
+    return { kind: 'unavailable', reason: 'open_failed' };
+  }
 }

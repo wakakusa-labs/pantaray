@@ -338,6 +338,8 @@ test('createMainWindow retries webContents listener registration after EINTR', (
   assert.equal(didFailAttempts, 3);
   assert.deepEqual(calls, [
     'center',
+    // The navigation guard is in place before anything loads.
+    'web:will-navigate',
     'web:did-fail-load',
     'web:did-fail-load',
     'web:did-fail-load',

@@ -7,6 +7,7 @@ const { loadRuntimeConfig } = require('./runtime_config');
 const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap');
 const { buildContentSecurityPolicy } = require('./content_security_policy');
 const { PANTARAY_ACCOUNT_LOGIN_ENABLED } = require('./dist/auth/accountLoginFeature');
+const { keepWindowOnItsDocument } = require('./dist/security/windowOpenPolicy');
 
 const BROWSER_WINDOW_EINTR_RETRY_LIMIT = 8;
 const WINDOW_STARTUP_STEP_EINTR_RETRY_LIMIT = 8;
@@ -368,6 +369,8 @@ function createMainWindow(options = {}) {
   });
 
   runWindowStartupStepWithRetry('center', () => win.center(), { optional: true });
+  // Before the first load, so no link in the window can ever replace the app.
+  keepWindowOnItsDocument(win.webContents);
 
   if (isDev) {
     const url = buildFrontendDevOrigin();

@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
+import type { KeyboardEvent, RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import styled from 'styled-components';
 
@@ -98,6 +98,23 @@ type MentionSession = Readonly<{
   catalog: Catalog;
 }>;
 
+/**
+ * The files a paste attaches, or none when it pastes text. Copied text can carry a file along
+ * (Quick Look adds the document it shows), and then the text is what was meant. A file copied
+ * in Finder carries only its name as text, so that paste attaches the file.
+ */
+function pastedFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.files);
+  const text = data.getData('text/plain').trim();
+  if (files.length === 0 || text === '') return files;
+  const names = new Set(files.map((file) => file.name));
+  // Each line a pasted file's name, or a path ending in it.
+  const namesOnly = text
+    .split(/\s*[\r\n]+\s*/)
+    .every((line) => names.has(line.slice(line.lastIndexOf('/') + 1)));
+  return namesOnly ? files : [];
+}
+
 export function ComposerMessageField({
   id,
   textareaRef,
@@ -109,7 +126,7 @@ export function ComposerMessageField({
   describedBy,
   onChange,
   onKeyDown,
-  onPaste,
+  onPasteFiles,
   onAddProject,
 }: {
   id: string;
@@ -122,7 +139,8 @@ export function ComposerMessageField({
   describedBy: string | undefined;
   onChange: (draft: string, mentions: ComposerMention[]) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** Files pasted instead of text; a read-only field takes none. */
+  onPasteFiles: (files: File[]) => void;
   /** "Add project": the Overlay brings the main window to Workspace; the chat goes there. */
   onAddProject: () => void;
 }) {
@@ -299,7 +317,13 @@ export function ComposerMessageField({
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           onKeyDown={handleKeyDown}
-          onPaste={onPaste}
+          onPaste={(event) => {
+            const files = pastedFiles(event.clipboardData);
+            if (readOnly || files.length === 0) return;
+            // Taking the files means the textarea must not also insert the text.
+            event.preventDefault();
+            onPasteFiles(files);
+          }}
         />
       </FieldStack>
       {open ? (

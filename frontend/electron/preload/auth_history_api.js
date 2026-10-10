@@ -29,6 +29,11 @@ function createAuthHistoryApi({ ipcRenderer }) {
         ipcRenderer.on('history:showChat', listener);
         return () => ipcRenderer.removeListener('history:showChat', listener);
       },
+      onShowItem: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+        ipcRenderer.on('history:showItem', listener);
+        return () => ipcRenderer.removeListener('history:showItem', listener);
+      },
     },
     actionFiles: {
       open: (params) => ipcRenderer.invoke('actionFile:open', params),

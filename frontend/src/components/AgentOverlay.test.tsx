@@ -251,6 +251,9 @@ describe('AgentOverlay broader E2E', () => {
   const observeOverlaySize = vi.fn();
   const getActionApprovalMode = vi.fn();
   const openWorkspaceSettings = vi.fn();
+  // The panel's handoff: close it, or close it and open the started task in the main window.
+  const hideOverlay = vi.fn();
+  const openTask = vi.fn(async () => undefined);
   const setActionApprovalMode =
     vi.fn<NonNullable<NonNullable<ElectronBridge['agentOverlay']>['setActionApprovalMode']>>();
   const getWorkspaceEditCommandPreference =
@@ -319,6 +322,8 @@ describe('AgentOverlay broader E2E', () => {
     setActionApprovalMode.mockReset();
     getWorkspaceEditCommandPreference.mockReset().mockResolvedValue(defaultPermissions);
     openWorkspaceSettings.mockReset();
+    hideOverlay.mockReset();
+    openTask.mockClear();
     getActionApprovalMode.mockReset();
     getActionApprovalMode.mockResolvedValue({
       action_id: 'act-1',
@@ -365,7 +370,8 @@ describe('AgentOverlay broader E2E', () => {
           },
           submitApprovalDecision,
           resize: resizeOverlay,
-          hide: vi.fn(),
+          hide: hideOverlay,
+          openTask,
           stopAction,
           getActionApprovalMode,
           setActionApprovalMode,
@@ -973,6 +979,8 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByText('Pending')).toBeNull();
 
     await act(async () => resolveFirst(createSubmittedResult('standalone-action', firstMessageId)));
+    // The new-task panel's first send started a task: it continues in the main window.
+    expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'standalone-action' });
     expect(await screen.findByText('Pending')).toBeInTheDocument();
     expect(outsideFocus).toHaveFocus();
     expect(screen.getByLabelText('Message')).toBeInTheDocument();
@@ -996,6 +1004,8 @@ describe('AgentOverlay broader E2E', () => {
 
     expect(screen.queryByText('Sent, updating')).toBeNull();
     expect(screen.getByLabelText('Message')).toHaveValue('');
+    // A send the reset composer no longer stands for opens nothing.
+    expect(openTask).toHaveBeenCalledTimes(1);
   });
 
   it('keeps displayed answers but uses the live process for Stop and failure feedback without a page', async () => {
@@ -1348,6 +1358,7 @@ describe('AgentOverlay broader E2E', () => {
 
     // 送信レスポンスの action_id を取り込む。
     await act(async () => {});
+    expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-comment' });
     // 起動した会話は返ってきた action_id で購読される（提案 id では紐付かない）。
     const firstPage = createConversationUpdate(null, false, 'act-comment');
     firstPage.snapshot.page.runs[0].entries = [
@@ -1387,9 +1398,11 @@ describe('AgentOverlay broader E2E', () => {
       conversationListener?.(createConversationUpdate('older', true, 'act-comment'))
     );
     expect(screen.queryByText('Just a comment, nothing to approve')).toBeNull();
+    // A message into the conversation already open starts nothing new.
+    expect(openTask).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the composer after a dismissal, and a message replies to the dismissed suggestion', async () => {
+  it('closes the panel once a dismissal is recorded; the composer of a dismissed suggestion replies to it', async () => {
     const messageId = '00000000-0000-4000-8000-000000000043';
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
     submitMessage.mockResolvedValueOnce(createStartedResult('act-after-dismissal', messageId));
@@ -1416,6 +1429,8 @@ describe('AgentOverlay broader E2E', () => {
       event: 'dismiss_suggestion',
       data: { suggestion_id: 'sug-offer' },
     });
+    // The panel waits for the dismissal to be recorded; one that fails stays to be decided again.
+    expect(hideOverlay).not.toHaveBeenCalled();
     await act(async () =>
       eventListener?.({
         event: 'suggestion_reaction_committed',
@@ -1428,6 +1443,10 @@ describe('AgentOverlay broader E2E', () => {
         sequence: 4,
       })
     );
+
+    // A decided suggestion keeps no panel, and the main window is left where it is.
+    expect(hideOverlay).toHaveBeenCalledTimes(1);
+    expect(openTask).not.toHaveBeenCalled();
 
     // Nothing written yet: the dismissal stands, and the composer waits for words.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
@@ -1530,6 +1549,10 @@ describe('AgentOverlay broader E2E', () => {
       },
     });
     expect(acceptAction).not.toHaveBeenCalled();
+    // The panel stays for the reply, and hands over the task the reply started.
+    await act(async () => {});
+    expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-after-dismissal' });
+    expect(hideOverlay).not.toHaveBeenCalled();
   });
 
   it('follows a reply to a dismissed suggestion, sent here or found already open', async () => {
@@ -1558,6 +1581,8 @@ describe('AgentOverlay broader E2E', () => {
     const composer = screen.getByRole('textbox', { name: 'Message' });
     expect(composer).toHaveValue('Also this');
     expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    // Nothing started: the panel keeps the conversation and the draft for it.
+    expect(openTask).not.toHaveBeenCalled();
     submitMessage.mockResolvedValueOnce(createSubmittedResult('act-existing', 'follow-up'));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(submitMessage.mock.calls[1][0].target).toEqual({
@@ -1635,6 +1660,7 @@ describe('AgentOverlay broader E2E', () => {
     acceptAction.mockRejectedValueOnce(new Error('Disconnected'));
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     await screen.findByText('Could not confirm this action. Try approving again.');
+    expect(openTask).not.toHaveBeenCalled();
     const restored = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
     expect(restored).toHaveValue('  Use this image  ');
     expect(screen.getByRole('img', { name: 'Attached image 1 of 1' })).toBeInTheDocument();
@@ -1653,9 +1679,98 @@ describe('AgentOverlay broader E2E', () => {
     const accepted = createPendingSnapshot();
     accepted.snapshot.suggestionId = 'sug-comment';
     await act(async () => snapshotListener?.(accepted));
+    // The approval that went through started its Action.
+    expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
     await act(async () => conversationListener?.(createConversationUpdate()));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
     expect(screen.queryByRole('img', { name: 'Attached image 1 of 1' })).toBeNull();
+  });
+
+  describe('hands work started in the panel to the main window', () => {
+    const offer = () => {
+      const snapshot = createCommentOnlySnapshot();
+      snapshot.snapshot.interactionContract = 'action_offer';
+      return snapshot;
+    };
+    const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
+    const actionMeta = { suggestion_id: 'sug-comment', command_id: 'cmd-9', kind: 'action' };
+    const accept = async () => {
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay />
+        </UiLanguageProvider>
+      );
+      await act(async () => snapshotListener?.(offer()));
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Accept' })));
+      // prettier-ignore
+      await emit({ event: 'action_requested', data: { suggestion_id: 'sug-comment', command_id: 'cmd-9', accepted_at: '2026-10-10T00:00:01Z' }, meta: actionMeta, sequence: 4 } as OrchestrationServerEvent);
+    };
+
+    it('opens an approved suggestion once its Action has started, and only then', async () => {
+      await accept();
+      // Accepted but not started: no Action to open yet.
+      expect(openTask).not.toHaveBeenCalled();
+
+      // prettier-ignore
+      await emit({ event: 'process_started', data: { kind: 'action', process_id: 'run-9', suggestion_id: 'sug-comment', action_id: 'act-9', command_id: 'cmd-9', accepted_at: '2026-10-10T00:00:01Z', started_at: '2026-10-10T00:00:02Z' }, meta: { ...actionMeta, process_id: 'run-9', action_id: 'act-9' }, sequence: 5 } as OrchestrationServerEvent);
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-9' });
+      // Main hides the panel as it opens the task; the renderer does not hide it a second time.
+      expect(hideOverlay).not.toHaveBeenCalled();
+
+      // prettier-ignore
+      await emit({ event: 'process_completed', data: { kind: 'action', process_id: 'run-9', action_id: 'act-9', command_id: 'cmd-9', status: 'success' }, meta: { ...actionMeta, process_id: 'run-9', action_id: 'act-9' }, sequence: 6 } as OrchestrationServerEvent);
+      expect(openTask).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the panel, with the failure, when the Action fails to start', async () => {
+      await accept();
+      // prettier-ignore
+      await emit({ event: 'error', data: { error_type: 'action', error_code: 'E', error_message: 'The Action could not start.', severity: 'error' }, meta: { ...actionMeta, action_id: 'act-9', stage: 'start_failed', error_code: 'E' }, sequence: 5 } as OrchestrationServerEvent);
+
+      expect(screen.getByText('The Action could not start.')).toBeInTheDocument();
+      expect(openTask).not.toHaveBeenCalled();
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
+    it('keeps the new-task panel while its first send fails, and opens the task its retry starts', async () => {
+      const messageId = '00000000-0000-4000-8000-0000000000a1';
+      vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+      submitMessage
+        .mockRejectedValueOnce(new Error('transport failed'))
+        .mockResolvedValueOnce(createStartedResult('act-new', messageId));
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay entryMode="standalone" />
+        </UiLanguageProvider>
+      );
+      await screen.findByRole('button', { name: /permissions: Ask every time/ });
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Tidy the notes' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      const retry = await screen.findByRole('button', { name: 'Retry sending' });
+      expect(openTask).not.toHaveBeenCalled();
+
+      fireEvent.click(retry);
+      await waitFor(() =>
+        expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-new' })
+      );
+    });
+
+    it('opens nothing from a panel that continues a task', async () => {
+      const messageId = '00000000-0000-4000-8000-0000000000a2';
+      vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
+      submitMessage.mockResolvedValueOnce(createSubmittedResult('act-1', messageId));
+      render(
+        <UiLanguageProvider initialLanguage="en">
+          <AgentOverlay entryMode="standalone" initialActionId="act-1" />
+        </UiLanguageProvider>
+      );
+      await act(async () => conversationListener?.(createConversationUpdate()));
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'And the rest' } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+
+      expect(submitMessage.mock.calls[0][0].target.kind).toBe('existing');
+      expect(openTask).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps a reply open on snapshot refresh and collapses it for the next Suggestion', async () => {

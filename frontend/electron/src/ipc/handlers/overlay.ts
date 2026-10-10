@@ -80,4 +80,16 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
   registrar.on('overlay:dragMove', handlers.onOverlayDragMove);
   registrar.on('overlay:dragEnd', handlers.onOverlayDragEnd);
   registrar.on('history:openOverlay', handlers.onHistoryOpenOverlay);
+
+  // Work a panel started continues in the main window. The panel is hidden first, by the path
+  // its close button takes, so it is not left the key window while the main window takes focus.
+  registrar.handle('overlay:openTask', (event, request) => {
+    const { actionId } = parseInput(
+      ActionConversationOverlayRequestSchema,
+      'overlay:openTask',
+      request
+    );
+    handlers.onNotificationHide(event);
+    ctx.windows.showTask(actionId);
+  });
 }

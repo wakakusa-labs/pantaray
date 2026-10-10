@@ -40,6 +40,8 @@ export const validReceiveChannels = [
   'chat:itemAppended',
   'chat:turnState',
   'history:showChat',
+  // Main window only: select this work in History (a task a panel started)
+  'history:showItem',
   // Screenshot status change notification
   'screenshot:statusChanged',
   // Capture allowlist settings update
@@ -152,6 +154,8 @@ export const validInvokeChannels = [
   'overlay:setActionApprovalMode',
   // Overlay → main window: show this Action's latest card in the chat
   'overlay:showChat',
+  // Overlay → main window: the panel closes and the main window opens the task it started
+  'overlay:openTask',
 ] as const;
 
 export type ValidSendChannel = (typeof validSendChannels)[number];

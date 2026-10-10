@@ -134,6 +134,8 @@ export type MainContext = {
     openActionConversationOverlay: (actionId: string) => void;
     /** Brings the main window forward and asks it to show this Action's latest chat card. */
     showChat: (actionId: string) => void;
+    /** Brings the main window forward on History with this Action selected. */
+    showTask: (actionId: string) => void;
   };
 
   auth: {

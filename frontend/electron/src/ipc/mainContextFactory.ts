@@ -209,6 +209,12 @@ export function buildMainContext(params: {
         if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
         mainWindow.webContents.send('history:showChat', { actionId });
       },
+      // An in-app navigation, not a load: a load would drop the window's chat and task drafts.
+      showTask: (actionId) => {
+        const mainWindow = params.getMainWindow();
+        if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
+        mainWindow.webContents.send('history:showItem', { item: `action:${actionId}` });
+      },
     },
 
     auth: {

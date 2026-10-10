@@ -28,6 +28,7 @@ import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclo
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
 import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
 import { useReplyAfterDismissal } from './agent-overlay/useReplyAfterDismissal';
+import { openTaskInMainWindow } from './agent-overlay/usePanelHandoff';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -93,6 +94,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       conversation?.update(page);
       setLiveState((current) => (current === liveState ? null : current));
     },
+    onConversationStarted: openTaskInMainWindow,
   });
   const standaloneComposerRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
@@ -500,7 +502,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
                     canAccept={canDecide && canAcceptSuggestion}
                     onDismiss={() => {
                       replyAfterDismissal(hasWords);
-                      ctrl.onReject();
+                      ctrl.onReject(hasWords);
                     }}
                     onAccept={acceptSuggestion}
                   />

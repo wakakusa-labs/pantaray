@@ -5,6 +5,7 @@ import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
+import { usePanelHandoff } from './usePanelHandoff';
 
 const RESIZE_EXPAND_THRESHOLD_PX = 4;
 const ACTION_RESIZE_BUFFER_PX = 32;
@@ -26,7 +27,8 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  onReject: () => void;
+  /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
+  onReject: (withReply: boolean) => void;
   onStop: (processId?: string) => void;
 };
 
@@ -60,6 +62,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
+  const acceptFailed = failedSuggestionId !== null && failedSuggestionId === state.suggestionId;
+  const awaitDecisionOutcome = usePanelHandoff(state, acceptFailed);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
 
@@ -318,42 +322,50 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  const onReject = useCallback(() => {
-    if (decisionLockedRef.current) return;
-    if (interactionContractRef.current !== 'action_offer') return;
-    if (reactionStateRef.current !== null) return;
-    dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    // The Overlay stays open: the user may still say why, or ask for something else.
-    const sid = suggestionIdRef.current;
-    if (sid) {
-      window.electron?.orchestration?.send({
-        event: 'dismiss_suggestion',
-        data: { suggestion_id: sid },
-      });
-    }
-  }, []);
+  const onReject = useCallback(
+    (withReply: boolean) => {
+      if (decisionLockedRef.current) return;
+      if (interactionContractRef.current !== 'action_offer') return;
+      if (reactionStateRef.current !== null) return;
+      dispatch({ type: 'SET_DECISION_LOCKED', value: true });
+      const sid = suggestionIdRef.current;
+      if (sid) {
+        // A reply keeps the panel open until it starts its conversation.
+        if (!withReply) awaitDecisionOutcome(sid, 'dismiss');
+        window.electron?.orchestration?.send({
+          event: 'dismiss_suggestion',
+          data: { suggestion_id: sid },
+        });
+      }
+    },
+    [awaitDecisionOutcome]
+  );
 
-  const onAccept = useCallback(async (options: SuggestionAcceptance) => {
-    if (decisionLockedRef.current) return;
-    if (interactionContractRef.current !== 'action_offer') return;
-    if (reactionStateRef.current !== null) return;
-    const sid = suggestionIdRef.current;
-    const acceptAction = window.electron?.orchestration?.acceptAction;
-    if (!sid || !acceptAction) return;
-    decisionLockedRef.current = true;
-    setFailedSuggestionId(null);
-    dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_REQUESTING });
-    try {
-      await acceptAction({ suggestionId: sid, commandId: null, ...options });
-    } catch {
-      if (suggestionIdRef.current !== sid) return;
-      decisionLockedRef.current = false;
-      dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_IDLE });
-      dispatch({ type: 'SET_DECISION_LOCKED', value: false });
-      setFailedSuggestionId(sid);
-    }
-  }, []);
+  const onAccept = useCallback(
+    async (options: SuggestionAcceptance) => {
+      if (decisionLockedRef.current) return;
+      if (interactionContractRef.current !== 'action_offer') return;
+      if (reactionStateRef.current !== null) return;
+      const sid = suggestionIdRef.current;
+      const acceptAction = window.electron?.orchestration?.acceptAction;
+      if (!sid || !acceptAction) return;
+      awaitDecisionOutcome(sid, 'accept');
+      decisionLockedRef.current = true;
+      setFailedSuggestionId(null);
+      dispatch({ type: 'SET_DECISION_LOCKED', value: true });
+      dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_REQUESTING });
+      try {
+        await acceptAction({ suggestionId: sid, commandId: null, ...options });
+      } catch {
+        if (suggestionIdRef.current !== sid) return;
+        decisionLockedRef.current = false;
+        dispatch({ type: 'SET_REQUEST_STATE', value: REQUEST_STATE_IDLE });
+        dispatch({ type: 'SET_DECISION_LOCKED', value: false });
+        setFailedSuggestionId(sid);
+      }
+    },
+    [awaitDecisionOutcome]
+  );
 
   const onClose = useCallback(() => {
     try {
@@ -386,7 +398,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onToggleExpand,
     onClose,
     onAccept,
-    acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
+    acceptFailed,
     onReject,
     onStop,
   };

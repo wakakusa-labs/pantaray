@@ -537,10 +537,17 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
     clip: { x: 0, y: 0, width: 620, height: 200 },
   });
 
+  // The Chat row takes the reader back to the newest message, which reads it.
+  await chatRow.click();
+  await expect(page.getByText('ほかに直すところがあれば言ってください。')).toBeInViewport();
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+  await expect(chatRow).toHaveText('チャット');
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
+
   // A restart reads the stored position, so what was read stays read.
   await page.reload();
   await expect(chatRow).toBeVisible();
-  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
+  expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
   await expect(history).not.toHaveAccessibleDescription(/未読/);
 });
 

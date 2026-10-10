@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -16,6 +17,8 @@ import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
+import { ChatUnreadTracker } from './ChatUnreadTracker';
+import { ChatUnreadContext } from './chatUnread';
 
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
@@ -83,6 +86,9 @@ const historyFetch = vi.fn(async () => ({
 
 beforeEach(() => {
   localStorage.clear();
+  // Every subscriber hears an appended item, as main's relay reaches them all.
+  const appended = new Set<(item: ChatItem) => void>();
+  appendItem = (item) => appended.forEach((callback) => callback(item));
   window.electron = {
     chat: {
       listItems,
@@ -94,8 +100,8 @@ beforeEach(() => {
         return () => {};
       },
       onItemAppended: (callback: (item: ChatItem) => void) => {
-        appendItem = callback;
-        return () => {};
+        appended.add(callback);
+        return () => appended.delete(callback);
       },
     },
     orchestration: {
@@ -302,6 +308,58 @@ it('shows the chat in the pane beside the sidebar of the chat row and the tasks'
   expect(screen.getByRole('heading', { level: 1, name: 'チャット' })).toBeInTheDocument();
   expect(within(chat).getByText('始めます。')).toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'メッセージ' })).toBeInTheDocument();
+});
+
+/** The unread count as `Layout` provides it, so the sidebar's Chat row shows it. */
+function WithUnreadCount({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  return (
+    <ChatUnreadContext.Provider value={count}>
+      <ChatUnreadTracker onCount={setCount} />
+      {children}
+    </ChatUnreadContext.Provider>
+  );
+}
+
+it('the Chat row takes a reader who scrolled up back to the newest message, which reads it', async () => {
+  const page = {
+    items: [reply(2, 'おはようございます。'), userMessage(1, 'おはよう')],
+    next_cursor: null,
+  };
+  // One read for the chat, one for the unread count.
+  pages = [page, page];
+  render(
+    <MemoryRouter initialEntries={['/history']}>
+      <UiLanguageProvider initialLanguage="ja">
+        <LocalOwnerContext.Provider value={OWNER}>
+          <ChatSessionProvider>
+            <WithUnreadCount>
+              <SuggestionHistoryPage />
+            </WithUnreadCount>
+          </ChatSessionProvider>
+        </LocalOwnerContext.Provider>
+      </UiLanguageProvider>
+    </MemoryRouter>
+  );
+  await screen.findByText('おはようございます。');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+
+  act(() => appendItem(reply(3, '表紙も作りました。')));
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  await waitFor(() => expect(chatRow).toHaveAccessibleDescription('未読 1 件'));
+  expect(scroll.scrollTop).toBe(100);
+
+  await userEvent.click(chatRow);
+  expect(scroll.scrollTop).toBe(1000);
+  await waitFor(() => expect(chatRow).not.toHaveAccessibleDescription());
+  expect(chatRow).toHaveTextContent(/^チャット$/);
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('3');
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {

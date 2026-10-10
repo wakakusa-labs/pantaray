@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
 import { useI18n } from '@/context/useI18n';
@@ -47,24 +55,25 @@ async function openCard(card: ChatCardData): Promise<void> {
  */
 type ChatJump = Readonly<{ key: string; itemId: string; returnTo: string | null; shown: boolean }>;
 
+/** What the page asks of the chat from outside it: the sidebar's Chat row shows the newest. */
+export type ChatViewHandle = { showNewest: () => void };
+
 /**
  * The single chat in the History page's detail pane: messages with their cards, read newest first
  * and scrolled up for older pages.
  */
-export function ChatView({
-  notice: pageNotice,
-  chat,
-  composer,
-  reveal,
-}: {
-  /** Shown under the pane's title (the app's AI-connection notice). */
-  notice: ReactNode;
-  /** The chat and its composer outlive this view, so leaving the page loses neither. */
-  chat: ChatItemsResult;
-  composer: ChatComposerControl;
-  /** The Action whose latest card the Overlay asked to show, or null. */
-  reveal: ChatReveal | null;
-}) {
+export const ChatView = forwardRef<
+  ChatViewHandle,
+  {
+    /** Shown under the pane's title (the app's AI-connection notice). */
+    notice: ReactNode;
+    /** The chat and its composer outlive this view, so leaving the page loses neither. */
+    chat: ChatItemsResult;
+    composer: ChatComposerControl;
+    /** The Action whose latest card the Overlay asked to show, or null. */
+    reveal: ChatReveal | null;
+  }
+>(function ChatView({ notice: pageNotice, chat, composer, reveal }, ref) {
   const { t, language } = useI18n();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
@@ -143,6 +152,14 @@ export function ChatView({
   });
   const returnTo = jump?.shown ? jump.returnTo : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Back at the newest message the reader sees it, so the existing check marks it read.
+  useImperativeHandle(ref, () => ({
+    showNewest: () => {
+      setJump(null);
+      scroll.followNewest();
+      markRead();
+    },
+  }));
 
   const handleRetryTurn = async (failureItemId: string): Promise<void> => {
     setNotice(null);
@@ -314,4 +331,4 @@ export function ChatView({
       </div>
     </div>
   );
-}
+});

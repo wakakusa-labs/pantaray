@@ -107,11 +107,16 @@ function EmptyStateHint({
   );
 }
 
-/** The chat's row: always the one shown for now, with Pantaray's unread messages counted. */
+/**
+ * The chat's row: always the one shown for now, with Pantaray's unread messages counted. It takes
+ * the chat back to its newest message.
+ */
 function ChatRow({
   t,
+  onShow,
 }: {
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+  onShow: () => void;
 }) {
   const unread = useChatUnreadCount();
   return (
@@ -121,6 +126,7 @@ function ChatRow({
         className="history-chat-row"
         aria-current="true"
         aria-describedby={unread > 0 ? CHAT_UNREAD_ID : undefined}
+        onClick={onShow}
       >
         <MessageCircle size={16} strokeWidth={1.8} aria-hidden="true" />
         <span className="history-chat-row__label">{t('history.chat.title')}</span>
@@ -143,7 +149,7 @@ function ChatRow({
  * The History page's sidebar: New task, search, the chat, and the user's tasks by day. A task
  * row opens its Overlay.
  */
-export function HistorySidebar() {
+export function HistorySidebar({ onShowChat }: { onShowChat: () => void }) {
   const {
     items,
     loading,
@@ -358,7 +364,7 @@ export function HistorySidebar() {
           </div>
         ) : null}
       </div>
-      <ChatRow t={t} />
+      <ChatRow t={t} onShow={onShowChat} />
       <div className="history-sidebar__tasks">{renderContent()}</div>
       {confirmingDelete ? (
         <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />

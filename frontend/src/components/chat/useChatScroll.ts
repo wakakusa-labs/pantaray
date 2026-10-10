@@ -125,10 +125,11 @@ export function useChatScroll({
     if (scrollRef.current) followingRef.current = isAtBottom(scrollRef.current);
   }, []);
 
-  /** The next items scroll into view, as after the reader sends a message. */
+  /** Back to the newest message, and the next items scroll into view, as after a send. */
   const followNewest = useCallback(() => {
     followingRef.current = true;
-  }, []);
+    if (scrollRef.current) pinToBottom(scrollRef.current);
+  }, [pinToBottom]);
 
   /** True while the chat is drawn and the reader is at its newest message, so it is in view. */
   const isAtNewest = useCallback(() => scrollRef.current !== null && followingRef.current, []);

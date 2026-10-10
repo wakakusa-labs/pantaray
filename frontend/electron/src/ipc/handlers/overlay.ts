@@ -81,16 +81,18 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
   registrar.on('overlay:dragEnd', handlers.onOverlayDragEnd);
   registrar.on('history:openOverlay', handlers.onHistoryOpenOverlay);
 
-  // Work a panel started continues in the main window. The panel closes, by the path its close
-  // button takes, only once the main window holds the task and the focus; when the main window
-  // cannot be shown, the call fails and the panel stays with its work.
+  // Work a panel started continues in the main window. The panel closes only once the main window
+  // holds the task and the focus; when the main window cannot be shown, the call fails and the
+  // panel stays with its work. The sender is held before the wait: by its end the user may have
+  // closed it and opened another panel, which must not be the one closed.
   registrar.handle('overlay:openTask', async (event, request) => {
     const { actionId } = parseInput(
       ActionConversationOverlayRequestSchema,
       'overlay:openTask',
       request
     );
+    const closeSender = handlers.captureSenderOverlay(event);
     await ctx.windows.showTask(actionId);
-    handlers.onNotificationHide(event);
+    closeSender();
   });
 }

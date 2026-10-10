@@ -13,7 +13,7 @@ const { createNotificationIpcHandlerFactory } = require('../electron/notificatio
 // Work a panel started continues in the main window: the main window comes forward on the task,
 // and only then does the panel close.
 
-function createMainWindow(steps, { loading = false, loadError = null } = {}) {
+function createMainWindow(steps, { loading = false, loadError = null, loaded = null } = {}) {
   return {
     isDestroyed: () => false,
     isMinimized: () => true,
@@ -23,6 +23,7 @@ function createMainWindow(steps, { loading = false, loadError = null } = {}) {
     focus: () => steps.push('focus'),
     loadURL: async (url) => {
       steps.push(['loadURL', url]);
+      await loaded;
       if (loadError) throw loadError;
     },
     webContents: {
@@ -32,8 +33,13 @@ function createMainWindow(steps, { loading = false, loadError = null } = {}) {
   };
 }
 
-/** The real `showTask` and the real hide path of the panel's close button, over fake windows. */
-function createHandoff(steps, { mainWindow = null, createMainWindow: create } = {}) {
+function createPanel(id) {
+  let destroyed = false;
+  return { id, isDestroyed: () => destroyed, destroy: () => (destroyed = true) };
+}
+
+/** The real `showTask` and the real panel registry lookups, over fake windows. */
+function createHandoff(steps, { mainWindow = null, createMainWindow: create, panels } = {}) {
   let current = mainWindow;
   const context = buildMainContext({
     getMainWindow: () => current,
@@ -45,14 +51,23 @@ function createHandoff(steps, { mainWindow = null, createMainWindow: create } = 
     frontendDistIndex: '/tmp/index.html',
     recordSecurityEvent: () => {},
   });
-  const panels = new Map([[2, { id: 'sug-1', isDestroyed: () => false }]]);
+  // Panels by their webContents id, and the registry of open panels by overlay id.
+  const open = panels ?? { byWebContents: new Map(), byOverlayId: new Map() };
+  if (!panels) {
+    const sender = createPanel('sug-1');
+    open.byWebContents.set(2, sender);
+    open.byOverlayId.set('sug-1', sender);
+  }
   const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
-    BrowserWindow: { fromWebContents: (webContents) => panels.get(webContents.id) ?? null },
+    BrowserWindow: {
+      fromWebContents: (webContents) => open.byWebContents.get(webContents.id) ?? null,
+    },
     screen: {},
     windows: {
       findOverlayIdByWindow: (win) => win.id,
+      getOverlay: (overlayId) => open.byOverlayId.get(overlayId) ?? null,
       hide: (overlayId) => steps.push(['hide', overlayId]),
-      getLastOverlayId: () => null,
+      getLastOverlayId: () => Array.from(open.byOverlayId.keys()).at(-1) ?? null,
     },
     interactions: {},
   });
@@ -107,6 +122,36 @@ test('the panel stays, and the request fails, when the loading main window fails
   });
 
   await assert.rejects(openTask({ actionId: 'act-1' }), /ERR_FILE_NOT_FOUND/);
+  assert.equal(
+    steps.some((step) => Array.isArray(step) && step[0] === 'hide'),
+    false
+  );
+});
+
+test('a panel closed while the main window loads is not replaced by another in the close', async () => {
+  const steps = [];
+  let finishLoad;
+  const loaded = new Promise((resolve) => (finishLoad = resolve));
+  const sender = createPanel('sug-1');
+  const panels = {
+    byWebContents: new Map([[2, sender]]),
+    byOverlayId: new Map([['sug-1', sender]]),
+  };
+  const openTask = createHandoff(steps, {
+    mainWindow: createMainWindow(steps, { loading: true, loaded }),
+    panels,
+  });
+
+  const request = openTask({ actionId: 'act-1' });
+  // Meanwhile the user closes that panel and the same suggestion opens in a new one.
+  sender.destroy();
+  panels.byWebContents.delete(2);
+  const reopened = createPanel('sug-1');
+  panels.byWebContents.set(3, reopened);
+  panels.byOverlayId.set('sug-1', reopened);
+  finishLoad();
+  await request;
+
   assert.equal(
     steps.some((step) => Array.isArray(step) && step[0] === 'hide'),
     false

@@ -67,6 +67,7 @@ export type OrchestrationManager = {
   acceptAction: (request: AcceptActionRequest) => Promise<OverlaySnapshot | null>;
   enqueueResumeRequest: (req: ResumeProcessRequest) => void;
   getOverlaySnapshot: (suggestionId: string) => OverlaySnapshot | null;
+  adoptSuggestionSnapshot: (persisted: OverlaySnapshot) => OverlaySnapshot;
   refreshActionConversation: (actionId: string) => void;
   refreshAndResumeActionConversation: (actionId: string) => void;
   handleApprovalDecisionSettled: (identity: {
@@ -520,6 +521,7 @@ export function createOrchestrationManager(params: {
       enqueueResumeRequest(request);
     },
     getOverlaySnapshot: rendererBridge.getOverlaySnapshot,
+    adoptSuggestionSnapshot: rendererBridge.adoptSuggestionSnapshot,
     refreshActionConversation: rendererBridge.refreshActionConversation,
     refreshAndResumeActionConversation: rendererBridge.refreshAndResumeActionConversation,
     handleApprovalDecisionSettled: rendererBridge.handleApprovalDecisionSettled,

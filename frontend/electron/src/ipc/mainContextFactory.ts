@@ -105,6 +105,7 @@ export function buildMainContext(params: {
   // overlay
   enqueueResumeRequest: (payload: ResumeProcessRequest) => void;
   resolveOverlayBootstrap: MainContext['overlay']['resolveOverlayBootstrap'];
+  adoptSuggestionSnapshot: MainContext['overlay']['adoptSuggestionSnapshot'];
   submitApprovalDecision: MainContext['overlay']['submitApprovalDecision'];
   getActionApprovalMode: MainContext['overlay']['getActionApprovalMode'];
   setActionApprovalMode: MainContext['overlay']['setActionApprovalMode'];
@@ -366,6 +367,7 @@ export function buildMainContext(params: {
       },
       resolveOverlayBootstrap: async (suggestionId) =>
         params.resolveOverlayBootstrap(String(suggestionId)),
+      adoptSuggestionSnapshot: params.adoptSuggestionSnapshot,
       submitApprovalDecision: async (payload) => params.submitApprovalDecision(payload),
       getActionApprovalMode: async (actionId) => params.getActionApprovalMode(actionId),
       setActionApprovalMode: async (actionId, approvalMode) =>

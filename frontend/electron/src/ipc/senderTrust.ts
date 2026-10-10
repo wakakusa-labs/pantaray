@@ -38,16 +38,20 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'ws:send',
   'ws:acceptAction',
   'ws:getStatus',
-]);
-
-const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
-  'clipboard:writeText',
-  'history:markCompletionViewed',
+  // Both windows act on an Action: the main window's task pane and, for now, an Overlay panel.
+  // Each Action call goes to the backend as the local owner, and openUserTurn resolves which
+  // window sent it before it delivers anything.
   'action:submitMessage',
   'action:resume',
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
+  'history:markCompletionViewed',
+  // Written by main, so a window without focus still copies.
+  'clipboard:writeText',
+]);
+
+const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'resize-notification-window',
   'notification-action-accept',
   'notification-action-reject',

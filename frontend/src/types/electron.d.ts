@@ -14,7 +14,6 @@ import type {
   ConnectionUpdateResult,
 } from '../../electron/src/ipc/schemas/aiConnection';
 import type {
-  ActionTerminalStatus,
   AcceptActionRequest,
   RendererOrchestrationClientEvent,
   OrchestrationServerEvent,
@@ -54,6 +53,10 @@ import type {
   HistoryItemDeleteRequest,
 } from '../../electron/src/history/historyContracts';
 import type { HistoryItemDeleteResult } from '../../electron/src/history/historyItemDelete';
+import type {
+  OverlaySnapshot,
+  OverlaySnapshotPayload,
+} from '../../electron/src/orchestration/contracts';
 
 import type { CommandNetworkSettings } from '../../electron/src/settings/workspaceSettingsFetch';
 
@@ -125,31 +128,8 @@ type ElectronOverlayPlacementKind = 'suggestion' | 'started' | 'history';
 type ElectronOverlayCell = { row: number; column: number };
 type ElectronOverlayPlacements = Record<ElectronOverlayPlacementKind, ElectronOverlayCell>;
 
-type ElectronOverlaySnapshot = {
-  suggestionId: string;
-  commandId: string | null;
-  interactionContract: 'action_offer' | 'message_only' | null;
-  suggestionText: string;
-  reactionState: 'accepted' | 'rejected' | null;
-  reactionTimestamp: string | null;
-  actionPhase: 'idle' | 'requesting' | 'accepted_pending_start' | 'processing' | 'terminal';
-  actionStatus: 'idle' | 'processing' | ActionTerminalStatus | null;
-  actionErrorCode: string | null;
-  actionFailureStage: string | null;
-  actionFailureMessagePublic: string | null;
-  processId: string | null;
-  actionId: string | null;
-  updatedAt: string | null;
-  lastSequence: number;
-  isLive: boolean;
-};
-
-type ElectronOverlaySnapshotPayload = {
-  snapshot: ElectronOverlaySnapshot;
-  initialUiState?: {
-    expand?: boolean;
-  } | null;
-};
+type ElectronOverlaySnapshot = OverlaySnapshot;
+type ElectronOverlaySnapshotPayload = OverlaySnapshotPayload;
 
 type ElectronOverlayDragPoint = {
   screenX: number;
@@ -247,16 +227,24 @@ declare global {
         /** Whether a turn is answering: the typing bubble. */
         onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };
+      /** Suggestions read into main's record; main accepts these from the main window only. */
+      suggestions?: {
+        /** Reads a suggestion without opening a panel; changes arrive on onSnapshot. */
+        read: (request: { suggestionId: string }) => Promise<ElectronOverlaySnapshot>;
+        /** Each change to a suggestion record main holds, and a dismissal before it is cleared. */
+        onSnapshot: (callback: (payload: ElectronOverlaySnapshotPayload) => void) => () => void;
+      };
       actionFiles?: {
         open: (params: { path: string }) => Promise<void>;
       };
-      /** Overlay windows only. */
       clipboard?: {
         writeText: (text: string) => Promise<void>;
       };
       actions?: {
         submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageSubmitResult>;
         resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageSubmitResult>;
+        /** Main window only: shows the Action in place; updates arrive on onConversationUpdated. */
+        openConversation: (request: { actionId: string }) => Promise<void>;
         attachImage: (request: {
           bytes: ArrayBuffer;
           declaredMimeType: ActionImageMimeType;
@@ -383,6 +371,7 @@ declare global {
         onSnapshot?: (
           func: (payload: ElectronOverlaySnapshotPayload) => void
         ) => (() => void) | undefined;
+        /** The approval calls below serve the main window too. */
         submitApprovalDecision?: (payload: {
           actionId: string;
           processId: string;

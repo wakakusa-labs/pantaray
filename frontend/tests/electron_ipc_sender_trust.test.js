@@ -86,31 +86,37 @@ test('Overlay reads workspace projects but cannot change them', () => {
   }
 });
 
-test('Conversation submission and read receipts belong to Overlay; History opens belong to main', () => {
+// The main window acts on an Action in its task pane; Overlay panels keep the same access.
+test('Both windows act on an Action; History opens and suggestion reads belong to main', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
   security.registerWindow('overlay', overlayEvent.sender);
 
-  assert.equal(security.authorize('action:submitMessage', overlayEvent), 'overlay');
-  // The main window's chat attaches and shows attached images too.
   for (const channel of [
+    'action:submitMessage',
+    'action:resume',
+    'overlay:submitApprovalDecision',
+    'overlay:getActionApprovalMode',
+    'overlay:setActionApprovalMode',
+    'clipboard:writeText',
+    'history:markCompletionViewed',
+    'action:readConversationPage',
+    // The main window's chat attaches and shows attached images too.
     'action:attachImage',
     'action:attachFile',
     'action:discardAttachment',
     'actionImage:reveal',
   ]) {
-    assert.equal(security.authorize(channel, overlayEvent), 'overlay');
-    assert.equal(security.authorize(channel, mainEvent), 'main');
+    assert.equal(security.authorize(channel, mainEvent), 'main', channel);
+    assert.equal(security.authorize(channel, overlayEvent), 'overlay', channel);
   }
-  assert.throws(
-    () => security.authorize('action:submitMessage', mainEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
-  assert.equal(security.authorize('action:readConversationPage', mainEvent), 'main');
-  assert.equal(security.authorize('action:readConversationPage', overlayEvent), 'overlay');
-  for (const channel of ['history:openNewConversation', 'history:deleteItem']) {
-    assert.equal(security.authorize(channel, mainEvent), 'main');
+  for (const channel of [
+    'action:openConversation',
+    'suggestion:read',
+    'history:openNewConversation',
+    'history:deleteItem',
+  ]) {
+    assert.equal(security.authorize(channel, mainEvent), 'main', channel);
     assert.throws(
       () => security.authorize(channel, overlayEvent),
       (error) =>
@@ -118,12 +124,14 @@ test('Conversation submission and read receipts belong to Overlay; History opens
     );
   }
   assert.equal(security.authorize('auth:getState', overlayEvent), 'overlay');
-  assert.equal(security.authorize('history:markCompletionViewed', overlayEvent), 'overlay');
-  assert.throws(
-    () => security.authorize('history:markCompletionViewed', mainEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
+  // Another WebContents on the main document is not the main window.
+  const foreignMainDocument = createSender('http://127.0.0.1:3001/#/history', 3);
+  for (const channel of ['action:submitMessage', 'action:openConversation', 'suggestion:read']) {
+    assert.throws(
+      () => security.authorize(channel, foreignMainDocument),
+      (error) => error instanceof IpcSenderRejectedError && error.code === 'window_role_mismatch'
+    );
+  }
 });
 
 // A send-channel rejection is dropped silently, so a missing grant would leave the

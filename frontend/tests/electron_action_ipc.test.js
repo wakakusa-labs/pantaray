@@ -14,18 +14,22 @@ const MESSAGE_RESPONSE = {
   process_id: 'process-1',
 };
 
-function register(overrides, overlayOverrides) {
+const MAIN_SENDER = { id: 100 };
+
+function register(overrides, overlayOverrides, mainWindow = null) {
   const handlers = new Map();
   const actions = {
     getCurrentSubjectId: () => 'user-1',
     resolveOverlayIdForSender: () => 'overlay-1',
     registerActionAssociation: () => {},
     refreshActionConversation: () => {},
+    refreshAndResumeActionConversation: () => {},
     ...overrides,
   };
   const overlay = { resumeLiveProcess: () => {}, ...overlayOverrides };
+  const windows = { getMainWindow: () => mainWindow };
   registerActionHandlers(
-    { actions, overlay },
+    { actions, overlay, windows },
     { handle: (channel, handler) => handlers.set(channel, handler) }
   );
   return (channel, payload, sender = { id: 1 }) => handlers.get(channel)({ sender }, payload);
@@ -278,6 +282,103 @@ test('Action submit maps only typed conflicts and never delivers a failed HTTP c
     else await assert.rejects(submission, (error) => error === current.error);
     assert.deepEqual(delivered, []);
   }
+});
+
+function mainWindowOf(webContents) {
+  return { isDestroyed: () => false, webContents };
+}
+
+test('A main-window turn refreshes and resumes the Action without binding a panel', async () => {
+  for (const channel of ['action:submitMessage', 'action:resume']) {
+    const delivered = [];
+    const invoke = register(
+      {
+        // The main window is not an Overlay, and must not be looked up as one.
+        resolveOverlayIdForSender: () => assert.fail('main sender resolved as an Overlay'),
+        submitMessage: async () => MESSAGE_RESPONSE,
+        resumeAction: async () => MESSAGE_RESPONSE,
+        registerActionAssociation: () => delivered.push('bind'),
+        refreshActionConversation: (actionId) => delivered.push(`refresh:${actionId}`),
+      },
+      {
+        resumeLiveProcess: (request) =>
+          delivered.push(`resume:${request.processId}:${request.actionId}:${request.fromStart}`),
+      },
+      mainWindowOf(MAIN_SENDER)
+    );
+    const request =
+      channel === 'action:resume'
+        ? { actionId: 'action-1', messageId: 'message-1' }
+        : validSubmit();
+
+    assert.deepEqual(await invoke(channel, request, MAIN_SENDER), {
+      kind: 'submitted',
+      response: MESSAGE_RESPONSE,
+    });
+    assert.deepEqual(delivered, ['refresh:action-1', 'resume:process-1:action-1:true']);
+  }
+});
+
+test('A main-window turn writes nothing when the owner changed during the submit', async () => {
+  const state = { subjectId: 'user-1' };
+  let resolveSubmit;
+  const delivered = [];
+  const invoke = register(
+    {
+      getCurrentSubjectId: () => state.subjectId,
+      submitMessage: () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        }),
+      registerActionAssociation: () => delivered.push('bind'),
+      refreshActionConversation: () => delivered.push('refresh'),
+    },
+    { resumeLiveProcess: () => delivered.push('resume') },
+    mainWindowOf(MAIN_SENDER)
+  );
+  const result = invoke('action:submitMessage', validSubmit(), MAIN_SENDER);
+  state.subjectId = 'user-2';
+  resolveSubmit(MESSAGE_RESPONSE);
+
+  assert.deepEqual(await result, { kind: 'submitted', response: MESSAGE_RESPONSE });
+  assert.deepEqual(delivered, []);
+});
+
+test('A turn from a WebContents that is neither the main window nor a panel is rejected', async () => {
+  const submitMessage = spy(MESSAGE_RESPONSE);
+  for (const mainWindow of [
+    mainWindowOf(MAIN_SENDER),
+    { isDestroyed: () => true, webContents: MAIN_SENDER },
+  ]) {
+    const invoke = register(
+      { resolveOverlayIdForSender: () => null, submitMessage },
+      undefined,
+      mainWindow
+    );
+    const sender = mainWindow.isDestroyed() ? MAIN_SENDER : { id: 5 };
+    await assert.rejects(
+      invoke('action:submitMessage', validSubmit(), sender),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'overlay_window_not_registered'
+    );
+  }
+  assert.equal(submitMessage.calls.length, 0);
+});
+
+test('Opening an Action in the main window refreshes and resumes it, and opens no window', async () => {
+  const opened = [];
+  const invoke = register({
+    refreshAndResumeActionConversation: (actionId) => opened.push(actionId),
+  });
+
+  assert.equal(await invoke('action:openConversation', { actionId: 'action-1' }), undefined);
+  for (const invalid of [{ actionId: ' action-1' }, { actionId: 'a', extra: true }, null]) {
+    await assert.rejects(
+      async () => invoke('action:openConversation', invalid),
+      (error) => error?.name === 'IpcValidationError'
+    );
+  }
+  assert.deepEqual(opened, ['action-1']);
 });
 
 function validSubmit() {

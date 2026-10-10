@@ -6,6 +6,7 @@ const { createCoreApi } = require('./core_api');
 const { createOrchestrationApi } = require('./orchestration_api');
 const { createOverlayApi } = require('./overlay_api');
 const { createSettingsApi } = require('./settings_api');
+const { createSuggestionsApi } = require('./suggestions_api');
 
 function createPreloadApi(params) {
   return {
@@ -13,6 +14,7 @@ function createPreloadApi(params) {
     ...createAuthHistoryApi(params),
     ...createActionsApi(params),
     ...createChatApi(params),
+    ...createSuggestionsApi(params),
     ...createCaptureApi(params),
     ...createSettingsApi(params),
     ...createOverlayApi(params),

@@ -48,9 +48,10 @@ type ActionTaskPaneProps = {
   /**
    * A file's preview, shown left of the conversation, which narrows to a column. It sits below
    * the header and beside the conversation, so opening and closing it keeps the conversation
-   * mounted with its scroll position and draft.
+   * mounted with its scroll position and draft. It gets the conversation so far, so a preview
+   * can follow the Action's later edits.
    */
-  preview?: ReactNode;
+  renderPreview?: (view: ActionConversationViewModel | null) => ReactNode;
   onShowInChat: () => void;
   /** Where projects are added: the composer's @-mention option and an approval's folder hint. */
   onAddProject: () => void;
@@ -65,7 +66,7 @@ type ActionTaskPaneProps = {
 export function ActionTaskPane({
   actionId,
   title,
-  preview,
+  renderPreview,
   onShowInChat,
   onAddProject,
   renderFileChips,
@@ -133,6 +134,8 @@ export function ActionTaskPane({
     const page = await conversation.loadOlder();
     if (page?.next_cursor === null && document.activeElement === button) answerRef.current?.focus();
   };
+
+  const preview = renderPreview?.(view) ?? null;
 
   return (
     <section

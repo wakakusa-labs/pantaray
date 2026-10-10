@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ActionTaskPane } from './ActionTaskPane';
 import { FileChips } from './FileChips';
 import { FilePreviewPane } from './FilePreviewPane';
-import { deriveTaskFiles, type TaskFile } from './taskFiles';
+import { deriveTaskFiles, latestCompletion, type TaskFile } from './taskFiles';
 
 type TaskWorkspaceProps = {
   /** The workspace holds one Action's preview, so the page keys it by this id. */
@@ -25,12 +25,13 @@ export function TaskWorkspace({ actionId, title, onShowInChat, onAddProject }: T
       title={title}
       onShowInChat={onShowInChat}
       onAddProject={onAddProject}
-      preview={
+      renderPreview={(view) =>
         previewFile ? (
           <FilePreviewPane
             key={previewFile.path}
             actionId={actionId}
             file={previewFile}
+            revision={view ? latestCompletion(view) : null}
             onClose={() => setPreviewFile(null)}
           />
         ) : null

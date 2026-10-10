@@ -100,3 +100,16 @@ export function deriveTaskFiles(view: ActionConversationView): TaskFile[] {
   }
   return [...files.values()];
 }
+
+/**
+ * Which finished run the conversation has reached. A later run may rewrite a file the preview
+ * shows, so the preview reads it again whenever this changes.
+ */
+export function latestCompletion(view: ActionConversationView): string | null {
+  for (let index = view.items.length - 1; index >= 0; index -= 1) {
+    const item = view.items[index];
+    if (item.kind === 'run' && item.completedAt !== null)
+      return `${item.runId}@${item.completedAt}`;
+  }
+  return null;
+}

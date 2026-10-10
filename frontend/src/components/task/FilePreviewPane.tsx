@@ -44,6 +44,13 @@ function htmlPreviewDocument(html: string): string {
   return `${doctype}${POLICY_META}${html.slice(doctype.length)}`;
 }
 
+/** A new revision changes the URL, so the frame loads the PDF again instead of keeping it. */
+function pdfUrl(actionId: string, filePath: string, revision: string | null): string {
+  const url = new URL(buildActionFileUrl(actionId, filePath));
+  if (revision !== null) url.searchParams.set('revision', revision);
+  return url.toString();
+}
+
 type Content =
   | Readonly<{ kind: 'loading' }>
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
@@ -52,8 +59,11 @@ type Content =
 
 const READ_KINDS = new Set<TaskFile['kind']>(['markdown', 'html', 'text', 'image']);
 
-/** Reads the file once; the workspace keys this pane by path, so another file remounts it. */
-function useFileContent(actionId: string, file: TaskFile): Content {
+/**
+ * Reads the file, and again for each new revision; the old content stays until the new one
+ * arrives. The workspace keys this pane by path, so another file remounts it.
+ */
+function useFileContent(actionId: string, file: TaskFile, revision: string | null): Content {
   const read = READ_KINDS.has(file.kind) ? window.electron?.actionFiles?.read : undefined;
   const [content, setContent] = useState<Content>(() =>
     read ? { kind: 'loading' } : { kind: 'unavailable' }
@@ -83,22 +93,25 @@ function useFileContent(actionId: string, file: TaskFile): Content {
       active = false;
       if (imageUrl) URL.revokeObjectURL(imageUrl);
     };
-  }, [actionId, file.path, read]);
+    // revision is not read inside: it only says the file may have changed since.
+  }, [actionId, file.path, read, revision]);
   return content;
 }
 
 type FilePreviewPaneProps = {
   actionId: string;
   file: TaskFile;
+  /** The conversation's latest finished run; a new one may have rewritten the file. */
+  revision: string | null;
   onClose: () => void;
 };
 
 /** One file an Action produced, shown read-only beside its conversation. */
-export function FilePreviewPane({ actionId, file, onClose }: FilePreviewPaneProps) {
+export function FilePreviewPane({ actionId, file, revision, onClose }: FilePreviewPaneProps) {
   const { language } = useI18n();
   const copy = COPY[language];
   const nameId = useId();
-  const content = useFileContent(actionId, file);
+  const content = useFileContent(actionId, file, revision);
   const [openFailed, setOpenFailed] = useState(false);
 
   const openInApp = async () => {
@@ -146,7 +159,7 @@ export function FilePreviewPane({ actionId, file, onClose }: FilePreviewPaneProp
           <iframe
             className="task-file-preview__frame"
             title={file.name}
-            src={buildActionFileUrl(actionId, file.path)}
+            src={pdfUrl(actionId, file.path, revision)}
           />
         ) : content.kind === 'loading' ? (
           <p className="task-file-preview__status" role="status">

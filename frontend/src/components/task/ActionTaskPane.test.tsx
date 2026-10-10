@@ -239,7 +239,9 @@ describe('ActionTaskPane', () => {
   });
 
   it('keeps the conversation and the composer beside a preview', async () => {
-    const { container } = await renderPane({ preview: <section aria-label="Preview" /> });
+    const { container } = await renderPane({
+      renderPreview: () => <section aria-label="Preview" />,
+    });
     expect(screen.getByText('Loading the conversation…')).toBeTruthy();
     emit(update(createActionPage('act-1', 'success'), 1));
     expect(screen.queryByText('Loading the conversation…')).toBeNull();

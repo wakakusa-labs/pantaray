@@ -18,6 +18,35 @@ const ANSWER = [
   'with pantaray-file:///work/quote/run.log , pantaray-file:///work/quote/chart.png and pantaray-file:///work/quote/rates.xlsx',
 ].join('\n');
 
+function emitPage(page: ReturnType<typeof createActionPage>, pageVersion: number) {
+  act(() =>
+    listeners.forEach((listener) =>
+      listener({
+        kind: 'action_updated',
+        snapshot: {
+          actionId: 'act-1',
+          page,
+          pageVersion,
+          transientToolSteps: [],
+          approvalBlockers: [],
+          lifecycle: null,
+        },
+      })
+    )
+  );
+}
+
+/** The first run's answer, then a follow-up run that finished later. */
+function followUpPage() {
+  const first = createActionPage('act-1', 'success', 'run-1');
+  first.runs[0].final_output = ANSWER;
+  const second = createActionPage('act-1', 'success', 'run-2');
+  second.runs[0].started_at = '2026-10-10T00:01:00.000000Z';
+  second.runs[0].completed_at = '2026-10-10T00:01:05.000000Z';
+  // A page lists its runs newest first.
+  return { ...second, runs: [...second.runs, ...first.runs] };
+}
+
 async function renderFinishedTask() {
   const rendered = render(
     <UiLanguageProvider initialLanguage="ja">
@@ -32,21 +61,7 @@ async function renderFinishedTask() {
   await screen.findByRole('button', { name: /毎回確認/ });
   const page = createActionPage('act-1', 'success');
   page.runs[0].final_output = ANSWER;
-  act(() =>
-    listeners.forEach((listener) =>
-      listener({
-        kind: 'action_updated',
-        snapshot: {
-          actionId: 'act-1',
-          page,
-          pageVersion: 1,
-          transientToolSteps: [],
-          approvalBlockers: [],
-          lifecycle: null,
-        },
-      })
-    )
-  );
+  emitPage(page, 1);
   return rendered;
 }
 
@@ -162,8 +177,8 @@ describe('TaskWorkspace', () => {
     fireEvent.click(chip('summary.pdf'));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:chart');
     const frame = screen.getByTitle('summary.pdf');
-    expect(frame.getAttribute('src')).toBe(
-      'pantaray-action-file://local/?action=act-1&path=%2Fwork%2Fquote%2Fsummary.pdf'
+    expect(frame.getAttribute('src')).toMatch(
+      /^pantaray-action-file:\/\/local\/\?action=act-1&path=%2Fwork%2Fquote%2Fsummary\.pdf&revision=run-1/
     );
     // A sandboxed frame turns the PDF viewer off.
     expect(frame.hasAttribute('sandbox')).toBe(false);
@@ -197,5 +212,22 @@ describe('TaskWorkspace', () => {
       'textContent',
       'ファイルを開けませんでした。'
     );
+  });
+
+  it('reads the open file again when a later run finishes, as it may have rewritten it', async () => {
+    read.mockResolvedValueOnce({ kind: 'text', text: '# 見積書 v1', truncated: false });
+    await renderFinishedTask();
+    fireEvent.click(chip('mail.md'));
+    expect(await screen.findByRole('heading', { name: '見積書 v1' })).toBeTruthy();
+
+    read.mockResolvedValueOnce({ kind: 'text', text: '# 見積書 v2', truncated: false });
+    emitPage(followUpPage(), 2);
+    expect(await screen.findByRole('heading', { name: '見積書 v2' })).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenLastCalledWith({ actionId: 'act-1', path: '/work/quote/mail.md' });
+
+    // The PDF frame's URL changes with the run, so it loads the file again.
+    fireEvent.click(chip('summary.pdf'));
+    expect(screen.getByTitle('summary.pdf').getAttribute('src')).toContain('revision=run-2');
   });
 });

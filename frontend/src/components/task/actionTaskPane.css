@@ -7,10 +7,28 @@
   color: var(--fog-text);
 }
 
-/* Beside a file preview the conversation keeps a narrow column of its own. */
-.action-task--column {
-  flex: none;
-  width: 400px;
+/*
+ * Beside a file preview the conversation keeps a narrow column of its own. The header stays
+ * full width above both, as a grid, so the conversation's elements never move in the tree.
+ */
+.action-task--split {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+.action-task--split .action-task__header {
+  grid-column: 1 / -1;
+}
+
+.action-task--split > :not(.action-task__header, .action-task__scroll, .action-task__dock) {
+  grid-row: 2 / 4;
+  grid-column: 1;
+}
+
+.action-task--split .action-task__scroll,
+.action-task--split .action-task__dock {
+  grid-column: 2;
   border-left: 1px solid var(--fog-line);
 }
 
@@ -99,7 +117,7 @@
   padding: 24px 28px;
 }
 
-.action-task--column .action-task__column {
+.action-task--split .action-task__column {
   padding: 20px 16px;
 }
 
@@ -169,7 +187,7 @@
   padding: 0 28px 20px;
 }
 
-.action-task--column .action-task__dock {
+.action-task--split .action-task__dock {
   padding: 0 16px 16px;
 }
 

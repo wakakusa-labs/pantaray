@@ -60,7 +60,6 @@ async function renderPane(props: Partial<Parameters<typeof ActionTaskPane>[0]> =
       <ActionTaskPane
         actionId="act-1"
         title="Rebuild the quote"
-        layout="full"
         onShowInChat={onShowInChat}
         onAddProject={onAddProject}
         {...props}
@@ -239,12 +238,15 @@ describe('ActionTaskPane', () => {
     expect(screen.queryByRole('button', { name: 'Refresh failed. Try again.' })).toBeNull();
   });
 
-  it('keeps the conversation and the composer in the narrow column', async () => {
-    const { container } = await renderPane({ layout: 'column' });
+  it('keeps the conversation and the composer beside a preview', async () => {
+    const { container } = await renderPane({
+      renderPreview: () => <section aria-label="Preview" />,
+    });
     expect(screen.getByText('Loading the conversation…')).toBeTruthy();
     emit(update(createActionPage('act-1', 'success'), 1));
     expect(screen.queryByText('Loading the conversation…')).toBeNull();
-    expect(container.querySelector('.action-task--column')).not.toBeNull();
+    expect(container.querySelector('.action-task--split')).not.toBeNull();
+    expect(screen.getByRole('region', { name: 'Preview' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Action conversation' })).toBeTruthy();
     expect(screen.getByText('answer of run-1')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeTruthy();

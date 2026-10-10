@@ -8,6 +8,7 @@ import {
 } from '../../electron/src/actions/actionContracts';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import { waitForAnimationsToSettle } from './animations';
+import { installTaskDrafts } from './taskDrafts';
 
 // Render the production entry with deterministic IPC inputs; no backend, account, or live store.
 let vite: ViteDevServer;
@@ -102,6 +103,7 @@ test.beforeEach(async ({ page }) => {
       },
     });
   });
+  await installTaskDrafts(page);
 });
 
 async function showSuggestion(

@@ -8,6 +8,7 @@ import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore
 import type { OverlaySnapshotPayload } from '../../src/components/agent-overlay/model/overlayTypes';
 import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
 import { waitForAnimationsToSettle } from './animations';
+import { installTaskDrafts } from './taskDrafts';
 
 // Production renderer with deterministic IPC pages, isolated from live accounts and storage.
 let vite: ViteDevServer;
@@ -168,6 +169,7 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
       },
     });
   }, language);
+  await installTaskDrafts(page);
 }
 
 for (const language of ['ja', 'en'] as const) {

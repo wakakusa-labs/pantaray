@@ -1501,3 +1501,48 @@ test('an event resent after a dismissal does not bring the suggestion back', () 
     'rejected'
   );
 });
+
+function dismissSuggestion(harness) {
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+}
+
+test('a reply to a dismissed suggestion reaches both windows and outlives a later read', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+  dismissSuggestion(harness);
+
+  harness.manager.recordSuggestionReply('sug-1', 'act-reply');
+
+  const replied = suggestionSnapshotsSentToMain(harness).at(-1);
+  assert.equal(replied.reactionState, 'rejected');
+  assert.equal(replied.actionId, 'act-reply');
+  assert.deepEqual(harness.overlayPayloads.get('sug-1').snapshot, replied);
+  // A read that left before the reply does not take its Action away.
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ reactionState: 'rejected' })
+  );
+  assert.equal(read.actionId, 'act-reply');
+  assert.equal(read.reactionState, 'rejected');
+});
+
+test('a read brings the reply Action to a dismissal main recorded before the reply', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  dismissSuggestion(harness);
+
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ reactionState: 'rejected', actionId: 'act-reply' })
+  );
+
+  assert.equal(read.reactionState, 'rejected');
+  assert.equal(read.actionId, 'act-reply');
+  assert.equal(suggestionSnapshotsSentToMain(harness).at(-1).actionId, 'act-reply');
+  assert.equal(harness.overlayPayloads.get('sug-1').snapshot.actionId, 'act-reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+});

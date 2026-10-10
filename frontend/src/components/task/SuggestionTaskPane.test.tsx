@@ -451,6 +451,28 @@ describe('SuggestionTaskPane', () => {
     expect(onStarted).toHaveBeenCalledWith('act-reply');
   });
 
+  it('hands over to the reply the other window sent for a dismissed suggestion', async () => {
+    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
+    await renderPane();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+
+    await publish(suggestion({ reactionState: 'rejected', actionId: 'act-reply' }));
+
+    expect(onStarted).toHaveBeenCalledWith('act-reply');
+    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+  });
+
+  it('opens the existing conversation when the suggestion was already replied to', async () => {
+    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
+    submitMessage.mockResolvedValueOnce({ kind: 'reply_exists', actionId: 'act-existing' });
+    await renderPane();
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Also this' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+
+    expect(onStarted).toHaveBeenCalledWith('act-existing');
+  });
+
   it('hands over at once when the suggestion already has an Action', async () => {
     read.mockResolvedValueOnce(
       suggestion({ reactionState: 'accepted', actionPhase: 'terminal', actionId: 'act-9' })

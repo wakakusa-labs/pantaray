@@ -480,7 +480,9 @@ export type ActionMessageResponse = z.infer<typeof ActionMessageResponseSchema>;
 export type ActionMessageSubmitResult =
   | Readonly<{ kind: 'submitted'; response: ActionMessageResponse }>
   | Readonly<{ kind: 'expected_process_conflict' }>
-  | Readonly<{ kind: 'action_conflict' }>;
+  | Readonly<{ kind: 'action_conflict' }>
+  /** The suggestion replied to already has its conversation; this is its Action. */
+  | Readonly<{ kind: 'reply_exists'; actionId: string }>;
 export type ActionConversationPage = z.infer<typeof ActionConversationPageSchema>;
 export type ActionImageReference = z.infer<typeof ImageReferenceSchema>;
 export type ActionProjectRef = z.infer<typeof ActionProjectRefsSchema>[number];

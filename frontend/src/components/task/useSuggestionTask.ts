@@ -163,8 +163,8 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
   });
   const approvalMode = useActionApprovalMode(null, suggestionId);
   const { submission } = composer.composer;
-  const replyActionId =
-    submission?.request.target.kind === 'new' ? composer.composer.initialActionId : null;
+  // Only a reply, sent or found already open, gives this composer an Action.
+  const replyActionId = composer.composer.initialActionId;
   const phase = deriveSuggestionTaskPhase({
     snapshot,
     loadFailed: loadFailedFor === suggestionId,

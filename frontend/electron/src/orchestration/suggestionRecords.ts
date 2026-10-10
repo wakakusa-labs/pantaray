@@ -11,12 +11,21 @@ export type SuggestionRecord = {
 
 // A record that never streamed its suggestion (accepted from a panel that read its bootstrap
 // itself) has no body or contract; a persisted read supplies them without touching its state.
+// A reply's Action never streams through the suggestion's events either, so only a read may
+// bring it to a suggestion that was not accepted.
 function fillFromPersisted(live: OverlaySnapshot, persisted: OverlaySnapshot): OverlaySnapshot {
-  if (live.suggestionText && live.interactionContract !== null) return live;
+  const actionId =
+    live.actionId === null && live.reactionState !== 'accepted'
+      ? persisted.actionId
+      : live.actionId;
+  if (live.suggestionText && live.interactionContract !== null && actionId === live.actionId) {
+    return live;
+  }
   return {
     ...live,
     suggestionText: live.suggestionText || persisted.suggestionText,
     interactionContract: live.interactionContract ?? persisted.interactionContract,
+    actionId,
   };
 }
 
@@ -45,6 +54,18 @@ export function createSuggestionRecords(params: {
     }
   }
 
+  function publish(snapshot: OverlaySnapshot): void {
+    sendToMain(snapshot);
+    try {
+      params.notificationWindow.setOverlaySnapshot(
+        String(snapshot.suggestionId),
+        toOverlaySnapshotPayload(snapshot)
+      );
+    } catch {
+      // no-op
+    }
+  }
+
   function store(record: SuggestionRecord): OverlaySnapshot {
     const dismissedSnapshot = dismissed.get(String(record.snapshot.suggestionId));
     if (dismissedSnapshot) return dismissedSnapshot;
@@ -56,17 +77,16 @@ export function createSuggestionRecords(params: {
       snapshot: normalized,
       executeEnvelope: record.executeEnvelope,
     });
-    sendToMain(normalized);
-    try {
-      params.notificationWindow.setOverlaySnapshot(
-        String(normalized.suggestionId),
-        toOverlaySnapshotPayload(normalized)
-      );
-    } catch {
-      // no-op
-    }
+    publish(normalized);
     params.onRecordsChanged();
     return normalized;
+  }
+
+  // A dismissal stays; the only thing it learns later is the Action a reply opened.
+  function replaceDismissed(snapshot: OverlaySnapshot): OverlaySnapshot {
+    dismissed.set(String(snapshot.suggestionId), snapshot);
+    publish(snapshot);
+    return snapshot;
   }
 
   function storeSnapshot(snapshot: OverlaySnapshot): OverlaySnapshot {
@@ -104,7 +124,10 @@ export function createSuggestionRecords(params: {
   function adoptPersisted(persisted: OverlaySnapshot): OverlaySnapshot {
     const suggestionId = String(persisted.suggestionId);
     const dismissedSnapshot = dismissed.get(suggestionId);
-    if (dismissedSnapshot) return fillFromPersisted(dismissedSnapshot, persisted);
+    if (dismissedSnapshot) {
+      const filled = fillFromPersisted(dismissedSnapshot, persisted);
+      return filled.actionId === dismissedSnapshot.actionId ? filled : replaceDismissed(filled);
+    }
     const current = records.get(suggestionId);
     if (current && current.snapshot.lastSequence >= persisted.lastSequence) {
       const filled = fillFromPersisted(current.snapshot, persisted);
@@ -125,6 +148,23 @@ export function createSuggestionRecords(params: {
     return storeSnapshot(persisted);
   }
 
+  // A reply opens the suggestion's one conversation. Every window showing the suggestion learns
+  // it, so none offers a second reply the backend would refuse.
+  function recordReply(suggestionId: string, actionId: string): void {
+    const dismissedSnapshot = dismissed.get(String(suggestionId));
+    if (dismissedSnapshot) {
+      if (dismissedSnapshot.actionId === null) replaceDismissed({ ...dismissedSnapshot, actionId });
+      return;
+    }
+    const current = records.get(String(suggestionId));
+    if (current && current.snapshot.actionId === null) {
+      store({
+        snapshot: { ...current.snapshot, actionId },
+        executeEnvelope: current.executeEnvelope,
+      });
+    }
+  }
+
   return {
     store,
     storeSnapshot,
@@ -133,6 +173,7 @@ export function createSuggestionRecords(params: {
     clear,
     dismiss,
     adoptPersisted,
+    recordReply,
     values: () => records.values(),
     // The owner changed: nothing held for the previous owner applies.
     reset: () => {

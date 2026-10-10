@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { SETTINGS_MESSAGES } from '@/i18n/messageCatalog/settings';
 import { t as translate } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
 import { OverlayPositionSection } from './OverlayPositionSection';
@@ -42,17 +43,29 @@ describe('OverlayPositionSection', () => {
     delete window.electron;
   });
 
-  it('names each control by its kind and announces where its overlay opens', async () => {
+  it("names the section and each kind by what appears, without the window's internal name", async () => {
     installBridge();
     render(<OverlayPositionSection t={ja} />);
 
-    const suggestion = await screen.findByRole('slider', { name: '提案の位置' });
+    expect(screen.getByRole('heading', { name: '提案や作業を出す位置' })).toBeInTheDocument();
+    expect(translate('en', 'settings.overlayPosition.title')).toBe(
+      'Where suggestions and tasks appear'
+    );
+    for (const language of ['ja', 'en'] as const)
+      for (const key of Object.keys(SETTINGS_MESSAGES[language]).filter((name) =>
+        name.startsWith('settings.overlayPosition.')
+      ))
+        expect(translate(language, key as MessageKey)).not.toMatch(
+          /オーバーレイ|パネル|overlay|panel/iu
+        );
+
+    const suggestion = await screen.findByRole('slider', { name: '届いた提案の位置' });
     expect(suggestion).toHaveAttribute('aria-valuetext', '上段・右端');
-    expect(screen.getByRole('slider', { name: '新しい作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '始めた作業の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
-    expect(screen.getByRole('slider', { name: '履歴から開く作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '一覧から開いた作業の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
@@ -61,7 +74,7 @@ describe('OverlayPositionSection', () => {
   it('moves one cell per arrow key, stops at the edges, and saves only that kind', async () => {
     const bridge = installBridge();
     render(<OverlayPositionSection t={ja} />);
-    const suggestion = await screen.findByRole('slider', { name: '提案の位置' });
+    const suggestion = await screen.findByRole('slider', { name: '届いた提案の位置' });
     suggestion.focus();
 
     fireEvent.keyDown(suggestion, { key: 'ArrowRight' });
@@ -76,7 +89,7 @@ describe('OverlayPositionSection', () => {
       [{ kind: 'suggestion', cell: { row: 1, column: 4 } }],
       [{ kind: 'suggestion', cell: { row: 1, column: 3 } }],
     ]);
-    expect(screen.getByRole('slider', { name: '新しい作業の位置' })).toHaveAttribute(
+    expect(screen.getByRole('slider', { name: '始めた作業の位置' })).toHaveAttribute(
       'aria-valuetext',
       '中段・中央'
     );
@@ -85,7 +98,7 @@ describe('OverlayPositionSection', () => {
   it('snaps the dragged block to the cell under the pointer and saves it on drop', async () => {
     const bridge = installBridge();
     render(<OverlayPositionSection t={ja} />);
-    const started = await screen.findByRole('slider', { name: '新しい作業の位置' });
+    const started = await screen.findByRole('slider', { name: '始めた作業の位置' });
     const screenElement = layOutScreen(started);
 
     fireEvent.pointerDown(screenElement, { button: 0, pointerId: 1, clientX: 80, clientY: 50 });
@@ -118,7 +131,7 @@ describe('OverlayPositionSection', () => {
       )
     );
     render(<OverlayPositionSection t={ja} />);
-    const history = await screen.findByRole('slider', { name: '履歴から開く作業の位置' });
+    const history = await screen.findByRole('slider', { name: '一覧から開いた作業の位置' });
 
     fireEvent.keyDown(history, { key: 'ArrowDown' });
     expect(history).toHaveAttribute('aria-valuetext', '下段・中央');

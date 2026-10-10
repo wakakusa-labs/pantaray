@@ -1,4 +1,4 @@
-import { MessageCircle, Trash2 } from 'lucide-react';
+import { MessageCircle, SquarePen, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
@@ -11,7 +11,6 @@ import {
 import { useI18n } from '@/context/useI18n';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
 import { historyItemSelection, type HistorySelection } from '@/history/historySelection';
-import { NEW_WORK_BUTTON_ID, openNewWork } from '@/history/newWork';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, type useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
@@ -21,11 +20,11 @@ import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
 import HistorySearchField from './HistorySearchField';
 import { liveStageText } from './liveStageText';
-import { NewWorkButton } from './NewWorkButton';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
 const CHAT_UNREAD_ID = 'history-chat-unread';
+const NEW_TASK_BUTTON_ID = 'history-new-task';
 const MAX_SHOWN_UNREAD = 99;
 
 /**
@@ -69,21 +68,20 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
 }
 
 /**
- * Points at the New task button, naming the shortcut only while it is registered. The sentence
- * stays one translatable string; `{shortcut}` marks where the keycaps replace it.
+ * The global shortcut for a new task, as quiet text above the search, shown only while it is
+ * registered. The sentence stays one translatable string; `{shortcut}` marks the keycaps.
  */
-function EmptyStateHint({
+function NewTaskShortcutHint({
   state,
   t,
 }: {
   state: ShortcutHintState;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }) {
-  if (state.status !== 'ready')
-    return <p className="history-empty-hint">{t('history.empty.startWithButton')}</p>;
-  const [before, after] = t('history.empty.startWithShortcut').split('{shortcut}');
+  if (state.status !== 'ready') return null;
+  const [before, after] = t('history.shortcutHint').split('{shortcut}');
   return (
-    <p className="history-empty-hint">
+    <p className="history-shortcut-hint">
       {before}
       <ShortcutKeycaps accelerator={state.accelerator} t={t} />
       {after}
@@ -129,8 +127,9 @@ function ChatRow({
 }
 
 /**
- * The History page's sidebar: New task, search, the chat, the projects, and the user's tasks by
- * day. A task row selects what the detail pane shows; the selected one is marked current.
+ * The History page's sidebar: the new-task shortcut, search, the projects, the chat, and the
+ * user's tasks by day under their heading, whose ✎ opens a new task in the detail pane. A task
+ * row selects what the detail pane shows; the selected one is marked current.
  */
 export function HistorySidebar({
   history,
@@ -212,18 +211,10 @@ export function HistorySidebar({
     const successor: ConversationHistoryListItem | undefined =
       index === -1 ? undefined : (rows[index + 1] ?? rows[index - 1]);
     removeItem(identity);
-    setFocusTargetId(successor ? openButtonId(itemIdentity(successor)) : NEW_WORK_BUTTON_ID);
+    setFocusTargetId(successor ? openButtonId(itemIdentity(successor)) : NEW_TASK_BUTTON_ID);
     // The pane cannot keep showing a deleted task; this entry stands in for it in the history.
     if (historyItemSelection(item) === shown)
       select(successor ? historyItemSelection(successor) : 'chat', { replace: true });
-  };
-  const handleNewConversation = async (): Promise<void> => {
-    setNotice(null);
-    try {
-      await openNewWork();
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
   };
   const renderContent = () => {
     if (loading) return <div className="history-loading">{t('history.loading')}</div>;
@@ -237,7 +228,6 @@ export function HistorySidebar({
       return (
         <div className="history-empty">
           <span>{t('history.empty')}</span>
-          <EmptyStateHint state={shortcutHint} t={t} />
         </div>
       );
     }
@@ -259,7 +249,7 @@ export function HistorySidebar({
             headingsPerDay.set(day.key, repeat + 1);
             return [
               <li key={`day:${day.key}:${repeat}`} className="history-day">
-                <h2>{day.label}</h2>
+                <h3>{day.label}</h3>
               </li>,
               ...day.items.map((item) => {
                 const identity = itemIdentity(item);
@@ -343,11 +333,7 @@ export function HistorySidebar({
   return (
     <aside className="history-sidebar" aria-label={t('history.sidebar.label')}>
       <div className="history-sidebar__head">
-        <NewWorkButton
-          shortcutHint={shortcutHint}
-          t={t}
-          onClick={() => void handleNewConversation()}
-        />
+        <NewTaskShortcutHint state={shortcutHint} t={t} />
         <HistorySearchField searchText={searchText} onSearch={setSearchText} />
         {notice ? (
           <div className="history-error" role="alert">
@@ -355,14 +341,30 @@ export function HistorySidebar({
           </div>
         ) : null}
       </div>
-      <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
       <HistoryProjects
         projects={projects}
         creating={creatingProject}
         onCreatingChange={onCreatingProjectChange}
         t={t}
       />
-      <div className="history-sidebar__tasks">{renderContent()}</div>
+      <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
+      <section className="history-tasks" aria-labelledby="history-tasks-title">
+        <div className="history-projects__head">
+          <h2 id="history-tasks-title">{t('history.tasks.title')}</h2>
+          <button
+            type="button"
+            id={NEW_TASK_BUTTON_ID}
+            className="history-projects__add"
+            aria-label={t('history.newConversation')}
+            title={t('history.newConversation')}
+            aria-current={selected === 'new' ? 'page' : undefined}
+            onClick={() => onSelect('new')}
+          >
+            <SquarePen size={15} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="history-sidebar__tasks">{renderContent()}</div>
+      </section>
       {confirmingDelete ? (
         <HistoryDeleteDialog
           t={t}

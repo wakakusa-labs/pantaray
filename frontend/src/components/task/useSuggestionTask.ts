@@ -7,7 +7,6 @@ import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
 import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
 import { useReplyAfterDismissal } from '../agent-overlay/useReplyAfterDismissal';
-import { useKeptTaskComposer, type TaskComposerDrafts } from './taskComposerDrafts';
 
 /**
  * Why the last answer did not go through. `accept_failed` is the accept call itself failing (main
@@ -79,7 +78,7 @@ function scoped<T>(state: Scoped<T> | null, suggestionId: string): T | null {
  * dismissed, opens a new Action with `reply_to_suggestion_id` through the Overlay's composer
  * controller.
  */
-export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDrafts) {
+export function useSuggestionTask(suggestionId: string) {
   const { language } = useI18n();
   const electron = window.electron;
   const suggestions = electron?.suggestions;
@@ -160,7 +159,6 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
     language,
     // Refreshing belongs to a conversation; once a reply starts one, the Action pane shows it.
     onRefreshedPage: () => undefined,
-    restored: drafts.read(`suggestion:${suggestionId}`),
   });
   const approvalMode = useActionApprovalMode(null, suggestionId);
   const { submission } = composer.composer;
@@ -173,21 +171,6 @@ export function useSuggestionTask(suggestionId: string, drafts: TaskComposerDraf
     failure,
     replyActionId,
     replying: submission !== null && submission.state !== 'failed',
-  });
-  useKeptTaskComposer({
-    drafts,
-    work: `suggestion:${suggestionId}`,
-    composer: composer.composer,
-    // A draft that went out with an approval, or whose suggestion has its Action, is not the
-    // user's to come back to. A reply in flight is kept for its retry, and a draft written while
-    // the record loads, after its read failed, or around a dismissal (a reply may still follow
-    // it) stays.
-    keepable: !(
-      phase === 'started' ||
-      phase === 'start_failed' ||
-      (phase === 'starting' && submission === null)
-    ),
-    composerGenerationRef: composer.composerGenerationRef,
   });
   const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
 

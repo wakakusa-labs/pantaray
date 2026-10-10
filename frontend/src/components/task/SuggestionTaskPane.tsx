@@ -10,7 +10,6 @@ import {
 } from '@/components/agent-overlay/OverlayComposer';
 import { useI18n } from '@/context/useI18n';
 
-import type { TaskComposerDrafts } from './taskComposerDrafts';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
 import './actionTaskPane.css';
 import './suggestionTaskPane.css';
@@ -48,8 +47,6 @@ type SuggestionTaskPaneProps = {
   onShowInChat: () => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
-  /** Where the composer waits while the pane is not shown. */
-  drafts: TaskComposerDrafts;
 };
 
 /**
@@ -64,14 +61,13 @@ export function SuggestionTaskPane({
   onStarted,
   onShowInChat,
   onAddProject,
-  drafts,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
   const copy = COPY[language];
   const titleId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
-  const task = useSuggestionTask(suggestionId, drafts);
+  const task = useSuggestionTask(suggestionId);
   const { snapshot, phase, failure, composer, approvalMode } = task;
   const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
   const suggestionText = snapshot?.suggestionText ?? '';

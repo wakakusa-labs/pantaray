@@ -16,7 +16,6 @@ import { useI18n } from '@/context/useI18n';
 import { liveStageText } from '@/components/history/liveStageText';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 
-import type { TaskComposerDrafts } from './taskComposerDrafts';
 import { useActionTask } from './useActionTask';
 import './actionTaskPane.css';
 
@@ -38,7 +37,6 @@ type ActionTaskPaneProps = {
   /** Content under the latest answer, such as the files it produced. */
   renderFileChips?: (view: ActionConversationViewModel) => ReactNode;
   /** Where the composer waits while the pane is not shown. */
-  drafts: TaskComposerDrafts;
 };
 
 /**
@@ -52,7 +50,6 @@ export function ActionTaskPane({
   onShowInChat,
   onAddProject,
   renderFileChips,
-  drafts,
 }: ActionTaskPaneProps) {
   const { language, t } = useI18n();
   const titleId = useId();
@@ -71,7 +68,7 @@ export function ActionTaskPane({
     });
   };
 
-  const task = useActionTask(actionId, drafts);
+  const task = useActionTask(actionId);
   const { view, lifecycle, status, conversation, approval, composer } = task;
   const draft = composer.state;
   const conversationCopy = useConversationCopy(window.electron?.actions, actionId);

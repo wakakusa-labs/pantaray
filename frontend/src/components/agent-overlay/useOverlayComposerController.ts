@@ -14,6 +14,7 @@ import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
 import type { ActionApprovalMode } from './useActionApprovalMode';
 import type { ComposerMention } from './composerMentions';
+import { useSharedTaskDraft } from './useSharedTaskDraft';
 
 import {
   addStagedAttachments,
@@ -116,7 +117,7 @@ export function useOverlayComposerController({
   suggestionAccepted,
   language,
   onRefreshedPage,
-  restored,
+  fallbackActionId = null,
 }: {
   actions: ComposerActions | undefined;
   initialActionId: string | null;
@@ -124,11 +125,11 @@ export function useOverlayComposerController({
   suggestionAccepted: boolean;
   language: 'en' | 'ja';
   onRefreshedPage: (page: ActionConversationPage) => void;
-  /** The main window's task pane brings back the composer it had when the user left it. */
-  restored?: ComposerState;
+  /** The Action a suggestion's window shows once its approval started one. */
+  fallbackActionId?: string | null;
 }) {
-  const [composer, setComposer] = useState<ComposerState>(
-    () => restored ?? initialComposerState(initialActionId)
+  const [composer, setComposer] = useState<ComposerState>(() =>
+    initialComposerState(initialActionId)
   );
   // These fences belong to the composer lifetime, not to live conversation updates.
   const composerGenerationRef = useRef(0);
@@ -147,25 +148,22 @@ export function useOverlayComposerController({
     // Pending image writes must not cross into a replacement composer.
     composerGenerationRef.current += 1;
   }, [suggestionId, suggestionAccepted, initialActionId]);
-  // The composer as last committed. A scope change replaces it above during render, so the
-  // documents it drops are read from here once the change commits. Documents that went out with
-  // a message or with the approval are the backend's to move, so they are left alone.
-  const committedRef = useRef({ scope, attachments: composer.attachments, sent: false });
-  useEffect(() => {
-    const previous = committedRef.current;
-    const approved =
-      previous.scope.suggestionId === scope.suggestionId &&
-      !previous.scope.suggestionAccepted &&
-      scope.suggestionAccepted;
-    if (previous.scope !== scope && !previous.sent && !approved) {
-      discardDocuments(actions, previous.attachments);
-    }
-    committedRef.current = {
-      scope,
-      attachments: composer.attachments,
-      sent: composer.submission !== null,
-    };
-  });
+  // The conversation this composer writes into, and so the task whose shared draft it shows.
+  const submittedActionId =
+    composer.submission?.request.target.kind === 'existing'
+      ? composer.submission.request.target.action_id
+      : null;
+  const conversationActionId = submittedActionId ?? composer.initialActionId ?? fallbackActionId;
+  useSharedTaskDraft(
+    actions,
+    conversationActionId !== null
+      ? `action:${conversationActionId}`
+      : suggestionId !== null
+        ? `suggestion:${suggestionId}`
+        : null,
+    composer,
+    setComposer
+  );
   const sendRequest = (request: ActionMessageRequest) => {
     if (!actions) return;
     const messageId = request.message.message_id;
@@ -454,6 +452,7 @@ export function useOverlayComposerController({
   };
   return {
     composer,
+    conversationActionId,
     images,
     files,
     canAttach,

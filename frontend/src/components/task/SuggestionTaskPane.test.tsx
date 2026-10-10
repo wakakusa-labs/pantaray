@@ -9,7 +9,7 @@ import type {
   OverlaySnapshotPayload,
 } from '../../../electron/src/orchestration/contracts';
 import { SuggestionTaskPane } from './SuggestionTaskPane';
-import { createTaskComposerDrafts } from './taskComposerDrafts';
+import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 
 type ElectronBridge = NonNullable<Window['electron']>;
 
@@ -85,7 +85,7 @@ const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
 const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
 
-async function renderPane(suggestionId = 'sug-1', drafts = createTaskComposerDrafts(undefined)) {
+async function renderPane(suggestionId = 'sug-1') {
   const rendered = render(
     <UiLanguageProvider initialLanguage="en">
       <SuggestionTaskPane
@@ -94,7 +94,6 @@ async function renderPane(suggestionId = 'sug-1', drafts = createTaskComposerDra
         onStarted={onStarted}
         onShowInChat={onShowInChat}
         onAddProject={() => undefined}
-        drafts={drafts}
       />
     </UiLanguageProvider>
   );
@@ -147,6 +146,7 @@ beforeEach(() => {
         submitMessage,
         attachImage: vi.fn(),
         attachFile: vi.fn(),
+        ...createTaskDraftBridge().window(),
         discardAttachment: vi.fn(async () => undefined),
         readConversationPage: vi.fn(),
       },
@@ -220,43 +220,43 @@ describe('SuggestionTaskPane', () => {
   });
 
   it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {
-    const drafts = createTaskComposerDrafts(undefined);
     const field = () => screen.getByLabelText('Additional instructions (optional)');
-    const first = await renderPane('sug-1', drafts);
+    const first = await renderPane('sug-1');
     fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
     first.unmount();
 
-    const second = await renderPane('sug-1', drafts);
+    const second = await renderPane('sug-1');
     expect(field()).toHaveValue('Use the new unit price');
-    acceptAction.mockReturnValueOnce(new Promise(() => {}));
     fireEvent.click(acceptButton());
+    // The extra instruction went with the approval.
+    await publish(
+      suggestion({ reactionState: 'accepted', actionPhase: 'requesting', lastSequence: 5 })
+    );
     second.unmount();
 
-    await renderPane('sug-1', drafts);
+    await renderPane('sug-1');
     expect(field()).toHaveValue('');
   });
 
   it('keeps a draft when the pane is left while the suggestion loads or after its read failed', async () => {
-    const drafts = createTaskComposerDrafts(undefined);
     const field = () => screen.getByLabelText('Additional instructions (optional)');
-    const first = await renderPane('sug-1', drafts);
+    const first = await renderPane('sug-1');
     fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
     first.unmount();
 
     read.mockReturnValueOnce(new Promise(() => {}));
-    (await renderPane('sug-1', drafts)).unmount();
+    (await renderPane('sug-1')).unmount();
     read.mockRejectedValueOnce(new Error('unavailable'));
-    const failed = await renderPane('sug-1', drafts);
+    const failed = await renderPane('sug-1');
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load this suggestion.');
     failed.unmount();
 
-    await renderPane('sug-1', drafts);
+    await renderPane('sug-1');
     expect(field()).toHaveValue('Use the new unit price');
   });
 
   it('keeps a draft written around a dismissal, since a reply may still follow it', async () => {
-    const drafts = createTaskComposerDrafts(undefined);
-    const first = await renderPane('sug-1', drafts);
+    const first = await renderPane('sug-1');
     fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
       target: { value: 'Only the summary' },
     });
@@ -264,14 +264,14 @@ describe('SuggestionTaskPane', () => {
     first.unmount();
 
     read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
-    const second = await renderPane('sug-1', drafts);
+    const second = await renderPane('sug-1');
     const message = () => screen.getByRole('textbox', { name: 'Message' });
     expect(message()).toHaveValue('Only the summary');
     fireEvent.change(message(), { target: { value: 'Only the summary, please' } });
     second.unmount();
 
     read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
-    await renderPane('sug-1', drafts);
+    await renderPane('sug-1');
     expect(message()).toHaveValue('Only the summary, please');
   });
 

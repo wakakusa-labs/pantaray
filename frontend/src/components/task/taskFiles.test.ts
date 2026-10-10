@@ -50,6 +50,7 @@ describe('deriveTaskFiles', () => {
           '送付メールは pantaray-file:///work/quote/mail.md 、単価表は pantaray-file:///work/quote/rates.xlsx。',
           '図は [chart](pantaray-file:///work/quote/chart.PNG) 、元データは pantaray-file:///work/quote/data.json',
           '要約 pantaray-file:///work/quote/summary.pdf',
+          '差分 pantaray-file:///work/quote/fix.patch と pantaray-file:///work/quote/all.DIFF',
         ].join('\n')
       )
     ).toEqual([
@@ -59,6 +60,8 @@ describe('deriveTaskFiles', () => {
       { name: 'chart.PNG', kind: 'image', label: 'PNG' },
       { name: 'data.json', kind: 'text', label: 'JSON' },
       { name: 'summary.pdf', kind: 'pdf', label: 'PDF' },
+      { name: 'fix.patch', kind: 'diff', label: 'PATCH' },
+      { name: 'all.DIFF', kind: 'diff', label: 'DIFF' },
     ]);
   });
 
@@ -84,7 +87,15 @@ describe('deriveTaskFiles', () => {
 
 describe('offersQuickLook', () => {
   it('leaves Quick Look out only for text the preview already shows', () => {
-    for (const name of ['mail.md', 'page.html', 'run.log', 'rows.csv', 'data.json']) {
+    for (const name of [
+      'mail.md',
+      'page.html',
+      'run.log',
+      'rows.csv',
+      'data.json',
+      'fix.patch',
+      'changes.diff',
+    ]) {
       expect(offersQuickLook(taskFileAt(`/work/${name}`))).toBe(false);
     }
     for (const name of [

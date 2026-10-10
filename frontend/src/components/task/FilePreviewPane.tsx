@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { X } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
@@ -183,6 +183,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
           title={file.path}
           onClick={() => void copyToClipboard(() => file.path)}
         >
+          <Copy size={13} strokeWidth={1.8} aria-hidden />
           <span aria-live="polite">
             {copyStatus === 'copied'
               ? copy.pathCopied

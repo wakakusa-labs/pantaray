@@ -83,12 +83,12 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--border-color-hover);
-  border-radius: 7px;
-  background: transparent;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: var(--surface-bg-hover);
   color: var(--fog-text);
   font-size: 12px;
   cursor: pointer;

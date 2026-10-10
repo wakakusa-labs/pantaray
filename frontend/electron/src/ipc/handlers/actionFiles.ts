@@ -1,6 +1,6 @@
 import fs from 'fs';
 
-import { isDocumentHtmlPath, readDocumentAsHtml } from '../../actions/actionDocumentHtml';
+import { documentHtmlFormat, readDocumentAsHtml } from '../../actions/actionDocumentHtml';
 import {
   openActionFileInApp,
   readActionFile,
@@ -35,9 +35,10 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
     const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:read', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
-    return isDocumentHtmlPath(realPath)
-      ? await readDocumentAsHtml(realPath, ctx.actionFiles.runFile)
-      : readActionFile(realPath);
+    const format = documentHtmlFormat(realPath);
+    return format === null
+      ? readActionFile(realPath)
+      : await readDocumentAsHtml(realPath, format, ctx.actionFiles.runFile);
   });
   registrar.handle('actionFile:openInApp', async (_event, params) => {
     const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:openInApp', params);

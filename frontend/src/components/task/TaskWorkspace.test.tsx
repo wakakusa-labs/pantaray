@@ -261,4 +261,15 @@ describe('TaskWorkspace', () => {
       'ファイルを開けませんでした。'
     );
   });
+
+  it('falls back to Quick Look and the default app when a document will not convert', async () => {
+    read.mockResolvedValue({ kind: 'unavailable', reason: 'conversion_failed' });
+    await renderFinishedTask();
+    fireEvent.click(chip('memo.docx'));
+    expect(await screen.findByText('このファイルはここでは表示できません。')).toBeTruthy();
+    expect(screen.queryByTitle('memo.docx')).toBeNull();
+    // The header's pair and the fallback's pair.
+    expect(screen.getAllByRole('button', { name: 'Quick Look で見る' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'いつものアプリで開く' })).toHaveLength(2);
+  });
 });

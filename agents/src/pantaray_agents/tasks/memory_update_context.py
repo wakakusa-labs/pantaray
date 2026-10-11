@@ -41,6 +41,10 @@ from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
 from pantaray_agents.local_runtime.runtime.fact_identity import (
     load_current_fact_identity,
 )
+from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
+    DismissedSuggestion,
+    read_dismissed_suggestions,
+)
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
 )
@@ -120,6 +124,7 @@ class PreparedMemoryUpdateRun:
             or self.context.activity_summaries
             or self.context.action_turns
             or self.context.chat_messages
+            or self.context.dismissed_suggestions
         )
 
     def base_draft(self, source: MemorySource) -> MemoryDraftCheckpoint:
@@ -194,6 +199,13 @@ def prepare_memory_update_run(
                     after=chat["after_sequence"],
                     through=chat["through_sequence"],
                 )
+            )
+        )
+        dismissed_suggestions = _render_dismissed_suggestions(
+            read_dismissed_suggestions(
+                connection,
+                user_id=user_id,
+                suggestion_ids=tuple(payload.get("dismissed_suggestion_ids", ())),
             )
         )
         workspace_scope.create(
@@ -277,6 +289,7 @@ def prepare_memory_update_run(
         memory_request_ids=tuple(request.request_id for request in memory_requests),
         session_memories=session_memories,
         chat_messages=chat_messages,
+        dismissed_suggestions=dismissed_suggestions,
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
@@ -493,6 +506,22 @@ def _render_chat_messages(messages: tuple[ChatMessage, ...]) -> str:
             f"{content.text}"
         )
     return "\n\n".join(entries)
+
+
+def _render_dismissed_suggestions(
+    suggestions: tuple[DismissedSuggestion, ...],
+) -> str:
+    return "\n\n".join(
+        f"### suggestion {suggestion.suggestion_id} "
+        f"(dismissed {describe_utc_timestamp(suggestion.rejected_at)})\n"
+        f"{suggestion.answer}\n\nDismissed"
+        + (
+            ""
+            if suggestion.dismiss_reason is None
+            else f", the user's reason: {suggestion.dismiss_reason}"
+        )
+        for suggestion in suggestions
+    )
 
 
 def _render_short_insights(

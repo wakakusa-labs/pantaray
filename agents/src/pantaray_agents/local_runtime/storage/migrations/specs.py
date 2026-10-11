@@ -143,6 +143,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0125_workspace_folders_in_projects.sql",
         "0126_action_withdrawn_messages.sql",
         "0127_suggestion_dismiss_reason.sql",
+        "0128_memory_dismissal_cursors.sql",
     )
     return tuple(
         MigrationSpec(

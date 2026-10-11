@@ -97,6 +97,7 @@ export function HistoryProjectOrganizationDialog({
       >
         <input
           type="text"
+          className="history-filter-input"
           value={newName}
           aria-label={t('history.projects.organizationNew')}
           placeholder={t('history.projects.organizationNew')}

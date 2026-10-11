@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ChevronDown, ChevronRight, GripVertical, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderOpen, GripVertical, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import type { useI18n } from '@/context/useI18n';
@@ -37,6 +37,7 @@ export function HistoryProjectRow({
   onRemoveFolder,
   isFolderPending,
   onAddFolder,
+  onOpenFolder,
   initiallyExpanded,
 }: {
   project: WorkspaceProject;
@@ -53,11 +54,14 @@ export function HistoryProjectRow({
   onRemoveFolder: (folderId: string) => Promise<boolean>;
   /** A folder being added or removed elsewhere cannot be removed until that settles. */
   isFolderPending: (folderId: string) => boolean;
+  onOpenFolder: (folderId: string) => void;
   onAddFolder: () => void;
   /** A project just created opens on its empty folder list, with its add button focused. */
   initiallyExpanded: boolean;
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
+  // The folder whose whole path is shown, wrapped, instead of cut to the line.
+  const [fullPathId, setFullPathId] = useState<string | null>(null);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
     useSortable({ id: project.project_id, disabled: dragDisabled });
   const detailsId = `history-project-details:${project.project_id}`;
@@ -134,14 +138,33 @@ export function HistoryProjectRow({
             const [pathStart, pathEnd] = splitPathForMiddleEllipsis(folder.real_path);
             return (
               <li key={folder.folder_id} className="history-project__folder">
-                <span className="history-project__path" title={folder.real_path}>
+                <button
+                  type="button"
+                  className="history-project__path"
+                  // The two halves are drawn apart; the whole path is what the button is.
+                  aria-label={folder.real_path}
+                  title={folder.real_path}
+                  aria-expanded={fullPathId === folder.folder_id}
+                  onClick={() =>
+                    setFullPathId((shown) => (shown === folder.folder_id ? null : folder.folder_id))
+                  }
+                >
                   <span className="history-project__path-start">{pathStart}</span>
                   <span className="history-project__path-end">{pathEnd}</span>
-                </span>
+                </button>
+                <button
+                  type="button"
+                  className="history-project__folder-action"
+                  aria-label={t('history.projects.openInFinder')}
+                  title={t('history.projects.openInFinder')}
+                  onClick={() => onOpenFolder(folder.folder_id)}
+                >
+                  <FolderOpen size={13} aria-hidden="true" />
+                </button>
                 <button
                   type="button"
                   id={folderRemoveId(project.project_id, folder.folder_id)}
-                  className="history-project__folder-remove"
+                  className="history-project__folder-action"
                   aria-label={t('history.projects.removeFolder', { name: folder.display_name })}
                   title={t('history.projects.removeFolder', { name: folder.display_name })}
                   aria-busy={isFolderPending(folder.folder_id)}
@@ -208,7 +231,7 @@ export function ProjectNameField({
   return (
     <input
       type="text"
-      className="history-project__rename"
+      className="history-filter-input history-project__rename"
       aria-label={label}
       placeholder={label}
       value={name}

@@ -99,7 +99,6 @@ export function HistoryProjects({
   const foldersOf = (projectId: string) =>
     (settings?.folders ?? []).filter((folder) => folder.project_ids.includes(projectId));
   const menuItems = (project: WorkspaceProject) => {
-    const firstFolder = foldersOf(project.project_id)[0];
     return [
       { label: t('history.projects.rename'), onSelect: () => setRenamingId(project.project_id) },
       {
@@ -109,11 +108,6 @@ export function HistoryProjects({
       {
         label: t('history.projects.setOrganization'),
         onSelect: () => setDialog({ kind: 'organizations', project }),
-      },
-      {
-        label: t('history.projects.openInFinder'),
-        disabled: !firstFolder,
-        onSelect: () => firstFolder && void projects.openFolder(firstFolder.folder_id),
       },
       { label: t('common.delete'), onSelect: () => setDialog({ kind: 'delete', project }) },
     ];
@@ -184,6 +178,7 @@ export function HistoryProjects({
                   }
                   isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
                   onAddFolder={() => void projects.addFolderToProject(project.project_id)}
+                  onOpenFolder={(folderId) => void projects.openFolder(folderId)}
                   initiallyExpanded={createdId === project.project_id}
                 />
               ))}

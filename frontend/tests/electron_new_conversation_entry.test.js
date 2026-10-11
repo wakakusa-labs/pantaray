@@ -22,6 +22,8 @@ function createOverlayOwnerHarness() {
     destroyed: [],
     bindings: [],
     refreshed: [],
+    refreshOutcome: Promise.resolve('refreshed'),
+    revealed: [],
     associations: new Map(),
     openWindows: new Set(),
     openResult: 'created',
@@ -54,7 +56,11 @@ function createOverlayOwnerHarness() {
     },
     resolveOverlayIdForAction: (actionId) => state.associations.get(actionId) ?? null,
     hasOverlayWindow: (overlayId) => state.openWindows.has(overlayId),
-    refreshAndResumeConversation: (actionId) => state.refreshed.push(actionId),
+    refreshAndResumeConversation: (actionId) => {
+      state.refreshed.push(actionId);
+      return state.refreshOutcome;
+    },
+    revealOverlay: (overlayId) => state.revealed.push(overlayId),
     holdsCaptureOsPermissions: () => state.holdsCaptureOsPermissions,
     presentRecordingIntro: () => state.introPresentedCount++,
   });
@@ -118,6 +124,38 @@ test('history conversation overlay binds its Action before opening and refreshin
   state.runtimeState = { status: 'syncing', message: null, owner: null };
   assert.equal(owner.openActionConversationOverlay('action-3'), 'initializing');
   assert.deepEqual(state.refreshed, ['action-1', 'action-2']);
+});
+
+test('an Action conversation window is revealed by main only when its conversation was not read', async () => {
+  const { owner, state } = createOverlayOwnerHarness();
+  state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  // A read conversation reaches the window, which shows itself once it is laid out.
+  owner.openActionConversationOverlay('action-1');
+  await settle();
+  assert.deepEqual(state.revealed, []);
+
+  for (const outcome of [Promise.resolve('failed'), Promise.resolve('superseded')]) {
+    state.refreshOutcome = outcome;
+    owner.openActionConversationOverlay('action-2');
+  }
+  state.refreshOutcome = Promise.reject(new Error('read failed'));
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args);
+  try {
+    owner.openActionConversationOverlay('action-3');
+    await settle();
+  } finally {
+    console.error = originalError;
+  }
+  assert.deepEqual(state.revealed, [
+    'conversation:action-2',
+    'conversation:action-2',
+    'conversation:action-3',
+  ]);
+  assert.equal(logged.length, 1);
 });
 
 test('a standalone Overlay that already holds the Action is reused instead of duplicated', () => {

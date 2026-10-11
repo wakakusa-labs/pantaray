@@ -413,7 +413,8 @@ declare global {
           fromStart?: boolean;
         }) => void;
         close: () => Promise<unknown>;
-        resize: (height: number) => Promise<unknown>;
+        /** `settled`: the content is laid out at this height, so a window waiting for it may show. */
+        resize: (height: number, options: { settled: boolean }) => void;
         onSnapshot?: (
           func: (payload: ElectronOverlaySnapshotPayload) => void
         ) => (() => void) | undefined;

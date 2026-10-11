@@ -68,8 +68,10 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       onSnapshot: snapshotChannel.subscribe,
       resize: (height, options) => {
         if (!isValidSendChannel('resize-notification-window')) return;
-        const payload = options?.id ? { id: String(options.id), height } : height;
-        ipcRenderer.send('resize-notification-window', payload);
+        ipcRenderer.send('resize-notification-window', {
+          height,
+          settled: options?.settled === true,
+        });
       },
       acceptAction: (data) => ipcRenderer.send('notification-action-accept', data),
       submitApprovalDecision: (payload) => {

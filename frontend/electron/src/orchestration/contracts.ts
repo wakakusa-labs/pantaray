@@ -148,6 +148,7 @@ export type NotificationWindowApi = {
     overlayId: string,
     actionId: string | null
   ) => 'created' | 'loading' | 'focused';
+  revealOverlayWindow: (overlayId: string) => void;
   hasOverlayWindow: (overlayId: string) => boolean;
   destroyOverlayWindow: (overlayId: string) => void;
   dispatchEventToOverlay: (channel: string, payload: unknown) => boolean;

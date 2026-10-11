@@ -471,6 +471,51 @@ describe('AgentOverlay broader E2E', () => {
     await waitFor(() => expect(resizeOverlay.mock.lastCall?.[0]).toBeGreaterThan(500));
   });
 
+  it('reports a settled height only once the conversation it opened for is laid out', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      // Before the conversation arrives, the body holds only its retry, short enough to collapse.
+      const conversation = this.textContent?.includes('canonical final output');
+      const height = this.parentElement?.hasAttribute('data-overlay-scroll')
+        ? conversation
+          ? 800
+          : 10
+        : this.hasAttribute('data-overlay-scroll')
+          ? conversation
+            ? 64
+            : 10
+          : 40;
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: height,
+        right: 400,
+        width: 400,
+        height,
+      } as DOMRect;
+    });
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
+      </UiLanguageProvider>
+    );
+    // Main keeps the window hidden until a settled height: before the conversation, it is a
+    // collapsed header that would expand in front of the user.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument());
+    // The collapsed panel is measured too, and the conversation then arrives while it is collapsed.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(resizeOverlay.mock.calls.some(([, options]) => options?.settled === true)).toBe(false);
+
+    await act(async () => conversationListener?.(createConversationUpdate()));
+    await waitFor(() => expect(resizeOverlay.mock.lastCall?.[1]).toEqual({ settled: true }));
+    const settled = resizeOverlay.mock.calls.find(([, options]) => options?.settled === true);
+    expect(settled?.[0]).toBeGreaterThan(500);
+    expect(screen.getByRole('button', { name: 'Collapse' })).toBeInTheDocument();
+  });
+
   describe('conversation copy', () => {
     /** One turn of a page chain: the newest page is `cursor: null`, each points to the next older. */
     const turn = (index: number, sequence: number, nextCursor: string | null) => {
@@ -962,7 +1007,7 @@ describe('AgentOverlay broader E2E', () => {
     await waitFor(() => {
       expect(observeOverlaySize).toHaveBeenCalled();
       // header + 会話本文 + composer の 3 ブロック（各 200px モック）+ action バッファ 32px。
-      expect(resizeOverlay).toHaveBeenCalledWith(632);
+      expect(resizeOverlay).toHaveBeenCalledWith(632, { settled: true });
     });
     computedStyleSpy.mockRestore();
     const outsideFocus = screen.getByRole('button', { name: 'Outside focus' });

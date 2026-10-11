@@ -10,7 +10,7 @@
 
 import type { BrowserWindow } from 'electron';
 
-import type { ActionConversationPage } from '../actions/actionContracts';
+import type { ActionLatestPages } from '../actions/actionLatestPageReader';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
@@ -128,7 +128,7 @@ export function createOrchestrationManager(params: {
   getOwnerId: () => string | null;
   getRuntimeState: () => LocalRuntimeState;
   getUiLanguage: () => 'en' | 'ja';
-  readLatestActionConversationPage: (actionId: string) => Promise<ActionConversationPage>;
+  latestActionPages: ActionLatestPages;
   /** Answers a screen capture request; absent means no desktop capture support. */
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
   onStatus?: (payload: OrchestrationStatusPayload) => void;
@@ -137,7 +137,7 @@ export function createOrchestrationManager(params: {
 }): OrchestrationManager {
   const notificationWindow = params.notificationWindow;
   if (
-    typeof params.readLatestActionConversationPage !== 'function' ||
+    typeof params.latestActionPages?.read !== 'function' ||
     typeof notificationWindow.resolveOverlayId !== 'function'
   ) {
     throw new Error('Action conversation read and Overlay target resolution are required');
@@ -494,7 +494,7 @@ export function createOrchestrationManager(params: {
   const rendererBridge = createOrchestrationRendererBridge({
     notificationWindow,
     getMainWindow: () => params.getMainWindow(),
-    readLatestActionConversationPage: params.readLatestActionConversationPage,
+    latestActionPages: params.latestActionPages,
     sendFromRenderer,
     requestResume: (request) => {
       // An internal refresh may finish after owner loss; its resume is obsolete.

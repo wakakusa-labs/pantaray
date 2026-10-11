@@ -61,7 +61,6 @@ from pantaray_agents.schema.websocket import (
     RejectSuggestionMessage,
     ResumeSessionMessage,
     SessionStartedMessage,
-    StopProcessMessage,
 )
 from pantaray_agents.tasks.chat_turns import request_chat_turn
 from pantaray_agents.utils.public_error import (
@@ -348,11 +347,6 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
                 return
             await handler.handle_dismiss(payload.suggestion_id, reason=payload.reason)
 
-        async def _handle_stop(data: dict) -> None:
-            payload = StopProcessMessage(**data)
-            # STOP はプロセス種別に応じて handler 側で完了イベント送信有無を制御する。
-            await handler.handle_stop_process(payload.process_id)
-
         async def _dispatch(event: str, data: dict) -> None:
             if event == InboundEvent.EXECUTE_ACTION.value:
                 await handler.execute_action(ExecuteActionMessage(**data))
@@ -365,9 +359,6 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
                 return
             if event == InboundEvent.RESUME_SESSION.value:
                 await _handle_resume_session(data)
-                return
-            if event == InboundEvent.STOP_PROCESS.value:
-                await _handle_stop(data)
                 return
             if event == InboundEvent.ACK_EVENT.value:
                 await handler.handle_ack(AckEventMessage(**data))

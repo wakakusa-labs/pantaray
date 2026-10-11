@@ -37,7 +37,6 @@ export type {
   ResumeSessionClientEvent,
   SessionExpiredEvent,
   SessionResumedEvent,
-  StopProcessClientEvent,
   SuggestionChunkEvent,
   SuggestionInteractionContract,
   SuggestionIdentityMeta,

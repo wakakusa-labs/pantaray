@@ -40,7 +40,6 @@ from .websocket import (
     ProcessCompletedMessage,
     ProcessStartedMessage,
     RejectSuggestionMessage,
-    StopProcessMessage,
     SuggestionChunkMessage,
     SuggestionReactionCommittedMessage,
 )
@@ -76,7 +75,6 @@ __all__ = [
     "ExecuteActionMessage",
     "DismissSuggestionMessage",
     "RejectSuggestionMessage",
-    "StopProcessMessage",
     "ProcessStartedMessage",
     "SuggestionChunkMessage",
     "SuggestionReactionCommittedMessage",

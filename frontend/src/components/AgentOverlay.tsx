@@ -23,6 +23,7 @@ import type {
 import { createActionToolOutputLoader } from '../../electron/src/actions/actionToolOutputLoader';
 import { useActionApprovalDecisionController } from './agent-overlay/useActionApprovalDecisionController';
 import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
+import { actionStopTarget, useActionStop } from './agent-overlay/useActionStop';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
@@ -305,17 +306,12 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     showBusyIndicator &&
     !latestRunOutcomeShown &&
     !currentRunLines.some((line) => line.kind === 'tool');
-  const stopProcessId = lifecycle
-    ? lifecycle.status === 'processing'
-      ? lifecycle.processId
-      : null
-    : canonicalPage === null
-      ? state.currentProcessId
-      : canonicalStatus === 'queued' || canonicalStatus === 'processing'
-        ? canonicalPage.action.latest_run_id
-        : null;
-  const canStop =
-    approvalUiState === 'hidden' && actionStatus === 'processing' && Boolean(stopProcessId);
+  const stopProcessId = actionStopTarget(lifecycle, canonicalPage, state.currentProcessId);
+  const { stopShown, stopState, stop } = useActionStop({
+    actionId: conversationActionId,
+    stopTarget: stopProcessId,
+    running: approvalUiState === 'hidden' && actionStatus === 'processing',
+  });
   // 提案オーバーレイから新規会話を始められるのは、開始経路を持たないコメントのみの提案か
   // 見送った提案で、まだアクションも要求も存在しないときだけ。どちらも execute_action では
   // 始まらないため、提案を最初のアシスタント発言とする新規会話として開始する。
@@ -345,7 +341,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const composerAction: 'send' | 'stop' | 'resume' =
     composer.draft.trim() !== ''
       ? 'send'
-      : canStop
+      : stopShown
         ? 'stop'
         : !lifecycle && canonicalPage?.action.resumable === true
           ? 'resume'
@@ -440,7 +436,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       controlRef={submissionControlRef}
       onRetry={retrySubmission}
       onRefresh={(button) => void refreshSubmission(button)}
-      onStop={canStop ? () => ctrl.onStop(stopProcessId ?? undefined) : undefined}
+      onStop={stopShown ? stop : undefined}
+      stopState={stopState}
     />
   ) : null;
   const canAcceptSuggestion =
@@ -511,6 +508,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           !composer.submission && hasWords && composer.attachmentsInFlight === 0 && permissionsReady
         }
         resumeFailed={composer.resume?.state === 'failed'}
+        stopState={stopState}
         sendSuperseded={composer.failureKind === 'superseded'}
         canResume={
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
@@ -521,14 +519,14 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         onAttachFiles={(files) => void attachFiles(files)}
         onRemoveAttachment={removeAttachment}
         onSubmit={sendDraft}
-        onStop={() => ctrl.onStop(stopProcessId ?? undefined)}
+        onStop={stop}
         onResume={() => {
           if (permissionsReady) requestResume(visiblePages);
         }}
       />
-    ) : toolOutputLoader && !operationalError && canStop ? (
+    ) : toolOutputLoader && !operationalError && stopShown ? (
       <ComposerSubmissionRow>
-        <ComposerStopButton onStop={() => ctrl.onStop(stopProcessId ?? undefined)} />
+        <ComposerStopButton onStop={stop} stopping={stopState === 'stopping'} />
       </ComposerSubmissionRow>
     ) : null;
 

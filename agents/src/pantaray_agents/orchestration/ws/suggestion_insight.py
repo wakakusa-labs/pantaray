@@ -139,7 +139,7 @@ class SuggestionInsightMixin:
         # 完了を届けるので、再開側では改めて追わない。
         already_relayed = process_id in self._relayed_suggestion_processes
         self.mark_suggestion_process_relayed(process_id)
-        # 再開後の stop_process / ack_event 整合のため、現在セッションへプロセスメタを同期する
+        # 再開後の ack_event 整合のため、現在セッションへプロセスメタを同期する
         try:
             self._sync_process_metadata_to_current_session(
                 process_id,

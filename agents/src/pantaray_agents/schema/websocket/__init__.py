@@ -6,7 +6,6 @@ from .client_messages import (
     ExecuteActionMessage,
     RejectSuggestionMessage,
     ResumeSessionMessage,
-    StopProcessMessage,
 )
 from .server_messages import (
     CompletionChunkMessage,
@@ -26,7 +25,6 @@ __all__ = [
     "ResumeSessionMessage",
     "DismissSuggestionMessage",
     "RejectSuggestionMessage",
-    "StopProcessMessage",
     "AckEventMessage",
     # Server -> Client Messages
     "ProcessStartedMessage",

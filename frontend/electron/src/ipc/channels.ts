@@ -10,7 +10,6 @@ export const validSendChannels = [
   'resize-notification-window',
   'notification-action-accept',
   'notification-hide',
-  'notification-stop-action',
   'overlay:recordInteraction',
   'overlay:dragStart',
   'overlay:dragMove',
@@ -107,7 +106,7 @@ export const validInvokeChannels = [
   'action:withdrawMessage',
   // Main window: show an Action in place (refresh and live resume, no window)
   'action:openConversation',
-  // Main window: stop the run its task pane shows
+  // Both windows: stop the run they show
   'action:stop',
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',

@@ -32,7 +32,6 @@ export type AgentOverlayController = {
   openTask: (actionId: string) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed: boolean;
-  onStop: (processId?: string) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,7 +75,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   // 最新値参照用（stale closure回避）
   const suggestionIdRef = useRef<string | null>(null);
-  const processIdRef = useRef<string | null>(null);
   const reactionStateRef = useRef<'accepted' | 'rejected' | null>(null);
   const interactionContractRef = useRef<'action_offer' | 'message_only' | null>(null);
   const decisionLockedRef = useRef<boolean>(false);
@@ -86,7 +84,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   useEffect(() => {
     suggestionIdRef.current = state.suggestionId;
-    processIdRef.current = state.currentProcessId;
     reactionStateRef.current = state.reactionState;
     interactionContractRef.current = state.interactionContract;
     decisionLockedRef.current = state.decisionLocked;
@@ -395,18 +392,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, []);
 
-  const onStop = useCallback((processId?: string) => {
-    try {
-      window.electron?.agentOverlay?.stopAction();
-    } catch {
-      // no-op
-    }
-    const pid = processId ?? processIdRef.current;
-    if (pid) {
-      window.electron?.orchestration?.send({ event: 'stop_process', data: { process_id: pid } });
-    }
-  }, []);
-
   return {
     state,
     headerRef,
@@ -423,6 +408,5 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     openTask,
     openTaskFailed:
       openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,
-    onStop,
   };
 }

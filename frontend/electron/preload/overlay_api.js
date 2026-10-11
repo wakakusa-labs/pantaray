@@ -107,11 +107,6 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       hide: () => {
         if (isValidSendChannel('notification-hide')) ipcRenderer.send('notification-hide');
       },
-      stopAction: () => {
-        if (isValidSendChannel('notification-stop-action')) {
-          ipcRenderer.send('notification-stop-action');
-        }
-      },
     },
   };
 }

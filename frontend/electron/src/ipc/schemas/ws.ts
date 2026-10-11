@@ -48,13 +48,6 @@ const RejectSuggestionSchema = z.object({
   }),
 });
 
-const StopProcessSchema = z.object({
-  event: z.literal('stop_process'),
-  data: z.object({
-    process_id: IdString,
-  }),
-});
-
 const ResumeProcessSchema = z.object({
   event: z.literal('resume_process'),
   data: z.object({
@@ -97,7 +90,6 @@ const AckEventSchema = z.object({
 export const OrchestrationClientEventSchema = z.discriminatedUnion('event', [
   DismissSuggestionSchema,
   RejectSuggestionSchema,
-  StopProcessSchema,
   ResumeProcessSchema,
   ResumeSessionSchema,
   AckEventSchema,

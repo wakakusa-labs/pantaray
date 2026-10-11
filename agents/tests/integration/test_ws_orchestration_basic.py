@@ -171,34 +171,3 @@ def test_dismiss_with_a_reason_records_it_and_starts_nothing(ws_app_harness) -> 
             and (msg.get("data") or {}).get("kind") == "action"
             for msg in msgs + more
         )
-
-
-def test_stop_process_cancels_stream(ws_app_harness) -> None:
-    from pantaray_agents.schema.events import OutboundEvent
-
-    user_id = "user_test"
-    with _ws_connect(ws_app_harness, user_id=user_id) as ws:
-        _ = _receive_ws_json(ws, timeout_s=2.0)
-
-        start_relayed_suggestion(ws_app_harness, user_id=user_id, terminal=False)
-
-        started = None
-        for _ in range(10):
-            msg = _receive_ws_json(ws, timeout_s=2.0)
-            if msg.get("event") == OutboundEvent.PROCESS_STARTED.value:
-                started = msg
-                break
-        assert started is not None
-        process_id = started.get("data", {}).get("process_id")
-        assert process_id
-
-        _send_ws(ws, "stop_process", {"process_id": process_id})
-
-        msgs = _drain_until(ws, {OutboundEvent.PROCESS_COMPLETED.value}, timeout_s=5.0)
-        completed = [
-            msg
-            for msg in msgs
-            if msg.get("event") == OutboundEvent.PROCESS_COMPLETED.value
-        ]
-        assert completed, f"No process_completed in {msgs}"
-        assert completed[-1].get("data", {}).get("status") == "canceled"

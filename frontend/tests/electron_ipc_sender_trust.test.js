@@ -96,6 +96,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:submitMessage',
     'action:resume',
     'action:withdrawMessage',
+    'action:stop',
     'overlay:submitApprovalDecision',
     'overlay:getActionApprovalMode',
     'overlay:setActionApprovalMode',
@@ -113,7 +114,6 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
   }
   for (const channel of [
     'action:openConversation',
-    'action:stop',
     'suggestion:read',
     // Reads and opens workspace files: the main window's preview only.
     'actionFile:read',

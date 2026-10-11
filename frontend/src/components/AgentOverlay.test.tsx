@@ -1525,7 +1525,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(acceptAction).not.toHaveBeenCalled();
   });
 
-  it('dismisses with the words as the reason, keeps the panel to show it, and starts nothing', async () => {
+  it('dismisses with the words as the reason, closes the panel once recorded, and starts nothing', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -1557,6 +1557,7 @@ describe('AgentOverlay broader E2E', () => {
     });
     expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Dismiss suggestion' })).toBeDisabled();
+    expect(hideOverlay).not.toHaveBeenCalled();
     await act(async () =>
       eventListener?.({
         event: 'suggestion_reaction_committed',
@@ -1580,6 +1581,97 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage).not.toHaveBeenCalled();
     expect(acceptAction).not.toHaveBeenCalled();
     expect(sendOrchestration).toHaveBeenCalledTimes(1);
+    expect(hideOverlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the panel when a dismissal with words is not recorded', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const offer = createCommentOnlySnapshot();
+    Object.assign(offer.snapshot, {
+      suggestionId: 'sug-offer',
+      interactionContract: 'action_offer',
+    });
+    await act(async () => snapshotListener?.(offer));
+    const field = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
+    fireEvent.change(field, { target: { value: 'Too long to read' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
+    await act(async () =>
+      eventListener?.({
+        event: 'error',
+        data: {
+          error_type: 'internal_error',
+          error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+          error_message: 'Failed to persist suggestion state.',
+          severity: 'error',
+        },
+        meta: {
+          kind: 'suggestion',
+          suggestion_id: 'sug-offer',
+          stage: 'dismiss',
+          error_code: 'WS_DEPENDENCY_UNAVAILABLE',
+        },
+        sequence: 4,
+      })
+    );
+
+    expect(hideOverlay).not.toHaveBeenCalled();
+    expect(screen.queryByText('Dismissed')).toBeNull();
+    expect(field).toHaveValue('Too long to read');
+  });
+
+  it('stays open when the suggestion it shows is dismissed in the main window', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const offer = createCommentOnlySnapshot();
+    Object.assign(offer.snapshot, {
+      suggestionId: 'sug-offer',
+      interactionContract: 'action_offer',
+    });
+    await act(async () => snapshotListener?.(offer));
+    // The main window's pane dismisses the suggestion this panel shows.
+    await act(async () =>
+      eventListener?.({
+        event: 'suggestion_reaction_committed',
+        data: {
+          suggestion_id: 'sug-offer',
+          reaction: 'rejected',
+          committed_at: '2026-03-08T00:00:01Z',
+          reason: 'Too long to read',
+        },
+        meta: { suggestion_id: 'sug-offer' },
+        sequence: 4,
+      })
+    );
+    expect(screen.getByText('Dismissed')).toBeInTheDocument();
+    expect(hideOverlay).not.toHaveBeenCalled();
+  });
+
+  it('stays open for a dismissed suggestion opened small from the main window', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const dismissed = createCommentOnlySnapshot();
+    Object.assign(dismissed.snapshot, {
+      suggestionId: 'sug-dismissed',
+      interactionContract: 'action_offer',
+      reactionState: 'rejected',
+      dismissReason: 'Not now',
+      isLive: false,
+    });
+    await act(async () => snapshotListener?.(dismissed));
+    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
+      'Not now'
+    );
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
     expect(hideOverlay).not.toHaveBeenCalled();
   });
 

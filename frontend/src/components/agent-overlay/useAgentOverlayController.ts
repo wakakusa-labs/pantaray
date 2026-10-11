@@ -74,7 +74,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
     suggestionId: string | null;
   } | null>(null);
-  // A suggestion dismissed here without words, whose panel closes once the dismissal is recorded.
+  // A suggestion dismissed here, whose panel closes once the dismissal is recorded.
   const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
@@ -340,7 +340,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  // A decided suggestion keeps no panel; one dismissed with a reason stays to show it.
+  // A suggestion dismissed here keeps no panel, reason or not; a dismissal that is not recorded
+  // keeps it. One opened already dismissed is not closed: only dismissing here closes it.
   useEffect(() => {
     const dismissed = closeAfterDismissalRef.current;
     if (dismissed === null) return;
@@ -356,7 +357,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     dispatch({ type: 'SET_DECISION_LOCKED', value: true });
     const sid = suggestionIdRef.current;
     if (sid) {
-      if (reason === null) closeAfterDismissalRef.current = sid;
+      closeAfterDismissalRef.current = sid;
       window.electron?.orchestration?.send({
         event: 'dismiss_suggestion',
         data: reason === null ? { suggestion_id: sid } : { suggestion_id: sid, reason },

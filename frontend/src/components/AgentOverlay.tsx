@@ -330,8 +330,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         state.isSuggestionStreamFinished &&
         state.currentActionId === null &&
         state.requestState === 'idle'));
-  // A reply to a message-only suggestion opens on request. After a dismissal the composer stays
-  // open, to say why or to ask for something else.
+  // A reply to a message-only suggestion opens on request. A dismissed offer opened here shows the
+  // composer at once, to ask for something else.
   const startsReply = entryMode === 'overlay' && canStartConversation;
   const answersDismissal = startsReply && state.reactionState === 'rejected';
   const canCompose = Boolean(

@@ -7,6 +7,7 @@ const { loadRuntimeConfig } = require('./runtime_config');
 const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap');
 const { buildContentSecurityPolicy } = require('./content_security_policy');
 const { PANTARAY_ACCOUNT_LOGIN_ENABLED } = require('./dist/auth/accountLoginFeature');
+const { keepWindowOnItsDocument } = require('./dist/security/windowOpenPolicy');
 
 const BROWSER_WINDOW_EINTR_RETRY_LIMIT = 8;
 const WINDOW_STARTUP_STEP_EINTR_RETRY_LIMIT = 8;
@@ -102,6 +103,12 @@ function setupWindowEventListeners(win) {
     'csp-listener',
     () => {
       win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        // The window's policy forbids being framed; a previewed PDF is framed by design and
+        // carries no script of the app's.
+        if (details.url.startsWith('pantaray-action-file:')) {
+          callback({});
+          return;
+        }
         const isDev = isDevRuntime();
         let apiOrigin = null;
         if (!isDev) {
@@ -221,9 +228,7 @@ function waitForWindowLoad(win, url, timeoutMs = DEV_WINDOW_LOAD_TIMEOUT_MS) {
 
     const onFail = (_event, errorCode, errorDescription, validatedURL) => {
       rejectOnce(
-        new Error(
-          `Window load failed: ${validatedURL || url} (${errorCode}: ${errorDescription})`
-        )
+        new Error(`Window load failed: ${validatedURL || url} (${errorCode}: ${errorDescription})`)
       );
     };
 
@@ -256,10 +261,7 @@ function reportDevWindowLoadFailure(error, finalUrl) {
     error: message,
   });
   try {
-    dialog.showErrorBox(
-      '起動エラー',
-      `開発用フロントエンドを読み込めませんでした。\n\n${message}`
-    );
+    dialog.showErrorBox('起動エラー', `開発用フロントエンドを読み込めませんでした。\n\n${message}`);
   } catch {}
 }
 
@@ -326,13 +328,15 @@ function runWindowStartupStepWithRetry(name, fn, options = {}) {
 
 function createMainWindow(options = {}) {
   const isDev = isDevRuntime();
-  const hashRoute = '/';
+  // A window opened to show something starts on it, e.g. "/history?item=action:<id>".
+  const hashRoute = options.hashRoute ?? '/';
 
   const win = createBrowserWindowWithRetry({
-    width: 1000,
-    height: 700,
-    minWidth: 800,
-    minHeight: 600,
+    // Room for the rail, the History sidebar and a readable detail column.
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
     frame: true,
     transparent: false,
     // The middle stop of the renderer's fog ground (index.css --app-background), so the
@@ -350,6 +354,8 @@ function createMainWindow(options = {}) {
       contextIsolation: true,
       sandbox: true,
       webviewTag: false,
+      // Chromium's PDF viewer, the only plugin, draws a previewed PDF.
+      plugins: true,
       additionalArguments: buildUiLanguageAdditionalArguments(options.initialUiLanguage),
       // 配布版は devtools を開けない（ログ/内部情報の露出を防ぐ）
       devTools: isDev,
@@ -364,6 +370,8 @@ function createMainWindow(options = {}) {
   });
 
   runWindowStartupStepWithRetry('center', () => win.center(), { optional: true });
+  // Before the first load, so no link in the window can ever replace the app.
+  keepWindowOnItsDocument(win.webContents);
 
   if (isDev) {
     const url = buildFrontendDevOrigin();
@@ -377,6 +385,9 @@ function createMainWindow(options = {}) {
   }
 
   let hasRetried = false;
+  // A window created on a task retries its first load there; once a page has loaded, a failed
+  // later load falls back to the app's start, not to that task again.
+  let retryRoute = hashRoute;
   runWindowStartupStepWithRetry(
     'did-fail-load-listener',
     () => {
@@ -389,7 +400,7 @@ function createMainWindow(options = {}) {
           });
           if (hasRetried) return;
           hasRetried = true;
-          loadPackagedIndex(win, hashRoute);
+          loadPackagedIndex(win, retryRoute);
         }
       });
     },
@@ -400,7 +411,7 @@ function createMainWindow(options = {}) {
     'did-finish-load-listener',
     () => {
       win.webContents.on('did-finish-load', () => {
-        // noop
+        retryRoute = '/';
       });
     },
     { optional: true }

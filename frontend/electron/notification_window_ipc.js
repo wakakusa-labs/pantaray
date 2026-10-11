@@ -50,6 +50,20 @@ function hideSenderWindow(BrowserWindow, windows, event) {
   return true;
 }
 
+/**
+ * The panel that sent this event, held so it can be closed later: the closer hides that exact
+ * window while it is still registered, and nothing at all once it is gone. Unlike a close
+ * button's hide, it never falls back to another panel.
+ */
+function captureSenderOverlay(BrowserWindow, windows, event) {
+  const win = findSenderWindow(BrowserWindow, event);
+  const overlayId = win && !win.isDestroyed() ? windows.findOverlayIdByWindow(win) : null;
+  return () => {
+    if (!overlayId || win.isDestroyed() || windows.getOverlay(overlayId) !== win) return;
+    windows.hide(overlayId);
+  };
+}
+
 function hideLastWindow(windows) {
   const lastOverlayId = windows.getLastOverlayId();
   if (lastOverlayId) windows.hide(lastOverlayId);
@@ -60,30 +74,22 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
     const { refreshActionConversation, resumeLiveProcess, resolveOverlayBootstrap } = options;
 
     return {
+      // `settled` marks the height the renderer's content is laid out at, so a window waiting for
+      // its layout is shown only after it has that size.
       onResizeNotificationWindow: (event, payload) => {
-        const targetId = payload && typeof payload === 'object' ? payload.id : null;
-        const requestedHeight = payload && typeof payload === 'object' ? payload.height : payload;
-        if (targetId) {
-          resizeWindow(screen, windows.getOverlay(String(targetId)), requestedHeight);
-          return;
-        }
-        resizeWindow(screen, findSenderWindow(BrowserWindow, event), requestedHeight);
+        const win = findSenderWindow(BrowserWindow, event);
+        resizeWindow(screen, win, payload?.height);
+        if (payload?.settled !== true || !win) return;
+        const overlayId = windows.findOverlayIdByWindow(win);
+        if (overlayId) windows.reveal(overlayId);
       },
       onNotificationActionAccept: (_event, data) => {
         console.log('Notification Accepted:', data);
       },
-      onNotificationActionReject: (event, data) => {
-        const suggestionId = data?.suggestion_id ? String(data.suggestion_id) : null;
-        if (suggestionId) {
-          windows.hide(suggestionId);
-          return;
-        }
-        if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
-      },
       onNotificationHide: (event) => {
         if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
       },
-      onNotificationStopAction: () => {},
+      captureSenderOverlay: (event) => captureSenderOverlay(BrowserWindow, windows, event),
       onOverlayInteraction: (event) => {
         const win = findSenderWindow(BrowserWindow, event);
         if (!interactions.activationTracker.isOverlayWindow(win)) return;
@@ -93,53 +99,34 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
       onOverlayDragStart: (event, payload) => interactions.dragController.start(event, payload),
       onOverlayDragMove: (event, payload) => interactions.dragController.move(event, payload),
       onOverlayDragEnd: (event) => interactions.dragController.end(event),
-      onHistoryOpenOverlay: (_event, payload) => {
-        void (async () => {
-          if (!payload || typeof payload !== 'object') return;
-          const suggestionId = windows.normalizeId(payload.suggestionId || payload.id);
-          if (!suggestionId) return;
-          if (typeof resolveOverlayBootstrap !== 'function') {
-            throw new Error('resolveOverlayBootstrap is unavailable');
-          }
-          const ownerScope = windows.readOwnerScope();
-          const bootstrap = await resolveOverlayBootstrap(suggestionId);
-          if (!windows.isOwnerScopeCurrent(ownerScope) || !bootstrap) return;
+      // The request is validated at the IPC boundary. It rejects when the suggestion could not
+      // be read or the owner changed meanwhile, so the main window can say it did not open.
+      onHistoryOpenOverlay: async (_event, { suggestionId, initialUiState, fromStart }) => {
+        const ownerScope = windows.readOwnerScope();
+        const bootstrap = await resolveOverlayBootstrap(suggestionId);
+        if (!windows.isOwnerScopeCurrent(ownerScope)) throw new Error('Local owner changed.');
+        if (!bootstrap) throw new Error('Suggestion bootstrap is unavailable.');
 
-          windows.setSnapshot(suggestionId, {
-            snapshot: bootstrap.snapshot,
-            initialUiState:
-              payload.initialUiState && typeof payload.initialUiState === 'object'
-                ? payload.initialUiState
-                : null,
-          });
-          windows.showHistory(suggestionId);
-
-          const actionId = windows.normalizeId(bootstrap.snapshot.actionId);
-          if (actionId) {
-            if (typeof refreshActionConversation !== 'function') {
-              throw new Error('refreshActionConversation is unavailable');
-            }
-            refreshActionConversation(actionId);
-          }
-
-          const liveResume = bootstrap.liveResume;
-          if (
-            liveResume.kind !== 'none' &&
-            liveResume.processId &&
-            typeof resumeLiveProcess === 'function'
-          ) {
-            resumeLiveProcess({
-              kind: liveResume.kind,
-              suggestionId,
-              actionId: liveResume.actionId,
-              commandId: liveResume.commandId,
-              processId: liveResume.processId,
-              fromStart: payload.fromStart !== false,
-            });
-          }
-        })().catch((error) => {
-          console.error('history:openOverlay failed:', error);
+        windows.setSnapshot(suggestionId, {
+          snapshot: bootstrap.snapshot,
+          initialUiState: initialUiState ?? null,
         });
+        windows.showHistory(suggestionId);
+
+        const actionId = windows.normalizeId(bootstrap.snapshot.actionId);
+        if (actionId) refreshActionConversation(actionId);
+
+        const liveResume = bootstrap.liveResume;
+        if (liveResume.kind !== 'none' && liveResume.processId) {
+          resumeLiveProcess({
+            kind: liveResume.kind,
+            suggestionId,
+            actionId: liveResume.actionId,
+            commandId: liveResume.commandId,
+            processId: liveResume.processId,
+            fromStart: fromStart !== false,
+          });
+        }
       },
     };
   };

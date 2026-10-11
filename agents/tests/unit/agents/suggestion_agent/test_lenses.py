@@ -11,11 +11,11 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     LlmToolCallTurn,
 )
 from pantaray_agents.agents.suggestion_agent.lenses import (
-    EXPLORATION_LENS_WEIGHTS,
     LENS_STEP_STRIDE,
+    LENS_WEIGHTS,
+    LENSES_PER_SUGGESTION,
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
-    URGENT_LENSES,
     decide_with_lenses,
     sample_lenses,
 )
@@ -113,17 +113,19 @@ async def _decide(model, steps: list[int]):
     )
 
 
-def test_each_suggestion_samples_two_urgent_lenses_and_one_exploration_lens() -> None:
+def test_each_suggestion_samples_three_distinct_lenses_from_the_whole_pool() -> None:
     rng = random.Random(1)
+    seen: set[str] = set()
     for _ in range(200):
-        first, second, third = sample_lenses(rng)
-        assert {first, second} <= set(URGENT_LENSES) and first != second
-        assert third in EXPLORATION_LENS_WEIGHTS
+        lenses = sample_lenses(rng)
+        assert len(set(lenses)) == LENSES_PER_SUGGESTION
+        seen.update(lenses)
+    assert seen == set(LENS_WEIGHTS)
 
 
 def test_every_sampled_lens_has_a_text() -> None:
     config = PromptLoader().load_config(SUGGESTION_LENS_PROMPT_NAME)
-    assert set(config.role_rules) == {*URGENT_LENSES, *EXPLORATION_LENS_WEIGHTS}
+    assert set(config.role_rules) == set(LENS_WEIGHTS)
 
 
 @pytest.mark.asyncio

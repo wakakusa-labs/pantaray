@@ -26,17 +26,17 @@ from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_MAX_IMAGES,
     ActionMessageId,
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
     bounded_project_refs,
-    require_project_ref_spans,
+    bounded_work_refs,
+    require_ref_spans,
 )
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.conversation_history import ConversationHistoryTimestamp
 
 # A card is drawn with one or two lines under its title.
 CHAT_CARD_SUMMARY_MAX_CODEPOINTS = 500
-# About 1,000 tokens of the final answer go into the chat's context (design 6.4).
-CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS = 4_000
 
 
 def _bounded_text(limit: int) -> StringConstraints:
@@ -47,8 +47,9 @@ def _bounded_text(limit: int) -> StringConstraints:
 # an Action as it is.
 type ChatText = Annotated[str, _bounded_text(ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)]
 type ChatCardSummary = Annotated[str, _bounded_text(CHAT_CARD_SUMMARY_MAX_CODEPOINTS)]
-type ChatActionEventExcerpt = Annotated[
-    str, _bounded_text(CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS)
+# A task's answer reaches the chat whole; the chat's window budget fits it.
+type ChatActionEventAnswer = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
 ]
 # The same attachment contract and limits as an Action USER message.
 type ChatImages = Annotated[
@@ -92,7 +93,13 @@ type ChatCard = Annotated[
 def _project_refs_in_text(
     refs: tuple[ActionProjectRef, ...], info: ValidationInfo
 ) -> tuple[ActionProjectRef, ...]:
-    return require_project_ref_spans(refs, info, text_field="text")
+    return require_ref_spans(refs, info, text_field="text")
+
+
+def _work_refs_in_text(
+    refs: tuple[ActionWorkRef, ...], info: ValidationInfo
+) -> tuple[ActionWorkRef, ...]:
+    return require_ref_spans(refs, info, text_field="text", beside_field="project_refs")
 
 
 class UserMessageContent(_ChatModel):
@@ -101,14 +108,18 @@ class UserMessageContent(_ChatModel):
     quote_item_id: ActionMessageId | None
     images: ChatImages
     files: ChatFiles
-    # Workspace projects named with @, as an Action message names them; after
-    # ``text``, which their spans point into.
+    # Workspace projects named with @, and tasks and suggestions named by their
+    # chips, as an Action message names them; after ``text``, which their spans
+    # point into.
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
 
     _bound_project_refs = field_validator("project_refs", mode="before")(
         bounded_project_refs
     )
+    _bound_work_refs = field_validator("work_refs", mode="before")(bounded_work_refs)
     _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
+    _span_work_refs = field_validator("work_refs")(_work_refs_in_text)
 
 
 class AssistantMessageContent(_ChatModel):
@@ -123,7 +134,8 @@ class ActionEventContent(_ChatModel):
     action_id: ActionMessageId
     event: ChatActionEventKind
     # Only a run that answered has one; a cancel or an approval wait may not.
-    final_answer_excerpt: ChatActionEventExcerpt | None
+    # The whole answer, despite the name, which rows already stored carry.
+    final_answer_excerpt: ChatActionEventAnswer | None
 
 
 class TurnFailureContent(_ChatModel):
@@ -165,15 +177,18 @@ class ChatMessageHttpRequest(_ChatModel):
     images: ChatImages = ()
     files: ChatFiles = ()
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
 
     _bound_project_refs = field_validator("project_refs", mode="before")(
         bounded_project_refs
     )
+    _bound_work_refs = field_validator("work_refs", mode="before")(bounded_work_refs)
     _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
+    _span_work_refs = field_validator("work_refs")(_work_refs_in_text)
 
 
 type ChatMessageRejectedField = Literal[
-    "body", "text", "quote_item_id", "images", "files", "project_refs"
+    "body", "text", "quote_item_id", "images", "files", "project_refs", "work_refs"
 ]
 
 
@@ -213,7 +228,6 @@ class ChatTurnRetryStale(_ChatModel):
 
 
 __all__ = [
-    "CHAT_ACTION_EVENT_EXCERPT_MAX_CODEPOINTS",
     "CHAT_CARD_SUMMARY_MAX_CODEPOINTS",
     "ActionEventContent",
     "AssistantMessageContent",

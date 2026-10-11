@@ -37,8 +37,6 @@ BUSY_TIMEOUT_MS = 5000
 # The live store; a replay writes steps and rows, so it only runs on a copy.
 LIVE_STORE_MARKER = "Application Support"
 UNUSED_PROXY_URL = "https://unused.invalid/v1/llm/proxy"
-# Two urgent lenses and one exploration lens (lenses.sample_lenses).
-LENS_RUNS = 3
 
 
 def _configure_env(*, db: Path, artifact_root: Path, log_dir: Path) -> None:
@@ -81,8 +79,11 @@ def _insights(db: Path, ids: list[str], latest: int) -> list[tuple[str, str]]:
 
 
 def _step_summary(db: Path, suggestion_id: str) -> dict[str, object]:
-    # Lens run i records its steps from i * stride, a value the tree under test sets.
-    from pantaray_agents.agents.suggestion_agent.lenses import LENS_STEP_STRIDE
+    # Lens run i records its steps from i * stride; the tree under test sets both.
+    from pantaray_agents.agents.suggestion_agent.lenses import (
+        LENS_STEP_STRIDE,
+        LENSES_PER_SUGGESTION,
+    )
 
     with sqlite3.connect(db) as connection:
         rows = connection.execute(
@@ -93,12 +94,12 @@ def _step_summary(db: Path, suggestion_id: str) -> dict[str, object]:
         ).fetchall()
     runs = [
         {"turns": 0, "failed_sends": 0, "tool_calls": 0, "tools": Counter()}
-        for _ in range(LENS_RUNS)
+        for _ in range(LENSES_PER_SUGGESTION)
     ]
     selector = None
     for number, kind, status, tool, response in rows:
         index = (number - 1) // LENS_STEP_STRIDE
-        if index >= LENS_RUNS:  # the selector's step, then the writer's
+        if index >= LENSES_PER_SUGGESTION:  # the selector's step, then the writer's
             if response and response.startswith("choice="):
                 selector = response
             continue

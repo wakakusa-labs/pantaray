@@ -23,8 +23,12 @@ import type {
 import { createActionToolOutputLoader } from '../../electron/src/actions/actionToolOutputLoader';
 import { useActionApprovalDecisionController } from './agent-overlay/useActionApprovalDecisionController';
 import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
+import { actionStopTarget, useActionStop } from './agent-overlay/useActionStop';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
+import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
+import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
+import { useClearReasonOnDismissal } from './agent-overlay/useClearReasonOnDismissal';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -42,7 +46,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
 }) => {
   const ctrl = useAgentOverlayController(entryMode === 'standalone');
   const headerDrag = useOverlayHeaderDrag();
-  const { state } = ctrl;
+  const { state, setContentReady } = ctrl;
   const { language, t } = useI18n();
   const actions = window.electron?.actions;
   if (window.electron && !actions) throw new Error('Missing Actions bridge.');
@@ -63,10 +67,11 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   );
   const {
     composer,
+    conversationActionId,
     images,
     files,
     canAttach,
-    projectRefs: supplementProjectRefs,
+    refs: supplementRefs,
     supplement,
     supplementInvalid,
     setComposer,
@@ -75,6 +80,10 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     restoreComposerFocusRef,
     submitDraft,
     requestResume,
+    changeDraft,
+    quoting,
+    clearMessage,
+    hasMessage: hasWords,
     attachFiles,
     removeAttachment,
     refreshSubmission,
@@ -89,6 +98,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       conversation?.update(page);
       setLiveState((current) => (current === liveState ? null : current));
     },
+    fallbackActionId: entryMode === 'overlay' ? state.currentActionId : null,
   });
   const standaloneComposerRef = useRef<HTMLTextAreaElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
@@ -96,14 +106,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     () => (actions ? createActionToolOutputLoader(actions.readToolOutputPage) : null),
     [actions]
   );
-  const submittedActionId =
-    composer.submission?.request.target.kind === 'existing'
-      ? composer.submission.request.target.action_id
-      : null;
-  const conversationActionId =
-    entryMode === 'standalone'
-      ? composer.initialActionId
-      : (submittedActionId ?? composer.initialActionId ?? state.currentActionId);
   const approvalMode = useActionApprovalMode(
     conversationActionId,
     entryMode === 'overlay' ? state.suggestionId : null
@@ -112,15 +114,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
   const approval = useActionApprovalDecisionController({ t });
   const { approvalBlockers, approvalUiState, setApprovalBlockers } = approval;
-  useEffect(() => {
-    if (entryMode === 'standalone') standaloneComposerRef.current?.focus();
-  }, [entryMode]);
-  useEffect(() => {
-    if (entryMode !== 'standalone') return;
-    return window.electron?.ipcRenderer.on('overlay:focusComposer', () => {
-      standaloneComposerRef.current?.focus();
-    });
-  }, [entryMode]);
+  useStandaloneComposerFocus(entryMode === 'standalone', standaloneComposerRef);
   useEffect(() => {
     submissionRefreshScopeRef.current += 1;
     setApprovalBlockers([]);
@@ -186,17 +180,23 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     visiblePages ? transientToolSteps : []
   );
   const currentView = view.action !== null || composer.submission !== null ? view : null;
+  // A message-only suggestion has no start of its own, and a dismissed offer has none left: a
+  // reply to either starts a new conversation that opens with the suggestion.
+  const repliesToSuggestion =
+    state.interactionContract === 'message_only' || state.reactionState === 'rejected';
   const approvedSuggestion = currentView?.action?.approved_suggestion ?? null;
   const suggestionDisplay = {
     suggestionText:
       approvedSuggestion?.content ??
-      (state.interactionContract === 'message_only' && currentView?.action
-        ? ''
-        : state.suggestionText),
+      (repliesToSuggestion && currentView?.action ? '' : state.suggestionText),
     isSuggestionStreamFinished: approvedSuggestion !== null || state.isSuggestionStreamFinished,
     isSuggestionAccepted:
       approvedSuggestion !== null ||
       (state.interactionContract === 'action_offer' && state.reactionState === 'accepted'),
+    dismissal:
+      state.interactionContract === 'action_offer' && state.reactionState === 'rejected'
+        ? { reason: state.dismissReason }
+        : null,
   };
   const canonicalPage =
     paging.currentPage?.action.action_id === conversationActionId ? paging.currentPage : null;
@@ -291,12 +291,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       setComposer((current) => visiblePages.reduce(reconcileCanonicalSubmission, current));
   }, [visiblePages, setComposer]);
   const conversationCopy = useConversationCopy(actions, currentView?.action?.action_id ?? null);
-  const canDecide =
+  // An unanswered offer's composer holds 承認 / 見送る; while one is under way both stay, disabled.
+  const offersDecision =
     state.interactionContract === 'action_offer' &&
     state.reactionState === null &&
-    !state.decisionLocked &&
     Boolean(state.suggestionId) &&
     Boolean(state.suggestionText);
+  const canDecide = offersDecision && !state.decisionLocked;
   const showBusyIndicator =
     approvalUiState === 'hidden' &&
     (lifecycle
@@ -308,20 +309,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     showBusyIndicator &&
     !latestRunOutcomeShown &&
     !currentRunLines.some((line) => line.kind === 'tool');
-  const stopProcessId = lifecycle
-    ? lifecycle.status === 'processing'
-      ? lifecycle.processId
-      : null
-    : canonicalPage === null
-      ? state.currentProcessId
-      : canonicalStatus === 'queued' || canonicalStatus === 'processing'
-        ? canonicalPage.action.latest_run_id
-        : null;
-  const canStop =
-    approvalUiState === 'hidden' && actionStatus === 'processing' && Boolean(stopProcessId);
-  // 提案オーバーレイから新規会話を始められるのは、開始経路を持たないコメントのみの提案で、
-  // まだアクションも要求も存在しないときだけ。コメントのみの提案は execute_action を受け付け
-  // ないため、提案を最初のアシスタント発言とする新規会話として開始する。
+  const stopProcessId = actionStopTarget(lifecycle, canonicalPage, state.currentProcessId);
+  const { stopShown, stopState, stop } = useActionStop({
+    actionId: conversationActionId,
+    stopTarget: stopProcessId,
+    running: approvalUiState === 'hidden' && actionStatus === 'processing',
+  });
+  // 提案オーバーレイから新規会話を始められるのは、開始経路を持たないコメントのみの提案か
+  // 見送った提案で、まだアクションも要求も存在しないときだけ。どちらも execute_action では
+  // 始まらないため、提案を最初のアシスタント発言とする新規会話として開始する。
   // アクションが既にある場合（採用直後の accepted_pending_start / processing / 終了直後で
   // 会話ページがまだ届いていない間を含む）は入力欄を出さない。別アクションを作ってしまうため、
   // ページが届いてから既存会話への追記として送る。
@@ -329,11 +325,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     composer.initialActionId === null &&
     visiblePages === null &&
     (entryMode === 'standalone' ||
-      (state.interactionContract === 'message_only' &&
+      (repliesToSuggestion &&
         Boolean(state.suggestionId) &&
         state.isSuggestionStreamFinished &&
         state.currentActionId === null &&
         state.requestState === 'idle'));
+  // A reply to a message-only suggestion opens on request. A dismissed offer opened here shows the
+  // composer at once, to ask for something else.
+  const startsReply = entryMode === 'overlay' && canStartConversation;
+  const answersDismissal = startsReply && state.reactionState === 'rejected';
   const canCompose = Boolean(
     actions &&
     composer.submission === null &&
@@ -341,16 +341,17 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   );
   // 入力欄の主ボタンが今どの操作なのか。書きかけがあれば送信、なければ動いている
   // ものを止めるか、直前に止めたものを再開する。
-  const composerAction: 'send' | 'stop' | 'resume' =
-    composer.draft.trim() !== ''
-      ? 'send'
-      : canStop
-        ? 'stop'
-        : !lifecycle && canonicalPage?.action.resumable === true
-          ? 'resume'
-          : 'send';
+  const composerAction: 'send' | 'stop' | 'resume' = hasWords
+    ? 'send'
+    : stopShown
+      ? 'stop'
+      : !lifecycle && canonicalPage?.action.resumable === true
+        ? 'resume'
+        : 'send';
   const awaitsBoundConversation =
     conversationActionId !== null && canonicalPage === null && composer.submission === null;
+  // An Action's window is shown once its conversation is laid out, not as a bare header first.
+  useEffect(() => setContentReady(!awaitsBoundConversation));
   useEffect(() => {
     if (composer.submission?.state === 'submitting' && document.activeElement === document.body) {
       restoreComposerFocusRef.current = true;
@@ -439,16 +440,38 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       controlRef={submissionControlRef}
       onRetry={retrySubmission}
       onRefresh={(button) => void refreshSubmission(button)}
-      onStop={canStop ? () => ctrl.onStop(stopProcessId ?? undefined) : undefined}
+      onStop={stopShown ? stop : undefined}
+      stopState={stopState}
     />
   ) : null;
   const canAcceptSuggestion =
     permissionsReady && composer.attachmentsInFlight === 0 && !supplementInvalid;
+  const sendDraft = () => {
+    if (permissionsReady)
+      submitDraft(
+        visiblePages,
+        canStartConversation,
+        stopProcessId,
+        state.lastSequence,
+        approvalMode.mode,
+        entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
+      );
+  };
+  const clearReasonOnDismissal = useClearReasonOnDismissal(
+    state.suggestionId,
+    state.reactionState === 'rejected',
+    supplement,
+    clearMessage
+  );
+  // 見送る takes only words, as the reason: attachments wait for a message of their own.
+  const canDismissSuggestion =
+    composer.attachments.length === 0 && composer.attachmentsInFlight === 0 && !supplementInvalid;
   const acceptSuggestion = () => {
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
     ctrl.onAccept({
       supplement,
-      supplementProjectRefs,
+      supplementProjectRefs: supplementRefs.project_refs,
+      supplementWorkRefs: supplementRefs.work_refs,
       approvalMode: approvalMode.mode,
       images,
       files,
@@ -457,67 +480,58 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const composerContent =
     toolOutputLoader &&
     (!operationalError || composer.submission) &&
-    (canCompose || canDecide || composer.submission) ? (
+    (canCompose || offersDecision || composer.submission) ? (
       <OverlayComposer
         approvalMode={approvalMode}
         draft={composer.draft}
         mentions={composer.mentions}
+        quoting={{ ...quoting, sourceRef: ctrl.contentInnerRef }}
         submissionControls={submissionControls}
-        retryAcceptance={canDecide && ctrl.acceptFailed}
+        retryAcceptance={offersDecision && ctrl.acceptFailed}
         attachments={composer.attachments}
         attachmentFailure={composer.attachmentFailure}
-        validationFailed={canDecide ? supplementInvalid : composer.validationFailed}
+        validationFailed={offersDecision ? supplementInvalid : composer.validationFailed}
         canAttach={canAttach}
-        action={canDecide ? 'accept' : composerAction}
+        action={
+          offersDecision
+            ? {
+                decision: (
+                  <SuggestionDecisionButtons
+                    canDismiss={canDecide && canDismissSuggestion}
+                    canAccept={canDecide && canAcceptSuggestion}
+                    onDismiss={() => {
+                      clearReasonOnDismissal(supplement);
+                      ctrl.onReject(supplement);
+                    }}
+                    onAccept={acceptSuggestion}
+                  />
+                ),
+              }
+            : composerAction
+        }
         canSend={
-          canDecide
-            ? canAcceptSuggestion
-            : !composer.submission &&
-              composer.draft.trim() !== '' &&
-              composer.attachmentsInFlight === 0 &&
-              permissionsReady
+          !composer.submission && hasWords && composer.attachmentsInFlight === 0 && permissionsReady
         }
         resumeFailed={composer.resume?.state === 'failed'}
+        stopState={stopState}
+        sendSuperseded={composer.failureKind === 'superseded'}
         canResume={
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
         }
         textareaRef={standaloneComposerRef}
-        onDraftChange={(draft, mentions) =>
-          setComposer((current) => ({
-            ...current,
-            draft,
-            mentions,
-            validationFailed: false,
-            resume: current.resume?.state === 'failed' ? null : current.resume,
-          }))
-        }
+        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
+        onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}
         onRemoveAttachment={removeAttachment}
-        onSubmit={() => {
-          if (canDecide) {
-            acceptSuggestion();
-            return;
-          }
-          if (permissionsReady)
-            submitDraft(
-              visiblePages,
-              canStartConversation,
-              stopProcessId,
-              state.lastSequence,
-              approvalMode.mode,
-              entryMode === 'overlay' && state.interactionContract === 'message_only'
-                ? state.suggestionId
-                : null
-            );
-        }}
-        onStop={() => ctrl.onStop(stopProcessId ?? undefined)}
+        onSubmit={sendDraft}
+        onStop={stop}
         onResume={() => {
           if (permissionsReady) requestResume(visiblePages);
         }}
       />
-    ) : toolOutputLoader && !operationalError && canStop ? (
+    ) : toolOutputLoader && !operationalError && stopShown ? (
       <ComposerSubmissionRow>
-        <ComposerStopButton onStop={() => ctrl.onStop(stopProcessId ?? undefined)} />
+        <ComposerStopButton onStop={stop} stopping={stopState === 'stopping'} />
       </ComposerSubmissionRow>
     ) : null;
 
@@ -525,15 +539,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     <AgentOverlayShell
       isVisible={entryMode === 'standalone' || state.isOverlayVisible}
       isContentVisible={entryMode === 'standalone' || state.isOverlayVisible}
-      isExpanded={
-        state.historyExpandOverride !== null ? state.historyExpandOverride : state.isExpanded
-      }
+      isExpanded={state.historyExpandOverride ?? state.isExpanded}
       content={state.content}
       {...suggestionDisplay}
       actionText={operationalError}
       conversationContent={conversationContent}
       composer={
-        canDecide ? null : entryMode === 'overlay' && canStartConversation && composerContent ? (
+        startsReply && !answersDismissal && composerContent ? (
           <SuggestionInputDisclosure
             key={state.suggestionId}
             label={t('overlay.composer.open')}
@@ -541,11 +553,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           >
             {composerContent}
           </SuggestionInputDisclosure>
+        ) : offersDecision && ctrl.acceptFailed ? (
+          <>
+            <p role="alert">{t('overlay.acceptFailed')}</p>
+            {composerContent}
+          </>
         ) : (
           composerContent
         )
       }
-      suggestionId={state.suggestionId}
       isActionStreamFinished={state.isActionStreamFinished}
       approvalUiState={approvalUiState}
       approvalBlockers={approvalBlockers}
@@ -553,34 +569,19 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       approvalErrorMessage={approval.approvalErrorMessage}
       showBusyIndicator={showBusyIndicator}
       showThinking={showThinking}
-      showFooterActions={approvalUiState === 'hidden' && canDecide}
       fadeDurationMs={600}
       onToggleExpand={ctrl.onToggleExpand}
       onClose={ctrl.onClose}
-      suggestionDecision={
-        canDecide
-          ? {
-              input: composerContent,
-              inputRef: standaloneComposerRef,
-              canAccept: canAcceptSuggestion,
-              accept: acceptSuggestion,
-              errorMessage: ctrl.acceptFailed
-                ? t('overlay.acceptFailed')
-                : approvalMode.errorKey
-                  ? t(approvalMode.errorKey)
-                  : null,
-            }
-          : undefined
-      }
-      onReject={canDecide ? ctrl.onReject : undefined}
       onDecideApproval={
         approvalUiState === 'approval_pending'
           ? (decision, blocker) => void approval.submitApprovalDecision(decision, blocker)
           : undefined
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
-      chatActionId={currentView?.action?.action_id ?? null}
-      onShowChat={window.electron?.agentOverlay?.showChat}
+      actionId={currentView?.action?.action_id ?? null}
+      suggestionId={state.suggestionId}
+      onOpenInMainWindow={ctrl.openTask}
+      openTaskFailed={ctrl.openTaskFailed}
       conversationCopy={conversationCopy}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}
       onHeaderPointerMove={headerDrag.onHeaderPointerMove}
@@ -590,7 +591,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       scrollableRef={ctrl.scrollableContentRef}
       contentInnerRef={ctrl.contentInnerRef}
       answerAreaRef={ctrl.answerAreaRef}
-      footerRef={ctrl.footerRef}
       composerRef={ctrl.composerRef}
       containerRef={ctrl.containerRef}
     />

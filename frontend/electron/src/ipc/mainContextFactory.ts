@@ -24,11 +24,15 @@ import type {
 import { buildFrontendDevOrigin } from '../runtime/devFrontendEnv';
 import { createIpcSenderSecurity } from './senderTrust';
 import { restoreAndFocusWindow } from '../windows/windowVisibility';
+import { createTaskDraftStore } from '../actions/taskDraftStore';
+import { discardStagedAttachment } from './handlers/actionAttachments';
 
 export function buildMainContext(params: {
   ipcMain: MainContext['ipcMain'];
   aiConnection: MainContext['aiConnection'];
   getMainWindow: () => BrowserWindow | null;
+  /** Creates the main window on a hash route; `getMainWindow` returns it afterwards. */
+  createMainWindow: (hashRoute: string) => void;
   openNewConversationOverlay: MainContext['windows']['openNewConversationOverlay'];
   openActionConversationOverlay: MainContext['windows']['openActionConversationOverlay'];
   getAllWindows: () => BrowserWindow[];
@@ -52,6 +56,7 @@ export function buildMainContext(params: {
   historyFetch: MainContext['history']['fetch'];
   markCompletionViewed: MainContext['history']['markCompletionViewed'];
   historyDeleteItem: MainContext['history']['deleteItem'];
+  historyReadItem: MainContext['history']['readItem'];
   actionFiles: MainContext['actionFiles'];
   clipboard: MainContext['clipboard'];
   update: MainContext['update'];
@@ -74,6 +79,7 @@ export function buildMainContext(params: {
   workspaceSettingsUpdateCommandNetwork: MainContext['workspaceSettings']['updateCommandNetwork'];
   workspaceSettingsCreateOrganization: MainContext['workspaceSettings']['createOrganization'];
   workspaceSettingsCreateProject: MainContext['workspaceSettings']['createProject'];
+  workspaceSettingsRenameProject: MainContext['workspaceSettings']['renameProject'];
   workspaceSettingsCreateFolder: MainContext['workspaceSettings']['createFolder'];
   workspaceSettingsReorderProjects: MainContext['workspaceSettings']['reorderProjects'];
   workspaceSettingsDeleteOrganization: MainContext['workspaceSettings']['deleteOrganization'];
@@ -83,6 +89,7 @@ export function buildMainContext(params: {
   workspaceSettingsUpdateFolderLinks: MainContext['workspaceSettings']['updateFolderLinks'];
   workspaceSettingsUpdateReadAccessScope: MainContext['workspaceSettings']['updateReadAccessScope'];
   workspaceSettingsSelectFolder: MainContext['workspaceSettings']['selectFolder'];
+  workspaceSettingsOpenFolder: MainContext['workspaceSettings']['openFolder'];
 
   // screenshot & privacy
   screenshotSync: ScreenshotSyncManager;
@@ -105,6 +112,8 @@ export function buildMainContext(params: {
   // overlay
   enqueueResumeRequest: (payload: ResumeProcessRequest) => void;
   resolveOverlayBootstrap: MainContext['overlay']['resolveOverlayBootstrap'];
+  adoptSuggestionSnapshot: MainContext['overlay']['adoptSuggestionSnapshot'];
+  recordSuggestionReply: MainContext['overlay']['recordSuggestionReply'];
   submitApprovalDecision: MainContext['overlay']['submitApprovalDecision'];
   getActionApprovalMode: MainContext['overlay']['getActionApprovalMode'];
   setActionApprovalMode: MainContext['overlay']['setActionApprovalMode'];
@@ -177,6 +186,11 @@ export function buildMainContext(params: {
     return result.value;
   }
 
+  const mainWindowUrl = (route: string): string =>
+    params.isDevRuntime()
+      ? `${buildFrontendDevOrigin()}/#${route}`
+      : `file://${params.frontendDistIndex}#${route}`;
+
   return {
     ipcMain: params.ipcMain,
     aiConnection: params.aiConnection,
@@ -189,9 +203,7 @@ export function buildMainContext(params: {
         const mainWindow = params.getMainWindow();
         if (!mainWindow) return;
         try {
-          const url = params.isDevRuntime()
-            ? `${buildFrontendDevOrigin()}/#${route}`
-            : `file://${params.frontendDistIndex}#${route}`;
+          const url = mainWindowUrl(route);
           // A failed load is reported and retried by the window's own did-fail-load listener.
           void mainWindow.loadURL(url).catch(() => undefined);
           restoreAndFocusWindow(mainWindow);
@@ -199,11 +211,30 @@ export function buildMainContext(params: {
           // no-op
         }
       },
-      showChat: (actionId) => {
+      showTask: async ({ kind, id }) => {
+        // The same `?item=` the renderer writes (historySelectionSearch).
+        const route = `/history?item=${kind}:${encodeURIComponent(id)}`;
         const mainWindow = params.getMainWindow();
-        // On macOS closing the main window hides it, so it exists while the app runs.
-        if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
-        mainWindow.webContents.send('history:showChat', { actionId });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          // A loaded page selects it in place: a load would drop its chat and task drafts. A page
+          // still loading has none yet and may not listen yet, so it loads on the task instead.
+          // A load that fails rejects, so the panel is kept.
+          if (mainWindow.webContents.isLoading()) {
+            const loaded = mainWindow.loadURL(mainWindowUrl(route));
+            restoreAndFocusWindow(mainWindow);
+            await loaded;
+          } else {
+            mainWindow.webContents.send('history:showItem', { item: `${kind}:${id}` });
+            restoreAndFocusWindow(mainWindow);
+          }
+          return;
+        }
+        // A created window owns its first load: a failure is reported and retried by its own
+        // did-fail-load listener, on the window now in front of the user.
+        params.createMainWindow(route);
+        if (!restoreAndFocusWindow(params.getMainWindow())) {
+          throw new Error('The main window could not be opened.');
+        }
       },
     },
 
@@ -240,6 +271,7 @@ export function buildMainContext(params: {
       fetch: async (p) => params.historyFetch(p),
       markCompletionViewed: params.markCompletionViewed,
       deleteItem: params.historyDeleteItem,
+      readItem: params.historyReadItem,
     },
 
     actionFiles: params.actionFiles,
@@ -250,6 +282,10 @@ export function buildMainContext(params: {
     chat: params.chat,
 
     actionImages: params.actionImages,
+    taskDrafts: createTaskDraftStore({
+      discardStagedFile: (ownerId, attachmentId) =>
+        discardStagedAttachment(params.actionImages.localArtifactRoot, ownerId, attachmentId),
+    }),
 
     ui: {
       getLanguage: () => normalizeUiLanguage(params.getUiLanguage()),
@@ -284,6 +320,8 @@ export function buildMainContext(params: {
         params.workspaceSettingsUpdateCommandNetwork(enabled),
       createOrganization: async (input) => params.workspaceSettingsCreateOrganization(input),
       createProject: async (input) => params.workspaceSettingsCreateProject(input),
+      renameProject: async (projectId, input) =>
+        params.workspaceSettingsRenameProject(projectId, input),
       createFolder: async (input) => params.workspaceSettingsCreateFolder(input),
       reorderProjects: async (input) => params.workspaceSettingsReorderProjects(input),
       deleteOrganization: async (organizationId) =>
@@ -297,6 +335,7 @@ export function buildMainContext(params: {
       updateReadAccessScope: async (readAccessScope) =>
         params.workspaceSettingsUpdateReadAccessScope(readAccessScope),
       selectFolder: async () => params.workspaceSettingsSelectFolder(),
+      openFolder: async (folderId) => params.workspaceSettingsOpenFolder(folderId),
     },
 
     screenshot: {
@@ -366,6 +405,8 @@ export function buildMainContext(params: {
       },
       resolveOverlayBootstrap: async (suggestionId) =>
         params.resolveOverlayBootstrap(String(suggestionId)),
+      adoptSuggestionSnapshot: params.adoptSuggestionSnapshot,
+      recordSuggestionReply: params.recordSuggestionReply,
       submitApprovalDecision: async (payload) => params.submitApprovalDecision(payload),
       getActionApprovalMode: async (actionId) => params.getActionApprovalMode(actionId),
       setActionApprovalMode: async (actionId, approvalMode) =>

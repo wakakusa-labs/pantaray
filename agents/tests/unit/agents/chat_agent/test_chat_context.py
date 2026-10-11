@@ -39,6 +39,7 @@ from pantaray_agents.local_runtime.runtime.identity import (
     reset_logged_out_owner,
 )
 from pantaray_agents.schema.chat import (
+    ActionEventContent,
     AssistantMessageContent,
     ChatActionCard,
     ChatItem,
@@ -308,7 +309,7 @@ def test_waiting_items_are_never_dropped_to_fit() -> None:
         _fit(_window(window_tokens=2_000), waiting)
 
 
-def test_a_named_project_reaches_the_model_with_its_folders() -> None:
+def test_a_named_project_and_task_reach_the_model() -> None:
     item = append_chat_item(
         user_id=USER,
         message_id="m-1",
@@ -328,6 +329,15 @@ def test_a_named_project_reaches_the_model_with_its_folders() -> None:
                         "end": 10,
                     },
                 ),
+                "work_refs": (
+                    {
+                        "kind": "action",
+                        "id": "a-1",
+                        "title": "README",
+                        "start": 13,
+                        "end": 19,
+                    },
+                ),
             }
         ),
     )
@@ -338,5 +348,51 @@ def test_a_named_project_reaches_the_model_with_its_folders() -> None:
     assert text.endswith(
         "Aurora Web の README を要約して\n\n"
         "Referenced workspace projects:\n- Aurora Web: /Users/me/aurora\n"
-        "Your own read tools can open these folders."
+        "Your own read tools can open these folders.\n\n"
+        "Referenced work:\n- task a-1: README\n"
+        "Read one with memory_sql: a task from agent_actions by action_id, a "
+        "suggestion from agent_suggestions by suggestion_id."
+    )
+
+
+def _task_ended(message_id: str, answer: str) -> ChatItem:
+    insert_agent_action(
+        db_path=Path(os.environ["LOCAL_DB_PATH"]), user_id=USER, action_id="act-1"
+    )
+    return append_chat_item(
+        user_id=USER,
+        message_id=message_id,
+        content=ActionEventContent(
+            kind="action_event",
+            action_id="act-1",
+            event="completed",
+            final_answer_excerpt=answer,
+        ),
+    )
+
+
+@pytest.mark.parametrize(("length", "said_cut"), [(4_000, True), (12_000, False)])
+def test_an_answer_cut_by_0_4_0_says_where_the_rest_is(
+    length: int, said_cut: bool
+) -> None:
+    ended = _task_ended("action-run:p1:end", "あ" * length)
+
+    (entry,) = render_item(TurnChatItem(item=ended, is_reply=False), NO_MEDIA)
+
+    text = entry.item.content[0].text
+    assert "あ" * length in text
+    assert ("agent_actions.final_output" in text) is said_cut
+
+
+def test_a_reply_cannot_quote_a_task_event() -> None:
+    ended = _task_ended("action-run:p1:end", "Done.")
+
+    verdict = check_reply(
+        user_id=USER,
+        arguments={"text": "Hi", "quote_item_id": ended.item_id, "cards": []},
+    )
+
+    assert (
+        verdict
+        == "The reply was not sent: quote_item_id is not a message of this chat."
     )

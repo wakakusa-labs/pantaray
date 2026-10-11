@@ -2,15 +2,17 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic.types import UUID4
 
 from ..agent.action_message import (
     ACTION_MESSAGE_MAX_FILES,
     ACTION_MESSAGE_MAX_IMAGES,
     ACTION_MESSAGE_MAX_PROJECT_REFS,
+    ACTION_MESSAGE_MAX_WORK_REFS,
     ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS,
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
 )
 from ..agent.image import ImageInput
@@ -45,6 +47,11 @@ class ExecuteActionMessage(BaseModel):
         max_length=ACTION_MESSAGE_MAX_PROJECT_REFS,
         description="Workspace projects named in the trimmed supplement",
     )
+    supplement_work_refs: tuple[ActionWorkRef, ...] = Field(
+        default=(),
+        max_length=ACTION_MESSAGE_MAX_WORK_REFS,
+        description="Tasks and suggestions named in the trimmed supplement",
+    )
     files: tuple[FileAttachmentInput, ...] = Field(
         default=(),
         max_length=ACTION_MESSAGE_MAX_FILES,
@@ -62,11 +69,21 @@ class DismissSuggestionMessage(BaseModel):
 
     Attributes:
         suggestion_id (str): 対象の提案ID（UUIDv4、必須）
-        reason (str | None): 見送り理由（任意）
+        reason (str | None): 見送り理由（任意）。見送りと一緒に記録するだけで、Action は始めない
     """
 
     suggestion_id: str = Field(description="対象の提案ID（UUIDv4、必須）")
-    reason: str | None = Field(default=None, description="見送り理由（任意）")
+    # The composer's words, which 承認 sends as a supplement, so the same limit.
+    reason: str | None = Field(
+        default=None,
+        max_length=ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS,
+        description="見送り理由（任意）",
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _trimmed_reason(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
 
 class RejectSuggestionMessage(DismissSuggestionMessage):
@@ -74,18 +91,6 @@ class RejectSuggestionMessage(DismissSuggestionMessage):
 
     WebSocket event: "reject_suggestion"（非推奨）
     """
-
-
-class StopProcessMessage(BaseModel):
-    """進行中の処理を中断するメッセージ
-
-    WebSocket event: "stop_process"
-
-    Attributes:
-        process_id (str): 中断する処理のID（UUIDv4、必須）
-    """
-
-    process_id: str = Field(description="中断する処理のID（UUIDv4、必須）")
 
 
 class ResumeSessionMessage(BaseModel):

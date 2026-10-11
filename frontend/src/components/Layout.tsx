@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Folder, Settings, UserRound } from 'lucide-react';
+import { House, Settings, UserRound } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/context/useI18n';
@@ -11,14 +11,14 @@ import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
 import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
-import { saveHistoryViewMode, showChatState } from '@/history/historyViewMode';
+import { useShowHistoryItem } from '@/history/useShowHistoryItem';
 import './Layout.css';
 
 /**
  * The main window's shell: an icon rail on the left on every page, and the page beside it.
  */
 const Layout: React.FC = () => {
-  const { user, signOut, authStatus, runtimeState } = useAuth();
+  const { user, signOut, authStatus } = useAuth();
   const needsLogin = authStatus === 'expired';
   const hasAccount = authStatus === 'authenticated' || needsLogin;
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -28,16 +28,13 @@ const Layout: React.FC = () => {
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // The Overlay's chat button: from any page, open History's chat on that Action's latest card.
+  // Home reopens what History last showed (its `?item=`), for as long as the window is open.
+  const lastHistorySearch = useRef('');
   useEffect(() => {
-    const onShowChat = window.electron?.history?.onShowChat;
-    if (!onShowChat) return;
-    return onShowChat(({ actionId }) => {
-      saveHistoryViewMode('chat');
-      navigate('/history', { state: showChatState(actionId) });
-    });
-  }, [navigate]);
+    if (location.pathname === '/history') lastHistorySearch.current = location.search;
+  }, [location.pathname, location.search]);
+
+  useShowHistoryItem();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -81,17 +78,18 @@ const Layout: React.FC = () => {
     return email[0].toUpperCase();
   };
 
-  // A page with its own columns shows the AI-connection notice in its right column. Workspace
-  // has those columns only once the local owner it belongs to is published.
-  const isSplitPage =
-    location.pathname === '/settings' ||
-    (location.pathname === '/workspace' &&
-      runtimeState.status === 'ready' &&
-      runtimeState.owner !== null);
+  // A page with its own columns shows the AI-connection notice in its right column.
+  const isSplitPage = location.pathname === '/history' || location.pathname === '/settings';
+
+  const openPage = (path: string) => {
+    if (path !== '/history') navigate(path);
+    // On History, Home leaves the selection as it is.
+    else if (location.pathname !== '/history')
+      navigate({ pathname: path, search: lastHistorySearch.current });
+  };
 
   const navItems = [
-    { path: '/history', label: t('nav.history'), Icon: Clock },
-    { path: '/workspace', label: t('settings.workspace.title'), Icon: Folder },
+    { path: '/history', label: t('nav.home'), Icon: House },
     { path: '/settings', label: t('nav.settings'), Icon: Settings },
   ];
 
@@ -108,12 +106,12 @@ const Layout: React.FC = () => {
               <button
                 key={path}
                 type="button"
-                onClick={() => navigate(path)}
+                onClick={() => openPage(path)}
                 className={['app-rail-item', isActive ? 'app-rail-item--active' : null]
                   .filter(Boolean)
                   .join(' ')}
                 aria-label={label}
-                title={label}
+                data-tooltip={label}
                 aria-current={isActive ? 'page' : undefined}
                 aria-describedby={unread ? 'app-rail-chat-unread' : undefined}
               >
@@ -174,7 +172,7 @@ const Layout: React.FC = () => {
           </span>
         ) : null}
 
-        {/* The chat's unread count, for the rail and History's chat switch on every page. */}
+        {/* The chat's unread count, for the rail and History's chat row on every page. */}
         <LocalOwnerBoundary fallback={null}>
           <ChatUnreadTracker onCount={setChatUnread} />
         </LocalOwnerBoundary>

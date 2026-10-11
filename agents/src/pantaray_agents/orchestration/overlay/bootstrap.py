@@ -182,6 +182,7 @@ def _build_snapshot(
         suggestionText=normalize_string(folded.suggestion_text) or "",
         reactionState=reaction,  # type: ignore[arg-type]
         reactionTimestamp=_derive_reaction_timestamp_from_fold(folded),
+        dismissReason=normalize_string(suggestion_row.get("dismiss_reason")),
         actionPhase=action_phase,  # type: ignore[arg-type]
         actionStatus=action_status,
         actionFailureCode=action_failure_code,

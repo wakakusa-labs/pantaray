@@ -1,386 +1,187 @@
-import { Trash2 } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { PanelLeft } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
-import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
-import { resolveToolLine } from '@/components/action-conversation/toolDisplayName';
-import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
-import HistorySearchField from '@/components/history/HistorySearchField';
-import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
-import { ChatView } from '@/components/chat/ChatView';
+import { AiConnectionNotice } from '@/components/AiConnectionNotice';
+import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
-import { HistoryModeSwitch } from '@/components/history/HistoryModeSwitch';
-import { NewWorkButton } from '@/components/history/NewWorkButton';
-import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
-import {
-  useGlobalShortcutHint,
-  type ShortcutHintState,
-} from '@/components/shortcut/useGlobalShortcutHint';
+import { HISTORY_SIDEBAR_ID, HistorySidebar } from '@/components/history/HistorySidebar';
+import { NewTaskPane } from '@/components/task/NewTaskPane';
+import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
+import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import { useI18n } from '@/context/useI18n';
-import { groupHistoryByDay } from '@/history/historyDayGroups';
-import { NEW_WORK_BUTTON_ID, openNewWork } from '@/history/newWork';
+import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
 import {
-  historyModeButtonId,
-  readHistoryViewMode,
-  readShowChatState,
-  saveHistoryViewMode,
-  type HistoryViewMode,
-} from '@/history/historyViewMode';
-import type { HistoryLiveStage } from '@/history/historyLiveStage';
-import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
-import { itemIdentity, useSuggestionHistory } from '@/hooks/useSuggestionHistory';
-import { getLocaleForUiLanguage } from '@/i18n/translate';
-import type { MessageKey } from '@/i18n/types';
+  historyItemSelection,
+  historySelectionSearch,
+  parseHistorySelection,
+  splitWorkKey,
+  type HistorySelection,
+} from '@/history/historySelection';
+import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 
 import './suggestionHistoryPage.css';
 
-const openButtonId = (identity: string) => `history-open:${identity}`;
-const deleteButtonId = (identity: string) => `history-delete:${identity}`;
+// A task the loaded list does not hold yet (still loading, filtered out, or older than its pages).
+const UNLISTED_TITLE = {
+  en: { action: 'Task', suggestion: 'Suggestion' },
+  ja: { action: '作業', suggestion: '提案' },
+} as const;
 
-/**
- * A running or approval-waiting conversation is one whose own run the backend refuses to delete
- * (409 `CONVERSATION_BUSY`). A Suggestion's `approval_pending` only waits for the user's answer.
- */
-function isDeleteBlocked(item: ConversationHistoryListItem): boolean {
-  return item.kind === 'conversation' && item.status !== 'idle';
-}
+/** Per viewer and only a convenience: without storage the sidebar starts shown. */
+const SIDEBAR_HIDDEN_STORAGE_KEY = 'pantaray.history.sidebarHidden';
 
-function deleteFailureMessageKey(errorCode: string | null): MessageKey {
-  if (errorCode === 'CONVERSATION_BUSY') return 'history.delete.busy';
-  if (errorCode === 'AUTHENTICATION_REQUIRED') return 'history.error.authenticationRequired';
-  return 'history.delete.failed';
-}
-
-async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<MessageKey | null> {
-  const deleteItem = window.electron?.history?.deleteItem;
-  if (!deleteItem) throw new Error('History delete bridge is unavailable.');
-  const result = await deleteItem(
-    item.kind === 'conversation'
-      ? { kind: 'conversation', id: item.action_id }
-      : { kind: 'suggestion', id: item.suggestion_id }
-  );
-  return result.ok ? null : deleteFailureMessageKey(result.errorCode);
-}
-
-function openSuggestionHistory(suggestionId: string): void {
-  const showHistory = window.electron?.agentOverlay?.showHistory;
-  if (!showHistory) throw new Error('Suggestion history overlay bridge is unavailable.');
-  showHistory({ suggestionId, initialUiState: { expand: true }, fromStart: true });
-}
-
-async function openConversation(actionId: string): Promise<void> {
-  const open = window.electron?.history?.openConversation;
-  if (!open) throw new Error('Conversation overlay bridge is unavailable.');
-  await open({ actionId });
-}
-
-function liveStageText(
-  stage: HistoryLiveStage,
-  language: 'en' | 'ja',
-  t: (key: MessageKey) => string
-): string {
-  switch (stage.kind) {
-    case 'tool':
-      return resolveToolLine(stage.label, language, {
-        subject: stage.subject,
-        running: true,
-        outcome: stage.outcome,
-      }).text;
-    case 'message':
-      return stage.text;
-    case 'thinking':
-      return t('overlay.thinking');
+function readSidebarHidden(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_HIDDEN_STORAGE_KEY) === '1';
+  } catch (error) {
+    // Storage blocked or unavailable throws a DOMException.
+    if (error instanceof DOMException) return false;
+    throw error;
   }
 }
 
-/**
- * Points at the header button, naming the shortcut only while it is registered. The sentence stays
- * one translatable string; `{shortcut}` marks where the keycaps replace it.
- */
-function EmptyStateHint({
-  state,
-  t,
-}: {
-  state: ShortcutHintState;
-  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
-}) {
-  if (state.status !== 'ready')
-    return <p className="history-empty-hint">{t('history.empty.startWithButton')}</p>;
-  const [before, after] = t('history.empty.startWithShortcut').split('{shortcut}');
-  return (
-    <p className="history-empty-hint">
-      {before}
-      <ShortcutKeycaps accelerator={state.accelerator} t={t} />
-      {after}
-    </p>
-  );
+function saveSidebarHidden(hidden: boolean) {
+  try {
+    localStorage.setItem(SIDEBAR_HIDDEN_STORAGE_KEY, hidden ? '1' : '0');
+  } catch (error) {
+    // Without storage the choice lasts until the page is left.
+    if (!(error instanceof DOMException)) throw error;
+  }
 }
 
-/** Today's history list, unchanged apart from the mode switch at the head of its toolbar. */
-function HistoryListView({ modeSwitch }: { modeSwitch: ReactNode }) {
-  const {
-    items,
-    loading,
-    loadingMore,
-    error,
-    isRealtimeSyncing,
-    searchText,
-    setSearchText,
-    loadMore,
-    hasMore,
-    isUnread,
-    removeItem,
-  } = useSuggestionHistory();
-  const { t, language, formatDateTime } = useI18n();
-  const liveStages = useHistoryLiveStages();
-  const [notice, setNotice] = useState<string | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState<ConversationHistoryListItem | null>(
-    null
-  );
-  const [deletingIdentity, setDeletingIdentity] = useState<string | null>(null);
-  const [focusTargetId, setFocusTargetId] = useState<string | null>(null);
-  const shortcutHint = useGlobalShortcutHint();
-  useLayoutEffect(() => {
-    if (focusTargetId === null) return;
-    document.getElementById(focusTargetId)?.focus();
-    setFocusTargetId(null);
-  }, [focusTargetId]);
+/** ⌘B on macOS, Ctrl+B elsewhere, with no other modifier. */
+function isSidebarShortcut(event: KeyboardEvent, isMac: boolean): boolean {
+  const primary = isMac ? event.metaKey : event.ctrlKey;
+  const other = isMac ? event.ctrlKey : event.metaKey;
+  return primary && !other && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b';
+}
 
-  const cancelDelete = (): void => {
-    if (confirmingDelete) setFocusTargetId(deleteButtonId(itemIdentity(confirmingDelete)));
-    setConfirmingDelete(null);
-  };
-  const confirmDelete = async (): Promise<void> => {
-    const item = confirmingDelete;
-    if (!item) return;
-    const identity = itemIdentity(item);
-    const identities = items.map(itemIdentity);
-    const index = identities.indexOf(identity);
-    const successor = identities[index + 1] ?? identities[index - 1];
-    setConfirmingDelete(null);
-    setDeletingIdentity(identity);
-    setNotice(null);
-    let failureKey: MessageKey | null;
-    try {
-      failureKey = await deleteHistoryItem(item);
-    } catch {
-      failureKey = 'history.delete.failed';
-    } finally {
-      setDeletingIdentity(null);
-    }
-    if (failureKey !== null) {
-      setNotice(t(failureKey));
-      setFocusTargetId(deleteButtonId(identity));
+/**
+ * History: the sidebar of the chat and the user's tasks, and the detail pane of the one selected.
+ * The selection is the URL's `?item=`, so it survives a reload and the back button returns to it.
+ * A toggle in the title bar row (and ⌘B / Ctrl+B) hides the sidebar so the detail pane widens.
+ */
+const SuggestionHistoryPage = () => {
+  const { chat, composer } = useChatSession();
+  const history = useSuggestionHistory();
+  const { language, t } = useI18n();
+  const workspace = useWorkspaceSettingsController(t);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const selection = parseHistorySelection(location.search);
+  const chatView = useRef<ChatViewHandle>(null);
+  const isMac = window.electron?.process.platform === 'darwin';
+
+  const [sidebarHidden, setSidebarHidden] = useState(readSidebarHidden);
+  const sidebarToggle = useRef<HTMLButtonElement>(null);
+  const toggleSidebar = useCallback(() => {
+    const hidden = !sidebarHidden;
+    // Focus inside a hidden sidebar would fall back to the page's start.
+    if (hidden && document.getElementById(HISTORY_SIDEBAR_ID)?.contains(document.activeElement))
+      sidebarToggle.current?.focus();
+    setSidebarHidden(hidden);
+    saveSidebarHidden(hidden);
+  }, [sidebarHidden]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || !isSidebarShortcut(event, isMac)) return;
+      // A modal dialog (the sidebar's delete confirmation among them) leaves the page inert
+      // behind it; hiding the sidebar would hide that dialog too.
+      if (event.target instanceof Element && event.target.closest('dialog')) return;
+      event.preventDefault();
+      toggleSidebar();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMac, toggleSidebar]);
+  const sidebarToggleLabel = t(sidebarHidden ? 'history.sidebar.show' : 'history.sidebar.hide');
+
+  const select = (next: HistorySelection, options?: { replace: true }) => {
+    // The chat already shown goes back to its newest message instead.
+    if (next === 'chat' && selection === 'chat') {
+      chatView.current?.showNewest();
       return;
     }
-    removeItem(identity);
-    setFocusTargetId(successor ? openButtonId(successor) : NEW_WORK_BUTTON_ID);
+    navigate({ search: historySelectionSearch(next) }, options);
   };
-  const handleNewConversation = async (): Promise<void> => {
-    setNotice(null);
-    try {
-      await openNewWork();
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
-  const handleConversation = async (actionId: string): Promise<void> => {
-    setNotice(null);
-    try {
-      await openConversation(actionId);
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
-  const renderContent = () => {
-    if (loading) return <div className="history-loading">{t('history.loading')}</div>;
-    if (error && items.length === 0)
-      return (
-        <div className="history-error" role="alert">
-          {error}
-        </div>
-      );
-    if (items.length === 0) {
-      return (
-        <div className="history-empty">
-          <span>{t('history.empty')}</span>
-          <EmptyStateHint state={shortcutHint} t={t} />
-        </div>
-      );
-    }
+  // The composers' Add project starts naming one in the sidebar, as its ＋ does.
+  const [creatingProject, setCreatingProject] = useState(false);
+  const addProject = () => setCreatingProject(true);
+  // The Overlay's Add project brings the main window here with `?project=new`; the request is
+  // taken while rendering, and the address then drops it.
+  const projectRequested = new URLSearchParams(location.search).get('project') === 'new';
+  if (projectRequested && !creatingProject) setCreatingProject(true);
+  useEffect(() => {
+    if (projectRequested) navigate({ search: '' }, { replace: true });
+  }, [projectRequested, navigate]);
 
-    const locale = getLocaleForUiLanguage(language);
-    const formatTime = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
-    // Headings and rows are siblings in one flat list keyed by identity, so a live update that
-    // adds or moves a day never remounts the rows that stay, nor takes focus from them.
-    const headingsPerDay = new Map<string, number>();
+  const renderDetail = () => {
+    if (selection === 'chat')
+      return (
+        <ChatView
+          ref={chatView}
+          notice={<AiConnectionNotice />}
+          chat={chat}
+          composer={composer}
+          onOpenWork={select}
+          onAddProject={addProject}
+        />
+      );
+    if (selection === 'new')
+      return (
+        <NewTaskPane
+          onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+          onAddProject={addProject}
+        />
+      );
+    const { kind, id } = splitWorkKey(selection);
+    const title =
+      history.items.find((item) => historyItemSelection(item) === selection)?.title ??
+      UNLISTED_TITLE[language][kind];
+    if (kind === 'action')
+      return <TaskWorkspace key={id} actionId={id} title={title} onAddProject={addProject} />;
     return (
-      <div className="history-list">
-        {groupHistoryByDay(
-          items,
-          new Date(),
-          { today: t('history.day.today'), yesterday: t('history.day.yesterday') },
-          locale
-        ).flatMap((day) => {
-          // Rows out of date order can bring a day back; its repeat count keeps the key unique.
-          const repeat = headingsPerDay.get(day.key) ?? 0;
-          headingsPerDay.set(day.key, repeat + 1);
-          return [
-            <h2 key={`day:${day.key}:${repeat}`} className="history-day">
-              {day.label}
-            </h2>,
-            ...day.items.map((item) => {
-              const identity = itemIdentity(item);
-              const statusMeta = getHistoryItemStatusMeta(item);
-              const liveStage =
-                item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
-              const content = (
-                <div className="history-item-body">
-                  <div className="history-item-text">
-                    <p className="history-item-title">{item.title}</p>
-                    <div className="history-item-meta">
-                      <span>
-                        {day.isRecent
-                          ? formatTime.format(new Date(item.updated_at))
-                          : formatDateTime(new Date(item.updated_at))}
-                      </span>
-                    </div>
-                    {liveStage ? (
-                      // Visual only: it changes on every step, and the badge carries the status.
-                      <p className="history-item-live" aria-hidden="true">
-                        {liveStageText(liveStage, language, t)}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="history-item-status">
-                    {isUnread(item) ? <span aria-label={t('history.unread')}>●</span> : null}
-                    {statusMeta ? (
-                      <span className={badgeClassName(statusMeta.tone)}>
-                        {t(statusMeta.labelKey)}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              );
-
-              return (
-                <div key={identity} className="history-item">
-                  <button
-                    type="button"
-                    id={openButtonId(identity)}
-                    className="history-item-button"
-                    onClick={() => {
-                      if (item.kind === 'conversation') {
-                        void handleConversation(item.action_id);
-                        return;
-                      }
-                      setNotice(null);
-                      try {
-                        openSuggestionHistory(item.suggestion_id);
-                      } catch {
-                        setNotice(t('history.openOverlayFailed'));
-                      }
-                    }}
-                  >
-                    {content}
-                  </button>
-                  <button
-                    type="button"
-                    id={deleteButtonId(identity)}
-                    className="history-item-delete"
-                    aria-label={`${t('common.delete')} ${item.title}`}
-                    title={t('common.delete')}
-                    aria-busy={deletingIdentity === identity}
-                    disabled={isDeleteBlocked(item) || deletingIdentity !== null}
-                    onClick={() => setConfirmingDelete(item)}
-                  >
-                    <Trash2 size={16} aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            }),
-          ];
-        })}
-        {error ? (
-          <div className="history-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {hasMore ? (
-          <button
-            type="button"
-            className="history-filter-button"
-            disabled={loadingMore || isRealtimeSyncing}
-            onClick={() => void loadMore()}
-          >
-            {loadingMore ? t('history.loadingMore') : t('history.loadMore')}
-          </button>
-        ) : null}
-      </div>
+      <SuggestionTaskPane
+        key={id}
+        suggestionId={id}
+        title={title}
+        onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+        onAddProject={addProject}
+      />
     );
   };
 
   return (
-    <div className="history-container">
-      <div className="history-header">
-        <div className="history-toolbar">
-          {modeSwitch}
-          <HistorySearchField searchText={searchText} onSearch={setSearchText} />
-          <NewWorkButton
-            shortcutHint={shortcutHint}
-            t={t}
-            onClick={() => void handleNewConversation()}
-          />
-        </div>
-        {notice ? (
-          <div className="history-error" role="alert">
-            {notice}
-          </div>
-        ) : null}
+    <div className={sidebarHidden ? 'history-page history-page--sidebar-hidden' : 'history-page'}>
+      <button
+        ref={sidebarToggle}
+        type="button"
+        className="history-sidebar-toggle"
+        aria-label={sidebarToggleLabel}
+        data-tooltip={sidebarToggleLabel}
+        aria-expanded={!sidebarHidden}
+        aria-controls={HISTORY_SIDEBAR_ID}
+        aria-keyshortcuts={isMac ? 'Meta+B' : 'Control+B'}
+        onClick={toggleSidebar}
+      >
+        <PanelLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+      </button>
+      <HistorySidebar
+        history={history}
+        projects={workspace}
+        creatingProject={creatingProject}
+        onCreatingProjectChange={setCreatingProject}
+        selected={selection}
+        onSelect={select}
+        hidden={sidebarHidden}
+      />
+      <div className="history-detail">
+        {/* A task or suggestion named in a task's sent message opens here, as the chat's do. */}
+        <OpenWorkContext.Provider value={select}>{renderDetail()}</OpenWorkContext.Provider>
       </div>
-      {renderContent()}
-      {confirmingDelete ? (
-        <HistoryDeleteDialog t={t} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
-      ) : null}
     </div>
-  );
-}
-
-/** History: the single chat by default, or the list; the viewer's choice is remembered. */
-const SuggestionHistoryPage = () => {
-  const { t } = useI18n();
-  const [mode, setMode] = useState<HistoryViewMode>(readHistoryViewMode);
-  const { chat, composer } = useChatSession();
-  // `Layout` brings the page here with the Action the Overlay asked to show in the chat.
-  const location = useLocation();
-  const reveal = readShowChatState(location.state, location.key);
-  const [revealSeen, setRevealSeen] = useState<string | null>(null);
-  if (reveal && reveal.key !== revealSeen) {
-    setRevealSeen(reveal.key);
-    setMode('chat');
-  }
-  const switchedRef = useRef(false);
-  // The switch is redrawn inside the other view's toolbar, so the pressed button gets focus back.
-  useLayoutEffect(() => {
-    if (!switchedRef.current) return;
-    switchedRef.current = false;
-    document.getElementById(historyModeButtonId(mode))?.focus();
-  }, [mode]);
-  const modeSwitch = (
-    <HistoryModeSwitch
-      mode={mode}
-      t={t}
-      onChange={(next) => {
-        saveHistoryViewMode(next);
-        switchedRef.current = true;
-        setMode(next);
-      }}
-    />
-  );
-  return mode === 'list' ? (
-    <HistoryListView modeSwitch={modeSwitch} />
-  ) : (
-    <ChatView modeSwitch={modeSwitch} chat={chat} composer={composer} reveal={reveal} />
   );
 };
 

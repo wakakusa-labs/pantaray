@@ -49,7 +49,7 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   { path: /^\/api\/agent\/history$/, methods: new Set(['GET']) },
   {
     path: /^\/api\/agent\/history\/items\/(conversation|suggestion)\/[^/]+$/,
-    methods: new Set(['DELETE']),
+    methods: new Set(['GET', 'DELETE']),
   },
   {
     path: /^\/api\/agent\/history\/[^/]+\/overlay-bootstrap$/,
@@ -66,6 +66,18 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/messages$/,
     methods: new Set(['POST']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/resume$/,
+    methods: new Set(['POST']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/cancel$/,
+    methods: new Set(['POST']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/unadopted-messages\/[^/]+$/,
+    methods: new Set(['DELETE']),
   },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/messages$/, methods: new Set(['POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/items$/, methods: new Set(['GET']) },
@@ -100,6 +112,10 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/(projects|folders)\/[^/]+\/links$/,
+    methods: new Set(['PUT']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/projects\/[^/]+\/name$/,
     methods: new Set(['PUT']),
   },
   {

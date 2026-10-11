@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { useState, type ReactNode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type {
@@ -13,9 +14,41 @@ import type { ConversationHistoryListItem } from '../../../electron/src/history/
 import type { OrchestrationStatus } from '../../../electron/src/orchestration/eventContracts';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { showChatState } from '@/history/historyViewMode';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
+import { ChatUnreadTracker } from './ChatUnreadTracker';
+import { ChatUnreadContext } from './chatUnread';
+
+// The AI-connection notice reads the account; its own tests cover it.
+vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
+// The task panes have their own tests; here they only stand for the selected work.
+const panes = vi.hoisted(() => ({ drafts: [] as unknown[] }));
+vi.mock('@/components/task/TaskWorkspace', () => ({
+  TaskWorkspace: ({
+    actionId,
+    onAddProject,
+    drafts,
+  }: {
+    actionId: string;
+    onAddProject: () => void;
+    drafts: unknown;
+  }) => {
+    panes.drafts.push(drafts);
+    return (
+      <section aria-label={`action ${actionId}`}>
+        <button type="button" onClick={onAddProject}>
+          add project
+        </button>
+      </section>
+    );
+  },
+}));
+vi.mock('@/components/task/SuggestionTaskPane', () => ({
+  SuggestionTaskPane: ({ suggestionId }: { suggestionId: string }) => (
+    <section aria-label={`suggestion ${suggestionId}`} />
+  ),
+}));
 
 const at = (minute: number) => `2026-10-08T01:${String(minute).padStart(2, '0')}:00.000Z`;
 
@@ -70,8 +103,15 @@ const attachFile = vi.fn(async ({ name }: { name: string }) => ({
   byteSize: 15,
 }));
 const discardAttachment = vi.fn(async () => undefined);
+const selectFolder = vi.fn(async () => ({ canceled: false, path: '/Users/me/aurora' }));
+const createProject = vi.fn(async ({ displayName }: { displayName: string }) => ({
+  project_id: 'p-1',
+  display_name: displayName,
+  sort_order: 0,
+  organization_ids: [],
+}));
 const historyFetch = vi.fn(async () => ({
-  data: [work('A1', '見積書のたたき台を作る', 'running')],
+  data: [work('A1', '見積書のたたき台を作る', 'running')] as ConversationHistoryListItem[],
   nextCursor: null,
   unreadActionIds: [],
   error: null,
@@ -80,6 +120,9 @@ const historyFetch = vi.fn(async () => ({
 
 beforeEach(() => {
   localStorage.clear();
+  // Every subscriber hears an appended item, as main's relay reaches them all.
+  const appended = new Set<(item: ChatItem) => void>();
+  appendItem = (item) => appended.forEach((callback) => callback(item));
   window.electron = {
     chat: {
       listItems,
@@ -91,8 +134,8 @@ beforeEach(() => {
         return () => {};
       },
       onItemAppended: (callback: (item: ChatItem) => void) => {
-        appendItem = callback;
-        return () => {};
+        appended.add(callback);
+        return () => appended.delete(callback);
       },
     },
     orchestration: {
@@ -103,6 +146,16 @@ beforeEach(() => {
     },
     history: { fetch: historyFetch, openConversation, openNewConversation: vi.fn() },
     actions: { attachFile, attachImage: vi.fn(), discardAttachment },
+    workspaceSettings: {
+      get: async () => ({
+        read_access_scope: 'workspace',
+        organizations: [],
+        projects: [],
+        folders: [],
+      }),
+      selectFolder,
+      createProject,
+    },
     process: { platform: 'darwin', env: { NODE_ENV: 'test' } },
   } as unknown as Window['electron'];
 });
@@ -112,18 +165,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function WorkspaceStub() {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate('/history')}>
-      Back to History
-    </button>
-  );
-}
-
 const OWNER = { id: 'user-1', kind: 'account' } as const;
 
-const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '/history' }) =>
+const renderPage = (
+  entry: { pathname: string; search?: string; state?: unknown } = { pathname: '/history' }
+) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
       <UiLanguageProvider initialLanguage="ja">
@@ -131,13 +177,73 @@ const renderPage = (entry: { pathname: string; state?: unknown } = { pathname: '
           <ChatSessionProvider>
             <Routes>
               <Route path="/history" element={<SuggestionHistoryPage />} />
-              <Route path="/workspace" element={<WorkspaceStub />} />
             </Routes>
           </ChatSessionProvider>
         </LocalOwnerContext.Provider>
       </UiLanguageProvider>
     </MemoryRouter>
   );
+
+it('labels a suggestion’s card as a suggestion, as the task list does', async () => {
+  historyFetch.mockResolvedValueOnce({
+    data: [
+      {
+        kind: 'suggestion',
+        suggestion_id: 'S1',
+        title: '請求書の下書きを作る',
+        updated_at: at(0),
+        status: 'approval_pending',
+      },
+    ],
+    nextCursor: null,
+    unreadActionIds: [],
+    error: null,
+    errorCode: null,
+  });
+  pages = [
+    {
+      items: [
+        item(1, {
+          kind: 'assistant_message',
+          text: 'まだ答えていない提案があります。',
+          quote_item_id: null,
+          cards: [{ kind: 'suggestion', suggestion_id: 'S1', summary: '請求書の下書き' }],
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const card = await screen.findByRole('button', { name: '請求書の下書きを作る を開く' });
+  await waitFor(() => expect(within(card).getByText('提案')).toBeInTheDocument());
+  expect(within(card).queryByText('確認待ち')).not.toBeInTheDocument();
+});
+
+it('shows no quote on a reply that quoted a task event', async () => {
+  pages = [
+    {
+      items: [
+        reply(2, '調査結果を受け取りました。', [], 'item-1'),
+        item(1, {
+          kind: 'action_event',
+          action_id: 'A1',
+          event: 'completed',
+          final_answer_excerpt: 'できました',
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const answer = await screen.findByRole('article', { name: 'Pantaray' });
+  expect(within(answer).getByText('調査結果を受け取りました。')).toBeInTheDocument();
+  expect(within(answer).queryByText('以前のメッセージ')).not.toBeInTheDocument();
+  expect(
+    within(answer).queryByRole('button', { name: '引用元のメッセージへ移動' })
+  ).not.toBeInTheDocument();
+});
 
 it('shows messages and cards, with a work’s status on its latest card only', async () => {
   pages = [
@@ -184,8 +290,22 @@ it('shows messages and cards, with a work’s status on its latest card only', a
     within(mine).getByRole('button', {
       name: 'AI に接続できず、返信できませんでした。もう一度送る',
     })
-  ).toHaveAttribute('title', 'AI に接続できず、返信できませんでした。もう一度送る');
+  ).toHaveAttribute('data-tooltip', 'AI に接続できず、返信できませんでした。もう一度送る');
   expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+
+  // Every icon-only button on the page, the sidebar's and the composer's too, names itself in the
+  // app's own tooltip.
+  expectIconButtonTooltips(document.body);
+  for (const name of [
+    'ファイルを追加',
+    '送信',
+    'メイン画面で新しい作業',
+    '小さく新しい作業',
+    'プロジェクトを追加',
+  ]) {
+    expectTooltipIsName(screen.getByRole('button', { name }));
+  }
+  expectTooltipIsName(within(chat).getAllByRole('button', { name: '引用して返信' })[0]);
 });
 
 it('merges live items once and reads the newest page again when the session starts over', async () => {
@@ -209,34 +329,178 @@ it('merges live items once and reads the newest page again when the session star
   expect(screen.getAllByText('おはようございます。')).toHaveLength(1);
 });
 
-it('opens a card’s work in the Overlay and outlines it', async () => {
+it('a card selects its work for the detail pane, without opening an Overlay', async () => {
   pages = [
-    { items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '要約' }])], next_cursor: null },
+    {
+      items: [
+        reply(1, '始めます。', [{ action_id: 'A1', summary: '要約' }]),
+        item(2, {
+          kind: 'assistant_message',
+          text: '提案もあります。',
+          quote_item_id: null,
+          cards: [{ kind: 'suggestion', suggestion_id: 'S1', summary: '提案の要約' }],
+        }),
+      ],
+      next_cursor: null,
+    },
   ];
   renderPage();
   const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
   card.focus();
   await userEvent.keyboard('{Enter}');
-  expect(openConversation).toHaveBeenCalledWith({ actionId: 'A1' });
-  expect(card).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: 'Pantaray とのチャット' })).not.toBeInTheDocument();
+  expect(openConversation).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  await userEvent.click(await screen.findByRole('button', { name: '提案の要約 を開く' }));
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
-it('remembers the chosen view and keeps focus on the switch', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  const { unmount } = renderPage();
-  const chatMode = await screen.findByRole('button', { name: 'チャット', pressed: true });
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole('button', { name: '作業', pressed: false }));
-  const listMode = screen.getByRole('button', { name: '作業', pressed: true });
-  expect(listMode).toHaveFocus();
-  expect(screen.getByRole('searchbox')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
-  expect(chatMode).not.toBeInTheDocument();
-
-  unmount();
+it('a task or suggestion named in a sent message opens it in the detail pane', async () => {
+  pages = [
+    {
+      items: [
+        item(1, {
+          kind: 'user_message',
+          text: 'Q3 と 案 を比べて',
+          quote_item_id: null,
+          images: [],
+          files: [],
+          project_refs: [],
+          work_refs: [
+            { kind: 'action', id: 'A1', title: 'Q3', start: 0, end: 2 },
+            { kind: 'suggestion', id: 'S1', title: '案', start: 5, end: 6 },
+          ],
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
   renderPage();
-  expect(await screen.findByRole('button', { name: '作業', pressed: true })).toBeInTheDocument();
+  const task = await screen.findByRole('link', { name: '「Q3」を開く' });
+  expect(task.textContent).toBe('Q3');
+  task.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  await userEvent.click(await screen.findByRole('link', { name: '「案」を開く' }));
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
+});
+
+it('a task pane’s Add project names a new project in the sidebar', async () => {
+  pages = [{ items: [], next_cursor: null }];
+  renderPage({ pathname: '/history', search: '?item=action:A1' });
+  const projects = await screen.findByRole('region', { name: 'プロジェクト' });
+  await userEvent.click(screen.getByRole('button', { name: 'add project' }));
+  const name = within(projects).getByRole('textbox', { name: 'プロジェクト名' });
+  expect(name).toHaveFocus();
+  await userEvent.type(name, 'aurora{Enter}');
+  expect(await within(projects).findByRole('button', { name: 'aurora' })).toBeInTheDocument();
+  expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
+  expect(selectFolder).not.toHaveBeenCalled();
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+});
+
+it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
+  pages = [{ items: [reply(1, '始めます。')], next_cursor: null }];
+  renderPage();
+  const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
+  const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
+  expect(chatRow).toHaveAttribute('aria-current', 'true');
+  expect(
+    within(sidebar).getByRole('button', { name: 'メイン画面で新しい作業' })
+  ).toBeInTheDocument();
+  expect(within(sidebar).getByRole('searchbox', { name: '作業を検索' })).toBeInTheDocument();
+  // A running task's row is its title on screen, and says it is running to assistive technology.
+  expect(
+    await within(sidebar).findByRole('button', { name: /^見積書のたたき台を作る/ })
+  ).toHaveAccessibleName('見積書のたたき台を作る 実行中');
+
+  const chat = await screen.findByRole('list', { name: 'Pantaray とのチャット' });
+  expect(sidebar).not.toContainElement(chat);
+  expect(screen.getByRole('heading', { level: 1, name: 'チャット' })).toBeInTheDocument();
+  expect(within(chat).getByText('始めます。')).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toBeInTheDocument();
+});
+
+/** The unread count as `Layout` provides it, so the sidebar's Chat row shows it. */
+function WithUnreadCount({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  return (
+    <ChatUnreadContext.Provider value={count}>
+      <ChatUnreadTracker onCount={setCount} />
+      {children}
+    </ChatUnreadContext.Provider>
+  );
+}
+
+it('the Chat row takes a reader who scrolled up back to the newest message, which reads it', async () => {
+  const page = {
+    items: [reply(2, 'おはようございます。'), userMessage(1, 'おはよう')],
+    next_cursor: null,
+  };
+  // One read for the chat, one for the unread count.
+  pages = [page, page];
+  render(
+    <MemoryRouter initialEntries={['/history']}>
+      <UiLanguageProvider initialLanguage="ja">
+        <LocalOwnerContext.Provider value={OWNER}>
+          <ChatSessionProvider>
+            <WithUnreadCount>
+              <SuggestionHistoryPage />
+            </WithUnreadCount>
+          </ChatSessionProvider>
+        </LocalOwnerContext.Provider>
+      </UiLanguageProvider>
+    </MemoryRouter>
+  );
+  await screen.findByText('おはようございます。');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+
+  act(() => appendItem(reply(3, '表紙も作りました。')));
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  await waitFor(() => expect(chatRow).toHaveAccessibleDescription('未読 1 件'));
+  expect(scroll.scrollTop).toBe(100);
+
+  await userEvent.click(chatRow);
+  expect(scroll.scrollTop).toBe(1000);
+  await waitFor(() => expect(chatRow).not.toHaveAccessibleDescription());
+  expect(chatRow).toHaveTextContent(/^チャット$/);
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('3');
+});
+
+it('the Chat row keeps the chat at the newest message when an older page lands after it', async () => {
+  pages = [{ items: [reply(5, '最新の返信')], next_cursor: 5 }];
+  renderPage();
+  await screen.findByText('最新の返信');
+  const scroll = document.querySelector<HTMLDivElement>('.chat-scroll')!;
+  Object.defineProperties(scroll, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 200 },
+  });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+  let landOlder!: (page: ChatItemPage) => void;
+  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
+  await userEvent.click(screen.getByRole('button', { name: '以前のメッセージを読み込む' }));
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  expect(scroll.scrollTop).toBe(1000);
+  await act(async () => landOlder({ items: [userMessage(4, '以前')], next_cursor: null }));
+  expect(screen.getByText('以前')).toBeInTheDocument();
+  expect(scroll.scrollTop).toBe(1000);
+
+  // Still following: a reply that arrives is at the bottom, so it is read.
+  act(() => appendItem(reply(6, '次の返信')));
+  expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('6');
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
@@ -361,40 +625,6 @@ it('resends a failed message with the same message_id and points at a refused fi
   );
   expect(input).not.toHaveAttribute('readonly');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-});
-
-it('opens on the chat at the Action’s latest card when the Overlay asks, reading older pages', async () => {
-  localStorage.setItem('pantaray.history-view-mode', 'list');
-  pages = [
-    { items: [userMessage(3, 'ほかの話'), userMessage(2, 'まだほかの話')], next_cursor: 2 },
-    {
-      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
-      next_cursor: null,
-    },
-  ];
-  renderPage({ pathname: '/history', state: showChatState('A1') });
-  const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
-  await waitFor(() => expect(card).toHaveFocus());
-  expect(card).toHaveAttribute('aria-current', 'true');
-  expect(screen.getByRole('button', { name: 'チャット', pressed: true })).toBeInTheDocument();
-  expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
-});
-
-it('keeps the draft and a failed request across a switch to the list', async () => {
-  pages = [{ items: [], next_cursor: null }];
-  renderPage();
-  const input = await screen.findByRole('textbox', { name: 'メッセージ' });
-  sendMessage.mockRejectedValueOnce(new Error('response lost'));
-  await userEvent.type(input, '届いたかわからない{Enter}');
-  await screen.findByRole('button', { name: '同じメッセージを再送' });
-
-  await userEvent.click(screen.getByRole('button', { name: '作業' }));
-  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
-  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('届いたかわからない');
-
-  sendMessage.mockResolvedValueOnce({ kind: 'rejected', field: 'body' });
-  await userEvent.click(screen.getByRole('button', { name: '同じメッセージを再送' }));
-  expect(sendMessage.mock.calls[1][0].message_id).toBe(sendMessage.mock.calls[0][0].message_id);
 });
 
 it('discards a document whose write finishes after the page closed', async () => {
@@ -630,15 +860,7 @@ it('names a workspace project with @ and sends it the way an Action message name
   expect(within(mine).getByText('Aurora Web')).toHaveClass('action-conversation__project-ref');
 });
 
-it('keeps the draft and its document through a trip to Workspace to add a project', async () => {
-  (window.electron as unknown as { workspaceSettings: unknown }).workspaceSettings = {
-    get: async () => ({
-      read_access_scope: 'workspace',
-      organizations: [],
-      projects: [],
-      folders: [],
-    }),
-  };
+it('starts naming a project from @, keeping the draft and its document', async () => {
   pages = [{ items: [], next_cursor: null }];
   renderPage();
   const input = (await screen.findByRole('textbox', { name: 'メッセージ' })) as HTMLTextAreaElement;
@@ -651,10 +873,12 @@ it('keeps the draft and its document through a trip to Workspace to add a projec
   await screen.findByRole('button', { name: '議事録.pdf を削除' });
   fireEvent.change(input, { target: { value: 'これを @', selectionStart: 5 } });
   await userEvent.click(await screen.findByRole('option', { name: 'プロジェクトを追加' }));
-  await userEvent.click(await screen.findByRole('button', { name: 'Back to History' }));
 
+  const projects = screen.getByRole('region', { name: 'プロジェクト' });
+  expect(within(projects).getByRole('textbox', { name: 'プロジェクト名' })).toHaveFocus();
+  expect(selectFolder).not.toHaveBeenCalled();
   // The draft, @ included, and the staged file are as they were left.
-  expect(await screen.findByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
+  expect(screen.getByRole('textbox', { name: 'メッセージ' })).toHaveValue('これを @');
   expect(screen.getByRole('button', { name: '議事録.pdf を削除' })).toBeInTheDocument();
   expect(discardAttachment).not.toHaveBeenCalled();
 });
@@ -741,4 +965,72 @@ it('drops the way back to the quote once the user sends a message', async () => 
   await userEvent.type(screen.getByRole('textbox', { name: 'メッセージ' }), '追加でお願い{Enter}');
   expect(sendMessage).toHaveBeenCalledOnce();
   expect(screen.queryByRole('button', { name: '元のメッセージに戻る' })).not.toBeInTheDocument();
+});
+
+// Selects `text` inside `element`'s text, as a drag or Shift+arrows would.
+function select(element: HTMLElement, text: string) {
+  const node = element.firstChild!;
+  const start = node.textContent!.indexOf(text);
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, start + text.length);
+  document.getSelection()!.removeAllRanges();
+  document.getSelection()!.addRange(range);
+  act(() => void document.dispatchEvent(new Event('selectionchange')));
+}
+
+it('adds selected passages with comments as quotes, and sends them all in one message', async () => {
+  pages = [{ items: [reply(1, 'A案は安い。B案は速い。C案は確実。')], next_cursor: null }];
+  renderPage();
+  const answer = await screen.findByText('A案は安い。B案は速い。C案は確実。');
+  const input = screen.getByRole('textbox', { name: 'メッセージ' });
+  const addQuote = async (text: string, comment: string) => {
+    select(answer, text);
+    await userEvent.click(screen.getByRole('button', { name: '返信に追加' }));
+    const field = screen.getByRole('textbox', { name: '選んだ部分へのコメント' });
+    expect(field).toHaveFocus();
+    if (comment) await userEvent.type(field, comment);
+    return field;
+  };
+
+  await addQuote('A案は安い。', 'もっと安く');
+  await userEvent.keyboard('{Enter}');
+  expect(input).toHaveFocus();
+  // Esc cancels: nothing is added, and focus returns to the message.
+  await addQuote('B案は速い。', '');
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('textbox', { name: '選んだ部分へのコメント' })).toBeNull();
+  expect(input).toHaveFocus();
+  // Enter that confirms an IME conversion adds nothing.
+  const field = await addQuote('B案は速い。', 'はやい');
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })
+  );
+  expect(screen.getByRole('list', { name: '引用 1 件' })).toBeInTheDocument();
+  await userEvent.keyboard('{Enter}');
+  await addQuote('C案は確実。', '');
+  await userEvent.keyboard('{Enter}');
+
+  const quotes = screen.getByRole('list', { name: '引用 3 件' });
+  // However many quotes there are, the list scrolls within 30vh and the message field stays.
+  expect(getComputedStyle(quotes).overflowY).toBe('auto');
+  expect(parseFloat(getComputedStyle(quotes).maxHeight)).toBeCloseTo(window.innerHeight * 0.3);
+  await userEvent.click(within(quotes).getByRole('button', { name: '引用 2 / 3 を削除' }));
+  expect(screen.getByRole('list', { name: '引用 2 件' })).toBeInTheDocument();
+  expect(sendMessage).not.toHaveBeenCalled();
+
+  sendMessage.mockImplementationOnce(async (request) => ({
+    kind: 'sent',
+    item: userMessage(2, request.text),
+  }));
+  await userEvent.type(input, 'どれがいい？{Enter}');
+
+  expect(sendMessage.mock.calls[0][0]).toMatchObject({
+    text: '> A案は安い。\n\nもっと安く\n\n> C案は確実。\n\nどれがいい？',
+    quote_item_id: null,
+  });
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  expect(mine.querySelector('blockquote')).toHaveTextContent('A案は安い。');
+  expect(within(mine).getByText('どれがいい？')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: /引用/ })).toBeNull();
 });

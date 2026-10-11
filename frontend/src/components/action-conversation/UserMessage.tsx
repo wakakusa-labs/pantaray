@@ -1,24 +1,54 @@
+import { X } from 'lucide-react';
+import { useContext, useState } from 'react';
+
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages } from './AttachedImages';
-import { ProjectRefText } from './ProjectRefText';
+import { QuotedMessageText } from './QuotedMessageText';
+import { OpenWorkContext, sentMessageRefs } from './sentMessageRefs';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
-export function UserItem({ item }: { item: ActionConversationUserItem }) {
-  const { language } = useI18n();
+/** No confirmation: the message has not run, so withdrawing it undoes nothing. */
+function WithdrawButton({ label, onWithdraw }: { label: string; onWithdraw: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="action-conversation__withdraw"
+      aria-label={label}
+      data-tooltip={label}
+      aria-disabled={busy}
+      onClick={() => {
+        if (busy) return;
+        setBusy(true);
+        // A failed withdrawal leaves the message where it is, ready to try again.
+        onWithdraw()
+          .catch((error: unknown) => console.error('Failed to withdraw the message:', error))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <X size={14} strokeWidth={1.75} aria-hidden />
+    </button>
+  );
+}
+
+export function UserItem({
+  item,
+  onWithdraw,
+}: {
+  item: ActionConversationUserItem;
+  /** Offered only where the message can be withdrawn: a canonical one no run has taken. */
+  onWithdraw?: (stepId: string) => Promise<void>;
+}) {
+  const { language, t } = useI18n();
+  const openWork = useContext(OpenWorkContext);
   const copy = COPY[language];
-  const content =
-    item.source === 'canonical' ? item.entry.content : item.submission.request.message.content;
+  const message = item.source === 'canonical' ? item.entry : item.submission.request.message;
+  const { content, images } = message;
+  const files = message.files ?? [];
   const status = item.source === 'canonical' ? item.entry.status : item.submission.state;
-  const images =
-    item.source === 'canonical' ? item.entry.images : item.submission.request.message.images;
-  const files =
-    (item.source === 'canonical' ? item.entry.files : item.submission.request.message.files) ?? [];
-  const projectRefs =
-    item.source === 'canonical'
-      ? item.entry.project_refs
-      : (item.submission.request.message.project_refs ?? []);
+  const refs = sentMessageRefs(message.project_refs ?? [], message.work_refs ?? [], t, openWork);
   const state =
     status !== 'adopted' ? (
       <span
@@ -27,6 +57,13 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
       >
         {copy.userStatus[status]}
       </span>
+    ) : null;
+  // Under the message, at its right edge, as the copy button sits under an answer.
+  const withdraw =
+    item.source === 'canonical' && status !== 'adopted' && onWithdraw ? (
+      <div className="action-conversation__user-actions">
+        <WithdrawButton label={copy.withdraw} onWithdraw={() => onWithdraw(item.entry.step_id)} />
+      </div>
     ) : null;
 
   // What Pantaray's chat wrote when it handed this over: Pantaray's, never a user bubble.
@@ -42,15 +79,18 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
         {hasUserPart ? null : state}
       </section>
     ) : null;
-  if (!hasUserPart) return note ?? state;
+  if (!hasUserPart) {
+    return (
+      <>
+        {note ?? state}
+        {withdraw}
+      </>
+    );
+  }
   return (
     <>
       <article className="action-conversation__user" aria-label={copy.you}>
-        {content !== null ? (
-          <p>
-            <ProjectRefText text={content} refs={projectRefs} />
-          </p>
-        ) : null}
+        {content !== null ? <QuotedMessageText text={content} refs={refs} /> : null}
         {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
         {files.length > 0 ? (
           <ul
@@ -68,6 +108,7 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
         {state}
       </article>
       {note}
+      {withdraw}
     </>
   );
 }

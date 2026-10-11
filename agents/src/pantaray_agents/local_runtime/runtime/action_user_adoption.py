@@ -92,10 +92,15 @@ def adopt_pending_action_user_steps_at_parent_think(
                 connection=connection,
                 user_id=request.user_id,
                 action_id=request.action_id,
-                expected_process_id=lineage.root_process_id,
                 adopted_process_id=lineage.root_process_id,
                 state=state,
                 adopted_at=adopted_at,
+                pending_steps=load_pending_action_user_steps_in_connection(
+                    connection=connection,
+                    user_id=request.user_id,
+                    action_id=request.action_id,
+                    expected_process_id=lineage.root_process_id,
+                ),
             )
 
 
@@ -104,13 +109,16 @@ def adopt_pending_action_user_steps_in_connection(
     connection: sqlite3.Connection,
     user_id: str,
     action_id: str,
-    expected_process_id: str,
     adopted_process_id: str,
     state: ActionAgentState,
     adopted_at: str,
-    pending_steps: tuple[PendingActionUserStep, ...] | None = None,
+    pending_steps: tuple[PendingActionUserStep, ...],
 ) -> ActionAgentState:
-    """Adopt every pending USER turn and checkpoint the projected state."""
+    """Adopt the given unadopted USER turns in order and checkpoint the state.
+
+    The caller loads ``pending_steps`` in this same transaction, which is what
+    keeps them its own until the UPDATE below claims them.
+    """
 
     if not connection.in_transaction:
         raise MigrationError("USER adoption requires a caller-owned transaction")
@@ -119,16 +127,7 @@ def adopt_pending_action_user_steps_in_connection(
     phase = state.get("phase")
     if phase not in {"init", "planning", "executing"}:
         raise MigrationError("pending USER turns require an active THINK phase")
-    pending = (
-        pending_steps
-        if pending_steps is not None
-        else load_pending_action_user_steps_in_connection(
-            connection=connection,
-            user_id=user_id,
-            action_id=action_id,
-            expected_process_id=expected_process_id,
-        )
-    )
+    pending = pending_steps
     if not pending:
         return state
 
@@ -179,11 +178,10 @@ def adopt_pending_action_user_steps_in_connection(
             """
             UPDATE agent_action_steps
             SET parent_step_id = ?, step_number = ?, local_step_number = ?,
-                short_step_id = ?, adopted_process_id = ?
+                short_step_id = ?, adopted_process_id = ?, adoption_canceled_at = NULL
             WHERE step_id = ? AND user_id = ? AND action_id = ?
               AND step_number IS NULL AND local_step_number IS NULL
-              AND short_step_id IS NULL AND adoption_canceled_at IS NULL
-              AND expected_process_id = ? AND adopted_process_id IS NULL
+              AND short_step_id IS NULL AND adopted_process_id IS NULL
             """,
             (
                 previous_step_id,
@@ -194,7 +192,6 @@ def adopt_pending_action_user_steps_in_connection(
                 row.step_id,
                 user_id,
                 action_id,
-                expected_process_id,
             ),
         )
         if cursor.rowcount != 1:
@@ -343,6 +340,45 @@ def load_pending_action_user_steps_in_connection(
     action_id: str,
     expected_process_id: str,
 ) -> tuple[PendingActionUserStep, ...]:
+    """The USER turns waiting for the run rooted at ``expected_process_id``."""
+
+    return _load_unadopted_user_steps(
+        connection=connection,
+        user_id=user_id,
+        action_id=action_id,
+        expected_process_id=expected_process_id,
+    )
+
+
+def load_not_executed_action_user_steps_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    after_accepted_sequence: int,
+) -> tuple[PendingActionUserStep, ...]:
+    """The USER turns a stopped or failed run left untaken, in sending order."""
+
+    return _load_unadopted_user_steps(
+        connection=connection,
+        user_id=user_id,
+        action_id=action_id,
+        expected_process_id=None,
+        after_accepted_sequence=after_accepted_sequence,
+    )
+
+
+def _load_unadopted_user_steps(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    expected_process_id: str | None,
+    after_accepted_sequence: int = 0,
+) -> tuple[PendingActionUserStep, ...]:
+    """Pending turns of one run, or (``None``) the not-executed ones of any run."""
+
+    not_executed = expected_process_id is None
     rows = connection.execute(
         """
         SELECT step_id, user_message_id, user_message_json, user_request_text,
@@ -351,10 +387,11 @@ def load_pending_action_user_steps_in_connection(
                adopted_process_id
         FROM agent_action_steps
         WHERE user_id = ? AND action_id = ? AND step_type = 'user_request'
-          AND step_number IS NULL AND adoption_canceled_at IS NULL
+          AND step_number IS NULL AND (adoption_canceled_at IS NOT NULL) = ?
+          AND accepted_sequence > ?
         ORDER BY accepted_sequence, step_id
         """,
-        (user_id, action_id),
+        (user_id, action_id, not_executed, after_accepted_sequence),
     ).fetchall()
     pending: list[PendingActionUserStep] = []
     for row in rows:
@@ -368,7 +405,7 @@ def load_pending_action_user_steps_in_connection(
             or row["short_step_id"] is not None
             or row["status"] != "success"
             or row["goal_handle"] != "S"
-            or row["expected_process_id"] != expected_process_id
+            or (not not_executed and row["expected_process_id"] != expected_process_id)
             or row["adopted_process_id"] is not None
         ):
             raise MigrationError("pending USER step ownership is inconsistent")
@@ -436,6 +473,7 @@ __all__ = [
     "PendingActionUserStep",
     "adopt_pending_action_user_steps_at_parent_think",
     "adopt_pending_action_user_steps_in_connection",
+    "load_not_executed_action_user_steps_in_connection",
     "load_pending_action_user_steps_in_connection",
     "mark_pending_action_user_steps_not_executed_in_connection",
 ]

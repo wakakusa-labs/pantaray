@@ -9,6 +9,7 @@ from tests.unit.local_runtime.broker_test_support import (
     _bootstrap_runtime_db,
     _grant_workspace_full_access,
 )
+from tests.unit.local_runtime.test_tool_broker_approval import _set_prompt_preference
 
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
@@ -121,7 +122,7 @@ async def test_get_reports_user_default_until_action_override_is_set(
         user_id="user-1",
         action_id="action-1",
         body=router_module.ActionApprovalModeUpdateRequest(
-            approval_mode="always_allow"
+            approval_mode="prompt_each_time"
         ),
         resolved_user_id="user-1",
     )
@@ -129,14 +130,34 @@ async def test_get_reports_user_default_until_action_override_is_set(
         user_id="user-1", action_id="action-1", resolved_user_id="user-1"
     )
 
+    # With nothing saved, a new Action starts without asking.
     assert (default_response.approval_mode, default_response.source) == (
-        "prompt_each_time",
+        "always_allow",
         "user_default",
     )
     assert (override_response.approval_mode, override_response.source) == (
-        "always_allow",
+        "prompt_each_time",
         "action",
     )
+
+
+@pytest.mark.asyncio
+async def test_unsaved_default_auto_approves_a_workspace_edit(
+    tmp_path: Path,
+) -> None:
+    # No saved preference, no global grants and no Action override.
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    workspace_file = context.workspace_path / "todo.txt"
+    workspace_file.write_text("old line\n", encoding="utf-8")
+
+    outcome = await _apply_patch(
+        db_path=db_path,
+        context=context,
+        tool_request_id="request-unsaved-default",
+    )
+
+    assert outcome.status == "success"
+    assert workspace_file.read_text(encoding="utf-8") == "new line\n"
 
 
 @pytest.mark.asyncio
@@ -203,6 +224,7 @@ async def test_pending_approval_is_not_auto_approved_by_a_later_mode_change(
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
     _bind_router_to_db(monkeypatch, db_path)
+    _set_prompt_preference(db_path)
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 

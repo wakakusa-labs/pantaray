@@ -8,11 +8,12 @@
 import type { MainContext } from '../context';
 import type { CreateNotificationIpcHandlers } from '../../orchestration/contracts';
 import type { IpcRegistrar } from '../registrar';
-import { ActionConversationOverlayRequestSchema } from '../schemas/actions';
 import { parseInput } from '../schemas/error';
 import {
   ActionApprovalModeUpdateSchema,
+  OverlayOpenTaskRequestSchema,
   SubmitApprovalDecisionPayloadSchema,
+  SuggestionOverlayOpenRequestSchema,
 } from '../schemas/overlay';
 import { IdSchema } from '../schemas/workspaceSettings';
 
@@ -48,15 +49,10 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     return await ctx.overlay.setActionApprovalMode(parsed.actionId, parsed.approvalMode);
   });
 
+  // The workspace is the projects in the History page's sidebar; this starts naming a new one.
   registrar.on('overlay:openWorkspaceSettings', () => {
-    ctx.windows.showMainRoute('/workspace');
+    ctx.windows.showMainRoute('/history?project=new');
   });
-
-  registrar.handle('overlay:showChat', (_event, request) =>
-    ctx.windows.showChat(
-      parseInput(ActionConversationOverlayRequestSchema, 'overlay:showChat', request).actionId
-    )
-  );
 
   const injectedFactory = ctx.overlay.createNotificationIpcHandlers;
   const factory =
@@ -73,12 +69,27 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
 
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);
   registrar.on('notification-action-accept', handlers.onNotificationActionAccept);
-  registrar.on('notification-action-reject', handlers.onNotificationActionReject);
   registrar.on('notification-hide', handlers.onNotificationHide);
-  registrar.on('notification-stop-action', handlers.onNotificationStopAction);
   registrar.on('overlay:recordInteraction', handlers.onOverlayInteraction);
   registrar.on('overlay:dragStart', handlers.onOverlayDragStart);
   registrar.on('overlay:dragMove', handlers.onOverlayDragMove);
   registrar.on('overlay:dragEnd', handlers.onOverlayDragEnd);
-  registrar.on('history:openOverlay', handlers.onHistoryOpenOverlay);
+  registrar.handle('history:openOverlay', (event, request) =>
+    handlers.onHistoryOpenOverlay(
+      event,
+      parseInput(SuggestionOverlayOpenRequestSchema, 'history:openOverlay', request)
+    )
+  );
+
+  // Work a panel shows (an Action, or a suggestion no Action has taken yet) continues in the main
+  // window. The panel closes only once the main window holds it and the focus; when the main window
+  // cannot be shown, the call fails and the panel stays with its work. The sender is held before
+  // the wait: by its end the user may have closed it and opened another panel, which must not be
+  // the one closed.
+  registrar.handle('overlay:openTask', async (event, request) => {
+    const task = parseInput(OverlayOpenTaskRequestSchema, 'overlay:openTask', request);
+    const closeSender = handlers.captureSenderOverlay(event);
+    await ctx.windows.showTask(task);
+    closeSender();
+  });
 }

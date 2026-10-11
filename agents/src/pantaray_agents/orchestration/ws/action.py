@@ -114,6 +114,7 @@ class ActionFlowMixin(ActionRelayMixin):
                 language=self._resolve_action_language(payload.language),
                 supplement=payload.supplement,
                 supplement_project_refs=payload.supplement_project_refs,
+                supplement_work_refs=payload.supplement_work_refs,
                 images=payload.images,
                 files=payload.files,
             )

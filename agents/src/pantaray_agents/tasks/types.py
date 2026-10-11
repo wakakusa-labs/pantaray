@@ -158,6 +158,8 @@ class MemoryUpdateJobPayload(TypedDict):
     summary_ids: list[str]
     action_terminals: list[MemoryUpdateActionTerminal]
     chat: NotRequired[MemoryUpdateChatRange]
+    # Suggestions the user dismissed without replying, which no Action carries.
+    dismissed_suggestion_ids: NotRequired[list[str]]
 
 
 __all__ = [

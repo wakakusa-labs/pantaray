@@ -33,6 +33,7 @@ from pantaray_agents.agents.action_agent.runtime.steps.tool import (
     record_tool_step,
 )
 from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    UNCANCELLABLE_TOOL_IDS,
     ActionStopRequested,
     ActionStopWatch,
 )
@@ -42,9 +43,6 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 from pantaray_agents.agents.core import TokenBudgetExceeded
 from pantaray_agents.application.action.ports import ActionStepEventPersistenceError
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    APPLY_PATCH_TOOL_ID,
-)
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
     canceled_command_output,
 )
@@ -92,17 +90,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent.runtime.graph import ActionGraphRuntime
 
 logger = logging.getLogger(__name__)
-
-UNCANCELLABLE_TOOL_IDS = frozenset({APPLY_PATCH_TOOL_ID})
-"""停止要求でも中断せず完走させる呼び出し。
-
-``apply_patch`` の本体は 1 つのスレッドがワークスペースの排他ロックを取って走る短い
-書き込みで、await 側を cancel してもそのスレッドは書き続ける。中断できるのは「結果を
-待つのをやめる」ところまでで、書き込み自体は止まらないので、cancel は「半分書けた
-ファイルを canceled として記録する」結果にしかならない。完走を待つほうが速く、かつ
-正しい。ほかの書き込み系ツール（``bash`` / ``run_python``）は sandbox のプロセス
-グループごと kill できるので、この例外には入らない。
-"""
 
 
 @dataclass(slots=True)

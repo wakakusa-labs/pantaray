@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { createLocalBackendClient } from '../localBackend/client';
 
 import {
@@ -7,6 +9,8 @@ import {
   type ActionMessageRequest,
   type ActionMessageResponse,
   type ActionResumeRequest,
+  type ActionWithdrawMessageRequest,
+  type ActionStopRequest,
   type ActionToolOutputDetail,
   parseActionConversationPage,
   parseActionMessageResponse,
@@ -14,6 +18,8 @@ import {
 } from './actionContracts';
 
 export const ACTION_CONVERSATION_REQUEST_TIMEOUT_MS = 30_000;
+
+const ActionStopResponseSchema = z.object({ status: z.literal('accepted') }).strict();
 
 type RequestJson = ReturnType<typeof createLocalBackendClient>['requestJson'];
 
@@ -44,6 +50,8 @@ export function createActionFetcher(params: {
 }): {
   submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageResponse>;
   resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageResponse>;
+  withdrawMessage: (request: ActionWithdrawMessageRequest) => Promise<void>;
+  stopAction: (request: ActionStopRequest) => Promise<void>;
   readConversationPage: (request: ActionConversationPageRequest) => Promise<ActionConversationPage>;
   readToolOutputPage: (request: ActionToolOutputRequest) => Promise<ActionToolOutputDetail>;
 } {
@@ -83,6 +91,27 @@ export function createActionFetcher(params: {
         throw new ActionWireContractError('Action resume');
       }
       return response;
+    },
+    withdrawMessage: async (request): Promise<void> => {
+      const actionId = encodeURIComponent(request.actionId);
+      const stepId = encodeURIComponent(request.stepId);
+      await params.requestJson<void>({
+        path: `${userPath()}/${actionId}/unadopted-messages/${stepId}`,
+        method: 'DELETE',
+        timeoutMs: ACTION_CONVERSATION_REQUEST_TIMEOUT_MS,
+      });
+    },
+    stopAction: async (request): Promise<void> => {
+      const actionId = encodeURIComponent(request.actionId);
+      const response = ActionStopResponseSchema.safeParse(
+        await params.requestJson<unknown>({
+          path: `${userPath()}/${actionId}/cancel`,
+          method: 'POST',
+          body: { reason: 'user_stop', expected_process_id: request.processId },
+          timeoutMs: ACTION_CONVERSATION_REQUEST_TIMEOUT_MS,
+        })
+      );
+      if (!response.success) throw new ActionWireContractError('Action stop');
     },
     readConversationPage: async (request): Promise<ActionConversationPage> => {
       const actionId = encodeURIComponent(request.actionId);

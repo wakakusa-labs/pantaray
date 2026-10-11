@@ -8,6 +8,7 @@ import {
   IdSchema,
   ReadAccessScopeSchema,
   CommandNetworkEnabledSchema,
+  RenameProjectInputSchema,
   ReorderProjectsInputSchema,
   UpdateFolderLinksInputSchema,
   UpdateProjectLinksInputSchema,
@@ -31,6 +32,11 @@ export function registerWorkspaceSettingsHandlers(ctx: MainContext, registrar: I
   registrar.handle('workspaceSettings:createProject', async (_event, input) => {
     const parsed = parseInput(CreateProjectInputSchema, 'workspaceSettings:createProject', input);
     return await ctx.workspaceSettings.createProject(parsed);
+  });
+  registrar.handle('workspaceSettings:renameProject', async (_event, projectId, input) => {
+    const id = parseInput(IdSchema, 'workspaceSettings:renameProject', projectId);
+    const parsed = parseInput(RenameProjectInputSchema, 'workspaceSettings:renameProject', input);
+    return await ctx.workspaceSettings.renameProject(id, parsed);
   });
   registrar.handle('workspaceSettings:createFolder', async (_event, input) => {
     const parsed = parseInput(CreateFolderInputSchema, 'workspaceSettings:createFolder', input);
@@ -95,5 +101,9 @@ export function registerWorkspaceSettingsHandlers(ctx: MainContext, registrar: I
   });
   registrar.handle('workspaceSettings:selectFolder', async () => {
     return await ctx.workspaceSettings.selectFolder();
+  });
+  registrar.handle('workspaceSettings:openFolder', async (_event, folderId) => {
+    const id = parseInput(IdSchema, 'workspaceSettings:openFolder', folderId);
+    return await ctx.workspaceSettings.openFolder(id);
   });
 }

@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const { registerActionHandlers } = require('../electron/dist/ipc/handlers/actions.js');
 const { LocalBackendRequestError } = require('../electron/dist/localBackend/client.js');
 const { IpcSenderRejectedError } = require('../electron/dist/ipc/senderTrust.js');
+const { createTaskDraftStore } = require('../electron/dist/actions/taskDraftStore.js');
 
 const MESSAGE_RESPONSE = {
   action_id: 'action-1',
@@ -14,18 +15,27 @@ const MESSAGE_RESPONSE = {
   process_id: 'process-1',
 };
 
-function register(overrides, overlayOverrides) {
+const MAIN_SENDER = { id: 100 };
+
+function register(
+  overrides,
+  overlayOverrides,
+  mainWindow = null,
+  taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} })
+) {
   const handlers = new Map();
   const actions = {
     getCurrentSubjectId: () => 'user-1',
     resolveOverlayIdForSender: () => 'overlay-1',
     registerActionAssociation: () => {},
     refreshActionConversation: () => {},
+    refreshAndResumeActionConversation: async () => 'refreshed',
     ...overrides,
   };
   const overlay = { resumeLiveProcess: () => {}, ...overlayOverrides };
+  const windows = { getMainWindow: () => mainWindow };
   registerActionHandlers(
-    { actions, overlay },
+    { actions, overlay, windows, taskDrafts },
     { handle: (channel, handler) => handlers.set(channel, handler) }
   );
   return (channel, payload, sender = { id: 1 }) => handlers.get(channel)({ sender }, payload);
@@ -172,6 +182,8 @@ test('Action submit binds the same Overlay before starting canonical refresh', a
     response,
   });
   assert.deepEqual(calls, [
+    // The owner whose draft a failed send would give its words back to.
+    'subject',
     'resolve_sender',
     'subject',
     'submit',
@@ -280,6 +292,266 @@ test('Action submit maps only typed conflicts and never delivers a failed HTTP c
   }
 });
 
+test('How a send ends settles the task draft, also with its window gone', async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const heard = [];
+  taskDrafts.open('user-1', 'action:action-1', { id: 7, send: (_c, change) => heard.push(change) });
+  const request = {
+    ...validSubmit(),
+    message: {
+      ...validSubmit().message,
+      images: [{ kind: 'image', storage_path: 'user-1/2026-10-11/a.png' }],
+    },
+  };
+  const send = (submitMessage) =>
+    register({ submitMessage }, {}, null, taskDrafts)('action:submitMessage', request);
+  const words = {
+    text: 'hello',
+    mentions: [],
+    quotes: [],
+    attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
+  };
+
+  // The words leave the draft as they go out: no window offers them while the send is out.
+  taskDrafts.update('user-1', 'action:action-1', { ...words, retry: null }, 8);
+  heard.length = 0;
+  await send(async () => MESSAGE_RESPONSE);
+  assert.deepEqual(heard, [{ work: 'action:action-1', draft: null }]);
+  heard.length = 0;
+
+  // The response was lost: only this exact request, deduped by its message_id, may follow.
+  await assert.rejects(
+    send(async () => {
+      throw new LocalBackendRequestError('backend failed', 500, 'InternalError');
+    })
+  );
+  assert.equal(heard.at(-1).draft.retry.message.message_id, 'message-1');
+  assert.deepEqual({ ...heard.at(-1).draft, retry: null }, { ...words, retry: null });
+
+  // Its retry went through: no window offers it any more.
+  await send(async () => MESSAGE_RESPONSE);
+  assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
+
+  // Refused: the words come back as a plain draft.
+  await send(async () => {
+    throw new LocalBackendRequestError('stale process', 409, 'ExpectedProcessConflict');
+  });
+  assert.deepEqual(heard.at(-1).draft, { ...words, retry: null });
+
+  // Another window wrote a newer draft while the send was out: the newer draft wins.
+  const newer = { ...words, text: 'newer', retry: null };
+  await assert.rejects(
+    send(async () => {
+      taskDrafts.update('user-1', 'action:action-1', newer, 8);
+      throw new Error('socket hang up');
+    })
+  );
+  assert.deepEqual(heard.at(-1).draft, newer);
+  assert.deepEqual(taskDrafts.open('user-1', 'action:action-1', { id: 9, send() {} }), newer);
+});
+
+test('A retry of a withdrawn message is settled: nothing runs and no draft offers it', async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const heard = [];
+  taskDrafts.open('user-1', 'action:action-1', { id: 7, send: (_c, change) => heard.push(change) });
+  const send = (submitMessage) =>
+    register({ submitMessage }, {}, null, taskDrafts)('action:submitMessage', validSubmit());
+  // The response was lost, so the draft offers this exact request as a retry ...
+  await assert.rejects(
+    send(async () => {
+      throw new Error('socket hang up');
+    })
+  );
+  assert.equal(heard.at(-1).draft.retry.message.message_id, 'message-1');
+
+  // ... and another window withdrew the message before the retry went out.
+  const result = await send(async () => {
+    throw new LocalBackendRequestError('withdrawn', 409, 'MessageWithdrawn');
+  });
+
+  assert.deepEqual(result, { kind: 'withdrawn' });
+  assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
+});
+
+test("Only the main window's new-task send touches the new task's draft", async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const newTask = {
+    text: 'Tidy the notes',
+    mentions: [],
+    quotes: [],
+    attachments: [],
+    retry: null,
+  };
+  taskDrafts.open('user-1', 'new', { id: 7, send: () => {} });
+  taskDrafts.update('user-1', 'new', newTask, 7);
+  const request = {
+    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    message: { version: 1, message_id: 'message-1', content: 'Other words', images: [] },
+  };
+  const fail = async () => {
+    throw new Error('socket hang up');
+  };
+  const read = () => taskDrafts.open('user-1', 'new', { id: 9, send: () => {} });
+
+  // The small New task window keeps its own draft.
+  await assert.rejects(
+    register({ submitMessage: fail }, {}, null, taskDrafts)('action:submitMessage', request)
+  );
+  assert.deepEqual(read(), newTask);
+
+  const fromMain = register({ submitMessage: fail }, {}, mainWindowOf(MAIN_SENDER), taskDrafts);
+  await assert.rejects(fromMain('action:submitMessage', request, MAIN_SENDER));
+  assert.equal(read().retry.message.message_id, 'message-1');
+});
+
+function mainWindowOf(webContents) {
+  return { isDestroyed: () => false, webContents };
+}
+
+test('A main-window turn refreshes and resumes the Action without binding a panel', async () => {
+  for (const channel of ['action:submitMessage', 'action:resume']) {
+    const delivered = [];
+    const invoke = register(
+      {
+        // The main window is not an Overlay, and must not be looked up as one.
+        resolveOverlayIdForSender: () => assert.fail('main sender resolved as an Overlay'),
+        submitMessage: async () => MESSAGE_RESPONSE,
+        resumeAction: async () => MESSAGE_RESPONSE,
+        registerActionAssociation: () => delivered.push('bind'),
+        refreshActionConversation: (actionId) => delivered.push(`refresh:${actionId}`),
+      },
+      {
+        resumeLiveProcess: (request) =>
+          delivered.push(`resume:${request.processId}:${request.actionId}:${request.fromStart}`),
+      },
+      mainWindowOf(MAIN_SENDER)
+    );
+    const request =
+      channel === 'action:resume'
+        ? { actionId: 'action-1', messageId: 'message-1' }
+        : validSubmit();
+
+    assert.deepEqual(await invoke(channel, request, MAIN_SENDER), {
+      kind: 'submitted',
+      response: MESSAGE_RESPONSE,
+    });
+    assert.deepEqual(delivered, ['refresh:action-1', 'resume:process-1:action-1:true']);
+  }
+});
+
+test('A main-window turn writes nothing when the owner changed during the submit', async () => {
+  const state = { subjectId: 'user-1' };
+  let resolveSubmit;
+  const delivered = [];
+  const invoke = register(
+    {
+      getCurrentSubjectId: () => state.subjectId,
+      submitMessage: () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        }),
+      registerActionAssociation: () => delivered.push('bind'),
+      refreshActionConversation: () => delivered.push('refresh'),
+    },
+    { resumeLiveProcess: () => delivered.push('resume') },
+    mainWindowOf(MAIN_SENDER)
+  );
+  const result = invoke('action:submitMessage', validSubmit(), MAIN_SENDER);
+  state.subjectId = 'user-2';
+  resolveSubmit(MESSAGE_RESPONSE);
+
+  assert.deepEqual(await result, { kind: 'submitted', response: MESSAGE_RESPONSE });
+  assert.deepEqual(delivered, []);
+});
+
+test('A turn from a WebContents that is neither the main window nor a panel is rejected', async () => {
+  const submitMessage = spy(MESSAGE_RESPONSE);
+  for (const mainWindow of [
+    mainWindowOf(MAIN_SENDER),
+    { isDestroyed: () => true, webContents: MAIN_SENDER },
+  ]) {
+    const invoke = register(
+      { resolveOverlayIdForSender: () => null, submitMessage },
+      undefined,
+      mainWindow
+    );
+    const sender = mainWindow.isDestroyed() ? MAIN_SENDER : { id: 5 };
+    await assert.rejects(
+      invoke('action:submitMessage', validSubmit(), sender),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'overlay_window_not_registered'
+    );
+  }
+  assert.equal(submitMessage.calls.length, 0);
+});
+
+test('Opening an Action in the main window refreshes and resumes it, and opens no window', async () => {
+  const opened = [];
+  const invoke = register({
+    refreshAndResumeActionConversation: async (actionId) => {
+      opened.push(actionId);
+      return 'refreshed';
+    },
+  });
+
+  assert.equal(await invoke('action:openConversation', { actionId: 'action-1' }), undefined);
+  for (const invalid of [{ actionId: ' action-1' }, { actionId: 'a', extra: true }, null]) {
+    await assert.rejects(
+      async () => invoke('action:openConversation', invalid),
+      (error) => error?.name === 'IpcValidationError'
+    );
+  }
+  assert.deepEqual(opened, ['action-1']);
+});
+
+test('Opening an Action rejects when its page could not be read, so the window can retry', async () => {
+  const invoke = register({ refreshAndResumeActionConversation: async () => 'failed' });
+  await assert.rejects(
+    async () => invoke('action:openConversation', { actionId: 'action-1' }),
+    (error) => error?.name === 'ActionConversationOpenError'
+  );
+
+  // A read dropped by an owner change is not this window's failure: main resets it instead.
+  const superseded = register({ refreshAndResumeActionConversation: async () => 'superseded' });
+  assert.equal(await superseded('action:openConversation', { actionId: 'action-1' }), undefined);
+});
+
+test('Stopping a run rereads its page and live run, and rejects a Stop not accepted', async () => {
+  const calls = [];
+  const invoke = register({
+    stopAction: async (request) => calls.push(['stop', request]),
+    refreshAndResumeActionConversation: async (actionId) => {
+      calls.push(['refresh', actionId]);
+      return 'refreshed';
+    },
+  });
+  assert.equal(
+    await invoke('action:stop', { actionId: 'action-1', processId: 'run-1' }),
+    undefined
+  );
+  assert.deepEqual(calls, [
+    ['stop', { actionId: 'action-1', processId: 'run-1' }],
+    ['refresh', 'action-1'],
+  ]);
+  await assert.rejects(
+    async () => invoke('action:stop', { actionId: 'action-1', processId: ' run-1' }),
+    (error) => error?.name === 'IpcValidationError'
+  );
+
+  const refused = [];
+  const failing = register({
+    stopAction: async () => {
+      throw new LocalBackendRequestError('conflict', 409);
+    },
+    refreshAndResumeActionConversation: async (actionId) => refused.push(actionId),
+  });
+  await assert.rejects(
+    async () => failing('action:stop', { actionId: 'action-1', processId: 'run-1' }),
+    (error) => error instanceof LocalBackendRequestError
+  );
+  assert.deepEqual(refused, ['action-1']);
+});
+
 function validSubmit() {
   return {
     target: { kind: 'existing', action_id: 'action-1', expected_process_id: null },
@@ -292,3 +564,101 @@ function validSubmit() {
     },
   };
 }
+
+function replySubmit() {
+  return {
+    target: {
+      kind: 'new',
+      approval_mode: 'prompt_each_time',
+      reply_to_suggestion_id: 'sug-1',
+    },
+    message: { version: 1, message_id: 'message-1', content: 'Only the summary', images: [] },
+  };
+}
+
+test('A reply tells every window which Action it opened for the suggestion', async () => {
+  const calls = [];
+  const invoke = register(
+    {
+      submitMessage: async () => MESSAGE_RESPONSE,
+      registerActionAssociation: (actionId) => calls.push(`bind:${actionId}`),
+      refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+    },
+    {
+      recordSuggestionReply: (suggestionId, actionId) =>
+        calls.push(`reply:${suggestionId}:${actionId}`),
+    }
+  );
+
+  await invoke('action:submitMessage', replySubmit());
+
+  assert.deepEqual(calls, ['reply:sug-1:action-1', 'bind:action-1', 'refresh:action-1']);
+});
+
+test('A reply refused because the suggestion has its conversation opens that conversation', async () => {
+  for (const existing of ['action-existing', null]) {
+    const calls = [];
+    const invoke = register(
+      {
+        submitMessage: async () => {
+          throw new LocalBackendRequestError('replied', 409, 'ActionConflict');
+        },
+        registerActionAssociation: (actionId) => calls.push(`bind:${actionId}`),
+        refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+      },
+      {
+        resolveOverlayBootstrap: async (suggestionId) => {
+          calls.push(`read:${suggestionId}`);
+          return { snapshot: { actionId: existing } };
+        },
+        recordSuggestionReply: (suggestionId, actionId) =>
+          calls.push(`reply:${suggestionId}:${actionId}`),
+        resumeLiveProcess: () => calls.push('resume'),
+      }
+    );
+
+    const result = await invoke('action:submitMessage', replySubmit());
+
+    if (existing) {
+      assert.deepEqual(result, { kind: 'reply_exists', actionId: existing });
+      assert.deepEqual(calls, [
+        'read:sug-1',
+        `reply:sug-1:${existing}`,
+        `bind:${existing}`,
+        `refresh:${existing}`,
+      ]);
+    } else {
+      assert.deepEqual(result, { kind: 'action_conflict' });
+      assert.deepEqual(calls, ['read:sug-1']);
+    }
+  }
+});
+
+test('Withdrawing validates the request, maps a run that took it first, and refreshes', async () => {
+  const adopted = new LocalBackendRequestError('adopted', 409, 'MessageAdopted');
+  const failure = new LocalBackendRequestError('unavailable', 503);
+  const calls = [];
+  const answers = [undefined, adopted, failure];
+  const invoke = register({
+    withdrawMessage: async (request) => {
+      calls.push(`withdraw:${request.stepId}`);
+      const answer = answers.shift();
+      if (answer) throw answer;
+    },
+    refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+  });
+  const withdraw = (stepId) => invoke('action:withdrawMessage', { actionId: 'action-1', stepId });
+
+  await assert.rejects(invoke('action:withdrawMessage', { actionId: 'action-1' }));
+  await assert.rejects(withdraw(' step-2'));
+  assert.deepEqual(await withdraw('step-2'), { kind: 'withdrawn' });
+  assert.deepEqual(await withdraw('step-2'), { kind: 'adopted' });
+  await assert.rejects(withdraw('step-2'), (error) => error === failure);
+  assert.deepEqual(calls, [
+    'withdraw:step-2',
+    'refresh:action-1',
+    'withdraw:step-2',
+    'refresh:action-1',
+    'withdraw:step-2',
+  ]);
+});

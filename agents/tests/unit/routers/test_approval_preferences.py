@@ -133,6 +133,40 @@ async def _execute_apply_patch_after_needs_read(
 
 
 @pytest.mark.asyncio
+async def test_settings_report_always_allow_until_the_user_saves_a_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.routers import (
+        approval_preferences as approval_preferences_router,
+    )
+
+    db_path, _context = _bootstrap_runtime_db(tmp_path)
+    monkeypatch.setattr(
+        approval_preferences_router,
+        "read_local_runtime_db_config",
+        lambda: (db_path, 1_000),
+    )
+
+    async def read_mode() -> str:
+        response = await approval_preferences_router.get_workspace_edit_and_command_approval_preference(
+            user_id="user-1", resolved_user_id="user-1"
+        )
+        return response.approval_mode
+
+    unsaved = await read_mode()
+    await approval_preferences_router.update_workspace_edit_and_command_approval_preference(
+        user_id="user-1",
+        body=approval_preferences_router.ApprovalPreferenceUpdateRequest(
+            approval_mode="prompt_each_time"
+        ),
+        resolved_user_id="user-1",
+    )
+
+    assert (unsaved, await read_mode()) == ("always_allow", "prompt_each_time")
+
+
+@pytest.mark.asyncio
 async def test_settings_update_to_always_allow_applies_on_next_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

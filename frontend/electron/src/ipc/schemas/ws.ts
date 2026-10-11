@@ -13,6 +13,7 @@ import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
   ActionProjectRefsSchema,
+  ActionWorkRefsSchema,
 } from '../../actions/actionContracts';
 
 import {
@@ -25,11 +26,18 @@ const IdString = z.string().trim().min(1).max(MAX_ID_LENGTH);
 const ReasonString = z.string().max(MAX_REASON_LENGTH);
 const ProcessKindSchema = z.enum(['suggestion', 'action']);
 
+// The composer's words, which 承認 sends as the supplement and 見送る as the reason.
+const ActionSupplementSchema = z
+  .string()
+  .transform(normalizeActionSupplement)
+  .refine((value) => value === null || isActionSupplementWithinLimit(value))
+  .nullable();
+
 const DismissSuggestionSchema = z.object({
   event: z.literal('dismiss_suggestion'),
   data: z.object({
     suggestion_id: IdString,
-    reason: ReasonString.optional(),
+    reason: ActionSupplementSchema.optional(),
   }),
 });
 
@@ -38,13 +46,6 @@ const RejectSuggestionSchema = z.object({
   data: z.object({
     suggestion_id: IdString,
     reason: ReasonString.optional(),
-  }),
-});
-
-const StopProcessSchema = z.object({
-  event: z.literal('stop_process'),
-  data: z.object({
-    process_id: IdString,
   }),
 });
 
@@ -90,17 +91,10 @@ const AckEventSchema = z.object({
 export const OrchestrationClientEventSchema = z.discriminatedUnion('event', [
   DismissSuggestionSchema,
   RejectSuggestionSchema,
-  StopProcessSchema,
   ResumeProcessSchema,
   ResumeSessionSchema,
   AckEventSchema,
 ]);
-
-const ActionSupplementSchema = z
-  .string()
-  .transform(normalizeActionSupplement)
-  .refine((value) => value === null || isActionSupplementWithinLimit(value))
-  .nullable();
 
 export const AcceptActionRequestSchema = z
   .object({
@@ -108,6 +102,7 @@ export const AcceptActionRequestSchema = z
     commandId: IdString.nullable(),
     supplement: ActionSupplementSchema,
     supplementProjectRefs: ActionProjectRefsSchema,
+    supplementWorkRefs: ActionWorkRefsSchema,
     approvalMode: z.enum(['prompt_each_time', 'always_allow']),
     images: ActionMessageRequestSchema.shape.message.shape.images,
     files: ActionFileAttachmentsSchema.optional(),

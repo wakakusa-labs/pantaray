@@ -3,8 +3,6 @@ const { test } = require('node:test');
 
 const { createChatFetcher } = require('../electron/dist/chat/chatFetch.js');
 const { registerChatHandlers } = require('../electron/dist/ipc/handlers/chat.js');
-const { registerOverlayHandlers } = require('../electron/dist/ipc/handlers/overlay.js');
-const { buildMainContext } = require('../electron/dist/ipc/mainContextFactory.js');
 const { createLocalBackendClient } = require('../electron/dist/localBackend/client.js');
 const { IpcValidationError } = require('../electron/dist/ipc/schemas/error.js');
 
@@ -189,6 +187,7 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     images: [],
     files: [],
     project_refs: [],
+    work_refs: [],
   };
 
   await ipc.invoke('chat:sendMessage', valid);
@@ -211,6 +210,10 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     // A named project has the Action message's shape: a code-point span and its folders.
     { ...valid, project_refs: [{ project_id: 'p-1', display_name: 'hello', start: 0, end: 5 }] },
     { ...valid, project_refs: undefined },
+    // A named task or suggestion: its kind, id, title and span, and nothing else.
+    { ...valid, work_refs: [{ kind: 'task', id: 'a-1', title: 'hello', start: 0, end: 5 }] },
+    { ...valid, work_refs: [{ kind: 'action', id: 'a-1', title: ' ', start: 0, end: 1 }] },
+    { ...valid, work_refs: undefined },
   ]) {
     await assert.rejects(ipc.invoke('chat:sendMessage', payload), IpcValidationError);
   }
@@ -224,60 +227,4 @@ test('chat IPC validates the renderer payload before anything reaches the backen
   assert.deepEqual(ipc.calls.at(-1), ['retry', { failure_item_id: 'item-8' }]);
   assert.equal(ipc.calls.length, 3);
   assert.deepEqual(await ipc.invoke('chat:getTurnState'), { running: true });
-});
-
-test('overlay:showChat validates the Action id and asks main to show it', async () => {
-  const handlers = new Map();
-  const shown = [];
-  registerOverlayHandlers(
-    {
-      windows: { showChat: (actionId) => shown.push(actionId) },
-      overlay: { createNotificationIpcHandlers: () => ({}) },
-      actions: {},
-    },
-    { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} }
-  );
-  const invoke = (payload) => handlers.get('overlay:showChat')({ sender: { id: 2 } }, payload);
-
-  await invoke({ actionId: 'act-1' });
-  for (const payload of [
-    { actionId: ' act-1' },
-    { actionId: '' },
-    { actionId: 'a', extra: 1 },
-    'act-1',
-  ]) {
-    await assert.rejects(async () => invoke(payload), IpcValidationError);
-  }
-  assert.deepEqual(shown, ['act-1']);
-});
-
-test('showChat brings the main window forward and tells it which Action to show', () => {
-  const steps = [];
-  let mainWindow = {
-    isDestroyed: () => false,
-    isMinimized: () => true,
-    restore: () => steps.push('restore'),
-    isVisible: () => false,
-    show: () => steps.push('show'),
-    focus: () => steps.push('focus'),
-    webContents: { send: (channel, payload) => steps.push([channel, payload]) },
-  };
-  const context = buildMainContext({
-    getMainWindow: () => mainWindow,
-    isDevRuntime: () => false,
-    frontendDistIndex: '/tmp/index.html',
-    recordSecurityEvent: () => {},
-  });
-
-  context.windows.showChat('act-1');
-  assert.deepEqual(steps, [
-    'restore',
-    'show',
-    'focus',
-    ['history:showChat', { actionId: 'act-1' }],
-  ]);
-
-  mainWindow = null;
-  context.windows.showChat('act-2');
-  assert.equal(steps.length, 4);
 });

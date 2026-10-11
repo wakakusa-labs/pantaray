@@ -1,4 +1,7 @@
-"""Durable shape and bounded submission contracts for Action USER messages."""
+"""Durable shape and bounded submission contracts for Action USER messages.
+
+The HTTP wire models that carry a message in are in ``action_message_http``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ import os
 import unicodedata
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Protocol, Self
 
 from pydantic import (
     AfterValidator,
@@ -21,9 +24,6 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from pantaray_agents.schema.action_conversation import ActionStatus
-
-from .base import AgentError
 from .image import ImageInput
 
 ACTION_MESSAGE_ID_MAX_CODEPOINTS = 128
@@ -38,6 +38,10 @@ ACTION_PROJECT_REF_MAX_PATHS = 32
 # for a project name and a folder path; a reference copies those values.
 ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS = 200
 ACTION_PROJECT_REF_PATH_MAX_CODEPOINTS = 4096
+# The same runaway guard for named tasks and suggestions. The composer shortens a
+# title to one line well inside the bound.
+ACTION_MESSAGE_MAX_WORK_REFS = 32
+ACTION_WORK_REF_TITLE_MAX_CODEPOINTS = 200
 ACTION_MESSAGE_MAX_FILES = 10
 # The user's chat messages one hand-off relays as their words.
 ACTION_MESSAGE_MAX_RELAYED_ITEMS = 32
@@ -83,7 +87,7 @@ def _bounded_id(value: str) -> str:
     return _bounded_text(value, limit=ACTION_MESSAGE_ID_MAX_CODEPOINTS)
 
 
-def _bounded_content(value: str) -> str:
+def bounded_content(value: str) -> str:
     return _bounded_text(value, limit=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)
 
 
@@ -103,16 +107,8 @@ type ActionMessageFailureType = Literal[
     "ActionConflict",
     "MessageIdentityConflict",
     "ExpectedProcessConflict",
+    "MessageWithdrawn",
 ]
-type ActionMessageValidationReason = Literal[
-    "blank",
-    "too_long",
-    "not_allowed",
-    "extra_field",
-    "invalid",
-    "too_many",
-]
-type ActionMessageValidationUnit = Literal["unicode_code_points"]
 
 
 def _bounded_items(*, limit: int, unit: str) -> Callable[[object], object]:
@@ -134,13 +130,16 @@ def _bounded_items(*, limit: int, unit: str) -> Callable[[object], object]:
     return validate
 
 
-_bounded_images = _bounded_items(
+bounded_images = _bounded_items(
     limit=ACTION_MESSAGE_MAX_IMAGES, unit="image_references"
 )
 bounded_project_refs = _bounded_items(
     limit=ACTION_MESSAGE_MAX_PROJECT_REFS, unit="project_references"
 )
-_bounded_files = _bounded_items(limit=ACTION_MESSAGE_MAX_FILES, unit="files")
+bounded_work_refs = _bounded_items(
+    limit=ACTION_MESSAGE_MAX_WORK_REFS, unit="work_references"
+)
+bounded_files = _bounded_items(limit=ACTION_MESSAGE_MAX_FILES, unit="files")
 
 
 def _bounded_project_name(value: str) -> str:
@@ -185,6 +184,39 @@ class ActionProjectRef(BaseModel):
     _validate_paths = field_validator("paths", mode="before")(
         _bounded_items(limit=ACTION_PROJECT_REF_MAX_PATHS, unit="project_paths")
     )
+
+    @property
+    def span_text(self) -> str:
+        return self.display_name
+
+
+def _bounded_work_title(value: str) -> str:
+    return _bounded_text(value, limit=ACTION_WORK_REF_TITLE_MAX_CODEPOINTS)
+
+
+class ActionWorkRef(BaseModel):
+    """A task (``action``) or suggestion the user named in their text, by id.
+
+    The title is the one the composer showed when the message was sent; a later
+    change to the task or suggestion does not rewrite the message. ``start`` and
+    ``end`` are Unicode code-point offsets, as on ``ActionProjectRef``. Nothing
+    here proves the id is the sender's: whoever reads it reads as its own user.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: Literal["action", "suggestion"]
+    id: str
+    title: str
+    start: NonNegativeInt
+    end: NonNegativeInt
+
+    _validate_id = field_validator("id")(_bounded_id)
+    _validate_title = field_validator("title")(_bounded_work_title)
+
+    @property
+    def span_text(self) -> str:
+        return self.title
 
 
 def _attachment_file_name(value: str) -> str:
@@ -232,13 +264,27 @@ class FileAttachmentInput(BaseModel):
         return f"{ACTION_ATTACHMENTS_DIRNAME}/{self.attachment_id}/{self.name}"
 
 
-def require_project_ref_spans(
-    refs: tuple[ActionProjectRef, ...], info: ValidationInfo, *, text_field: str
-) -> tuple[ActionProjectRef, ...]:
-    """Check each reference names its own span of the text, in order.
+class _SpanRef(Protocol):
+    @property
+    def start(self) -> int: ...
+    @property
+    def end(self) -> int: ...
+    @property
+    def span_text(self) -> str: ...
 
-    A text that failed its own validation is absent from ``info.data``; its error
-    is the one reported.
+
+def require_ref_spans[RefT: _SpanRef](
+    refs: tuple[RefT, ...],
+    info: ValidationInfo,
+    *,
+    text_field: str,
+    beside_field: str | None = None,
+) -> tuple[RefT, ...]:
+    """Check each reference names its own span of the text, in order, and none
+    overlaps a reference of ``beside_field`` into the same text.
+
+    A field that failed its own validation is absent from ``info.data``; its
+    error is the one reported.
     """
 
     if not refs or text_field not in info.data:
@@ -247,14 +293,21 @@ def require_project_ref_spans(
     if text is None:
         raise PydanticCustomError(
             "action_message_not_allowed",
-            "project references require the text they point into",
+            "references require the text they point into",
         )
+    beside: tuple[_SpanRef, ...] = (
+        info.data.get(beside_field, ()) if beside_field is not None else ()
+    )
     previous_end = 0
     for ref in refs:
-        if ref.start < previous_end or text[ref.start : ref.end] != ref.display_name:
+        if (
+            ref.start < previous_end
+            or text[ref.start : ref.end] != ref.span_text
+            or any(ref.start < other.end and other.start < ref.end for other in beside)
+        ):
             raise PydanticCustomError(
                 "action_message_invalid",
-                "project reference does not name its span of the text",
+                "reference does not name its own span of the text",
             )
         previous_end = ref.end
     return refs
@@ -312,27 +365,51 @@ class ActionUserMessageInput(BaseModel):
     supplement_project_refs: tuple[ActionProjectRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
     chat_handoff: ChatHandoffInput | None = None
+    # After the project lists: a task or suggestion never shares a project's span.
+    work_refs: tuple[ActionWorkRef, ...] = ()
+    supplement_work_refs: tuple[ActionWorkRef, ...] = ()
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
     _bound_project_refs = field_validator(
         "project_refs", "supplement_project_refs", mode="before"
     )(bounded_project_refs)
-    _bound_files = field_validator("files", mode="before")(_bounded_files)
+    _bound_work_refs = field_validator(
+        "work_refs", "supplement_work_refs", mode="before"
+    )(bounded_work_refs)
+    _bound_files = field_validator("files", mode="before")(bounded_files)
 
     @field_validator("project_refs")
     @classmethod
     def _validate_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return require_project_ref_spans(refs, info, text_field="content")
+        return require_ref_spans(refs, info, text_field="content")
 
     @field_validator("supplement_project_refs")
     @classmethod
     def _validate_supplement_project_refs(
         cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
     ) -> tuple[ActionProjectRef, ...]:
-        return require_project_ref_spans(refs, info, text_field="supplement")
+        return require_ref_spans(refs, info, text_field="supplement")
+
+    @field_validator("work_refs")
+    @classmethod
+    def _validate_work_refs(
+        cls, refs: tuple[ActionWorkRef, ...], info: ValidationInfo
+    ) -> tuple[ActionWorkRef, ...]:
+        return require_ref_spans(
+            refs, info, text_field="content", beside_field="project_refs"
+        )
+
+    @field_validator("supplement_work_refs")
+    @classmethod
+    def _validate_supplement_work_refs(
+        cls, refs: tuple[ActionWorkRef, ...], info: ValidationInfo
+    ) -> tuple[ActionWorkRef, ...]:
+        return require_ref_spans(
+            refs, info, text_field="supplement", beside_field="supplement_project_refs"
+        )
 
     @property
     def is_chat_instruction(self) -> bool:
@@ -368,165 +445,14 @@ class ActionUserMessageInput(BaseModel):
         return self
 
 
-class _ActionMessageHttpModel(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        strict=True,
-        hide_input_in_errors=True,
-    )
-
-
-class ActionMessageHttpNewTarget(_ActionMessageHttpModel):
-    kind: Literal["new"]
-    approval_mode: Literal["prompt_each_time", "always_allow"] | None = None
-    reply_to_suggestion_id: ActionMessageId | None = None
-
-
-class ActionMessageHttpExistingTarget(_ActionMessageHttpModel):
-    kind: Literal["existing"]
-    action_id: ActionMessageId
-    expected_process_id: ActionMessageId | None
-
-
-ActionMessageHttpTarget = Annotated[
-    ActionMessageHttpNewTarget | ActionMessageHttpExistingTarget,
-    Field(discriminator="kind"),
-]
-
-
-class ActionMessageHttpMessage(_ActionMessageHttpModel):
-    version: Literal[1]
-    message_id: ActionMessageId
-    content: Annotated[
-        str,
-        Field(
-            json_schema_extra={
-                "minLength": 1,
-                "maxLength": ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
-                "pattern": r"\S",
-            }
-        ),
-    ]
-    images: Annotated[
-        tuple[ImageInput, ...],
-        Field(json_schema_extra={"maxItems": ACTION_MESSAGE_MAX_IMAGES}),
-    ]
-    language: Literal["en", "ja"] | None = None
-    project_refs: Annotated[
-        tuple[ActionProjectRef, ...],
-        Field(json_schema_extra={"maxItems": ACTION_MESSAGE_MAX_PROJECT_REFS}),
-    ] = ()
-    files: Annotated[
-        tuple[FileAttachmentInput, ...],
-        Field(json_schema_extra={"maxItems": ACTION_MESSAGE_MAX_FILES}),
-    ] = ()
-
-    _validate_content = field_validator("content")(_bounded_content)
-    _validate_images = field_validator("images", mode="before")(_bounded_images)
-    _bound_project_refs = field_validator("project_refs", mode="before")(
-        bounded_project_refs
-    )
-    _bound_files = field_validator("files", mode="before")(_bounded_files)
-
-    @field_validator("project_refs")
-    @classmethod
-    def _validate_project_refs(
-        cls, refs: tuple[ActionProjectRef, ...], info: ValidationInfo
-    ) -> tuple[ActionProjectRef, ...]:
-        return require_project_ref_spans(refs, info, text_field="content")
-
-    @field_validator("version", mode="before")
-    @classmethod
-    def _require_exact_wire_version(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise PydanticCustomError(
-                "action_message_invalid",
-                "HTTP Action message version must be the integer 1",
-            )
-        return value
-
-
-class ActionMessageHttpRequest(_ActionMessageHttpModel):
-    target: ActionMessageHttpTarget
-    message: ActionMessageHttpMessage
-
-
-class ActionResumeHttpRequest(_ActionMessageHttpModel):
-    """Ask for the stopped run to be continued as one follow-up turn.
-
-    There is no message: the caller pressed a button. ``message_id`` is the same
-    user-wide idempotency key an ordinary submission carries, so a retry after a
-    lost response continues the same turn instead of opening a second one.
-    """
-
-    message_id: ActionMessageId
-
-
-class _ActionMessageHttpResponseBase(_ActionMessageHttpModel):
-    action_id: str
-    message_id: str
-    step_id: str
-    action_status: ActionStatus
-
-
-class ActionMessageHttpStartedResponse(_ActionMessageHttpResponseBase):
-    disposition: Literal["started"]
-    process_id: str
-
-
-class ActionMessageHttpDeferredResponse(_ActionMessageHttpResponseBase):
-    disposition: Literal["pending", "not_executed"]
-    process_id: None
-
-
-ActionMessageHttpResponse = Annotated[
-    ActionMessageHttpStartedResponse | ActionMessageHttpDeferredResponse,
-    Field(discriminator="disposition"),
-]
-
-
-class ActionMessageHttpNotFoundFailure(_ActionMessageHttpModel):
-    type: Literal["ActionNotFound"]
-
-
-class ActionMessageHttpConflictFailure(_ActionMessageHttpModel):
-    type: Literal[
-        "ActionConflict",
-        "MessageIdentityConflict",
-        "ExpectedProcessConflict",
-    ]
-
-
-class ActionMessageHttpErrorDetail(_ActionMessageHttpModel):
-    detail: str
-
-
-class ActionMessageHttpServerErrorDetail(_ActionMessageHttpModel):
-    detail: AgentError
-
-
-ActionMessageHttpDefaultErrorDetail = (
-    ActionMessageHttpErrorDetail | ActionMessageHttpServerErrorDetail
-)
-
-
-class ActionMessageValidationError(_ActionMessageHttpModel):
-    type: Literal["ActionMessageValidationError"] = "ActionMessageValidationError"
-    field: str
-    reason: ActionMessageValidationReason
-    limit: int | None
-    unit: ActionMessageValidationUnit | None
-
-
 def validate_action_user_message_for_submit(
     message: ActionUserMessageInput,
 ) -> ActionUserMessageInput:
     """Validate only new submissions without narrowing the durable V1 reader."""
 
     _bounded_id(message.message_id)
-    _bounded_content(message.content)
-    _bounded_images(message.images)
+    bounded_content(message.content)
+    bounded_images(message.images)
     if message.supplement is not None:
         _bounded_text(
             message.supplement,
@@ -539,8 +465,6 @@ def validate_action_user_message_for_submit(
 
 
 __all__ = [
-    "bounded_project_refs",
-    "require_project_ref_spans",
     "ACTION_ATTACHMENTS_DIRNAME",
     "ACTION_FILE_NAME_MAX_BYTES",
     "ACTION_FILE_TYPE_LABEL_BY_EXTENSION",
@@ -549,33 +473,25 @@ __all__ = [
     "ACTION_MESSAGE_MAX_FILES",
     "ACTION_MESSAGE_MAX_IMAGES",
     "ACTION_MESSAGE_MAX_PROJECT_REFS",
+    "ACTION_MESSAGE_MAX_WORK_REFS",
     "ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS",
     "ACTION_PROJECT_REF_MAX_PATHS",
     "ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS",
     "ACTION_PROJECT_REF_PATH_MAX_CODEPOINTS",
+    "ACTION_WORK_REF_TITLE_MAX_CODEPOINTS",
     "ActionMessageFailureType",
-    "ActionMessageHttpConflictFailure",
-    "ActionMessageHttpDeferredResponse",
-    "ActionMessageHttpDefaultErrorDetail",
-    "ActionMessageHttpErrorDetail",
-    "ActionMessageHttpExistingTarget",
-    "ActionMessageHttpMessage",
-    "ActionMessageHttpNewTarget",
-    "ActionMessageHttpNotFoundFailure",
-    "ActionMessageHttpRequest",
-    "ActionMessageHttpResponse",
-    "ActionMessageHttpServerErrorDetail",
-    "ActionMessageHttpStartedResponse",
-    "ActionMessageHttpTarget",
     "ActionMessageId",
-    "ActionMessageValidationError",
-    "ActionMessageValidationReason",
-    "ActionMessageValidationUnit",
     "ActionProjectRef",
-    "ActionResumeHttpRequest",
     "ActionUserMessageInput",
+    "ActionWorkRef",
     "ChatHandoffInput",
     "FileAttachmentInput",
     "SuggestionApprovalInput",
+    "bounded_content",
+    "bounded_files",
+    "bounded_images",
+    "bounded_project_refs",
+    "bounded_work_refs",
+    "require_ref_spans",
     "validate_action_user_message_for_submit",
 ]

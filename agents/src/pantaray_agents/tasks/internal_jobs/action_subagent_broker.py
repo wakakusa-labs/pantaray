@@ -92,6 +92,7 @@ _ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
         "line_count": {"type": "integer", "minimum": 1},
         "preview": {"type": "string"},
         "retry_hint": {"type": "string"},
+        "status": {"type": "string"},
     },
 }
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {

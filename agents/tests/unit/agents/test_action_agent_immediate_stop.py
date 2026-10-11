@@ -29,6 +29,7 @@ from tests.unit.agents.test_action_agent_tool_batch_execution import (
 )
 
 from pantaray_agents.agents.action_agent.runtime import graph as graph_module
+from pantaray_agents.agents.action_agent.runtime import stop_watch
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act import (
     call_execution,
 )
@@ -392,7 +393,7 @@ def test_only_apply_patch_is_exempt_from_immediate_cancellation() -> None:
     待ち合わせを打ち切る。ここを広げると「実行中の呼び出しを待つ」旧挙動が戻る。
     """
 
-    assert call_execution.UNCANCELLABLE_TOOL_IDS == frozenset({PATCH_TOOL})
+    assert stop_watch.UNCANCELLABLE_TOOL_IDS == frozenset({PATCH_TOOL})
 
 
 @pytest.mark.asyncio

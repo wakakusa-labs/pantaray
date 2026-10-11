@@ -85,6 +85,7 @@ def _create_schema(db_path: Path) -> None:
                 user_request_text TEXT,
                 llm_response_text TEXT,
                 runtime_state_checkpoint TEXT,
+                completed_at TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE processes (
@@ -150,7 +151,8 @@ def _create_schema(db_path: Path) -> None:
                 user_id TEXT NOT NULL,
                 action_id TEXT NOT NULL,
                 tool_request_id TEXT NOT NULL,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                claimed_at TEXT
             );
             """
         )

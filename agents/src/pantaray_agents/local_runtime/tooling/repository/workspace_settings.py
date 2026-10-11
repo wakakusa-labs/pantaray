@@ -13,6 +13,7 @@ from .workspace_settings_models import (
     WorkspaceFolder,
     WorkspaceOrganization,
     WorkspaceProject,
+    WorkspaceProjectNameTakenError,
     WorkspaceSettings,
 )
 
@@ -78,40 +79,40 @@ def create_workspace_project(
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
             ensure_user_row(connection, user_id=user_id)
-            connection.execute(
-                """
-                INSERT INTO workspace_projects(
-                    project_id, user_id, display_name, sort_order, status, created_at, updated_at
-                ) VALUES (
-                    ?, ?, ?,
-                    COALESCE((
-                        SELECT MAX(existing.sort_order) + 1
-                        FROM workspace_projects AS existing
-                        WHERE existing.user_id = ?
-                    ), 0),
-                    'active', ?, ?
-                )
-                ON CONFLICT(user_id, display_name) DO UPDATE SET
-                    status = 'active',
-                    updated_at = excluded.updated_at
-                """,
-                (project_id, user_id, normalized_name, user_id, now, now),
-            )
-            row = _fetch_project_by_name(
-                connection=connection,
-                user_id=user_id,
-                display_name=normalized_name,
-            )
-            stored_project_id = str(row["project_id"])
+            # A taken name is refused rather than answered with that project: a caller that
+            # rolls back what it created must never be handed a project it did not create.
+            try:
+                row = connection.execute(
+                    """
+                    INSERT INTO workspace_projects(
+                        project_id, user_id, display_name, sort_order, status,
+                        created_at, updated_at
+                    ) VALUES (
+                        ?, ?, ?,
+                        COALESCE((
+                            SELECT MAX(existing.sort_order) + 1
+                            FROM workspace_projects AS existing
+                            WHERE existing.user_id = ?
+                        ), 0),
+                        'active', ?, ?
+                    )
+                    RETURNING display_name, sort_order
+                    """,
+                    (project_id, user_id, normalized_name, user_id, now, now),
+                ).fetchone()
+            except sqlite3.IntegrityError as exc:
+                raise WorkspaceProjectNameTakenError(
+                    f"workspace project name is taken: {normalized_name}"
+                ) from exc
             _replace_project_organization_links(
                 connection=connection,
                 user_id=user_id,
-                project_id=stored_project_id,
+                project_id=project_id,
                 organization_ids=organization_ids,
                 now=now,
             )
     return WorkspaceProject(
-        project_id=stored_project_id,
+        project_id=project_id,
         display_name=str(row["display_name"]),
         sort_order=int(row["sort_order"]),
         organization_ids=_unique_sorted(organization_ids),
@@ -441,25 +442,6 @@ def _fetch_organization_by_name(
     ).fetchone()
     if row is None:
         raise MigrationError("workspace organization upsert did not return a row")
-    return cast(sqlite3.Row, row)
-
-
-def _fetch_project_by_name(
-    *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    display_name: str,
-) -> sqlite3.Row:
-    row = connection.execute(
-        """
-        SELECT project_id, display_name, sort_order
-        FROM workspace_projects
-        WHERE user_id = ? AND display_name = ?
-        """,
-        (user_id, display_name),
-    ).fetchone()
-    if row is None:
-        raise MigrationError("workspace project upsert did not return a row")
     return cast(sqlite3.Row, row)
 
 

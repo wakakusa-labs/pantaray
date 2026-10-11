@@ -11,6 +11,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { OverlayOpenTaskRequest } from './schemas/overlay';
 import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
 
@@ -25,7 +26,7 @@ import type {
   ActionApprovalModeResponse,
 } from '../actions/actionApprovalModeFetch';
 import type { HistoryFetchResult } from '../history/historyFetch';
-import type { HistoryItemDeleteRequest } from '../history/historyContracts';
+import type { ConversationHistoryListItem, HistoryItemKey } from '../history/historyContracts';
 import type { HistoryItemDeleteResult } from '../history/historyItemDelete';
 import type { ActionCompletionViewedRequest } from '../history/actionReadState';
 import type {
@@ -35,6 +36,7 @@ import type {
   WorkspaceFolder,
   WorkspaceOrganization,
   WorkspaceProject,
+  WorkspaceProjectCreateResult,
   WorkspaceSettings,
 } from '../settings/workspaceSettingsFetch';
 import type { IpcMainLike } from './registrar';
@@ -49,13 +51,17 @@ import type {
   CreateFolderInput,
   CreateOrganizationInput,
   CreateProjectInput,
+  RenameProjectInput,
   ReorderProjectsInput,
   UpdateFolderLinksInput,
   UpdateProjectLinksInput,
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
+import type { RunFile } from '../actions/actionDocumentHtml';
 import type { createActionFetcher } from '../actions/actionFetch';
+import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
+import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
 import type {
   CreateNotificationIpcHandlers,
@@ -98,7 +104,7 @@ export type CaptureGateState = {
 export type UpdateReadyNotice = { version: string | null };
 
 // Main-window pages that main opens on its own; each has a caller.
-export type MainWindowRoute = '/login' | '/workspace';
+export type MainWindowRoute = '/login' | '/history?project=new';
 
 export type MainContext = {
   aiConnection: Pick<
@@ -128,8 +134,11 @@ export type MainContext = {
     showMainRoute: (route: MainWindowRoute) => void;
     openNewConversationOverlay: () => void;
     openActionConversationOverlay: (actionId: string) => void;
-    /** Brings the main window forward and asks it to show this Action's latest chat card. */
-    showChat: (actionId: string) => void;
+    /**
+     * Brings the main window forward on History with this Action or suggestion selected, creating
+     * the window when there is none. Rejects when no main window could be shown or its load failed.
+     */
+    showTask: (task: OverlayOpenTaskRequest) => Promise<void>;
   };
 
   auth: {
@@ -151,17 +160,28 @@ export type MainContext = {
   history: {
     fetch: (params: unknown) => Promise<HistoryFetchResult>;
     markCompletionViewed: (request: ActionCompletionViewedRequest) => void;
-    deleteItem: (request: HistoryItemDeleteRequest) => Promise<HistoryItemDeleteResult>;
+    deleteItem: (request: HistoryItemKey) => Promise<HistoryItemDeleteResult>;
+    /** The row History shows for this item, or null when it holds none for this user. */
+    readItem: (request: HistoryItemKey) => Promise<ConversationHistoryListItem | null>;
   };
 
   actionFiles: {
     /** Selects the path in Finder; never opens or executes it. */
     open: (params: ActionFileOpenInput) => void;
+    /** `shell.openPath` for a vetted Action file: the error message, empty on success. */
+    openInApp: (realPath: string) => Promise<string>;
+    /** `execFile` without a shell, for `textutil`'s conversion and `open -a`. */
+    runFile: RunFile;
+    /** Asks for an app in /Applications over the main window: its path, or null if cancelled. */
+    chooseApp: () => Promise<string | null>;
   };
 
   clipboard: {
     writeText: (text: string) => void;
   };
+
+  /** Each task's unsent draft, shared by the windows whose composers show it. */
+  taskDrafts: TaskDraftStore;
 
   actionImages: {
     /** `LOCAL_ARTIFACT_ROOT`; images live under `{root}/generated/images`. */
@@ -181,6 +201,8 @@ export type MainContext = {
     resolveOverlayIdForSender: (sender: IpcSenderIdentity) => string | null;
     registerActionAssociation: (actionId: string, overlayId: string) => void;
     refreshActionConversation: (actionId: string) => void;
+    /** Refreshes the Action's page and attaches its live run if one is unfinished. */
+    refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   };
 
   ui: {
@@ -215,7 +237,8 @@ export type MainContext = {
     getCommandNetwork: () => Promise<CommandNetworkSettings>;
     updateCommandNetwork: (enabled: boolean) => Promise<CommandNetworkSettings>;
     createOrganization: (input: CreateOrganizationInput) => Promise<WorkspaceOrganization>;
-    createProject: (input: CreateProjectInput) => Promise<WorkspaceProject>;
+    createProject: (input: CreateProjectInput) => Promise<WorkspaceProjectCreateResult>;
+    renameProject: (projectId: string, input: RenameProjectInput) => Promise<WorkspaceProject>;
     createFolder: (input: CreateFolderInput) => Promise<WorkspaceFolder>;
     reorderProjects: (input: ReorderProjectsInput) => Promise<{ project_ids: string[] }>;
     deleteOrganization: (organizationId: string) => Promise<void>;
@@ -233,6 +256,8 @@ export type MainContext = {
       readAccessScope: ReadAccessScope
     ) => Promise<{ read_access_scope: ReadAccessScope }>;
     selectFolder: () => Promise<{ canceled: boolean; path: string | null }>;
+    /** Opens a registered folder, named by id, in Finder. */
+    openFolder: (folderId: string) => Promise<void>;
   };
 
   screenshot: {
@@ -275,6 +300,10 @@ export type MainContext = {
   overlay: {
     resumeLiveProcess: (payload: ResumeProcessRequest) => void;
     resolveOverlayBootstrap: (suggestionId: string) => Promise<OverlayBootstrapResponse | null>;
+    /** Stores a persisted suggestion snapshot in main's record; returns what the record holds. */
+    adoptSuggestionSnapshot: (snapshot: OverlaySnapshot) => OverlaySnapshot;
+    /** Tells every window showing the suggestion which Action a reply to it opened. */
+    recordSuggestionReply: (suggestionId: string, actionId: string) => void;
     submitApprovalDecision: (payload: SubmitApprovalDecisionPayload) => Promise<void>;
     getActionApprovalMode: (actionId: string) => Promise<ActionApprovalModeResponse>;
     setActionApprovalMode: (

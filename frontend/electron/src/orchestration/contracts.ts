@@ -1,3 +1,4 @@
+import type { SuggestionOverlayOpenRequest } from '../ipc/schemas/overlay';
 import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
 
 import type {
@@ -45,6 +46,8 @@ export type OverlaySnapshot = {
   suggestionText: string;
   reactionState: 'accepted' | 'rejected' | null;
   reactionTimestamp: string | null;
+  /** What the user wrote when they dismissed it. */
+  dismissReason: string | null;
   actionPhase: OverlayActionPhase;
   actionStatus: OverlayActionStatus | null;
   actionErrorCode: string | null;
@@ -101,14 +104,15 @@ export type HistoryChangedPayload =
 export type NotificationIpcHandlers = {
   onResizeNotificationWindow: (event: unknown, payload: unknown) => void;
   onNotificationActionAccept: (event: unknown, payload: unknown) => void;
-  onNotificationActionReject: (event: unknown, payload: unknown) => void;
   onNotificationHide: (event: unknown) => void;
-  onNotificationStopAction: (event: unknown) => void;
+  /** Holds the sending panel; the returned closer hides it if it is still that open panel. */
+  captureSenderOverlay: (event: unknown) => () => void;
   onOverlayInteraction: (event: unknown) => void;
   onOverlayDragStart: (event: unknown, payload: unknown) => void;
   onOverlayDragMove: (event: unknown, payload: unknown) => void;
   onOverlayDragEnd: (event: unknown) => void;
-  onHistoryOpenOverlay: (event: unknown, payload: unknown) => void;
+  /** Opens the suggestion in a panel; rejects when it was not opened. */
+  onHistoryOpenOverlay: (event: unknown, request: SuggestionOverlayOpenRequest) => Promise<void>;
 };
 
 export type CreateNotificationIpcHandlers = (options: {
@@ -146,6 +150,7 @@ export type NotificationWindowApi = {
     overlayId: string,
     actionId: string | null
   ) => 'created' | 'loading' | 'focused';
+  revealOverlayWindow: (overlayId: string) => void;
   hasOverlayWindow: (overlayId: string) => boolean;
   destroyOverlayWindow: (overlayId: string) => void;
   dispatchEventToOverlay: (channel: string, payload: unknown) => boolean;

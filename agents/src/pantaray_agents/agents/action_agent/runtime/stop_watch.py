@@ -41,6 +41,9 @@ from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_d
 from pantaray_agents.local_runtime.runtime.db_execution_context import (
     resolve_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    APPLY_PATCH_TOOL_ID,
+)
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .log_safety import exception_type_name
@@ -55,6 +58,17 @@ STOP_POLL_INTERVAL_SECONDS = 0.25
 Design limit: one indexed SQLite read per interval per running call site is
 cheap enough to leave unconfigured. Shorten it only if a measured Stop latency
 budget below ~1s appears.
+"""
+
+UNCANCELLABLE_TOOL_IDS = frozenset({APPLY_PATCH_TOOL_ID})
+"""停止要求でも中断せず完走させる呼び出し（親の run と subagent の両方）。
+
+``apply_patch`` の本体は 1 つのスレッドがワークスペースの排他ロックを取って走る短い
+書き込みで、await 側を cancel してもそのスレッドは書き続ける。中断できるのは「結果を
+待つのをやめる」ところまでで、書き込み自体は止まらないので、cancel は「半分書けた
+ファイルを canceled として記録する」結果にしかならない。完走を待つほうが速く、かつ
+正しい。ほかの書き込み系ツール（``bash`` / ``run_python``）は sandbox のプロセス
+グループごと kill できるので、この例外には入らない。
 """
 
 type StopProbe = Callable[[], bool]
@@ -260,6 +274,7 @@ def _outer_cancellation_requested() -> bool:
 
 __all__ = [
     "STOP_POLL_INTERVAL_SECONDS",
+    "UNCANCELLABLE_TOOL_IDS",
     "ActionStopRequested",
     "ActionStopWatch",
     "StopProbe",

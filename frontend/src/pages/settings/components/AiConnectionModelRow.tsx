@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { Translate } from '../types';
 import { AiConnectionRow } from './AiConnectionRow';
+
+/** The "other" choice. A blank name is never saved, so it cannot collide with a model. */
+const OTHER_MODEL = '';
 
 /**
  * A model is a per-request setting, not an account boundary: changing it stops nothing that is
@@ -10,36 +14,41 @@ import { AiConnectionRow } from './AiConnectionRow';
 export function AiConnectionModelRow({
   model,
   candidates,
+  allowsOther = false,
   selectionOnly = false,
   onSave,
   t,
 }: {
   model: string;
   candidates: readonly string[];
+  /** Offer a typed name beside the candidates; with no candidates there is only the input. */
+  allowsOther?: boolean;
   selectionOnly?: boolean;
   onSave: (model: string) => Promise<void>;
   t: Translate;
 }) {
   const selectedModel = selectionOnly && !candidates.includes(model) ? '' : model;
   const [draft, setDraft] = useState(selectedModel);
+  const [custom, setCustom] = useState(allowsOther && !candidates.includes(model));
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<'saved' | 'saveFailed' | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
   // Saving locks the control, which drops its focus. Return focus where the user left it.
   const focusAfter = useRef<Element | null>(null);
+  const hasSelect = candidates.length > 0;
   useEffect(() => {
     setDraft(selectedModel);
   }, [selectedModel]);
   useEffect(() => {
     if (saving) return;
-    const control = selectionOnly ? selectRef.current : inputRef.current;
+    const control = custom ? inputRef.current : selectRef.current;
     const target = result === 'saveFailed' ? control : focusAfter.current;
     focusAfter.current = null;
     if (result === 'saveFailed' || document.activeElement === document.body) {
       if (target instanceof HTMLElement) target.focus();
     }
-  }, [result, saving, selectionOnly]);
+  }, [result, saving, custom]);
 
   const save = async (value: string, returnFocusTo: Element | null) => {
     focusAfter.current = returnFocusTo;
@@ -75,50 +84,64 @@ export function AiConnectionModelRow({
           commit(draft, inputRef.current);
         }}
       >
-        {selectionOnly ? (
+        {hasSelect ? (
           <select
             id="ai-model"
             ref={selectRef}
             className="history-filter-select"
-            value={draft}
+            value={custom ? OTHER_MODEL : draft}
             disabled={saving}
             onChange={(event) => {
+              if (event.target.value === OTHER_MODEL) {
+                flushSync(() => setCustom(true));
+                inputRef.current?.focus();
+                return;
+              }
+              setCustom(false);
               setDraft(event.target.value);
               commit(event.target.value, event.target);
             }}
           >
-            <option value="" disabled>
-              {t('settings.aiConnection.modelSelectPlaceholder')}
-            </option>
+            {selectionOnly ? (
+              <option value="" disabled>
+                {t('settings.aiConnection.modelSelectPlaceholder')}
+              </option>
+            ) : null}
             {candidates.map((candidate) => (
               <option key={candidate} value={candidate}>
                 {candidate}
               </option>
             ))}
+            {/* Keep a saved name that is no longer offered visible instead of replacing it. */}
+            {!selectionOnly && !allowsOther && !candidates.includes(model) ? (
+              <option value={model}>{model}</option>
+            ) : null}
+            {allowsOther ? (
+              <option value={OTHER_MODEL}>{t('settings.aiConnection.modelOther')}</option>
+            ) : null}
           </select>
-        ) : (
+        ) : null}
+        {custom ? (
           <input
-            id="ai-model"
+            id={hasSelect ? 'ai-model-other' : 'ai-model'}
             ref={inputRef}
             className="history-filter-input"
             type="text"
             spellCheck={false}
-            list={candidates.length > 0 ? 'ai-model-candidates' : undefined}
+            aria-label={hasSelect ? t('settings.aiConnection.modelOther') : undefined}
             placeholder={t('settings.aiConnection.modelPlaceholder')}
             value={draft}
             disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={(event) => commit(draft, event.relatedTarget)}
           />
-        )}
+        ) : null}
         {result === 'saveFailed' ? (
           <button
             type="button"
             className="settings-text-button"
             disabled={saving}
-            onClick={() =>
-              void save(draft.trim(), selectionOnly ? selectRef.current : inputRef.current)
-            }
+            onClick={() => void save(draft.trim(), custom ? inputRef.current : selectRef.current)}
           >
             {t('settings.aiConnection.model.retry')}
           </button>
@@ -130,20 +153,15 @@ export function AiConnectionModelRow({
           {result ? t(`settings.aiConnection.model.${result}`) : ''}
         </span>
       </form>
-      {!selectionOnly && candidates.length > 0 ? (
-        <datalist id="ai-model-candidates">
-          {candidates.map((candidate) => (
-            <option key={candidate} value={candidate} />
-          ))}
-        </datalist>
+      {selectionOnly || allowsOther ? (
+        <p className="ai-note ai-note--control">
+          {t(
+            selectionOnly
+              ? 'settings.aiConnection.chatgptModelHint'
+              : 'settings.aiConnection.modelHint'
+          )}
+        </p>
       ) : null}
-      <p className="ai-note ai-note--control">
-        {t(
-          selectionOnly
-            ? 'settings.aiConnection.chatgptModelHint'
-            : 'settings.aiConnection.modelHint'
-        )}
-      </p>
     </AiConnectionRow>
   );
 }

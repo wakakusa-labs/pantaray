@@ -14,6 +14,7 @@ afterEach(() => {
 function renderField(get: () => Promise<unknown>) {
   (window as { electron?: unknown }).electron = { workspaceSettings: { get } };
   const onKeyDown = vi.fn();
+  const onPasteFiles = vi.fn();
   function Harness() {
     const [value, setValue] = useState('');
     const [mentions, setMentions] = useState<ComposerMention[]>([]);
@@ -34,7 +35,7 @@ function renderField(get: () => Promise<unknown>) {
             setMentions(next);
           }}
           onKeyDown={onKeyDown}
-          onPaste={() => {}}
+          onPasteFiles={onPasteFiles}
           onAddProject={() => {}}
         />
       </form>
@@ -45,7 +46,7 @@ function renderField(get: () => Promise<unknown>) {
       <Harness />
     </UiLanguageProvider>
   );
-  return { input: screen.getByRole('textbox') as HTMLTextAreaElement, onKeyDown };
+  return { input: screen.getByRole('textbox') as HTMLTextAreaElement, onKeyDown, onPasteFiles };
 }
 
 // prettier-ignore
@@ -71,4 +72,30 @@ it('tells a failed workspace read apart from an empty workspace', async () => {
   expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
     'Add project',
   ]);
+});
+
+function paste(input: HTMLTextAreaElement, files: File[], text: string): boolean {
+  return fireEvent.paste(input, {
+    clipboardData: { files, getData: (type: string) => (type === 'text/plain' ? text : '') },
+  });
+}
+
+it('pastes copied text as text, even when the copy carries the file it came from', () => {
+  const { input, onPasteFiles } = renderField(async () => settings);
+  // Text copied in Quick Look comes with the document Quick Look shows.
+  const notDefault = paste(input, [new File(['# Report'], 'report.md')], 'Quarterly totals');
+  expect(notDefault).toBe(true);
+  expect(onPasteFiles).not.toHaveBeenCalled();
+});
+
+it('attaches a file copied in Finder, whose text is only its name, and a pasted image', () => {
+  const { input, onPasteFiles } = renderField(async () => settings);
+  const files = [new File(['x'], 'quote.pdf'), new File(['y'], '見積書.docx')];
+  expect(paste(input, files, 'quote.pdf\r見積書.docx')).toBe(false);
+  expect(onPasteFiles).toHaveBeenLastCalledWith(files);
+
+  const screenshot = [new File(['png'], 'image.png', { type: 'image/png' })];
+  expect(paste(input, screenshot, '')).toBe(false);
+  expect(onPasteFiles).toHaveBeenLastCalledWith(screenshot);
+  expect(onPasteFiles).toHaveBeenCalledTimes(2);
 });

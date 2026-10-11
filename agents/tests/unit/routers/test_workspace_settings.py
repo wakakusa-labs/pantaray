@@ -12,6 +12,9 @@ from pantaray_agents.local_runtime.tooling.repository import (
     WorkspaceProject,
     WorkspaceSettings,
 )
+from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
+    WorkspaceProjectNameTakenError,
+)
 from pantaray_agents.routers import workspace_settings as router_module
 
 
@@ -184,3 +187,56 @@ def test_workspace_project_order_route_rejects_user_mismatch() -> None:
         )
 
     assert response.status_code == 403
+
+
+def test_workspace_project_create_answers_a_taken_name_with_conflict(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        router_module,
+        "read_local_runtime_db_config",
+        lambda: (Path("runtime.db"), 1_000),
+    )
+
+    def _taken(**_kwargs):
+        raise WorkspaceProjectNameTakenError("workspace project name is taken: Core")
+
+    monkeypatch.setattr(router_module, "create_workspace_project", _taken)
+
+    with _client() as client:
+        response = client.post(
+            "/v1/agents/users/user-1/workspace-settings/projects",
+            json={"display_name": "Core"},
+        )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    (
+        (
+            "post",
+            "/v1/agents/users/user-1/workspace-settings/folders",
+            {"display_name": "repo", "real_path": "/tmp/repo", "project_ids": []},
+        ),
+        (
+            "put",
+            "/v1/agents/users/user-1/workspace-settings/folders/folder-1/links",
+            {"project_ids": []},
+        ),
+    ),
+)
+def test_workspace_folder_routes_refuse_a_folder_without_a_project(
+    monkeypatch, method: str, path: str, body: dict[str, object]
+) -> None:
+    monkeypatch.setattr(
+        router_module,
+        "read_local_runtime_db_config",
+        lambda: (Path("runtime.db"), 1_000),
+    )
+
+    with _client() as client:
+        response = client.request(method, path, json=body)
+
+    assert response.status_code == 422

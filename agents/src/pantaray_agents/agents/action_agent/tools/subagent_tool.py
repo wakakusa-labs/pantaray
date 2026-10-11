@@ -184,13 +184,22 @@ SEND_MESSAGE_TO_SUBAGENT_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id=SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
         name="Send Message to Subagent",
-        description="Durably send one bounded private message to an active subagent.",
+        description=(
+            "Durably send one bounded private message to a subagent. A subagent "
+            "that stopped or finished continues as a new subagent: it keeps its "
+            "task, claims and conversation, gets this message, and the result "
+            "returns its new child_process_id."
+        ),
         guide=ToolGuideSpec(
-            what="Send correction or additional context to one owned subagent.",
+            what=(
+                "Send correction or additional context to one owned subagent, or "
+                "continue one that stopped or finished."
+            ),
             when="Use when the child should consider new information on its next turn.",
             pitfalls=(
                 "Reuse a message_id only for an exact retry of the same content. "
-                "Acceptance does not mean the child has consumed the message."
+                "Acceptance does not mean the child has consumed the message. "
+                "After a continuation, wait for and message the new child_process_id."
             ),
         ),
         concurrency=ToolConcurrency("sequential"),
@@ -224,7 +233,20 @@ SEND_MESSAGE_TO_SUBAGENT_TOOL = ToolDefinition.from_spec(
             ),
             description="Durably accept one private parent-to-child message.",
         ),
-        output_schema={"const": True},
+        output_schema={
+            "oneOf": [
+                {"const": True},
+                {
+                    "type": "object",
+                    "properties": {
+                        "child_process_id": {"type": "string"},
+                        "continues_child_process_id": {"type": "string"},
+                    },
+                    "required": ["child_process_id", "continues_child_process_id"],
+                    "additionalProperties": False,
+                },
+            ]
+        },
     )
 )
 

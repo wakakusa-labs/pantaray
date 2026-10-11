@@ -1,4 +1,8 @@
-"""Snapshot a message-only Suggestion as the first ordinary assistant message."""
+"""Snapshot a Suggestion the user answers in words as the first assistant message.
+
+A message-only Suggestion is answered this way, and so is an offer the user dismissed:
+writing after dismissing it asks for something else. The dismissal stays as recorded.
+"""
 
 import sqlite3
 import uuid
@@ -18,7 +22,9 @@ def insert_suggestion_reply_message(
     source = connection.execute(
         """SELECT answer,created_at FROM agent_suggestions
         WHERE user_id=? AND suggestion_id=? AND status='success' AND has_suggestion=1
-          AND interaction_contract='message_only' AND LENGTH(TRIM(answer))>0""",
+          AND (interaction_contract='message_only'
+               OR (interaction_contract='action_offer' AND user_reaction='rejected'))
+          AND LENGTH(TRIM(answer))>0""",
         (user_id, suggestion_id),
     ).fetchone()
     if source is None:

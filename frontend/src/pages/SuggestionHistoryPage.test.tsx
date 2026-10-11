@@ -1,623 +1,365 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { forwardRef, useImperativeHandle } from 'react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ActionConversationPage } from '../../electron/src/actions/actionContracts';
-import type {
-  ActionLiveSnapshot,
-  ActionLiveUpdate,
-} from '../../electron/src/actions/actionLiveCore';
-import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 
-import { COMMON_MESSAGES } from '@/i18n/messageCatalog/common';
-import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
-import { t as translate } from '@/i18n/translate';
-import { ChatSessionProvider } from '@/components/chat/ChatSessionProvider';
+import type { ActionConversationUserItem } from '../../electron/src/actions/actionConversationModel';
+import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
+import { UserItem } from '@/components/action-conversation/UserMessage';
+import type { ChatViewHandle } from '@/components/chat/ChatView';
+import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSession';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
+import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import { historySelectionSearch, parseHistorySelection } from '@/history/historySelection';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
 
-function PageWrapper({ children }: { children: ReactNode }) {
-  return (
-    <MemoryRouter>
-      <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
-        <ChatSessionProvider>{children}</ChatSessionProvider>
-      </LocalOwnerContext.Provider>
-    </MemoryRouter>
-  );
-}
-const mocks = vi.hoisted(() => ({
-  error: 'history.error.fetchFailed' as string | null,
-  itemsOverride: null as ConversationHistoryListItem[] | null,
-  loading: false,
-  loadMore: vi.fn(),
-  markCompletionViewed: vi.fn(async () => undefined),
-  removeItem: vi.fn(),
-  setSearchText: vi.fn(),
-  unreadActionId: 'A1' as string | null,
-}));
-vi.mock('@/context/useI18n', async () => {
-  const { formatDateTime } = await import('@/i18n/translate');
-  return {
-    useI18n: () => ({
-      language: 'ja',
-      t: (key: string) => key,
-      formatDateTime: (date: Date) => formatDateTime('ja', date),
-    }),
-  };
-});
-vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useSuggestionHistory')>()),
-  useSuggestionHistory: () => ({
-    items: mocks.itemsOverride ?? [
-      {
-        kind: 'conversation',
-        action_id: 'A1',
-        title: 'Conversation',
-        updated_at: '2026-08-30T01:02:03.000Z',
-        status: 'idle',
-        latest_completion_event_id: 'C1',
-      },
-      {
-        kind: 'suggestion',
-        suggestion_id: 'S1',
-        title: 'Suggestion',
-        updated_at: '2026-08-30T01:02:03.000Z',
-        status: 'idle',
-      },
-    ],
-    loading: mocks.loading,
-    loadingMore: false,
-    error: mocks.error,
-    isRealtimeSyncing: false,
-    searchText: '',
-    setSearchText: mocks.setSearchText,
-    loadMore: mocks.loadMore,
-    hasMore: true,
-    isUnread: (item: { action_id?: string }) => item.action_id === mocks.unreadActionId,
-    removeItem: mocks.removeItem,
+const mocks = vi.hoisted(() => ({ showNewest: vi.fn() }));
+
+// The panes and the chat have their own tests; here they only show what the page gave them.
+vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
+vi.mock('@/components/chat/ChatView', () => ({
+  ChatView: forwardRef<ChatViewHandle>(function ChatView(_props, ref) {
+    useImperativeHandle(ref, () => ({ showNewest: mocks.showNewest }));
+    return <section aria-label="chat" />;
   }),
 }));
+vi.mock('@/components/task/TaskWorkspace', () => ({
+  TaskWorkspace: ({
+    actionId,
+    title,
+    onAddProject,
+  }: {
+    actionId: string;
+    title: string;
+    onAddProject: () => void;
+  }) => (
+    <section aria-label={`action ${actionId}`}>
+      <h1>{title}</h1>
+      <UserItem item={SENT_NAMING_SUGGESTION} />
+      <button type="button" onClick={onAddProject}>
+        add project
+      </button>
+    </section>
+  ),
+}));
+vi.mock('@/components/task/SuggestionTaskPane', () => ({
+  SuggestionTaskPane: ({
+    suggestionId,
+    title,
+    onStarted,
+  }: {
+    suggestionId: string;
+    title: string;
+    onStarted: (actionId: string) => void;
+  }) => (
+    <section aria-label={`suggestion ${suggestionId}`}>
+      <h1>{title}</h1>
+      <button type="button" onClick={() => onStarted('A9')}>
+        accept
+      </button>
+    </section>
+  ),
+}));
 
-const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+vi.mock('@/components/task/NewTaskPane', () => ({
+  NewTaskPane: ({ onStarted }: { onStarted: (actionId: string) => void }) => (
+    <section aria-label="new task">
+      <button type="button" onClick={() => onStarted('A7')}>
+        send
+      </button>
+    </section>
+  ),
+}));
+
+// A sent message in the task's conversation that names the suggestion S1.
+const SENT_NAMING_SUGGESTION: ActionConversationUserItem = {
+  kind: 'user',
+  source: 'canonical',
+  key: 'sent',
+  visibility: 'always',
+  entry: {
+    step_kind: 'user',
+    chat_note: null,
+    approved_suggestion: null,
+    step_id: 'step-sent',
+    step_number: 1,
+    message_id: 'message-sent',
+    accepted_sequence: 1,
+    content: '請求書 を見て',
+    images: [],
+    project_refs: [],
+    work_refs: [
+      { kind: 'suggestion', id: 'S1', title: '請求書を作りましょうか', start: 0, end: 3 },
+    ],
+    status: 'adopted',
+  },
+};
+
+const ITEMS: ConversationHistoryListItem[] = [
+  {
+    kind: 'conversation',
+    action_id: 'A1',
+    title: '見積書を直す',
+    updated_at: '2026-10-10T01:00:00.000Z',
+    status: 'idle',
+    latest_completion_event_id: null,
+  },
+  {
+    kind: 'suggestion',
+    suggestion_id: 'S1',
+    title: '請求書を作りましょうか',
+    updated_at: '2026-10-10T00:00:00.000Z',
+    status: 'approval_pending',
+  },
+];
+const deleteItem = vi.fn(async () => ({ ok: true }) as const);
+const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
+
+const stored = new Map<string, string>();
 
 beforeEach(() => {
-  // These cases cover the list mode; the chat mode has its own tests.
-  localStorage.setItem('pantaray.history-view-mode', 'list');
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.setAttribute('open', '');
-    },
+  stored.clear();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => stored.set(key, value),
   });
+  window.electron = {
+    process: { platform: 'darwin' },
+    history: {
+      fetch: vi.fn(async () => ({
+        data: ITEMS,
+        nextCursor: null,
+        unreadActionIds: [],
+        error: null,
+        errorCode: null,
+      })),
+      deleteItem,
+      openConversation: vi.fn(),
+    },
+    agentOverlay: { showHistory: vi.fn() },
+    workspaceSettings: {
+      get: vi.fn(async () => ({
+        read_access_scope: 'workspace',
+        organizations: [],
+        projects: [],
+        folders: [],
+      })),
+      selectFolder,
+    },
+  } as unknown as Window['electron'];
+  const originalShowModal = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  };
+  return () => {
+    HTMLDialogElement.prototype.showModal = originalShowModal;
+  };
 });
 
 afterEach(() => {
   cleanup();
-  if (originalShowModal) {
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
-  } else {
-    Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
-  }
-  mocks.error = 'history.error.fetchFailed';
-  mocks.itemsOverride = null;
-  mocks.loading = false;
-  mocks.unreadActionId = 'A1';
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
-it('空状態でも起動ボタンは右上の1つだけで、keyboardから開ける', async () => {
-  const openNewConversation = vi.fn(async () => undefined);
-  window.electron = { history: { openNewConversation } } as unknown as Window['electron'];
-  const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  expect(HISTORY_MESSAGES.ja['history.newConversation']).toBe('新しい作業');
-  expect(HISTORY_MESSAGES.en['history.newConversation']).toBe('New task');
-  expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  expect(cta.closest('.history-toolbar')).not.toBeNull();
-  cta.focus();
-  await userEvent.keyboard('{Enter}');
-  expect(openNewConversation).toHaveBeenCalledOnce();
-  expect(openNewConversation).toHaveBeenCalledWith();
-
-  mocks.error = null;
-  mocks.itemsOverride = [];
-  rerender(<SuggestionHistoryPage />);
-  expect(screen.getAllByRole('button', { name: 'history.newConversation' })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: 'history.newConversation' })).toBe(cta);
-  expect(cta).toHaveFocus();
-  // No shortcut bridge: the empty state points at the button alone.
-  expect(screen.getByText('history.empty.startWithButton')).toBeInTheDocument();
-  expect(HISTORY_MESSAGES.ja['history.empty.startWithShortcut']).toContain('{shortcut}');
-
-  openNewConversation.mockRejectedValueOnce(new Error('unavailable'));
-  await userEvent.click(cta);
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.openOverlayFailed');
-});
-
-it('設定中のショートカットはCTAの中に薄いキーキャップで出し、名前は変えない', async () => {
-  const getState = vi.fn(async () => ({ accelerator: 'Option+Space', failure: null }));
-  window.electron = {
-    process: { platform: 'darwin' },
-    history: { openNewConversation: vi.fn(async () => undefined) },
-    shortcut: { getState },
-  } as unknown as Window['electron'];
-  const { container, rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  // While the shortcut loads, the button shows nothing extra.
-  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
-  expect(cta).not.toHaveAttribute('title');
-  await waitFor(() => expect(cta).toHaveAttribute('aria-keyshortcuts', 'Alt+Space'));
-  const keys = cta.querySelector('.history-new-conversation-keys');
-  expect(keys).toHaveAttribute('aria-hidden', 'true');
-  expect([...keys!.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['⌥', 'Space']);
-  expect(cta).toHaveAccessibleName('history.newConversation');
-  expect(container.querySelectorAll('.shortcut-keycaps')).toHaveLength(1);
-  expect(translate('ja', 'shortcut.hint.label', { keys: 'Option Space' })).toBe(
-    'ショートカット: Option Space'
+function LocationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="location">{`${location.pathname}${location.search}`}</output>
+      <button type="button" onClick={() => navigate(-1)}>
+        back
+      </button>
+    </>
   );
-  expect(COMMON_MESSAGES.en['shortcut.hint.label']).toBe('Shortcut: {keys}');
+}
 
-  mocks.error = null;
-  mocks.itemsOverride = [];
-  rerender(<SuggestionHistoryPage />);
-  // The empty state names the shortcut inside the sentence instead of repeating the button.
-  const hint = container.querySelector('.history-empty-hint');
-  expect(hint?.querySelector('.shortcut-keycaps')).not.toBeNull();
-  expect(HISTORY_MESSAGES.ja['history.empty.startWithShortcut'].split('{shortcut}')).toHaveLength(
-    2
+const renderPage = (entries: string[]) =>
+  render(
+    <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
+      <UiLanguageProvider initialLanguage="ja">
+        <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
+          <ChatSessionContext.Provider value={{} as ChatSession}>
+            <Routes>
+              <Route path="/history" element={<SuggestionHistoryPage />} />
+            </Routes>
+            <LocationProbe />
+          </ChatSessionContext.Provider>
+        </LocalOwnerContext.Provider>
+      </UiLanguageProvider>
+    </MemoryRouter>
   );
-  expect(HISTORY_MESSAGES.en['history.empty.startWithShortcut'].split('{shortcut}')).toHaveLength(
-    2
-  );
-});
 
-it('ショートカットが登録できていないときはキーキャップを出さず、CTAの説明で伝える', async () => {
-  window.electron = {
-    process: { platform: 'darwin' },
-    shortcut: {
-      getState: vi.fn(async () => ({
-        accelerator: 'Option+Space',
-        failure: 'registration_unavailable',
-      })),
-    },
-  } as unknown as Window['electron'];
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
+const location = () => screen.getByRole('status', { name: 'location' });
 
-  const cta = screen.getByRole('button', { name: 'history.newConversation' });
-  await waitFor(() => expect(cta).toHaveAttribute('title', 'shortcut.hint.unavailable'));
-  expect(cta).toHaveAccessibleDescription('shortcut.hint.unavailable');
-  expect(cta).not.toHaveAttribute('aria-keyshortcuts');
-  expect(cta.querySelector('.shortcut-keycaps')).toBeNull();
-});
+it('shows what `?item=` names, and the chat for a missing or malformed item', async () => {
+  renderPage(['/history?item=action:A1']);
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  // The title is the history row's once the list is read.
+  expect(await screen.findByRole('heading', { name: '見積書を直す' })).toBeInTheDocument();
+  cleanup();
 
-it('行は最終更新の日ごとに、今日・昨日・日付の見出しの下にまとめる', () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(2026, 9, 2, 9));
-  window.electron = {} as unknown as Window['electron'];
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  const row = (id: string, updatedAt: Date) => ({
-    kind: 'suggestion' as const,
-    suggestion_id: id,
-    title: id,
-    updated_at: updatedAt.toISOString(),
-    status: 'idle' as const,
-  });
-  mocks.itemsOverride = [
-    row('T1', new Date(2026, 9, 2, 8)),
-    row('T2', new Date(2026, 9, 2, 0)),
-    row('Y1', new Date(2026, 9, 1, 23)),
-    row('O1', new Date(2026, 8, 29, 8)),
-  ];
-  try {
-    render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
+  renderPage(['/history?item=suggestion:S1']);
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
+  expect(
+    await screen.findByRole('heading', { name: '請求書を作りましょうか' })
+  ).toBeInTheDocument();
+  cleanup();
 
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'history.day.today',
-      'history.day.yesterday',
-      '9月29日',
-    ]);
-    // Under today and yesterday a row shows its time; older rows keep the full date.
-    expect(screen.getByRole('button', { name: /^T1/ })).toHaveTextContent(
-      /^T108:00history.status.suggestion$/
-    );
-    expect(screen.getByRole('button', { name: /^O1/ })).toHaveTextContent('2026年9月29日 08:00');
-    expect(HISTORY_MESSAGES.ja['history.day.today']).toBe('今日');
-    expect(HISTORY_MESSAGES.en['history.day.yesterday']).toBe('Yesterday');
-  } finally {
-    vi.useRealTimers();
+  // A task the list does not hold is still shown, under a plain title.
+  renderPage(['/history?item=action:OLD']);
+  expect(
+    within(screen.getByRole('region', { name: 'action OLD' })).getByRole('heading', {
+      name: '作業',
+    })
+  ).toBeInTheDocument();
+  cleanup();
+
+  for (const entry of [
+    '/history',
+    '/history?item=chat',
+    '/history?item=action:',
+    '/history?item=action:%20A1',
+    '/history?item=conversation:A1',
+  ]) {
+    renderPage([entry]);
+    expect(screen.getByRole('region', { name: 'chat' })).toBeInTheDocument();
+    cleanup();
   }
 });
 
-it('Conversation行はOverlayを開き、実際の表示前に既読にしない', async () => {
-  const openConversation = vi.fn(async () => 'created' as const);
-  const showHistory = vi.fn();
-  window.electron = {
-    agentOverlay: { showHistory },
-    history: { openConversation, markCompletionViewed: mocks.markCompletionViewed },
-  } as unknown as Window['electron'];
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
+it('selects a row into the URL and marks it current; the Chat row of the chat shows the newest', async () => {
+  renderPage(['/history']);
+  const row = await screen.findByRole('button', { name: /^見積書を直す/ });
+  const chatRow = screen.getByRole('button', { name: 'チャット' });
+  expect(chatRow).toHaveAttribute('aria-current', 'true');
 
-  const conversation = screen.getByRole('button', { name: /^Conversation/ });
-  expect(conversation).not.toHaveAttribute('aria-expanded');
-  expect(screen.getByLabelText('history.unread')).toBeInTheDocument();
-  expect(screen.getAllByText((text) => text.endsWith(':02'))).toHaveLength(2);
-  conversation.focus();
-  await userEvent.keyboard('{Enter}');
-  expect(openConversation).toHaveBeenCalledWith({ actionId: 'A1' });
-  expect(mocks.markCompletionViewed).not.toHaveBeenCalled();
-  expect(screen.queryByRole('region', { name: 'history.detail.conversation' })).toBeNull();
+  await userEvent.click(chatRow);
+  expect(mocks.showNewest).toHaveBeenCalledOnce();
+  expect(location()).toHaveTextContent(/^\/history$/);
 
-  fireEvent.click(screen.getByRole('button', { name: /^Suggestion/ }));
-  expect(showHistory).toHaveBeenCalledWith({
-    suggestionId: 'S1',
-    initialUiState: { expand: true },
-    fromStart: true,
-  });
+  await userEvent.click(row);
+  expect(location()).toHaveTextContent('/history?item=action:A1');
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(row).toHaveAttribute('aria-current', 'true');
+  expect(chatRow).not.toHaveAttribute('aria-current');
+
+  await userEvent.click(screen.getByRole('button', { name: /^請求書を作りましょうか/ }));
+  expect(location()).toHaveTextContent('/history?item=suggestion:S1');
+
+  await userEvent.click(chatRow);
+  expect(location()).toHaveTextContent('/history?item=chat');
+  expect(screen.getByRole('region', { name: 'chat' })).toBeInTheDocument();
+  expect(mocks.showNewest).toHaveBeenCalledOnce();
+  // Rows choose the pane; no Overlay opens.
+  expect(window.electron?.history?.openConversation).not.toHaveBeenCalled();
+  expect(window.electron?.agentOverlay?.showHistory).not.toHaveBeenCalled();
 });
 
-it('履歴の取得失敗は読み上げソフトに届くalertとして出す', () => {
-  window.electron = {} as unknown as Window['electron'];
-  mocks.unreadActionId = null;
-  const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
+it('replaces an accepted suggestion with its Action in the same history entry', async () => {
+  renderPage(['/history?item=chat', '/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'accept' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).toBeInTheDocument();
 
-  expect(screen.getByRole('alert')).toHaveTextContent('history.error.fetchFailed');
-
-  // 1件も出せなかったときの取得失敗。
-  mocks.itemsOverride = [];
-  rerender(<SuggestionHistoryPage />);
-  expect(screen.getByRole('alert')).toHaveTextContent('history.error.fetchFailed');
+  await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=chat');
 });
 
-it('Overlay起動失敗を通知し、追加読み込みと検索に応答する', async () => {
-  const openConversation = vi.fn(async () => 'focused' as const);
-  window.electron = { history: { openConversation } } as unknown as Window['electron'];
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  await userEvent.click(screen.getByRole('button', { name: /^Conversation/ }));
-  openConversation.mockRejectedValueOnce(new Error('unavailable'));
-  await userEvent.click(screen.getByRole('button', { name: /^Conversation/ }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.openOverlayFailed');
-
-  fireEvent.click(screen.getByRole('button', { name: 'history.loadMore' }));
-  expect(mocks.loadMore).toHaveBeenCalledOnce();
-  const search = screen.getByRole('searchbox', { name: 'history.search' });
-  fireEvent.change(search, { target: { value: `${'😀'.repeat(256)}x` } });
-  expect(search).toHaveValue('😀'.repeat(256));
-  await waitFor(() => expect(mocks.setSearchText).toHaveBeenCalledWith('😀'.repeat(256)));
+it('opens a new task from ✎ and replaces it with the Action its send opened', async () => {
+  renderPage(['/history?item=chat']);
+  await userEvent.click(await screen.findByRole('button', { name: NEW_TASK }));
+  expect(location()).toHaveTextContent('/history?item=new');
+  expect(parseHistorySelection('?item=new')).toBe('new');
+  await userEvent.click(screen.getByRole('button', { name: 'send' }));
+  expect(location()).toHaveTextContent('/history?item=action:A7');
 });
 
-it('バッジは running / approval_pending だけに出し、idle には出さない', () => {
-  window.electron = {} as unknown as Window['electron'];
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  mocks.itemsOverride = [
-    {
-      kind: 'conversation',
-      action_id: 'A-running',
-      title: 'Running',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'running',
-      latest_completion_event_id: null,
-    },
-    {
-      kind: 'conversation',
-      action_id: 'A-approval',
-      title: 'Approval',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'approval_pending',
-      latest_completion_event_id: null,
-    },
-    {
-      kind: 'conversation',
-      action_id: 'A-idle',
-      title: 'Idle',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'idle',
-      latest_completion_event_id: null,
-    },
-  ];
-  const { container } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  expect([...container.querySelectorAll('.badge')].map((badge) => badge.textContent)).toEqual([
-    'history.status.running',
-    'history.status.approvalPending',
-  ]);
-});
-
-function livePage(
-  actionId: string,
-  status: ActionConversationPage['action']['status'],
-  entries: ActionConversationPage['runs'][number]['entries']
-): ActionConversationPage {
-  return {
-    action: {
-      action_id: actionId,
-      suggestion_id: null,
-      approved_suggestion: null,
-      status,
-      latest_run_id: `${actionId}-run`,
-      resumable: false,
-    },
-    runs: [
-      {
-        run_id: `${actionId}-run`,
-        status: status === 'success' ? 'success' : 'running',
-        started_at: '2026-10-02T00:00:00.000000Z',
-        completed_at: status === 'success' ? '2026-10-02T00:01:00.000000Z' : null,
-        completion_event_id: status === 'success' ? 'C' : null,
-        entries,
-        final_output: status === 'success' ? 'Done' : null,
-        error: null,
-      },
-    ],
-    unadopted_messages: [],
-    next_cursor: null,
-  };
-}
-
-function liveUpdate(
-  page: ActionConversationPage,
-  approvalBlockers: ActionLiveSnapshot['approvalBlockers'] = []
-): ActionLiveUpdate {
-  const snapshot: ActionLiveSnapshot = {
-    actionId: page.action.action_id,
-    page,
-    pageVersion: 1,
-    transientToolSteps: [],
-    approvalBlockers,
-    lifecycle: null,
-  };
-  return { kind: 'action_updated', snapshot };
-}
-
-it('実行中の会話だけ行の下に今の動きを1行で出し、終われば消す。行は作り直さない', () => {
-  const listeners = new Set<(update: ActionLiveUpdate) => void>();
-  window.electron = {
-    actions: {
-      onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {
-        listeners.add(callback);
-        return () => listeners.delete(callback);
-      },
-    },
-  } as unknown as Window['electron'];
-  const publish = (update: ActionLiveUpdate) =>
-    act(() => listeners.forEach((listener) => listener(update)));
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  const conversation = (actionId: string): ConversationHistoryListItem => ({
-    kind: 'conversation',
-    action_id: actionId,
-    title: actionId,
-    updated_at: '2026-08-30T01:02:03.000Z',
-    status: 'running',
-    latest_completion_event_id: null,
-  });
-  mocks.itemsOverride = [conversation('A1'), conversation('A2')];
-  const { container } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-  const lines = () =>
-    [...container.querySelectorAll('.history-item')].map(
-      (row) => row.querySelector('.history-item-live')?.textContent ?? null
-    );
-  const row = screen.getByRole('button', { name: /^A1/ });
-  row.focus();
-  expect(lines()).toEqual([null, null]);
-
-  publish(
-    liveUpdate(
-      livePage('A1', 'processing', [
-        {
-          step_kind: 'tool',
-          step_id: 'tool-2',
-          step_number: 2,
-          label: 'read',
-          status: 'processing',
-          outcome: 'completed',
-          subject: 'notes.md',
-          output_preview: null,
-          output_available: false,
-          images: [],
-        },
-        { step_kind: 'assistant', step_id: 'assistant-1', step_number: 1, content: 'Looking' },
-      ])
-    )
-  );
-  publish(liveUpdate(livePage('A2', 'queued', [])));
-  expect(lines()).toEqual(['notes.md を読み取っています', 'overlay.thinking']);
-  // Visual only: the line stays out of the row's accessible name and is not a live region.
-  expect(row).toHaveAccessibleName(/^A1/);
-  expect(row).not.toHaveAccessibleName(/読み取っています/);
-  expect(container.querySelector('.history-item-live')).toHaveAttribute('aria-hidden', 'true');
-
-  const found = livePage('A1', 'processing', [
-    { step_kind: 'assistant', step_id: 'assistant-3', step_number: 3, content: 'Found it\nmore' },
-  ]);
-  publish(liveUpdate(found));
-  publish(liveUpdate(livePage('A2', 'success', [])));
-  expect(lines()).toEqual(['Found it', null]);
-  expect(screen.getByRole('button', { name: /^A1/ })).toBe(row);
-  expect(row).toHaveFocus();
-
-  // While an approval is pending the badge says so; the line would only repeat it.
-  publish(
-    liveUpdate(found, [
-      {
-        actionId: 'A1',
-        processId: 'A1-run',
-        approvalSessionId: 'session-1',
-        toolRequestId: 'request-1',
-        toolId: 'bash',
-        intentClass: 'write',
-        commandSummary: {},
-      },
-    ])
-  );
-  expect(lines()).toEqual([null, null]);
-  publish(liveUpdate(found));
-  expect(lines()).toEqual(['Found it', null]);
-
-  publish({ kind: 'reset' });
-  expect(lines()).toEqual([null, null]);
-});
-
-it('日の見出しが増えたり行が別の日へ移ったりしても、残った行はフォーカスを保つ', () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(2026, 9, 2, 9));
-  window.electron = {} as unknown as Window['electron'];
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  const row = (id: string, updatedAt: Date) => ({
-    kind: 'suggestion' as const,
-    suggestion_id: id,
-    title: id,
-    updated_at: updatedAt.toISOString(),
-    status: 'idle' as const,
-  });
-  mocks.itemsOverride = [
-    row('Y1', new Date(2026, 9, 1, 8)),
-    row('O1', new Date(2026, 8, 29, 8)),
-    row('O2', new Date(2026, 8, 29, 7)),
-  ];
-  try {
-    const { rerender } = render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-    const older = screen.getByRole('button', { name: /^O1/ });
-    older.focus();
-
-    // A live update brings a first row for today, and O2 moves to today as well.
-    mocks.itemsOverride = [
-      row('N1', new Date(2026, 9, 2, 8)),
-      row('O2', new Date(2026, 9, 2, 7)),
-      row('Y1', new Date(2026, 9, 1, 8)),
-      row('O1', new Date(2026, 8, 29, 8)),
-    ];
-    rerender(<SuggestionHistoryPage />);
-
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'history.day.today',
-      'history.day.yesterday',
-      '9月29日',
-    ]);
-    expect(screen.getByRole('button', { name: /^O1/ })).toBe(older);
-    expect(older).toHaveFocus();
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-function installDeleteBridge(result: { ok: true } | { ok: false; errorCode: string | null }) {
-  const deleteItem = vi.fn(async () => result);
-  window.electron = { history: { deleteItem } } as unknown as Window['electron'];
-  mocks.error = null;
-  mocks.unreadActionId = null;
-  return deleteItem;
-}
-
-it('削除の確認はキャンセルが初期フォーカスで、キャンセルもEscも削除せず元のボタンへ戻る', async () => {
-  const deleteItem = installDeleteBridge({ ok: true });
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
-  await userEvent.click(trigger);
-  const dialog = screen.getByRole('dialog', { name: 'history.delete.confirmTitle' });
-  expect(dialog).toHaveAccessibleDescription('history.delete.confirmBody');
-  expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveFocus();
-  await userEvent.keyboard('{Enter}');
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(trigger).toHaveFocus();
-
-  await userEvent.click(trigger);
-  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(trigger).toHaveFocus();
-  expect(deleteItem).not.toHaveBeenCalled();
-  expect(mocks.removeItem).not.toHaveBeenCalled();
-});
-
-it('削除すると行を一覧から外し、次の行へフォーカスを移す', async () => {
-  const deleteItem = installDeleteBridge({ ok: true });
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+it('moves the selection off a deleted task in place of its history entry', async () => {
+  renderPage(['/history?item=chat', '/history?item=action:A1']);
+  await userEvent.click(await screen.findByRole('button', { name: '削除 見積書を直す' }));
+  await userEvent.click(screen.getByRole('button', { name: '削除' }));
   expect(deleteItem).toHaveBeenCalledWith({ kind: 'conversation', id: 'A1' });
-  expect(mocks.removeItem).toHaveBeenCalledWith('conversation:A1');
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(screen.getByRole('button', { name: /^Suggestion/ })).toHaveFocus();
+  expect(location()).toHaveTextContent('/history?item=suggestion:S1');
 
-  // A Suggestion row is deleted the same way, by its own id.
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete Suggestion' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
-  expect(deleteItem).toHaveBeenLastCalledWith({ kind: 'suggestion', id: 'S1' });
+  await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=chat');
 });
 
-it('実行中で断られたら短い通知を出し、行を残して削除ボタンへ戻る', async () => {
-  installDeleteBridge({ ok: false, errorCode: 'CONVERSATION_BUSY' });
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
-  await userEvent.click(trigger);
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.busy');
-  expect(mocks.removeItem).not.toHaveBeenCalled();
-  expect(trigger).toHaveFocus();
-  expect(HISTORY_MESSAGES.ja['history.delete.busy']).toBe(
-    'この会話は実行中のため、いまは削除できません。'
-  );
+it("opens a task's sent work chip in place, as the chat's", async () => {
+  renderPage(['/history?item=chat', '/history?item=action:A1']);
+  await userEvent.click(screen.getByRole('link', { name: '「請求書を作りましょうか」を開く' }));
+  expect(location()).toHaveTextContent('/history?item=suggestion:S1');
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
-it('ほかの失敗は削除失敗として通知する', async () => {
-  const deleteItem = installDeleteBridge({
-    ok: false,
-    errorCode: 'CONVERSATION_HISTORY_DELETE_FAILED',
+const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;
+const NEW_TASK = /^(メイン画面で新しい作業|New task in the main window)$/u;
+
+it('the Action pane starts naming a project in place', async () => {
+  renderPage(['/history?item=action:A1']);
+  await userEvent.click(screen.getByRole('button', { name: 'add project' }));
+  expect(screen.getByRole('textbox', { name: PROJECT_NAME })).toHaveFocus();
+  expect(selectFolder).not.toHaveBeenCalled();
+  expect(location()).toHaveTextContent('/history?item=action:A1');
+});
+
+it('starts naming a project when the Overlay asks for a new one', async () => {
+  renderPage(['/history?project=new']);
+  expect(await screen.findByRole('textbox', { name: PROJECT_NAME })).toHaveFocus();
+  expect(location()).not.toHaveTextContent('project=new');
+});
+
+it('writes the selection as `?item=kind:id`, encoding only the id', () => {
+  expect(historySelectionSearch('chat')).toBe('?item=chat');
+  expect(historySelectionSearch('action:a b&c:d')).toBe('?item=action:a%20b%26c%3Ad');
+  expect(parseHistorySelection(historySelectionSearch('action:a b&c:d'))).toBe('action:a b&c:d');
+});
+
+const SIDEBAR = { name: 'チャットと作業' } as const;
+
+it('hides the sidebar and shows it again, keeping the detail pane and the choice', async () => {
+  renderPage(['/history?item=action:A1']);
+  const toggle = screen.getByRole('button', { name: 'サイドバーを隠す' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle).toHaveAttribute('aria-controls', screen.getByRole('complementary', SIDEBAR).id);
+
+  await userEvent.click(toggle);
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(toggle).toHaveAccessibleName('サイドバーを表示');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  // The choice survives a restart.
+  cleanup();
+  renderPage(['/history?item=action:A1']);
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'サイドバーを表示' }));
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+});
+
+it('⌘B hides the sidebar and moves focus out of it to the toggle', async () => {
+  renderPage(['/history']);
+  const search = screen.getByRole('searchbox', { name: '作業を検索' });
+  search.focus();
+
+  fireEvent.keyDown(search, { key: 'b', metaKey: true });
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  expect(screen.getByRole('button', { name: 'サイドバーを表示' })).toHaveFocus();
+
+  fireEvent.keyDown(document.body, { key: 'b', metaKey: true });
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+});
+
+it('starts with the sidebar shown when storage is unavailable', () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => {
+      throw new DOMException('blocked', 'SecurityError');
+    },
   });
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.failed');
-
-  deleteItem.mockRejectedValueOnce(new Error('bridge failed'));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.failed');
-  expect(mocks.removeItem).not.toHaveBeenCalled();
-});
-
-it('実行中・確認待ちの会話は削除できず、返事待ちの提案は削除できる', () => {
-  installDeleteBridge({ ok: true });
-  mocks.itemsOverride = [
-    {
-      kind: 'conversation',
-      action_id: 'A-running',
-      title: 'Running',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'running',
-      latest_completion_event_id: null,
-    },
-    {
-      kind: 'conversation',
-      action_id: 'A-approval',
-      title: 'Approval',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'approval_pending',
-      latest_completion_event_id: null,
-    },
-    {
-      kind: 'suggestion',
-      suggestion_id: 'S-offer',
-      title: 'Offer',
-      updated_at: '2026-08-30T01:02:03.000Z',
-      status: 'approval_pending',
-    },
-  ];
-  render(<SuggestionHistoryPage />, { wrapper: PageWrapper });
-
-  expect(screen.getByRole('button', { name: 'common.delete Running' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'common.delete Approval' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'common.delete Offer' })).toBeEnabled();
+  renderPage(['/history']);
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });

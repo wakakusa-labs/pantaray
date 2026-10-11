@@ -5,6 +5,7 @@ const { createOrchestrationApi } = require('../electron/preload/orchestration_ap
 const { createOverlayApi } = require('../electron/preload/overlay_api');
 const { createPreloadApi } = require('../electron/preload/create_preload_api');
 const { createActionsApi } = require('../electron/preload/actions_api');
+const { createSuggestionsApi } = require('../electron/preload/suggestions_api');
 
 function createIpcRenderer() {
   const listeners = new Map();
@@ -65,6 +66,8 @@ test('Action preload API forwards typed invokes and retains the latest update pe
   const output = { actionId: 'a1', stepId: 's1', cursor: null, limitBytes: 16_384 };
 
   await api.actions.submitMessage(submit);
+  await api.actions.openConversation({ actionId: 'a1' });
+  await api.suggestions.read({ suggestionId: 's1' });
   await api.actions.readConversationPage(page);
   await api.actions.readToolOutputPage(output);
   const file = { bytes: new ArrayBuffer(1), name: 'a.pdf' };
@@ -75,9 +78,12 @@ test('Action preload API forwards typed invokes and retains the latest update pe
   await api.history.openNewConversation();
   await api.history.openConversation({ actionId: 'a1' });
   await api.history.deleteItem({ kind: 'conversation', id: 'a1' });
+  await api.history.readItem({ kind: 'suggestion', id: 's1' });
 
   assert.deepEqual(ipcRenderer.invoked, [
     ['action:submitMessage', submit],
+    ['action:openConversation', { actionId: 'a1' }],
+    ['suggestion:read', { suggestionId: 's1' }],
     ['action:readConversationPage', page],
     ['action:readToolOutputPage', output],
     ['action:attachFile', file],
@@ -86,6 +92,7 @@ test('Action preload API forwards typed invokes and retains the latest update pe
     ['history:openNewConversation'],
     ['history:openConversation', { actionId: 'a1' }],
     ['history:deleteItem', { kind: 'conversation', id: 'a1' }],
+    ['history:readItem', { kind: 'suggestion', id: 's1' }],
   ]);
 
   ipcRenderer.emit('action:conversationUpdated', actionUpdate('a1', 'queued'));
@@ -152,6 +159,19 @@ for (const hasFreshUpdate of [false, true]) {
     assert.deepEqual(replayed, hasFreshUpdate ? [latest] : []);
   });
 }
+
+test('suggestion snapshots reach the main window subscriber until it unsubscribes', () => {
+  const ipcRenderer = createIpcRenderer();
+  const { suggestions } = createSuggestionsApi({ ipcRenderer });
+  const received = [];
+  const unsubscribe = suggestions.onSnapshot((payload) => received.push(payload));
+  const payload = { snapshot: { suggestionId: 'S1' } };
+  ipcRenderer.emit('suggestion:snapshot', payload);
+  unsubscribe();
+  ipcRenderer.emit('suggestion:snapshot', { snapshot: { suggestionId: 'S2' } });
+
+  assert.deepEqual(received, [payload]);
+});
 
 test('overlay API retains snapshots until the renderer subscribes', () => {
   const ipcRenderer = createIpcRenderer();
@@ -231,4 +251,21 @@ test('notification orchestration consumes buffered events across StrictMode resu
   assert.deepEqual(firstSetup, [{ event_id: 'before-first-subscribe' }]);
   assert.deepEqual(secondSetup, [{ event_id: 'during-second-setup' }]);
   assert.deepEqual(thirdSetup, [{ event_id: 'between-setups' }]);
+});
+
+test('History preload keeps a show-item request sent before the shell subscribes', () => {
+  const { createAuthHistoryApi } = require('../electron/preload/auth_history_api');
+  const ipcRenderer = createIpcRenderer();
+  const { history } = createAuthHistoryApi({ ipcRenderer });
+  ipcRenderer.emit('history:showItem', { item: 'action:a1' });
+  ipcRenderer.emit('history:showItem', { item: 'action:a2' });
+
+  const received = [];
+  const unsubscribe = history.onShowItem((payload) => received.push(payload));
+  ipcRenderer.emit('history:showItem', { item: 'action:a3' });
+  unsubscribe();
+  // A request answered once is not answered again by the next subscriber.
+  history.onShowItem((payload) => received.push(payload));
+
+  assert.deepEqual(received, [{ item: 'action:a2' }, { item: 'action:a3' }]);
 });

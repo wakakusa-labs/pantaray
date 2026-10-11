@@ -12,13 +12,12 @@ const {
   moveOverlayWindowToCell,
   showInteractiveOverlayWindow,
 } = require('./overlay_window_factory');
+const { normalizeId, createOverlayAssociations } = require('./overlay_associations');
 
 const overlayWindows = new Map(); // key: suggestionId, value: BrowserWindow
 let lastOverlayId = null;
 const overlayState = new Map(); // id -> { ready, queue, shellMode }
 const overlaySnapshotPayloads = new Map(); // id -> latest overlay:snapshot payload
-const processToSuggestion = new Map(); // processId -> suggestionId
-const actionToOverlayId = new Map(); // actionId -> Overlay id
 // Overlay ids whose window this app opened for one conversation. Their close
 // control destroys the window instead of hiding it, so a session cannot
 // accumulate invisible conversation renderers.
@@ -38,6 +37,18 @@ const overlayDragController = createOverlayDragController({
   activationTracker: overlayActivationTracker,
 });
 const auxiliaryWindowIpcSecurity = createAuxiliaryWindowIpcSecurity();
+const {
+  registerProcessAssociation,
+  registerActionAssociation,
+  adoptActionAssociation,
+  cleanupMappingsForSuggestion,
+  cleanupMappingsForProcess,
+  cleanupMappingsForAction,
+  clearActionAssociations,
+  clearAllAssociations,
+  resolveOverlayId,
+  dispatchEventToOverlay,
+} = createOverlayAssociations({ overlayWindows, hasOverlayWindow, sendToOverlay });
 const overlayWindowFactory = createOverlayWindowFactory({
   getUiLanguage: currentUiLanguage,
   registerWindow: (win) => auxiliaryWindowIpcSecurity.registerWindow('overlay', win),
@@ -75,7 +86,7 @@ const overlayWindowSlots = new WeakMap();
 
 // Suggestions and History windows take the lowest free slot of their cell's stack, so the two
 // never open exactly on top of each other when they share a cell (by default, the top-right).
-// A slot is held by a window in that cell that is shown or still loading to be shown; a closed
+// A slot is held by a window in that cell that is shown or still waiting to be shown; a closed
 // (hidden) one frees it. A task the user starts always opens in its cell itself.
 function stackPlacement(placementKind) {
   const cell = overlayCellFor(placementKind);
@@ -88,7 +99,7 @@ function stackPlacement(placementKind) {
       placed.cell.row === cell.row &&
       placed.cell.column === cell.column &&
       !win.isDestroyed() &&
-      (win.isVisible() || overlayState.get(id)?.readyToShow === false)
+      (win.isVisible() || awaitsFirstShow(overlayState.get(id)))
     ) {
       heldSlots.add(placed.stackIndex);
     }
@@ -126,12 +137,6 @@ function currentUiLanguage() {
   return language;
 }
 
-function normalizeId(value) {
-  if (!value && value !== 0) return null;
-  const str = String(value).trim();
-  return str.length ? str : null;
-}
-
 function getOverlayRuntimeState(id) {
   const normalizedId = normalizeId(id);
   if (!normalizedId) return null;
@@ -142,11 +147,18 @@ function getOverlayRuntimeState(id) {
   const created = {
     ready: false,
     readyToShow: false,
+    // An Action's conversation window stays hidden until its conversation is laid out.
+    awaitsLayout: false,
     queue: [],
     shellMode: PASSIVE_SHELL_MODE,
   };
   overlayState.set(normalizedId, created);
   return created;
+}
+
+// Not shown yet: still loading, or waiting for its conversation to be laid out.
+function awaitsFirstShow(runtime) {
+  return Boolean(runtime) && (!runtime.readyToShow || runtime.awaitsLayout);
 }
 
 function setLocalOwnerIdGetter(getter) {
@@ -172,8 +184,7 @@ function clearForOwnerChange() {
   overlayWindows.clear();
   overlayState.clear();
   overlaySnapshotPayloads.clear();
-  processToSuggestion.clear();
-  actionToOverlayId.clear();
+  clearAllAssociations();
   conversationOverlayIds.clear();
   lastOverlayId = null;
 }
@@ -243,84 +254,6 @@ function enqueueOverlayMessage(id, channel, payload) {
   runtime.queue.push({ channel, payload });
 }
 
-function registerProcessAssociation(processId, suggestionId) {
-  const pid = normalizeId(processId);
-  const sid = normalizeId(suggestionId);
-  if (!pid || !sid) return;
-  processToSuggestion.set(pid, sid);
-}
-
-// An explicit open or send binds the Action to the window the user is looking at.
-function registerActionAssociation(actionId, overlayId) {
-  const aid = normalizeId(actionId);
-  const oid = normalizeId(overlayId);
-  if (!aid || !oid) return;
-  actionToOverlayId.set(aid, oid);
-}
-
-// A server event or Suggestion snapshot names the Action's Suggestion, which is not necessarily
-// the window showing it: a conversation opened from History is a different window, and every run
-// of the Action, follow-ups and replays included, still carries the Suggestion id. So these binds
-// take the Action only from no window, never from one that is open.
-function adoptActionAssociation(actionId, overlayId) {
-  const aid = normalizeId(actionId);
-  const oid = normalizeId(overlayId);
-  if (!aid || !oid) return;
-  const current = actionToOverlayId.get(aid);
-  if (current && current !== oid && hasOverlayWindow(current)) return;
-  actionToOverlayId.set(aid, oid);
-}
-
-function cleanupMappingsForSuggestion(suggestionId) {
-  const sid = normalizeId(suggestionId);
-  if (!sid) return;
-  for (const [pid, mappedSid] of [...processToSuggestion.entries()]) {
-    if (mappedSid === sid) {
-      processToSuggestion.delete(pid);
-    }
-  }
-  for (const [aid, mappedOverlayId] of [...actionToOverlayId.entries()]) {
-    if (mappedOverlayId === sid) {
-      actionToOverlayId.delete(aid);
-    }
-  }
-}
-
-function cleanupMappingsForProcess(processId) {
-  const pid = normalizeId(processId);
-  if (pid) {
-    processToSuggestion.delete(pid);
-  }
-}
-
-function cleanupMappingsForAction(actionId) {
-  const aid = normalizeId(actionId);
-  if (aid) {
-    actionToOverlayId.delete(aid);
-  }
-}
-
-function clearActionAssociations() {
-  actionToOverlayId.clear();
-}
-
-function resolveOverlayId({ suggestionId, processId, actionId }) {
-  const sid = normalizeId(suggestionId);
-  const pid = normalizeId(processId);
-  const aid = normalizeId(actionId);
-
-  if (sid && overlayWindows.has(sid)) {
-    return sid;
-  }
-  if (aid && actionToOverlayId.has(aid)) {
-    return actionToOverlayId.get(aid);
-  }
-  if (pid && processToSuggestion.has(pid)) {
-    return processToSuggestion.get(pid);
-  }
-  return null;
-}
-
 function createMappedOverlayWindow(id, options) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
@@ -370,18 +303,35 @@ function createHistoryOverlayWindow(id) {
   });
 }
 
+// A window opened for an existing Action first paints before its conversation is read, as a
+// bare header that grows once the conversation arrives. It is shown only when its renderer
+// reports the conversation laid out at its final size, or when main gives up on the read.
 function createStandaloneConversationOverlayWindow(id, actionId) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
   runtime.shellMode = INTERACTIVE_SHELL_MODE;
+  runtime.awaitsLayout = Boolean(actionId);
   return createMappedOverlayWindow(id, {
     actionId,
     conversation: true,
     entryMode: 'standalone',
     interactive: true,
     placementKind: standalonePlacementKind(actionId),
-    onReadyToShow: showInteractiveOverlayWindow,
+    onReadyToShow: (win, state) => {
+      if (!state.awaitsLayout) showInteractiveOverlayWindow(win);
+    },
   });
+}
+
+/** Shows a conversation window that waited for its layout; any other window is left as it is. */
+function revealOverlayWindow(id) {
+  const normalizedId = normalizeId(id);
+  const runtime = normalizedId ? overlayState.get(normalizedId) : null;
+  if (!runtime?.awaitsLayout) return;
+  runtime.awaitsLayout = false;
+  const win = overlayWindows.get(normalizedId);
+  // Before ready-to-show, that event shows it.
+  if (runtime.readyToShow && win && !win.isDestroyed()) showInteractiveOverlayWindow(win);
 }
 
 function getOrCreateOverlayWindow(id) {
@@ -420,7 +370,7 @@ function openStandaloneConversationOverlay(id, actionId = null) {
   if (!runtime) throw new Error('Standalone Overlay state is unavailable.');
   const existing = overlayWindows.get(normalizedId);
   if (existing && !existing.isDestroyed()) {
-    if (!runtime.ready || !runtime.readyToShow) return 'loading';
+    if (!runtime.ready || awaitsFirstShow(runtime)) return 'loading';
     placeHiddenOverlayWindow(existing, standalonePlacementKind(actionId));
     showInteractiveOverlayWindow(existing, { explicitFocus: true });
     existing.webContents.send('overlay:focusComposer');
@@ -506,20 +456,6 @@ function setOverlaySnapshot(id, payload) {
   }
 }
 
-function dispatchEventToOverlay(channel, payload) {
-  if (!payload || typeof payload !== 'object') return false;
-  const meta = payload.meta || {};
-  const data = payload.data || {};
-  const targetId = resolveOverlayId({
-    suggestionId: meta.suggestion_id || data.suggestion_id,
-    processId: meta.process_id || data.process_id,
-    actionId: meta.action_id || data.action_id,
-  });
-  if (!targetId) return false;
-  sendToOverlay(targetId, channel, payload);
-  return true;
-}
-
 const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
   BrowserWindow,
   screen,
@@ -531,6 +467,7 @@ const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
     getOverlay: (id) => overlayWindows.get(id) || null,
     hide: hideNotification,
     normalizeId,
+    reveal: revealOverlayWindow,
     setSnapshot: setOverlaySnapshot,
     showHistory: getOrCreateHistoryOverlayWindow,
   },
@@ -559,6 +496,7 @@ module.exports = {
   resolveOverlayId,
   resolveOverlayIdForSender,
   openStandaloneConversationOverlay,
+  revealOverlayWindow,
   hasOverlayWindow,
   destroyOverlayWindow,
   dispatchEventToOverlay,

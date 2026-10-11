@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MarkdownBlock } from './MarkdownRenderer';
+import { OpenFileLinkContext } from './openFileLinkContext';
 
 describe('MarkdownBlock', () => {
   afterEach(() => {
@@ -75,6 +76,49 @@ describe('MarkdownBlock', () => {
     expect(screen.getByText('pantaray-file:///Users/name/a.md')).toBeTruthy();
   });
 
+  it('hands a file link to the host that previews files, instead of Finder', () => {
+    const open = vi.fn(async () => undefined);
+    const onOpenFile = vi.fn();
+    window.electron = { actionFiles: { open } } as unknown as Window['electron'];
+
+    render(
+      <OpenFileLinkContext.Provider value={onOpenFile}>
+        <MarkdownBlock
+          isStreamFinished
+          text="[見積](pantaray-file:///Users/name/My%20Docs/a.html)"
+        />
+      </OpenFileLinkContext.Provider>
+    );
+
+    expect(fireEvent.click(screen.getByRole('link', { name: '見積' }))).toBe(false);
+    expect(onOpenFile).toHaveBeenCalledWith('/Users/name/My Docs/a.html');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens a web link in a new window, which main sends to the browser', () => {
+    render(<MarkdownBlock isStreamFinished text="[docs](https://example.com/a)" />);
+
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(link.getAttribute('href')).toBe('https://example.com/a');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('keeps any other link as text, so it cannot load a page over the app', () => {
+    const { container } = render(
+      <MarkdownBlock
+        isStreamFinished
+        text={
+          '[顧客提示版HTML](AIサイバー攻撃/Xer_提案.html)、[脚注](#note)、' +
+          '[ファイル](file:///etc/hosts)、[実行](javascript:alert(1))'
+        }
+      />
+    );
+
+    expect(screen.queryAllByRole('link')).toEqual([]);
+    expect(container.textContent).toBe('顧客提示版HTML、脚注、ファイル、実行');
+  });
+
   it('ends a bare file URL where the sentence around it goes on', () => {
     render(
       <MarkdownBlock
@@ -104,5 +148,28 @@ describe('MarkdownBlock', () => {
 
     await waitFor(() => expect(container.textContent).toContain('次に pantaray-file:///'));
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['a.md']);
+  });
+
+  it('breaks a paragraph and a list item at each single newline, and leaves code as written', () => {
+    const { container } = render(
+      <MarkdownBlock
+        isStreamFinished
+        text={
+          'よろしくお願いいたします。\n株式会社サンプル  \n山田 太郎\n\n' +
+          '- 住所\n  東京都\n\n' +
+          '```\nconst a = 1;\nconst b = 2;\n```'
+        }
+      />
+    );
+
+    const [signature] = container.querySelectorAll('p');
+    // A hard break (two trailing spaces) stays one break, not two.
+    expect(signature.innerHTML).toBe(
+      'よろしくお願いいたします。<br>\n株式会社サンプル<br>\n山田 太郎'
+    );
+    expect(container.querySelector('li')?.innerHTML).toBe('住所<br>\n東京都');
+    const code = container.querySelector('pre code');
+    expect(code?.textContent).toBe('const a = 1;\nconst b = 2;\n');
+    expect(code?.querySelector('br')).toBeNull();
   });
 });

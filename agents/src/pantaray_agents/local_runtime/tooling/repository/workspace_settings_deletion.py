@@ -40,6 +40,28 @@ def delete_workspace_project(
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
             ensure_user_row(connection, user_id=user_id)
+            # A registered folder stays inside the agent's read, edit and command boundary, so
+            # one that only this project holds goes with it rather than staying where nothing
+            # shows it.
+            connection.execute(
+                """
+                DELETE FROM workspace_folders
+                WHERE user_id = ?
+                  AND folder_id IN (
+                      SELECT link.folder_id
+                      FROM workspace_folder_projects AS link
+                      WHERE link.user_id = ? AND link.project_id = ?
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM workspace_folder_projects AS other
+                            WHERE other.user_id = link.user_id
+                              AND other.folder_id = link.folder_id
+                              AND other.project_id <> link.project_id
+                        )
+                  )
+                """,
+                (user_id, user_id, project_id),
+            )
             _delete_workspace_item(
                 connection=connection,
                 table_name="workspace_projects",

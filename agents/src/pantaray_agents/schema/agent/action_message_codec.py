@@ -8,6 +8,7 @@ from .action_message import (
     ACTION_FILE_TYPE_LABEL_BY_EXTENSION,
     ActionProjectRef,
     ActionUserMessageInput,
+    ActionWorkRef,
     FileAttachmentInput,
     SuggestionApprovalInput,
 )
@@ -29,6 +30,13 @@ _BYTES_PER_KILOBYTE = 1024
 _CHAT_INSTRUCTION_TRAILER = (
     "(You wrote the instruction above in your chat with the user when you "
     "handed this work over; it is not the user's own words.)"
+)
+# What the user calls a task is an Action here; the model knows it as a task.
+_WORK_REF_LABEL = {"action": "task", "suggestion": "suggestion"}
+# Both the chat and a task read these rows with their memory_sql tool.
+_WORK_REFS_TRAILER = (
+    "Read one with memory_sql: a task from agent_actions by action_id, a "
+    "suggestion from agent_suggestions by suggestion_id."
 )
 _CHAT_NOTE_HEADING = (
     "Your note from your chat with the user (you wrote this; it is not the "
@@ -92,6 +100,9 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
         sections.append(render_project_refs(project_refs))
+    work_refs = (*message.work_refs, *message.supplement_work_refs)
+    if work_refs:
+        sections.append(render_work_refs(work_refs))
     if message.files:
         sections.append(_render_files(message.files))
     return "\n\n".join(sections)
@@ -121,6 +132,17 @@ def render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
     return "Referenced workspace projects:\n" + "\n".join(lines)
 
 
+def render_work_refs(refs: tuple[ActionWorkRef, ...]) -> str:
+    first_by_work: dict[tuple[str, str], ActionWorkRef] = {}
+    for ref in refs:
+        first_by_work.setdefault((ref.kind, ref.id), ref)
+    lines = [
+        f"- {_WORK_REF_LABEL[ref.kind]} {ref.id}: {ref.title}"
+        for ref in first_by_work.values()
+    ]
+    return "Referenced work:\n" + "\n".join([*lines, _WORK_REFS_TRAILER])
+
+
 def _render_files(files: tuple[FileAttachmentInput, ...]) -> str:
     lines = [
         f"- {file.name} ({ACTION_FILE_TYPE_LABEL_BY_EXTENSION[file.extension]}, "
@@ -142,6 +164,7 @@ def _format_byte_size(byte_size: int) -> str:
 __all__ = [
     "parse_action_user_message",
     "render_project_refs",
+    "render_work_refs",
     "parse_stored_action_user_message",
     "render_action_user_request_text",
     "render_action_user_visible_text",

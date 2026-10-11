@@ -10,7 +10,8 @@
 
 import type { BrowserWindow } from 'electron';
 
-import type { ActionConversationPage } from '../actions/actionContracts';
+import type { ActionLatestPages } from '../actions/actionLatestPageReader';
+import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
@@ -32,6 +33,7 @@ import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
   ActionProjectRefsSchema,
+  ActionWorkRefsSchema,
 } from '../actions/actionContracts';
 import { createOrchestrationRendererBridge } from './orchestrationRendererBridge';
 
@@ -67,8 +69,10 @@ export type OrchestrationManager = {
   acceptAction: (request: AcceptActionRequest) => Promise<OverlaySnapshot | null>;
   enqueueResumeRequest: (req: ResumeProcessRequest) => void;
   getOverlaySnapshot: (suggestionId: string) => OverlaySnapshot | null;
+  adoptSuggestionSnapshot: (persisted: OverlaySnapshot) => OverlaySnapshot;
+  recordSuggestionReply: (suggestionId: string, actionId: string) => void;
   refreshActionConversation: (actionId: string) => void;
-  refreshAndResumeActionConversation: (actionId: string) => void;
+  refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   handleApprovalDecisionSettled: (identity: {
     actionId: string;
     processId: string;
@@ -124,7 +128,7 @@ export function createOrchestrationManager(params: {
   getOwnerId: () => string | null;
   getRuntimeState: () => LocalRuntimeState;
   getUiLanguage: () => 'en' | 'ja';
-  readLatestActionConversationPage: (actionId: string) => Promise<ActionConversationPage>;
+  latestActionPages: ActionLatestPages;
   /** Answers a screen capture request; absent means no desktop capture support. */
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
   onStatus?: (payload: OrchestrationStatusPayload) => void;
@@ -133,7 +137,7 @@ export function createOrchestrationManager(params: {
 }): OrchestrationManager {
   const notificationWindow = params.notificationWindow;
   if (
-    typeof params.readLatestActionConversationPage !== 'function' ||
+    typeof params.latestActionPages?.read !== 'function' ||
     typeof notificationWindow.resolveOverlayId !== 'function'
   ) {
     throw new Error('Action conversation read and Overlay target resolution are required');
@@ -179,6 +183,7 @@ export function createOrchestrationManager(params: {
       case 'execute_action': {
         const images = ActionMessageRequestSchema.shape.message.shape.images.safeParse(data.images);
         const projectRefs = ActionProjectRefsSchema.safeParse(data.supplement_project_refs);
+        const workRefs = ActionWorkRefsSchema.safeParse(data.supplement_work_refs);
         const files = ActionFileAttachmentsSchema.optional().safeParse(data.files);
         if (
           typeof data.suggestion_id !== 'string' ||
@@ -188,6 +193,7 @@ export function createOrchestrationManager(params: {
           (data.approval_mode !== 'prompt_each_time' && data.approval_mode !== 'always_allow') ||
           !images.success ||
           !projectRefs.success ||
+          !workRefs.success ||
           !files.success
         ) {
           return null;
@@ -200,6 +206,7 @@ export function createOrchestrationManager(params: {
             language: data.language,
             supplement: data.supplement,
             supplement_project_refs: projectRefs.data,
+            supplement_work_refs: workRefs.data,
             approval_mode: data.approval_mode,
             images: images.data,
             files: files.data,
@@ -218,10 +225,6 @@ export function createOrchestrationManager(params: {
             reason: typeof data.reason === 'string' ? data.reason : undefined,
           },
         };
-      case 'stop_process':
-        return typeof data.process_id === 'string'
-          ? { event, data: { process_id: data.process_id } }
-          : null;
       case 'resume_process':
         return {
           event,
@@ -491,7 +494,7 @@ export function createOrchestrationManager(params: {
   const rendererBridge = createOrchestrationRendererBridge({
     notificationWindow,
     getMainWindow: () => params.getMainWindow(),
-    readLatestActionConversationPage: params.readLatestActionConversationPage,
+    latestActionPages: params.latestActionPages,
     sendFromRenderer,
     requestResume: (request) => {
       // An internal refresh may finish after owner loss; its resume is obsolete.
@@ -520,6 +523,8 @@ export function createOrchestrationManager(params: {
       enqueueResumeRequest(request);
     },
     getOverlaySnapshot: rendererBridge.getOverlaySnapshot,
+    adoptSuggestionSnapshot: rendererBridge.adoptSuggestionSnapshot,
+    recordSuggestionReply: rendererBridge.recordSuggestionReply,
     refreshActionConversation: rendererBridge.refreshActionConversation,
     refreshAndResumeActionConversation: rendererBridge.refreshAndResumeActionConversation,
     handleApprovalDecisionSettled: rendererBridge.handleApprovalDecisionSettled,

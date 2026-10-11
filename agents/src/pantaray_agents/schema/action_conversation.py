@@ -22,11 +22,16 @@ from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_microsecond
 
 type ActionStatus = Literal["queued", "processing", "success", "error", "canceled"]
 type RunStatus = Literal["running", "approval_pending", "success", "error", "canceled"]
-type UserEntryStatus = Literal["adopted", "pending", "not_executed"]
+# ``runs_with_next_message``: not executed, and the next run the user starts
+# takes it; ``not_executed``: not executed, and no run will take it.
+type UserEntryStatus = Literal[
+    "adopted", "pending", "runs_with_next_message", "not_executed"
+]
 type ActionStepStatus = Literal["processing", "success", "error", "timeout"]
 type ToolEntryOutcome = Literal[
-    "completed", "denied", "unavailable", "not_executed", "preparing"
+    "completed", "denied", "unavailable", "not_executed", "preparing", "needs_read"
 ]
+type ToolEntryFileOperation = Literal["add", "update", "delete"]
 # The body kind a successful page render returns while the renderer it needs is still
 # being set up; the row says the pages will be shown once it is ready, not that it failed.
 RENDERER_PREPARING_OUTPUT_KIND = "renderer_preparing"
@@ -198,6 +203,20 @@ class UserEntryProjectRef(_ActionConversationModel):
     end: NonNegativeInt
 
 
+class UserEntryWorkRef(_ActionConversationModel):
+    """A task or suggestion named in ``UserEntry.content``, titled as when sent.
+
+    ``kind`` and ``id`` name the item, so the conversation can open it.
+    ``start`` and ``end`` are Unicode code-point offsets into that content.
+    """
+
+    kind: Literal["action", "suggestion"]
+    id: ActionConversationIdentity
+    title: NonBlankText
+    start: NonNegativeInt
+    end: NonNegativeInt
+
+
 class UserEntryFile(_ActionConversationModel):
     """A document attached to the message, as it was named when sent."""
 
@@ -219,6 +238,7 @@ class UserEntry(_ActionConversationModel):
     chat_note: NonBlankText | None = None
     images: tuple[ImageInput, ...]
     project_refs: tuple[UserEntryProjectRef, ...]
+    work_refs: tuple[UserEntryWorkRef, ...] = ()
     files: tuple[UserEntryFile, ...]
     status: UserEntryStatus
 
@@ -253,6 +273,14 @@ class AssistantEntry(_ActionConversationModel):
     content: NonBlankText
 
 
+class ToolEntryFileEdit(_ActionConversationModel):
+    """How one applied file patch changed its file: counts only, never content."""
+
+    operation: ToolEntryFileOperation
+    added_lines: NonNegativeInt
+    removed_lines: NonNegativeInt
+
+
 class ToolEntry(_ActionConversationModel):
     step_kind: Literal["tool"]
     step_id: ActionConversationIdentity
@@ -269,6 +297,8 @@ class ToolEntry(_ActionConversationModel):
     output_preview: NonBlankText | None
     output_available: bool
     images: tuple[ImageInput, ...]
+    # Set only for an applied patch whose diff the durable row holds inline.
+    file_edit: ToolEntryFileEdit | None
 
     @model_validator(mode="after")
     def validate_output_availability(self) -> Self:
@@ -398,7 +428,7 @@ class ActionConversationPage(_ActionConversationModel):
     def validate_page(self) -> Self:
         run_entries = tuple(entry for run in self.runs for entry in run.entries)
         if any(
-            message.status not in {"pending", "not_executed"}
+            message.status == "adopted"
             or (
                 message.status == "pending"
                 and self.action.status in _TERMINAL_CONVERSATION_STATUSES
@@ -506,6 +536,8 @@ __all__ = [
     "RENDERER_PREPARING_OUTPUT_KIND",
     "RunStatus",
     "ToolEntry",
+    "ToolEntryFileEdit",
+    "ToolEntryFileOperation",
     "ToolEntryOutcome",
     "UserEntry",
     "UserEntryStatus",

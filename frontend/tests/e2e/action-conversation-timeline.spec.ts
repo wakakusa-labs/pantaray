@@ -8,6 +8,7 @@ import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore
 import type { OverlaySnapshotPayload } from '../../src/components/agent-overlay/model/overlayTypes';
 import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
 import { waitForAnimationsToSettle } from './animations';
+import { installTaskDrafts } from './taskDrafts';
 
 // Production renderer with deterministic IPC pages, isolated from live accounts and storage.
 let vite: ViteDevServer;
@@ -136,9 +137,6 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           },
           resize: noop,
           getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
-          showChat: async (request: { actionId: string }) => {
-            document.documentElement.dataset.showChat = JSON.stringify(request);
-          },
         },
         orchestration: {
           onEvent: () => noop,
@@ -168,6 +166,7 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
       },
     });
   }, language);
+  await installTaskDrafts(page);
 }
 
 for (const language of ['ja', 'en'] as const) {
@@ -202,21 +201,13 @@ for (const language of ['ja', 'en'] as const) {
     // Only the live work sweeps, and reduced motion (the English run) keeps it still.
     const shimmer = page.locator('.action-conversation__shimmer');
     await expect(shimmer).toHaveCount(1);
-    await expect(shimmer).toHaveText(language === 'ja' ? 'Pantarayの作業' : "Pantaray's work");
+    // Between Tools the live work's label says the model is thinking.
+    await expect(shimmer).toHaveText(language === 'ja' ? '考えています' : 'Thinking');
     expect(await work.nth(2).locator('.action-conversation__shimmer').count()).toBe(1);
     expect(await shimmer.evaluate((element) => getComputedStyle(element).animationName)).toBe(
       language === 'ja' ? 'action-conversation-shimmer' : 'none'
     );
     await capture(page, info, 'running');
-    const showChat = page.getByRole('button', {
-      name: language === 'ja' ? 'チャットで見る' : 'Show in chat',
-    });
-    await showChat.focus();
-    await page.keyboard.press('Enter');
-    await expect(page.locator('html')).toHaveAttribute(
-      'data-show-chat',
-      JSON.stringify({ actionId: 'action-1' })
-    );
     if (language === 'ja') {
       const outputButton = page.getByRole('button', { name: /notes-b.md/ });
       await outputButton.click();
@@ -318,7 +309,6 @@ for (const language of ['ja', 'en'] as const) {
     await expect(badge).toHaveCount(0);
     const instructionLabel =
       language === 'ja' ? '追加の指示（任意）' : 'Additional instructions (optional)';
-    await page.getByRole('button', { name: instructionLabel }).click();
     const comment = language === 'ja' ? '変更のリスクも教えて' : 'Include the risks.';
     await page.getByRole('textbox', { name: instructionLabel }).fill(comment);
     await page

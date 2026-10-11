@@ -100,6 +100,7 @@ def _tool_payload(**overrides: object) -> dict[str, object]:
         "output_preview": None,
         "output_available": True,
         "images": (),
+        "file_edit": None,
     }
     payload.update(overrides)
     return payload

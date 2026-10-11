@@ -10,7 +10,6 @@ class InboundEvent(StrEnum):
     # よりソフトな表現として "dismiss" を採用（UI文言も合わせる）。
     DISMISS_SUGGESTION = "dismiss_suggestion"
     RESUME_SESSION = "resume_session"
-    STOP_PROCESS = "stop_process"
     ACK_EVENT = "ack_event"
 
 

@@ -11,6 +11,7 @@ const COPY = {
   user: 'あなた',
   pantaray: 'Pantaray',
   images: (count: number) => `（画像 ${count} 枚）`,
+  outcome: (message: string) => (message === 'Action execution failed.' ? '失敗' : message),
 };
 const image = (index: number) => ({
   kind: 'image' as const,
@@ -53,6 +54,7 @@ const tool = (step: number): Entry => ({
   output_preview: null,
   output_available: true,
   images: [],
+  file_edit: null,
 });
 /** Entries are given oldest first and stored newest first, as the backend pages them. */
 const run = (id: string, entries: Entry[], outcome: Pick<Run, 'final_output' | 'error'>): Run => ({
@@ -153,6 +155,17 @@ describe('formatConversationTranscript', () => {
         'Pantaray\nThe archive failed.',
       ].join('\n\n')
     );
+  });
+
+  it('copies a failed run’s fixed message as the conversation shows it', () => {
+    const failed = run('run-1', [user(1, 1, 'Archive them')], {
+      final_output: null,
+      error: { code: 'LLM_PROVIDER_ERROR', message: 'Action execution failed.' },
+    });
+
+    expect(
+      formatConversationTranscript(projectActionConversationView([page([failed])]), COPY)
+    ).toBe('あなた\nArchive them\n\nPantaray\n失敗');
   });
 
   it('notes attached images, including on a message that has no text', () => {

@@ -53,6 +53,8 @@ PATCH_ERROR_WRITE_FAILED = "PATCH_WRITE_FAILED"
 
 _UTF8_BOM = "\ufeff"
 _LINE_ENDING = re.compile(r"(\r\n|\r|\n)")
+_NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
+_HUNK_HEADER = re.compile(r"@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 
 
 class StructuredPatchError(RuntimeError):
@@ -517,14 +519,37 @@ def _apply_file_changes(
 
 
 def create_patch_diff(change: StructuredPatchFileChange) -> str:
+    # difflib emits an unterminated last line as is, gluing the next diff line onto
+    # it. GNU diff ends it and adds the marker, which keeps the text a valid diff.
     return "".join(
-        unified_diff(
+        line if line.endswith(("\n", "\r")) else f"{line}\n{_NO_NEWLINE_MARKER}"
+        for line in unified_diff(
             patch_line_segments(change.old_text),
             patch_line_segments(change.new_text),
             fromfile=change.path,
             tofile=change.path,
         )
     )
+
+
+def count_patch_diff_lines(diff_text: str) -> tuple[int, int] | None:
+    """Return the (added, removed) line counts of one file's create_patch_diff text.
+
+    None when the lines disagree with the hunk headers, as in a diff stored before
+    unterminated last lines were marked, which glued the next line onto them.
+    """
+
+    signs = {" ": 0, "+": 0, "-": 0}
+    old_total = new_total = 0
+    for line in patch_line_segments(diff_text):
+        if header := _HUNK_HEADER.match(line):
+            old_total += int(header[1] or 1)  # An omitted range length is 1.
+            new_total += int(header[2] or 1)
+        elif (old_total or new_total) and line[:1] in signs:  # Past the file header.
+            signs[line[:1]] += 1
+    if (signs[" "] + signs["-"], signs[" "] + signs["+"]) != (old_total, new_total):
+        return None
+    return signs["+"], signs["-"]
 
 
 def _apply_single_change(

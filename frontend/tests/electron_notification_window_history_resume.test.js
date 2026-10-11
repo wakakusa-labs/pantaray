@@ -4,6 +4,19 @@ const Module = require('module');
 
 process.env.FRONTEND_PORT = '3001';
 
+
+// Starts each read as soon as it is asked for, as the shared reader does with no other caller.
+function immediateLatestPages(readPage) {
+  let readsStarted = 0;
+  return {
+    read: (actionId) => {
+      const readNumber = ++readsStarted;
+      return Promise.resolve(readPage(actionId)).then((page) => ({ page, readNumber }));
+    },
+    readsStarted: () => readsStarted,
+  };
+}
+
 function createEmitter() {
   const listeners = new Map();
   return {
@@ -308,7 +321,7 @@ test('history requests started before an owner switch cannot reopen or resume af
     refreshActionConversation: id => refreshed.push(id),
     resumeLiveProcess: request => resumed.push(request),
   });
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  const request = handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   owner = null;
   windows.clearForOwnerChange();
   owner = 'owner-b';
@@ -318,7 +331,8 @@ test('history requests started before an owner switch cannot reopen or resume af
     snapshot: createSnapshot({ actionId: 'old-action' }),
     liveResume: { kind: 'action', processId: 'old-process', actionId: 'old-action', commandId: 'old-command' },
   }));
-  await new Promise(resolve => setImmediate(resolve));
+  // The main window hears that the panel did not open.
+  await assert.rejects(request, /Local owner changed/);
   assert.equal(instances.length, 0);
   assert.deepEqual(refreshed, []);
   assert.deepEqual(resumed, []);
@@ -327,7 +341,18 @@ test('history requests started before an owner switch cannot reopen or resume af
   assert.deepEqual(instances[0].sent, []);
 });
 
-test('unavailable owners cannot open windows or fetch history while same-owner refresh keeps existing windows', async t => {
+test('a suggestion that cannot be read opens no panel, and the request says so', async () => {
+  const { notificationWindow: windows, instances } = loadNotificationWindowModule();
+  const handlers = windows.createNotificationIpcHandlers({
+    resolveOverlayBootstrap: async () => null,
+    refreshActionConversation: () => {},
+    resumeLiveProcess: () => {},
+  });
+  await assert.rejects(handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' }), /Suggestion bootstrap is unavailable/);
+  assert.equal(instances.length, 0);
+});
+
+test('unavailable owners cannot open windows or fetch history while same-owner refresh keeps existing windows', async () => {
   let owner = 'owner-a';
   const { notificationWindow: windows, instances } = loadNotificationWindowModule(() => owner);
   windows.openStandaloneConversationOverlay('conversation');
@@ -338,15 +363,10 @@ test('unavailable owners cannot open windows or fetch history while same-owner r
   assert.throws(() => windows.openStandaloneConversationOverlay('other'), /Local owner is unavailable/);
   assert.throws(() => windows.showNotification('other'), /Local owner is unavailable/);
   const requests = [];
-  const errors = [];
-  t.mock.method(console, 'error', (...args) => errors.push(args));
   const handlers = windows.createNotificationIpcHandlers({
     resolveOverlayBootstrap: async id => { requests.push(id); return createBootstrapResponse(); },
   });
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(errors.length, 1);
-  assert.match(errors[0][1].message, /Local owner is unavailable/);
+  await assert.rejects(handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' }), /Local owner is unavailable/);
   assert.deepEqual(requests, []);
   assert.equal(instances.length, 1);
   assert.equal(existing.isDestroyed(), false);
@@ -960,6 +980,10 @@ test('an open overlay of any kind leaves the main window able to take typing', a
       win.webContentsEvents.emit('did-finish-load');
       win.windowEvents.emit('ready-to-show');
     }
+    handlers.onResizeNotificationWindow(
+      { sender: instances[3].webContents },
+      { height: 400, settled: true }
+    );
     handlers.onOverlayInteraction({ sender: instances[0].webContents });
     notificationWindow.hideOverlay('S1');
     handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
@@ -970,6 +994,66 @@ test('an open overlay of any kind leaves the main window able to take typing', a
   } finally {
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   }
+});
+
+test('a window opened for an Action is first shown at its laid-out size, not before', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    refreshActionConversation: () => {},
+    resolveOverlayBootstrap: async () => null,
+  });
+  const shownHeights = [];
+  const openReady = (id, actionId) => {
+    notificationWindow.openStandaloneConversationOverlay(id, actionId);
+    const win = instances[instances.length - 1];
+    for (const method of ['show', 'showInactive']) {
+      const original = win[method].bind(win);
+      win[method] = () => {
+        shownHeights.push([id, win.getBounds().height]);
+        original();
+      };
+    }
+    win.webContentsEvents.emit('did-finish-load');
+    win.windowEvents.emit('ready-to-show');
+    return win;
+  };
+  const resize = (win, payload) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, payload);
+
+  // A new conversation has its composer from the first paint, so it shows at once.
+  openReady('standalone:1', null);
+  assert.deepEqual(shownHeights, [['standalone:1', 120]]);
+
+  const conversation = openReady('conversation:A1', 'A1');
+  assert.equal(conversation.isVisible(), false);
+  // Asking again while it waits does not show it early.
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'), 'loading');
+  // Heights measured before the conversation is laid out, collapsed or not, keep it hidden.
+  resize(conversation, { height: 160, settled: false });
+  assert.equal(conversation.isVisible(), false);
+  resize(conversation, { height: 640, settled: true });
+  assert.equal(conversation.isVisible(), true);
+  assert.deepEqual(shownHeights.at(-1), ['conversation:A1', 640]);
+
+  // Once shown, it is the user's: later reports neither show nor hide it again.
+  const shownCount = shownHeights.length;
+  resize(conversation, { height: 700, settled: true });
+  notificationWindow.revealOverlayWindow('conversation:A1');
+  assert.equal(shownHeights.length, shownCount);
+  assert.equal(conversation.getBounds().height, 700);
+});
+
+test('a window whose conversation could not be read is shown with its retry', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  // Main gives up before the window finished loading: ready-to-show shows it.
+  notificationWindow.revealOverlayWindow('conversation:A1');
+  assert.equal(instances[0].isVisible(), false);
+  instances[0].webContentsEvents.emit('did-finish-load');
+  instances[0].windowEvents.emit('ready-to-show');
+  assert.equal(instances[0].isVisible(), true);
 });
 
 test('closing a conversation Overlay destroys it and releases its Action association', () => {
@@ -1018,7 +1102,7 @@ function createActionLiveBridge(notificationWindow) {
       isDestroyed: () => false,
       webContents: { send: (channel, payload) => mainSent.push({ channel, payload }) },
     }),
-    readLatestActionConversationPage: async (actionId) => ({
+    latestActionPages: immediateLatestPages(async (actionId) => ({
       action: {
         action_id: actionId,
         suggestion_id: 'S1',
@@ -1041,7 +1125,7 @@ function createActionLiveBridge(notificationWindow) {
       ],
       unadopted_messages: [],
       next_cursor: null,
-    }),
+    })),
     sendFromRenderer: async () => {},
     requestResume: () => {},
     getUiLanguage: () => 'en',
@@ -1211,6 +1295,7 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
   // A Suggestion arriving stacks upward over the one shown in its cell only; a moved setting
   // applies to the next window only.
   for (const win of instances) win.windowEvents.emit('ready-to-show');
+  notificationWindow.revealOverlayWindow('conversation:A1');
   assert.equal(instances.filter((win) => win.isVisible()).length, 4);
   notificationWindow.showNotification('S3');
   assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 132 });

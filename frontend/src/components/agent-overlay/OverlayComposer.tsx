@@ -9,6 +9,8 @@ import { ComposerMessageField } from './ComposerMessageField';
 import type { ComposerMention } from './composerMentions';
 import type { ActionApprovalModeControl } from './useActionApprovalMode';
 import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
+import { ComposerQuotes, type ComposerQuoting } from './ComposerQuotes';
+import type { ActionStopState } from './useActionStop';
 import {
   ATTACHMENT_ACCEPT,
   type AttachmentFailure,
@@ -26,15 +28,18 @@ import type { ComposerState } from './useOverlayComposerController';
  * 高さは中身が決める。本文欄が伸びれば枠も上へ伸び、操作の行は常に下端に残る。
  */
 const ComposerForm = styled.form`
+  /* Also the tones of the quote popover opened from inside this form. */
+  --composer-surface: rgba(10, 14, 20, 0.34);
+  --composer-border: var(--border-color);
   display: grid;
   gap: 8px;
   padding: 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--composer-border);
   border-radius: 16px;
   /*
    * 枠線はガラスの上ではほとんど見えないので、入力欄であることはこの面が示す。
    */
-  background: rgba(10, 14, 20, 0.34);
+  background: var(--composer-surface);
 
   /*
    * 本文欄は枠いっぱいに広がるので、自前の輪郭を出すと枠と二重になる。焦点の印は
@@ -47,11 +52,22 @@ const ComposerForm = styled.form`
   }
 `;
 
-/** 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。 */
+/**
+ * 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。
+ * 決定ボタンの並びは送信の円より幅を取るので、狭い枠では次の行の右端へ折り返す。
+ */
 const ComposerActions = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+`;
+
+/** 送信の円の代わりに右端へ寄せる、ホスト側の決定ボタンの並び。 */
+const ComposerDecision = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 `;
 
 /**
@@ -141,6 +157,11 @@ const ComposerPrimaryButton = styled.button`
   }
 `;
 
+const ComposerStatus = styled.span`
+  color: var(--text-secondary);
+  font-size: var(--text-meta-size);
+`;
+
 const MESSAGE_FIELD_ID = 'overlay-composer-message';
 const MESSAGE_ERROR_ID = 'overlay-composer-message-error';
 
@@ -157,6 +178,8 @@ type OverlayComposerProps = {
   approvalMode: ActionApprovalModeControl;
   draft: string;
   mentions: readonly ComposerMention[];
+  /** Quotes picked from the conversation above; absent where there is no conversation. */
+  quoting?: ComposerQuoting;
   /** Keep the unconfirmed message selectable while its exact request is retried. */
   submissionControls: ReactNode;
   retryAcceptance: boolean;
@@ -167,14 +190,20 @@ type OverlayComposerProps = {
   canAttach: boolean;
   /**
    * 右端のボタンが担う操作。本文があれば送信、空でエージェントが動いていれば
-   * 停止、空で直前に止めたままなら再開。
+   * 停止、空で直前に止めたままなら再開。`decision` はホストのボタン（承認の可否など）が
+   * 送信の代わりに右端へ並び、本文はそのボタンが使う。Enter ではどれも押さない。
    */
-  action: 'send' | 'stop' | 'resume' | 'accept';
+  action: 'send' | 'stop' | 'resume' | { decision: ReactNode };
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
+  /** 停止を受け付けて run が止まりきるのを待っている（stopping）か、通らなかった（failed）。 */
+  stopState?: ActionStopState | null;
+  sendSuperseded?: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
+  /** The @-mention list's "Add project" option; the host decides where projects are added. */
+  onAddProject: () => void;
   onDraftChange: (value: string, mentions: ComposerMention[]) => void;
   onAttachFiles: (files: readonly File[]) => void;
   onRemoveAttachment: (attachment: ComposerAttachment) => void;
@@ -192,14 +221,25 @@ export const ComposerSubmissionRow = styled.div`
   gap: var(--space-sm);
 `;
 
-/** The one stop control. A live run is stopped from here and nowhere else. */
-export function ComposerStopButton({ onStop }: { onStop: () => void }) {
+/**
+ * The one stop control. A live run is stopped from here and nowhere else. While an accepted Stop
+ * waits for the run to end, it stays in place, disabled, and says so.
+ */
+export function ComposerStopButton({
+  onStop,
+  stopping = false,
+}: {
+  onStop: () => void;
+  stopping?: boolean;
+}) {
   const { t } = useI18n();
+  const label = t(stopping ? 'overlay.composer.stopping' : 'overlay.composer.stop');
   return (
     <ComposerPrimaryButton
       type="button"
-      aria-label={t('overlay.composer.stop')}
-      title={t('overlay.composer.stop')}
+      disabled={stopping}
+      aria-label={label}
+      data-tooltip={label}
       onClick={onStop}
     >
       <Square
@@ -218,12 +258,14 @@ export function ComposerSubmissionStatus({
   onRetry,
   onRefresh,
   onStop,
+  stopState = null,
 }: {
   composer: Pick<ComposerState, 'submission' | 'failureKind' | 'refreshState'>;
   controlRef: RefObject<HTMLButtonElement>;
   onRetry: () => void;
   onRefresh: (button: HTMLButtonElement) => void;
   onStop?: () => void;
+  stopState?: ActionStopState | null;
 }) {
   const { t } = useI18n();
   const { submission, failureKind, refreshState } = composer;
@@ -257,7 +299,7 @@ export function ComposerSubmissionStatus({
       ) : (
         <span role="status">{t('overlay.composer.sending')}</span>
       )}
-      {onStop && <ComposerStopButton onStop={onStop} />}
+      {onStop && <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />}
     </ComposerSubmissionRow>
   );
 }
@@ -266,6 +308,7 @@ export function OverlayComposer({
   approvalMode,
   draft,
   mentions,
+  quoting,
   submissionControls,
   retryAcceptance,
   attachments,
@@ -275,8 +318,11 @@ export function OverlayComposer({
   action,
   canSend,
   resumeFailed,
+  stopState = null,
+  sendSuperseded = false,
   canResume,
   textareaRef,
+  onAddProject,
   onDraftChange,
   onAttachFiles,
   onRemoveAttachment,
@@ -287,13 +333,14 @@ export function OverlayComposer({
   const { t } = useI18n();
   const attachInputRef = useRef<HTMLInputElement>(null);
   const isReadOnly = retryAcceptance || Boolean(submissionControls);
+  const decides = typeof action === 'object';
 
   return (
     <ComposerForm
       className="overlay-composer"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSend) onSubmit();
+        if (canSend && !decides) onSubmit();
       }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
@@ -302,35 +349,30 @@ export function OverlayComposer({
       }}
     >
       <ScreenReaderOnly htmlFor={MESSAGE_FIELD_ID}>
-        {t(action === 'accept' ? 'overlay.supplement.label' : 'overlay.composer.label')}
+        {t(decides ? 'overlay.supplement.label' : 'overlay.composer.label')}
       </ScreenReaderOnly>
+      {quoting ? (
+        <ComposerQuotes quoting={quoting} readOnly={isReadOnly} textareaRef={textareaRef} />
+      ) : null}
       <ComposerMessageField
         id={MESSAGE_FIELD_ID}
         textareaRef={textareaRef}
         value={draft}
         mentions={mentions}
         readOnly={isReadOnly}
-        placeholder={t(
-          action === 'accept' ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder'
-        )}
+        placeholder={t(decides ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')}
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
-        onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
+        onAddProject={onAddProject}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
-          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。
+          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。決定は
+          // どちらを選ぶかを本人が押して決めるので、Enter は何もしない。
           event.preventDefault();
-          if (canSend) onSubmit();
+          if (canSend && !decides) onSubmit();
         }}
-        onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files);
-          if (isReadOnly || files.length === 0) return;
-          // A pasted screenshot also arrives as text/plain noise in some apps; taking the
-          // files means the textarea must not additionally insert that text.
-          event.preventDefault();
-          onAttachFiles(files);
-        }}
+        onPasteFiles={onAttachFiles}
       />
       <ComposerAttachments
         attachments={attachments}
@@ -341,14 +383,29 @@ export function OverlayComposer({
       />
       {validationFailed ? (
         <ComposerAlert id={MESSAGE_ERROR_ID} role="alert">
-          {t(action === 'accept' ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
+          {t(decides ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
         </ComposerAlert>
       ) : null}
       {resumeFailed ? (
         <ComposerAlert role="alert">{t('overlay.composer.resumeFailed')}</ComposerAlert>
       ) : null}
+      {stopState === 'stopping' ? (
+        <ComposerStatus role="status">{t('overlay.composer.stopping')}</ComposerStatus>
+      ) : null}
+      {stopState === 'failed' ? (
+        <ComposerAlert role="alert">{t('overlay.composer.stopFailed')}</ComposerAlert>
+      ) : null}
+      {sendSuperseded ? (
+        <ComposerAlert role="alert">{t('overlay.composer.sendSuperseded')}</ComposerAlert>
+      ) : null}
       {submissionControls ??
-        (!retryAcceptance && (
+        (retryAcceptance ? (
+          typeof action === 'object' && (
+            <ComposerActions>
+              <ComposerDecision>{action.decision}</ComposerDecision>
+            </ComposerActions>
+          )
+        ) : (
           <ComposerActions>
             <input
               ref={attachInputRef}
@@ -367,34 +424,36 @@ export function OverlayComposer({
               type="button"
               disabled={!canAttach}
               aria-label={t('overlay.composer.attach')}
-              title={t('overlay.composer.attach')}
+              data-tooltip={t('overlay.composer.attach')}
               onClick={() => attachInputRef.current?.click()}
             >
               <Plus strokeWidth={1.75} aria-hidden />
             </ComposerIconButton>
             <ApprovalModeMenu approvalMode={approvalMode} />
-            {action === 'send' ? (
+            {typeof action === 'object' ? (
+              <ComposerDecision>{action.decision}</ComposerDecision>
+            ) : action === 'send' ? (
               <ComposerPrimaryButton
                 type="submit"
                 disabled={!canSend}
                 aria-label={t('overlay.composer.send')}
-                title={t('overlay.composer.send')}
+                data-tooltip={t('overlay.composer.send')}
               >
                 <ArrowUp strokeWidth={2.25} aria-hidden />
               </ComposerPrimaryButton>
             ) : action === 'stop' ? (
-              <ComposerStopButton onStop={onStop} />
-            ) : action === 'resume' ? (
+              <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />
+            ) : (
               <ComposerPrimaryButton
                 type="button"
                 disabled={!canResume}
                 aria-label={t('overlay.composer.resume')}
-                title={t('overlay.composer.resume')}
+                data-tooltip={t('overlay.composer.resume')}
                 onClick={onResume}
               >
                 <Play strokeWidth={2.25} fill="currentColor" aria-hidden />
               </ComposerPrimaryButton>
-            ) : null}
+            )}
           </ComposerActions>
         ))}
     </ComposerForm>

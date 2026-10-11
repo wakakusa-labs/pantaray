@@ -9,15 +9,12 @@
 export const validSendChannels = [
   'resize-notification-window',
   'notification-action-accept',
-  'notification-action-reject',
   'notification-hide',
-  'notification-stop-action',
   'overlay:recordInteraction',
   'overlay:dragStart',
   'overlay:dragMove',
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
-  'history:openOverlay',
   'open-external-url',
   // WebSocket bridge (connect/disconnect は main に統一のため未公開)
   'ws:send',
@@ -35,10 +32,15 @@ export const validReceiveChannels = [
   'overlay:snapshot',
   'overlay:focusComposer',
   'action:conversationUpdated',
-  // Main window only: an item appended to the user's chat, and the overlay's "show in chat"
+  // Main window only: a suggestion record main holds changed, or is about to be cleared
+  'suggestion:snapshot',
+  // Main window only: an item appended to the user's chat, and whether a turn is answering
   'chat:itemAppended',
   'chat:turnState',
-  'history:showChat',
+  // Main window only: select this work in History (a task a panel started)
+  'history:showItem',
+  // A task's shared draft as another window changed it
+  'action:draftChanged',
   // Screenshot status change notification
   'screenshot:statusChanged',
   // Capture allowlist settings update
@@ -76,6 +78,7 @@ export const validInvokeChannels = [
   'workspaceSettings:updateCommandNetwork',
   'workspaceSettings:createOrganization',
   'workspaceSettings:createProject',
+  'workspaceSettings:renameProject',
   'workspaceSettings:createFolder',
   'workspaceSettings:reorderProjects',
   'workspaceSettings:deleteOrganization',
@@ -85,11 +88,24 @@ export const validInvokeChannels = [
   'workspaceSettings:updateFolderLinks',
   'workspaceSettings:updateReadAccessScope',
   'workspaceSettings:selectFolder',
+  'workspaceSettings:openFolder',
   'actionFile:open',
+  // Main window: preview a file an Action names, or open it in its default app or another
+  'actionFile:read',
+  'actionFile:openInApp',
+  'actionFile:openWithApp',
+  'actionFile:reveal',
+  'actionFile:quickLook',
   // Overlay copy buttons: written by main, so a window without focus still copies.
   'clipboard:writeText',
   'action:submitMessage',
   'action:resume',
+  // Withdraw a message no run has taken yet
+  'action:withdrawMessage',
+  // Main window: show an Action in place (refresh and live resume, no window)
+  'action:openConversation',
+  // Both windows: stop the run they show
+  'action:stop',
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',
   'actionImage:reveal',
@@ -103,10 +119,13 @@ export const validInvokeChannels = [
   'chat:listItems',
   'chat:retryTurn',
   'chat:getTurnState',
+  // Main window: read a suggestion into main's record without opening a panel
+  'suggestion:read',
   // Suggestion history (main SSOT)
   'history:fetch',
   'history:markCompletionViewed',
   'history:deleteItem',
+  'history:readItem',
   'history:openNewConversation',
   'history:openConversation',
   'screenshot:getStatus',
@@ -137,8 +156,14 @@ export const validInvokeChannels = [
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
-  // Overlay → main window: show this Action's latest card in the chat
-  'overlay:showChat',
+  // Main window → panel: a suggestion opens small
+  'history:openOverlay',
+  // Panel → main window: the panel closes and the main window opens its Action or suggestion
+  'overlay:openTask',
+  // Shared task drafts, for every composer that shows a task
+  'action:openDraft',
+  'action:updateDraft',
+  'action:closeDraft',
 ] as const;
 
 export type ValidSendChannel = (typeof validSendChannels)[number];

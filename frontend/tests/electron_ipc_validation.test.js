@@ -57,7 +57,7 @@ function validIdeFileRules() {
   };
 }
 
-function buildCtx(overrides = {}) {
+function buildCtx(overrides = {}, openOverlay = asyncSpy(undefined)) {
   const ipcMain = createFakeIpcMain();
   const ctx = {
     ipcMain,
@@ -155,14 +155,12 @@ function buildCtx(overrides = {}) {
       createNotificationIpcHandlers: () => ({
         onResizeNotificationWindow: () => {},
         onNotificationActionAccept: () => {},
-        onNotificationActionReject: () => {},
         onNotificationHide: () => {},
-        onNotificationStopAction: () => {},
         onOverlayInteraction: () => {},
         onOverlayDragStart: () => {},
         onOverlayDragMove: () => {},
         onOverlayDragEnd: () => {},
-        onHistoryOpenOverlay: () => {},
+        onHistoryOpenOverlay: openOverlay,
       }),
     },
     ...overrides,
@@ -494,6 +492,30 @@ test('ws:send forwards a valid dismiss_suggestion event', async () => {
   assert.deepEqual(ctx.ws.send.calls[0][0], payload);
 });
 
+test('ws:send trims a dismissal reason and drops one over the supplement limit', async () => {
+  const { ctx, ipcMain } = buildCtx();
+  const listener = getListener(ipcMain, 'ws:send');
+  listener({ event: 'dismiss_suggestion', data: { suggestion_id: 's1', reason: ' done ' } });
+  await flushMicrotasks();
+  assert.deepEqual(ctx.ws.send.calls[0][0], {
+    event: 'dismiss_suggestion',
+    data: { suggestion_id: 's1', reason: 'done' },
+  });
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    listener({
+      event: 'dismiss_suggestion',
+      data: { suggestion_id: 's1', reason: '見'.repeat(8_001) },
+    });
+    await flushMicrotasks();
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(ctx.ws.send.calls.length, 1);
+});
+
 test('ws:send rejects a complete execute_action outside the dedicated IPC', async () => {
   const { ctx, ipcMain } = buildCtx();
   const listener = getListener(ipcMain, 'ws:send');
@@ -531,6 +553,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: null,
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
     }),
     rejectsValidation('ws:acceptAction')
   );
@@ -542,6 +565,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: null,
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
       extra: true,
     }),
     rejectsValidation('ws:acceptAction')
@@ -554,6 +578,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: '😀'.repeat(8_001),
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
     }),
     rejectsValidation('ws:acceptAction')
   );
@@ -567,6 +592,8 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       ],
     },
     { files: [{ attachment_id: '../staged', name: 'a.pdf', byte_size: 1 }] },
+    { supplementWorkRefs: [{ kind: 'action', id: '', title: 'Demo', start: 0, end: 4 }] },
+    { supplementWorkRefs: undefined },
   ]) {
     await assert.rejects(
       invoke({
@@ -576,6 +603,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
         commandId: null,
         supplement: null,
         supplementProjectRefs: [],
+        supplementWorkRefs: [],
         ...invalid,
       }),
       rejectsValidation('ws:acceptAction')
@@ -600,6 +628,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     commandId: null,
     supplement: '😀'.repeat(8_000),
     supplementProjectRefs,
+    supplementWorkRefs: [],
     files,
   };
   await invoke(request);
@@ -610,6 +639,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     commandId: null,
     supplement: '   ',
     supplementProjectRefs: [],
+    supplementWorkRefs: [],
   });
   assert.deepEqual(ctx.ws.acceptAction.calls, [
     [request],
@@ -621,6 +651,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
         commandId: null,
         supplement: null,
         supplementProjectRefs: [],
+        supplementWorkRefs: [],
       },
     ],
   ]);
@@ -729,4 +760,25 @@ test('workspaceSettings:updateCommandNetwork accepts booleans and rejects coerci
     ctx.workspaceSettings.updateCommandNetwork.calls.map((call) => call[0]),
     [false, true]
   );
+});
+
+test('history:openOverlay passes a valid request on and moves nothing for a malformed one', async () => {
+  const openOverlay = asyncSpy(undefined);
+  const { ipcMain } = buildCtx({}, openOverlay);
+  const invoke = getInvoke(ipcMain, 'history:openOverlay');
+  const request = { suggestionId: 'sug-1', initialUiState: { expand: true } };
+  await invoke(request);
+  assert.deepEqual(openOverlay.calls, [[{}, request]]);
+
+  for (const invalid of [
+    { suggestionId: ' sug-1' },
+    { suggestionId: '' },
+    { id: 'sug-1' },
+    { suggestionId: 'sug-1', initialUiState: { expand: 'yes' } },
+    { suggestionId: 'sug-1', extra: true },
+    'sug-1',
+  ]) {
+    await assert.rejects(invoke(invalid), rejectsValidation('history:openOverlay'));
+  }
+  assert.equal(openOverlay.calls.length, 1);
 });

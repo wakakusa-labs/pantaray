@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { MIN_HEIGHT, getMaxHeight } from './Styled';
 import type { AgentOverlayState, OverlaySnapshotPayload } from './model/overlayTypes';
 import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model/reducer';
+import type { WorkRefKind } from '@/history/workRefLink';
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
@@ -19,7 +20,6 @@ export type AgentOverlayController = {
   scrollableContentRef: React.RefObject<HTMLDivElement>;
   contentInnerRef: React.RefObject<HTMLDivElement>;
   answerAreaRef: React.RefObject<HTMLDivElement>;
-  footerRef: React.RefObject<HTMLDivElement>;
   composerRef: React.RefObject<HTMLDivElement>;
   containerRef: React.RefObject<HTMLDivElement>;
   // handlers
@@ -27,8 +27,17 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  onReject: () => void;
-  onStop: (processId?: string) => void;
+  /** 見送る, with the composer's words as the reason, or null when there are none. */
+  onReject: (reason: string | null) => void;
+  /** Shows this panel's Action or suggestion in the main window, which then closes the panel. */
+  openTask: (work: { kind: WorkRefKind; id: string }) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed: boolean;
+  /**
+   * Whether the content this panel opened for is rendered. Until it is, no measured height is
+   * reported as settled, so main keeps a window that waits for its layout hidden.
+   */
+  setContentReady: (ready: boolean) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,17 +66,23 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const scrollableContentRef = useRef<HTMLDivElement>(null);
   const contentInnerRef = useRef<HTMLDivElement>(null);
   const answerAreaRef = useRef<HTMLDivElement>(null);
-  const footerRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
+  // The suggestion (none in a new-task panel) whose work the main window could not show.
+  const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
+    suggestionId: string | null;
+  } | null>(null);
+  // A suggestion dismissed here, whose panel closes once the dismissal is recorded.
+  const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
+  const [contentReady, setContentReady] = useState(false);
+  const contentReadyRef = useRef(false);
 
   // 最新値参照用（stale closure回避）
   const suggestionIdRef = useRef<string | null>(null);
-  const processIdRef = useRef<string | null>(null);
   const reactionStateRef = useRef<'accepted' | 'rejected' | null>(null);
   const interactionContractRef = useRef<'action_offer' | 'message_only' | null>(null);
   const decisionLockedRef = useRef<boolean>(false);
@@ -77,7 +92,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
 
   useEffect(() => {
     suggestionIdRef.current = state.suggestionId;
-    processIdRef.current = state.currentProcessId;
     reactionStateRef.current = state.reactionState;
     interactionContractRef.current = state.interactionContract;
     decisionLockedRef.current = state.decisionLocked;
@@ -85,6 +99,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     historyExpandOverrideRef.current = state.historyExpandOverride;
     isExpandedRef.current = state.isExpanded;
     isActionPhaseRef.current = effectiveActionPhase;
+    contentReadyRef.current = contentReady;
   }, [
     state.suggestionId,
     state.currentProcessId,
@@ -97,6 +112,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     state.historyExpandOverride,
     state.isExpanded,
     effectiveActionPhase,
+    contentReady,
   ]);
 
   const measureAndResize = useCallback((options?: { manual?: boolean }) => {
@@ -108,7 +124,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     //   ウィンドウが伸びない（=スクロールが残る）根本原因になる。
     // - ここでは scrollHeight を使って「必要な内容高さ」を推定し、その分だけウィンドウをリサイズする。
     const headerEl = headerRef.current;
-    const footerEl = footerRef.current;
     const composerEl = composerRef.current;
     const scrollableEl = scrollableContentRef.current;
     const contentInnerEl = contentInnerRef.current;
@@ -122,12 +137,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       return px(cs.marginTop) + px(cs.marginBottom);
     };
 
-    // Header/Footer は「見える分 + 外側余白」
+    // Header は「見える分 + 外側余白」
     const headerH = headerEl
       ? Math.ceil(headerEl.getBoundingClientRect().height + outerMarginY(headerEl))
-      : 0;
-    const footerH = footerEl
-      ? Math.ceil(footerEl.getBoundingClientRect().height + outerMarginY(footerEl))
       : 0;
     // composer はスクロール領域の外にあるので、その分の高さを別に確保する。
     const composerH = composerEl
@@ -149,7 +161,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     const containerPad =
       px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth);
 
-    const needed = Math.ceil(containerPad + headerH + footerH + composerH + scrollNeeded);
+    const needed = Math.ceil(containerPad + headerH + composerH + scrollNeeded);
     if (!needed) return;
 
     const mode = isActionPhaseRef.current ? 'action' : 'suggestion';
@@ -163,16 +175,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       : SUGGESTION_RESIZE_BUFFER_PX;
     const targetHeight = Math.min(maxHeight, Math.max(MIN_HEIGHT, needed + resizeBufferPx));
 
-    try {
-      window.electron?.agentOverlay?.resize(targetHeight);
-    } catch {
-      // no-op
-    }
-
-    if (options?.manual) return;
-
     // Auto expand/collapse (既存挙動互換)
-    if (historyExpandOverrideRef.current === null && !manualResizeRef.current) {
+    let shouldExpand = isExpandedRef.current;
+    if (!options?.manual && historyExpandOverrideRef.current === null && !manualResizeRef.current) {
       const collapsedPreviewHeight = scrollableEl
         ? getCollapsedPreviewHeightPx(px(window.getComputedStyle(scrollableEl).lineHeight))
         : MIN_HEIGHT;
@@ -181,11 +186,21 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
         collapsedPreviewHeightPx: collapsedPreviewHeight,
         thresholdPx: RESIZE_EXPAND_THRESHOLD_PX,
       });
-      const shouldExpand =
+      shouldExpand =
         contentRequiresExpansion || targetHeight > MIN_HEIGHT + RESIZE_EXPAND_THRESHOLD_PX;
-      if (shouldExpand !== isExpandedRef.current) {
-        dispatch({ type: 'SET_EXPANDED', value: shouldExpand });
-      }
+    }
+    // A height measured just before an automatic expand or collapse is not the one the panel
+    // settles at: the change re-measures it.
+    const settled = contentReadyRef.current && shouldExpand === isExpandedRef.current;
+
+    try {
+      window.electron?.agentOverlay?.resize(targetHeight, { settled });
+    } catch {
+      // no-op
+    }
+
+    if (shouldExpand !== isExpandedRef.current) {
+      dispatch({ type: 'SET_EXPANDED', value: shouldExpand });
     }
   }, []);
 
@@ -243,6 +258,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     state.isSuggestionStreamFinished,
     state.isActionStreamFinished,
     state.reactionState,
+    contentReady,
     measureAndResize,
   ]);
 
@@ -268,7 +284,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       contentInnerRef.current,
       scrollableContentRef.current,
       headerRef.current,
-      footerRef.current,
       composerRef.current,
     ].filter((element): element is HTMLDivElement => Boolean(element));
 
@@ -325,24 +340,27 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  const onReject = useCallback(() => {
+  // A suggestion dismissed here keeps no panel, reason or not; a dismissal that is not recorded
+  // keeps it. One opened already dismissed is not closed: only dismissing here closes it.
+  useEffect(() => {
+    const dismissed = closeAfterDismissalRef.current;
+    if (dismissed === null) return;
+    if (dismissed === state.suggestionId && state.reactionState !== 'rejected') return;
+    closeAfterDismissalRef.current = null;
+    if (dismissed === state.suggestionId) window.electron?.agentOverlay?.hide();
+  }, [state.suggestionId, state.reactionState]);
+
+  const onReject = useCallback((reason: string | null) => {
     if (decisionLockedRef.current) return;
     if (interactionContractRef.current !== 'action_offer') return;
     if (reactionStateRef.current !== null) return;
     dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    try {
-      window.electron?.agentOverlay?.rejectAction({
-        id: 'some-notification-id',
-        action: 'dismiss',
-      });
-    } catch {
-      // no-op
-    }
     const sid = suggestionIdRef.current;
     if (sid) {
+      closeAfterDismissalRef.current = sid;
       window.electron?.orchestration?.send({
         event: 'dismiss_suggestion',
-        data: { suggestion_id: sid },
+        data: reason === null ? { suggestion_id: sid } : { suggestion_id: sid, reason },
       });
     }
   }, []);
@@ -369,23 +387,23 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, []);
 
+  // Main closes the panel once the main window shows the task; a failure keeps it, saying so.
+  const openTask = useCallback((work: { kind: WorkRefKind; id: string }) => {
+    const suggestionId = suggestionIdRef.current;
+    void window.electron?.agentOverlay?.openTask?.(work).then(
+      () => setOpenTaskFailedFor(null),
+      (error: unknown) => {
+        console.error('Failed to open the task in the main window:', error);
+        setOpenTaskFailedFor({ suggestionId });
+      }
+    );
+  }, []);
+
   const onClose = useCallback(() => {
     try {
       window.electron?.agentOverlay?.hide();
     } catch {
       // no-op
-    }
-  }, []);
-
-  const onStop = useCallback((processId?: string) => {
-    try {
-      window.electron?.agentOverlay?.stopAction();
-    } catch {
-      // no-op
-    }
-    const pid = processId ?? processIdRef.current;
-    if (pid) {
-      window.electron?.orchestration?.send({ event: 'stop_process', data: { process_id: pid } });
     }
   }, []);
 
@@ -395,7 +413,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     scrollableContentRef,
     contentInnerRef,
     answerAreaRef,
-    footerRef,
     composerRef,
     containerRef,
     onToggleExpand,
@@ -403,6 +420,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onAccept,
     acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
     onReject,
-    onStop,
+    openTask,
+    openTaskFailed:
+      openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,
+    setContentReady,
   };
 }

@@ -32,6 +32,8 @@ function createSettingsApi({ ipcRenderer }) {
       createOrganization: (input) =>
         ipcRenderer.invoke('workspaceSettings:createOrganization', input),
       createProject: (input) => ipcRenderer.invoke('workspaceSettings:createProject', input),
+      renameProject: (projectId, input) =>
+        ipcRenderer.invoke('workspaceSettings:renameProject', projectId, input),
       createFolder: (input) => ipcRenderer.invoke('workspaceSettings:createFolder', input),
       reorderProjects: (input) => ipcRenderer.invoke('workspaceSettings:reorderProjects', input),
       deleteOrganization: (organizationId) =>
@@ -46,6 +48,7 @@ function createSettingsApi({ ipcRenderer }) {
       updateReadAccessScope: (readAccessScope) =>
         ipcRenderer.invoke('workspaceSettings:updateReadAccessScope', readAccessScope),
       selectFolder: () => ipcRenderer.invoke('workspaceSettings:selectFolder'),
+      openFolder: (folderId) => ipcRenderer.invoke('workspaceSettings:openFolder', folderId),
     },
   };
 }

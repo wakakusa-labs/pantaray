@@ -36,7 +36,7 @@ export function createDesktopUpdaterForMain(params: {
         message: text.downloadingBody,
       });
     },
-    onUpdateDownloaded: () => params.updateUi.handleUpdateDownloaded(),
+    onReadyChanged: () => params.updateUi.handleUpdateDownloaded(),
     onUpdateNotAvailable: ({ reason }) => {
       if (reason !== 'manual') return;
       params.updateUi.handleNoUpdateAvailable(

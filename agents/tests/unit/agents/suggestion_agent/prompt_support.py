@@ -3,19 +3,16 @@
 from collections.abc import Callable
 
 from pantaray_agents.agents.suggestion_agent.lenses import (
-    EXPLORATION_LENS_WEIGHTS,
+    LENS_WEIGHTS,
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
-    URGENT_LENSES,
 )
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.utils.prompt_loader import PromptConfig
 
 LENS_CONFIG = PromptConfig(
     prompt="Lens: {lens}",
-    role_rules={
-        lens: f"### {lens}" for lens in (*URGENT_LENSES, *EXPLORATION_LENS_WEIGHTS)
-    },
+    role_rules={lens: f"### {lens}" for lens in LENS_WEIGHTS},
 )
 SELECTOR_CONFIG = PromptConfig(
     prompt="select: {current_time} | {recent_suggestions} | {candidates}",

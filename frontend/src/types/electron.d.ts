@@ -14,7 +14,6 @@ import type {
   ConnectionUpdateResult,
 } from '../../electron/src/ipc/schemas/aiConnection';
 import type {
-  ActionTerminalStatus,
   AcceptActionRequest,
   RendererOrchestrationClientEvent,
   OrchestrationServerEvent,
@@ -25,7 +24,10 @@ import type {
   ActionMessageRequest,
   ActionMessageSubmitResult,
   ActionResumeRequest,
+  ActionStopRequest,
   ActionToolOutputDetail,
+  ActionWithdrawMessageRequest,
+  ActionWithdrawMessageResult,
 } from '../../electron/src/actions/actionContracts';
 import type {
   ActionConversationPageReadResult,
@@ -33,6 +35,8 @@ import type {
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type { TaskDraftChange } from '../../electron/src/actions/taskDraftStore';
+import type { TaskDraft, TaskDraftWork } from '../../electron/src/ipc/schemas/taskDrafts';
 import type {
   ChatItem,
   ChatItemPage,
@@ -46,14 +50,25 @@ import type {
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
+import type {
+  ActionFileOpenResult,
+  ActionFileOpenWithResult,
+  ActionFileReadResult,
+  ActionFileRequest,
+} from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
 import type { ActionCompletionViewedRequest } from '../../electron/src/history/actionReadState';
 import type {
+  ConversationHistoryListItem,
   ConversationHistoryRequest,
-  HistoryItemDeleteRequest,
+  HistoryItemKey,
 } from '../../electron/src/history/historyContracts';
 import type { HistoryItemDeleteResult } from '../../electron/src/history/historyItemDelete';
+import type {
+  OverlaySnapshot,
+  OverlaySnapshotPayload,
+} from '../../electron/src/orchestration/contracts';
 
 import type { CommandNetworkSettings } from '../../electron/src/settings/workspaceSettingsFetch';
 
@@ -125,31 +140,8 @@ type ElectronOverlayPlacementKind = 'suggestion' | 'started' | 'history';
 type ElectronOverlayCell = { row: number; column: number };
 type ElectronOverlayPlacements = Record<ElectronOverlayPlacementKind, ElectronOverlayCell>;
 
-type ElectronOverlaySnapshot = {
-  suggestionId: string;
-  commandId: string | null;
-  interactionContract: 'action_offer' | 'message_only' | null;
-  suggestionText: string;
-  reactionState: 'accepted' | 'rejected' | null;
-  reactionTimestamp: string | null;
-  actionPhase: 'idle' | 'requesting' | 'accepted_pending_start' | 'processing' | 'terminal';
-  actionStatus: 'idle' | 'processing' | ActionTerminalStatus | null;
-  actionErrorCode: string | null;
-  actionFailureStage: string | null;
-  actionFailureMessagePublic: string | null;
-  processId: string | null;
-  actionId: string | null;
-  updatedAt: string | null;
-  lastSequence: number;
-  isLive: boolean;
-};
-
-type ElectronOverlaySnapshotPayload = {
-  snapshot: ElectronOverlaySnapshot;
-  initialUiState?: {
-    expand?: boolean;
-  } | null;
-};
+type ElectronOverlaySnapshot = OverlaySnapshot;
+type ElectronOverlaySnapshotPayload = OverlaySnapshotPayload;
 
 type ElectronOverlayDragPoint = {
   screenX: number;
@@ -222,7 +214,9 @@ declare global {
       history?: {
         fetch: (params: ConversationHistoryRequest) => Promise<HistoryFetchResult>;
         markCompletionViewed: (request: ActionCompletionViewedRequest) => Promise<void>;
-        deleteItem: (request: HistoryItemDeleteRequest) => Promise<HistoryItemDeleteResult>;
+        deleteItem: (request: HistoryItemKey) => Promise<HistoryItemDeleteResult>;
+        /** The row History shows for this item, or null when it holds none for this user. */
+        readItem: (request: HistoryItemKey) => Promise<ConversationHistoryListItem | null>;
         openNewConversation: () => Promise<void>;
         /** Resolves to how the Overlay was shown, or why it was not (sign-in or recording). */
         openConversation: (request: {
@@ -231,8 +225,8 @@ declare global {
           'created' | 'loading' | 'focused' | 'initializing' | 'login' | 'recording_intro'
         >;
         onChanged?: (cb: (payload: unknown) => void) => () => void;
-        /** The Overlay asked to show this Action's latest card in the chat. */
-        onShowChat?: (cb: (payload: { actionId: string }) => void) => () => void;
+        /** Main asked to select this work in History; the payload is checked where it lands. */
+        onShowItem?: (cb: (payload: unknown) => void) => () => void;
       };
       /** The single chat; main accepts these from the main window only. */
       chat?: {
@@ -247,16 +241,44 @@ declare global {
         /** Whether a turn is answering: the typing bubble. */
         onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };
-      actionFiles?: {
-        open: (params: { path: string }) => Promise<void>;
+      /** Suggestions read into main's record; main accepts these from the main window only. */
+      suggestions?: {
+        /** Reads a suggestion without opening a panel; changes arrive on onSnapshot. */
+        read: (request: { suggestionId: string }) => Promise<ElectronOverlaySnapshot>;
+        /** Each change to a suggestion record main holds, and a dismissal before it is cleared. */
+        onSnapshot: (callback: (payload: ElectronOverlaySnapshotPayload) => void) => () => void;
       };
-      /** Overlay windows only. */
+      actionFiles?: {
+        /** Selects the file in Finder. */
+        open: (params: { path: string }) => Promise<void>;
+        /** Main window only: a file the Action's conversation names, as text or an image. */
+        read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
+        /** Main window only: opens a file the Action names in its default app. */
+        openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
+        /** Main window only: asks for an app in /Applications and opens the file in it. */
+        openWithApp: (request: ActionFileRequest) => Promise<ActionFileOpenWithResult>;
+        /** Main window only: selects a file the Action names in Finder. */
+        reveal: (
+          request: ActionFileRequest
+        ) => Promise<{ kind: 'revealed' } | { kind: 'unavailable'; reason: 'not_found' }>;
+        /** Main window only: shows the file in macOS Quick Look over the main window. */
+        quickLook: (
+          request: ActionFileRequest
+        ) => Promise<{ kind: 'shown' } | { kind: 'unavailable'; reason: 'not_found' }>;
+      };
       clipboard?: {
         writeText: (text: string) => Promise<void>;
       };
       actions?: {
         submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageSubmitResult>;
         resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageSubmitResult>;
+        withdrawMessage: (
+          request: ActionWithdrawMessageRequest
+        ) => Promise<ActionWithdrawMessageResult>;
+        /** Main window only: shows the Action in place; updates arrive on onConversationUpdated. */
+        openConversation: (request: { actionId: string }) => Promise<void>;
+        /** Stops the run the window shows; rejects when the Stop was not accepted. */
+        stopAction: (request: ActionStopRequest) => Promise<void>;
         attachImage: (request: {
           bytes: ArrayBuffer;
           declaredMimeType: ActionImageMimeType;
@@ -268,6 +290,12 @@ declare global {
           name: string;
         }) => Promise<ActionAttachFileResult>;
         discardAttachment: (request: { attachmentId: string }) => Promise<void>;
+        /** Subscribes this composer to a task's shared draft and returns it. */
+        openDraft: (request: { work: TaskDraftWork }) => Promise<TaskDraft | null>;
+        updateDraft: (request: { work: TaskDraftWork; draft: TaskDraft }) => Promise<void>;
+        closeDraft: (request: { work: TaskDraftWork }) => Promise<void>;
+        /** Another window changed a task's draft; `draft` is null once it is cleared. */
+        onDraftChanged: (callback: (change: TaskDraftChange) => void) => () => void;
         readConversationPage: (
           request: ActionConversationPageRequest
         ) => Promise<ActionConversationPageReadResult>;
@@ -328,10 +356,15 @@ declare global {
         createOrganization: (input: {
           displayName: string;
         }) => Promise<ElectronWorkspaceOrganization>;
+        /** A name another project has is refused with `PROJECT_NAME_TAKEN`. */
         createProject: (input: {
           displayName: string;
           organizationIds: string[];
-        }) => Promise<ElectronWorkspaceProject>;
+        }) => Promise<ElectronWorkspaceProject | { errorCode: 'PROJECT_NAME_TAKEN' }>;
+        renameProject: (
+          projectId: string,
+          input: { displayName: string }
+        ) => Promise<ElectronWorkspaceProject>;
         createFolder: (input: {
           displayName: string;
           realPath: string;
@@ -354,6 +387,7 @@ declare global {
           readAccessScope: 'workspace' | 'full_access'
         ) => Promise<{ read_access_scope: 'workspace' | 'full_access' }>;
         selectFolder: () => Promise<{ canceled: boolean; path: string | null }>;
+        openFolder: (folderId: string) => Promise<void>;
       };
       privacy?: {
         getCaptureSettings: () => Promise<CapturePrivacySettings>;
@@ -372,17 +406,19 @@ declare global {
         onCaptureSettingsUpdated?: (cb: (settings: CapturePrivacySettings) => void) => () => void;
       };
       agentOverlay?: {
-        /** 履歴オーバーレイ表示（main 側で通知ウィンドウを開く） */
-        showHistory?: (payload: {
+        /** Opens this suggestion in a panel; rejects when it was not opened. */
+        showHistory?: (request: {
           suggestionId: string;
           initialUiState?: { expand?: boolean } | null;
           fromStart?: boolean;
-        }) => void;
+        }) => Promise<void>;
         close: () => Promise<unknown>;
-        resize: (height: number) => Promise<unknown>;
+        /** `settled`: the content is laid out at this height, so a window waiting for it may show. */
+        resize: (height: number, options: { settled: boolean }) => void;
         onSnapshot?: (
           func: (payload: ElectronOverlaySnapshotPayload) => void
         ) => (() => void) | undefined;
+        /** The approval calls below serve the main window too. */
         submitApprovalDecision?: (payload: {
           actionId: string;
           processId: string;
@@ -400,12 +436,10 @@ declare global {
         dragEnd?: () => void;
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
-        /** Brings the main window forward on this Action's latest chat card. */
-        showChat?: (request: { actionId: string }) => Promise<void>;
+        /** Closes this panel and brings the main window forward with its work selected. */
+        openTask?: (request: { kind: 'action' | 'suggestion'; id: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
-        rejectAction: (data: unknown) => void;
         hide: () => void;
-        stopAction: () => void;
       };
       orchestration?: {
         send: (message: RendererOrchestrationClientEvent) => void;

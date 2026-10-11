@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 
 import { useLocalOwner } from '@/context/localOwnerContext';
 
@@ -8,16 +8,10 @@ import {
   getCachedWorkspaceSettings,
   setCachedWorkspaceSettings,
 } from './components/workspaceSettingsCache';
-import {
-  applyWorkspaceMutation,
-  countOrganizationUsage,
-  workspaceFocusId,
-} from './components/workspaceSettingsModel';
+import { applyWorkspaceMutation, displayNameFromPath } from './components/workspaceSettingsModel';
 import type {
-  WorkspaceFolderCreateInput,
-  FocusKey,
-  FocusRequest,
   WorkspaceMutationEvent,
+  WorkspaceProject,
   WorkspaceSettings,
 } from './components/workspaceSettingsModel';
 
@@ -25,40 +19,24 @@ type WorkspaceSettingsAction =
   | { type: 'settingsLoaded'; settings: WorkspaceSettings }
   | WorkspaceMutationEvent;
 
-export type ResolvedFocusRequest = {
-  key: FocusKey;
-};
-
-// Project creation focuses a control that only exists once the response supplies its id, so the
-// success key may be derived from the mutation result. A mutation submitted from a surface that
-// stays open on failure omits the failure key so that focus stays on the control it came from.
-type MutationFocusRequest<Result> = {
-  onSuccess: FocusKey | ((result: Result) => FocusKey);
-  onFailure?: FocusKey;
-};
-
 export type WorkspacePendingKey =
   | 'organization:create'
   | 'project:create'
-  | 'projects:reorder'
-  | `organization:delete:${string}`
   | `project:delete:${string}`
   | `project:links:${string}`
+  | `project:rename:${string}`
   | `folder:create:${string}`
-  | `folder:delete:${string}`
-  | `folder:links:${string}`;
+  | `folder:${string}`;
 
 export const workspacePendingKey = {
   organizationCreate: 'organization:create' as WorkspacePendingKey,
-  organizationDelete: (organizationId: string): WorkspacePendingKey =>
-    `organization:delete:${organizationId}`,
   projectCreate: 'project:create' as WorkspacePendingKey,
   projectDelete: (projectId: string): WorkspacePendingKey => `project:delete:${projectId}`,
   projectLinks: (projectId: string): WorkspacePendingKey => `project:links:${projectId}`,
+  projectRename: (projectId: string): WorkspacePendingKey => `project:rename:${projectId}`,
   folderCreate: (projectId: string): WorkspacePendingKey => `folder:create:${projectId}`,
-  folderDelete: (folderId: string): WorkspacePendingKey => `folder:delete:${folderId}`,
-  folderLinks: (folderId: string): WorkspacePendingKey => `folder:links:${folderId}`,
-  projectsReorder: 'projects:reorder' as WorkspacePendingKey,
+  // One key for every change to a folder; it marks that folder's controls as busy.
+  folder: (folderId: string): WorkspacePendingKey => `folder:${folderId}`,
 };
 
 /**
@@ -68,10 +46,14 @@ export const workspacePendingKey = {
  * (electron/src/settings/workspaceSettingsFetch.ts:220-226), never from an id sent by the
  * renderer, and the module cache is written under the owner captured here.
  */
+
 export function useWorkspaceSettingsController(t: Translate) {
   const { id: ownerId } = useLocalOwner();
   const settingsRevisionRef = useRef(0);
-  const pendingGuardRef = useRef<Set<WorkspacePendingKey>>(new Set());
+  // Workspace edits are rare, so they run one at a time: a change asked for while another is
+  // in flight, including one whose folder dialog is still open, is refused and does nothing.
+  const lockRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   // `null` is "nothing has been read yet", which is not the same as a workspace whose
   // lists happen to be empty: defaults nobody confirmed must never be shown, cached or
   // mutated as if they were this owner's settings.
@@ -79,12 +61,14 @@ export function useWorkspaceSettingsController(t: Translate) {
     workspaceSettingsReducer,
     getCachedWorkspaceSettings(ownerId)
   );
+  // A folder dialog can answer after the first read has landed; what it acts on is read then.
+  const latestSettingsRef = useRef(settings);
+  useEffect(() => {
+    latestSettingsRef.current = settings;
+  });
   const [projectGeneration, setProjectGeneration] = useState(0);
-  const [isLoading, setIsLoading] = useState(settings === null);
   const [pending, setPending] = useState<ReadonlySet<WorkspacePendingKey>>(new Set());
-  const [focusRequest, setFocusRequest] = useState<ResolvedFocusRequest | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const showLoading = isLoading && settings === null;
 
   useEffect(() => {
     let cancelled = false;
@@ -102,8 +86,6 @@ export function useWorkspaceSettingsController(t: Translate) {
         if (!cancelled && settingsRevisionRef.current === startRevision) {
           setErrorMessage(t('settings.workspace.loadFailed'));
         }
-      } finally {
-        if (!cancelled) setIsLoading(false);
       }
     })();
     return () => {
@@ -115,35 +97,48 @@ export function useWorkspaceSettingsController(t: Translate) {
     if (settings) setCachedWorkspaceSettings(ownerId, settings);
   }, [settings, ownerId]);
 
+  const locked =
+    <Args extends unknown[], Result>(refused: Result, work: (...args: Args) => Promise<Result>) =>
+    async (...args: Args): Promise<Result> => {
+      if (lockRef.current) return refused;
+      lockRef.current = true;
+      setBusy(true);
+      try {
+        return await work(...args);
+      } finally {
+        lockRef.current = false;
+        setBusy(false);
+      }
+    };
+
+  // Runs one request inside a change that holds the lock; its pending key only marks the
+  // control it belongs to as busy.
   const commitMutation = async <Result>(
     pendingKey: WorkspacePendingKey,
     operation: () => Promise<Result>,
-    toEvent: (result: Result) => WorkspaceMutationEvent,
-    advancesProjectGeneration = false,
-    focus?: MutationFocusRequest<Result>
+    // Null for an answer that changed nothing, such as a refused project name.
+    toEvent: (result: Result) => WorkspaceMutationEvent | null,
+    advancesProjectGeneration = false
   ): Promise<Result | null> => {
-    if (!beginPending(pendingKey, pendingGuardRef.current, setPending)) return null;
+    setPending((current) => new Set(current).add(pendingKey));
     setErrorMessage(null);
     try {
       const result = await operation();
+      const event = toEvent(result);
+      if (event === null) return result;
       settingsRevisionRef.current += 1;
-      dispatchSettings(toEvent(result));
+      dispatchSettings(event);
       if (advancesProjectGeneration) setProjectGeneration((current) => current + 1);
-      if (focus) {
-        const { onSuccess } = focus;
-        setFocusRequest({ key: typeof onSuccess === 'function' ? onSuccess(result) : onSuccess });
-      }
       return result;
     } catch {
       setErrorMessage(t('settings.workspace.saveFailed'));
-      if (focus?.onFailure) setFocusRequest({ key: focus.onFailure });
       return null;
     } finally {
-      endPending(pendingKey, pendingGuardRef.current, setPending);
+      setPending((current) => new Set([...current].filter((key) => key !== pendingKey)));
     }
   };
 
-  const addOrganization = async (displayName: string): Promise<string | null> => {
+  const addOrganization = locked(null, async (displayName: string): Promise<string | null> => {
     const trimmedName = displayName.trim();
     if (!trimmedName) return null;
     const organization = await commitMutation(
@@ -153,128 +148,25 @@ export function useWorkspaceSettingsController(t: Translate) {
       (created) => ({ type: 'organizationCreated', organization: created })
     );
     return organization?.organization_id ?? null;
-  };
+  });
 
-  const createProject = async (
-    displayName: string,
-    organizationIds: string[]
-  ): Promise<boolean> => {
-    const trimmedName = displayName.trim();
-    if (!trimmedName) return false;
-    const project = await commitMutation(
-      workspacePendingKey.projectCreate,
-      async () =>
-        await requireWorkspaceSettingsApi().createProject({
-          displayName: trimmedName,
-          organizationIds,
-        }),
-      (created) => ({ type: 'projectCreated', project: created }),
-      true,
-      { onSuccess: (created) => workspaceFocusId.projectFolderAdd(created.project_id) }
-    );
-    return project !== null;
-  };
+  // The picker answers with the canonical path (featureRuntime.ts), the form the backend keys
+  // folders by. Creating a registered folder again would replace all of its links.
+  const findRegisteredFolder = (realPath: string) =>
+    latestSettingsRef.current?.folders.find((folder) => folder.canonical_real_path === realPath);
 
-  const createFolder = async (input: WorkspaceFolderCreateInput): Promise<boolean> => {
-    const displayName = input.displayName.trim();
-    const realPath = input.realPath.trim();
-    if (!displayName || !realPath) return false;
-    const folder = await commitMutation(
-      workspacePendingKey.folderCreate(input.projectIds[0] ?? 'unassigned'),
-      async () =>
-        await requireWorkspaceSettingsApi().createFolder({
-          displayName,
-          realPath,
-          organizationIds: input.organizationIds,
-          projectIds: input.projectIds,
-        }),
-      (created) => ({ type: 'folderCreated', folder: created })
-    );
-    return folder !== null;
-  };
-
-  // Every surface deletes through here, so an organization still in use is never deleted
-  // without the user agreeing to drop it from those projects and folders.
-  const deleteOrganization = async (organizationId: string, focus: FocusRequest) => {
-    const organization = settings?.organizations.find(
-      (candidate) => candidate.organization_id === organizationId
-    );
-    if (!settings || !organization) return;
-    const usage = countOrganizationUsage(organizationId, settings.projects, settings.folders);
-    if (
-      usage > 0 &&
-      !window.confirm(
-        t('settings.workspace.organizationDelete.confirm', {
-          name: organization.display_name,
-          count: usage,
-        })
-      )
-    ) {
-      return;
+  const updateProjectOrganizations = locked(
+    false,
+    async (projectId: string, organizationIds: string[]): Promise<boolean> => {
+      const project = await commitMutation(
+        workspacePendingKey.projectLinks(projectId),
+        async () =>
+          await requireWorkspaceSettingsApi().updateProjectLinks(projectId, { organizationIds }),
+        (updated) => ({ type: 'projectLinksUpdated', project: updated })
+      );
+      return project !== null;
     }
-    await commitMutation(
-      workspacePendingKey.organizationDelete(organizationId),
-      async () => await requireWorkspaceSettingsApi().deleteOrganization(organizationId),
-      () => ({ type: 'organizationDeleted', organizationId }),
-      false,
-      focus
-    );
-  };
-
-  const deleteProject = async (projectId: string, focus: FocusRequest) => {
-    await commitMutation(
-      workspacePendingKey.projectDelete(projectId),
-      async () => await requireWorkspaceSettingsApi().deleteProject(projectId),
-      () => ({ type: 'projectDeleted', projectId }),
-      true,
-      focus
-    );
-  };
-
-  const updateProjectOrganizations = async (
-    projectId: string,
-    organizationIds: string[],
-    focus: FocusRequest
-  ): Promise<boolean> => {
-    const project = await commitMutation(
-      workspacePendingKey.projectLinks(projectId),
-      async () =>
-        await requireWorkspaceSettingsApi().updateProjectLinks(projectId, { organizationIds }),
-      (updated) => ({ type: 'projectLinksUpdated', project: updated }),
-      false,
-      focus
-    );
-    return project !== null;
-  };
-
-  const deleteFolder = async (folderId: string, focus: FocusRequest) => {
-    await commitMutation(
-      workspacePendingKey.folderDelete(folderId),
-      async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
-      () => ({ type: 'folderDeleted', folderId }),
-      false,
-      focus
-    );
-  };
-
-  const assignFolderToProject = async (
-    folderId: string,
-    projectId: string,
-    focus: FocusRequest
-  ): Promise<boolean> => {
-    const folder = await commitMutation(
-      workspacePendingKey.folderLinks(folderId),
-      async () =>
-        await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
-          organizationIds: [],
-          projectIds: [projectId],
-        }),
-      (updated) => ({ type: 'folderLinksUpdated', folder: updated }),
-      false,
-      focus
-    );
-    return folder !== null;
-  };
+  );
 
   const selectFolder = async (): Promise<string | null> => {
     setErrorMessage(null);
@@ -287,6 +179,133 @@ export function useWorkspaceSettingsController(t: Translate) {
     }
   };
 
+  // The backend refuses a taken name too; this says so before anything is sent.
+  const refuseTakenName = (name: string): boolean => {
+    if (!settings?.projects.some((project) => project.display_name === name)) return false;
+    setErrorMessage(t('history.projects.nameTaken', { name }));
+    return true;
+  };
+
+  /** The sidebar's ＋: a project of this name with no folder yet; null when it was refused. */
+  const createProject = locked(
+    null,
+    async (displayName: string): Promise<WorkspaceProject | null> => {
+      const name = displayName.trim();
+      if (!settings || !name || refuseTakenName(name)) return null;
+      const created = await commitMutation(
+        workspacePendingKey.projectCreate,
+        async () =>
+          await requireWorkspaceSettingsApi().createProject({
+            displayName: name,
+            organizationIds: [],
+          }),
+        (result) => ('errorCode' in result ? null : { type: 'projectCreated', project: result }),
+        true
+      );
+      if (created && 'errorCode' in created) {
+        setErrorMessage(t('history.projects.nameTaken', { name }));
+        return null;
+      }
+      return created;
+    }
+  );
+
+  /** The sidebar's remove; the backend unregisters the folders only this project holds. */
+  const removeProject = locked(false, async (projectId: string): Promise<boolean> => {
+    const removed = await commitMutation(
+      workspacePendingKey.projectDelete(projectId),
+      async () => await requireWorkspaceSettingsApi().deleteProject(projectId),
+      () => ({ type: 'projectDeleted', projectId }),
+      true
+    );
+    return removed !== null;
+  });
+
+  /** A name another project has is refused here: the backend keeps project names unique. */
+  const renameProject = locked(false, async (projectId: string, displayName: string) => {
+    const name = displayName.trim();
+    const project = settings?.projects.find((candidate) => candidate.project_id === projectId);
+    if (!settings || !project || !name) return false;
+    if (name === project.display_name) return true;
+    if (refuseTakenName(name)) return false;
+    const renamed = await commitMutation(
+      workspacePendingKey.projectRename(projectId),
+      async () =>
+        await requireWorkspaceSettingsApi().renameProject(projectId, { displayName: name }),
+      (updated) => ({ type: 'projectRenamed', project: updated })
+    );
+    return renamed !== null;
+  });
+
+  // Holds the lock from before the dialog opens, so nothing changes the folder meanwhile.
+  const addFolderToProject = locked(false, async (projectId: string) => {
+    const realPath = await selectFolder();
+    if (!realPath) return false;
+    const registered = findRegisteredFolder(realPath);
+    if (registered) {
+      // A folder already in the workspace joins this project as well, keeping its other links.
+      if (registered.project_ids.includes(projectId)) return true;
+      const linked = await commitMutation(
+        workspacePendingKey.folder(registered.folder_id),
+        async () =>
+          await requireWorkspaceSettingsApi().updateFolderLinks(registered.folder_id, {
+            organizationIds: registered.organization_ids,
+            projectIds: [...registered.project_ids, projectId],
+          }),
+        (updated) => ({ type: 'folderLinksUpdated', folder: updated })
+      );
+      return linked !== null;
+    }
+    const folder = await commitMutation(
+      workspacePendingKey.folderCreate(projectId),
+      async () =>
+        await requireWorkspaceSettingsApi().createFolder({
+          displayName: displayNameFromPath(realPath),
+          realPath,
+          organizationIds: [],
+          projectIds: [projectId],
+        }),
+      (created) => ({ type: 'folderCreated', folder: created })
+    );
+    return folder !== null;
+  });
+
+  /**
+   * Takes a folder out of one project. A folder no other project holds is unregistered with
+   * it: a registered folder stays inside the agent's boundary, so it must stay in a project.
+   */
+  const removeFolderFromProject = locked(false, async (folderId: string, projectId: string) => {
+    const folder = settings?.folders.find((candidate) => candidate.folder_id === folderId);
+    if (!folder) return false;
+    const otherProjectIds = folder.project_ids.filter((candidate) => candidate !== projectId);
+    const removed =
+      otherProjectIds.length === 0
+        ? await commitMutation(
+            workspacePendingKey.folder(folderId),
+            async () => await requireWorkspaceSettingsApi().deleteFolder(folderId),
+            () => ({ type: 'folderDeleted', folderId })
+          )
+        : await commitMutation(
+            workspacePendingKey.folder(folderId),
+            async () =>
+              await requireWorkspaceSettingsApi().updateFolderLinks(folderId, {
+                organizationIds: folder.organization_ids,
+                projectIds: otherProjectIds,
+              }),
+            (updated) => ({ type: 'folderLinksUpdated', folder: updated })
+          );
+    return removed !== null;
+  });
+
+  const openFolder = async (folderId: string): Promise<void> => {
+    setErrorMessage(null);
+    try {
+      await requireWorkspaceSettingsApi().openFolder(folderId);
+    } catch {
+      setErrorMessage(t('history.projects.openFailed'));
+    }
+  };
+
   const previewProjectOrder = (projects: WorkspaceSettings['projects']) => {
     dispatchSettings({
       type: 'projectsOrderPreview',
@@ -295,10 +314,9 @@ export function useWorkspaceSettingsController(t: Translate) {
   };
 
   const persistProjectOrder = async (projectIds: string[]): Promise<void> => {
-    const pendingKey = workspacePendingKey.projectsReorder;
-    if (!beginPending(pendingKey, pendingGuardRef.current, setPending)) {
-      throw new Error('Workspace project reorder is already in progress.');
-    }
+    if (lockRef.current) throw new Error('Another workspace change is in progress.');
+    lockRef.current = true;
+    setBusy(true);
     setErrorMessage(null);
     try {
       const response = await requireWorkspaceSettingsApi().reorderProjects({ projectIds });
@@ -312,17 +330,13 @@ export function useWorkspaceSettingsController(t: Translate) {
       dispatchSettings({ type: 'projectsReordered', projectIds: response.project_ids });
       setProjectGeneration((current) => current + 1);
     } finally {
-      endPending(pendingKey, pendingGuardRef.current, setPending);
+      lockRef.current = false;
+      setBusy(false);
     }
   };
 
-  const isProjectStructurePending =
-    pending.has(workspacePendingKey.projectCreate) ||
-    pending.has(workspacePendingKey.projectsReorder) ||
-    [...pending].some((key) => key.startsWith('project:delete:'));
-
   const dragController = useWorkspaceProjectDragController({
-    disabled: isProjectStructurePending,
+    disabled: busy,
     generation: projectGeneration,
     projects: settings?.projects ?? [],
     t,
@@ -331,49 +345,21 @@ export function useWorkspaceSettingsController(t: Translate) {
     onFailure: () => setErrorMessage(t('settings.workspace.saveFailed')),
   });
 
-  const clearFocusRequest = useCallback((request: ResolvedFocusRequest) => {
-    setFocusRequest((current) => (current === request ? null : current));
-  }, []);
-
   return {
+    addFolderToProject,
     addOrganization,
-    assignFolderToProject,
-    createFolder,
+    busy,
     createProject,
-    deleteFolder,
-    deleteOrganization,
-    deleteProject,
     dragController,
     errorMessage,
-    focusRequest,
-    isProjectStructurePending,
+    openFolder,
     pending,
-    clearFocusRequest,
-    selectFolder,
+    removeFolderFromProject,
+    removeProject,
+    renameProject,
     settings,
-    showLoading,
     updateProjectOrganizations,
   };
-}
-
-function beginPending(
-  key: WorkspacePendingKey,
-  guard: Set<WorkspacePendingKey>,
-  setPending: (pending: ReadonlySet<WorkspacePendingKey>) => void
-): boolean {
-  if (guard.has(key)) return false;
-  guard.add(key);
-  setPending(new Set(guard));
-  return true;
-}
-
-function endPending(
-  key: WorkspacePendingKey,
-  guard: Set<WorkspacePendingKey>,
-  setPending: (pending: ReadonlySet<WorkspacePendingKey>) => void
-): void {
-  guard.delete(key);
-  setPending(new Set(guard));
 }
 
 function workspaceSettingsReducer(

@@ -6,17 +6,10 @@ export type WorkspaceOrganization = WorkspaceSettings['organizations'][number];
 export type WorkspaceProject = WorkspaceSettings['projects'][number];
 export type WorkspaceFolder = WorkspaceSettings['folders'][number];
 
-export type WorkspaceFolderCreateInput = {
-  displayName: string;
-  realPath: string;
-  organizationIds: string[];
-  projectIds: string[];
-};
-
 export type WorkspaceMutationEvent =
   | { type: 'organizationCreated'; organization: WorkspaceOrganization }
-  | { type: 'organizationDeleted'; organizationId: string }
   | { type: 'projectCreated'; project: WorkspaceProject }
+  | { type: 'projectRenamed'; project: WorkspaceProject }
   | { type: 'projectDeleted'; projectId: string }
   | { type: 'folderCreated'; folder: WorkspaceFolder }
   | { type: 'folderDeleted'; folderId: string }
@@ -24,35 +17,6 @@ export type WorkspaceMutationEvent =
   | { type: 'folderLinksUpdated'; folder: WorkspaceFolder }
   | { type: 'projectsReordered'; projectIds: string[] }
   | { type: 'projectsOrderPreview'; projectIds: string[] };
-
-export type FocusKey = string;
-
-export type FocusRequest = {
-  onSuccess: FocusKey;
-  onFailure: FocusKey;
-};
-
-export const workspaceFocusId = {
-  organizationDelete: (organizationId: string): FocusKey =>
-    `ws-organization-delete-${organizationId}`,
-  organizationInput: 'ws-organization-input' as FocusKey,
-  organizationManagerOpen: 'ws-organization-manager-open' as FocusKey,
-  organizationCreateOption: 'ws-organization-create-option' as FocusKey,
-  organizationOptionDelete: (organizationId: string): FocusKey =>
-    `ws-organization-option-delete-${organizationId}`,
-  projectAdd: 'ws-project-add' as FocusKey,
-  projectDelete: (projectId: string): FocusKey => `ws-project-delete-${projectId}`,
-  projectHeading: (projectId: string): FocusKey => `ws-project-heading-${projectId}`,
-  projectFolderAdd: (projectId: string): FocusKey => `ws-project-folder-add-${projectId}`,
-  projectOrganizationAdd: (projectId: string): FocusKey =>
-    `ws-project-organization-add-${projectId}`,
-  projectOrganizationRemove: (projectId: string, organizationId: string): FocusKey =>
-    `ws-project-organization-remove-${projectId}-${organizationId}`,
-  projectFolderDelete: (projectId: string, folderId: string): FocusKey =>
-    `ws-project-folder-delete-${projectId}-${folderId}`,
-  unassignedFolderDelete: (folderId: string): FocusKey => `ws-unassigned-folder-delete-${folderId}`,
-  unassignedAssign: (folderId: string): FocusKey => `ws-unassigned-assign-${folderId}`,
-};
 
 // This reducer mirrors the canonical response rules in workspace_settings.py,
 // workspace_project_order.py, migrations 0036 (link FK cascades), and 0068 (project order).
@@ -73,26 +37,8 @@ export function applyWorkspaceMutation(
           compareOrganizations
         ),
       };
-    case 'organizationDeleted':
-      return {
-        ...settings,
-        organizations: settings.organizations.filter(
-          (organization) => organization.organization_id !== event.organizationId
-        ),
-        projects: settings.projects.map((project) => ({
-          ...project,
-          organization_ids: project.organization_ids.filter(
-            (organizationId) => organizationId !== event.organizationId
-          ),
-        })),
-        folders: settings.folders.map((folder) => ({
-          ...folder,
-          organization_ids: folder.organization_ids.filter(
-            (organizationId) => organizationId !== event.organizationId
-          ),
-        })),
-      };
     case 'projectCreated':
+    case 'projectRenamed':
     case 'projectLinksUpdated':
       return {
         ...settings,
@@ -104,13 +50,20 @@ export function applyWorkspaceMutation(
         ),
       };
     case 'projectDeleted':
+      // The backend unregisters the folders only this project held (workspace_settings_deletion).
       return {
         ...settings,
         projects: settings.projects.filter((project) => project.project_id !== event.projectId),
-        folders: settings.folders.map((folder) => ({
-          ...folder,
-          project_ids: folder.project_ids.filter((projectId) => projectId !== event.projectId),
-        })),
+        folders: settings.folders
+          .filter(
+            (folder) =>
+              !folder.project_ids.includes(event.projectId) ||
+              folder.project_ids.some((projectId) => projectId !== event.projectId)
+          )
+          .map((folder) => ({
+            ...folder,
+            project_ids: folder.project_ids.filter((projectId) => projectId !== event.projectId),
+          })),
       };
     case 'folderCreated':
     case 'folderLinksUpdated':
@@ -139,19 +92,6 @@ export function applyWorkspaceMutation(
         projects: orderProjectsByIds(settings.projects, event.projectIds),
       };
   }
-}
-
-export function successorFocusKey(
-  ids: string[],
-  removedId: string,
-  toKey: (id: string) => FocusKey,
-  anchorKey: FocusKey
-): FocusKey {
-  const removedIndex = ids.indexOf(removedId);
-  if (removedIndex < 0) return anchorKey;
-  const remainingIds = ids.filter((id) => id !== removedId);
-  const successorId = remainingIds[Math.min(removedIndex, remainingIds.length - 1)];
-  return successorId === undefined ? anchorKey : toKey(successorId);
 }
 
 export function upsertSorted<T>(
@@ -191,52 +131,18 @@ export function orderProjectsByIds(
   }));
 }
 
-export function getUnassignedFolders(
-  folders: WorkspaceFolder[],
-  projects: WorkspaceProject[]
-): WorkspaceFolder[] {
-  const activeProjectIds = new Set(projects.map((project) => project.project_id));
-  return folders.filter(
-    (folder) => !folder.project_ids.some((projectId) => activeProjectIds.has(projectId))
-  );
-}
-
-export function resolveFolderOrganizations(
-  folder: WorkspaceFolder,
-  organizations: WorkspaceOrganization[]
-): WorkspaceOrganization[] {
-  const organizationIds = new Set(folder.organization_ids);
-  return organizations
-    .filter((organization) => organizationIds.has(organization.organization_id))
-    .sort(compareOrganizations);
-}
-
-export function countOrganizationUsage(
-  organizationId: string,
-  projects: WorkspaceProject[],
-  folders: WorkspaceFolder[]
-): number {
-  const projectCount = projects.filter((project) =>
-    project.organization_ids.includes(organizationId)
-  ).length;
-  const activeProjectIds = new Set(projects.map((project) => project.project_id));
-  const directFolderCount = folders.filter(
-    (folder) =>
-      !folder.project_ids.some((projectId) => activeProjectIds.has(projectId)) &&
-      folder.organization_ids.includes(organizationId)
-  ).length;
-  return projectCount + directFolderCount;
-}
-
 export function displayNameFromPath(realPath: string): string {
   const normalized = realPath.replace(/[\\/]+$/u, '');
   const parts = normalized.split(/[\\/]/u);
   return parts[parts.length - 1] || normalized;
 }
 
+/** The folders a path goes through, and its last name, which stays when a short line cuts it. */
 export function splitPathForMiddleEllipsis(realPath: string): [string, string] {
-  const midpoint = Math.ceil(realPath.length / 2);
-  return [realPath.slice(0, midpoint), realPath.slice(midpoint)];
+  const lastSeparator = realPath.replace(/[\\/]+$/u, '').search(/[\\/][^\\/]*$/u);
+  return lastSeparator < 0
+    ? ['', realPath]
+    : [realPath.slice(0, lastSeparator + 1), realPath.slice(lastSeparator + 1)];
 }
 
 export function compareOrganizations(

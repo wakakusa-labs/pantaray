@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActionMessageRequestSchema,
-  codePointSpanInTrimmedText,
   type ActionConversationPage,
   type ActionMessageRequest,
-  type ActionProjectRef,
 } from '../../../electron/src/actions/actionContracts';
 import type {
   ActionConversationPageChain,
@@ -13,7 +11,9 @@ import type {
 import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
 import type { ActionApprovalMode } from './useActionApprovalMode';
-import type { ComposerMention } from './composerMentions';
+import { mentionRefs, type ComposerMention } from './composerMentions';
+import { composeQuotedMessage, type ComposerQuote } from './messageQuotes';
+import { useSharedTaskDraft } from './useSharedTaskDraft';
 
 import {
   addStagedAttachments,
@@ -30,8 +30,10 @@ type ComposerActions = NonNullable<NonNullable<typeof window.electron>['actions'
 
 export type ComposerState = {
   draft: string;
-  /** Workspace projects named in `draft`, in text order. */
+  /** Projects, tasks and suggestions named in `draft`, in text order. */
   mentions: readonly ComposerMention[];
+  /** Passages quoted from the conversation, in the order added; they go out before `draft`. */
+  quotes: readonly ComposerQuote[];
   /** Attachments in the order the user added them. */
   attachments: readonly ComposerAttachment[];
   /** Attach round trips still running. Sending is blocked while any is outstanding. */
@@ -45,7 +47,8 @@ export type ComposerState = {
   } | null;
   initialActionId: string | null;
   validationFailed: boolean;
-  failureKind: 'transport' | 'expected_process_conflict' | 'action_conflict' | null;
+  /** `superseded`: a send whose outcome is unknown gave way to another window's newer draft. */
+  failureKind: 'transport' | 'expected_process_conflict' | 'action_conflict' | 'superseded' | null;
   refreshState: 'idle' | 'loading' | 'failed';
   /**
    * 「再開」の往復。押している間は二重に開かないよう閉じ、失敗は入力欄の中で告げる。
@@ -60,6 +63,7 @@ export function initialComposerState(initialActionId: string | null): ComposerSt
   return {
     draft: '',
     mentions: [],
+    quotes: [],
     attachments: [],
     attachmentsInFlight: 0,
     attachmentFailure: null,
@@ -101,6 +105,7 @@ export function reconcileCanonicalSubmission(
         ...settled,
         draft: '',
         mentions: [],
+        quotes: [],
         attachments: [],
         submission: null,
         failureKind: null,
@@ -116,6 +121,8 @@ export function useOverlayComposerController({
   suggestionAccepted,
   language,
   onRefreshedPage,
+  fallbackActionId = null,
+  newTask = false,
 }: {
   actions: ComposerActions | undefined;
   initialActionId: string | null;
@@ -123,6 +130,10 @@ export function useOverlayComposerController({
   suggestionAccepted: boolean;
   language: 'en' | 'ja';
   onRefreshedPage: (page: ActionConversationPage) => void;
+  /** The Action a suggestion's window shows once its approval started one. */
+  fallbackActionId?: string | null;
+  /** The main window's new task, whose draft is kept until its first send opens an Action. */
+  newTask?: boolean;
 }) {
   const [composer, setComposer] = useState<ComposerState>(() =>
     initialComposerState(initialActionId)
@@ -144,31 +155,65 @@ export function useOverlayComposerController({
     // Pending image writes must not cross into a replacement composer.
     composerGenerationRef.current += 1;
   }, [suggestionId, suggestionAccepted, initialActionId]);
-  // The composer as last committed. A scope change replaces it above during render, so the
-  // documents it drops are read from here once the change commits. Documents that went out with
-  // a message or with the approval are the backend's to move, so they are left alone.
-  const committedRef = useRef({ scope, attachments: composer.attachments, sent: false });
-  useEffect(() => {
-    const previous = committedRef.current;
-    const approved =
-      previous.scope.suggestionId === scope.suggestionId &&
-      !previous.scope.suggestionAccepted &&
-      scope.suggestionAccepted;
-    if (previous.scope !== scope && !previous.sent && !approved) {
-      discardDocuments(actions, previous.attachments);
-    }
-    committedRef.current = {
-      scope,
-      attachments: composer.attachments,
-      sent: composer.submission !== null,
-    };
-  });
+  // The conversation this composer writes into, and so the task whose shared draft it shows.
+  const submittedActionId =
+    composer.submission?.request.target.kind === 'existing'
+      ? composer.submission.request.target.action_id
+      : null;
+  const conversationActionId = submittedActionId ?? composer.initialActionId ?? fallbackActionId;
+  useSharedTaskDraft(
+    actions,
+    conversationActionId !== null
+      ? `action:${conversationActionId}`
+      : suggestionId !== null
+        ? `suggestion:${suggestionId}`
+        : newTask
+          ? 'new'
+          : null,
+    composer,
+    setComposer
+  );
   const sendRequest = (request: ActionMessageRequest) => {
     if (!actions) return;
     const messageId = request.message.message_id;
     void actions
       .submitMessage(request)
       .then((result) => {
+        if (result.kind === 'reply_exists') {
+          // The suggestion already has its conversation: open that one, keeping the draft for it.
+          setComposer((current) =>
+            current.submissionStartFence?.messageId === messageId
+              ? {
+                  ...current,
+                  submission: null,
+                  submissionStartFence: null,
+                  failureKind: null,
+                  refreshState: 'idle',
+                  initialActionId: result.actionId,
+                }
+              : current
+          );
+          return;
+        }
+        if (result.kind === 'withdrawn') {
+          // A retry of a send the user withdrew meanwhile: it is settled, and nothing runs.
+          setComposer((current) =>
+            current.submissionStartFence?.messageId === messageId
+              ? {
+                  ...current,
+                  draft: '',
+                  mentions: [],
+                  quotes: [],
+                  attachments: [],
+                  submission: null,
+                  submissionStartFence: null,
+                  failureKind: null,
+                  refreshState: 'idle',
+                }
+              : current
+          );
+          return;
+        }
         if (result.kind !== 'submitted') {
           setComposer((current) => {
             if (current.submissionStartFence?.messageId !== messageId) return current;
@@ -241,16 +286,12 @@ export function useOverlayComposerController({
       .catch(() => settle('failed'));
   };
   const { images, files } = attachmentPayload(composer.attachments);
-  // The same draft is either the message content or the approval supplement; both are trimmed
-  // before sending, so one conversion serves both.
-  const projectRefs: ActionProjectRef[] = composer.mentions.map((mention) => ({
-    project_id: mention.projectId,
-    display_name: mention.displayName,
-    paths: [...mention.paths],
-    ...codePointSpanInTrimmedText(composer.draft, mention.start, mention.end),
-  }));
+  // The same message is either the message content or the approval supplement; both are
+  // trimmed before sending, so one conversion serves both.
+  const message = composeQuotedMessage(composer.quotes, composer.draft);
+  const refs = mentionRefs(message, composer.mentions);
   const canAttach = canAttachMore(composer.attachments);
-  const supplement = normalizeActionSupplement(composer.draft);
+  const supplement = normalizeActionSupplement(message.text);
   const supplementInvalid = supplement !== null && !isActionSupplementWithinLimit(supplement);
   const submitDraft = (
     visiblePages: ActionConversationPageChain | null,
@@ -284,11 +325,12 @@ export function useOverlayComposerController({
       message: {
         version: 1,
         message_id: crypto.randomUUID(),
-        content: composer.draft,
+        content: message.text,
         images,
         language,
-        project_refs: projectRefs,
+        project_refs: refs.project_refs,
         files,
+        work_refs: refs.work_refs,
       },
     });
     if (!parsed.success) {
@@ -404,6 +446,23 @@ export function useOverlayComposerController({
       );
     }
   };
+  // Typing dismisses a failed resume's notice; so does a quote, which is part of the message.
+  const editMessage = (edit: (current: ComposerState) => Partial<ComposerState>) =>
+    setComposer((current) => ({
+      ...current,
+      ...edit(current),
+      validationFailed: false,
+      resume: current.resume?.state === 'failed' ? null : current.resume,
+    }));
+  const changeDraft = (draft: string, mentions: readonly ComposerMention[]) =>
+    editMessage(() => ({ draft, mentions }));
+  const addQuote = (text: string, comment: string) =>
+    editMessage((current) => ({
+      quotes: [...current.quotes, { id: crypto.randomUUID(), text, comment }],
+    }));
+  const removeQuote = (id: string) =>
+    editMessage((current) => ({ quotes: current.quotes.filter((quote) => quote.id !== id) }));
+  const clearMessage = () => editMessage(() => ({ draft: '', mentions: [], quotes: [] }));
   const retrySubmission = () => {
     const request = composer.submission?.request;
     if (
@@ -426,10 +485,13 @@ export function useOverlayComposerController({
   };
   return {
     composer,
+    conversationActionId,
     images,
     files,
     canAttach,
-    projectRefs,
+    refs,
+    /** The draft and its quotes make a message to send. */
+    hasMessage: message.text.trim() !== '',
     supplement,
     supplementInvalid,
     setComposer,
@@ -438,6 +500,10 @@ export function useOverlayComposerController({
     restoreComposerFocusRef,
     submitDraft,
     requestResume,
+    changeDraft,
+    /** The composer's side of quoting; the host names the conversation they come from. */
+    quoting: { quotes: composer.quotes, onAdd: addQuote, onRemove: removeQuote },
+    clearMessage,
     attachFiles,
     removeAttachment,
     refreshSubmission,

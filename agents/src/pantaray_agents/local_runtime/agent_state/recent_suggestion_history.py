@@ -16,6 +16,7 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
         WITH recent AS (
             SELECT suggestions.user_id, suggestions.answer,
                    suggestions.created_at, suggestions.user_reaction,
+                   suggestions.dismiss_reason,
                    (
                        SELECT actions.action_id
                        FROM agent_actions AS actions
@@ -42,6 +43,7 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
             LIMIT ?
         )
         SELECT recent.answer, recent.created_at, recent.user_reaction,
+               recent.dismiss_reason,
                actions.status AS action_status,
                initial.user_message_json AS user_reply_json,
                -- Later turns the user sent in the same Action, such as

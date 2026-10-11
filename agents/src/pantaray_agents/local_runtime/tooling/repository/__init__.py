@@ -30,7 +30,6 @@ from .command_invocation_audits import (
     upsert_command_invocation_audit,
 )
 from .common import (
-    DEFAULT_PROMPT_EACH_TIME_PREFERENCE_ID,
     ApprovalDecisionConflictError,
     _configure_connection,
     _deserialize_json_string_map,
@@ -83,7 +82,6 @@ __all__ = [
     "ApprovalDecisionConflictError",
     "ApprovalSessionExecutionConflictError",
     "CommandInvocationAuditUpsertInput",
-    "DEFAULT_PROMPT_EACH_TIME_PREFERENCE_ID",
     "ExecutionSessionCompletionStatusError",
     "ExecutionSessionNotFoundError",
     "ExecutionSessionParentConflictError",

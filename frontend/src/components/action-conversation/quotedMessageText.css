@@ -1,0 +1,14 @@
+/* A passage the user quoted, set off from their own words by a rule and a dimmer tone. */
+.message-quote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.78);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-quote + *,
+* + .message-quote {
+  margin-top: 6px;
+}

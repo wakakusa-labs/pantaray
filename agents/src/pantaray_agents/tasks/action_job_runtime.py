@@ -291,6 +291,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
             user_step_created_at=context.user_step_created_at,
             user_message=context.user_message,
             preceding_assistant_messages=context.preceding_assistant_messages,
+            stopped_run_note=context.stopped_run_note,
             execution_target=context.execution_target,
             approval_resume_session_id=context.approval_session_id,
             approval_resume_tool_request_id=context.approval_tool_request_id,

@@ -40,10 +40,24 @@ function createActionsApi({ ipcRenderer }) {
     actions: {
       submitMessage: (request) => ipcRenderer.invoke('action:submitMessage', request),
       resumeAction: (request) => ipcRenderer.invoke('action:resume', request),
+      withdrawMessage: (request) => ipcRenderer.invoke('action:withdrawMessage', request),
+      // Main window only: show the Action in place; updates arrive on onConversationUpdated.
+      openConversation: (request) => ipcRenderer.invoke('action:openConversation', request),
+      // Stop the run the window shows.
+      stopAction: (request) => ipcRenderer.invoke('action:stop', request),
       attachImage: (request) => ipcRenderer.invoke('action:attachImage', request),
       revealImage: (request) => ipcRenderer.invoke('actionImage:reveal', request),
       attachFile: (request) => ipcRenderer.invoke('action:attachFile', request),
       discardAttachment: (request) => ipcRenderer.invoke('action:discardAttachment', request),
+      // A task's shared draft: open returns it, and changes from other windows follow.
+      openDraft: (request) => ipcRenderer.invoke('action:openDraft', request),
+      updateDraft: (request) => ipcRenderer.invoke('action:updateDraft', request),
+      closeDraft: (request) => ipcRenderer.invoke('action:closeDraft', request),
+      onDraftChanged: (callback) => {
+        const listener = (_event, change) => callback(change);
+        ipcRenderer.on('action:draftChanged', listener);
+        return () => ipcRenderer.removeListener('action:draftChanged', listener);
+      },
       readConversationPage: (request) => ipcRenderer.invoke('action:readConversationPage', request),
       readToolOutputPage: (request) => ipcRenderer.invoke('action:readToolOutputPage', request),
       onConversationUpdated: (callback) => {

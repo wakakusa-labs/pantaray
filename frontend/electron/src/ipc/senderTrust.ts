@@ -33,32 +33,42 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'action:attachImage',
   'action:attachFile',
   'action:discardAttachment',
+  // A task's draft is shared by its composers in both windows.
+  'action:openDraft',
+  'action:updateDraft',
+  'action:closeDraft',
   'actionImage:reveal',
   'ui:getLanguage',
   'ws:send',
   'ws:acceptAction',
   'ws:getStatus',
-]);
-
-const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
-  'clipboard:writeText',
-  'history:markCompletionViewed',
+  // Both windows act on an Action: the main window's task pane and, for now, an Overlay panel.
+  // Each Action call goes to the backend as the local owner, and openUserTurn resolves which
+  // window sent it before it delivers anything.
   'action:submitMessage',
   'action:resume',
+  'action:withdrawMessage',
+  'action:stop',
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
+  'history:markCompletionViewed',
+  // Read-only: both windows' composers title a pasted task or suggestion link.
+  'history:readItem',
+  // Written by main, so a window without focus still copies.
+  'clipboard:writeText',
+]);
+
+const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'resize-notification-window',
   'notification-action-accept',
-  'notification-action-reject',
   'notification-hide',
-  'notification-stop-action',
   'overlay:recordInteraction',
   'overlay:dragStart',
   'overlay:dragMove',
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
-  'overlay:showChat',
+  'overlay:openTask',
 ]);
 
 export class IpcSenderRejectedError extends Error {

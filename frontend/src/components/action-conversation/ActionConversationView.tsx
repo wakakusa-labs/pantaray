@@ -10,12 +10,14 @@ import type { ActionLiveSnapshot } from '../../../electron/src/actions/actionLiv
 import type { ActionToolOutputLoader } from '../../../electron/src/actions/actionToolOutputLoader';
 
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
+import { useLiveStageText } from '@/components/history/liveStageText';
 import { useI18n } from '@/context/useI18n';
 
 import type { ImageGridCopy } from './AttachedImages';
 import { UserItem } from './UserMessage';
 import { CopyAnswerButton } from './CopyAnswerButton';
 import { ToolRow, type ToolRowStatus } from './ToolRow';
+import { terminalOutcomeText } from './terminalOutcomeText';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
 import {
   foldsCommentary,
@@ -64,15 +66,17 @@ type LabeledToolStatus = Exclude<ToolStatus, 'success'>;
  * 承認されなかった呼び出しと、記録がオフのまま呼ばれた読み取りは、成功したステップとして
  * 残る。停止が届いたとき発行前だった呼び出しは、失敗したステップとして残る。どれも
  * 走らなかったことに変わりはないので、状態語より先に「未実行」を出す。行を眺めるだけの
- * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページも失敗ではなく、行の文が
- * そう言うので状態語は出さない。
+ * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページと、編集の前に読ませる
+ * ため中身だけを返したパッチも失敗ではなく、行の文がそう言うので状態語は出さない。
  */
 function toolRowStatus(entry: ToolEntry, copy: Copy): ToolRowStatus | null {
   if (entry.outcome === 'not_executed') return { label: copy.toolNotRun, failed: false };
   if (entry.status !== 'success') {
     return { label: copy.toolStatus[entry.status], failed: entry.status !== 'processing' };
   }
-  return entry.outcome === 'completed' || entry.outcome === 'preparing'
+  return entry.outcome === 'completed' ||
+    entry.outcome === 'preparing' ||
+    entry.outcome === 'needs_read'
     ? null
     : { label: copy.toolNotRun, failed: false };
 }
@@ -173,7 +177,7 @@ export function StepItem({
   toolOutputLoader: ActionToolOutputLoader;
   onFocusedContentUnmount: (key: string) => void;
 }) {
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const copy = COPY[language];
 
   const contentRef = useRef<HTMLElement>(null);
@@ -206,10 +210,12 @@ export function StepItem({
                 subject: entry.subject,
                 running,
                 outcome: entry.outcome,
+                fileOperation: entry.file_edit?.operation,
               })
         }
         // 引数を持たないツールは、結果の頭を添えて何が返ったかだけでも見せる。
         preview={entry.subject === null ? entry.output_preview : null}
+        fileEdit={entry.file_edit}
         stepNumber={entry.step_number}
         runLabel={runLabel}
         status={
@@ -247,7 +253,7 @@ export function StepItem({
       {line.kind === 'assistant' || line.kind === 'final_output' ? (
         <MarkdownBlock text={line.text} isStreamFinished />
       ) : (
-        <p>{line.text}</p>
+        <p>{terminalOutcomeText(line.text, t)}</p>
       )}
       {line.kind === 'final_output' ? <CopyAnswerButton markdown={line.text} /> : null}
     </section>
@@ -334,8 +340,23 @@ function WorkSection({
   const [expansion, setExpansion] = useState({ key: expansionKey, expanded: false });
   const expanded = expansion.key === expansionKey && expansion.expanded;
   const count = section.lines.filter((line) => line.kind === 'tool').length;
-  // The section the running Tool belongs to shimmers; it is the on-screen sign of progress.
-  const live = !awaitingApproval && section.lines.some((line) => line.key === liveToolKey);
+  // The section holding the run's latest Tool is live: it shimmers, the on-screen sign of progress.
+  const liveTool = awaitingApproval
+    ? undefined
+    : section.lines.find(
+        (line): line is ActionConversationToolItem =>
+          line.kind === 'tool' && line.key === liveToolKey
+      );
+  // While live, the label says what is happening now in the words the Tool's own row uses. The
+  // accessible name stays fixed, so the label does not announce every step.
+  const label =
+    useLiveStageText(
+      liveTool === undefined
+        ? null
+        : liveTool.entry.status === 'processing'
+          ? { kind: 'tool', ...liveTool.entry }
+          : { kind: 'thinking' }
+    ) ?? copy.agentWork;
   const disclosureRef = useCallback(
     (element: HTMLButtonElement | null) => registerDisclosure(section.key, element),
     [registerDisclosure, section.key]
@@ -356,7 +377,11 @@ function WorkSection({
         aria-expanded={expanded}
         onClick={() => setExpansion({ key: expansionKey, expanded: !expanded })}
       >
-        <span className={live ? 'action-conversation__shimmer' : undefined}>{copy.agentWork}</span>
+        <span
+          className={`action-conversation__work-label${liveTool ? ' action-conversation__shimmer' : ''}`}
+        >
+          {label}
+        </span>
         {count > 0 ? (
           <span className="action-conversation__count" aria-hidden>
             {count}
@@ -427,7 +452,9 @@ export function RunItem({
     else disclosures.current.delete(key);
   }, []);
   const toolLines = run.lines.filter((line) => line.kind === 'tool');
-  const liveToolKey = isLatest && !settled ? toolLines[toolLines.length - 1]?.key : undefined;
+  // Once the final answer shows, the work behind it is no longer what is happening now.
+  const liveToolKey =
+    isLatest && !settled && !finalAnswerVisible ? toolLines[toolLines.length - 1]?.key : undefined;
   // A run waiting for approval has paused its whole process, so none of its
   // processing Tools is actually running.
   const awaitingApproval = run.status === 'approval_pending' && !settled;
@@ -499,7 +526,23 @@ export function ActionConversationView({
   const copy = COPY[language];
   const conversationRef = useRef<HTMLElement>(null);
   const actionId = view.action?.action_id ?? null;
-  const runs = view.items.filter((item): item is ActionConversationRunItem => item.kind === 'run');
+  // Hidden as soon as it is withdrawn: a page read before then can still hold it.
+  const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(() => new Set());
+  const withdrawMessage = useCallback(
+    async (stepId: string) => {
+      const actions = window.electron?.actions;
+      if (actionId === null || !actions) return;
+      const result = await actions.withdrawMessage({ actionId, stepId });
+      // A run took it first: main has refreshed the conversation, which shows it as run.
+      if (result.kind === 'withdrawn') setWithdrawn((current) => new Set(current).add(stepId));
+    },
+    [actionId]
+  );
+  const items = view.items.filter(
+    (item) =>
+      !(item.kind === 'user' && item.source === 'canonical' && withdrawn.has(item.entry.step_id))
+  );
+  const runs = items.filter((item): item is ActionConversationRunItem => item.kind === 'run');
   const restoreConversationFocus = useCallback(() => conversationRef.current?.focus(), []);
   const latestRun = runs.find((run) => run.runId === view.action?.latest_run_id) ?? null;
   // 実行が始まったことと、確認を待っていることは、ツール行が 1 つも出ていなくても伝わらないと
@@ -524,7 +567,7 @@ export function ActionConversationView({
         {announcedRunStatus}
       </span>
       <ol className="action-conversation__items">
-        {view.items.map((item) => (
+        {items.map((item) => (
           <li key={item.kind === 'run' ? `run:${item.runId}` : item.key}>
             {item.kind === 'run' ? (
               <RunItem
@@ -540,7 +583,7 @@ export function ActionConversationView({
                 onFocusedRunUnmount={restoreConversationFocus}
               />
             ) : (
-              <UserItem item={item} />
+              <UserItem item={item} onWithdraw={withdrawMessage} />
             )}
           </li>
         ))}

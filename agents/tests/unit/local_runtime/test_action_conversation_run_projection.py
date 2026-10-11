@@ -108,6 +108,7 @@ def _read(
     *,
     status: ActionStatus = "processing",
     scope: ActionConversationHistoryScope = "current_timeline",
+    next_run_takes_after: int | None = None,
 ) -> tuple[ActionConversationPage, Mock]:
     history = ActionConversationHistoryPage(
         ActionConversationSummary(
@@ -133,6 +134,11 @@ def _read(
         run_projection,
         "select_action_logical_run_authorities_in_connection",
         select_authority,
+    )
+    monkeypatch.setattr(
+        run_projection,
+        "next_run_takes_messages_after_in_connection",
+        Mock(return_value=next_run_takes_after),
     )
     with closing(sqlite3.connect(":memory:")) as connection:
         page = run_projection.read_action_conversation_page_in_connection(
@@ -234,3 +240,45 @@ def test_unadopted_uses_empty_selection(monkeypatch: pytest.MonkeyPatch) -> None
     assert (page.runs, page.unadopted_messages[0].status) == ((), "pending")
     selector.assert_called_once()
     assert selector.call_args.kwargs["selections"] == frozenset()
+
+
+def _not_executed(step_id: str, accepted_sequence: int) -> ActionHistoryUserRow:
+    message = ActionUserMessageInput(message_id=f"message-{step_id}", content="Later")
+    return ActionHistoryUserRow(
+        step_id,
+        None,
+        accepted_sequence,
+        message.message_id,
+        serialize_action_user_message(message),
+        render_action_user_request_text(message),
+        None,
+        "run-old",
+        "2026-10-11T00:00:00Z",
+        ACTION_USER_STEP_NAME,
+    )
+
+
+@pytest.mark.parametrize(
+    ("takes_after", "expected"),
+    [
+        # Only a message sent after the latest run's root joins the next run.
+        (2, ("not_executed", "runs_with_next_message")),
+        # No restorable checkpoint: the next run takes none of them.
+        (None, ("not_executed", "not_executed")),
+    ],
+)
+def test_a_not_run_message_says_whether_the_next_send_takes_it(
+    monkeypatch: pytest.MonkeyPatch,
+    takes_after: int | None,
+    expected: tuple[str, str],
+) -> None:
+    page, _ = _read(
+        monkeypatch,
+        (_not_executed("older", 1), _not_executed("newer", 3)),
+        (),
+        status="canceled",
+        scope="unadopted",
+        next_run_takes_after=takes_after,
+    )
+
+    assert tuple(entry.status for entry in page.unadopted_messages) == expected

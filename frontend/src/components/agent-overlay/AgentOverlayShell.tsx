@@ -2,6 +2,11 @@ import { useEffect, useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
+import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import type { WorkKey } from '@/components/chat/chatTimeline';
+import { splitWorkKey } from '@/history/historySelection';
+import { useCopyWorkLink } from '@/history/useCopyWorkLink';
+import type { WorkRefKind } from '@/history/workRefLink';
 import { PopupContainer } from './OverlayBackground';
 import HeaderRow, { HeaderButtonGroup } from './HeaderBar';
 import { ApprovalPanel as ApprovalPanelView } from './ApprovalPanel';
@@ -16,6 +21,7 @@ import {
   ComposerDock,
 } from './ContentLayout';
 import { MarkdownBlock } from './MarkdownRenderer';
+import { DismissalReason } from './DismissalReason';
 import { HeaderIconButton } from './IconButton';
 import {
   Check,
@@ -23,16 +29,15 @@ import {
   ChevronUp,
   CircleAlert,
   Clipboard,
-  MessageCircle,
+  Maximize2,
   Minus,
 } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
-import { SuggestionDecisionControls, type SuggestionDecision } from './SuggestionDecisionControls';
 
-const SuggestionAcceptedStatus = styled.span`
+const SuggestionDecisionStatus = styled.span`
   display: flex;
   width: fit-content;
   align-items: center;
@@ -44,11 +49,6 @@ const SuggestionAcceptedStatus = styled.span`
 `;
 
 const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
-
-/** The chat button holds the header's left end; the other buttons stay right. */
-const ShowChatButton = styled(HeaderIconButton)`
-  margin-right: auto;
-`;
 
 const VisuallyHidden = styled.span`
   position: absolute;
@@ -102,9 +102,10 @@ type AgentOverlayShellProps = {
   isExpanded: boolean;
   content: string | null;
   suggestionText: string;
-  suggestionId?: string | null;
   isSuggestionStreamFinished: boolean;
   isSuggestionAccepted?: boolean;
+  /** A dismissed offer, with the reason the user gave, if any. */
+  dismissal?: { reason: string | null } | null;
   actionText: string;
   conversationContent?: ReactNode;
   /** パネル下端に固定する入力欄。会話履歴と一緒にはスクロールしない。 */
@@ -120,15 +121,20 @@ type AgentOverlayShellProps = {
    */
   showBusyIndicator: boolean;
   showThinking?: boolean;
-  /** The Action the main window's chat can show; null until one exists. */
-  chatActionId?: string | null;
-  onShowChat?: (request: { actionId: string }) => Promise<void>;
-  showFooterActions?: boolean;
+  /** The Action shown; null until one exists. */
+  actionId?: string | null;
+  /** The suggestion shown, whose link is copied until an Action takes its place. */
+  suggestionId?: string | null;
+  /**
+   * Moves the Action, or the suggestion until an Action takes it up, to the main window, which
+   * then closes this panel.
+   */
+  onOpenInMainWindow?: (work: { kind: WorkRefKind; id: string }) => void;
+  /** The main window could not be shown with this panel's task. */
+  openTaskFailed?: boolean;
   fadeDurationMs?: number;
   onToggleExpand?: () => void;
   onClose?: () => void;
-  suggestionDecision?: SuggestionDecision;
-  onReject?: () => void;
   onDecideApproval?: (decision: ApprovalDecision, blocker: ActionApprovalBlocker) => void;
   onOpenWorkspaceSettings?: () => void;
   /** Present while a conversation is shown; copies the whole conversation. */
@@ -141,14 +147,37 @@ type AgentOverlayShellProps = {
   scrollableRef?: RefObject<HTMLDivElement>;
   contentInnerRef?: RefObject<HTMLDivElement>;
   answerAreaRef?: RefObject<HTMLDivElement>;
-  footerRef?: RefObject<HTMLDivElement>;
   composerRef?: RefObject<HTMLDivElement>;
   containerRef?: RefObject<HTMLDivElement>;
 };
 
+function CopyLinkButton({
+  visible,
+  kind,
+  id,
+}: {
+  visible: boolean;
+  kind: WorkRefKind;
+  id: string;
+}) {
+  const link = useCopyWorkLink(kind, id);
+  return (
+    <>
+      <HeaderIconButton
+        $visible={visible}
+        onClick={link.copy}
+        aria-label={link.label}
+        data-tooltip={link.title}
+      >
+        <link.Icon strokeWidth={1.75} />
+      </HeaderIconButton>
+      {link.failed ? <VisuallyHidden role="alert">{link.failed}</VisuallyHidden> : null}
+    </>
+  );
+}
+
 /** Electron通知とWebモーダルで共有するAgentOverlayの表示・操作シェル。 */
 const AgentOverlayShell = ({
-  suggestionId,
   isVisible,
   isContentVisible,
   isExpanded,
@@ -156,6 +185,7 @@ const AgentOverlayShell = ({
   suggestionText,
   isSuggestionStreamFinished,
   isSuggestionAccepted = false,
+  dismissal = null,
   actionText,
   conversationContent = null,
   composer = null,
@@ -166,14 +196,13 @@ const AgentOverlayShell = ({
   approvalErrorMessage = null,
   showBusyIndicator,
   showThinking = false,
-  chatActionId = null,
-  onShowChat,
-  showFooterActions = true,
+  actionId = null,
+  suggestionId = null,
+  onOpenInMainWindow,
+  openTaskFailed = false,
   fadeDurationMs = 600,
   onToggleExpand,
   onClose,
-  suggestionDecision,
-  onReject,
   onDecideApproval,
   onOpenWorkspaceSettings,
   conversationCopy,
@@ -185,7 +214,6 @@ const AgentOverlayShell = ({
   scrollableRef,
   contentInnerRef,
   answerAreaRef,
-  footerRef,
   composerRef,
   containerRef,
 }: AgentOverlayShellProps) => {
@@ -194,6 +222,16 @@ const AgentOverlayShell = ({
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
   const { t } = useI18n();
+  // The work this panel stands for: its Action, or the suggestion until one exists.
+  const work: { kind: WorkRefKind; id: string } | null =
+    actionId !== null
+      ? { kind: 'action', id: actionId }
+      : suggestionId !== null
+        ? { kind: 'suggestion', id: suggestionId }
+        : null;
+  const openWork = onOpenInMainWindow
+    ? (key: WorkKey) => onOpenInMainWindow(splitWorkKey(key))
+    : null;
   const showApprovalPanel = approvalUiState === 'approval_pending' && approvalBlockers.length > 0;
   const copyConversationFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
@@ -260,24 +298,28 @@ const AgentOverlayShell = ({
         {showBusyIndicator && (
           <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>
         )}
-        {chatActionId !== null && onShowChat && (
-          <ShowChatButton
-            $visible={isVisible}
-            onClick={() => void onShowChat({ actionId: chatActionId })}
-            aria-label={t('overlay.showInChat')}
-            title={t('overlay.showInChat')}
-          >
-            <MessageCircle strokeWidth={1.75} aria-hidden />
-          </ShowChatButton>
-        )}
         <HeaderButtonGroup>
+          {work !== null ? (
+            <CopyLinkButton visible={isVisible} kind={work.kind} id={work.id} />
+          ) : null}
+          {work !== null && onOpenInMainWindow && (
+            <HeaderIconButton
+              $visible={isVisible}
+              onClick={() => onOpenInMainWindow(work)}
+              aria-label={t('overlay.openInMainWindow')}
+              data-tooltip={t('overlay.openInMainWindow')}
+            >
+              {/* The pair of the main window's PictureInPicture2, which opens a task here. */}
+              <Maximize2 strokeWidth={1.75} aria-hidden />
+            </HeaderIconButton>
+          )}
           {conversationCopy && (
             <>
               <HeaderIconButton
                 $visible={isVisible}
                 onClick={conversationCopy.copy}
                 aria-label={t('overlay.copyConversation')}
-                title={copyConversationFailed ?? t('overlay.copyConversation')}
+                data-tooltip={copyConversationFailed ?? t('overlay.copyConversation')}
               >
                 {conversationCopy.status === 'copied' ? (
                   <Check strokeWidth={1.75} />
@@ -298,7 +340,7 @@ const AgentOverlayShell = ({
               $visible={isVisible}
               onClick={onToggleExpand}
               aria-label={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
-              title={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
+              data-tooltip={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
             >
               {isExpanded ? <ChevronUp strokeWidth={1.75} /> : <ChevronDown strokeWidth={1.75} />}
             </HeaderIconButton>
@@ -309,7 +351,7 @@ const AgentOverlayShell = ({
               onMouseDown={handleCloseMouseDown}
               onClick={handleCloseClick}
               aria-label={t('overlay.hideNotification')}
-              title={t('overlay.hideNotification')}
+              data-tooltip={t('overlay.hideNotification')}
             >
               <Minus strokeWidth={1.75} />
             </HeaderIconButton>
@@ -321,7 +363,6 @@ const AgentOverlayShell = ({
         <ScrollableContent
           ref={resolvedScrollableRef}
           $collapsed={!isExpanded}
-          $hasFooter={Boolean(showFooterActions)}
           onScroll={handleScrollableContentScroll}
           data-overlay-scroll="true"
         >
@@ -342,10 +383,20 @@ const AgentOverlayShell = ({
                     isStreamFinished={isSuggestionStreamFinished}
                   />
                   {isSuggestionAccepted ? (
-                    <SuggestionAcceptedStatus>
+                    <SuggestionDecisionStatus>
                       <Check size={14} aria-hidden="true" />
                       {t('overlay.suggestionAccepted')}
-                    </SuggestionAcceptedStatus>
+                    </SuggestionDecisionStatus>
+                  ) : null}
+                  {dismissal ? (
+                    <>
+                      {dismissal.reason !== null ? (
+                        <DismissalReason reason={dismissal.reason} />
+                      ) : null}
+                      <SuggestionDecisionStatus>
+                        {t('overlay.suggestionDismissed')}
+                      </SuggestionDecisionStatus>
+                    </>
                   ) : null}
                 </NotificationContent>
               </ContentWrapper>
@@ -354,10 +405,17 @@ const AgentOverlayShell = ({
             {(conversationContent || actionText || showThinking) && (
               <ContentWrapper>
                 <AnswerArea ref={answerAreaRef} tabIndex={-1}>
-                  {conversationContent ??
-                    (actionText ? (
-                      <MarkdownBlock text={actionText} isStreamFinished={isActionStreamFinished} />
-                    ) : null)}
+                  {/* A task or suggestion named in a sent message opens in the main window, as
+                      Open in main window does. */}
+                  <OpenWorkContext.Provider value={openWork}>
+                    {conversationContent ??
+                      (actionText ? (
+                        <MarkdownBlock
+                          text={actionText}
+                          isStreamFinished={isActionStreamFinished}
+                        />
+                      ) : null)}
+                  </OpenWorkContext.Provider>
                   {showThinking ? (
                     <ThinkingLine aria-hidden>{t('overlay.thinking')}</ThinkingLine>
                   ) : null}
@@ -386,20 +444,17 @@ const AgentOverlayShell = ({
             ))}
           </ApprovalDock>
         ) : null}
+        {openTaskFailed ? (
+          <p role="alert">
+            {t(
+              work?.kind === 'suggestion'
+                ? 'overlay.openSuggestionFailed'
+                : 'overlay.openTaskFailed'
+            )}
+          </p>
+        ) : null}
         {composer}
       </ComposerDock>
-
-      {showFooterActions && suggestionDecision && (
-        <SuggestionDecisionControls
-          key={suggestionId}
-          isVisible={isVisible}
-          isBusy={showBusyIndicator}
-          compact={!isExpanded}
-          footerRef={footerRef}
-          decision={suggestionDecision}
-          onReject={onReject}
-        />
-      )}
     </PopupContainer>
   );
 };

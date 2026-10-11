@@ -25,7 +25,10 @@ from pantaray_agents.schema.agent.base import JSONValue
         ),
         (
             "apply_patch",
-            {"applied_paths": ["a.py"], "diff": "--- a\n+++ b\n+one\n+two\n-old\n"},
+            {
+                "applied_paths": ["a.py"],
+                "diff": "--- a.py\n+++ a.py\n@@ -1 +1,2 @@\n+one\n+two\n-old\n",
+            },
             "apply_patch: ok, 1 file, +2 -1",
         ),
         (
@@ -45,8 +48,21 @@ from pantaray_agents.schema.agent.base import JSONValue
         ),
         (
             "wait_subagents",
-            {"results": [{"status": "completed"}, {"status": "running"}]},
-            "wait_subagents: ok, 1 done, 1 running",
+            {
+                "results": [
+                    {"status": "success"},
+                    {"status": "failure"},
+                    {"status": "canceled"},
+                    {"status": "nonterminal"},
+                ]
+            },
+            "wait_subagents: ok, 3 done, 1 running",
+        ),
+        ("send_message_to_subagent", True, "send_message_to_subagent: ok"),
+        (
+            "send_message_to_subagent",
+            {"child_process_id": "child-2", "continues_child_process_id": "child-1"},
+            "send_message_to_subagent: ok, continued child-1 as new subagent child-2",
         ),
         ("zanei_timeline", {"events": [{}]}, "zanei_timeline: ok, 1 event"),
         (

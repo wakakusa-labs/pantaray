@@ -2,10 +2,11 @@ import { randomUUID } from 'crypto';
 
 import type { BrowserWindow } from 'electron';
 
-import type { ActionConversationPage } from '../actions/actionContracts';
+import type { ActionLatestPages } from '../actions/actionLatestPageReader';
 import {
   createActionLiveCoordinator,
   type ActionLiveEventRoute,
+  type ActionLiveRefreshOutcome,
   type ActionLiveUpdate,
 } from '../actions/actionLiveCore';
 import type {
@@ -18,6 +19,7 @@ import type {
   ResumeProcessRequest,
 } from './contracts';
 import { canReuseActionCommand, isReplayableActionPhase } from './contracts';
+import { createSuggestionRecords } from './suggestionRecords';
 import { broadcastHistoryChanged } from './historyNotifications';
 import {
   getEventMeta,
@@ -27,11 +29,7 @@ import {
   isProcessStartedSuggestionEvent,
   isSuggestionReactionCommittedEvent,
 } from './eventContracts';
-import {
-  applyOverlayServerEvent,
-  createOverlaySnapshot,
-  toOverlaySnapshotPayload,
-} from './overlayState';
+import { applyOverlayServerEvent, createOverlaySnapshot } from './overlayState';
 
 const ACTION_COMMAND_PRESTART_REPLAY_INTERVAL_MS = 2_000;
 type TimerApi = {
@@ -39,15 +37,10 @@ type TimerApi = {
   clearTimeout: typeof globalThis.clearTimeout;
 };
 
-type OverlayRecord = {
-  snapshot: OverlaySnapshot;
-  executeEnvelope: ExecuteActionClientEvent | null;
-};
-
 export function createOrchestrationRendererBridge(params: {
   notificationWindow: NotificationWindowApi;
   getMainWindow: () => BrowserWindow | null;
-  readLatestActionConversationPage: (actionId: string) => Promise<ActionConversationPage>;
+  latestActionPages: ActionLatestPages;
   sendFromRenderer: (message: unknown) => Promise<void>;
   requestResume: (request: ResumeProcessRequest) => void;
   getUiLanguage: () => 'en' | 'ja';
@@ -62,7 +55,11 @@ export function createOrchestrationRendererBridge(params: {
 
   let lastReplayedSessionId: string | null = null;
   let prestartReplayTimer: ReturnType<typeof setTimeout> | null = null;
-  const overlayRecords = new Map<string, OverlayRecord>();
+  const suggestionRecords = createSuggestionRecords({
+    notificationWindow,
+    getMainWindow: params.getMainWindow,
+    onRecordsChanged: () => syncPrestartReplayLoop(),
+  });
   const liveProcesses = new Map<string, string>();
 
   function sendActionLiveUpdate(update: ActionLiveUpdate): void {
@@ -98,53 +95,13 @@ export function createOrchestrationRendererBridge(params: {
   }
 
   const actionLive = createActionLiveCoordinator({
-    readLatestPage: params.readLatestActionConversationPage,
+    latestPages: params.latestActionPages,
     publish: sendActionLiveUpdate,
     surfaceRefreshError: (actionId, error) => {
       console.error(`Failed to refresh Action conversation ${actionId}:`, error);
     },
   });
   notificationWindow.setActionLiveSnapshotGetter(actionLive.getSnapshot);
-
-  function storeOverlayRecord(record: OverlayRecord): void {
-    const normalized = {
-      ...record.snapshot,
-      updatedAt: record.snapshot.updatedAt ?? new Date().toISOString(),
-    };
-    overlayRecords.set(String(normalized.suggestionId), {
-      snapshot: normalized,
-      executeEnvelope: record.executeEnvelope,
-    });
-    try {
-      notificationWindow.setOverlaySnapshot(
-        String(normalized.suggestionId),
-        toOverlaySnapshotPayload(normalized)
-      );
-    } catch {
-      // no-op
-    }
-    syncPrestartReplayLoop();
-  }
-
-  function storeOverlaySnapshot(snapshot: OverlaySnapshot): void {
-    const current = overlayRecords.get(String(snapshot.suggestionId));
-    storeOverlayRecord({
-      snapshot,
-      executeEnvelope:
-        snapshot.actionPhase !== 'terminal' && current?.snapshot.commandId === snapshot.commandId
-          ? current.executeEnvelope
-          : null,
-    });
-  }
-
-  function getOverlaySnapshot(suggestionId: string): OverlaySnapshot | null {
-    return overlayRecords.get(String(suggestionId))?.snapshot ?? null;
-  }
-
-  function clearOverlaySnapshot(suggestionId: string): void {
-    overlayRecords.delete(String(suggestionId));
-    syncPrestartReplayLoop();
-  }
 
   function syncCommandStateFromEvent(
     message: OrchestrationServerEvent,
@@ -164,16 +121,16 @@ export function createOrchestrationRendererBridge(params: {
       meta?.suggestion_id ?? (data as Record<string, unknown>).suggestion_id
     );
     if (!suggestionId) return;
+    const next = applyOverlayServerEvent(suggestionRecords.getSnapshot(suggestionId), stateEvent);
     if (isSuggestionReactionCommittedEvent(stateEvent) && stateEvent.data.reaction === 'rejected') {
-      clearOverlaySnapshot(suggestionId);
+      suggestionRecords.dismiss(next);
       return;
     }
-    const current = getOverlaySnapshot(suggestionId);
-    storeOverlaySnapshot(applyOverlayServerEvent(current, stateEvent));
+    suggestionRecords.storeSnapshot(next);
   }
 
   function hasOutstandingPrestartCommands(): boolean {
-    return Array.from(overlayRecords.values()).some(
+    return Array.from(suggestionRecords.values()).some(
       (record) =>
         record.executeEnvelope !== null && isReplayableActionPhase(record.snapshot.actionPhase)
     );
@@ -198,7 +155,7 @@ export function createOrchestrationRendererBridge(params: {
   }
 
   async function replayOutstandingCommands(): Promise<void> {
-    for (const record of overlayRecords.values()) {
+    for (const record of suggestionRecords.values()) {
       if (!record.executeEnvelope || !isReplayableActionPhase(record.snapshot.actionPhase))
         continue;
       try {
@@ -418,7 +375,7 @@ export function createOrchestrationRendererBridge(params: {
     }
     notificationWindow.clearActionAssociations();
     liveProcesses.clear();
-    overlayRecords.clear();
+    suggestionRecords.reset();
     clearPrestartReplayLoop();
     actionLive.clearAll();
   }
@@ -439,20 +396,21 @@ export function createOrchestrationRendererBridge(params: {
   // would deliver no lifecycle, step, or approval events. A nonterminal page
   // therefore resumes the Action root process the latest run names: the backend
   // resolves that resume from durable process events, not from the WS session
-  // that started the run.
-  function refreshAndResumeActionConversation(actionId: string): void {
-    void (async () => {
-      await actionLive.refresh(actionId);
-      const action = actionLive.getSnapshot(actionId)?.page?.action;
-      if (action?.status !== 'queued' && action?.status !== 'processing') return;
-      if (action.latest_run_id === null || hasLiveActionProcess(actionId)) return;
-      params.requestResume({
-        kind: 'action',
-        actionId,
-        processId: action.latest_run_id,
-        fromStart: true,
-      });
-    })();
+  // that started the run. A failed read resumes nothing, so the caller learns of it.
+  async function refreshAndResumeActionConversation(
+    actionId: string
+  ): Promise<ActionLiveRefreshOutcome> {
+    const outcome = await actionLive.refresh(actionId);
+    const action = actionLive.getSnapshot(actionId)?.page?.action;
+    if (action?.status !== 'queued' && action?.status !== 'processing') return outcome;
+    if (action.latest_run_id === null || hasLiveActionProcess(actionId)) return outcome;
+    params.requestResume({
+      kind: 'action',
+      actionId,
+      processId: action.latest_run_id,
+      fromStart: true,
+    });
+    return outcome;
   }
 
   function handleApprovalDecisionSettled(identity: {
@@ -470,8 +428,7 @@ export function createOrchestrationRendererBridge(params: {
     const normalizedSuggestionId = params.normalizeId(request.suggestionId);
     if (!normalizedSuggestionId) return null;
 
-    const current = overlayRecords.get(normalizedSuggestionId);
-    const previousRecord = current ?? null;
+    const current = suggestionRecords.getRecord(normalizedSuggestionId);
     const shouldReuse = Boolean(current && canReuseActionCommand(current.snapshot.actionPhase));
     const currentCommandId = shouldReuse ? params.normalizeId(current?.snapshot.commandId) : null;
     const requestedCommandId = params.normalizeId(request.commandId);
@@ -496,6 +453,7 @@ export function createOrchestrationRendererBridge(params: {
             language: params.getUiLanguage(),
             supplement: request.supplement,
             supplement_project_refs: request.supplementProjectRefs,
+            supplement_work_refs: request.supplementWorkRefs,
             approval_mode: request.approvalMode,
             images: request.images,
             files: request.files,
@@ -515,22 +473,24 @@ export function createOrchestrationRendererBridge(params: {
             isLive: true,
           });
 
-    storeOverlayRecord({ snapshot: nextSnapshot, executeEnvelope });
+    suggestionRecords.store({ snapshot: nextSnapshot, executeEnvelope });
     try {
       await params.sendFromRenderer(executeEnvelope);
     } catch (error) {
-      if (previousRecord) storeOverlayRecord(previousRecord);
-      else clearOverlaySnapshot(normalizedSuggestionId);
+      if (current) suggestionRecords.store(current);
+      else suggestionRecords.clear(normalizedSuggestionId);
       throw error;
     }
-    return getOverlaySnapshot(normalizedSuggestionId);
+    return suggestionRecords.getSnapshot(normalizedSuggestionId);
   }
 
   return {
     acceptAction,
+    adoptSuggestionSnapshot: suggestionRecords.adoptPersisted,
+    recordSuggestionReply: suggestionRecords.recordReply,
     forwardEventToRenderers,
     forwardStatusToRenderers,
-    getOverlaySnapshot,
+    getOverlaySnapshot: suggestionRecords.getSnapshot,
     refreshActionConversation,
     refreshAndResumeActionConversation,
     handleApprovalDecisionSettled,

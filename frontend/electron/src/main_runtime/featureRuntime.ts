@@ -8,7 +8,10 @@ import {
   nativeImage,
   shell,
 } from 'electron';
+import { execFile } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { createAuthCoordinator } from '../auth/authCoordinator';
 import type { createLocalBackendAuthContextController } from '../auth/localBackendAuthContextController';
 import type { LocalOwner } from '../auth/localRuntimeState';
@@ -25,9 +28,10 @@ import { createActionReadState } from '../history/actionReadState';
 import { broadcastHistoryChanged } from '../orchestration/historyNotifications';
 import { createHistoryFetcher } from '../history/historyFetch';
 import { createHistoryItemDeleter } from '../history/historyItemDelete';
+import { createHistoryItemReader } from '../history/historyItemRead';
 import type { MainContext } from '../ipc/context';
 import { createOverlayBootstrapFetcher } from '../history/overlayBootstrapFetch';
-import { startMainIpcRuntime } from './ipcBootstrap';
+import { startMainIpcRuntime, type MainIpcRuntime } from './ipcBootstrap';
 import { createLocalBackendClient } from '../localBackend/client';
 import type { NotificationWindowApi, UiLanguage } from '../orchestration/contracts';
 import {
@@ -54,6 +58,7 @@ import {
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
+import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
@@ -85,13 +90,15 @@ type FeatureRuntimeParams = {
   getLocalApiToken: () => string | null;
   updateUi: ReturnType<typeof createUpdateUiManager>;
   getMainWindow: () => BrowserWindow | null;
-  createMainWindow: () => void;
+  /** Creates the main window, on `hashRoute` when given. */
+  createMainWindow: (hashRoute?: string) => void;
   resolveUiSettingsPath: (userId: string | null) => string;
   getUiLanguage: () => UiLanguage;
   setUiLanguage: (language: UiLanguage) => void;
   logger: LoggerLike | null;
 };
 const ACTION_CONVERSATION_LATEST_PAGE_LIMIT = 25;
+const execFileAsync = promisify(execFile);
 
 function safely<T>(operation: () => T, fallback: T): T {
   try {
@@ -119,6 +126,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     hasOverlayWindow: params.notificationWindow.hasOverlayWindow,
     refreshAndResumeConversation: (actionId) =>
       orchestration.refreshAndResumeActionConversation(actionId),
+    revealOverlay: params.notificationWindow.revealOverlayWindow,
     holdsCaptureOsPermissions,
     // The main window is where the recording screen lives, and it reads the pending
     // request set just above — so a window the user closed is created rather than
@@ -161,7 +169,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getOwnerId: params.supabaseWiring.getLocalOwnerId,
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     getUiLanguage: params.getUiLanguage,
-    readLatestActionConversationPage: latestActionPageReader.read,
+    latestActionPages: latestActionPageReader,
     // `requestJson` is defined just below; the responder only calls it once a
     // capture request actually arrives, long after this module finished loading.
     respondToScreenCapture: createScreenCaptureResponder({
@@ -187,6 +195,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     getCompletionUnreadSnapshot: actionReadState.snapshotCompletionUnread,
   });
+  const historyReadItem = createHistoryItemReader({ requestJson });
   const historyDeleteItem = createHistoryItemDeleter({
     requestJson,
     closeConversationWindow: ({ kind, id }) => {
@@ -222,7 +231,22 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       : await dialog.showOpenDialog(options);
     if (result.canceled || result.filePaths.length === 0) return { canceled: true, path: null };
     lastWorkspaceFolderParent = path.dirname(result.filePaths[0]);
-    return { canceled: false, path: result.filePaths[0] };
+    // Resolved as the local backend resolves a folder's canonical_real_path, so the renderer can
+    // tell a folder that is already registered: registering it again replaces its links.
+    return { canceled: false, path: await realpath(result.filePaths[0]) };
+  };
+  const chooseApp = async (): Promise<string | null> => {
+    const mainWindow = params.getMainWindow();
+    // An app is a bundle macOS shows as one file; the filter lists nothing else.
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      defaultPath: '/Applications',
+      filters: [{ name: 'Applications', extensions: ['app'] }],
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
   };
   const openExternalUrl = createExternalUrlOpener({
     isDevRuntime: params.isDevRuntime,
@@ -309,13 +333,14 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     actionReadState.setSubject(owner.id);
   };
 
-  const registerMainIpc = (): void => {
+  const registerMainIpc = (): MainIpcRuntime =>
     startMainIpcRuntime({
       notificationWindow: params.notificationWindow,
       context: {
         ipcMain,
         aiConnection: params.aiConnection,
         getMainWindow: params.getMainWindow,
+        createMainWindow: params.createMainWindow,
         openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
         openActionConversationOverlay: conversationOverlay.openActionConversationOverlay,
         getAllWindows: () => BrowserWindow.getAllWindows(),
@@ -331,12 +356,17 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         startBrowserLogin: params.authCoordinator.startBrowserLogin,
         historyFetch,
         historyDeleteItem,
+        historyReadItem,
         markCompletionViewed: (request) => {
           actionReadState.markCompletionViewed(request);
           broadcastHistoryChanged(params.getMainWindow(), { source: 'read_state' });
         },
         actionFiles: {
           open: ({ path }) => shell.showItemInFolder(path),
+          openInApp: (realPath) => shell.openPath(realPath),
+          runFile: async (file, args, options) =>
+            (await execFileAsync(file, [...args], { ...options, encoding: 'utf8' })).stdout,
+          chooseApp,
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {
@@ -347,12 +377,13 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           ...actions,
           readConversationPage: (request) =>
             request.cursor === null && request.limit === ACTION_CONVERSATION_LATEST_PAGE_LIMIT
-              ? latestActionPageReader.read(request.actionId)
+              ? latestActionPageReader.read(request.actionId).then(({ page }) => page)
               : actions.readConversationPage(request),
           getCurrentSubjectId: getUserId,
           resolveOverlayIdForSender: params.notificationWindow.resolveOverlayIdForSender,
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
+          refreshAndResumeActionConversation: orchestration.refreshAndResumeActionConversation,
         },
         chat: {
           ...createChatFetcher({ requestJson, getUserId }),
@@ -395,6 +426,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         workspaceSettingsUpdateCommandNetwork: workspaceSettingsFetch.updateCommandNetwork,
         workspaceSettingsCreateOrganization: workspaceSettingsFetch.createOrganization,
         workspaceSettingsCreateProject: workspaceSettingsFetch.createProject,
+        workspaceSettingsRenameProject: workspaceSettingsFetch.renameProject,
         workspaceSettingsCreateFolder: workspaceSettingsFetch.createFolder,
         workspaceSettingsReorderProjects: workspaceSettingsFetch.reorderProjects,
         workspaceSettingsDeleteOrganization: workspaceSettingsFetch.deleteOrganization,
@@ -404,6 +436,11 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         workspaceSettingsUpdateFolderLinks: workspaceSettingsFetch.updateFolderLinks,
         workspaceSettingsUpdateReadAccessScope: workspaceSettingsFetch.updateReadAccessScope,
         workspaceSettingsSelectFolder: selectWorkspaceFolder,
+        workspaceSettingsOpenFolder: (folderId) =>
+          openRegisteredWorkspaceFolder(folderId, {
+            getSettings: workspaceSettingsFetch.get,
+            openPath: (realPath) => shell.openPath(realPath),
+          }),
         screenshotSync,
         startScreenshots,
         readCaptureGateState: conversationOverlay.readGateState,
@@ -418,6 +455,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         wsGetStatus: () => ({ status: orchestration.isConnected() ? 'connected' : 'disconnected' }),
         enqueueResumeRequest: (payload) => orchestration.enqueueResumeRequest(payload),
         resolveOverlayBootstrap,
+        adoptSuggestionSnapshot: orchestration.adoptSuggestionSnapshot,
+        recordSuggestionReply: orchestration.recordSuggestionReply,
         submitApprovalDecision: async (payload) => {
           const subjectId = getUserId();
           if (subjectId === null) throw new Error('Missing authenticated user id.');
@@ -433,7 +472,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         createNotificationIpcHandlers: params.notificationWindow.createNotificationIpcHandlers,
       },
     });
-  };
 
   return {
     applyLocalOwner,
@@ -461,6 +499,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getGlobalShortcutState: shortcutController.getState,
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
+    readActionConversationPage: actions.readConversationPage,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,
     startScreenshots,

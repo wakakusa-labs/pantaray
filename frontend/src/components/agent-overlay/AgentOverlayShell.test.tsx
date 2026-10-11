@@ -3,32 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
+import { UserItem } from '@/components/action-conversation/UserMessage';
 import AgentOverlayShell from './AgentOverlayShell';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 describe('AgentOverlayShell', () => {
-  it('does not show suggestion status text even while stop action is visible', () => {
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlayShell
-          isVisible={true}
-          isContentVisible={true}
-          isExpanded={true}
-          content={null}
-          suggestionText="提案です"
-          isSuggestionStreamFinished={true}
-          actionText=""
-          isActionStreamFinished={false}
-          approvalUiState="hidden"
-          showBusyIndicator={true}
-          showFooterActions={true}
-        />
-      </UiLanguageProvider>
-    );
-
-    expect(screen.queryByText('承認')).toBeNull();
-  });
-
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
     const onConversationAction = vi.fn();
     const onConversationLink = vi.fn();
@@ -68,7 +49,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={false}
-          showFooterActions={false}
           conversationContent={
             <>
               <button
@@ -162,7 +142,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={true}
-          showFooterActions={false}
         />
       </UiLanguageProvider>
     );
@@ -173,9 +152,48 @@ describe('AgentOverlayShell', () => {
     expect(shell.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 
-  it('opens the shown Action in the main chat from the header once the Action exists', async () => {
-    const onShowChat = vi.fn(async () => undefined);
-    const renderShell = (chatActionId: string | null) => (
+  it('names each header button in its tooltip, and opens the main window with the pair of Open small', () => {
+    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
+    const { container } = render(
+      <UiLanguageProvider initialLanguage="ja">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={false}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          actionId="action-1"
+          onOpenInMainWindow={() => {}}
+          conversationCopy={{ status: 'idle', copy: () => {} }}
+          onToggleExpand={() => {}}
+          onClose={() => {}}
+        />
+      </UiLanguageProvider>
+    );
+    const header = within(container);
+    // The link, the main window, the copy; then the panel's own expand and hide.
+    const buttons = expectIconButtonTooltips(container);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'リンクをコピー',
+      'メイン画面で開く',
+      '会話をコピー',
+      '展開する',
+      '非表示',
+    ]);
+    buttons.forEach(expectTooltipIsName);
+    const openInMain = header.getByRole('button', { name: 'メイン画面で開く' });
+    expect(openInMain.querySelector('svg.lucide-maximize-2')).not.toBeNull();
+  });
+
+  it('copies the link of the suggestion it shows, then of the Action that took its place', async () => {
+    const writeText = vi.fn(async () => undefined);
+    window.electron = { clipboard: { writeText } } as unknown as Window['electron'];
+    const renderShell = (actionId: string | null, suggestionId: string | null) => (
       <UiLanguageProvider initialLanguage="ja">
         <AgentOverlayShell
           isVisible={true}
@@ -187,28 +205,25 @@ describe('AgentOverlayShell', () => {
           actionText=""
           isActionStreamFinished={false}
           approvalUiState="hidden"
-          showBusyIndicator={true}
-          showFooterActions={false}
-          chatActionId={chatActionId}
-          onShowChat={onShowChat}
+          showBusyIndicator={false}
+          actionId={actionId}
+          suggestionId={suggestionId}
         />
       </UiLanguageProvider>
     );
-    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
-    const { container, rerender } = render(renderShell(null));
+    const { container, rerender } = render(renderShell(null, null));
     const shell = within(container);
-    // A Suggestion not yet accepted has no Action to show.
-    expect(shell.queryByRole('button', { name: 'チャットで見る' })).toBeNull();
+    expect(shell.queryByRole('button', { name: 'リンクをコピー' })).toBeNull();
 
-    rerender(renderShell('action-1'));
-    const button = shell.getByRole('button', { name: 'チャットで見る' });
-    expect(button).toHaveAttribute('title', 'チャットで見る');
-    expect(button).toHaveTextContent('');
-    button.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(onShowChat).toHaveBeenCalledWith({ actionId: 'action-1' });
-    // The busy dots are gone, but the running state is still announced.
-    expect(shell.getByRole('status')).toHaveTextContent('実行中');
+    rerender(renderShell(null, 'sug-1'));
+    await userEvent.click(shell.getByRole('button', { name: 'リンクをコピー' }));
+    rerender(renderShell('action-1', 'sug-1'));
+    await userEvent.click(shell.getByRole('button', { name: 'リンクをコピー' }));
+    expect(writeText.mock.calls).toEqual([
+      ['pantaray://suggestion/sug-1'],
+      ['pantaray://task/action-1'],
+    ]);
+    delete (window as { electron?: unknown }).electron;
   });
 
   it('keeps the composer out of the scrolling conversation and never puts Stop in the header', () => {
@@ -227,7 +242,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={true}
-          showFooterActions={false}
           conversationContent={<p>long conversation</p>}
           composer={<textarea aria-label="Message" />}
         />
@@ -271,7 +285,6 @@ describe('AgentOverlayShell', () => {
             },
           ]}
           showBusyIndicator={false}
-          showFooterActions={false}
           conversationContent={<p>long conversation</p>}
           composer={<textarea aria-label="Message" />}
         />
@@ -320,7 +333,6 @@ describe('AgentOverlayShell', () => {
             isActionStreamFinished={false}
             approvalUiState="hidden"
             showBusyIndicator={false}
-            showFooterActions={false}
             conversationContent={<p>conversation</p>}
             composer={<textarea aria-label="Message" />}
           />
@@ -353,7 +365,6 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={true}
           approvalUiState="hidden"
           showBusyIndicator={false}
-          showFooterActions={false}
           onClose={onClose}
         />
       </UiLanguageProvider>
@@ -364,5 +375,53 @@ describe('AgentOverlayShell', () => {
     fireEvent.click(button);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("opens a sent message's task in the main window, as Open in main window does", () => {
+    const onOpenInMainWindow = vi.fn();
+    const sent: ActionConversationUserItem = {
+      kind: 'user',
+      source: 'canonical',
+      key: 'sent',
+      visibility: 'always',
+      entry: {
+        step_kind: 'user',
+        chat_note: null,
+        approved_suggestion: null,
+        step_id: 'step-sent',
+        step_number: 1,
+        message_id: 'message-sent',
+        accepted_sequence: 1,
+        content: 'Check the quote',
+        images: [],
+        project_refs: [],
+        work_refs: [{ kind: 'action', id: 'action-2', title: 'Fix the quote', start: 10, end: 15 }],
+        status: 'adopted',
+      },
+    };
+    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
+    const { container } = render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={true}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          actionId="action-1"
+          onOpenInMainWindow={onOpenInMainWindow}
+          conversationContent={<UserItem item={sent} />}
+          onToggleExpand={() => {}}
+        />
+      </UiLanguageProvider>
+    );
+
+    fireEvent.click(within(container).getByRole('link', { name: 'Open Fix the quote' }));
+
+    expect(onOpenInMainWindow).toHaveBeenCalledExactlyOnceWith({ kind: 'action', id: 'action-2' });
   });
 });

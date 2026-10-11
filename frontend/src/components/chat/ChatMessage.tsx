@@ -4,7 +4,8 @@ import { useId } from 'react';
 import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/chat/chatContracts';
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
 import { AttachedImages } from '@/components/action-conversation/AttachedImages';
-import { ProjectRefText } from '@/components/action-conversation/ProjectRefText';
+import { QuotedMessageText } from '@/components/action-conversation/QuotedMessageText';
+import { sentMessageRefs } from '@/components/action-conversation/sentMessageRefs';
 import { USER_MESSAGE_COPY } from '@/components/action-conversation/userMessageCopy';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { useI18n } from '@/context/useI18n';
@@ -13,7 +14,6 @@ import type { MessageKey } from '@/i18n/types';
 
 import { ChatCard } from './ChatCard';
 import {
-  cardElementId,
   cardPosition,
   cardWorkKey,
   isChatMessage,
@@ -79,9 +79,9 @@ export function ChatMessage({
   time,
   latestCards,
   works,
-  openWork,
   t,
   onOpenCard,
+  onOpenWork,
   onQuote,
   onJumpToQuote,
   found,
@@ -92,9 +92,10 @@ export function ChatMessage({
   time: string;
   latestCards: ReadonlyMap<WorkKey, string>;
   works: ReadonlyMap<WorkKey, ChatWorkState>;
-  openWork: WorkKey | null;
   t: Translate;
   onOpenCard: (card: ChatCardData) => void;
+  /** Opens a task or suggestion the user named in their message. */
+  onOpenWork: (work: WorkKey) => void;
   /** Starts a reply that quotes this message; null while the composer cannot take one. */
   onQuote: (() => void) | null;
   /** Takes the chat to the message this one quotes. */
@@ -120,13 +121,17 @@ export function ChatMessage({
     >
       <div className="chat-stack">
         <div className="chat-bubble">
-          {quoteItemId !== null ? (
+          {/* Replies saved before quotes were limited to messages may quote a task event,
+              which the chat does not draw. */}
+          {quoteItemId !== null && (quoted === undefined || isChatMessage(quoted)) ? (
             <QuotedMessage quoted={quoted} t={t} onJump={() => onJumpToQuote(quoteItemId)} />
           ) : null}
           {mine ? (
-            <p className="chat-bubble__text">
-              <ProjectRefText text={content.text} refs={content.project_refs} />
-            </p>
+            <QuotedMessageText
+              text={content.text}
+              refs={sentMessageRefs(content.project_refs, content.work_refs ?? [], t, onOpenWork)}
+              className="chat-bubble__text"
+            />
           ) : (
             <MarkdownBlock text={content.text} isStreamFinished />
           )}
@@ -152,7 +157,7 @@ export function ChatMessage({
             type="button"
             className="chat-retry"
             aria-label={retry.label}
-            title={retry.label}
+            data-tooltip={retry.label}
             disabled={retry.disabled}
             onClick={retry.onRetry}
           >
@@ -165,11 +170,9 @@ export function ChatMessage({
               return (
                 <ChatCard
                   key={cardPosition(item.item_id, index)}
-                  id={cardElementId(cardPosition(item.item_id, index))}
                   card={card}
                   work={works.get(work)}
                   isLatest={latestCards.get(work) === cardPosition(item.item_id, index)}
-                  isOpen={openWork === work}
                   t={t}
                   onOpen={() => onOpenCard(card)}
                 />
@@ -185,7 +188,7 @@ export function ChatMessage({
           type="button"
           className="chat-reply"
           aria-label={t('history.chat.quote.reply')}
-          title={t('history.chat.quote.reply')}
+          data-tooltip={t('history.chat.quote.reply')}
           onClick={onQuote}
         >
           <Reply size={15} aria-hidden="true" />

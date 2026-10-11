@@ -185,6 +185,31 @@ async def test_initialize_context_projects_persisted_user_message_as_first_step(
 
 
 @pytest.mark.asyncio
+async def test_the_note_on_a_stopped_run_follows_the_opening_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = MockActionAgentRepository()
+    agent = _build_agent(repo)
+    await _save_suggestion(repo)
+    state = _state_with_execution_context(
+        _bootstrap_execution_context(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    )
+    runtime = _runtime(agent)
+    request = runtime.request.model_copy(  # type: ignore[attr-defined]
+        update={"stopped_run_note": "The user stopped the previous run."}
+    )
+
+    updated = await initialize_context(  # type: ignore[arg-type]
+        agent, state, _runtime(agent, request=request)
+    )
+
+    text = updated["history_by_scope"]["S"][0]["user_request_text"]
+    assert text.startswith("SUG\n\nSuggestion metadata:")
+    assert text.endswith("\n\nThe user stopped the previous run.")
+
+
+@pytest.mark.asyncio
 async def test_initialize_context_projects_followup_to_restored_history_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

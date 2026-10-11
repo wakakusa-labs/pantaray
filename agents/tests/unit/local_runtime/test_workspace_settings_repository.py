@@ -19,6 +19,9 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
 from pantaray_agents.local_runtime.tooling.repository.workspace_project_order import (
     replace_workspace_project_order,
 )
+from pantaray_agents.local_runtime.tooling.repository.workspace_project_rename import (
+    rename_workspace_project,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
@@ -34,6 +37,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_deletio
     delete_workspace_folder,
     delete_workspace_organization,
     delete_workspace_project,
+)
+from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
+    WorkspaceProjectNameTakenError,
 )
 
 from .action_seed import insert_agent_action
@@ -129,8 +135,10 @@ def test_workspace_settings_crud_and_duplicate_folder_update(tmp_path: Path) -> 
 
 def test_workspace_settings_deletes_entities_and_cascades_links(tmp_path: Path) -> None:
     db_path = _bootstrap_db(tmp_path)
-    folder_path = tmp_path / "repo"
-    folder_path.mkdir()
+    own_path = tmp_path / "repo"
+    shared_path = tmp_path / "shared"
+    own_path.mkdir()
+    shared_path.mkdir()
 
     organization = create_workspace_organization(
         db_path=db_path,
@@ -139,39 +147,50 @@ def test_workspace_settings_deletes_entities_and_cascades_links(tmp_path: Path) 
         display_name="Acme",
         now=TIMESTAMP,
     )
-    project = create_workspace_project(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        display_name="Core",
-        organization_ids=(organization.organization_id,),
-        now=TIMESTAMP,
+    core, other = (
+        create_workspace_project(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            display_name=name,
+            organization_ids=(organization.organization_id,),
+            now=TIMESTAMP,
+        )
+        for name in ("Core", "Other")
     )
-    folder = create_workspace_folder(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        real_path=folder_path,
-        display_name="Repo",
-        organization_ids=(organization.organization_id,),
-        project_ids=(project.project_id,),
-        now=TIMESTAMP,
-    )
+    for path, project_ids in (
+        (own_path, (core.project_id,)),
+        (shared_path, (core.project_id, other.project_id)),
+    ):
+        create_workspace_folder(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            real_path=path,
+            display_name=path.name,
+            organization_ids=(),
+            project_ids=project_ids,
+            now=TIMESTAMP,
+        )
 
     delete_workspace_project(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id="user-1",
-        project_id=project.project_id,
+        project_id=core.project_id,
     )
 
-    settings_after_project_delete = list_workspace_settings(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
+    # The folder only Core held is unregistered with it; the shared one stays with Other.
+    after_project_delete = list_workspace_settings(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
     )
-    assert settings_after_project_delete.projects == ()
-    assert settings_after_project_delete.folders[0].project_ids == ()
+    assert [project.project_id for project in after_project_delete.projects] == [
+        other.project_id
+    ]
+    assert [
+        (folder.display_name, folder.project_ids)
+        for folder in after_project_delete.folders
+    ] == [("shared", (other.project_id,))]
 
     delete_workspace_organization(
         db_path=db_path,
@@ -179,28 +198,24 @@ def test_workspace_settings_deletes_entities_and_cascades_links(tmp_path: Path) 
         user_id="user-1",
         organization_id=organization.organization_id,
     )
-
-    settings_after_organization_delete = list_workspace_settings(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
+    after_organization_delete = list_workspace_settings(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
     )
-    assert settings_after_organization_delete.organizations == ()
-    assert settings_after_organization_delete.folders[0].organization_ids == ()
+    assert after_organization_delete.organizations == ()
+    assert after_organization_delete.projects[0].organization_ids == ()
 
     delete_workspace_folder(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id="user-1",
-        folder_id=folder.folder_id,
+        folder_id=after_project_delete.folders[0].folder_id,
     )
-
-    settings_after_folder_delete = list_workspace_settings(
+    delete_workspace_project(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id="user-1",
+        project_id=other.project_id,
     )
-    assert settings_after_folder_delete.folders == ()
 
     with sqlite3.connect(db_path) as connection:
         assert _table_count(connection, "workspace_projects") == 0
@@ -209,6 +224,42 @@ def test_workspace_settings_deletes_entities_and_cascades_links(tmp_path: Path) 
         assert _table_count(connection, "workspace_project_organizations") == 0
         assert _table_count(connection, "workspace_folder_organizations") == 0
         assert _table_count(connection, "workspace_folder_projects") == 0
+
+
+def test_workspace_project_create_refuses_a_taken_name_and_keeps_that_project(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    organization = create_workspace_organization(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        display_name="Acme",
+        now=TIMESTAMP,
+    )
+    existing = create_workspace_project(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        display_name="Core",
+        organization_ids=(organization.organization_id,),
+        now=TIMESTAMP,
+    )
+
+    with pytest.raises(WorkspaceProjectNameTakenError):
+        create_workspace_project(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            display_name=" Core ",
+            organization_ids=(),
+            now=TIMESTAMP,
+        )
+
+    settings = list_workspace_settings(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
+    )
+    assert settings.projects == (existing,)
 
 
 def test_workspace_settings_persists_read_access_scope(tmp_path: Path) -> None:
@@ -365,6 +416,72 @@ def test_workspace_settings_replaces_existing_context_links(tmp_path: Path) -> N
             (folder.folder_id,),
         ).fetchone()
     assert direct_link_count == (0,)
+
+
+def test_workspace_project_rename_keeps_links_and_refuses_a_taken_name(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    organization = create_workspace_organization(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        display_name="Xer",
+        now=TIMESTAMP,
+    )
+    alpha, beta = (
+        create_workspace_project(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            display_name=name,
+            organization_ids=organization_ids,
+            now=TIMESTAMP,
+        )
+        for name, organization_ids in (
+            ("Alpha", (organization.organization_id,)),
+            ("Beta", ()),
+        )
+    )
+
+    renamed = rename_workspace_project(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        project_id=alpha.project_id,
+        display_name="  Gamma ",
+        now=TIMESTAMP,
+    )
+    with pytest.raises(WorkspaceProjectNameTakenError):
+        rename_workspace_project(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            project_id=beta.project_id,
+            display_name="Gamma",
+            now=TIMESTAMP,
+        )
+    with pytest.raises(MigrationError):
+        rename_workspace_project(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-2",
+            project_id=alpha.project_id,
+            display_name="Delta",
+            now=TIMESTAMP,
+        )
+
+    assert renamed.display_name == "Gamma"
+    assert renamed.organization_ids == (organization.organization_id,)
+    settings = list_workspace_settings(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
+    )
+    assert [
+        (project.display_name, project.sort_order) for project in settings.projects
+    ] == [
+        ("Gamma", alpha.sort_order),
+        ("Beta", beta.sort_order),
+    ]
 
 
 def test_workspace_project_order_is_contiguous_and_new_projects_append(

@@ -139,11 +139,13 @@ class ActionResumeService:
                     )
                 raw_anchor = checkpoint_row.metadata.get("approval_anchor_step_id")
                 anchor_step_id = raw_anchor if isinstance(raw_anchor, str) else None
-                approval_resume_advanced = (
-                    anchor_step_id is not None
-                    and anchor_step_id
-                    != cast(dict[str, object], checkpoint_row.data).get("step_id")
-                )
+                # The approval applies only to the checkpoint that still names
+                # it; without an anchor the resumed run already consumed it.
+                approval_resume_advanced = self.is_approval_resume_request(
+                    request
+                ) and anchor_step_id != cast(
+                    dict[str, object], checkpoint_row.data
+                ).get("step_id")
                 restored_state = self.apply_latest_runtime_state_config(
                     checkpoint_state=checkpoint_state,
                     state_config=state_config,

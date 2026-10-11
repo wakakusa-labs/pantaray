@@ -15,6 +15,7 @@ from ..storage.transactions import (
 from .action_approval_projection import (
     append_pending_approval_snapshot_in_connection,
 )
+from .action_subagent_ownership import owned_child_sql
 from .action_subagent_pause import cancel_paused_action_subagent_in_connection
 from .action_subagent_terminal import (
     build_action_subagent_canceled_result,
@@ -178,9 +179,9 @@ def _require_parent_child_authority(
     """
 
     row = connection.execute(
-        """
+        f"""
         SELECT child.process_id,
-               child.parent_process_id=parent.process_id
+               {owned_child_sql("parent.process_id")}
                AND child.action_id=parent.action_id
                AND child.user_id=parent.user_id
                AND child.kind='action_subagent' AS owned_child,

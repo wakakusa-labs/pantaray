@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -13,6 +14,7 @@ from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
 from ..storage.transactions import immediate_transaction
+from .action_subagent_ownership import owned_child_sql
 from .job_types import LOCAL_ACTION_JOB_TYPE
 from .process_events import append_process_event_in_connection
 from .utc_timestamps import now_utc_iso
@@ -24,6 +26,20 @@ ACTION_SUBAGENT_MESSAGE_EVENT = "action_subagent_message"
 ACTION_SUBAGENT_TOOL_EVENT = "action_subagent_tool"
 # Every parent message before it went into the child's conversation here.
 ACTION_SUBAGENT_DELIVERED_EVENT = "action_subagent_messages_delivered"
+ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
+ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
+ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
+# On a continuation: which finished child and message it carries on. Not history.
+ACTION_SUBAGENT_CONTINUES_EVENT = "action_subagent_continues"
+# The rows that rebuild the child's conversation, and nothing of its lifecycle.
+ACTION_SUBAGENT_HISTORY_EVENTS = (
+    ACTION_SUBAGENT_MESSAGE_EVENT,
+    ACTION_SUBAGENT_DELIVERED_EVENT,
+    ACTION_SUBAGENT_TURN_EVENT,
+    ACTION_SUBAGENT_TOOL_EVENT,
+    ACTION_SUBAGENT_NOTICE_EVENT,
+    ACTION_SUBAGENT_AGENTS_MD_EVENT,
+)
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled"})
 
 
@@ -56,7 +72,9 @@ class ActionSubagentMessageRequest:
 
 def send_action_subagent_message(
     *, db_path: Path, busy_timeout_ms: int, request: ActionSubagentMessageRequest
-) -> None:
+) -> bool:
+    """Accept the message, or report ``False`` for a finished child, which takes none."""
+
     if busy_timeout_ms <= 0:
         raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
     _validate_request(request)
@@ -82,9 +100,7 @@ def send_action_subagent_message(
                         "message_id is already bound to different content"
                     )
             elif child_status in _TERMINAL_STATUSES:
-                raise ActionSubagentMessageInputError(
-                    "terminal Action subagent cannot accept a new message"
-                )
+                return False
             else:
                 append_process_event_in_connection(
                     connection=connection,
@@ -97,6 +113,114 @@ def send_action_subagent_message(
                     },
                     created_at=now_utc_iso(),
                 )
+    return True
+
+
+def find_action_subagent_continuation_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    from_process_id: str,
+    message_id: str,
+    content: str,
+) -> str | None:
+    """The child an earlier send of this message already continued, if any.
+
+    A message continues a finished child once: the same message sent again,
+    whatever call carries it, gets that continuation back, and the same
+    message_id with other content is refused, as it is for a live child.
+    """
+
+    row = connection.execute(
+        """
+        SELECT event.process_id,event.payload_json FROM process_events AS event
+        JOIN processes AS child ON child.process_id=event.process_id
+        WHERE child.user_id=? AND child.action_id=? AND child.kind='action_subagent'
+          AND event.event_name=? AND event.event_id=?
+        """,
+        (
+            user_id,
+            action_id,
+            ACTION_SUBAGENT_CONTINUES_EVENT,
+            _continues_event_id(from_process_id, message_id),
+        ),
+    ).fetchone()
+    if row is None:
+        return None
+    if _object(row[1]).get("content_sha256") != _sha256(content):
+        raise ActionSubagentMessageInputError(
+            "message_id is already bound to different content"
+        )
+    return str(row[0])
+
+
+def continue_action_subagent_history_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    from_process_id: str,
+    to_process_id: str,
+    message_id: str,
+    content: str,
+    created_at: str,
+) -> None:
+    """Give a new child the finished child's conversation and the parent's message.
+
+    The finished child's rows stay as they are: they are read and appended to the
+    new child in order, then the message waits for the new child's first send.
+    The finished child's result is collected, since the new child carries on
+    its work.
+    """
+
+    placeholders = ",".join("?" * len(ACTION_SUBAGENT_HISTORY_EVENTS))
+    rows = connection.execute(
+        "SELECT event_id,event_name,payload_json FROM process_events "
+        f"WHERE process_id=? AND event_name IN ({placeholders}) ORDER BY event_seq",
+        (from_process_id, *ACTION_SUBAGENT_HISTORY_EVENTS),
+    ).fetchall()
+    for event_id, event_name, payload_json in rows:
+        payload: dict[str, object] = dict(_object(payload_json))
+        append_process_event_in_connection(
+            connection=connection,
+            process_id=to_process_id,
+            event_name=str(event_name),
+            event_id=str(event_id),
+            payload=payload,
+            created_at=created_at,
+        )
+    append_process_event_in_connection(
+        connection=connection,
+        process_id=to_process_id,
+        event_name=ACTION_SUBAGENT_MESSAGE_EVENT,
+        event_id=f"subagent-message:{message_id}",
+        payload={"message_id": message_id, "content": content},
+        created_at=created_at,
+    )
+    append_process_event_in_connection(
+        connection=connection,
+        process_id=to_process_id,
+        event_name=ACTION_SUBAGENT_CONTINUES_EVENT,
+        event_id=_continues_event_id(from_process_id, message_id),
+        payload={
+            "child_process_id": from_process_id,
+            "message_id": message_id,
+            "content_sha256": _sha256(content),
+        },
+        created_at=created_at,
+    )
+    connection.execute(
+        "UPDATE processes SET result_collected_at=COALESCE(result_collected_at, ?) "
+        "WHERE process_id=? AND status IN ('completed','failed','canceled')",
+        (created_at, from_process_id),
+    )
+
+
+def _continues_event_id(from_process_id: str, message_id: str) -> str:
+    return f"subagent-continues:{from_process_id}:{message_id}"
+
+
+def _sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def append_action_subagent_event(
@@ -210,9 +334,9 @@ def _require_authority(
     connection: sqlite3.Connection, request: ActionSubagentMessageRequest
 ) -> str:
     row = connection.execute(
-        """
+        f"""
         SELECT child.status,
-               child.parent_process_id=parent.process_id
+               {owned_child_sql("parent.process_id")}
                AND child.action_id=parent.action_id
                AND child.user_id=parent.user_id
                AND child.kind='action_subagent' AS owned_child

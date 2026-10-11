@@ -36,6 +36,9 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     NewActionTarget,
     SubmitActionMessageCommand,
 )
+from pantaray_agents.local_runtime.runtime.action_message_withdrawal import (
+    withdraw_action_message,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message,
 )
@@ -196,6 +199,35 @@ async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -
         "chat-turn/a0/start_action/1",
         "chat-turn/a1/send_to_action/1",
     ]
+
+
+async def test_a_message_the_user_withdrew_is_not_sent_again(db_path: Path) -> None:
+    started = await _turn("a0")("start_action", relay=[], note="Draft it")
+    assert isinstance(started, dict)
+    payload = claim_next_pending_action_job(
+        db_path=db_path, busy_timeout_ms=1_000, owner_user_id=USER, claimed_by="w"
+    )
+    ActionJobRuntimeRepository(
+        db_path=db_path, busy_timeout_ms=1_000
+    ).prepare_execution(payload=payload, started_at=NOW)
+    action_id = str(started["action_id"])
+    await _turn("a1")("send_to_action", action_id=action_id, relay=[], note="Also this")
+    with sqlite3.connect(db_path) as connection:
+        (step_id,) = connection.execute(
+            "SELECT step_id FROM agent_action_steps WHERE step_number IS NULL"
+        ).fetchone()
+    withdraw_action_message(user_id=USER, action_id=action_id, step_id=step_id)
+
+    # The same turn run again after a restart.
+    rerun = await _turn("a1")(
+        "send_to_action", action_id=action_id, relay=[], note="Also this"
+    )
+
+    assert isinstance(rerun, dict) and rerun["error_code"] == "MESSAGE_WITHDRAWN"
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM agent_action_steps WHERE step_number IS NULL"
+        ).fetchone() == (0,)
 
 
 async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
@@ -446,7 +478,8 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
         "end": 10,
     }
     earlier = _say_with("m-1", "前回の見積もりの件", ())
-    named = _say_with("m-2", "Aurora Web で作り直して", (ref,))
+    task = {"kind": "action", "id": "a-9", "title": "Q3", "start": 13, "end": 15}
+    named = _say_with("m-2", "Aurora Web で Q3 を作り直して", (ref,), (task,))
 
     turn = _turn("a0")
     relayed = await turn("start_action", relay=[earlier, named], note=None)
@@ -460,9 +493,12 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
 
     first, second, third = _sent_messages(db_path, action_id)
     # Relayed: the user's words, verbatim and in order, with their project's span moved.
-    assert first.content == "前回の見積もりの件\n\nAurora Web で作り直して"
+    assert first.content == "前回の見積もりの件\n\nAurora Web で Q3 を作り直して"
     (project,) = first.project_refs
     assert first.content[project.start : project.end] == "Aurora Web"
+    (named_task,) = first.work_refs
+    assert first.content[named_task.start : named_task.end] == "Q3"
+    assert (named_task.kind, named_task.id) == ("action", "a-9")
     assert project.paths == ("/Users/me/aurora",)
     assert first.chat_handoff == ChatHandoffInput(relayed_item_ids=(earlier, named))
     # The chat's own instruction is the message, marked as relaying none of theirs.
@@ -477,7 +513,12 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
     assert isinstance(nothing, dict) and nothing["error_code"] == "NOTHING_TO_SEND"
 
 
-def _say_with(message_id: str, text: str, refs: tuple[dict[str, object], ...]) -> str:
+def _say_with(
+    message_id: str,
+    text: str,
+    refs: tuple[dict[str, object], ...],
+    work_refs: tuple[dict[str, object], ...] = (),
+) -> str:
     return append_chat_item(
         user_id=USER,
         message_id=message_id,
@@ -490,6 +531,7 @@ def _say_with(message_id: str, text: str, refs: tuple[dict[str, object], ...]) -
                     "images": [],
                     "files": [],
                     "project_refs": list(refs),
+                    "work_refs": list(work_refs),
                 }
             )
         ),

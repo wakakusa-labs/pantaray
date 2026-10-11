@@ -61,6 +61,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
 from pantaray_agents.local_runtime.tooling.models import (
+    ApprovalMode,
     ApprovalPreferenceUpsertInput,
     CapabilityGrantCreateInput,
 )
@@ -254,6 +255,9 @@ def _running_child(
                 scheduled_at=TIMESTAMP,
             )
     bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
+    # Gated tools pause until a test opts into always_allow, which replaces this
+    # row through its shared preference_id.
+    _save_workspace_approval_mode(db_path, "prompt_each_time")
     context = ensure_action_scratch_execution_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -575,6 +579,77 @@ def test_cancel_between_tool_and_next_proxy_stops_second_request(
     ):
         subagent_job.run_action_subagent_job(payload)
 
+    assert len(client.prompts) == 1
+    _assert_canceled(db_path)
+
+
+# Long enough that a child which waits for its in-flight work instead of
+# cancelling it fails the test, short enough that the failure is not a hang.
+_IN_FLIGHT_SECONDS = 10
+
+
+class _HangingModels:
+    """An LLM request that is still in flight when the parent's Stop lands."""
+
+    def __init__(self, on_start: Callable[[], None]) -> None:
+        self.on_start = on_start
+        self.cancelled = False
+
+    async def generate_content(self, **_kwargs: object) -> object:
+        self.on_start()
+        try:
+            await asyncio.sleep(_IN_FLIGHT_SECONDS)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise AssertionError("the Stop must cancel the request in flight")
+
+
+def test_stop_cancels_the_llm_request_in_flight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    models = _HangingModels(lambda: _request_cancel(db_path, payload))
+    client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert models.cancelled
+    _assert_canceled(db_path)
+
+
+def test_stop_cancels_the_tool_in_flight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path, payload = _running_child(
+        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
+    )
+    cancelled = False
+
+    async def in_flight(**_kwargs: object) -> object:
+        nonlocal cancelled
+        _request_cancel(db_path, payload)
+        try:
+            await asyncio.sleep(_IN_FLIGHT_SECONDS)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        raise AssertionError("the Stop must cancel the tool in flight")
+
+    monkeypatch.setattr(subagent_broker, "execute_broker_tool", in_flight)
+    client = _Client(calls=(_read("r1", "a.txt"), _REPORT_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    assert cancelled
     assert len(client.prompts) == 1
     _assert_canceled(db_path)
 
@@ -1025,7 +1100,7 @@ def test_wait_reports_an_approval_paused_child_as_nonterminal(
     assert snapshot.terminal_child_process_ids == ()
 
 
-def _allow_workspace_commands(db_path: Path) -> None:
+def _save_workspace_approval_mode(db_path: Path, mode: ApprovalMode) -> None:
     upsert_approval_preference(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -1034,12 +1109,16 @@ def _allow_workspace_commands(db_path: Path) -> None:
             user_id="user-1",
             scope_type="global",
             scope_ref=None,
-            approval_mode="always_allow",
+            approval_mode=mode,
             applies_to=("workspace_edit_and_command",),
             created_at=TIMESTAMP,
             updated_at=TIMESTAMP,
         ),
     )
+
+
+def _allow_workspace_commands(db_path: Path) -> None:
+    _save_workspace_approval_mode(db_path, "always_allow")
     create_capability_grant(
         db_path=db_path,
         busy_timeout_ms=1_000,

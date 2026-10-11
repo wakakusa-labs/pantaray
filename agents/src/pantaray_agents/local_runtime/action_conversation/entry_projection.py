@@ -1,5 +1,7 @@
 """Pure public-entry projection for durable Action conversation rows."""
 
+import json
+
 from pydantic import ValidationError
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
@@ -13,6 +15,15 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_STEP_NAME,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
+from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate import (
+    PATCH_NEEDS_READ_STATUS,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
+    ApplyPatchToolArgs,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
+    count_patch_diff_lines,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     TOOL_RESULT_BINARY_MEDIA_TYPE,
 )
@@ -20,14 +31,17 @@ from pantaray_agents.schema.action_conversation import (
     RENDERER_PREPARING_OUTPUT_KIND,
     ApprovedSuggestion,
     ToolEntry,
+    ToolEntryFileEdit,
     ToolEntryOutcome,
     UserEntry,
     UserEntryFile,
     UserEntryProjectRef,
     UserEntryStatus,
+    UserEntryWorkRef,
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -60,8 +74,14 @@ def action_user_row_is_visible(row: ActionHistoryUserRow) -> bool:
     return row.step_name != ACTION_RESUME_STEP_NAME
 
 
-def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
-    """Project one adopted or unadopted durable USER row."""
+def project_action_user_entry(
+    row: ActionHistoryUserRow, *, next_run_takes_after: int | None = None
+) -> UserEntry:
+    """Project one adopted or unadopted durable USER row.
+
+    ``next_run_takes_after`` is where the next run starts taking not-executed
+    messages (``None`` when it takes none); see the queued-message adoption.
+    """
 
     message_id = row.user_message_id
     try:
@@ -77,6 +97,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
     approved_suggestion: ApprovedSuggestion | None = None
     chat_note: str | None = None
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
     if message is None:
         content = row.user_request_text
@@ -89,6 +110,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
             )
             content = message.supplement
             project_refs = message.supplement_project_refs
+            work_refs = message.supplement_work_refs
         elif message.is_chat_instruction:
             # The chat's own instruction: Pantaray's words, not the user's.
             content = None
@@ -96,6 +118,7 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
         else:
             content = message.content
             project_refs = message.project_refs
+            work_refs = message.work_refs
         if message.chat_handoff is not None and not message.is_chat_instruction:
             chat_note = message.chat_handoff.note
         images = message.images
@@ -104,9 +127,12 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
     status: UserEntryStatus = (
         "adopted"
         if row.adopted_process_id is not None
-        else "not_executed"
-        if row.adoption_canceled_at is not None
         else "pending"
+        if row.adoption_canceled_at is None
+        else "runs_with_next_message"
+        if next_run_takes_after is not None
+        and row.accepted_sequence > next_run_takes_after
+        else "not_executed"
     )
     try:
         return UserEntry(
@@ -124,6 +150,16 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
                     display_name=ref.display_name, start=ref.start, end=ref.end
                 )
                 for ref in project_refs
+            ),
+            work_refs=tuple(
+                UserEntryWorkRef(
+                    kind=ref.kind,
+                    id=ref.id,
+                    title=ref.title,
+                    start=ref.start,
+                    end=ref.end,
+                )
+                for ref in work_refs
             ),
             files=tuple(
                 UserEntryFile(name=file.name, byte_size=file.byte_size)
@@ -174,7 +210,8 @@ def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
     successful steps whose body says the call never happened, so the terminal status
     cannot carry that distinction. A call a user Stop reached before it was issued is
     persisted as an error step, yet it never ran either. A page render whose renderer
-    is still being set up succeeds without drawing anything. Each producer marks its
+    is still being set up succeeds without drawing anything, and a patch held until its
+    file is read succeeds without changing the file. Each producer marks its
     own body, and this is the one place that turns those markers into the closed
     outcome the row reads.
     """
@@ -196,7 +233,47 @@ def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
         and output.get("kind") == RENDERER_PREPARING_OUTPUT_KIND
     ):
         return "preparing"
+    # Storage keeps a spilled result's status beside its reference, and this status
+    # alone says the patch was not applied, so a long file read still reads as one.
+    if step.status == "success" and output.get("status") == PATCH_NEEDS_READ_STATUS:
+        return "needs_read"
     return "completed"
+
+
+def _tool_entry_file_edit(
+    row: ActionHistoryToolRow, step: FormalToolStepOutput
+) -> ToolEntryFileEdit | None:
+    """Count one applied patch's lines from the diff its durable row holds inline.
+
+    A spilled result keeps its diff in an action file this projection does not read, and
+    a failed or read-first patch changed nothing, so none of them has a count.
+    """
+
+    output = step.output
+    if (
+        row.tool_id != "apply_patch"
+        or step.status != "success"
+        or not isinstance(output, dict)
+        or output.get("status") != "success"
+        or not isinstance(diff := output.get("diff"), str)
+        or row.tool_args is None
+    ):
+        return None
+    # agent_action_steps.tool_args carries a json_valid CHECK, so the column parses.
+    payload = json.loads(row.tool_args)
+    try:
+        args = ApplyPatchToolArgs.model_validate(
+            payload.get("args") if isinstance(payload, dict) else None
+        )
+    except ValidationError:
+        return None
+    counts = count_patch_diff_lines(diff)
+    if counts is None:
+        return None
+    # apply_patch takes exactly one change per call.
+    return ToolEntryFileEdit(
+        operation=args.changes[0].op, added_lines=counts[0], removed_lines=counts[1]
+    )
 
 
 def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
@@ -206,6 +283,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
     output_preview: str | None = None
     images: tuple[ImageInput, ...] = ()
     outcome: ToolEntryOutcome = "completed"
+    file_edit: ToolEntryFileEdit | None = None
     if row.tool_output is not None:
         try:
             output = FormalToolStepOutput.model_validate_json(row.tool_output)
@@ -234,6 +312,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
         )
         images = _tool_entry_images(output.output)
         outcome = _tool_entry_outcome(output)
+        file_edit = _tool_entry_file_edit(row, output)
         if output_available:
             output_preview = project_tool_output_preview(
                 row.tool_id, output.output, output.output_storage_kind
@@ -251,6 +330,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
             output_preview=output_preview,
             output_available=output_available,
             images=images,
+            file_edit=file_edit,
         )
     except ValidationError as exc:
         raise ActionConversationEntryIntegrityError(

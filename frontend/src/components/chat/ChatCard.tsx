@@ -2,10 +2,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { useId } from 'react';
 
 import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
-import {
-  badgeClassName,
-  getConversationHistoryStatusMeta,
-} from '@/components/history/statusTokens';
+import { badgeClassName, getHistoryItemStatusMeta } from '@/components/history/statusTokens';
 import type { ChatWorkState } from '@/hooks/useChatWorkStates';
 import type { MessageKey } from '@/i18n/types';
 
@@ -14,35 +11,34 @@ import type { MessageKey } from '@/i18n/types';
  * message, and the work's status when this is its latest card.
  */
 export function ChatCard({
-  id,
   card,
   work,
   isLatest,
-  isOpen,
   t,
   onOpen,
 }: {
-  /** The element id a request to show this work scrolls to. */
-  id: string;
   card: ChatCardData;
   /** Undefined when the work was deleted or is older than the states read for the chat. */
   work: ChatWorkState | undefined;
   isLatest: boolean;
-  isOpen: boolean;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
   onOpen: () => void;
 }) {
   const summaryId = useId();
   const statusId = useId();
-  const statusMeta = isLatest && work ? getConversationHistoryStatusMeta(work.status) : null;
+  const statusMeta =
+    isLatest && work
+      ? getHistoryItemStatusMeta({
+          kind: card.kind === 'action' ? 'conversation' : 'suggestion',
+          status: work.status,
+        })
+      : null;
   return (
     <button
-      id={id}
       type="button"
-      className={isOpen ? 'chat-card chat-card--open' : 'chat-card'}
+      className="chat-card"
       aria-label={t('history.chat.card.openLabel', { title: work?.title ?? card.summary })}
       aria-describedby={statusMeta ? `${summaryId} ${statusId}` : summaryId}
-      aria-current={isOpen ? 'true' : undefined}
       onClick={onOpen}
     >
       {work ? (

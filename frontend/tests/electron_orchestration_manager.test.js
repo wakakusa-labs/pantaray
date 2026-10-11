@@ -5,6 +5,19 @@ const {
   createOrchestrationManager,
 } = require('../electron/dist/orchestration/orchestrationManager.js');
 
+
+// Starts each read as soon as it is asked for, as the shared reader does with no other caller.
+function immediateLatestPages(readPage) {
+  let readsStarted = 0;
+  return {
+    read: (actionId) => {
+      const readNumber = ++readsStarted;
+      return Promise.resolve(readPage(actionId)).then((page) => ({ page, readNumber }));
+    },
+    readsStarted: () => readsStarted,
+  };
+}
+
 function createFakeTimers() {
   /** @type {Array<{ id: number, ms: number, fn: Function }>} */
   const timeouts = [];
@@ -50,6 +63,7 @@ function actionRequest(supplement = null, commandId = null) {
     commandId,
     supplement,
     supplementProjectRefs: [],
+    supplementWorkRefs: [],
     approvalMode: 'prompt_each_time',
     images: [],
   };
@@ -118,11 +132,11 @@ function createManagerHarness(overrides = {}) {
     getOwnerId: overrides.getOwnerId || (() => 'user-1'),
     getRuntimeState: overrides.getRuntimeState || (() => ({ status: 'ready', message: null })),
     getUiLanguage: overrides.getUiLanguage || (() => 'en'),
-    readLatestActionConversationPage: async (actionId) => {
+    latestActionPages: immediateLatestPages(async (actionId) => {
       return overrides.readLatestActionConversationPage
         ? await overrides.readLatestActionConversationPage(actionId)
         : conversationPage(actionId);
-    },
+    }),
     timers,
   });
 
@@ -314,7 +328,7 @@ test('OrchestrationManager: runtimeBackendUrl が無い場合は暗黙フォー�
     getOwnerId: () => 'user-1',
     getRuntimeState: () => ({ status: 'ready', message: null }),
     getUiLanguage: () => 'en',
-    readLatestActionConversationPage: async (actionId) => conversationPage(actionId),
+    latestActionPages: immediateLatestPages(async (actionId) => conversationPage(actionId)),
     timers,
   });
 
@@ -354,7 +368,7 @@ test('OrchestrationManager: runtime が ready でない場合は接続せず既�
     getOwnerId: () => 'user-1',
     getRuntimeState: () => ({ status: 'degraded', message: 'sync failed' }),
     getUiLanguage: () => 'en',
-    readLatestActionConversationPage: async (actionId) => conversationPage(actionId),
+    latestActionPages: immediateLatestPages(async (actionId) => conversationPage(actionId)),
     timers: createFakeTimers(),
   });
 
@@ -430,7 +444,7 @@ test('OrchestrationManager: acceptAction は send 例外時にも snapshot を�
     getOwnerId: () => 'user-1',
     getRuntimeState: () => ({ status: 'ready', message: null }),
     getUiLanguage: () => 'en',
-    readLatestActionConversationPage: async (actionId) => conversationPage(actionId),
+    latestActionPages: immediateLatestPages(async (actionId) => conversationPage(actionId)),
     timers,
   });
 
@@ -496,6 +510,7 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
       language: 'ja',
       supplement: 'Keep this condition',
       supplement_project_refs: [],
+      supplement_work_refs: [],
       approval_mode: 'always_allow',
       images,
       files,
@@ -1105,6 +1120,21 @@ test('OrchestrationManager: 履歴から開いた未終了の会話は root proc
   assert.equal(resumed.length, 1);
 });
 
+test('OrchestrationManager: 会話の読み込みに失敗したら resume せず失敗を返す', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const resumed = [];
+  const harness = createManagerHarness({
+    onResumeProcess: (request) => resumed.push(request),
+    readLatestActionConversationPage: async () => {
+      throw new Error('backend unavailable');
+    },
+  });
+  harness.manager.ensureConnected();
+
+  assert.equal(await harness.manager.refreshAndResumeActionConversation('action-1'), 'failed');
+  assert.deepEqual(resumed, []);
+});
+
 test('OrchestrationManager: すでに live 中の Action は再 resume しない', async () => {
   const resumed = [];
   const harness = createManagerHarness({
@@ -1184,7 +1214,7 @@ test('OrchestrationManager: an existing transport cannot send or queue work whil
   h.manager.ensureConnected();
   owner = null;
   await assert.rejects(
-    h.manager.sendFromRenderer({ event: 'stop_process', data: { process_id: 'old-run' } }),
+    h.manager.sendFromRenderer({ event: 'dismiss_suggestion', data: { suggestion_id: 's-1' } }),
     /owner is unavailable/
   );
   assert.throws(
@@ -1304,4 +1334,236 @@ test('main keeps the chat turn state for a main window that loads again mid-turn
   assert.deepEqual(harness.manager.getChatTurnState(), { running: false });
   hooks.forwardStatusToRenderers({ status: 'closed' });
   assert.equal(harness.manager.getChatTurnState(), null);
+});
+
+function persistedSnapshot(overrides = {}) {
+  return {
+    suggestionId: 'sug-1',
+    commandId: null,
+    interactionContract: 'action_offer',
+    suggestionText: 'Draft the reply',
+    reactionState: null,
+    reactionTimestamp: null,
+    actionPhase: 'idle',
+    actionStatus: null,
+    actionErrorCode: null,
+    actionFailureStage: null,
+    actionFailureMessagePublic: null,
+    processId: null,
+    actionId: null,
+    updatedAt: '2026-10-10T00:00:00Z',
+    lastSequence: 3,
+    isLive: false,
+    ...overrides,
+  };
+}
+
+function suggestionSnapshotsSentToMain(harness) {
+  return harness.mainWindowMessages
+    .filter((message) => message.channel === 'suggestion:snapshot')
+    .map((message) => message.payload.snapshot);
+}
+
+test('the main window hears each suggestion record change, and the dismissal before it is cleared', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  const stored = harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness), [stored]);
+  // The Overlay gets the same payload shape from the same store.
+  assert.deepEqual(harness.overlayPayloads.get('sug-1').snapshot, stored);
+
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: {
+      suggestion_id: 'sug-1',
+      reaction: 'rejected',
+      committed_at: '2026-10-10T00:01:00Z',
+      reason: 'Sent it myself',
+    },
+    meta: { suggestion_id: 'sug-1' },
+  });
+
+  const dismissed = suggestionSnapshotsSentToMain(harness).at(-1);
+  assert.equal(dismissed.reactionState, 'rejected');
+  assert.equal(dismissed.dismissReason, 'Sent it myself');
+  assert.equal(dismissed.suggestionText, 'Draft the reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+});
+
+test('a persisted suggestion read never replaces newer live state or a pending command', async () => {
+  const harness = createManagerHarness();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+  const stale = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ lastSequence: 2, suggestionText: 'older' })
+  );
+  assert.equal(stale.suggestionText, 'Draft the reply');
+  assert.equal(stale.lastSequence, 3);
+
+  // Accepted from the chat before main read it: the record has no text and an unsent command.
+  const accepted = createManagerHarness();
+  const pending = await accepted.manager.acceptAction(actionRequest());
+  const read = accepted.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 5 }));
+  assert.equal(read.commandId, pending.commandId);
+  assert.equal(read.actionPhase, 'requesting');
+  assert.equal(read.suggestionText, 'Draft the reply');
+
+  // The command is still replayed on the next session, so the accept is not lost.
+  const hooks = accepted.getWsHooks();
+  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'sess-1' });
+  assert.equal(accepted.sentMessages.length, 2);
+  assert.deepEqual(accepted.sentMessages[1], accepted.sentMessages[0]);
+});
+
+test('a suggestion read that left before a dismissal does not answer it again', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  // The read is in flight when a panel dismisses the suggestion main holds no record of.
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+
+  assert.equal(read.reactionState, 'rejected');
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness), []);
+  assert.equal(harness.overlayPayloads.has('sug-1'), false);
+
+  // The dismissal belongs to the owner it happened under.
+  harness.manager.resetActionLive();
+  assert.equal(harness.manager.adoptSuggestionSnapshot(persistedSnapshot()).reactionState, null);
+});
+
+test('a same-sequence read fills the body of a suggestion accepted in a History panel', async () => {
+  const harness = createManagerHarness();
+  // The History panel kept its bootstrap to itself, so main's record starts without a body.
+  const accepted = await harness.manager.acceptAction(actionRequest());
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'action_requested',
+    sequence: 5,
+    data: {
+      suggestion_id: 'sug-1',
+      command_id: accepted.commandId,
+      accepted_at: '2026-10-10T00:00:00Z',
+      committed_at: '2026-10-10T00:00:00Z',
+    },
+    meta: { suggestion_id: 'sug-1', kind: 'action', command_id: accepted.commandId },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 5 }));
+
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(read.interactionContract, 'action_offer');
+  assert.equal(read.reactionState, 'accepted');
+  assert.equal(read.actionPhase, 'accepted_pending_start');
+  assert.equal(read.commandId, accepted.commandId);
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
+  assert.deepEqual(suggestionSnapshotsSentToMain(harness).at(-1), read);
+});
+
+test('an older read still fills the body of an accepted suggestion the events never carry', async () => {
+  const harness = createManagerHarness();
+  const accepted = await harness.manager.acceptAction(actionRequest());
+  // The read fetched its bootstrap at sequence 3; action_requested at 5 reaches main first.
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'action_requested',
+    sequence: 5,
+    data: {
+      suggestion_id: 'sug-1',
+      command_id: accepted.commandId,
+      accepted_at: '2026-10-10T00:00:00Z',
+      committed_at: '2026-10-10T00:00:00Z',
+    },
+    meta: { suggestion_id: 'sug-1', kind: 'action', command_id: accepted.commandId },
+  });
+
+  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 3 }));
+
+  assert.equal(read.suggestionText, 'Draft the reply');
+  assert.equal(read.interactionContract, 'action_offer');
+  assert.equal(read.reactionState, 'accepted');
+  assert.equal(read.actionPhase, 'accepted_pending_start');
+  assert.equal(read.commandId, accepted.commandId);
+  assert.equal(read.lastSequence, 5);
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
+});
+
+test('an event resent after a dismissal does not bring the suggestion back', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+  const hooks = harness.getWsHooks();
+  hooks.forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+  const sentBeforeResend = suggestionSnapshotsSentToMain(harness).length;
+
+  hooks.forwardEventToRenderers({
+    event: 'suggestion_chunk',
+    sequence: 5,
+    data: { content: 'resent' },
+    meta: { suggestion_id: 'sug-1', process_id: 'proc-s1', kind: 'suggestion' },
+  });
+
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+  assert.equal(suggestionSnapshotsSentToMain(harness).length, sentBeforeResend);
+  assert.doesNotMatch(harness.overlayPayloads.get('sug-1').snapshot.suggestionText, /resent/);
+  assert.equal(
+    harness.manager.adoptSuggestionSnapshot(persistedSnapshot()).reactionState,
+    'rejected'
+  );
+});
+
+function dismissSuggestion(harness) {
+  harness.getWsHooks().forwardEventToRenderers({
+    event: 'suggestion_reaction_committed',
+    sequence: 4,
+    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    meta: { suggestion_id: 'sug-1' },
+  });
+}
+
+test('a reply to a dismissed suggestion reaches both windows and outlives a later read', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+  dismissSuggestion(harness);
+
+  harness.manager.recordSuggestionReply('sug-1', 'act-reply');
+
+  const replied = suggestionSnapshotsSentToMain(harness).at(-1);
+  assert.equal(replied.reactionState, 'rejected');
+  assert.equal(replied.actionId, 'act-reply');
+  assert.deepEqual(harness.overlayPayloads.get('sug-1').snapshot, replied);
+  // A read that left before the reply does not take its Action away.
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ reactionState: 'rejected' })
+  );
+  assert.equal(read.actionId, 'act-reply');
+  assert.equal(read.reactionState, 'rejected');
+});
+
+test('a read brings the reply Action to a dismissal main recorded before the reply', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  dismissSuggestion(harness);
+
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ reactionState: 'rejected', actionId: 'act-reply' })
+  );
+
+  assert.equal(read.reactionState, 'rejected');
+  assert.equal(read.actionId, 'act-reply');
+  assert.equal(suggestionSnapshotsSentToMain(harness).at(-1).actionId, 'act-reply');
+  assert.equal(harness.overlayPayloads.get('sug-1').snapshot.actionId, 'act-reply');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
 });

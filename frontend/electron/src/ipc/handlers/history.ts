@@ -9,7 +9,7 @@
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import { ActionCompletionViewedRequestSchema } from '../../history/actionReadState';
-import { HistoryItemDeleteRequestSchema } from '../../history/historyContracts';
+import { HistoryItemKeySchema } from '../../history/historyContracts';
 import { ActionConversationOverlayRequestSchema } from '../schemas/actions';
 import { parseInput } from '../schemas/error';
 
@@ -27,9 +27,10 @@ export function registerHistoryHandlers(ctx: MainContext, registrar: IpcRegistra
     )
   );
   registrar.handle('history:deleteItem', (_event, request) =>
-    ctx.history.deleteItem(
-      parseInput(HistoryItemDeleteRequestSchema, 'history:deleteItem', request)
-    )
+    ctx.history.deleteItem(parseInput(HistoryItemKeySchema, 'history:deleteItem', request))
+  );
+  registrar.handle('history:readItem', (_event, request) =>
+    ctx.history.readItem(parseInput(HistoryItemKeySchema, 'history:readItem', request))
   );
   registrar.handle('history:openNewConversation', () => {
     ctx.windows.openNewConversationOverlay();

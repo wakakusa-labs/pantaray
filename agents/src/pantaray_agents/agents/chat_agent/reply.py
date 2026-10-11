@@ -65,8 +65,8 @@ REPLY_TOOL = LlmToolDefinition(
             "quote_item_id": {
                 "type": ["string", "null"],
                 "description": (
-                    "The id of the chat item you answer, when showing which one "
-                    "helps; otherwise null."
+                    "The id of the user's or your own message you answer, when "
+                    "showing which one helps; otherwise null."
                 ),
             },
             "cards": {
@@ -103,7 +103,7 @@ def check_reply(
         return f"The reply was not sent: {problems}."
     unavailable = read_unavailable_reference(user_id=user_id, content=content)
     if unavailable == "quote_item_id":
-        return "The reply was not sent: quote_item_id is not an item of this chat."
+        return "The reply was not sent: quote_item_id is not a message of this chat."
     if unavailable == "cards":
         return (
             "The reply was not sent: a card names an Action or Suggestion the user "

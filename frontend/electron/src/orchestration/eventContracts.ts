@@ -2,6 +2,7 @@ import type {
   ActionFileAttachment,
   ActionMessageRequest,
   ActionProjectRef,
+  ActionWorkRef,
 } from '../actions/actionContracts';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -26,6 +27,7 @@ export type AcceptActionRequest = {
   supplement: string | null;
   // Spans point into the trimmed supplement.
   supplementProjectRefs: ActionProjectRef[];
+  supplementWorkRefs: ActionWorkRef[];
   approvalMode: 'prompt_each_time' | 'always_allow';
   images: ActionMessageRequest['message']['images'];
   files?: ActionFileAttachment[];
@@ -109,6 +111,7 @@ export type ExecuteActionClientEvent = {
     language: UiLanguage;
     supplement: string | null;
     supplement_project_refs: AcceptActionRequest['supplementProjectRefs'];
+    supplement_work_refs: AcceptActionRequest['supplementWorkRefs'];
     approval_mode: AcceptActionRequest['approvalMode'];
     images: AcceptActionRequest['images'];
     files?: AcceptActionRequest['files'];
@@ -117,17 +120,13 @@ export type ExecuteActionClientEvent = {
 
 export type DismissSuggestionClientEvent = {
   event: 'dismiss_suggestion';
-  data: { suggestion_id: string; reason?: string };
+  /** `reason`: the user's words, recorded with the dismissal. A dismissal starts nothing. */
+  data: { suggestion_id: string; reason?: string | null };
 };
 
 export type RejectSuggestionClientEvent = {
   event: 'reject_suggestion';
   data: { suggestion_id: string; reason?: string };
-};
-
-export type StopProcessClientEvent = {
-  event: 'stop_process';
-  data: { process_id: string };
 };
 
 export type ResumeProcessClientEvent = {
@@ -168,7 +167,6 @@ export type AckEventClientEvent = {
 export type RendererOrchestrationClientEvent =
   | DismissSuggestionClientEvent
   | RejectSuggestionClientEvent
-  | StopProcessClientEvent
   | ResumeProcessClientEvent
   | ResumeSessionClientEvent
   | AckEventClientEvent;
@@ -187,6 +185,8 @@ export type SuggestionReactionCommittedEvent = OrchestrationEventWithMeta<
     suggestion_id: string;
     reaction: 'accepted' | 'rejected';
     committed_at: string;
+    /** The user's words recorded with a dismissal. Events stored before reasons existed have none. */
+    reason?: string | null;
   },
   SuggestionIdentityMeta
 >;

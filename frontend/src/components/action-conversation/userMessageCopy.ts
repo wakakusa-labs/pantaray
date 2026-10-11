@@ -7,9 +7,16 @@ type UserMessageCopy = {
   userImages: ImageGridCopy;
   userFiles: (count: number) => string;
   userStatus: Record<
-    'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
+    | 'pending'
+    | 'runs_with_next_message'
+    | 'not_executed'
+    | 'submitting'
+    | 'awaiting_refresh'
+    | 'failed',
     string
   >;
+  /** The ✕ under a message no run has taken yet. */
+  withdraw: string;
 };
 /** The labels of a user's message and its attachments, shared by the Overlay and the chat. */
 export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
@@ -31,11 +38,13 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
     userFiles: (count) => `${count} attached file${count === 1 ? '' : 's'}`,
     userStatus: {
       pending: 'Pending',
+      runs_with_next_message: 'Runs with your next message',
       not_executed: 'Not executed',
       submitting: 'Sending',
       awaiting_refresh: 'Sent, updating',
       failed: 'Send failed',
     },
+    withdraw: 'Withdraw this message',
   },
   ja: {
     you: 'あなた',
@@ -54,10 +63,12 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
     userFiles: (count) => `添付ファイル ${count} 件`,
     userStatus: {
       pending: '保留',
+      runs_with_next_message: '次の送信で実行',
       not_executed: '未実行',
       submitting: '送信中',
       awaiting_refresh: '送信済み・更新中',
       failed: '送信失敗',
     },
+    withdraw: 'このメッセージを取り消す',
   },
 };

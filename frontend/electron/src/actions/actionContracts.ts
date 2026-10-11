@@ -18,6 +18,8 @@ const ACTION_MESSAGE_MAX_PROJECT_REFS = 32;
 export const ACTION_MESSAGE_MAX_FILES = 10;
 const ACTION_PROJECT_REF_MAX_PATHS = 32;
 const ACTION_PROJECT_REF_NAME_MAX_CODEPOINTS = 200;
+const ACTION_MESSAGE_MAX_WORK_REFS = 32;
+const ACTION_WORK_REF_TITLE_MAX_CODEPOINTS = 200;
 
 export type ActionTimelinePosition = Readonly<{
   step_number: number;
@@ -110,6 +112,22 @@ export const ActionProjectRefsSchema = z
   )
   .max(ACTION_MESSAGE_MAX_PROJECT_REFS);
 
+// A task (`action`) or suggestion named in the user's text, as its chip titled it when sent.
+// Spans as for project refs; the backend checks each names its title and none overlaps a project.
+export const ActionWorkRefsSchema = z
+  .array(
+    z
+      .object({
+        kind: z.enum(['action', 'suggestion']),
+        id: ActionMessageIdSchema,
+        title: boundedActionMessageText(ACTION_WORK_REF_TITLE_MAX_CODEPOINTS),
+        start: CodePointOffsetSchema,
+        end: CodePointOffsetSchema,
+      })
+      .strict()
+  )
+  .max(ACTION_MESSAGE_MAX_WORK_REFS);
+
 /**
  * Convert a UTF-16 span of the raw composer draft to the code-point span of the
  * same characters in the trimmed text that is sent. This is the one place the two
@@ -138,6 +156,7 @@ export const ActionMessageRequestSchema = z
         language: z.enum(['en', 'ja']).nullable().optional(),
         project_refs: ActionProjectRefsSchema.optional(),
         files: ActionFileAttachmentsSchema.optional(),
+        work_refs: ActionWorkRefsSchema.optional(),
       })
       .strict(),
   })
@@ -151,6 +170,22 @@ export const ActionResumeRequestSchema = z
   .object({
     actionId: CanonicalIdentitySchema,
     messageId: ActionMessageIdSchema,
+  })
+  .strict();
+
+/** A message no run has taken yet, by its `unadopted_messages` entry's step. */
+export const ActionWithdrawMessageRequestSchema = z
+  .object({
+    actionId: CanonicalIdentitySchema,
+    stepId: CanonicalIdentitySchema,
+  })
+  .strict();
+
+/** Stop names the run the window shows, so a Stop pressed late never ends the run after it. */
+export const ActionStopRequestSchema = z
+  .object({
+    actionId: CanonicalIdentitySchema,
+    processId: CanonicalIdentitySchema,
   })
   .strict();
 
@@ -201,11 +236,26 @@ const UserEntrySchema = z
         })
         .strict()
     ),
+    // Code-point spans of tasks and suggestions named in `content`, as sent. Optional until
+    // every backend returns the field.
+    work_refs: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['action', 'suggestion']),
+            id: CanonicalIdentitySchema,
+            title: NonBlankTextSchema,
+            start: CodePointOffsetSchema,
+            end: CodePointOffsetSchema,
+          })
+          .strict()
+      )
+      .optional(),
     // Documents sent with the message. Optional until every backend returns the field.
     files: z
       .array(z.object({ name: z.string(), byte_size: z.number().int().positive() }).strict())
       .optional(),
-    status: z.enum(['adopted', 'pending', 'not_executed']),
+    status: z.enum(['adopted', 'pending', 'runs_with_next_message', 'not_executed']),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -243,9 +293,10 @@ const ToolEntrySchema = z
     // while recording is off are successful steps that never ran, and a call a Stop
     // reached before it was issued is an error step that never ran, so the status alone
     // cannot say. A page render whose renderer is still being set up succeeds without
-    // drawing anything. A tool step recorded before the outcome existed did run.
+    // drawing anything, and a patch held until its file is read changes nothing. A tool
+    // step recorded before the outcome existed did run.
     outcome: z
-      .enum(['completed', 'denied', 'unavailable', 'not_executed', 'preparing'])
+      .enum(['completed', 'denied', 'unavailable', 'not_executed', 'preparing', 'needs_read'])
       .default('completed'),
     // The one argument the step acted on, and the head of its result when it has none.
     // A tool step recorded before the row said what it did carries neither.
@@ -254,6 +305,17 @@ const ToolEntrySchema = z
     output_available: z.boolean(),
     // A tool step recorded before capture_screen existed carries no image list.
     images: z.array(ImageReferenceSchema).default([]),
+    // Line counts of an applied patch whose diff the row holds inline; counts only. Any
+    // other step, a spilled diff included, carries none.
+    file_edit: z
+      .object({
+        operation: z.enum(['add', 'update', 'delete']),
+        added_lines: z.number().int().nonnegative(),
+        removed_lines: z.number().int().nonnegative(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -369,7 +431,7 @@ const ActionConversationPageSchema = z
     if (
       page.unadopted_messages.some(
         (entry) =>
-          (entry.status !== 'pending' && entry.status !== 'not_executed') ||
+          entry.status === 'adopted' ||
           (entry.status === 'pending' && TERMINAL_CONVERSATION_STATUSES.has(page.action.status))
       )
     ) {
@@ -464,14 +526,23 @@ const ActionToolOutputDetailSchema = z
 
 export type ActionMessageRequest = z.infer<typeof ActionMessageRequestSchema>;
 export type ActionResumeRequest = z.infer<typeof ActionResumeRequestSchema>;
+export type ActionWithdrawMessageRequest = z.infer<typeof ActionWithdrawMessageRequestSchema>;
+/** `adopted`: a run took the message first, so it stays and now shows as run. */
+export type ActionWithdrawMessageResult = Readonly<{ kind: 'withdrawn' | 'adopted' }>;
+export type ActionStopRequest = z.infer<typeof ActionStopRequestSchema>;
 export type ActionMessageResponse = z.infer<typeof ActionMessageResponseSchema>;
 export type ActionMessageSubmitResult =
   | Readonly<{ kind: 'submitted'; response: ActionMessageResponse }>
   | Readonly<{ kind: 'expected_process_conflict' }>
-  | Readonly<{ kind: 'action_conflict' }>;
+  | Readonly<{ kind: 'action_conflict' }>
+  /** The suggestion replied to already has its conversation; this is its Action. */
+  | Readonly<{ kind: 'reply_exists'; actionId: string }>
+  /** A retry of a message the user withdrew: nothing was registered and nothing runs. */
+  | Readonly<{ kind: 'withdrawn' }>;
 export type ActionConversationPage = z.infer<typeof ActionConversationPageSchema>;
 export type ActionImageReference = z.infer<typeof ImageReferenceSchema>;
 export type ActionProjectRef = z.infer<typeof ActionProjectRefsSchema>[number];
+export type ActionWorkRef = z.infer<typeof ActionWorkRefsSchema>[number];
 export type ActionFileAttachment = z.infer<typeof ActionFileAttachmentsSchema>[number];
 export type ActionToolOutputDetail = z.infer<typeof ActionToolOutputDetailSchema>;
 

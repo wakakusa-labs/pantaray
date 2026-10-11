@@ -40,6 +40,9 @@ class SuggestionReactionCommittedMessage(BaseModel):
         description="DB に確定したリアクション"
     )
     committed_at: str = Field(description="確定時刻（ISO 8601形式）")
+    reason: str | None = Field(
+        default=None, description="見送りと一緒に記録したユーザーの理由。なければ null"
+    )
 
 
 class ActionRequestedMessage(BaseModel):

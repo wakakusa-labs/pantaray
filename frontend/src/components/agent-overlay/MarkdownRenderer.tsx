@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import styled from 'styled-components';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +6,13 @@ import { useLLMOutput } from '@llm-ui/react';
 import type { BlockMatch, LLMOutputFallbackBlock } from '@llm-ui/react';
 import { markdownLookBack } from '@llm-ui/markdown';
 import type { ComponentPropsWithoutRef } from 'react';
+
+import {
+  BARE_FILE_URL_START,
+  bareFileUrlAt,
+  localPathFromPantarayFileHref,
+} from '../../../electron/src/actions/pantarayFileLinks';
+import { OpenFileLinkContext } from './openFileLinkContext';
 
 const MarkdownWrapper = styled.div`
   font-family: var(--font-sans);
@@ -118,43 +125,6 @@ const MarkdownWrapper = styled.div`
   }
 `;
 
-function localPathFromPantarayFileHref(href: string): string | null {
-  if (!href.startsWith('pantaray-file:///')) return null;
-  try {
-    const url = new URL(href);
-    return decodeURIComponent(url.pathname);
-  } catch {
-    return null;
-  }
-}
-
-// A reply often names a file as a bare pantaray-file:/// URL rather than a Markdown
-// link, and GFM links only http(s) and www on its own. Japanese prose runs on with
-// no space, so the URL ends at whitespace, a quote, a Japanese stop, comma or quote
-// bracket, or a closing bracket it did not open, and drops trailing punctuation.
-const BARE_FILE_URL_START = 'pantaray-file:///';
-const URL_STOPS = new Set([...'<>"“”。、「」『』']);
-const CLOSING_BRACKETS: Record<string, string> = { ')': '(', '）': '（', ']': '[', '】': '【' };
-const OPENING_BRACKETS = new Set(Object.values(CLOSING_BRACKETS));
-const TRAILING_PUNCTUATION = /[.,:;!?']+$/u;
-
-function bareFileUrlAt(text: string, start: number): string {
-  const depth = new Map<string, number>();
-  let end = start + BARE_FILE_URL_START.length;
-  for (; end < text.length; end += 1) {
-    const char = text[end];
-    if (/\s/u.test(char) || URL_STOPS.has(char)) break;
-    if (OPENING_BRACKETS.has(char)) depth.set(char, (depth.get(char) ?? 0) + 1);
-    const opening = CLOSING_BRACKETS[char];
-    if (opening !== undefined) {
-      const open = depth.get(opening) ?? 0;
-      if (open === 0) break;
-      depth.set(opening, open - 1);
-    }
-  }
-  return text.slice(start, end).replace(TRAILING_PUNCTUATION, '');
-}
-
 // The few mdast fields this pass reads and writes.
 type MarkdownNode = {
   type: string;
@@ -207,37 +177,80 @@ function remarkBareFileLinks(options: { streaming: boolean }) {
   };
 }
 
+/**
+ * Shows a single newline in prose as a line break, as the writer laid it out (a signature, an
+ * address). Markdown would join the lines with a space. Code holds no text node, so it is kept.
+ */
+function remarkSoftLineBreaks() {
+  const visit = (node: MarkdownNode): void => {
+    if (!node.children) return;
+    node.children = node.children.flatMap((child) => {
+      if (child.type !== 'text' || !child.value?.includes('\n')) {
+        visit(child);
+        return [child];
+      }
+      return child.value
+        .split(/[ \t]*\r?\n/)
+        .flatMap((line, index) => [
+          ...(index > 0 ? [{ type: 'break' }] : []),
+          ...(line ? [{ type: 'text', value: line }] : []),
+        ]);
+    });
+  };
+  return visit;
+}
+
 function markdownUrlTransform(url: string): string {
   if (url.startsWith('pantaray-file:///')) return url;
   return defaultUrlTransform(url);
 }
 
-const markdownComponents = {
-  a: ({ href, children, ...props }: ComponentPropsWithoutRef<'a'>) => {
-    const localPath = typeof href === 'string' ? localPathFromPantarayFileHref(href) : null;
-    if (localPath) {
-      return (
-        <a
-          href={href}
-          {...props}
-          onClick={(event) => {
-            event.preventDefault();
-            void window.electron?.actionFiles?.open({ path: localPath }).catch((error: unknown) => {
-              console.error('Failed to reveal local file link', error);
-            });
-          }}
-        >
-          {children}
-        </a>
-      );
-    }
+function isWebUrl(href: string): boolean {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<'a'>) {
+  const openFile = useContext(OpenFileLinkContext);
+  const localPath = typeof href === 'string' ? localPathFromPantarayFileHref(href) : null;
+  if (localPath) {
+    return (
+      <a
+        href={href}
+        {...props}
+        onClick={(event) => {
+          event.preventDefault();
+          if (openFile) {
+            openFile(localPath);
+            return;
+          }
+          void window.electron?.actionFiles?.open({ path: localPath }).catch((error: unknown) => {
+            console.error('Failed to reveal local file link', error);
+          });
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  // A new window becomes the default browser (main's window-open handler).
+  if (typeof href === 'string' && isWebUrl(href)) {
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
         {children}
       </a>
     );
-  },
-};
+  }
+  // Any other link (relative, a hash, another scheme) would resolve against the app's own
+  // address and replace the app, so it stays text.
+  return <span>{children}</span>;
+}
+
+const markdownComponents = { a: MarkdownLink };
 
 export const MarkdownBlock: React.FC<{
   text: string;
@@ -246,7 +259,12 @@ export const MarkdownBlock: React.FC<{
   const markdownFallbackBlock: LLMOutputFallbackBlock = {
     component: ({ blockMatch }: { blockMatch: BlockMatch }) => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkBareFileLinks, { streaming: !isStreamFinished }]]}
+        // The breaks come last: the file-link pass reads text positions, which a split drops.
+        remarkPlugins={[
+          remarkGfm,
+          [remarkBareFileLinks, { streaming: !isStreamFinished }],
+          remarkSoftLineBreaks,
+        ]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

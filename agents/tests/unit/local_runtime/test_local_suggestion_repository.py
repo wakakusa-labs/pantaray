@@ -662,7 +662,47 @@ async def test_recent_suggestions_keep_dismissal_distinct_from_no_reply(
     recent = await repo.get_recent_suggestions(USER_ID)
     assert recent.data is not None
     assert recent.data[0]["user_reaction"] == "rejected"
+    assert recent.data[0]["dismiss_reason"] is None
     assert recent.data[0]["user_reply"] is None
+
+
+@pytest.mark.asyncio
+async def test_dismissal_keeps_the_users_reason_for_the_next_suggestion_run(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+
+    db_path = _bootstrap_db(tmp_path)
+    repo = _repo(db_path)
+    await repo.create_processing_suggestion_row(
+        user_id=USER_ID,
+        suggestion_id=SUGGESTION_ID,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    await repo.save_suggestion(
+        _success_response(answer="Review again?"),
+        prompt_name="suggestion",
+        prompt_version="react_v2",
+    )
+    reaction = await repo.mark_user_reaction(
+        user_id=USER_ID,
+        suggestion_id=SUGGESTION_ID,
+        user_reaction="dismiss",
+        dismiss_reason="The review is already done.",
+    )
+    assert reaction.error is None
+    assert reaction.data is not None
+    assert reaction.data["dismiss_reason"] == "The review is already done."
+    recent = await repo.get_recent_suggestions(USER_ID)
+    assert recent.data is not None
+    assert recent.data[0]["dismiss_reason"] == "The review is already done."
+    # The reason is recorded with the dismissal; nothing was started for it.
+    assert recent.data[0]["action_status"] is None
+    assert recent.data[0]["user_reply"] is None
+    with sqlite3.connect(db_path) as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM agent_actions").fetchone()[0] == 0
+        )
 
 
 @pytest.mark.asyncio

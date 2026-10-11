@@ -4,6 +4,7 @@ import AgentOverlay from './components/AgentOverlay';
 import { UiLanguageProvider } from './context/UiLanguageContext';
 import { resolveRendererInitialLanguage } from './i18n/initialLanguage';
 import './index.css';
+import './iconTooltip.css';
 
 type OverlayEntry = { mode: 'overlay' | 'standalone'; actionId: string | null };
 

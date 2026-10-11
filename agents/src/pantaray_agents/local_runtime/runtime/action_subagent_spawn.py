@@ -22,6 +22,10 @@ from ..tooling.action_subagent_resource_claims import (
 from .action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
 )
+from .action_subagent_messages import (
+    continue_action_subagent_history_in_connection,
+    find_action_subagent_continuation_in_connection,
+)
 from .action_subagent_queue import enqueue_action_subagent_job_in_connection
 from .job_payload_builder import build_action_subagent_job_payload
 from .job_payload_models import serialize_action_subagent_job_payload
@@ -58,6 +62,15 @@ type ActionSubagentSpawnResourceClaim = (
 
 
 @dataclass(frozen=True, slots=True)
+class ActionSubagentContinuation:
+    """A finished child whose conversation the new child carries on, with a message."""
+
+    child_process_id: str
+    message_id: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class ActionSubagentSpawnRequest:
     user_id: str
     action_id: str
@@ -72,6 +85,7 @@ class ActionSubagentSpawnRequest:
     context_refs: tuple[str, ...]
     resource_claims: tuple[ActionSubagentSpawnResourceClaim, ...]
     spawned_at: str
+    continues: ActionSubagentContinuation | None = None
 
     @property
     def logical_request_id(self) -> str:
@@ -125,6 +139,28 @@ def spawn_action_subagent(
         with immediate_transaction(connection):
             current_cwd = _require_parent_spawn_authority(connection, request)
             _require_workspace_claim_cwds(request, current_cwd=current_cwd)
+            continued = (
+                find_action_subagent_continuation_in_connection(
+                    connection=connection,
+                    user_id=request.user_id,
+                    action_id=request.action_id,
+                    from_process_id=request.continues.child_process_id,
+                    message_id=request.continues.message_id,
+                    content=request.continues.content,
+                )
+                if request.continues is not None
+                else None
+            )
+            if continued is not None:
+                return ActionSubagentSpawnResult(
+                    child_process_id=continued,
+                    job_id=str(
+                        connection.execute(
+                            "SELECT job_id FROM jobs WHERE process_id=?", (continued,)
+                        ).fetchone()[0]
+                    ),
+                    inserted_new=False,
+                )
             if _is_exact_replay(
                 connection,
                 request=request,
@@ -152,6 +188,15 @@ def spawn_action_subagent(
                 acquired_at=request.spawned_at,
                 claims=claims,
             )
+            if request.continues is not None:
+                continue_action_subagent_history_in_connection(
+                    connection=connection,
+                    from_process_id=request.continues.child_process_id,
+                    to_process_id=child_process_id,
+                    message_id=request.continues.message_id,
+                    content=request.continues.content,
+                    created_at=request.spawned_at,
+                )
     return ActionSubagentSpawnResult(
         child_process_id=child_process_id,
         job_id=job_id,

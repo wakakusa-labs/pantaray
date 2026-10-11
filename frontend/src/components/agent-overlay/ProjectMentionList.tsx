@@ -5,7 +5,7 @@ import styled, { css } from 'styled-components';
 import { Plus } from 'lucide-react';
 
 import { useI18n } from '@/context/useI18n';
-import { mentionOptionId, type ComposerMention } from './composerMentions';
+import { mentionOptionId, type ProjectMention } from './composerMentions';
 
 const OPTION_HEIGHT_PX = 28;
 const VISIBLE_PROJECT_ROWS = 7;
@@ -89,9 +89,7 @@ const MentionFailure = styled.p`
   font-size: var(--text-meta-size);
 `;
 
-export type MentionOptionItem =
-  | (Readonly<{ kind: 'project' }> & Omit<ComposerMention, 'start' | 'end'>)
-  | Readonly<{ kind: 'add' }>;
+export type MentionOptionItem = Omit<ProjectMention, 'start' | 'end'> | Readonly<{ kind: 'add' }>;
 
 export function ProjectMentionList({
   id,

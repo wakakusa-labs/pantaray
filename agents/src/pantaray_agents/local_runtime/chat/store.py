@@ -351,7 +351,9 @@ def _require_references(
     quote_item_id = content.quote_item_id
     if quote_item_id is not None and (
         connection.execute(
-            "SELECT 1 FROM chat_items WHERE user_id = ? AND item_id = ?",
+            # Only a message is drawn, so only a message can be quoted.
+            "SELECT 1 FROM chat_items WHERE user_id = ? AND item_id = ? "
+            "AND kind IN ('user_message', 'assistant_message')",
             (user_id, quote_item_id),
         ).fetchone()
         is None

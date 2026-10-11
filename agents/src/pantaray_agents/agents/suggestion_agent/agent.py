@@ -233,10 +233,10 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         suggestion_request = request
 
         # 直近のanswer（最新12件）を取得（thinkingは含めない）
-        # 期間は広め（30日）に設定し、limitで12件に絞る
+        # 期間は広め（30日）に設定し、limitで20件に絞る
         recent_suggestion_rows = repository_data_or_raise(
             await self.repository.get_recent_suggestions(
-                suggestion_request.user_id, days=30, limit=12
+                suggestion_request.user_id, days=30, limit=20
             ),
             safe_message="failed to fetch recent suggestions",
         )

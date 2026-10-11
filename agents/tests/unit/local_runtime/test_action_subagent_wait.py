@@ -6,12 +6,16 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    subagent_cancel,
     subagent_wait,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
     ToolValidationError,
 )
-from pantaray_agents.agents.action_agent.tools import WAIT_SUBAGENTS_TOOL
+from pantaray_agents.agents.action_agent.tools import (
+    CANCEL_SUBAGENT_TOOL,
+    WAIT_SUBAGENTS_TOOL,
+)
 from pantaray_agents.local_runtime.agent_state import LocalActionRepository
 from pantaray_agents.local_runtime.runtime import action_subagent_terminal as terminal
 from pantaray_agents.local_runtime.runtime.job_claim import claim_next_pending_job
@@ -261,3 +265,86 @@ async def test_a_stopped_wait_returns_without_waiting_for_its_children(
         with pytest.raises(asyncio.CancelledError):
             await waiting
         assert loop.time() - canceled_at < 1.0
+
+
+def _resume_after_stop(db_path: Path) -> None:
+    """The stopped run ended after its child settled; the resume opened a new run."""
+
+    with spawn._connect(db_path) as connection:
+        connection.executescript(
+            f"""
+            UPDATE jobs SET status='canceled',completed_at='{spawn.TIMESTAMP}'
+            WHERE job_id='parent-job';
+            UPDATE processes SET status='canceled',current_job_id=NULL,
+                completed_at='{spawn.TIMESTAMP}'
+            WHERE process_id='parent-process';
+            INSERT INTO processes(process_id,user_id,kind,status,action_id,current_job_id,started_at,updated_at,heartbeat_at,next_event_seq) VALUES ('resumed-process','user-1','action','running','action-1','resumed-job','{spawn.TIMESTAMP}','{spawn.TIMESTAMP}','{spawn.TIMESTAMP}',1);
+            INSERT INTO jobs(job_id,user_id,job_type,process_id,status,attempt,claimed_by,claimed_at,heartbeat_at,scheduled_at,started_at,logical_key) VALUES ('resumed-job','user-1','execute_action','resumed-process','running',1,'worker','{spawn.TIMESTAMP}','{spawn.TIMESTAMP}','{spawn.TIMESTAMP}','{spawn.TIMESTAMP}','action-1');
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_run_hears_that_its_stopped_runs_child_was_stopped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """再開した run が、停止した run の子を名指ししても検証エラーにならない。
+
+    停止で子は canceled に確定してから run が終わる。再開後の会話はその子の ID を
+    覚えているので、待つ・止めるツールは「止まった」と答え、もう一度始めるかは親が決める。
+    """
+
+    db_path, children = _children(tmp_path, 1)
+    child_id = children[0]["process_id"]
+    _terminalize(db_path, children[0], terminal.build_action_subagent_canceled_result())
+    _resume_after_stop(db_path)
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", str(spawn.BUSY_TIMEOUT_MS))
+    stopped = {"child_process_id": child_id, "status": "canceled"}
+    state = {"user_id": "user-1", "action_id": "action-1"}
+    with TraceContextManager(
+        user_id="user-1",
+        action_id="action-1",
+        local_job_id="resumed-job",
+        extra={"process_id": "resumed-process"},
+    ):
+        waited = await subagent_wait.run_wait_subagents_tool(
+            step_id="wait",
+            tool_def=WAIT_SUBAGENTS_TOOL,
+            args={"child_process_ids": [child_id]},
+            state=state,
+            actor="supervisor",  # type: ignore[arg-type]
+        )
+        canceled = await subagent_cancel.run_cancel_subagent_tool(
+            step_id="cancel",
+            tool_def=CANCEL_SUBAGENT_TOOL,
+            args={"child_process_id": child_id},
+            state=state,
+            actor="supervisor",  # type: ignore[arg-type]
+        )
+        # A finished child of another Action is still not this parent's.
+        foreign = _foreign_child(db_path)
+        with spawn._connect(db_path) as connection:
+            connection.execute(
+                "UPDATE processes SET status='canceled' WHERE process_id=?", (foreign,)
+            )
+        with pytest.raises(ToolValidationError, match="not owned"):
+            await subagent_wait.run_wait_subagents_tool(
+                step_id="foreign",
+                tool_def=WAIT_SUBAGENTS_TOOL,
+                args={"child_process_ids": [foreign]},
+                state=state,
+                actor="supervisor",  # type: ignore[arg-type]
+            )
+    assert waited.output == {"results": [stopped]}
+    assert canceled.output == stopped
+    # The resumed run collects what it read, so nothing is left owed to it.
+    assert waited.subagent_collection_receipt is not None
+    repository = LocalActionRepository(
+        db_path=db_path, busy_timeout_ms=spawn.BUSY_TIMEOUT_MS
+    )
+    saved = await _save_collection_step(
+        repository, step_id="wait-resumed", receipt=waited.subagent_collection_receipt
+    )
+    assert saved.error is None

@@ -8,6 +8,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from pantaray_agents.agents.action_agent.runtime.checkpoint import (
+    RUNTIME_STATE_CHECKPOINT_VERSION,
+    build_runtime_state_checkpoint,
+)
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
+    project_persisted_user_request_step,
+)
+from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.local_runtime.agent_state import LocalActionRepository
 from pantaray_agents.local_runtime.runtime import (
     action_messages,
@@ -244,6 +252,13 @@ def _create_schema(db_path: Path) -> None:
                 payload_json TEXT NOT NULL,
                 FOREIGN KEY(job_id) REFERENCES jobs(job_id)
             );
+            CREATE TABLE action_withdrawn_messages (
+                user_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                withdrawn_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, message_id)
+            );
             INSERT INTO users(user_id, ui_language, created_at, updated_at)
             VALUES ('user-1', 'ja', '2026-08-16T00:00:00Z', '2026-08-16T00:00:00Z');
             """
@@ -366,6 +381,8 @@ def test_reply_snapshots_assistant_before_user_and_replays_without_reading_sourc
         "UPDATE agent_suggestions SET status='processing'",
         "UPDATE agent_suggestions SET has_suggestion=0",
         "UPDATE agent_suggestions SET interaction_contract='action_offer'",
+        """UPDATE agent_suggestions
+           SET interaction_contract='action_offer',user_reaction='accepted'""",
         "UPDATE agent_suggestions SET answer='   '",
     ],
 )
@@ -383,6 +400,41 @@ def test_reply_rejects_unavailable_source_atomically(
             assert (
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
             )
+
+
+def test_reply_to_a_dismissed_offer_starts_an_action_and_keeps_the_dismissal(
+    creation_db: Path,
+) -> None:
+    _insert_reply_source(creation_db)
+    with sqlite3.connect(creation_db) as connection:
+        connection.execute(
+            """UPDATE agent_suggestions
+               SET interaction_contract='action_offer',user_reaction='rejected',
+                   rejected_at='2026-08-16T01:01:00.000Z'"""
+        )
+    result = submit_action_message(_reply_command())
+    assert isinstance(result, StartedActionMessageResult)
+    with sqlite3.connect(creation_db) as connection:
+        assert connection.execute(
+            """SELECT step_type,source_suggestion_id,llm_response_text,adopted_process_id
+               FROM agent_action_steps WHERE step_number=1"""
+        ).fetchone() == (
+            "assistant_message",
+            "comment-1",
+            "元の発言",
+            result.process_id,
+        )
+        assert connection.execute(
+            "SELECT suggestion_id FROM agent_actions"
+        ).fetchone() == (None,)
+        assert connection.execute(
+            "SELECT status FROM jobs WHERE job_id=?", (result.job_id,)
+        ).fetchone() == ("queued",)
+        assert connection.execute(
+            """SELECT user_reaction,rejected_at,accepted_at,action_status,
+                      action_process_id
+               FROM agent_suggestions"""
+        ).fetchone() == ("rejected", "2026-08-16T01:01:00.000Z", None, None, None)
 
 
 def test_reply_cannot_also_approve_a_suggestion() -> None:
@@ -1695,3 +1747,108 @@ def test_creation_replay_preserves_later_consent_and_rejects_changed_initial_mod
     )
     with sqlite3.connect(creation_db) as connection:
         assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+
+
+def _checkpoint_run(db_path: Path, *, action_id: str, user_step_ids: list[str]) -> None:
+    """Finish the latest run with a restorable checkpoint holding these USER steps."""
+
+    state = create_initial_state(
+        user_id="user-1",
+        suggestion_id=None,
+        action_id=action_id,
+        started_at="2026-08-16T01:02:03.000Z",
+        max_steps=20,
+        max_tool_steps=10,
+        token_budget=None,
+    )
+    state["phase"] = "executing"
+    for number, step_id in enumerate(user_step_ids, start=1):
+        state = project_persisted_user_request_step(
+            state,
+            step_id=step_id,
+            step_number=number,
+            local_step_number=number,
+            short_step_id=f"S-{number}-USER",
+            request_text="text",
+            occurred_at="2026-08-16T01:02:03.000Z",
+            history_phase="executing",
+        )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
+               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
+            (
+                json.dumps(build_runtime_state_checkpoint(state)),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                user_step_ids[-1],
+            ),
+        )
+    _finish_initial_run_statuses(db_path, action_id=action_id)
+
+
+def _finish_initial_run_statuses(db_path: Path, *, action_id: str) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE agent_actions SET status = 'success' WHERE action_id = ?",
+            (action_id,),
+        )
+        connection.execute(
+            "UPDATE jobs SET status = 'completed' WHERE logical_key = ?", (action_id,)
+        )
+        connection.execute(
+            "UPDATE processes SET status = 'completed', completed_at = updated_at "
+            "WHERE action_id = ?",
+            (action_id,),
+        )
+
+
+def test_a_message_older_than_the_latest_run_stays_out_of_the_next_one(
+    creation_db: Path,
+) -> None:
+    """A fails before its first checkpoint, B succeeds, C starts, C takes a steer.
+
+    The message queued during A could not join B, which had no state to add it
+    to. C must not take it either: a run is ordered by its earliest message, so
+    C would sort before B and C's own follow-ups would be refused.
+    """
+
+    run_a = submit_action_message(_text_command())
+    queued = submit_action_message(
+        _followup_command(run_a, message_id="message-queued")
+    )
+    assert queued.disposition == "pending"
+    with sqlite3.connect(creation_db) as connection:
+        connection.execute(
+            "UPDATE agent_action_steps SET adoption_canceled_at = ? WHERE step_id = ?",
+            ("2026-08-16T01:02:04.000Z", queued.user_step_id),
+        )
+    _fail_action_run(creation_db, run_a, stage="prepare")
+    run_b = submit_action_message(_followup_command(run_a, message_id="message-b"))
+    assert isinstance(run_b, StartedActionMessageResult)
+    _checkpoint_run(
+        creation_db,
+        action_id=run_a.action_id,
+        user_step_ids=[run_a.user_step_id, run_b.user_step_id],
+    )
+
+    run_c = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id="user-1",
+            target=ExistingActionTarget(
+                action_id=run_a.action_id, expected_process_id=None
+            ),
+            message=ActionUserMessageInput(message_id="message-c", content="Next"),
+        )
+    )
+    assert isinstance(run_c, StartedActionMessageResult)
+    steer = submit_action_message(_followup_command(run_c, message_id="message-d"))
+
+    assert steer.disposition == "pending"
+    with sqlite3.connect(creation_db) as connection:
+        left = connection.execute(
+            "SELECT step_number, adoption_canceled_at IS NOT NULL "
+            "FROM agent_action_steps WHERE step_id = ?",
+            (queued.user_step_id,),
+        ).fetchone()
+    # Still not executed, and still the user's to withdraw.
+    assert left == (None, 1)

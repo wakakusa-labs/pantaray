@@ -60,16 +60,17 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       },
     },
     agentOverlay: {
-      showHistory: (payload) => {
-        if (isValidSendChannel('history:openOverlay')) {
-          ipcRenderer.send('history:openOverlay', payload);
-        }
+      showHistory: (request) => {
+        assertValidInvokeChannel('history:openOverlay');
+        return ipcRenderer.invoke('history:openOverlay', request);
       },
       onSnapshot: snapshotChannel.subscribe,
       resize: (height, options) => {
         if (!isValidSendChannel('resize-notification-window')) return;
-        const payload = options?.id ? { id: String(options.id), height } : height;
-        ipcRenderer.send('resize-notification-window', payload);
+        ipcRenderer.send('resize-notification-window', {
+          height,
+          settled: options?.settled === true,
+        });
       },
       acceptAction: (data) => ipcRenderer.send('notification-action-accept', data),
       submitApprovalDecision: (payload) => {
@@ -97,24 +98,14 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       dragEnd: () => {
         if (isValidSendChannel('overlay:dragEnd')) ipcRenderer.send('overlay:dragEnd');
       },
-      showChat: (request) => ipcRenderer.invoke('overlay:showChat', request),
+      openTask: (request) => ipcRenderer.invoke('overlay:openTask', request),
       openWorkspaceSettings: () => {
         if (isValidSendChannel('overlay:openWorkspaceSettings')) {
           ipcRenderer.send('overlay:openWorkspaceSettings');
         }
       },
-      rejectAction: (data) => {
-        if (isValidSendChannel('notification-action-reject')) {
-          ipcRenderer.send('notification-action-reject', data);
-        }
-      },
       hide: () => {
         if (isValidSendChannel('notification-hide')) ipcRenderer.send('notification-hide');
-      },
-      stopAction: () => {
-        if (isValidSendChannel('notification-stop-action')) {
-          ipcRenderer.send('notification-stop-action');
-        }
       },
     },
   };

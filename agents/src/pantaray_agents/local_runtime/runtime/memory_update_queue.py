@@ -68,6 +68,7 @@ def build_coalesced_memory_update_payload(
     enqueued_at: str,
     pending: tuple[PendingMemoryTrigger, ...],
     chat: MemoryUpdateChatRange | None,
+    dismissed_suggestion_ids: tuple[str, ...],
 ) -> MemoryUpdateJobPayload:
     short_insight_ids: list[str] = []
     summary_ids: list[str] = []
@@ -99,6 +100,8 @@ def build_coalesced_memory_update_payload(
     }
     if chat is not None:
         payload["chat"] = chat
+    if dismissed_suggestion_ids:
+        payload["dismissed_suggestion_ids"] = list(dismissed_suggestion_ids)
     return build_memory_update_job_payload(payload)
 
 

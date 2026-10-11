@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from pydantic.json_schema import JsonSchemaValue
@@ -14,6 +14,10 @@ from pantaray_agents.local_runtime.runtime.action_file_attachments import (
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
+)
+from pantaray_agents.local_runtime.runtime.action_message_withdrawal import (
+    ActionMessageAdoptedError,
+    withdraw_action_message,
 )
 from pantaray_agents.local_runtime.runtime.action_messages import (
     ActionMessageConflictError,
@@ -27,7 +31,8 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message as submit_canonical_action_message,
 )
-from pantaray_agents.schema.agent.action_message import (
+from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.agent.action_message_http import (
     ActionMessageHttpConflictFailure,
     ActionMessageHttpDefaultErrorDetail,
     ActionMessageHttpDeferredResponse,
@@ -41,8 +46,8 @@ from pantaray_agents.schema.agent.action_message import (
     ActionMessageValidationError,
     ActionMessageValidationReason,
     ActionMessageValidationUnit,
+    ActionMessageWithdrawConflictFailure,
     ActionResumeHttpRequest,
-    ActionUserMessageInput,
 )
 from pantaray_agents.security.storage_paths import validate_image_storage_path
 
@@ -212,6 +217,47 @@ async def resume_action(
     return _response(result)
 
 
+@router.delete(
+    "/{user_id}/actions/{action_id}/unadopted-messages/{step_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description=(
+        "Withdraw a message no run has taken yet (`step_id` of an entry in "
+        "`unadopted_messages`). Also 204 when it is already gone. Once a run "
+        "has taken it, the call returns 409 `MessageAdopted` and changes nothing."
+    ),
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ActionMessageHttpErrorDetail},
+        status.HTTP_403_FORBIDDEN: {"model": ActionMessageHttpErrorDetail},
+        status.HTTP_409_CONFLICT: {"model": ActionMessageWithdrawConflictFailure},
+    },
+)
+async def withdraw_unadopted_action_message(
+    user_id: str,
+    action_id: str,
+    step_id: str,
+    resolved_user_id: str = Depends(get_current_user_id_from_token),
+) -> Response:
+    if resolved_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user_id mismatch",
+        )
+    try:
+        await asyncio.to_thread(
+            withdraw_action_message,
+            user_id=user_id,
+            action_id=action_id,
+            step_id=step_id,
+        )
+    except ActionMessageAdoptedError:
+        failure = ActionMessageWithdrawConflictFailure(type="MessageAdopted")
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=failure.model_dump(mode="json"),
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 def _canonical_command(
     *, user_id: str, request: ActionMessageHttpRequest
 ) -> SubmitActionMessageCommand:
@@ -246,6 +292,7 @@ def _canonical_command(
             language=message.language,
             project_refs=message.project_refs,
             files=message.files,
+            work_refs=message.work_refs,
         ),
     )
 

@@ -183,6 +183,9 @@ class SuggestionHistoryEntry(BaseModel):
     user_reaction: Literal["accepted", "rejected"] | None = Field(
         default=None, description="承認・却下。未反応やmessage_onlyの場合はnull"
     )
+    dismiss_reason: str | None = Field(
+        default=None, description="見送りと一緒にユーザーが書いた理由。なければ null"
+    )
     user_reply: str | None = Field(
         default=None,
         description=(

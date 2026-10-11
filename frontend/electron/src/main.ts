@@ -12,7 +12,7 @@ import {
 } from './settings/scope';
 import { createAuthCoordinator } from './auth/authCoordinator';
 import { broadcastAuthStateToAllWindows } from './auth/authBroadcast';
-import { APP_PROTOCOL, createDeepLinkAuthManager } from './auth/deepLinkAuth';
+import { APP_PROTOCOL, createDeepLinkManager } from './protocol/deepLink';
 import { extractUserIdFromJwt } from './auth/jwt';
 import { createLocalConnectionRuntime } from './aiConnection/localConnectionRuntime';
 import { createLocalBackendHelperManager } from './auth/localBackendHelperManager';
@@ -38,8 +38,16 @@ import { showEditContextMenus } from './ui/editContextMenu';
 import { startDesktopBackgroundRuntime } from './main_runtime/backgroundStartup';
 import { createDesktopRuntime, loadDevelopmentEnvironment } from './main_runtime/desktopRuntime';
 import { createDesktopFeatureRuntime } from './main_runtime/featureRuntime';
+import type { MainIpcRuntime } from './main_runtime/ipcBootstrap';
 import { applyDevUserDataDirOverride } from './runtime/userDataOverride';
-import { registerActionImageProtocol, registerActionImageScheme } from './protocol/imageProtocol';
+import {
+  ACTION_IMAGE_PRIVILEGED_SCHEME,
+  registerActionImageProtocol,
+} from './protocol/imageProtocol';
+import {
+  ACTION_FILE_PRIVILEGED_SCHEME,
+  registerActionFileProtocol,
+} from './protocol/actionFileProtocol';
 
 type LoggerLike = {
   isPackaged?: boolean;
@@ -78,9 +86,13 @@ function normalizeNodeEnv(value: string | undefined): 'development' | 'productio
 }
 process.env.NODE_ENV = app.isPackaged ? 'production' : normalizeNodeEnv(process.env.NODE_ENV);
 applyDevUserDataDirOverride({ app });
-// Chromium freezes the scheme registry when the app becomes ready, so `pantaray-image://`
-// has to be declared here rather than alongside its handler.
-registerActionImageScheme(protocol);
+// Chromium freezes the scheme registry when the app becomes ready, so the schemes have to be
+// declared here rather than alongside their handlers, and in one call: Electron keeps only
+// the last registration.
+protocol.registerSchemesAsPrivileged([
+  ACTION_IMAGE_PRIVILEGED_SCHEME,
+  ACTION_FILE_PRIVILEGED_SCHEME,
+]);
 
 const { createLogger, disableConsoleForRelease } = loadNodeModule('../logger') as {
   createLogger: () => LoggerLike;
@@ -190,7 +202,10 @@ const { createOrchestrationWS } = require('../ws_orchestration') as {
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createMainWindow } = require('../window_lifecycle') as {
-  createMainWindow: (options: { initialUiLanguage: UiLanguage }) => BrowserWindow;
+  createMainWindow: (options: {
+    initialUiLanguage: UiLanguage;
+    hashRoute?: string;
+  }) => BrowserWindow;
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createClient } = require('@supabase/supabase-js') as {
@@ -451,18 +466,23 @@ const featureRuntime = createDesktopFeatureRuntime({
   logger,
 });
 
-// ---- Deep link auth (TS module) ----
-const deepLinkAuth = createDeepLinkAuthManager({
+// Set once IPC is registered, before the main window is created.
+let mainIpc: MainIpcRuntime | null = null;
+
+const deepLink = createDeepLinkManager({
   app,
-  protocol: APP_PROTOCOL,
   getMainWindow: () => mainWindow,
   handleCallback: (payload) => authCoordinator.handleCallback(payload),
+  showItem: async (item) => {
+    if (!mainIpc) throw new Error('A linked item arrived before IPC was registered.');
+    await mainIpc.context.windows.showTask(item);
+  },
 });
-deepLinkAuth.installAppHandlers();
+deepLink.installAppHandlers();
 
-function createWindow(): void {
-  mainWindow = createMainWindow({ initialUiLanguage: uiLanguage });
-  deepLinkAuth.onMainWindowCreated();
+function createWindow(hashRoute?: string): void {
+  mainWindow = createMainWindow({ initialUiLanguage: uiLanguage, hashRoute });
+  deepLink.onMainWindowCreated();
 }
 
 function startBackgroundRuntime(): void {
@@ -511,17 +531,20 @@ installDesktopApplicationLifecycle({
   initializeUpdater: initializeDesktopUpdater,
   rebuildAppMenu: () => updateUi.rebuildAppMenu(),
   registerIpc: () => {
-    featureRuntime.registerMainIpc();
+    mainIpc = featureRuntime.registerMainIpc();
     // Registered with IPC so the renderer can never reach an image URL before the handler that
     // authorizes it exists.
     registerActionImageProtocol(protocol, {
       localArtifactRoot: LOCAL_BACKEND_ARTIFACT_ROOT,
       getCurrentSubjectId: featureRuntime.getCurrentSubjectId,
     });
+    registerActionFileProtocol(protocol, {
+      readConversationPage: featureRuntime.readActionConversationPage,
+    });
   },
   createMainWindow: createWindow,
   initializeGlobalShortcut: featureRuntime.initializeGlobalShortcut,
-  handleStartupArgs: (argv) => deepLinkAuth.handleStartupArgs(argv),
+  handleStartupArgs: (argv) => deepLink.handleStartupArgs(argv),
   startBackgroundRuntime,
   activate: () => {
     void updateUi.refreshCaptureStatus();

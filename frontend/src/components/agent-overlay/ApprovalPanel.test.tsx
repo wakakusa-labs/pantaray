@@ -134,7 +134,7 @@ describe('ApprovalPanel', () => {
       '許可しない',
       '今回だけ許可',
       'この会話では許可',
-      '作業フォルダの設定を開く',
+      '作業フォルダを追加',
     ]);
     fireEvent.click(screen.getByRole('button', { name: '許可しない' }));
     fireEvent.click(screen.getByRole('button', { name: '今回だけ許可' }));
@@ -144,7 +144,7 @@ describe('ApprovalPanel', () => {
       ['approved_once'],
       ['approved_for_conversation'],
     ]);
-    fireEvent.click(screen.getByRole('button', { name: '作業フォルダの設定を開く' }));
+    fireEvent.click(screen.getByRole('button', { name: '作業フォルダを追加' }));
     expect(handlers.onOpenWorkspaceSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -163,7 +163,7 @@ describe('ApprovalPanel', () => {
         { exact: false }
       )
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Open workspace folder settings' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a workspace folder' })).toBeTruthy();
   });
 
   it('offers only a one-off approval for a folder that cannot be allowed for the conversation', () => {
@@ -220,7 +220,7 @@ describe('ApprovalPanel', () => {
       '許可しない',
       '今回だけ許可',
       'この会話では許可',
-      '作業フォルダの設定を開く',
+      '作業フォルダを追加',
     ]);
     // Without a reason the command stays in view, as before.
     expect(screen.getByText('touch made.txt').closest('details')).toBeNull();

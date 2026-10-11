@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
-import type { ChatCard as ChatCardData } from '../../../electron/src/chat/chatContracts';
-import { NewWorkButton } from '@/components/history/NewWorkButton';
-import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupByLocalDay } from '@/history/historyDayGroups';
-import { openNewWork } from '@/history/newWork';
 import type { ChatItemsResult } from '@/hooks/useChatItems';
 import { useChatWorkStates } from '@/hooks/useChatWorkStates';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
@@ -13,7 +17,6 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import { ChatComposer } from './ChatComposer';
 import { ChatMessage } from './ChatMessage';
 import {
-  cardElementId,
   cardWorkKey,
   isChatMessage,
   latestCardPositions,
@@ -23,26 +26,10 @@ import {
 } from './chatTimeline';
 import type { ChatComposerControl } from './useChatComposer';
 import { useChatReadMark } from './useChatReadMark';
-import { useChatReveal, type ChatReveal } from './useChatReveal';
+import { useChatReveal } from './useChatReveal';
 import { useChatScroll } from './useChatScroll';
 
 import './chatView.css';
-
-async function openCard(card: ChatCardData): Promise<void> {
-  if (card.kind === 'action') {
-    const open = window.electron?.history?.openConversation;
-    if (!open) throw new Error('Conversation overlay bridge is unavailable.');
-    await open({ actionId: card.action_id });
-    return;
-  }
-  const showHistory = window.electron?.agentOverlay?.showHistory;
-  if (!showHistory) throw new Error('Suggestion history overlay bridge is unavailable.');
-  showHistory({
-    suggestionId: card.suggestion_id,
-    initialUiState: { expand: true },
-    fromStart: true,
-  });
-}
 
 /**
  * A jump to a message: from a quote to the quoted message, with `returnTo` the quote's message,
@@ -50,37 +37,31 @@ async function openCard(card: ChatCardData): Promise<void> {
  */
 type ChatJump = Readonly<{ key: string; itemId: string; returnTo: string | null; shown: boolean }>;
 
+/** What the page asks of the chat from outside it: the sidebar's Chat row shows the newest. */
+export type ChatViewHandle = { showNewest: () => void };
+
 /**
- * The single chat in the History page: messages with their cards, read newest first and
- * scrolled up for older pages.
+ * The single chat in the History page's detail pane: messages with their cards, read newest first
+ * and scrolled up for older pages.
  */
-export function ChatView({
-  modeSwitch,
-  chat,
-  composer,
-  reveal,
-}: {
-  modeSwitch: ReactNode;
-  /** The chat and its composer outlive this view, so switching to the list loses neither. */
-  chat: ChatItemsResult;
-  composer: ChatComposerControl;
-  /** The Action whose latest card the Overlay asked to show, or null. */
-  reveal: ChatReveal | null;
-}) {
+export const ChatView = forwardRef<
+  ChatViewHandle,
+  {
+    /** Shown under the pane's title (the app's AI-connection notice). */
+    notice: ReactNode;
+    /** The chat and its composer outlive this view, so leaving the page loses neither. */
+    chat: ChatItemsResult;
+    composer: ChatComposerControl;
+    /** A card selects its work for the detail pane. */
+    onOpenWork: (work: WorkKey) => void;
+    /** The composer's "Add project". */
+    onAddProject: () => void;
+  }
+>(function ChatView({ notice: pageNotice, chat, composer, onOpenWork, onAddProject }, ref) {
   const { t, language } = useI18n();
-  const shortcutHint = useGlobalShortcutHint();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
-  const [openWork, setOpenWork] = useState<WorkKey | null>(null);
-  // The Overlay that asked to show its Action is the one open now.
-  const [revealSeen, setRevealSeen] = useState<string | null>(null);
   const [jump, setJump] = useState<ChatJump | null>(null);
-  if (reveal && reveal.key !== revealSeen) {
-    setRevealSeen(reveal.key);
-    setOpenWork(`action:${reveal.actionId}`);
-    // The Overlay's request is the newer one; a jump still looking for its message gives way.
-    setJump(null);
-  }
   const ready = !chat.loading;
   const scroll = useChatScroll({
     items: chat.items,
@@ -123,14 +104,6 @@ export function ChatView({
     loadOlder: scroll.loadOlderKeepingPlace,
     readPlace: scroll.readPlace,
   };
-  const revealCard = reveal ? latestCards.get(`action:${reveal.actionId}`) : undefined;
-  useChatReveal({
-    ...reading,
-    target: reveal && {
-      key: reveal.key,
-      elementId: revealCard === undefined ? null : cardElementId(revealCard),
-    },
-  });
   const jumpCount = useRef(0);
   const jumpTo = (itemId: string, returnTo: string | null) => {
     jumpCount.current += 1;
@@ -146,15 +119,16 @@ export function ChatView({
   });
   const returnTo = jump?.shown ? jump.returnTo : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
+  // Back at the newest message the reader sees it, so the existing check marks it read.
+  useImperativeHandle(ref, () => ({
+    showNewest: () => {
+      setJump(null);
+      scroll.followNewest();
+      markRead();
+    },
+  }));
 
-  const handleNewWork = async (): Promise<void> => {
-    setNotice(null);
-    try {
-      await openNewWork();
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
-    }
-  };
   const handleRetryTurn = async (failureItemId: string): Promise<void> => {
     setNotice(null);
     setRetrying(true);
@@ -164,15 +138,6 @@ export function ChatView({
       setNotice(t('history.chat.retryFailed'));
     } finally {
       setRetrying(false);
-    }
-  };
-  const handleOpenCard = async (card: ChatCardData): Promise<void> => {
-    setNotice(null);
-    try {
-      await openCard(card);
-      setOpenWork(cardWorkKey(card));
-    } catch {
-      setNotice(t('history.openOverlayFailed'));
     }
   };
 
@@ -202,9 +167,9 @@ export function ChatView({
             time={formatTime.format(new Date(item.created_at))}
             latestCards={latestCards}
             works={works}
-            openWork={openWork}
             t={t}
-            onOpenCard={(card) => void handleOpenCard(card)}
+            onOpenCard={(card) => onOpenWork(cardWorkKey(card))}
+            onOpenWork={onOpenWork}
             onJumpToQuote={(quoteItemId) => jumpTo(quoteItemId, item.item_id)}
             found={jump?.shown === true && jump.itemId === item.item_id}
             onQuote={
@@ -248,7 +213,7 @@ export function ChatView({
           markRead();
         }}
       >
-        <div className="chat-column">
+        <div className="chat-column" ref={columnRef}>
           {chat.hasOlder ? (
             <button
               ref={scroll.olderTriggerRef}
@@ -284,18 +249,15 @@ export function ChatView({
 
   return (
     <div className="history-container chat-view">
-      <div className="history-header">
-        <div className="history-toolbar">
-          {modeSwitch}
-          <span className="history-toolbar__spacer" />
-          <NewWorkButton shortcutHint={shortcutHint} t={t} onClick={() => void handleNewWork()} />
+      <header className="history-pane-header">
+        <h1>{t('history.chat.title')}</h1>
+      </header>
+      {pageNotice}
+      {notice ? (
+        <div className="history-error history-pane-notice" role="alert">
+          {notice}
         </div>
-        {notice ? (
-          <div className="history-error" role="alert">
-            {notice}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
       {renderBody()}
       {returnTo !== null ? (
         <button
@@ -308,8 +270,10 @@ export function ChatView({
       ) : null}
       <ChatComposer
         composer={composer}
+        quoteSourceRef={columnRef}
         textareaRef={textareaRef}
         t={t}
+        onAddProject={onAddProject}
         onSend={() => {
           setJump(null);
           scroll.followNewest();
@@ -328,4 +292,4 @@ export function ChatView({
       </div>
     </div>
   );
-}
+});

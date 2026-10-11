@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.action_conversation.history_candidates import
     register_conversation_history_casefold_sqlite,
 )
 from pantaray_agents.local_runtime.action_conversation.history_repository import (
+    read_conversation_history_item_in_connection,
     read_conversation_history_page_in_connection,
 )
 from pantaray_agents.local_runtime.runtime.job_payload_builder import (
@@ -254,6 +255,26 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
             ("suggestion", "Pending Suggestion ÜBER", "approval_pending"),
         ]
         assert items[2].model_dump()["latest_completion_event_id"] == ("event-terminal")
+        # One row by its key, as the list shows it; an accepted suggestion is its task.
+        for item, expected_row in (
+            (("conversation", "action-terminal"), items[2]),
+            (("suggestion", "suggestion-pending"), items[3]),
+            (("suggestion", "sug-1"), items[0]),
+            (("conversation", "suggestion-pending"), None),
+            (("conversation", "missing"), None),
+        ):
+            assert (
+                read_conversation_history_item_in_connection(
+                    connection=connection, user_id=_USER_ID, item=item
+                )
+                == expected_row
+            ), item
+        assert (
+            read_conversation_history_item_in_connection(
+                connection=connection, user_id="user-2", item=("conversation", "act-1")
+            )
+            is None
+        )
         assert first_selects == single_action_selects
 
         for search_text, expected_ids in (
@@ -379,6 +400,14 @@ def test_reply_to_message_suggestion_keeps_the_suggestion_as_its_title(
 
         expected = [("conversation", suggestion_text)]
         assert titles() == expected
+        # A link to the replied-to suggestion now names the task that replied.
+        connection.execute("BEGIN")
+        replied = read_conversation_history_item_in_connection(
+            connection=connection, user_id=_USER_ID, item=("suggestion", "sug-1")
+        )
+        connection.rollback()
+        assert replied is not None and replied.kind == "conversation"
+        assert (replied.action_id, replied.title) == ("act-1", suggestion_text)
         add_user("step-steer", 3, steer)
         connection.commit()
         assert titles() == expected

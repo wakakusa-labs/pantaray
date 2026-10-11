@@ -22,6 +22,7 @@ from pantaray_agents.schema.agent.action import (
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
+    ActionWorkRef,
     ChatHandoffInput,
     FileAttachmentInput,
 )
@@ -77,6 +78,7 @@ async def accept_suggestion(
     language: ActionLanguage | None,
     supplement: str | None,
     supplement_project_refs: tuple[ActionProjectRef, ...],
+    supplement_work_refs: tuple[ActionWorkRef, ...],
     images: tuple[ImageInput, ...],
     files: tuple[FileAttachmentInput, ...],
     chat_handoff: ChatHandoffInput | None = None,
@@ -117,6 +119,7 @@ async def accept_suggestion(
                 language=language,
                 supplement=_optional_text(supplement),
                 supplement_project_refs=supplement_project_refs,
+                supplement_work_refs=supplement_work_refs,
                 approval_mode=approval_mode,
                 images=images,
                 files=files,
@@ -165,6 +168,7 @@ def _build_command(
     language: ActionLanguage | None,
     supplement: str | None,
     supplement_project_refs: tuple[ActionProjectRef, ...],
+    supplement_work_refs: tuple[ActionWorkRef, ...],
     approval_mode: ApprovalMode,
     images: tuple[ImageInput, ...],
     files: tuple[FileAttachmentInput, ...],
@@ -196,6 +200,7 @@ def _build_command(
                 language=language,
                 supplement=supplement,
                 supplement_project_refs=supplement_project_refs,
+                supplement_work_refs=supplement_work_refs,
                 images=images,
                 files=files,
                 chat_handoff=chat_handoff,

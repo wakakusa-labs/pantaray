@@ -1,10 +1,10 @@
 import { ArrowUp, Plus, X } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
 import { ComposerMessageField } from '@/components/agent-overlay/ComposerMessageField';
+import { ComposerQuotes } from '@/components/agent-overlay/ComposerQuotes';
 import type { MessageKey } from '@/i18n/types';
 
 import { speakerKey } from './chatTimeline';
@@ -21,6 +21,7 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
   images: 'history.chat.composer.attachmentsRejected',
   files: 'history.chat.composer.attachmentsRejected',
   project_refs: 'history.chat.composer.projectsRejected',
+  work_refs: 'history.chat.composer.workRejected',
 };
 
 /**
@@ -29,18 +30,22 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
  */
 export function ChatComposer({
   composer,
+  quoteSourceRef,
   textareaRef,
   t,
+  onAddProject,
   onSend,
 }: {
   composer: ReturnType<typeof useChatComposer>;
+  /** The chat's messages, whose selected text can be added to the reply. */
+  quoteSourceRef: RefObject<HTMLElement>;
+  onAddProject: () => void;
   /** Sends the draft; the chat also scrolls to the newest message for it. */
   onSend: () => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
   const { state } = composer;
   const readOnly = state.pending !== null;
   return (
@@ -68,7 +73,7 @@ export function ChatComposer({
               type="button"
               className="chat-icon-button"
               aria-label={t('history.chat.quote.clear')}
-              title={t('history.chat.quote.clear')}
+              data-tooltip={t('history.chat.quote.clear')}
               onClick={() => {
                 composer.setQuote(null);
                 textareaRef.current?.focus();
@@ -79,6 +84,11 @@ export function ChatComposer({
           )}
         </div>
       ) : null}
+      <ComposerQuotes
+        quoting={{ ...composer.quoting, sourceRef: quoteSourceRef }}
+        readOnly={readOnly}
+        textareaRef={textareaRef}
+      />
       <ComposerAttachments
         attachments={state.attachments}
         failure={state.attachmentFailure}
@@ -105,7 +115,7 @@ export function ChatComposer({
           className="chat-icon-button"
           disabled={!composer.canAttach}
           aria-label={t('overlay.composer.attach')}
-          title={t('overlay.composer.attach')}
+          data-tooltip={t('overlay.composer.attach')}
           onClick={() => fileInputRef.current?.click()}
         >
           <Plus size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -122,21 +132,16 @@ export function ChatComposer({
             mentions={state.mentions}
             readOnly={readOnly}
             placeholder={t('overlay.composer.placeholder')}
-            invalid={state.problem === 'text' || state.problem === 'project_refs'}
+            invalid={['text', 'project_refs', 'work_refs'].includes(state.problem ?? '')}
             describedBy={state.problem ? PROBLEM_ID : undefined}
             onChange={composer.setDraft}
-            onAddProject={() => navigate('/workspace')}
+            onAddProject={onAddProject}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey) return;
               event.preventDefault();
               if (composer.canSend) onSend();
             }}
-            onPaste={(event) => {
-              const files = Array.from(event.clipboardData.files);
-              if (readOnly || files.length === 0) return;
-              event.preventDefault();
-              void composer.attachFiles(files);
-            }}
+            onPasteFiles={(files) => void composer.attachFiles(files)}
           />
         </div>
         <button
@@ -144,7 +149,7 @@ export function ChatComposer({
           className="chat-send"
           disabled={!composer.canSend}
           aria-label={t('overlay.composer.send')}
-          title={t('overlay.composer.send')}
+          data-tooltip={t('overlay.composer.send')}
         >
           <ArrowUp size={16} strokeWidth={2.25} aria-hidden="true" />
         </button>

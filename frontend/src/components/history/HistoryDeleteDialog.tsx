@@ -8,10 +8,14 @@ import type { MessageKey } from '@/i18n/types';
  */
 export function HistoryDeleteDialog({
   t,
+  title,
+  body,
   onConfirm,
   onCancel,
 }: {
   t: (key: MessageKey) => string;
+  title: string;
+  body: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -35,8 +39,8 @@ export function HistoryDeleteDialog({
         onCancel();
       }}
     >
-      <h2 id="history-delete-dialog-title">{t('history.delete.confirmTitle')}</h2>
-      <p id="history-delete-dialog-body">{t('history.delete.confirmBody')}</p>
+      <h2 id="history-delete-dialog-title">{title}</h2>
+      <p id="history-delete-dialog-body">{body}</p>
       <div className="history-delete-dialog__actions">
         <button type="button" ref={cancelRef} className="history-filter-button" onClick={onCancel}>
           {t('common.cancel')}

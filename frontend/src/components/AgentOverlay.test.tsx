@@ -1456,10 +1456,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
     expect(screen.getByText('Draft the invoice?')).toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
-    expect(composer).toHaveAttribute(
-      'placeholder',
-      'Add a reason, or what you would like instead (optional)'
-    );
+    expect(composer).toHaveAttribute('placeholder', 'Send a message');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(sendOrchestration).toHaveBeenCalledTimes(1);
@@ -1593,7 +1590,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => snapshotListener?.(dismissed));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Add a reason, or what you would like instead (optional)'
+      'Send a message'
     );
 
     const replied = structuredClone(dismissed);

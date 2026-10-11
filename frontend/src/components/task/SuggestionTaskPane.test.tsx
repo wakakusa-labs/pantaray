@@ -349,7 +349,7 @@ describe('SuggestionTaskPane', () => {
     // Nothing written: the dismissal stands.
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Add a reason, or what you would like instead (optional)'
+      'Send a message'
     );
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();

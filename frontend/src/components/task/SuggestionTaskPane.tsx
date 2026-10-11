@@ -210,7 +210,6 @@ export function SuggestionTaskPane({
             sendSuperseded={draft.failureKind === 'superseded'}
             canResume={false}
             textareaRef={textareaRef}
-            placeholder={dismissed ? t('overlay.composer.dismissedPlaceholder') : undefined}
             onAddProject={onAddProject}
             onDraftChange={(value, mentions) =>
               setComposer((current) => ({

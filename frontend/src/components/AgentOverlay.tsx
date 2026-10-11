@@ -516,7 +516,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
         }
         textareaRef={standaloneComposerRef}
-        placeholder={answersDismissal ? t('overlay.composer.dismissedPlaceholder') : undefined}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}

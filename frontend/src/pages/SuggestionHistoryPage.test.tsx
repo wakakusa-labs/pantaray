@@ -262,7 +262,7 @@ it('moves the selection off a deleted task in place of its history entry', async
 });
 
 const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;
-const NEW_TASK = /^(新しい作業|New task)$/u;
+const NEW_TASK = /^(メイン画面で新しい作業|New task in the main window)$/u;
 
 it('the Action pane starts naming a project in place', async () => {
   renderPage(['/history?item=action:A1']);

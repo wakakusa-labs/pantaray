@@ -296,7 +296,13 @@ it('shows messages and cards, with a work’s status on its latest card only', a
   // Every icon-only button on the page, the sidebar's and the composer's too, names itself in the
   // app's own tooltip.
   expectIconButtonTooltips(document.body);
-  for (const name of ['ファイルを追加', '送信', '新しい作業', 'プロジェクトを追加']) {
+  for (const name of [
+    'ファイルを追加',
+    '送信',
+    'メイン画面で新しい作業',
+    '小さく新しい作業',
+    'プロジェクトを追加',
+  ]) {
     expectTooltipIsName(screen.getByRole('button', { name }));
   }
   expectTooltipIsName(within(chat).getAllByRole('button', { name: '引用して返信' })[0]);
@@ -403,7 +409,9 @@ it('shows the chat in the pane beside the sidebar of the chat row and the tasks'
   const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
   const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
   expect(chatRow).toHaveAttribute('aria-current', 'true');
-  expect(within(sidebar).getByRole('button', { name: '新しい作業' })).toBeInTheDocument();
+  expect(
+    within(sidebar).getByRole('button', { name: 'メイン画面で新しい作業' })
+  ).toBeInTheDocument();
   expect(within(sidebar).getByRole('searchbox', { name: '作業を検索' })).toBeInTheDocument();
   // A running task's row is its title on screen, and says it is running to assistive technology.
   expect(

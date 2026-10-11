@@ -1,13 +1,10 @@
-import { MessageCircle, SquarePen, Trash2 } from 'lucide-react';
+import { MessageCircle, PictureInPicture2, SquarePen, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
-import { ShortcutKeycaps } from '@/components/shortcut/ShortcutHint';
-import {
-  useGlobalShortcutHint,
-  type ShortcutHintState,
-} from '@/components/shortcut/useGlobalShortcutHint';
+import { acceleratorKeycaps, ariaKeyShortcuts } from '@/components/shortcut/acceleratorKeycaps';
+import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
@@ -81,28 +78,6 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
   return result.ok ? null : deleteFailureMessageKey(result.errorCode);
 }
 
-/**
- * The global shortcut for a new task, as quiet text above the search, shown only while it is
- * registered. The sentence stays one translatable string; `{shortcut}` marks the keycaps.
- */
-function NewTaskShortcutHint({
-  state,
-  t,
-}: {
-  state: ShortcutHintState;
-  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
-}) {
-  if (state.status !== 'ready') return null;
-  const [before, after] = t('history.shortcutHint').split('{shortcut}');
-  return (
-    <p className="history-shortcut-hint">
-      {before}
-      <ShortcutKeycaps accelerator={state.accelerator} t={t} />
-      {after}
-    </p>
-  );
-}
-
 /** The chat's row, with Pantaray's unread messages counted. */
 function ChatRow({
   t,
@@ -141,9 +116,10 @@ function ChatRow({
 }
 
 /**
- * The History page's sidebar: the new-task shortcut, search, the projects, the chat, and the
- * user's tasks by day under their heading, whose ✎ opens a new task in the detail pane. A task
- * row selects what the detail pane shows; the selected one is marked current.
+ * The History page's sidebar: search, the projects, the chat, and the user's tasks by day under
+ * their heading. The heading starts a new task in two places: ✎ in the detail pane, and the small
+ * window's icon in the small window, as the global shortcut does. A task row selects what the
+ * detail pane shows; the selected one is marked current.
  */
 export function HistorySidebar({
   history,
@@ -187,6 +163,10 @@ export function HistorySidebar({
   const [deletingIdentity, setDeletingIdentity] = useState<string | null>(null);
   const [focusTargetId, setFocusTargetId] = useState<string | null>(null);
   const shortcutHint = useGlobalShortcutHint();
+  const shortcutKeycaps =
+    shortcutHint.status === 'ready'
+      ? acceleratorKeycaps(shortcutHint.accelerator, window.electron?.process.platform === 'darwin')
+      : null;
   const tasksRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   // The observer reads these when the end comes into view, not when it was set up.
@@ -256,6 +236,13 @@ export function HistorySidebar({
     // The pane cannot keep showing a deleted task; this entry stands in for it in the history.
     if (historyItemSelection(item) === shown)
       select(successor ? historyItemSelection(successor) : 'chat', { replace: true });
+  };
+  const openSmallNewTask = (): void => {
+    setNotice(null);
+    window.electron?.history?.openNewConversation().catch((error: unknown) => {
+      console.error('Failed to open a new task in a small window:', error);
+      setNotice(t('history.newTaskSmallFailed'));
+    });
   };
   const renderContent = () => {
     if (loading) return <div className="history-loading">{t('history.loading')}</div>;
@@ -365,7 +352,6 @@ export function HistorySidebar({
       hidden={hidden}
     >
       <div className="history-sidebar__head">
-        <NewTaskShortcutHint state={shortcutHint} t={t} />
         <HistorySearchField searchText={searchText} onSearch={setSearchText} />
         {notice ? (
           <div className="history-error" role="alert">
@@ -383,17 +369,36 @@ export function HistorySidebar({
       <section className="history-tasks" aria-labelledby="history-tasks-title">
         <div className="history-projects__head">
           <h2 id="history-tasks-title">{t('history.tasks.title')}</h2>
-          <button
-            type="button"
-            id={NEW_TASK_BUTTON_ID}
-            className="history-projects__add"
-            aria-label={t('history.newConversation')}
-            data-tooltip={t('history.newConversation')}
-            aria-current={selected === 'new' ? 'page' : undefined}
-            onClick={() => onSelect('new')}
-          >
-            <SquarePen size={15} aria-hidden="true" />
-          </button>
+          <div className="history-tasks__new">
+            <button
+              type="button"
+              id={NEW_TASK_BUTTON_ID}
+              className="history-projects__add"
+              aria-label={t('history.newTaskMain')}
+              data-tooltip={t('history.newTaskMain')}
+              aria-current={selected === 'new' ? 'page' : undefined}
+              onClick={() => onSelect('new')}
+            >
+              <SquarePen size={15} aria-hidden="true" />
+            </button>
+            {/* The task headers' Open small icon; here it opens a new task, like the shortcut. */}
+            <button
+              type="button"
+              className="history-projects__add"
+              aria-label={t('history.newTaskSmall')}
+              aria-keyshortcuts={shortcutKeycaps ? ariaKeyShortcuts(shortcutKeycaps) : undefined}
+              data-tooltip={
+                shortcutKeycaps
+                  ? t('history.newTaskSmallWithShortcut', {
+                      shortcut: shortcutKeycaps.map((keycap) => keycap.symbol).join(' '),
+                    })
+                  : t('history.newTaskSmall')
+              }
+              onClick={openSmallNewTask}
+            >
+              <PictureInPicture2 size={15} aria-hidden="true" />
+            </button>
+          </div>
         </div>
         <div ref={tasksRef} className="history-sidebar__tasks">
           {renderContent()}

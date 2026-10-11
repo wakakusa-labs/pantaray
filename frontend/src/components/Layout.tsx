@@ -29,6 +29,11 @@ const Layout: React.FC = () => {
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
+  // Home reopens what History last showed (its `?item=`), for as long as the window is open.
+  const lastHistorySearch = useRef('');
+  useEffect(() => {
+    if (location.pathname === '/history') lastHistorySearch.current = location.search;
+  }, [location.pathname, location.search]);
 
   // The Overlay's chat button: from any page, open History's chat on that Action's latest card.
   useEffect(() => {
@@ -85,6 +90,13 @@ const Layout: React.FC = () => {
   // A page with its own columns shows the AI-connection notice in its right column.
   const isSplitPage = location.pathname === '/history' || location.pathname === '/settings';
 
+  const openPage = (path: string) => {
+    if (path !== '/history') navigate(path);
+    // On History, Home leaves the selection as it is.
+    else if (location.pathname !== '/history')
+      navigate({ pathname: path, search: lastHistorySearch.current });
+  };
+
   const navItems = [
     { path: '/history', label: t('nav.home'), Icon: House },
     { path: '/settings', label: t('nav.settings'), Icon: Settings },
@@ -103,7 +115,7 @@ const Layout: React.FC = () => {
               <button
                 key={path}
                 type="button"
-                onClick={() => navigate(path)}
+                onClick={() => openPage(path)}
                 className={['app-rail-item', isActive ? 'app-rail-item--active' : null]
                   .filter(Boolean)
                   .join(' ')}

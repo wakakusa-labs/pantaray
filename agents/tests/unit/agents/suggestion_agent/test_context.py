@@ -778,6 +778,22 @@ def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejec
     assert "y" * (RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS + 1) not in rendered
 
 
+def test_a_dismissal_reason_reads_as_the_users_own_reason() -> None:
+    entry = normalize_recent_suggestion_entry(
+        {
+            "answer": "Repeat the review?",
+            "created_at": "2026-09-10T00:00:00Z",
+            "user_reaction": "rejected",
+            "dismiss_reason": "Already reviewed this morning.",
+        }
+    )
+    assert entry is not None
+    assert (
+        "  User reaction: rejected\n"
+        "  User's reason for dismissing: Already reviewed this morning."
+    ) in format_recent_suggestions([entry])
+
+
 def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None:
     from pantaray_agents.agents.suggestion_agent.context_formatters import (
         RECENT_SUGGESTIONS_MAX_CHARS,

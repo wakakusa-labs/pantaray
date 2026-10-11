@@ -33,6 +33,9 @@ class OverlaySnapshotModel(BaseModel):
     reactionTimestamp: str | None = Field(
         default=None, description="Committed reaction timestamp"
     )
+    dismissReason: str | None = Field(
+        default=None, description="The user's reason recorded with the dismissal"
+    )
     actionPhase: OverlayActionPhase = Field(description="Overlay action phase")
     actionStatus: str | None = Field(default=None, description="Durable action status")
     actionFailureCode: str | None = Field(

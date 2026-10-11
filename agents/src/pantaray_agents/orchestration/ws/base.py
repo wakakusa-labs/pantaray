@@ -422,6 +422,7 @@ class BaseWSHandler:
         suggestion_id: str,
         reaction: str,
         committed_at: str,
+        reason: str | None,
         meta: EventMeta | None = None,
         persist_public_event: bool = True,
         persisted_sequence_override: int | None = None,
@@ -435,6 +436,7 @@ class BaseWSHandler:
                 suggestion_id=suggestion_id,
                 reaction=reaction,  # type: ignore[arg-type]
                 committed_at=committed_at,
+                reason=reason,
             ),
             meta=payload_meta,
             persist_public_event=persist_public_event,

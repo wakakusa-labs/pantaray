@@ -117,7 +117,8 @@ export type ExecuteActionClientEvent = {
 
 export type DismissSuggestionClientEvent = {
   event: 'dismiss_suggestion';
-  data: { suggestion_id: string; reason?: string };
+  /** `reason`: the user's words, recorded with the dismissal. A dismissal starts nothing. */
+  data: { suggestion_id: string; reason?: string | null };
 };
 
 export type RejectSuggestionClientEvent = {
@@ -187,6 +188,8 @@ export type SuggestionReactionCommittedEvent = OrchestrationEventWithMeta<
     suggestion_id: string;
     reaction: 'accepted' | 'rejected';
     committed_at: string;
+    /** The user's words recorded with a dismissal. Events stored before reasons existed have none. */
+    reason?: string | null;
   },
   SuggestionIdentityMeta
 >;

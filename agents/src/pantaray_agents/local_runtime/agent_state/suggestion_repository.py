@@ -313,6 +313,7 @@ class LocalSuggestionRepository(
         update_action_failure_code: bool = False,
         accepted_at: str | None = None,
         rejected_at: str | None = None,
+        dismiss_reason: str | None = None,
     ) -> RepositoryResult[DBRow]:
         try:
             stored_user_reaction = normalize_public_suggestion_reaction_for_write(
@@ -326,8 +327,10 @@ class LocalSuggestionRepository(
             update_columns.extend(["accepted_at = ?", "rejected_at = NULL"])
             params.append(accepted_at or now_utc_iso())
         elif stored_user_reaction == "rejected":
-            update_columns.extend(["rejected_at = ?", "accepted_at = NULL"])
-            params.append(rejected_at or now_utc_iso())
+            update_columns.extend(
+                ["rejected_at = ?", "accepted_at = NULL", "dismiss_reason = ?"]
+            )
+            params.extend([rejected_at or now_utc_iso(), dismiss_reason])
         if action_status is not None:
             update_columns.append("action_status = ?")
             params.append(action_status)

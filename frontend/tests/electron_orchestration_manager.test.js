@@ -1361,12 +1361,18 @@ test('the main window hears each suggestion record change, and the dismissal bef
   harness.getWsHooks().forwardEventToRenderers({
     event: 'suggestion_reaction_committed',
     sequence: 4,
-    data: { suggestion_id: 'sug-1', reaction: 'rejected', committed_at: '2026-10-10T00:01:00Z' },
+    data: {
+      suggestion_id: 'sug-1',
+      reaction: 'rejected',
+      committed_at: '2026-10-10T00:01:00Z',
+      reason: 'Sent it myself',
+    },
     meta: { suggestion_id: 'sug-1' },
   });
 
   const dismissed = suggestionSnapshotsSentToMain(harness).at(-1);
   assert.equal(dismissed.reactionState, 'rejected');
+  assert.equal(dismissed.dismissReason, 'Sent it myself');
   assert.equal(dismissed.suggestionText, 'Draft the reply');
   assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
 });

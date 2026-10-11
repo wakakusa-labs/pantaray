@@ -851,6 +851,48 @@ async def test_overlay_bootstrap_returns_idle_when_start_lane_is_missing() -> No
     assert response.snapshot.actionStatus == "idle"
 
 
+async def test_overlay_bootstrap_carries_the_reason_recorded_with_a_dismissal() -> None:
+    repo = _SuggestionRepo(
+        suggestion_row={
+            "suggestion_id": "sug-123",
+            "user_id": "user-123",
+            "action_status": "idle",
+            "user_reaction": "rejected",
+            "rejected_at": "2026-03-14T00:00:03Z",
+            "dismiss_reason": "Already done by hand.",
+        },
+        event_rows=[
+            _event(
+                sequence=1,
+                event_name="suggestion_chunk",
+                created_at="2026-03-14T00:00:02Z",
+                action_id=None,
+                data={"content": "first line"},
+            ),
+            _event(
+                sequence=2,
+                event_name="suggestion_reaction_committed",
+                created_at="2026-03-14T00:00:03Z",
+                action_id=None,
+                data={
+                    "suggestion_id": "sug-123",
+                    "reaction": "rejected",
+                    "committed_at": "2026-03-14T00:00:03Z",
+                    "reason": "Already done by hand.",
+                },
+            ),
+        ],
+    )
+
+    response = await _overlay_service(repo).build_for_suggestion(
+        user_id="user-123",
+        suggestion_id="sug-123",
+    )
+
+    assert response.snapshot.reactionState == "rejected"
+    assert response.snapshot.dismissReason == "Already done by hand."
+
+
 async def test_overlay_bootstrap_requires_history_sequence() -> None:
     repo = _SuggestionRepo(
         suggestion_row={

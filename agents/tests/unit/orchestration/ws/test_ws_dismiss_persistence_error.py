@@ -54,7 +54,7 @@ async def test_handle_dismiss_persistence_failure_returns_dependency_error() -> 
         side_effect=SuggestionStatusPersistenceError("db unavailable")
     )
 
-    await handler.handle_dismiss("sug-1")
+    await handler.handle_dismiss("sug-1", reason=None)
 
     sent = [call.args[0] for call in websocket.send_json.call_args_list if call.args]
     error_events = [

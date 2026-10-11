@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic.types import UUID4
 
 from ..agent.action_message import (
@@ -62,11 +62,21 @@ class DismissSuggestionMessage(BaseModel):
 
     Attributes:
         suggestion_id (str): 対象の提案ID（UUIDv4、必須）
-        reason (str | None): 見送り理由（任意）
+        reason (str | None): 見送り理由（任意）。見送りと一緒に記録するだけで、Action は始めない
     """
 
     suggestion_id: str = Field(description="対象の提案ID（UUIDv4、必須）")
-    reason: str | None = Field(default=None, description="見送り理由（任意）")
+    # The composer's words, which 承認 sends as a supplement, so the same limit.
+    reason: str | None = Field(
+        default=None,
+        max_length=ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS,
+        description="見送り理由（任意）",
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _trimmed_reason(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
 
 class RejectSuggestionMessage(DismissSuggestionMessage):

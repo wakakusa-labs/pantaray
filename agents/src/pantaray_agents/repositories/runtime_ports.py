@@ -262,6 +262,7 @@ class SuggestionRepositoryPort(Protocol):
         update_action_failure_code: bool = False,
         accepted_at: str | None = None,
         rejected_at: str | None = None,
+        dismiss_reason: str | None = None,
     ) -> RepositoryResult[DBRow]: ...
 
     async def update_action_status(

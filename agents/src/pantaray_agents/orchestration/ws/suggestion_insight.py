@@ -1,21 +1,12 @@
-"""Suggestion の dismiss とセッション再開を担う Mixin。
-
-NOTE:
-    既存の後方互換のため、WSイベントとしての "reject" 系も受け入れるが、
-    UI/ドキュメント上は "dismiss" を主語に統一する。
-"""
+"""Suggestion のセッション再開を担う Mixin。"""
 
 from __future__ import annotations
 
 import logging
 from typing import Literal
 
-from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.orchestration.ws.error_meta import (
     build_session_error_meta,
-)
-from pantaray_agents.orchestration.ws.handler_shared import (
-    SuggestionStatusPersistenceError,
 )
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.schema.events import OutboundEvent
@@ -37,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class SuggestionInsightMixin:
-    """Suggestion dismiss とセッション再開を制御する Mixin。"""
+    """Suggestion のセッション再開を制御する Mixin。"""
 
     # 実体は WSOrchestrationHandler.__init__ が tunables から設定する。
     _session_max_age_seconds: int
@@ -186,36 +177,3 @@ class SuggestionInsightMixin:
             )
         if not already_relayed and proc.completed_at is None and proc.suggestion_id:
             self.follow_resumed_suggestion_process(process_id, proc.suggestion_id)
-
-    async def handle_dismiss(self, suggestion_id: str) -> None:
-        rejected_at = now_utc_iso()
-        try:
-            row = await self._persist_suggestion_status(
-                suggestion_id,
-                user_reaction="rejected",
-                action_status="idle",
-                rejected_at=rejected_at,
-                accepted_at=None,
-            )
-        except SuggestionStatusPersistenceError as exc:
-            await self._send_suggestion_persistence_error(
-                suggestion_id=suggestion_id,
-                failure_kind="persist_dismiss_reaction",
-                exc=exc,
-            )
-            return
-        committed_at = (
-            str(row.get("rejected_at") or rejected_at)
-            if isinstance(row, dict)
-            else rejected_at
-        )
-        await self.emit_suggestion_reaction_committed(
-            suggestion_id=suggestion_id,
-            reaction="rejected",
-            committed_at=committed_at,
-            meta={"suggestion_id": suggestion_id, "kind": "suggestion"},
-        )
-
-    async def handle_reject(self, suggestion_id: str) -> None:
-        """後方互換: reject は dismiss と同義として扱う。"""
-        await self.handle_dismiss(suggestion_id)

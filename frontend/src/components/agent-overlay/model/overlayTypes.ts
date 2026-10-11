@@ -66,6 +66,7 @@ export type OverlaySnapshot = {
   suggestionText: string;
   reactionState: 'accepted' | 'rejected' | null;
   reactionTimestamp: string | null;
+  dismissReason: string | null;
   actionPhase: 'idle' | 'requesting' | 'accepted_pending_start' | 'processing' | 'terminal';
   actionStatus: 'idle' | 'processing' | 'success' | 'error' | 'canceled' | 'timeout' | null;
   actionErrorCode: string | null;
@@ -105,6 +106,8 @@ export type AgentOverlayState = {
   // status
   reactionState: 'accepted' | 'rejected' | null;
   reactionTimestamp: string | null;
+  /** What the user wrote when they dismissed it. */
+  dismissReason: string | null;
   actionStatusState: OverlayActionStatusState | null;
   actionErrorCode: string | null;
   actionFailureStage: string | null;

@@ -16,6 +16,7 @@ import {
   ComposerDock,
 } from './ContentLayout';
 import { MarkdownBlock } from './MarkdownRenderer';
+import { DismissalReason } from './DismissalReason';
 import { HeaderIconButton } from './IconButton';
 import {
   ArrowUpRight,
@@ -32,7 +33,7 @@ import type { ActionApprovalBlocker } from '../../../electron/src/actions/action
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
 
-const SuggestionAcceptedStatus = styled.span`
+const SuggestionDecisionStatus = styled.span`
   display: flex;
   width: fit-content;
   align-items: center;
@@ -104,6 +105,8 @@ type AgentOverlayShellProps = {
   suggestionText: string;
   isSuggestionStreamFinished: boolean;
   isSuggestionAccepted?: boolean;
+  /** A dismissed offer, with the reason the user gave, if any. */
+  dismissal?: { reason: string | null } | null;
   actionText: string;
   conversationContent?: ReactNode;
   /** パネル下端に固定する入力欄。会話履歴と一緒にはスクロールしない。 */
@@ -154,6 +157,7 @@ const AgentOverlayShell = ({
   suggestionText,
   isSuggestionStreamFinished,
   isSuggestionAccepted = false,
+  dismissal = null,
   actionText,
   conversationContent = null,
   composer = null,
@@ -347,10 +351,20 @@ const AgentOverlayShell = ({
                     isStreamFinished={isSuggestionStreamFinished}
                   />
                   {isSuggestionAccepted ? (
-                    <SuggestionAcceptedStatus>
+                    <SuggestionDecisionStatus>
                       <Check size={14} aria-hidden="true" />
                       {t('overlay.suggestionAccepted')}
-                    </SuggestionAcceptedStatus>
+                    </SuggestionDecisionStatus>
+                  ) : null}
+                  {dismissal ? (
+                    <>
+                      {dismissal.reason !== null ? (
+                        <DismissalReason reason={dismissal.reason} />
+                      ) : null}
+                      <SuggestionDecisionStatus>
+                        {t('overlay.suggestionDismissed')}
+                      </SuggestionDecisionStatus>
+                    </>
                   ) : null}
                 </NotificationContent>
               </ContentWrapper>

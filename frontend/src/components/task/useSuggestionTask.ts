@@ -6,7 +6,7 @@ import { isErrorEvent } from '../../../electron/src/orchestration/eventContracts
 import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
 import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
-import { useReplyAfterDismissal } from '../agent-overlay/useReplyAfterDismissal';
+import { useClearReasonOnDismissal } from '../agent-overlay/useClearReasonOnDismissal';
 
 /**
  * Why the last answer did not go through. `accept_failed` is the accept call itself failing (main
@@ -29,7 +29,7 @@ export type SuggestionTaskPhase =
   | 'start_failed'
   /** An Action exists for it; the Action pane takes over. */
   | 'started'
-  /** Dismissed. A reply may still follow it and start an Action. */
+  /** Dismissed, with the user's reason if they gave one. A reply may still start an Action. */
   | 'dismissed';
 
 type Scoped<T> = { suggestionId: string; value: T };
@@ -74,9 +74,9 @@ function scoped<T>(state: Scoped<T> | null, suggestionId: string): T | null {
  *
  * Every answer goes the way the Overlay sends it. Accepting is `ws:acceptAction` with no command id,
  * so main reuses the command it already holds for this suggestion; dismissing is
- * `dismiss_suggestion` on `ws:send`; replying to a message-only suggestion, or to one the user
- * dismissed, opens a new Action with `reply_to_suggestion_id` through the Overlay's composer
- * controller.
+ * `dismiss_suggestion` on `ws:send`, with what the user wrote as its reason; replying to a
+ * message-only suggestion, or to one the user dismissed, opens a new Action with
+ * `reply_to_suggestion_id` through the Overlay's composer controller.
  */
 export function useSuggestionTask(suggestionId: string) {
   const { language } = useI18n();
@@ -213,21 +213,33 @@ export function useSuggestionTask(suggestionId: string) {
     if (!canReply || snapshot === null) return;
     composer.submitDraft(null, true, null, snapshot.lastSequence, approvalMode.mode, suggestionId);
   };
-  const replyAfterDismissal = useReplyAfterDismissal(suggestionId, phase === 'dismissed', reply);
+  const reason = composer.supplement;
+  const clearReasonOnDismissal = useClearReasonOnDismissal(
+    suggestionId,
+    phase === 'dismissed',
+    reason,
+    () => composer.changeDraft('', [])
+  );
 
-  // Words go out as a reply after the dismissal, so they wait for what a reply waits for.
+  // 見送る takes only words, as the reason: attachments wait for a message of their own.
   const canDismiss =
     phase === 'actionable' &&
     contract === 'action_offer' &&
-    (!hasWords || (permissionsReady && composer.composer.attachmentsInFlight === 0));
+    composer.composer.attachments.length === 0 &&
+    composer.composer.attachmentsInFlight === 0 &&
+    !composer.supplementInvalid;
   const dismiss = () => {
     if (!canDismiss || !orchestration) return;
-    replyAfterDismissal(hasWords);
+    clearReasonOnDismissal(reason);
     // ws:send is fire-and-forget: a transport failure in main never reaches this window.
     dismissingRef.current = suggestionId;
     setPending({ suggestionId, value: 'dismiss' });
     setFailure(null);
-    orchestration.send({ event: 'dismiss_suggestion', data: { suggestion_id: suggestionId } });
+    orchestration.send({
+      event: 'dismiss_suggestion',
+      data:
+        reason === null ? { suggestion_id: suggestionId } : { suggestion_id: suggestionId, reason },
+    });
   };
 
   return {

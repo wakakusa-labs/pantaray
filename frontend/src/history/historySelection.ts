@@ -25,8 +25,10 @@ export function parseHistorySelection(search: string): HistorySelection {
 }
 
 export function historySelectionSearch(selection: HistorySelection): string {
+  if (selection === 'chat' || selection === NEW_TASK) return `?${SELECTION_PARAM}=${selection}`;
   // A query may hold `:` as is, so the kind's separator stays readable; the id is encoded.
-  return `?${SELECTION_PARAM}=${encodeURIComponent(selection).replace('%3A', ':')}`;
+  const { kind, id } = splitWorkKey(selection);
+  return `?${SELECTION_PARAM}=${kind}:${encodeURIComponent(id)}`;
 }
 
 /** The kind and id a work's key names. */

@@ -12,6 +12,7 @@ from pantaray_agents.schema.agent.action import (
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -117,6 +118,121 @@ def test_project_refs_render_one_line_per_project_and_round_trip() -> None:
             user_request_text=request_text,
         )
         == message
+    )
+
+
+def test_work_refs_list_each_task_and_suggestion_once_and_round_trip() -> None:
+    report = ActionWorkRef(
+        kind="action", id="action-1", title="Q3 report", start=0, end=9
+    )
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Q3 report vs Demo App, Q3 report and Try X",
+        project_refs=(
+            ActionProjectRef(
+                project_id="project-1",
+                display_name="Demo App",
+                paths=(),
+                start=13,
+                end=21,
+            ),
+        ),
+        work_refs=(
+            report,
+            report.model_copy(update={"start": 23, "end": 32}),
+            ActionWorkRef(
+                kind="suggestion", id="suggestion-1", title="Try X", start=37, end=42
+            ),
+        ),
+    )
+
+    request_text = render_action_user_request_text(message)
+
+    assert request_text.endswith(
+        "- Demo App: no folders registered\n\n"
+        "Referenced work:\n"
+        "- task action-1: Q3 report\n"
+        "- suggestion suggestion-1: Try X\n"
+        "Read one with memory_sql: a task from agent_actions by action_id, a "
+        "suggestion from agent_suggestions by suggestion_id."
+    )
+    assert (
+        parse_stored_action_user_message(
+            message_id="message-1",
+            message_json=serialize_action_user_message(message),
+            user_request_text=request_text,
+        )
+        == message
+    )
+
+
+def test_a_message_without_work_refs_keeps_its_stored_request_text() -> None:
+    # Rows written before work_refs existed must still match their stored text.
+    message = ActionUserMessageInput(message_id="message-1", content="Plain")
+
+    assert render_action_user_request_text(message) == "Plain"
+    assert (
+        parse_action_user_message(
+            '{"version":1,"message_id":"message-1","content":"Plain","images":[]}'
+        ).work_refs
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    ("work_ref", "reason"),
+    [
+        # The span does not spell the title.
+        ({"start": 0, "end": 4, "title": "Q3 r"}, "action_message_invalid"),
+        ({"start": 1, "end": 10, "title": "Q3 report"}, "action_message_invalid"),
+        # It overlaps the project named at the same place.
+        ({"start": 0, "end": 9, "title": "Q3 report"}, "action_message_invalid"),
+    ],
+)
+def test_work_refs_must_name_their_own_span(
+    work_ref: dict[str, object], reason: str
+) -> None:
+    with pytest.raises(ValidationError) as captured:
+        ActionUserMessageInput(
+            message_id="message-1",
+            content="Q3 report",
+            project_refs=(
+                ActionProjectRef(
+                    project_id="project-1", display_name="Q3", paths=(), start=0, end=2
+                ),
+            ),
+            work_refs=(
+                ActionWorkRef.model_validate(
+                    {"kind": "action", "id": "action-1", **work_ref}
+                ),
+            ),
+        )
+
+    error = captured.value.errors(include_url=False)[0]
+    assert (error["loc"], error["type"]) == (("work_refs",), reason)
+
+
+def test_supplement_work_refs_point_into_the_supplement() -> None:
+    approval = SuggestionApprovalInput(
+        suggestion_id="suggestion-1", approved_at="2026-08-16T00:00:00Z"
+    )
+    ref = ActionWorkRef(kind="action", id="action-1", title="Q3", start=0, end=2)
+
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="The approved suggestion",
+        supplement="Q3 too",
+        supplement_work_refs=(ref,),
+        suggestion_approval=approval,
+    )
+    assert "- task action-1: Q3" in render_action_user_request_text(message)
+
+    with pytest.raises(ValidationError) as captured:
+        ActionUserMessageInput(
+            message_id="message-1", content="Q3", supplement_work_refs=(ref,)
+        )
+    assert captured.value.errors(include_url=False)[0]["type"] == (
+        "action_message_not_allowed"
     )
 
 

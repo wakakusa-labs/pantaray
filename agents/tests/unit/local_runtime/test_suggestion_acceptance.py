@@ -101,6 +101,7 @@ async def _accept(
         language="ja",
         supplement=supplement,
         supplement_project_refs=(),
+        supplement_work_refs=(),
         images=(),
         files=(),
     )
@@ -190,6 +191,7 @@ async def test_another_users_suggestion_is_not_found(db_path: Path) -> None:
         language=None,
         supplement=None,
         supplement_project_refs=(),
+        supplement_work_refs=(),
         images=(),
         files=(),
     )

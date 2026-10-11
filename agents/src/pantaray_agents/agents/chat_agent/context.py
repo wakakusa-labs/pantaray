@@ -30,7 +30,10 @@ from pantaray_agents.conversation.window import (
 from pantaray_agents.local_runtime.chat.store import TurnChatItem
 from pantaray_agents.local_runtime.chat.work_list import ChatWorkList
 from pantaray_agents.schema.action_conversation import ActionStatus
-from pantaray_agents.schema.agent.action_message_codec import render_project_refs
+from pantaray_agents.schema.agent.action_message_codec import (
+    render_project_refs,
+    render_work_refs,
+)
 from pantaray_agents.schema.chat import (
     ActionEventContent,
     AssistantMessageContent,
@@ -260,6 +263,8 @@ def _body(
             f"{body}\n\n{render_project_refs(content.project_refs)}\n"
             "Your own read tools can open these folders."
         )
+    if content.work_refs:
+        body = f"{body}\n\n{render_work_refs(content.work_refs)}"
     return body
 
 

@@ -37,9 +37,11 @@ from pantaray_agents.schema.action_conversation import (
     UserEntryFile,
     UserEntryProjectRef,
     UserEntryStatus,
+    UserEntryWorkRef,
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -95,6 +97,7 @@ def project_action_user_entry(
     approved_suggestion: ApprovedSuggestion | None = None
     chat_note: str | None = None
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
     if message is None:
         content = row.user_request_text
@@ -107,6 +110,7 @@ def project_action_user_entry(
             )
             content = message.supplement
             project_refs = message.supplement_project_refs
+            work_refs = message.supplement_work_refs
         elif message.is_chat_instruction:
             # The chat's own instruction: Pantaray's words, not the user's.
             content = None
@@ -114,6 +118,7 @@ def project_action_user_entry(
         else:
             content = message.content
             project_refs = message.project_refs
+            work_refs = message.work_refs
         if message.chat_handoff is not None and not message.is_chat_instruction:
             chat_note = message.chat_handoff.note
         images = message.images
@@ -145,6 +150,10 @@ def project_action_user_entry(
                     display_name=ref.display_name, start=ref.start, end=ref.end
                 )
                 for ref in project_refs
+            ),
+            work_refs=tuple(
+                UserEntryWorkRef(title=ref.title, start=ref.start, end=ref.end)
+                for ref in work_refs
             ),
             files=tuple(
                 UserEntryFile(name=file.name, byte_size=file.byte_size)

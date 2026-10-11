@@ -309,7 +309,7 @@ def test_waiting_items_are_never_dropped_to_fit() -> None:
         _fit(_window(window_tokens=2_000), waiting)
 
 
-def test_a_named_project_reaches_the_model_with_its_folders() -> None:
+def test_a_named_project_and_task_reach_the_model() -> None:
     item = append_chat_item(
         user_id=USER,
         message_id="m-1",
@@ -329,6 +329,15 @@ def test_a_named_project_reaches_the_model_with_its_folders() -> None:
                         "end": 10,
                     },
                 ),
+                "work_refs": (
+                    {
+                        "kind": "action",
+                        "id": "a-1",
+                        "title": "README",
+                        "start": 13,
+                        "end": 19,
+                    },
+                ),
             }
         ),
     )
@@ -339,7 +348,10 @@ def test_a_named_project_reaches_the_model_with_its_folders() -> None:
     assert text.endswith(
         "Aurora Web の README を要約して\n\n"
         "Referenced workspace projects:\n- Aurora Web: /Users/me/aurora\n"
-        "Your own read tools can open these folders."
+        "Your own read tools can open these folders.\n\n"
+        "Referenced work:\n- task a-1: README\n"
+        "Read one with memory_sql: a task from agent_actions by action_id, a "
+        "suggestion from agent_suggestions by suggestion_id."
     )
 
 

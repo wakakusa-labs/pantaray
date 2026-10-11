@@ -9,8 +9,10 @@ from ..agent.action_message import (
     ACTION_MESSAGE_MAX_FILES,
     ACTION_MESSAGE_MAX_IMAGES,
     ACTION_MESSAGE_MAX_PROJECT_REFS,
+    ACTION_MESSAGE_MAX_WORK_REFS,
     ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS,
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
 )
 from ..agent.image import ImageInput
@@ -44,6 +46,11 @@ class ExecuteActionMessage(BaseModel):
         default=(),
         max_length=ACTION_MESSAGE_MAX_PROJECT_REFS,
         description="Workspace projects named in the trimmed supplement",
+    )
+    supplement_work_refs: tuple[ActionWorkRef, ...] = Field(
+        default=(),
+        max_length=ACTION_MESSAGE_MAX_WORK_REFS,
+        description="Tasks and suggestions named in the trimmed supplement",
     )
     files: tuple[FileAttachmentInput, ...] = Field(
         default=(),

@@ -15,6 +15,7 @@ import {
   ActionMessageIdSchema,
   ActionProjectRefsSchema,
   ActionWireContractError,
+  ActionWorkRefsSchema,
   CanonicalIdentitySchema,
   ImageReferenceSchema,
 } from '../actions/actionContracts';
@@ -81,6 +82,8 @@ const ChatItemContentSchema = z.discriminatedUnion('kind', [
       images: z.array(ImageReferenceSchema),
       files: ActionFileAttachmentsSchema,
       project_refs: ActionProjectRefsSchema,
+      // Optional until every backend returns the field.
+      work_refs: ActionWorkRefsSchema.optional(),
     })
     .strict(),
   z

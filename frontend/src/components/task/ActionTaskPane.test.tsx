@@ -48,7 +48,7 @@ let listeners: Set<(update: ActionLiveUpdate) => void>;
 const openConversation = vi.fn<Actions['openConversation']>();
 const readConversationPage = vi.fn<Actions['readConversationPage']>();
 const submitMessage = vi.fn<Actions['submitMessage']>();
-const sendOrchestration = vi.fn();
+const stopAction = vi.fn<NonNullable<NonNullable<Window['electron']>['actions']>['stopAction']>();
 const submitApprovalDecision = vi.fn();
 const writeText = vi.fn<(text: string) => Promise<void>>();
 const onShowInChat = vi.fn();
@@ -98,7 +98,7 @@ beforeEach(() => {
   openConversation.mockReset().mockResolvedValue(undefined);
   readConversationPage.mockReset();
   submitMessage.mockReset().mockReturnValue(new Promise(() => {}));
-  sendOrchestration.mockReset();
+  stopAction.mockReset().mockReturnValue(new Promise(() => {}));
   submitApprovalDecision.mockReset().mockResolvedValue(undefined);
   writeText.mockReset().mockResolvedValue(undefined);
   onShowInChat.mockReset();
@@ -111,6 +111,7 @@ beforeEach(() => {
         openConversation,
         submitMessage: drafts.sending(submitMessage),
         resumeAction: vi.fn(() => new Promise(() => {})),
+        stopAction,
         readConversationPage,
         readToolOutputPage: vi.fn(),
         ...drafts.window(),
@@ -120,7 +121,6 @@ beforeEach(() => {
           return () => listeners.delete(callback);
         },
       },
-      orchestration: { send: sendOrchestration },
       history: { openConversation: openSmall },
       clipboard: { writeText },
       agentOverlay: {
@@ -225,10 +225,9 @@ describe('ActionTaskPane', () => {
     await renderPane();
     emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
     fireEvent.click(primaryButton('Stop'));
-    expect(sendOrchestration).toHaveBeenCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-1' },
-    });
+    expect(stopAction).toHaveBeenCalledWith({ actionId: 'act-1', processId: 'run-1' });
+    expect(primaryButton('Stopping…')).toBeDisabled();
+    expect(screen.getByText('Stopping…', { selector: '[role="status"]' })).toBeInTheDocument();
 
     emit(update(createActionPage('act-1', 'canceled', 'run-1'), 2));
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();

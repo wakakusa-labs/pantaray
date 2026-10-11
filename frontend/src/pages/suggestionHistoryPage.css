@@ -119,18 +119,9 @@
   margin-left: 16px;
 }
 
-/* Quiet, like the projects' heading: it says what the shortcut does and is not a control. */
-.history-shortcut-hint {
-  margin: 0;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-}
-
-.history-shortcut-hint .shortcut-keycap {
-  background: transparent;
-  border-color: rgba(214, 226, 248, 0.12);
-  color: var(--fog-text-3);
-  font-weight: var(--weight-regular);
+.history-tasks__new {
+  display: flex;
+  gap: 2px;
 }
 
 .history-sidebar__tasks {

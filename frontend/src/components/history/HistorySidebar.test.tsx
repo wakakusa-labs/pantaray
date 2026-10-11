@@ -151,23 +151,13 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('上からショートカット、検索、プロジェクト、チャット、作業の順に並べ、＋で追加の流れを呼ぶ', async () => {
+it('上から検索、プロジェクト、チャット、作業の順に並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
-  window.electron = {
-    process: { platform: 'darwin' },
-    shortcut: { getState: vi.fn(async () => ({ accelerator: 'Option+Space', failure: null })) },
-  } as unknown as Window['electron'];
-  const { container } = render(<Sidebar />, { wrapper: SidebarWrapper });
+  window.electron = {} as unknown as Window['electron'];
+  render(<Sidebar />, { wrapper: SidebarWrapper });
 
-  const hint = await waitFor(() => {
-    const found = container.querySelector('.history-shortcut-hint');
-    expect(found).not.toBeNull();
-    return found!;
-  });
-  // The hint is the head's first line, right above the search.
-  expect(hint.nextElementSibling).toHaveAttribute('role', 'search');
   const order = [
-    hint.parentElement!,
+    screen.getByRole('search'),
     screen.getByRole('region', { name: 'history.projects.title' }),
     screen.getByRole('button', { name: 'history.chat.title' }),
     screen.getByRole('region', { name: 'history.tasks.title' }),
@@ -185,46 +175,70 @@ it('上からショートカット、検索、プロジェクト、チャット�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
-it('設定中のショートカットを押せない薄い文で出し、登録できていなければ出さない', async () => {
-  const getState = vi
-    .fn()
-    .mockResolvedValueOnce({ accelerator: 'Option+Space', failure: null })
-    .mockResolvedValueOnce({ accelerator: 'Option+Space', failure: 'registration_unavailable' });
-  window.electron = {
-    process: { platform: 'darwin' },
-    shortcut: { getState },
-  } as unknown as Window['electron'];
-  const { container, unmount } = render(<Sidebar />, { wrapper: SidebarWrapper });
-
-  const hint = await waitFor(() => {
-    const found = container.querySelector('.history-shortcut-hint');
-    expect(found).not.toBeNull();
-    return found!;
-  });
-  expect(hint.tagName).toBe('P');
-  expect(within(hint as HTMLElement).queryByRole('button')).toBeNull();
-  expect([...hint.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['⌥', 'Space']);
-  expect(HISTORY_MESSAGES.ja['history.shortcutHint']).toBe('{shortcut} で新しい作業');
-  expect(HISTORY_MESSAGES.en['history.shortcutHint'].split('{shortcut}')).toHaveLength(2);
-  unmount();
-
-  const { container: second } = render(<Sidebar />, { wrapper: SidebarWrapper });
-  await waitFor(() => expect(getState).toHaveBeenCalledTimes(2));
-  expect(second.querySelector('.history-shortcut-hint')).toBeNull();
-});
-
-it('作業の見出しは作業が無くても出し、その ✎ で新しい作業を詳細に選ぶ', async () => {
+it('作業の見出しは作業が無くても出し、✎ はメイン画面に、隣の小さく開くはショートカットと同じ小さい作業を開く', async () => {
   mocks.error = null;
   mocks.itemsOverride = [];
+  const openNewConversation = vi.fn(async () => undefined);
+  window.electron = {
+    process: { platform: 'darwin' },
+    history: { openNewConversation },
+    shortcut: { getState: vi.fn(async () => ({ accelerator: 'Option+Space', failure: null })) },
+  } as unknown as Window['electron'];
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const tasks = screen.getByRole('region', { name: 'history.tasks.title' });
   expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('作業');
   expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Tasks');
-  const compose = within(tasks).getByRole('button', { name: 'history.newConversation' });
-  compose.focus();
+  expect(HISTORY_MESSAGES.ja['history.newTaskMain']).toBe('メイン画面で新しい作業');
+  expect(HISTORY_MESSAGES.ja['history.newTaskSmall']).toBe('小さく新しい作業');
+  // Pen first, then the small window, as one row beside the heading.
+  expect(
+    within(tasks)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label'))
+  ).toEqual(['history.newTaskMain', 'history.newTaskSmall']);
+  const main = within(tasks).getByRole('button', { name: 'history.newTaskMain' });
+  main.focus();
   await userEvent.keyboard('{Enter}');
   expect(mocks.select).toHaveBeenCalledWith('new');
+  expect(openNewConversation).not.toHaveBeenCalled();
+
+  const small = within(tasks).getByRole('button', { name: 'history.newTaskSmall' });
+  await waitFor(() => expect(small).toHaveAttribute('aria-keyshortcuts', 'Alt+Space'));
+  expect(small).toHaveAttribute(
+    'data-tooltip',
+    'history.newTaskSmallWithShortcut {"shortcut":"⌥ Space"}'
+  );
+  expect(HISTORY_MESSAGES.ja['history.newTaskSmallWithShortcut']).toBe(
+    '小さく新しい作業（{shortcut}）'
+  );
+  small.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(openNewConversation).toHaveBeenCalledOnce();
+  expect(mocks.select).toHaveBeenCalledOnce();
+
+  openNewConversation.mockRejectedValueOnce(new Error('unavailable'));
+  await userEvent.click(small);
+  expect(await screen.findByRole('alert')).toHaveTextContent('history.newTaskSmallFailed');
+});
+
+it('ショートカットが登録できていなければ、小さく開くの案内は名前だけにする', async () => {
+  const getState = vi.fn(async () => ({
+    accelerator: 'Option+Space',
+    failure: 'registration_unavailable',
+  }));
+  window.electron = {
+    process: { platform: 'darwin' },
+    shortcut: { getState },
+  } as unknown as Window['electron'];
+  render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  await waitFor(() => expect(getState).toHaveBeenCalledOnce());
+  // Let the read settle, so the assertions see its outcome rather than the loading state.
+  await act(async () => {});
+  const small = screen.getByRole('button', { name: 'history.newTaskSmall' });
+  expect(small).toHaveAttribute('data-tooltip', 'history.newTaskSmall');
+  expect(small).not.toHaveAttribute('aria-keyshortcuts');
 });
 
 it('行は最終更新の日ごとに、今日・昨日・日付の見出しの下にまとめる', () => {

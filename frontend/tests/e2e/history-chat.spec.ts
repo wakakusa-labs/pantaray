@@ -293,7 +293,7 @@ test('the sidebar holds search, the chat row, and the tasks by day under their N
 }, info) => {
   await installBridge(page);
   const sidebar = sidebarOf(page);
-  await expect(sidebar.getByRole('button', { name: '新しい作業' })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'メイン画面で新しい作業' })).toBeVisible();
   await expect(sidebar.getByRole('searchbox', { name: '作業を検索' })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('heading', { level: 2, name: '作業' })).toBeVisible();

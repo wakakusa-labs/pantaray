@@ -553,6 +553,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: null,
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
     }),
     rejectsValidation('ws:acceptAction')
   );
@@ -564,6 +565,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: null,
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
       extra: true,
     }),
     rejectsValidation('ws:acceptAction')
@@ -576,6 +578,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       commandId: null,
       supplement: '😀'.repeat(8_001),
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
     }),
     rejectsValidation('ws:acceptAction')
   );
@@ -589,6 +592,8 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
       ],
     },
     { files: [{ attachment_id: '../staged', name: 'a.pdf', byte_size: 1 }] },
+    { supplementWorkRefs: [{ kind: 'action', id: '', title: 'Demo', start: 0, end: 4 }] },
+    { supplementWorkRefs: undefined },
   ]) {
     await assert.rejects(
       invoke({
@@ -598,6 +603,7 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
         commandId: null,
         supplement: null,
         supplementProjectRefs: [],
+        supplementWorkRefs: [],
         ...invalid,
       }),
       rejectsValidation('ws:acceptAction')
@@ -622,6 +628,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     commandId: null,
     supplement: '😀'.repeat(8_000),
     supplementProjectRefs,
+    supplementWorkRefs: [],
     files,
   };
   await invoke(request);
@@ -632,6 +639,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     commandId: null,
     supplement: '   ',
     supplementProjectRefs: [],
+    supplementWorkRefs: [],
   });
   assert.deepEqual(ctx.ws.acceptAction.calls, [
     [request],
@@ -643,6 +651,7 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
         commandId: null,
         supplement: null,
         supplementProjectRefs: [],
+        supplementWorkRefs: [],
       },
     ],
   ]);

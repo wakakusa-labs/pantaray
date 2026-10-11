@@ -180,6 +180,7 @@ function withUserMessage(
     content,
     images: [],
     project_refs: [],
+    work_refs: [],
     status,
   });
   return update;
@@ -202,6 +203,7 @@ function withApprovedSuggestion(
       content: comment,
       images: [],
       project_refs: [],
+      work_refs: [],
       status: 'adopted',
       approved_suggestion: { suggestion_id: 'sug-1', content },
     },
@@ -491,6 +493,7 @@ describe('AgentOverlay broader E2E', () => {
                 ? [{ kind: 'image', storage_path: 'user-1/2026-09-29/approval.png' }]
                 : [],
             project_refs: [],
+            work_refs: [],
             status: 'adopted',
             approved_suggestion:
               sequence === 1 ? { suggestion_id: 'sug-1', content: 'Tidy the notes' } : null,
@@ -598,6 +601,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });
@@ -858,6 +862,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });
@@ -1349,6 +1354,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });
@@ -1369,6 +1375,7 @@ describe('AgentOverlay broader E2E', () => {
         content: 'Do it then',
         images: [],
         project_refs: [],
+        work_refs: [],
         status: 'adopted',
       },
       {
@@ -1466,6 +1473,7 @@ describe('AgentOverlay broader E2E', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });
@@ -1644,6 +1652,7 @@ describe('AgentOverlay broader E2E', () => {
       commandId: null,
       supplement: 'Use this image',
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
       approvalMode: 'always_allow',
       images: [{ kind: 'image', storage_path: storagePath }],
       files: [],
@@ -1840,6 +1849,7 @@ describe('AgentOverlay broader E2E', () => {
         content: accepted.snapshot.suggestionText,
         images: [],
         project_refs: [],
+        work_refs: [],
         status: 'adopted',
         approved_suggestion: null,
       });

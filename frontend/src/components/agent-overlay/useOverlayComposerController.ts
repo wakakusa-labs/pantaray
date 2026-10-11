@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActionMessageRequestSchema,
-  codePointSpanInTrimmedText,
   type ActionConversationPage,
   type ActionMessageRequest,
-  type ActionProjectRef,
 } from '../../../electron/src/actions/actionContracts';
 import type {
   ActionConversationPageChain,
@@ -13,7 +11,7 @@ import type {
 import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
 import type { ActionApprovalMode } from './useActionApprovalMode';
-import type { ComposerMention } from './composerMentions';
+import { mentionRefs, type ComposerMention } from './composerMentions';
 import { composeQuotedMessage, type ComposerQuote } from './messageQuotes';
 import { useSharedTaskDraft } from './useSharedTaskDraft';
 
@@ -32,7 +30,7 @@ type ComposerActions = NonNullable<NonNullable<typeof window.electron>['actions'
 
 export type ComposerState = {
   draft: string;
-  /** Workspace projects named in `draft`, in text order. */
+  /** Projects, tasks and suggestions named in `draft`, in text order. */
   mentions: readonly ComposerMention[];
   /** Passages quoted from the conversation, in the order added; they go out before `draft`. */
   quotes: readonly ComposerQuote[];
@@ -291,16 +289,7 @@ export function useOverlayComposerController({
   // The same message is either the message content or the approval supplement; both are
   // trimmed before sending, so one conversion serves both.
   const message = composeQuotedMessage(composer.quotes, composer.draft);
-  const projectRefs: ActionProjectRef[] = composer.mentions.map((mention) => ({
-    project_id: mention.projectId,
-    display_name: mention.displayName,
-    paths: [...mention.paths],
-    ...codePointSpanInTrimmedText(
-      message.text,
-      mention.start + message.draftOffset,
-      mention.end + message.draftOffset
-    ),
-  }));
+  const refs = mentionRefs(message, composer.mentions);
   const canAttach = canAttachMore(composer.attachments);
   const supplement = normalizeActionSupplement(message.text);
   const supplementInvalid = supplement !== null && !isActionSupplementWithinLimit(supplement);
@@ -339,8 +328,9 @@ export function useOverlayComposerController({
         content: message.text,
         images,
         language,
-        project_refs: projectRefs,
+        project_refs: refs.project_refs,
         files,
+        work_refs: refs.work_refs,
       },
     });
     if (!parsed.success) {
@@ -499,7 +489,7 @@ export function useOverlayComposerController({
     images,
     files,
     canAttach,
-    projectRefs,
+    refs,
     /** The draft and its quotes make a message to send. */
     hasMessage: message.text.trim() !== '',
     supplement,

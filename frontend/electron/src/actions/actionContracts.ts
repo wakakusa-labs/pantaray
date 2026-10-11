@@ -156,6 +156,7 @@ export const ActionMessageRequestSchema = z
         language: z.enum(['en', 'ja']).nullable().optional(),
         project_refs: ActionProjectRefsSchema.optional(),
         files: ActionFileAttachmentsSchema.optional(),
+        work_refs: ActionWorkRefsSchema.optional(),
       })
       .strict(),
   })
@@ -539,6 +540,7 @@ export type ActionMessageSubmitResult =
 export type ActionConversationPage = z.infer<typeof ActionConversationPageSchema>;
 export type ActionImageReference = z.infer<typeof ImageReferenceSchema>;
 export type ActionProjectRef = z.infer<typeof ActionProjectRefsSchema>[number];
+export type ActionWorkRef = z.infer<typeof ActionWorkRefsSchema>[number];
 export type ActionFileAttachment = z.infer<typeof ActionFileAttachmentsSchema>[number];
 export type ActionToolOutputDetail = z.infer<typeof ActionToolOutputDetailSchema>;
 

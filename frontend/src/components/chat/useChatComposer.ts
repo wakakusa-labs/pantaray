@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { codePointSpanInTrimmedText } from '../../../electron/src/actions/actionContracts';
 import {
   ChatMessageRequestSchema,
   type ChatItem,
@@ -17,7 +16,7 @@ import {
   type AttachmentFailure,
   type ComposerAttachment,
 } from '@/components/agent-overlay/attachmentStaging';
-import type { ComposerMention } from '@/components/agent-overlay/composerMentions';
+import { mentionRefs, type ComposerMention } from '@/components/agent-overlay/composerMentions';
 import { composeQuotedMessage, type ComposerQuote } from '@/components/agent-overlay/messageQuotes';
 
 import type { ChatMessageItem } from './chatTimeline';
@@ -27,7 +26,7 @@ export type ChatSendProblem = ChatMessageRejectedField | 'transport';
 
 type ChatComposerState = {
   draft: string;
-  /** Workspace projects named in `draft` with @, in text order. */
+  /** Projects, tasks and suggestions named in `draft`, in text order. */
   mentions: readonly ComposerMention[];
   quote: ChatMessageItem | null;
   /** Passages picked from the chat, in the order added; they go out before `draft`. */
@@ -116,16 +115,7 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
       text: message.text,
       quote_item_id: state.quote?.item_id ?? null,
       ...attachmentPayload(state.attachments),
-      project_refs: state.mentions.map((mention) => ({
-        project_id: mention.projectId,
-        display_name: mention.displayName,
-        paths: [...mention.paths],
-        ...codePointSpanInTrimmedText(
-          message.text,
-          mention.start + message.draftOffset,
-          mention.end + message.draftOffset
-        ),
-      })),
+      ...mentionRefs(message, state.mentions),
     });
     if (!parsed.success) {
       setState((current) => ({ ...current, problem: 'text' }));
@@ -179,7 +169,7 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
         ...current,
         draft,
         mentions,
-        problem: ['text', 'body', 'project_refs'].includes(current.problem ?? '')
+        problem: ['text', 'body', 'project_refs', 'work_refs'].includes(current.problem ?? '')
           ? null
           : current.problem,
       })),

@@ -121,6 +121,8 @@ export const HISTORY_MESSAGES = defineMessages({
       'An attachment can’t be sent. Remove it and send again.',
     'history.chat.composer.projectsRejected':
       'A project you named can’t be used. Name it again with @ and send again.',
+    'history.chat.composer.workRejected':
+      'A task or suggestion you named can’t be used. Remove it and send again.',
   },
   ja: {
     'history.loading': '履歴を読み込み中…',
@@ -241,5 +243,7 @@ export const HISTORY_MESSAGES = defineMessages({
       '送れない添付があります。外してから送り直してください。',
     'history.chat.composer.projectsRejected':
       '指定したプロジェクトを使えません。@ で選び直して送ってください。',
+    'history.chat.composer.workRejected':
+      '指定した作業か提案を使えません。外してから送り直してください。',
   },
 });

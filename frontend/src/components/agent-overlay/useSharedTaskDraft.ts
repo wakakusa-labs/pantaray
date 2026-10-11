@@ -28,7 +28,9 @@ const EMPTY_DRAFT: TaskDraft = {
 function draftOf(composer: ComposerState): TaskDraft {
   return {
     text: composer.draft,
-    mentions: composer.mentions.map((mention) => ({ ...mention, paths: [...mention.paths] })),
+    mentions: composer.mentions.map((mention) =>
+      mention.kind === 'project' ? { ...mention, paths: [...mention.paths] } : { ...mention }
+    ),
     quotes: composer.quotes.map((quote) => ({ ...quote })),
     attachments: [...composer.attachments],
     retry: holdsRetry(composer) && composer.submission ? composer.submission.request : null,
@@ -39,7 +41,13 @@ function draftOf(composer: ComposerState): TaskDraft {
 function draftKey(draft: TaskDraft): string {
   return JSON.stringify([
     draft.text,
-    draft.mentions.map((m) => [m.projectId, m.displayName, m.paths, m.start, m.end]),
+    draft.mentions.map((m) => [
+      m.kind,
+      m.kind === 'project' ? [m.projectId, m.paths] : m.id,
+      m.displayName,
+      m.start,
+      m.end,
+    ]),
     draft.quotes.map((q) => [q.id, q.text, q.comment]),
     draft.attachments.map((a) =>
       a.kind === 'image' ? [a.storagePath] : [a.attachmentId, a.name, a.byteSize]

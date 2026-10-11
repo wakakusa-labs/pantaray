@@ -71,7 +71,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     images,
     files,
     canAttach,
-    projectRefs: supplementProjectRefs,
+    refs: supplementRefs,
     supplement,
     supplementInvalid,
     setComposer,
@@ -468,7 +468,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
     ctrl.onAccept({
       supplement,
-      supplementProjectRefs,
+      supplementProjectRefs: supplementRefs.project_refs,
+      supplementWorkRefs: supplementRefs.work_refs,
       approvalMode: approvalMode.mode,
       images,
       files,

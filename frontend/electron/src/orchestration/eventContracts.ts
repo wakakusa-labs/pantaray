@@ -2,6 +2,7 @@ import type {
   ActionFileAttachment,
   ActionMessageRequest,
   ActionProjectRef,
+  ActionWorkRef,
 } from '../actions/actionContracts';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -26,6 +27,7 @@ export type AcceptActionRequest = {
   supplement: string | null;
   // Spans point into the trimmed supplement.
   supplementProjectRefs: ActionProjectRef[];
+  supplementWorkRefs: ActionWorkRef[];
   approvalMode: 'prompt_each_time' | 'always_allow';
   images: ActionMessageRequest['message']['images'];
   files?: ActionFileAttachment[];
@@ -109,6 +111,7 @@ export type ExecuteActionClientEvent = {
     language: UiLanguage;
     supplement: string | null;
     supplement_project_refs: AcceptActionRequest['supplementProjectRefs'];
+    supplement_work_refs: AcceptActionRequest['supplementWorkRefs'];
     approval_mode: AcceptActionRequest['approvalMode'];
     images: AcceptActionRequest['images'];
     files?: AcceptActionRequest['files'];

@@ -1,17 +1,21 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import styled from 'styled-components';
 
+import { workRefLink } from '@/history/workRefLink';
 import {
   findMentionTrigger,
   insertMention,
   rebaseMentions,
   removeMentionBefore,
+  replaceWithText,
   mentionOptionId,
   type ComposerEdit,
   type ComposerMention,
 } from './composerMentions';
+import { useWorkRefConversion } from './useWorkRefConversion';
+import { WorkChipToggle } from './WorkChipToggle';
 import {
   MENTION_PANEL_ROOM_PX,
   ProjectMentionList,
@@ -115,6 +119,13 @@ function pastedFiles(data: DataTransfer): File[] {
   return namesOnly ? files : [];
 }
 
+// Showing waits out a pointer passing over a chip; hiding waits out its way from chip to pill.
+const CHIP_PILL_SHOW_DELAY_MS = 200;
+const CHIP_PILL_HIDE_DELAY_MS = 300;
+
+const isChipToggle = (target: EventTarget | null) =>
+  target instanceof HTMLElement && target.dataset.chipToggle !== undefined;
+
 export function ComposerMessageField({
   id,
   textareaRef,
@@ -152,6 +163,11 @@ export function ComposerMessageField({
   const [session, setSession] = useState<MentionSession | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [composing, setComposing] = useState(false);
+  const stackRef = useRef<HTMLDivElement>(null);
+  const [hoveredChip, setHoveredChip] = useState<number | null>(null);
+  // The chip whose 「テキストに戻す」 the pointer is on, between the chip and the pill.
+  const [pillChip, setPillChip] = useState<number | null>(null);
+  const [shownChip, setShownChip] = useState<number | null>(null);
 
   const trigger = caret === null || readOnly ? null : findMentionTrigger(value, caret);
   const catalog = trigger && session?.start === trigger.start ? session.catalog : null;
@@ -218,6 +234,63 @@ export function ComposerMessageField({
     textareaRef.current?.setSelectionRange(edit.caret, edit.caret);
   };
 
+  const conversion = useWorkRefConversion({
+    value,
+    mentions,
+    apply: (edit, nextCaret) => {
+      if (nextCaret === null) onChange(edit.draft, edit.mentions);
+      else applyEdit({ ...edit, caret: nextCaret });
+    },
+  });
+
+  // A task or suggestion chip the pointer is over, or else the one the caret touches.
+  const isWorkChip = (index: number | null): index is number =>
+    index !== null && mentions[index] !== undefined && mentions[index].kind !== 'project';
+  const caretChip = mentions.findIndex(
+    (mention) =>
+      mention.kind !== 'project' && caret !== null && mention.start <= caret && caret <= mention.end
+  );
+  const activeChip = readOnly
+    ? null
+    : isWorkChip(hoveredChip)
+      ? hoveredChip
+      : isWorkChip(pillChip)
+        ? pillChip
+        : caretChip >= 0
+          ? caretChip
+          : null;
+  // The pill follows the active chip after a short pause, so passing over chips does not flicker.
+  useEffect(() => {
+    if (activeChip === shownChip) return;
+    const timer = window.setTimeout(
+      () => setShownChip(activeChip),
+      activeChip === null ? CHIP_PILL_HIDE_DELAY_MS : CHIP_PILL_SHOW_DELAY_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [activeChip, shownChip]);
+
+  const showAsText = (index: number) => {
+    const chip = mentions[index];
+    if (chip.kind === 'project') return;
+    setHoveredChip(null);
+    setPillChip(null);
+    setShownChip(null);
+    textareaRef.current?.focus();
+    applyEdit(
+      replaceWithText(value, mentions, chip.start, chip.end, workRefLink(chip.kind, chip.id), null)
+    );
+  };
+
+  const hoverChipAt = (x: number, y: number) => {
+    const chips = stackRef.current?.querySelectorAll<HTMLElement>('[data-chip]') ?? [];
+    const found = Array.from(chips).find((span) =>
+      Array.from(span.getClientRects()).some(
+        (rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+      )
+    );
+    setHoveredChip(found ? Number(found.dataset.chip) : null);
+  };
+
   const pick = (index: number) => {
     const option = options[index];
     if (!trigger) return;
@@ -226,8 +299,7 @@ export function ComposerMessageField({
       dismiss(trigger.start);
       return;
     }
-    const { kind: _kind, ...project } = option;
-    applyEdit(insertMention(value, mentions, trigger, project));
+    applyEdit(insertMention(value, mentions, trigger, option));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -272,16 +344,29 @@ export function ComposerMessageField({
 
   return (
     <>
-      <FieldStack>
+      <FieldStack
+        ref={stackRef}
+        onMouseMove={(event) => {
+          if (!isChipToggle(event.target)) hoverChipAt(event.clientX, event.clientY);
+        }}
+        onMouseLeave={() => setHoveredChip(null)}
+      >
         <Backdrop
           ref={backdropRef}
           aria-hidden="true"
           // visibility, not display: a hidden-by-display box would lose its synced scrollTop.
           style={{ visibility: composing ? 'hidden' : undefined }}
         >
-          {segments.map((text, index) =>
-            index % 2 ? <MentionText key={index}>{text}</MentionText> : text
-          )}
+          {segments.map((text, index) => {
+            if (index % 2 === 0) return text;
+            const mentionIndex = (index - 1) / 2;
+            const isWork = mentions[mentionIndex].kind !== 'project';
+            return (
+              <MentionText key={index} data-chip={isWork ? mentionIndex : undefined}>
+                {text}
+              </MentionText>
+            );
+          })}
           {/* A trailing newline needs a glyph after it to take up its line, as in the textarea. */}
           {'\u200b'}
         </Backdrop>
@@ -301,15 +386,19 @@ export function ComposerMessageField({
           aria-activedescendant={open ? mentionOptionId(listId, active) : undefined}
           onChange={(event) => {
             const draft = event.target.value;
-            onChange(draft, rebaseMentions(value, draft, mentions));
+            const next = rebaseMentions(value, draft, mentions);
+            onChange(draft, next);
             syncCaret(draft, event.target.selectionStart);
+            // A task or suggestion link typed or pasted becomes its chip.
+            if (!readOnly) conversion.noticeEdit(value, draft, next);
           }}
           onSelect={(event) =>
             syncCaret(event.currentTarget.value, event.currentTarget.selectionStart)
           }
-          onBlur={() => {
-            setCaret(null);
+          onBlur={(event) => {
             setSession(null);
+            // Tabbing to the chip's 「テキストに戻す」 keeps the chip it belongs to.
+            if (!isChipToggle(event.relatedTarget)) setCaret(null);
           }}
           onScroll={(event) => {
             if (backdropRef.current) backdropRef.current.scrollTop = event.currentTarget.scrollTop;
@@ -325,6 +414,18 @@ export function ComposerMessageField({
             onPasteFiles(files);
           }}
         />
+        {isWorkChip(shownChip) ? (
+          <WorkChipToggle
+            chip={shownChip}
+            stackRef={stackRef}
+            onToggle={() => showAsText(shownChip)}
+            onPointerEnter={() => setPillChip(shownChip)}
+            onPointerLeave={() => setPillChip(null)}
+            onBlur={(event) => {
+              if (event.relatedTarget !== textareaRef.current) setCaret(null);
+            }}
+          />
+        ) : null}
       </FieldStack>
       {open ? (
         <ProjectMentionList

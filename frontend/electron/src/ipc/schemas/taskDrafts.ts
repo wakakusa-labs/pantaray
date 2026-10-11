@@ -36,22 +36,35 @@ export const TaskDraftWorkSchema = z
   .transform((value) => value as `action:${string}` | `suggestion:${string}` | 'new');
 
 const RefSchema = z.string().min(1).max(TASK_DRAFT_MAX_REF_LENGTH);
+const OffsetSchema = z.number().int().nonnegative();
 
 export const TaskDraftSchema = z
   .object({
     text: z.string().max(TASK_DRAFT_MAX_TEXT_LENGTH),
-    // UTF-16 offsets into `text`, as the composer keeps them.
+    // UTF-16 offsets into `text`, as the composer keeps them: projects, and tasks and suggestions.
     mentions: z
       .array(
-        z
-          .object({
-            projectId: CanonicalIdentitySchema,
-            displayName: RefSchema,
-            paths: z.array(RefSchema).max(TASK_DRAFT_MAX_PATHS),
-            start: z.number().int().nonnegative(),
-            end: z.number().int().nonnegative(),
-          })
-          .strict()
+        z.discriminatedUnion('kind', [
+          z
+            .object({
+              kind: z.literal('project'),
+              projectId: CanonicalIdentitySchema,
+              displayName: RefSchema,
+              paths: z.array(RefSchema).max(TASK_DRAFT_MAX_PATHS),
+              start: OffsetSchema,
+              end: OffsetSchema,
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.enum(['action', 'suggestion']),
+              id: CanonicalIdentitySchema,
+              displayName: RefSchema,
+              start: OffsetSchema,
+              end: OffsetSchema,
+            })
+            .strict(),
+        ])
       )
       .max(TASK_DRAFT_MAX_MENTIONS),
     // Passages quoted from the conversation with the user's comment, in the order added.

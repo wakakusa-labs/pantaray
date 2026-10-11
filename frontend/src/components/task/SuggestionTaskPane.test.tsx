@@ -284,6 +284,7 @@ describe('SuggestionTaskPane', () => {
       commandId: null,
       supplement: 'Use the new unit price',
       supplementProjectRefs: [],
+      supplementWorkRefs: [],
       approvalMode: 'prompt_each_time',
       images: [],
       files: [],
@@ -487,6 +488,7 @@ describe('SuggestionTaskPane', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });
@@ -539,6 +541,7 @@ describe('SuggestionTaskPane', () => {
         images: [],
         language: 'en',
         project_refs: [],
+        work_refs: [],
         files: [],
       },
     });

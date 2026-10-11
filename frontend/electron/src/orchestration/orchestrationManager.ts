@@ -33,6 +33,7 @@ import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
   ActionProjectRefsSchema,
+  ActionWorkRefsSchema,
 } from '../actions/actionContracts';
 import { createOrchestrationRendererBridge } from './orchestrationRendererBridge';
 
@@ -182,6 +183,7 @@ export function createOrchestrationManager(params: {
       case 'execute_action': {
         const images = ActionMessageRequestSchema.shape.message.shape.images.safeParse(data.images);
         const projectRefs = ActionProjectRefsSchema.safeParse(data.supplement_project_refs);
+        const workRefs = ActionWorkRefsSchema.safeParse(data.supplement_work_refs);
         const files = ActionFileAttachmentsSchema.optional().safeParse(data.files);
         if (
           typeof data.suggestion_id !== 'string' ||
@@ -191,6 +193,7 @@ export function createOrchestrationManager(params: {
           (data.approval_mode !== 'prompt_each_time' && data.approval_mode !== 'always_allow') ||
           !images.success ||
           !projectRefs.success ||
+          !workRefs.success ||
           !files.success
         ) {
           return null;
@@ -203,6 +206,7 @@ export function createOrchestrationManager(params: {
             language: data.language,
             supplement: data.supplement,
             supplement_project_refs: projectRefs.data,
+            supplement_work_refs: workRefs.data,
             approval_mode: data.approval_mode,
             images: images.data,
             files: files.data,

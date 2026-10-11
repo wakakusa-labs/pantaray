@@ -1025,6 +1025,9 @@ it('adds selected passages with comments as quotes, and sends them all in one me
   await userEvent.keyboard('{Enter}');
 
   const quotes = screen.getByRole('list', { name: '引用 3 件' });
+  // However many quotes there are, the list scrolls within 30vh and the message field stays.
+  expect(getComputedStyle(quotes).overflowY).toBe('auto');
+  expect(parseFloat(getComputedStyle(quotes).maxHeight)).toBeCloseTo(window.innerHeight * 0.3);
   await userEvent.click(within(quotes).getByRole('button', { name: '引用 2 / 3 を削除' }));
   expect(
     within(screen.getByRole('list', { name: '引用 2 件' })).getAllByRole('listitem')

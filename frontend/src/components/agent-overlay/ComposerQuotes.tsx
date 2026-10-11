@@ -74,11 +74,17 @@ const FloatingButton = styled.button`
   }
 `;
 
+/**
+ * Scrolls on its own past a third of the window, so however many quotes there are, the message
+ * field and its send and stop buttons stay in view, also beside an approval's 45vh dock.
+ */
 const QuoteList = styled.ul`
   display: grid;
   gap: 6px;
+  max-height: 30vh;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 `;
 
@@ -97,20 +103,23 @@ const QuoteCard = styled.li`
     min-width: 0;
   }
 
-  blockquote {
+  blockquote,
+  p {
     display: -webkit-box;
     margin: 0;
     overflow: hidden;
-    color: var(--text-secondary);
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
   }
 
+  blockquote {
+    color: var(--text-secondary);
+  }
+
   p {
-    margin: 2px 0 0;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
+    margin-top: 2px;
   }
 
   button {

@@ -679,6 +679,12 @@ test('conversation wire は canceled Action だけを resumable にする', asyn
     });
 
   assert.equal((await read(page('canceled', true))).action.resumable, true);
+  // A stopped run's waiting message says whether the next send takes it.
+  for (const status of ['runs_with_next_message', 'not_executed']) {
+    const waiting = { ...CONVERSATION_PAGE.unadopted_messages[0], status };
+    const parsed = await read({ ...page('canceled', true), unadopted_messages: [waiting] });
+    assert.equal(parsed.unadopted_messages[0].status, status);
+  }
   await assert.rejects(
     () => read(page('processing', true)),
     (error) => error instanceof ActionWireContractError

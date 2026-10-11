@@ -22,7 +22,11 @@ from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_microsecond
 
 type ActionStatus = Literal["queued", "processing", "success", "error", "canceled"]
 type RunStatus = Literal["running", "approval_pending", "success", "error", "canceled"]
-type UserEntryStatus = Literal["adopted", "pending", "not_executed"]
+# ``runs_with_next_message``: not executed, and the next run the user starts
+# takes it; ``not_executed``: not executed, and no run will take it.
+type UserEntryStatus = Literal[
+    "adopted", "pending", "runs_with_next_message", "not_executed"
+]
 type ActionStepStatus = Literal["processing", "success", "error", "timeout"]
 type ToolEntryOutcome = Literal[
     "completed", "denied", "unavailable", "not_executed", "preparing", "needs_read"
@@ -409,7 +413,7 @@ class ActionConversationPage(_ActionConversationModel):
     def validate_page(self) -> Self:
         run_entries = tuple(entry for run in self.runs for entry in run.entries)
         if any(
-            message.status not in {"pending", "not_executed"}
+            message.status == "adopted"
             or (
                 message.status == "pending"
                 and self.action.status in _TERMINAL_CONVERSATION_STATUSES

@@ -109,6 +109,28 @@ function toolLineOf(node: HTMLElement): HTMLElement {
 describe('ActionConversationView', () => {
   afterEach(cleanup);
 
+  it.each([
+    ['ja', '次の送信で実行', '未実行'],
+    ['en', 'Runs with your next message', 'Not executed'],
+  ] as const)('says which not-run message the next send takes (%s)', (language, next, stranded) => {
+    const notRun = (key: string, status: 'runs_with_next_message' | 'not_executed') => {
+      const item = canonicalUser(key, `text ${key}`);
+      return { ...item, entry: { ...item.entry, status, step_number: null } };
+    };
+    renderView(
+      viewWith(
+        [notRun('next', 'runs_with_next_message'), notRun('old', 'not_executed')],
+        'canceled'
+      ),
+      language
+    );
+
+    const bubble = (key: string) => screen.getByText(`text ${key}`).closest('article')!;
+    expect(within(bubble('next')).getByText(next)).toBeVisible();
+    expect(within(bubble('old')).getByText(stranded)).toBeVisible();
+    expect(within(bubble('next')).queryByText(stranded)).toBeNull();
+  });
+
   it('keeps an unexecuted approval status visible without an empty user bubble', () => {
     const user = canonicalUser('approval', '');
     Object.assign(user.entry, {

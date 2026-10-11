@@ -137,9 +137,6 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           },
           resize: noop,
           getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
-          showChat: async (request: { actionId: string }) => {
-            document.documentElement.dataset.showChat = JSON.stringify(request);
-          },
         },
         orchestration: {
           onEvent: () => noop,
@@ -211,15 +208,6 @@ for (const language of ['ja', 'en'] as const) {
       language === 'ja' ? 'action-conversation-shimmer' : 'none'
     );
     await capture(page, info, 'running');
-    const showChat = page.getByRole('button', {
-      name: language === 'ja' ? 'チャットで見る' : 'Show in chat',
-    });
-    await showChat.focus();
-    await page.keyboard.press('Enter');
-    await expect(page.locator('html')).toHaveAttribute(
-      'data-show-chat',
-      JSON.stringify({ actionId: 'action-1' })
-    );
     if (language === 'ja') {
       const outputButton = page.getByRole('button', { name: /notes-b.md/ });
       await outputButton.click();

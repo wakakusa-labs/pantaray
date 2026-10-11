@@ -2,3 +2,16 @@
 .action-conversation__project-ref {
   color: #a8d0ff;
 }
+
+.action-conversation__project-ref--opens {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.action-conversation__project-ref--opens:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+  border-radius: 2px;
+}

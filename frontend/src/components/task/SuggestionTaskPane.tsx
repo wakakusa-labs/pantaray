@@ -1,10 +1,11 @@
-import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
+import { Check, CircleAlert, Clipboard } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { SuggestionDecisionButtons } from '@/components/agent-overlay/SuggestionDecisionButtons';
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
+import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import {
   ComposerSubmissionStatus,
   OverlayComposer,
@@ -45,7 +46,6 @@ type SuggestionTaskPaneProps = {
   /** Called once an Action exists for the suggestion: accepted, or replied to. */
   onStarted: (actionId: string) => void;
   /** Opens the chat, as the task pane's header button does. */
-  onShowInChat: () => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
 };
@@ -60,7 +60,6 @@ export function SuggestionTaskPane({
   suggestionId,
   title,
   onStarted,
-  onShowInChat,
   onAddProject,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
@@ -72,6 +71,7 @@ export function SuggestionTaskPane({
   const task = useSuggestionTask(suggestionId);
   const { snapshot, phase, failure, composer, approvalMode } = task;
   const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
+  const link = useCopyWorkLink('suggestion', suggestionId);
   const suggestionText = snapshot?.suggestionText ?? '';
   const { composer: draft, setComposer } = composer;
 
@@ -106,12 +106,17 @@ export function SuggestionTaskPane({
           <button
             type="button"
             className="action-task__icon-button"
-            aria-label={t('overlay.showInChat')}
-            data-tooltip={t('overlay.showInChat')}
-            onClick={onShowInChat}
+            aria-label={link.label}
+            data-tooltip={link.title}
+            onClick={link.copy}
           >
-            <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
+            <link.Icon size={17} strokeWidth={1.8} aria-hidden />
           </button>
+          {link.failed ? (
+            <span className="action-task__sr-only" role="alert">
+              {link.failed}
+            </span>
+          ) : null}
           <button
             type="button"
             className="action-task__icon-button"

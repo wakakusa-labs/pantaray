@@ -13,11 +13,6 @@ export function speakerKey(item: ChatMessageItem): 'history.chat.you' | 'history
   return item.content.kind === 'user_message' ? 'history.chat.you' : 'history.chat.pantaray';
 }
 
-/** Where a card is in the page, so a request to show a work can scroll to it. */
-export function cardElementId(position: string): string {
-  return `chat-card:${position}`;
-}
-
 /** Where a message is in the page, so a jump to it can scroll to it. */
 export function messageElementId(itemId: string): string {
   return `chat-message:${itemId}`;

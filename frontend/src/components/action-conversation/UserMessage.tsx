@@ -49,10 +49,13 @@ export function UserItem({
     item.source === 'canonical' ? item.entry.images : item.submission.request.message.images;
   const files =
     (item.source === 'canonical' ? item.entry.files : item.submission.request.message.files) ?? [];
-  const projectRefs =
+  const refs =
     item.source === 'canonical'
-      ? item.entry.project_refs
-      : (item.submission.request.message.project_refs ?? []);
+      ? [...item.entry.project_refs, ...(item.entry.work_refs ?? [])]
+      : [
+          ...(item.submission.request.message.project_refs ?? []),
+          ...(item.submission.request.message.work_refs ?? []),
+        ];
   const state =
     status !== 'adopted' ? (
       <span
@@ -94,7 +97,7 @@ export function UserItem({
   return (
     <>
       <article className="action-conversation__user" aria-label={copy.you}>
-        {content !== null ? <QuotedMessageText text={content} refs={projectRefs} /> : null}
+        {content !== null ? <QuotedMessageText text={content} refs={refs} /> : null}
         {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
         {files.length > 0 ? (
           <ul

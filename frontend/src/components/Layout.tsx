@@ -11,7 +11,6 @@ import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
 import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
-import { showChatState } from '@/history/historyViewMode';
 import { useShowHistoryItem } from '@/history/useShowHistoryItem';
 import './Layout.css';
 
@@ -35,14 +34,6 @@ const Layout: React.FC = () => {
     if (location.pathname === '/history') lastHistorySearch.current = location.search;
   }, [location.pathname, location.search]);
 
-  // The Overlay's chat button: from any page, open History's chat on that Action's latest card.
-  useEffect(() => {
-    const onShowChat = window.electron?.history?.onShowChat;
-    if (!onShowChat) return;
-    return onShowChat(({ actionId }) => {
-      navigate('/history', { state: showChatState(actionId) });
-    });
-  }, [navigate]);
   useShowHistoryItem();
 
   useEffect(() => {

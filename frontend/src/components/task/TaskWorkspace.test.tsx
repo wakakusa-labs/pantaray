@@ -57,12 +57,7 @@ function followUpPage() {
 async function renderFinishedTask() {
   const rendered = render(
     <UiLanguageProvider initialLanguage="ja">
-      <TaskWorkspace
-        actionId="act-1"
-        title="見積書を作り直す"
-        onShowInChat={() => {}}
-        onAddProject={() => {}}
-      />
+      <TaskWorkspace actionId="act-1" title="見積書を作り直す" onAddProject={() => {}} />
     </UiLanguageProvider>
   );
   await screen.findByRole('button', { name: /毎回確認/ });

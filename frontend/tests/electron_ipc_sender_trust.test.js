@@ -177,12 +177,6 @@ test('Only the main window uses the chat, and only the Overlay asks to show it',
         error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
     );
   }
-  assert.equal(security.authorize('overlay:showChat', overlayEvent), 'overlay');
-  assert.throws(
-    () => security.authorize('overlay:showChat', mainEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
 });
 
 test('Only the main window reads and acts on the update ready notice', () => {

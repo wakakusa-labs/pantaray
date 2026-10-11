@@ -13,7 +13,6 @@ import type { MessageKey } from '@/i18n/types';
 
 import { ChatCard } from './ChatCard';
 import {
-  cardElementId,
   cardPosition,
   cardWorkKey,
   isChatMessage,
@@ -79,9 +78,9 @@ export function ChatMessage({
   time,
   latestCards,
   works,
-  openWork,
   t,
   onOpenCard,
+  onOpenWork,
   onQuote,
   onJumpToQuote,
   found,
@@ -92,9 +91,10 @@ export function ChatMessage({
   time: string;
   latestCards: ReadonlyMap<WorkKey, string>;
   works: ReadonlyMap<WorkKey, ChatWorkState>;
-  openWork: WorkKey | null;
   t: Translate;
   onOpenCard: (card: ChatCardData) => void;
+  /** Opens a task or suggestion the user named in their message. */
+  onOpenWork: (work: WorkKey) => void;
   /** Starts a reply that quotes this message; null while the composer cannot take one. */
   onQuote: (() => void) | null;
   /** Takes the chat to the message this one quotes. */
@@ -128,7 +128,16 @@ export function ChatMessage({
           {mine ? (
             <QuotedMessageText
               text={content.text}
-              refs={content.project_refs}
+              refs={[
+                ...content.project_refs,
+                ...(content.work_refs ?? []).map((ref) => ({
+                  ...ref,
+                  open: {
+                    label: t('history.chat.workRef.open', { title: ref.title }),
+                    onOpen: () => onOpenWork(`${ref.kind}:${ref.id}`),
+                  },
+                })),
+              ]}
               className="chat-bubble__text"
             />
           ) : (
@@ -169,11 +178,9 @@ export function ChatMessage({
               return (
                 <ChatCard
                   key={cardPosition(item.item_id, index)}
-                  id={cardElementId(cardPosition(item.item_id, index))}
                   card={card}
                   work={works.get(work)}
                   isLatest={latestCards.get(work) === cardPosition(item.item_id, index)}
-                  isOpen={openWork === work}
                   t={t}
                   onOpen={() => onOpenCard(card)}
                 />

@@ -17,7 +17,6 @@ import {
   splitWorkKey,
   type HistorySelection,
 } from '@/history/historySelection';
-import { readShowChatState, showChatState } from '@/history/historyViewMode';
 import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 
 import './suggestionHistoryPage.css';
@@ -40,8 +39,6 @@ const SuggestionHistoryPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const selection = parseHistorySelection(location.search);
-  // `Layout` and the task pane bring the page here with the Action to show in the chat.
-  const reveal = readShowChatState(location.state, location.key);
   const chatView = useRef<ChatViewHandle>(null);
 
   const select = (next: HistorySelection, options?: { replace: true }) => {
@@ -52,8 +49,6 @@ const SuggestionHistoryPage = () => {
     }
     navigate({ search: historySelectionSearch(next) }, options);
   };
-  const showInChat = (actionId: string) =>
-    navigate({ search: historySelectionSearch('chat') }, { state: showChatState(actionId) });
   // The composers' Add project starts naming one in the sidebar, as its ＋ does.
   const [creatingProject, setCreatingProject] = useState(false);
   const addProject = () => setCreatingProject(true);
@@ -73,7 +68,6 @@ const SuggestionHistoryPage = () => {
           notice={<AiConnectionNotice />}
           chat={chat}
           composer={composer}
-          reveal={reveal}
           onOpenWork={select}
           onAddProject={addProject}
         />
@@ -90,22 +84,13 @@ const SuggestionHistoryPage = () => {
       history.items.find((item) => historyItemSelection(item) === selection)?.title ??
       UNLISTED_TITLE[language][kind];
     if (kind === 'action')
-      return (
-        <TaskWorkspace
-          key={id}
-          actionId={id}
-          title={title}
-          onShowInChat={() => showInChat(id)}
-          onAddProject={addProject}
-        />
-      );
+      return <TaskWorkspace key={id} actionId={id} title={title} onAddProject={addProject} />;
     return (
       <SuggestionTaskPane
         key={id}
         suggestionId={id}
         title={title}
         onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
-        onShowInChat={() => select('chat')}
         onAddProject={addProject}
       />
     );

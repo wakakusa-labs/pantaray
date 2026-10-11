@@ -53,12 +53,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
     ctx.windows.showMainRoute('/history?project=new');
   });
 
-  registrar.handle('overlay:showChat', (_event, request) =>
-    ctx.windows.showChat(
-      parseInput(ActionConversationOverlayRequestSchema, 'overlay:showChat', request).actionId
-    )
-  );
-
   const injectedFactory = ctx.overlay.createNotificationIpcHandlers;
   const factory =
     typeof injectedFactory === 'function'

@@ -48,8 +48,15 @@ from pantaray_agents.schema.agent.base import JSONValue
         ),
         (
             "wait_subagents",
-            {"results": [{"status": "completed"}, {"status": "running"}]},
-            "wait_subagents: ok, 1 done, 1 running",
+            {
+                "results": [
+                    {"status": "success"},
+                    {"status": "failure"},
+                    {"status": "canceled"},
+                    {"status": "nonterminal"},
+                ]
+            },
+            "wait_subagents: ok, 3 done, 1 running",
         ),
         ("send_message_to_subagent", True, "send_message_to_subagent: ok"),
         (

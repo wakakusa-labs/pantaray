@@ -180,10 +180,11 @@ def _web_extract_detail(body: Mapping[str, JSONValue]) -> list[str]:
 
 def _wait_subagents_detail(body: Mapping[str, JSONValue]) -> list[str]:
     results = _items(body, "results")
+    # A child still going is "nonterminal"; every other status is an end.
     done = sum(
         1
         for result in results
-        if isinstance(result, Mapping) and result.get("status") != "running"
+        if isinstance(result, Mapping) and result.get("status") != "nonterminal"
     )
     return [f"{done:,} done", f"{len(results) - done:,} running"]
 

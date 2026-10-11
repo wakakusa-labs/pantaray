@@ -22,7 +22,10 @@ from ..tooling.action_subagent_resource_claims import (
 from .action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
 )
-from .action_subagent_messages import continue_action_subagent_history_in_connection
+from .action_subagent_messages import (
+    continue_action_subagent_history_in_connection,
+    find_action_subagent_continuation_in_connection,
+)
 from .action_subagent_queue import enqueue_action_subagent_job_in_connection
 from .job_payload_builder import build_action_subagent_job_payload
 from .job_payload_models import serialize_action_subagent_job_payload
@@ -136,6 +139,28 @@ def spawn_action_subagent(
         with immediate_transaction(connection):
             current_cwd = _require_parent_spawn_authority(connection, request)
             _require_workspace_claim_cwds(request, current_cwd=current_cwd)
+            continued = (
+                find_action_subagent_continuation_in_connection(
+                    connection=connection,
+                    user_id=request.user_id,
+                    action_id=request.action_id,
+                    from_process_id=request.continues.child_process_id,
+                    message_id=request.continues.message_id,
+                    content=request.continues.content,
+                )
+                if request.continues is not None
+                else None
+            )
+            if continued is not None:
+                return ActionSubagentSpawnResult(
+                    child_process_id=continued,
+                    job_id=str(
+                        connection.execute(
+                            "SELECT job_id FROM jobs WHERE process_id=?", (continued,)
+                        ).fetchone()[0]
+                    ),
+                    inserted_new=False,
+                )
             if _is_exact_replay(
                 connection,
                 request=request,

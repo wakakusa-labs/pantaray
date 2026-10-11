@@ -17,6 +17,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_continue import (
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
     ACTION_SUBAGENT_NOTICE_EVENT,
+    ActionSubagentMessageInputError,
     append_action_subagent_event,
 )
 from pantaray_agents.local_runtime.runtime.db_execution_context import (
@@ -99,12 +100,14 @@ def _continue(
     child_process_id: str,
     *,
     llm_step_id: str = "supervisor-think-2",
+    step_number: int = 10,
+    content: str = MESSAGE,
 ) -> str:
     think = replace(
         spawn._request(context),
         origin=ActionToolCallOrigin(llm_step_id=llm_step_id, call_id="call-1"),
     )
-    spawn._insert_think(db_path, think, step_number=10)
+    spawn._insert_think(db_path, think, step_number=step_number)
     return continue_action_subagent(
         db_path=db_path,
         busy_timeout_ms=spawn.BUSY_TIMEOUT_MS,
@@ -120,7 +123,7 @@ def _continue(
             current_cwd=context.workspace_path,
             child_process_id=child_process_id,
             message_id="message-1",
-            content=MESSAGE,
+            content=content,
             continued_at=spawn.TIMESTAMP,
         ),
     ).child_process_id
@@ -249,3 +252,57 @@ def _job_id(db_path: Path, process_id: str) -> str:
                 "SELECT job_id FROM jobs WHERE process_id=?", (process_id,)
             ).fetchone()[0]
         )
+
+
+def _subagent_count(db_path: Path) -> int:
+    with spawn._connect(db_path) as connection:
+        return int(
+            connection.execute(
+                "SELECT COUNT(*) FROM processes WHERE kind='action_subagent'"
+            ).fetchone()[0]
+        )
+
+
+@pytest.mark.parametrize("continuation_ended", (False, True), ids=("live", "ended"))
+def test_the_same_message_sent_again_gets_the_same_continuation(
+    tmp_path: Path, continuation_ended: bool
+) -> None:
+    """A message continues a finished child once, whichever call sends it again.
+
+    The model names the message_id, so a later turn can carry the same message
+    with a new call (a replay after a crash or a resume, or a plain retry).
+    """
+
+    db_path, context, finished = _finished_child(
+        tmp_path, terminal.build_action_subagent_canceled_result()
+    )
+    first = _continue(db_path, context, finished["process_id"])
+    if continuation_ended:
+        _claim(db_path)
+        terminal.finalize_action_subagent_terminal(
+            db_path=db_path,
+            busy_timeout_ms=spawn.BUSY_TIMEOUT_MS,
+            payload=_payload(db_path, _job_id(db_path, first)),
+            result=terminal.build_action_subagent_success_result("Done."),
+        )
+
+    again = _continue(
+        db_path,
+        context,
+        finished["process_id"],
+        llm_step_id="supervisor-think-3",
+        step_number=11,
+    )
+
+    assert again == first
+    assert _subagent_count(db_path) == 2
+    with pytest.raises(ActionSubagentMessageInputError, match="different content"):
+        _continue(
+            db_path,
+            context,
+            finished["process_id"],
+            llm_step_id="supervisor-think-4",
+            step_number=12,
+            content="Something else.",
+        )
+    assert _subagent_count(db_path) == 2

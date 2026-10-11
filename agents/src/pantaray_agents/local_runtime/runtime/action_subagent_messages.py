@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -28,6 +29,8 @@ ACTION_SUBAGENT_DELIVERED_EVENT = "action_subagent_messages_delivered"
 ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
 ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
 ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
+# On a continuation: which finished child and message it carries on. Not history.
+ACTION_SUBAGENT_CONTINUES_EVENT = "action_subagent_continues"
 # The rows that rebuild the child's conversation, and nothing of its lifecycle.
 ACTION_SUBAGENT_HISTORY_EVENTS = (
     ACTION_SUBAGENT_MESSAGE_EVENT,
@@ -113,6 +116,45 @@ def send_action_subagent_message(
     return True
 
 
+def find_action_subagent_continuation_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    from_process_id: str,
+    message_id: str,
+    content: str,
+) -> str | None:
+    """The child an earlier send of this message already continued, if any.
+
+    A message continues a finished child once: the same message sent again,
+    whatever call carries it, gets that continuation back, and the same
+    message_id with other content is refused, as it is for a live child.
+    """
+
+    row = connection.execute(
+        """
+        SELECT event.process_id,event.payload_json FROM process_events AS event
+        JOIN processes AS child ON child.process_id=event.process_id
+        WHERE child.user_id=? AND child.action_id=? AND child.kind='action_subagent'
+          AND event.event_name=? AND event.event_id=?
+        """,
+        (
+            user_id,
+            action_id,
+            ACTION_SUBAGENT_CONTINUES_EVENT,
+            _continues_event_id(from_process_id, message_id),
+        ),
+    ).fetchone()
+    if row is None:
+        return None
+    if _object(row[1]).get("content_sha256") != _sha256(content):
+        raise ActionSubagentMessageInputError(
+            "message_id is already bound to different content"
+        )
+    return str(row[0])
+
+
 def continue_action_subagent_history_in_connection(
     *,
     connection: sqlite3.Connection,
@@ -154,11 +196,31 @@ def continue_action_subagent_history_in_connection(
         payload={"message_id": message_id, "content": content},
         created_at=created_at,
     )
+    append_process_event_in_connection(
+        connection=connection,
+        process_id=to_process_id,
+        event_name=ACTION_SUBAGENT_CONTINUES_EVENT,
+        event_id=_continues_event_id(from_process_id, message_id),
+        payload={
+            "child_process_id": from_process_id,
+            "message_id": message_id,
+            "content_sha256": _sha256(content),
+        },
+        created_at=created_at,
+    )
     connection.execute(
         "UPDATE processes SET result_collected_at=COALESCE(result_collected_at, ?) "
         "WHERE process_id=? AND status IN ('completed','failed','canceled')",
         (created_at, from_process_id),
     )
+
+
+def _continues_event_id(from_process_id: str, message_id: str) -> str:
+    return f"subagent-continues:{from_process_id}:{message_id}"
+
+
+def _sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def append_action_subagent_event(

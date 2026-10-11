@@ -17,7 +17,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .attachment_reference import build_workspace_file_attachment
+from .attachment_reference import build_read_image
 from .read_contract import ReadToolArgs, ReadToolResult
 from .read_document import document_format, read_document, reject_legacy_document
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
@@ -130,50 +130,20 @@ def _read_file(
                 ),
                 code=READ_ATTACHMENT_TOO_LARGE,
             )
-        payload = _read_attachment_payload(target=target, descriptor=descriptor)
-        workspace_attachment = build_workspace_file_attachment(
-            canonical_root_path=target.canonical_root_path,
-            root_relative_path=target.root_relative_path,
-            display_path=target.display_path,
-            mime_type=mime_type,
-            payload=payload,
-        )
         return ReadToolResult(
             output={
                 "kind": "attachment",
                 "path": target.display_path,
                 "mime_type": mime_type,
                 "message": "Image read successfully",
-                "attachments": [
-                    {
-                        "type": "file",
-                        "mime_type": mime_type,
-                        "path": target.display_path,
-                        "ref": workspace_attachment.ref,
-                        "byte_size": workspace_attachment.byte_size,
-                    }
-                ],
             },
             search_text=None,
             file_paths=(target.display_path,),
             file_reference_paths=action_reference_paths(target),
-            attachments=(
-                {
-                    "type": "file",
-                    "source_kind": "workspace_file",
-                    "ref": workspace_attachment.ref,
-                    "blob_ref": workspace_attachment.blob_ref,
-                    "display_path": target.display_path,
-                    "workspace_root_path": str(
-                        workspace_attachment.canonical_root_path
-                    ),
-                    "workspace_relative_path": (
-                        workspace_attachment.root_relative_path
-                    ),
-                    "mime_type": mime_type,
-                    "byte_size": workspace_attachment.byte_size,
-                    "sha256": workspace_attachment.sha256,
-                },
+            image=build_read_image(
+                display_path=target.display_path,
+                mime_type=mime_type,
+                payload=_read_attachment_payload(target=target, descriptor=descriptor),
             ),
         )
     reject_legacy_document(target)

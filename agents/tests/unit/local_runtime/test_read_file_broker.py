@@ -7,6 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
+    collect_prompt_file_inputs,
+)
+from pantaray_agents.agents.core.llm_file_inputs import build_blob_file_block
+from pantaray_agents.local_runtime.llm_proxy.content_files import (
+    prepare_content_file,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
@@ -238,7 +245,10 @@ async def test_read_refuses_a_fifo_instead_of_waiting_for_a_writer(
 
 
 @pytest.mark.asyncio
-async def test_read_returns_image_attachment(tmp_path: Path) -> None:
+async def test_a_read_image_is_sent_as_read_after_its_file_is_rewritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
     source_path = context.workspace_path / "pixel.png"
@@ -249,28 +259,27 @@ async def test_read_returns_image_attachment(tmp_path: Path) -> None:
         context=context,
         args={"path": "pixel.png"},
     )
+    # The Action regenerates the screenshot it just looked at.
+    source_path.write_bytes(payload + b"regenerated")
 
     assert outcome.status == "success"
     assert outcome.output["kind"] == "attachment"
-    assert outcome.output["mime_type"] == "image/png"
-    attachments = outcome.output["attachments"]
-    assert isinstance(attachments, list)
-    assert "url" not in attachments[0]
-    assert attachments[0]["ref"].startswith("tool_attachment:")
-    assert attachments[0]["byte_size"] == 24
-    assert "sha256" not in attachments[0]
-    assert "workspace_root_path" not in attachments[0]
-    assert "workspace_relative_path" not in attachments[0]
-    assert outcome.attachments[0]["ref"] == attachments[0]["ref"]
-    assert outcome.attachments[0]["source_kind"] == "workspace_file"
-    assert outcome.attachments[0]["workspace_root_path"] == str(
-        context.workspace_path.resolve()
+    (shown,) = outcome.output["attachments"]
+    (kept,) = outcome.attachments
+    assert shown["source_kind"] == kept["source_kind"] == "local_image_blob"
+    assert shown["storage_path"] == kept["storage_path"]
+    assert shown["ref"] == kept["ref"]
+    assert "sha256" not in shown
+    # The next turn's request reads the history's attachment back as it was read.
+    (file_input,) = collect_prompt_file_inputs(
+        prompt=kept["ref"], owners=[{"attachments": [kept]}]
     )
-    assert outcome.attachments[0]["workspace_relative_path"] == "pixel.png"
-    assert "blob_path" not in outcome.attachments[0]
-    assert outcome.attachments[0]["sha256"] == hashlib.sha256(payload).hexdigest()
-    assert outcome.attachments[0]["mime_type"] == "image/png"
-    assert not (context.action_temp_dir / "tool-attachments").exists()
+    prepared = prepare_content_file(
+        file_data=build_blob_file_block(file_input)["file_data"],
+        user_id="user-1",  # the user read_tool_broker_support runs as
+    )
+    assert prepared.payload == payload
+    assert prepared.sha256 == hashlib.sha256(payload).hexdigest()
     assert outcome.search_text is None
 
 

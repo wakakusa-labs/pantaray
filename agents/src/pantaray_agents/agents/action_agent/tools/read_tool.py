@@ -325,15 +325,22 @@ READ_TOOL = ToolDefinition.from_spec(
                         "type": "object",
                         "properties": {
                             "type": {"type": "string", "enum": ["file"]},
+                            "source_kind": {
+                                "type": "string",
+                                "enum": ["local_image_blob"],
+                            },
                             "mime_type": {"type": "string"},
                             "path": {"type": "string"},
+                            "storage_path": {"type": "string"},
                             "ref": {"type": "string"},
                             "byte_size": {"type": "integer"},
                         },
                         "required": [
                             "type",
+                            "source_kind",
                             "mime_type",
                             "path",
+                            "storage_path",
                             "ref",
                             "byte_size",
                         ],

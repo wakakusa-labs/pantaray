@@ -107,11 +107,19 @@ class ReadDirectoryOutput(BaseModel):
 
 
 class ReadAttachment(BaseModel):
+    """The copy of the image the Action kept, under its user-scoped storage_path.
+
+    Durable history keeps this output, so the image is named by the copy and
+    never by the file it was read from, which may change after the read.
+    """
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
     type: Literal["file"]
+    source_kind: Literal["local_image_blob"]
     mime_type: str
     path: str
+    storage_path: str
     ref: str
     byte_size: int
 

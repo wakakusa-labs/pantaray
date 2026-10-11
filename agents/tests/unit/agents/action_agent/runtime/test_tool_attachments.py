@@ -20,6 +20,7 @@ from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
 from pantaray_agents.agents.core.llm_file_inputs import interleave_file_inputs
 from pantaray_agents.local_runtime.llm_proxy.content_files import (
     FileInputAccessError,
+    WorkspaceFileChangedError,
     prepare_content_file,
 )
 
@@ -246,12 +247,15 @@ def test_workspace_file_input_revalidates_original_file_before_llm_upload(
     assert prepared.payload == payload
     assert prepared.sha256 == sha256
 
+    # Same size, other bytes: only the digest tells them apart.
     source_path.write_bytes(b"%PDF-1.7\nnew\n")
-    with pytest.raises(RuntimeError, match="LLM file input sha256 mismatch"):
+    with pytest.raises(WorkspaceFileChangedError) as changed:
         prepare_content_file(
             file_data=file_block["file_data"],
             user_id="user-1",
         )
+    assert changed.value.application_ref == "tool_attachment:workspace"
+    assert changed.value.path == source_path
 
 
 def test_workspace_file_input_rejects_symlink_replacement_without_reading_target(
@@ -278,7 +282,7 @@ def test_workspace_file_input_rejects_symlink_replacement_without_reading_target
     source_path.unlink()
     source_path.symlink_to(outside_path)
 
-    with pytest.raises(FileInputAccessError, match="securely opened"):
+    with pytest.raises(WorkspaceFileChangedError):
         prepare_content_file(
             file_data=file_data,
             user_id="user-1",
@@ -296,7 +300,7 @@ def test_workspace_file_input_rejects_intermediate_directory_symlink(
     (outside_path / "source.pdf").write_bytes(payload)
     (workspace_path / "linked").symlink_to(outside_path, target_is_directory=True)
 
-    with pytest.raises(FileInputAccessError, match="securely opened"):
+    with pytest.raises(WorkspaceFileChangedError):
         prepare_content_file(
             file_data={
                 "source_kind": "workspace_file",
@@ -326,7 +330,7 @@ def test_workspace_file_input_rejects_root_directory_symlink_replacement(
     (outside_path / "source.pdf").write_bytes(payload)
     workspace_path.symlink_to(outside_path, target_is_directory=True)
 
-    with pytest.raises(FileInputAccessError, match="securely opened"):
+    with pytest.raises(WorkspaceFileChangedError):
         prepare_content_file(
             file_data={
                 "source_kind": "workspace_file",
@@ -365,7 +369,7 @@ def test_workspace_file_input_rejects_special_file_before_read(
     fifo_path = tmp_path / "attachment.pdf"
     os.mkfifo(fifo_path)
 
-    with pytest.raises(FileInputAccessError, match="not a regular file"):
+    with pytest.raises(WorkspaceFileChangedError):
         prepare_content_file(
             file_data={
                 "source_kind": "workspace_file",

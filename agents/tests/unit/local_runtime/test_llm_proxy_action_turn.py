@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 
 import pytest
 from tests.unit.local_runtime.test_llm_proxy_client import (
@@ -17,7 +18,11 @@ from tests.unit.local_runtime.test_llm_proxy_client import (
     cloud_session_db as cloud_session_db,
 )
 
-from pantaray_agents.local_runtime.llm_proxy.request_builder import build_llm_request
+from pantaray_agents.local_runtime.llm_proxy.content_files import FileInputAccessError
+from pantaray_agents.local_runtime.llm_proxy.request_builder import (
+    BuiltLlmRequest,
+    build_llm_request,
+)
 from pantaray_agents.local_runtime.llm_proxy.types import ProxyResponse
 from pantaray_agents.utils.llm_types import GenerateContentConfig
 from pantaray_agents.utils.trace_context import TraceContextManager
@@ -350,3 +355,127 @@ def test_conversation_media_is_uploaded_once_without_repeating_it_in_the_message
     # against the multipart uploads, and a missing one fails the request.
     assert [ref for ref, _ in built.multipart_files] == ["attachment_blob_shot"]
     assert built.multipart_files[0][1][1] == payload
+
+
+def _legacy_workspace_turn(
+    tmp_path: Path, *, conversation: bool
+) -> tuple[dict[str, object], LlmActionTurnRequest]:
+    """One image history named by its workspace file, as ``read`` once stored it."""
+
+    payload = b"\x89PNG\r\n\x1a\nscreenshot"
+    (tmp_path / "shot.png").write_bytes(payload)
+    descriptor = {
+        "blob_ref": "attachment_blob_shot",
+        "mime_type": "image/png",
+        "byte_size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "application_ref": "tool_attachment:shot",
+    }
+    action_request = _request()
+    assert isinstance(action_request, LlmActionTurnRequest)
+    if conversation:
+        action_request = action_request.model_copy(
+            update={
+                "conversation": [
+                    LlmTurnAssistantItem(
+                        type="assistant",
+                        calls=[
+                            LlmToolCall(call_id="call_a", name="inspect", arguments={})
+                        ],
+                    ),
+                    LlmTurnToolResultItem(
+                        type="tool_result",
+                        call_id="call_a",
+                        name="inspect",
+                        output={"attached_files": ["tool_attachment:shot"]},
+                        content=[
+                            LlmInputImageBlock(
+                                type="input_image",
+                                image=LlmImageDescriptor.model_validate(descriptor),
+                            )
+                        ],
+                    ),
+                ]
+            }
+        )
+    file_data = {
+        **descriptor,
+        "source_kind": "workspace_file",
+        "workspace_root_path": str(tmp_path),
+        "workspace_relative_path": "shot.png",
+    }
+    return file_data, action_request
+
+
+def _build(
+    file_data: dict[str, object], tool_use: LlmActionTurnRequest
+) -> BuiltLlmRequest:
+    return build_llm_request(
+        contents=["See tool_attachment:shot", {"file_data": file_data}],
+        config=GenerateContentConfig(
+            inference_profile=ACTION_EXECUTING_PROFILE_ID, tool_use=tool_use
+        ),
+        user_id="user-1",
+        local_job_id="job-1",
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda path: path.write_bytes(b"regenerated"), id="resized"),
+        # Same size, other bytes: only the digest tells them apart.
+        pytest.param(
+            lambda path: path.write_bytes(b"\x89PNG\r\n\x1a\nSCREENSHOT"),
+            id="same-size",
+        ),
+        pytest.param(lambda path: path.unlink(), id="removed"),
+        pytest.param(
+            lambda path: (path.unlink(), path.mkdir()), id="not-a-regular-file"
+        ),
+    ],
+)
+def test_an_image_whose_workspace_file_changed_is_sent_as_a_note(
+    tmp_path: Path, change: Callable[[Path], object]
+) -> None:
+    """History from before ``read`` kept its copy must not fail every later turn."""
+
+    file_data, tool_use = _legacy_workspace_turn(tmp_path, conversation=True)
+    change(tmp_path / "shot.png")
+
+    built = _build(file_data, tool_use)
+
+    assert built.multipart_files == []
+    assert isinstance(built.request.tool_use, LlmActionTurnRequest)
+    conversation = built.request.tool_use.conversation
+    assert conversation is not None
+    tool_result = conversation[1]
+    assert isinstance(tool_result, LlmTurnToolResultItem)
+    (note,) = tool_result.content
+    assert isinstance(note, LlmInputTextBlock)
+    assert "tool_attachment:shot" in note.text
+    assert str(tmp_path / "shot.png") in note.text
+    assert [block.type for block in built.request.messages[0].content] == ["input_text"]
+    # Every later turn sends the same words, so the prefix stays cacheable.
+    assert _build(file_data, tool_use).request == built.request
+
+
+def test_an_image_whose_workspace_file_changed_is_a_note_in_a_string_prompt(
+    tmp_path: Path,
+) -> None:
+    file_data, tool_use = _legacy_workspace_turn(tmp_path, conversation=False)
+    (tmp_path / "shot.png").unlink()
+
+    built = _build(file_data, tool_use)
+
+    assert built.multipart_files == []
+    _prompt, note = built.request.messages[0].content
+    assert isinstance(note, LlmInputTextBlock)
+    assert "tool_attachment:shot" in note.text
+
+
+def test_a_workspace_file_input_with_an_unsafe_path_still_fails(tmp_path: Path) -> None:
+    file_data, tool_use = _legacy_workspace_turn(tmp_path, conversation=True)
+
+    with pytest.raises(FileInputAccessError, match="unsafe path component"):
+        _build({**file_data, "workspace_relative_path": "../shot.png"}, tool_use)

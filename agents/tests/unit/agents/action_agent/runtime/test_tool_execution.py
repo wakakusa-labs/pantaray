@@ -1146,14 +1146,10 @@ async def test_run_tool_projects_broker_binary_output_before_returning(
         status="success",
         output=payload,
     )
-    # No read returns bytes, so the outcome is substituted after the read runs.
+    # No read returns bytes, so the read's outcome is substituted.
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker.read_tool_outcome",
-        lambda _result: raw_outcome,
+        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read_executor",
+        lambda **_kwargs: raw_outcome,
     )
 
     result = await run_tool(
@@ -1190,7 +1186,7 @@ async def test_run_tool_does_not_execute_broker_without_invocation_audit(
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read",
+        "pantaray_agents.local_runtime.tooling.brokering.broker.run_read_executor",
         executor,
     )
 

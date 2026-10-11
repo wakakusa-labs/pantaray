@@ -8,11 +8,13 @@ lives here so neither route duplicates content-block assembly or file reads.
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 
 from pantaray_agents.local_runtime.llm_proxy.content_files import (
     MultipartFile,
     PreparedContentFile,
+    WorkspaceFileChangedError,
     prepare_content_file,
 )
 from pantaray_agents.local_runtime.llm_proxy.generate_config import (
@@ -24,7 +26,10 @@ from pantaray_agents.local_runtime.llm_proxy.response_parsing import (
     is_mapping,
 )
 from pantaray_llm.contracts.action_turn import LlmActionTurnRequest
-from pantaray_llm.contracts.conversation import LlmTurnAssistantItem
+from pantaray_llm.contracts.conversation import (
+    LlmConversation,
+    LlmTurnAssistantItem,
+)
 from pantaray_llm.contracts.request import (
     LlmImageDescriptor,
     LlmInputBlock,
@@ -36,6 +41,8 @@ from pantaray_llm.contracts.request import (
     LlmRequestTrace,
 )
 from pantaray_llm.contracts.tool_use import LlmToolUseRequest
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +86,8 @@ def build_llm_request(
     conversation_media_refs = _conversation_media_refs(tool_use)
     content_blocks: list[LlmInputBlock] = []
     multipart_files: list[MultipartFile] = []
+    # Notes standing in for images whose workspace file changed, by their ref.
+    changed_notes: dict[str, LlmInputTextBlock] = {}
     for content in contents:
         if isinstance(content, str):
             content_blocks.append(LlmInputTextBlock(type="input_text", text=content))
@@ -88,10 +97,17 @@ def build_llm_request(
         file_data = content.get("file_data")
         if not is_mapping(file_data):
             raise RuntimeError("Unsupported LLM contents block")
-        prepared_file = prepare_content_file(
-            file_data=file_data,
-            user_id=user_id,
-        )
+        try:
+            prepared_file = prepare_content_file(
+                file_data=file_data,
+                user_id=user_id,
+            )
+        except WorkspaceFileChangedError as exc:
+            note = _changed_file_note(exc)
+            changed_notes[exc.application_ref] = note
+            if exc.application_ref not in conversation_media_refs:
+                content_blocks.append(note)
+            continue
         if prepared_file.application_ref not in conversation_media_refs:
             content_blocks.append(_file_block(prepared_file))
         multipart_files.append(
@@ -104,6 +120,12 @@ def build_llm_request(
                 ),
             )
         )
+    if changed_notes:
+        logger.info(
+            "Sent %d note(s) for workspace images that changed after they were read",
+            len(changed_notes),
+        )
+        tool_use = _with_changed_notes(tool_use, changed_notes)
     messages: list[LlmMessage] = []
     if settings.system_instruction is not None:
         messages.append(
@@ -155,6 +177,52 @@ def _conversation_media_refs(
         )
         if descriptor.application_ref is not None
     )
+
+
+def _changed_file_note(exc: WorkspaceFileChangedError) -> LlmInputTextBlock:
+    """What the model reads in place of an image whose file no longer matches.
+
+    Only history written before ``read`` kept its own copy names a workspace
+    file, and once that file is rewritten or removed the image cannot be sent
+    again. Failing the request would fail every later turn of the task, so the
+    model is told instead. The words depend on the input alone, so every later
+    turn sends the same note and the prompt prefix stays cacheable.
+    """
+
+    return LlmInputTextBlock(
+        type="input_text",
+        text=(
+            f"[{exc.application_ref}] This image is no longer available: "
+            f"{exc.path} changed or was removed after it was read. Read the "
+            "file again if you still need it."
+        ),
+    )
+
+
+def _with_changed_notes(
+    tool_use: LlmToolUseRequest | LlmActionTurnRequest | None,
+    notes: dict[str, LlmInputTextBlock],
+) -> LlmToolUseRequest | LlmActionTurnRequest | None:
+    """The conversation with each changed image's block replaced by its note."""
+
+    if not isinstance(tool_use, LlmActionTurnRequest) or tool_use.conversation is None:
+        return tool_use
+    conversation: LlmConversation = [
+        item
+        if isinstance(item, LlmTurnAssistantItem)
+        else item.model_copy(
+            update={
+                "content": [
+                    notes.get(block.image.application_ref or "", block)
+                    if isinstance(block, LlmInputImageBlock)
+                    else block
+                    for block in item.content
+                ]
+            }
+        )
+        for item in tool_use.conversation
+    ]
+    return tool_use.model_copy(update={"conversation": conversation})
 
 
 def _read_generate_settings(config: object | None) -> _GenerateSettings:

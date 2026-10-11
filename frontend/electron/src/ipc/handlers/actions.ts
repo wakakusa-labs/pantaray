@@ -9,7 +9,7 @@ import type {
   ActionWithdrawMessageResult,
 } from '../../actions/actionContracts';
 import { LocalBackendRequestError } from '../../localBackend/client';
-import { sendWork, type TaskSendOutcome } from '../../actions/taskDraftStore';
+import { answeredSendOutcome, sendWork, type TaskSendOutcome } from '../../actions/taskDraftStore';
 import {
   ActionConversationOverlayRequestSchema,
   ActionConversationPageRequestSchema,
@@ -155,12 +155,7 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
         () => ctx.actions.submitMessage(parsed),
         replyTo
       );
-      // A withdrawn message is settled too: its retry must not come back as a draft.
-      settle(
-        result.kind === 'submitted' || result.kind === 'reply_exists' || result.kind === 'withdrawn'
-          ? 'sent'
-          : 'refused'
-      );
+      settle(answeredSendOutcome(result));
       return result;
     } catch (error) {
       // The backend answered with a refusal, or the outcome is unknown and only a retry of

@@ -10,7 +10,7 @@ type UserMessageCopy = {
     'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
     string
   >;
-  /** The ✕ beside a message no run has taken yet. */
+  /** The ✕ under a message no run has taken yet. */
   withdraw: string;
 };
 /** The labels of a user's message and its attachments, shared by the Overlay and the chat. */

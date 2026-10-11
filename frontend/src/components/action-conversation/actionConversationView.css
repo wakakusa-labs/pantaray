@@ -177,20 +177,11 @@
   opacity: 0.5;
 }
 
-/* 未実行・保留の語と、その横に置く取り消しの ✕。 */
-.action-conversation__state-line {
+/* 未実行のメッセージを取り消す ✕。吹き出しの外、右端の下に置く。 */
+.action-conversation__user-actions {
   display: flex;
-  align-items: center;
-  gap: 2px;
+  justify-content: flex-end;
   margin-top: var(--space-xs);
-}
-
-.action-conversation__state-line > .action-conversation__state {
-  margin-top: 0;
-}
-
-.action-conversation__withdraw {
-  padding: 2px;
 }
 
 .action-conversation__withdraw[aria-disabled='true'] {

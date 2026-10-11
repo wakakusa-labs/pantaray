@@ -53,7 +53,7 @@ export function UserItem({
     item.source === 'canonical'
       ? item.entry.project_refs
       : (item.submission.request.message.project_refs ?? []);
-  const label =
+  const state =
     status !== 'adopted' ? (
       <span
         className="action-conversation__state"
@@ -62,17 +62,13 @@ export function UserItem({
         {copy.userStatus[status]}
       </span>
     ) : null;
-  const state =
-    item.source === 'canonical' &&
-    (status === 'pending' || status === 'not_executed') &&
-    onWithdraw ? (
-      <span className="action-conversation__state-line">
-        {label}
+  // Under the message, at its right edge, as the copy button sits under an answer.
+  const withdraw =
+    item.source === 'canonical' && status !== 'adopted' && onWithdraw ? (
+      <div className="action-conversation__user-actions">
         <WithdrawButton label={copy.withdraw} onWithdraw={() => onWithdraw(item.entry.step_id)} />
-      </span>
-    ) : (
-      label
-    );
+      </div>
+    ) : null;
 
   // What Pantaray's chat wrote when it handed this over: Pantaray's, never a user bubble.
   const chatNote = item.source === 'canonical' ? item.entry.chat_note : null;
@@ -87,7 +83,14 @@ export function UserItem({
         {hasUserPart ? null : state}
       </section>
     ) : null;
-  if (!hasUserPart) return note ?? state;
+  if (!hasUserPart) {
+    return (
+      <>
+        {note ?? state}
+        {withdraw}
+      </>
+    );
+  }
   return (
     <>
       <article className="action-conversation__user" aria-label={copy.you}>
@@ -113,6 +116,7 @@ export function UserItem({
         {state}
       </article>
       {note}
+      {withdraw}
     </>
   );
 }

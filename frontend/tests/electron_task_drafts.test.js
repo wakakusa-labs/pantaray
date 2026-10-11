@@ -14,7 +14,13 @@ const FILE = {
   byteSize: 12,
 };
 const IMAGE = { kind: 'image', storagePath: 'user-1/2026-10-11/a.png' };
-const draft = (text, attachments = []) => ({ text, mentions: [], attachments, retry: null });
+const draft = (text, attachments = []) => ({
+  text,
+  mentions: [],
+  quotes: [],
+  attachments,
+  retry: null,
+});
 
 // A store behind the real handlers, with two windows: the main window (1) and a small one (2).
 function harness() {

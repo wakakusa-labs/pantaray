@@ -4,6 +4,7 @@ import { useRef, type RefObject } from 'react';
 import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
 import { ComposerMessageField } from '@/components/agent-overlay/ComposerMessageField';
+import { ComposerQuotes } from '@/components/agent-overlay/ComposerQuotes';
 import type { MessageKey } from '@/i18n/types';
 
 import { speakerKey } from './chatTimeline';
@@ -28,12 +29,15 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
  */
 export function ChatComposer({
   composer,
+  quoteSourceRef,
   textareaRef,
   t,
   onAddProject,
   onSend,
 }: {
   composer: ReturnType<typeof useChatComposer>;
+  /** The chat's messages, whose selected text can be added to the reply. */
+  quoteSourceRef: RefObject<HTMLElement>;
   onAddProject: () => void;
   /** Sends the draft; the chat also scrolls to the newest message for it. */
   onSend: () => void;
@@ -79,6 +83,11 @@ export function ChatComposer({
           )}
         </div>
       ) : null}
+      <ComposerQuotes
+        quoting={{ ...composer.quoting, sourceRef: quoteSourceRef }}
+        readOnly={readOnly}
+        textareaRef={textareaRef}
+      />
       <ComposerAttachments
         attachments={state.attachments}
         failure={state.attachmentFailure}

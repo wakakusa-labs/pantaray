@@ -362,6 +362,8 @@
 }
 
 .chat-dock {
+  --composer-surface: var(--fog-mist);
+  --composer-border: rgba(214, 226, 248, 0.1);
   box-sizing: border-box;
   display: flex;
   flex: none;
@@ -402,9 +404,9 @@
   align-items: flex-end;
   gap: 8px;
   padding: 6px;
-  border: 1px solid rgba(214, 226, 248, 0.1);
+  border: 1px solid var(--composer-border);
   border-radius: 22px;
-  background: var(--fog-mist);
+  background: var(--composer-surface);
 }
 
 .chat-composer:has(textarea:focus-visible) {

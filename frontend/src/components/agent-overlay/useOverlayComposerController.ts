@@ -14,6 +14,7 @@ import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
 import type { ActionApprovalMode } from './useActionApprovalMode';
 import type { ComposerMention } from './composerMentions';
+import { composeQuotedMessage, type ComposerQuote } from './messageQuotes';
 import { useSharedTaskDraft } from './useSharedTaskDraft';
 
 import {
@@ -33,6 +34,8 @@ export type ComposerState = {
   draft: string;
   /** Workspace projects named in `draft`, in text order. */
   mentions: readonly ComposerMention[];
+  /** Passages quoted from the conversation, in the order added; they go out before `draft`. */
+  quotes: readonly ComposerQuote[];
   /** Attachments in the order the user added them. */
   attachments: readonly ComposerAttachment[];
   /** Attach round trips still running. Sending is blocked while any is outstanding. */
@@ -62,6 +65,7 @@ export function initialComposerState(initialActionId: string | null): ComposerSt
   return {
     draft: '',
     mentions: [],
+    quotes: [],
     attachments: [],
     attachmentsInFlight: 0,
     attachmentFailure: null,
@@ -103,6 +107,7 @@ export function reconcileCanonicalSubmission(
         ...settled,
         draft: '',
         mentions: [],
+        quotes: [],
         attachments: [],
         submission: null,
         failureKind: null,
@@ -200,6 +205,7 @@ export function useOverlayComposerController({
                   ...current,
                   draft: '',
                   mentions: [],
+                  quotes: [],
                   attachments: [],
                   submission: null,
                   submissionStartFence: null,
@@ -282,16 +288,21 @@ export function useOverlayComposerController({
       .catch(() => settle('failed'));
   };
   const { images, files } = attachmentPayload(composer.attachments);
-  // The same draft is either the message content or the approval supplement; both are trimmed
-  // before sending, so one conversion serves both.
+  // The same message is either the message content or the approval supplement; both are
+  // trimmed before sending, so one conversion serves both.
+  const message = composeQuotedMessage(composer.quotes, composer.draft);
   const projectRefs: ActionProjectRef[] = composer.mentions.map((mention) => ({
     project_id: mention.projectId,
     display_name: mention.displayName,
     paths: [...mention.paths],
-    ...codePointSpanInTrimmedText(composer.draft, mention.start, mention.end),
+    ...codePointSpanInTrimmedText(
+      message.text,
+      mention.start + message.draftOffset,
+      mention.end + message.draftOffset
+    ),
   }));
   const canAttach = canAttachMore(composer.attachments);
-  const supplement = normalizeActionSupplement(composer.draft);
+  const supplement = normalizeActionSupplement(message.text);
   const supplementInvalid = supplement !== null && !isActionSupplementWithinLimit(supplement);
   const submitDraft = (
     visiblePages: ActionConversationPageChain | null,
@@ -325,7 +336,7 @@ export function useOverlayComposerController({
       message: {
         version: 1,
         message_id: crypto.randomUUID(),
-        content: composer.draft,
+        content: message.text,
         images,
         language,
         project_refs: projectRefs,
@@ -445,15 +456,23 @@ export function useOverlayComposerController({
       );
     }
   };
-  // Typing dismisses a failed resume's notice.
-  const changeDraft = (draft: string, mentions: readonly ComposerMention[]) =>
+  // Typing dismisses a failed resume's notice; so does a quote, which is part of the message.
+  const editMessage = (edit: (current: ComposerState) => Partial<ComposerState>) =>
     setComposer((current) => ({
       ...current,
-      draft,
-      mentions,
+      ...edit(current),
       validationFailed: false,
       resume: current.resume?.state === 'failed' ? null : current.resume,
     }));
+  const changeDraft = (draft: string, mentions: readonly ComposerMention[]) =>
+    editMessage(() => ({ draft, mentions }));
+  const addQuote = (text: string, comment: string) =>
+    editMessage((current) => ({
+      quotes: [...current.quotes, { id: crypto.randomUUID(), text, comment }],
+    }));
+  const removeQuote = (id: string) =>
+    editMessage((current) => ({ quotes: current.quotes.filter((quote) => quote.id !== id) }));
+  const clearMessage = () => editMessage(() => ({ draft: '', mentions: [], quotes: [] }));
   const retrySubmission = () => {
     const request = composer.submission?.request;
     if (
@@ -481,6 +500,8 @@ export function useOverlayComposerController({
     files,
     canAttach,
     projectRefs,
+    /** The draft and its quotes make a message to send. */
+    hasMessage: message.text.trim() !== '',
     supplement,
     supplementInvalid,
     setComposer,
@@ -490,6 +511,9 @@ export function useOverlayComposerController({
     submitDraft,
     requestResume,
     changeDraft,
+    /** The composer's side of quoting; the host names the conversation they come from. */
+    quoting: { quotes: composer.quotes, onAdd: addQuote, onRemove: removeQuote },
+    clearMessage,
     attachFiles,
     removeAttachment,
     refreshSubmission,

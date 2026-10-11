@@ -18,6 +18,7 @@ const TASK_DRAFT_MAX_TEXT_LENGTH = 256_000;
 const TASK_DRAFT_MAX_MENTIONS = 256;
 const TASK_DRAFT_MAX_PATHS = 32;
 const TASK_DRAFT_MAX_REF_LENGTH = 1_024;
+const TASK_DRAFT_MAX_QUOTES = 64;
 
 const WORK_KEY = /^(action|suggestion):(.+)$/s;
 
@@ -53,6 +54,18 @@ export const TaskDraftSchema = z
           .strict()
       )
       .max(TASK_DRAFT_MAX_MENTIONS),
+    // Passages quoted from the conversation with the user's comment, in the order added.
+    quotes: z
+      .array(
+        z
+          .object({
+            id: z.string().uuid(),
+            text: z.string().min(1).max(TASK_DRAFT_MAX_TEXT_LENGTH),
+            comment: z.string().max(TASK_DRAFT_MAX_TEXT_LENGTH),
+          })
+          .strict()
+      )
+      .max(TASK_DRAFT_MAX_QUOTES),
     // References to what main already wrote or staged; never the bytes.
     attachments: z
       .array(

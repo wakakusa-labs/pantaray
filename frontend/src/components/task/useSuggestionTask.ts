@@ -202,7 +202,7 @@ export function useSuggestionTask(suggestionId: string) {
     }
   };
 
-  const hasWords = composer.composer.draft.trim() !== '';
+  const hasWords = composer.hasMessage;
   const canReply =
     ((phase === 'actionable' && contract === 'message_only') || phase === 'dismissed') &&
     permissionsReady &&
@@ -218,7 +218,7 @@ export function useSuggestionTask(suggestionId: string) {
     suggestionId,
     phase === 'dismissed',
     reason,
-    () => composer.changeDraft('', [])
+    composer.clearMessage
   );
 
   // 見送る takes only words, as the reason: attachments wait for a message of their own.

@@ -20,7 +20,10 @@ const fileIds = (draft: TaskDraft): string[] => [
 ];
 
 const isEmpty = (draft: TaskDraft) =>
-  draft.text === '' && draft.attachments.length === 0 && draft.retry === null;
+  draft.text === '' &&
+  draft.quotes.length === 0 &&
+  draft.attachments.length === 0 &&
+  draft.retry === null;
 
 /** How a send ended, as main heard it from the backend. */
 export type TaskSendOutcome = 'sent' | 'refused' | 'unknown';
@@ -158,6 +161,8 @@ export function createTaskDraftStore(params: {
           : {
               text: content,
               mentions: current?.mentions ?? [],
+              // The quotes went out written into the text, and come back that way.
+              quotes: [],
               attachments: [
                 ...images.map((image) => ({
                   kind: 'image' as const,

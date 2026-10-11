@@ -67,6 +67,7 @@ export function SuggestionTaskPane({
   const copy = COPY[language];
   const titleId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
   const task = useSuggestionTask(suggestionId);
   const { snapshot, phase, failure, composer, approvalMode } = task;
@@ -130,7 +131,7 @@ export function SuggestionTaskPane({
         </div>
       </header>
       <div className="suggestion-task__scroll">
-        <div className="suggestion-task__column">
+        <div className="suggestion-task__column" ref={columnRef}>
           {phase === 'loading' ? (
             <p className="suggestion-task__status" role="status">
               {copy.loading}
@@ -176,6 +177,7 @@ export function SuggestionTaskPane({
             approvalMode={approvalMode}
             draft={draft.draft}
             mentions={draft.mentions}
+            quoting={{ ...composer.quoting, sourceRef: columnRef }}
             submissionControls={
               draft.submission ? (
                 <ComposerSubmissionStatus

@@ -308,6 +308,7 @@ test('How a send ends settles the task draft, also with its window gone', async 
   const words = {
     text: 'hello',
     mentions: [],
+    quotes: [],
     attachments: [{ kind: 'image', storagePath: 'user-1/2026-10-11/a.png' }],
   };
 
@@ -374,7 +375,13 @@ test('A retry of a withdrawn message is settled: nothing runs and no draft offer
 
 test("Only the main window's new-task send touches the new task's draft", async () => {
   const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
-  const newTask = { text: 'Tidy the notes', mentions: [], attachments: [], retry: null };
+  const newTask = {
+    text: 'Tidy the notes',
+    mentions: [],
+    quotes: [],
+    attachments: [],
+    retry: null,
+  };
   taskDrafts.open('user-1', 'new', { id: 7, send: () => {} });
   taskDrafts.update('user-1', 'new', newTask, 7);
   const request = {

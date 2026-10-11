@@ -289,6 +289,7 @@ export function ActionTaskPane({
           approvalMode={task.approvalMode}
           draft={draft.draft}
           mentions={draft.mentions}
+          quoting={{ ...composer.quoting, sourceRef: contentRef }}
           submissionControls={
             draft.submission ? (
               <ComposerSubmissionStatus

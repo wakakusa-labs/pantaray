@@ -1,6 +1,7 @@
 import { Check, CircleAlert, Clipboard, MessageCircle } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 
+import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { SuggestionDecisionButtons } from '@/components/agent-overlay/SuggestionDecisionButtons';
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
@@ -51,7 +52,7 @@ type SuggestionTaskPaneProps = {
 
 /**
  * An unanswered suggestion in the main window's detail pane: its text, and a composer whose
- * 承認 / 見送る take what the user wrote, as the approval's extra instruction or as a reply after
+ * 承認 / 見送る take what the user wrote, as the approval's extra instruction or as the reason for
  * the dismissal. A message-only suggestion is answered by a reply, which starts a new Action; so
  * is a dismissed one, if the user writes after all.
  */
@@ -152,7 +153,10 @@ export function SuggestionTaskPane({
             </p>
           ) : null}
           {phase === 'dismissed' ? (
-            <p className="suggestion-task__status">{copy.dismissed}</p>
+            <>
+              {snapshot?.dismissReason ? <DismissalReason reason={snapshot.dismissReason} /> : null}
+              <p className="suggestion-task__status">{copy.dismissed}</p>
+            </>
           ) : null}
           {failure && (phase === 'actionable' || phase === 'start_failed') ? (
             <p className="suggestion-task__alert" role="alert">
@@ -206,7 +210,6 @@ export function SuggestionTaskPane({
             sendSuperseded={draft.failureKind === 'superseded'}
             canResume={false}
             textareaRef={textareaRef}
-            placeholder={dismissed ? t('overlay.composer.dismissedPlaceholder') : undefined}
             onAddProject={onAddProject}
             onDraftChange={(value, mentions) =>
               setComposer((current) => ({

@@ -21,6 +21,7 @@ function suggestion(overrides: Partial<OverlaySnapshot> = {}): OverlaySnapshot {
     suggestionText: 'Draft the invoice before month end?',
     reactionState: null,
     reactionTimestamp: null,
+    dismissReason: null,
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,
@@ -256,22 +257,13 @@ describe('SuggestionTaskPane', () => {
     expect(field()).toHaveValue('Use the new unit price');
   });
 
-  it('keeps a draft written around a dismissal, since a reply may still follow it', async () => {
+  it('keeps a draft written after a dismissal for its return', async () => {
+    read.mockResolvedValue(suggestion({ reactionState: 'rejected' }));
+    const message = () => screen.getByRole('textbox', { name: 'Message' });
     const first = await renderPane('sug-1');
-    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
-      target: { value: 'Only the summary' },
-    });
-    fireEvent.click(dismissButton());
+    fireEvent.change(message(), { target: { value: 'Only the summary, please' } });
     first.unmount();
 
-    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
-    const second = await renderPane('sug-1');
-    const message = () => screen.getByRole('textbox', { name: 'Message' });
-    expect(message()).toHaveValue('Only the summary');
-    fireEvent.change(message(), { target: { value: 'Only the summary, please' } });
-    second.unmount();
-
-    read.mockResolvedValueOnce(suggestion({ reactionState: 'rejected' }));
     await renderPane('sug-1');
     expect(message()).toHaveValue('Only the summary, please');
   });
@@ -357,63 +349,60 @@ describe('SuggestionTaskPane', () => {
     // Nothing written: the dismissal stands.
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Add a reason, or what you would like instead (optional)'
+      'Send a message'
     );
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(onStarted).not.toHaveBeenCalled();
   });
 
-  it('dismisses with the words, then sends them as a reply once the dismissal is recorded', async () => {
-    const messageId = '00000000-0000-4000-8000-000000000044';
-    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
-    submitMessage.mockReturnValueOnce(new Promise(() => {}));
+  it('dismisses with the words as the reason, starts nothing, and shows the reason', async () => {
     await renderPane();
     fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
-      target: { value: 'Only the summary, please' },
+      target: { value: ' Already sent it by hand ' },
     });
 
     fireEvent.click(dismissButton());
     expect(send).toHaveBeenCalledWith({
       event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-1' },
+      data: { suggestion_id: 'sug-1', reason: 'Already sent it by hand' },
     });
-    // The backend takes a reply only to a dismissed offer.
-    expect(submitMessage).not.toHaveBeenCalled();
 
-    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
-    expect(submitMessage).toHaveBeenCalledTimes(1);
-    expect(submitMessage).toHaveBeenCalledWith({
-      target: { kind: 'new', approval_mode: 'prompt_each_time', reply_to_suggestion_id: 'sug-1' },
-      message: {
-        version: 1,
-        message_id: messageId,
-        content: 'Only the summary, please',
-        images: [],
-        language: 'en',
-        project_refs: [],
-        files: [],
-      },
-    });
+    await publish(
+      suggestion({
+        reactionState: 'rejected',
+        dismissReason: 'Already sent it by hand',
+        lastSequence: 5,
+      })
+    );
+    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
+      'Already sent it by hand'
+    );
+    expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
+    // The reason was recorded: the composer is empty again, for a reply if the user wants one.
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+    expect(submitMessage).not.toHaveBeenCalled();
     expect(acceptAction).not.toHaveBeenCalled();
-    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+    expect(onStarted).not.toHaveBeenCalled();
   });
 
-  it('keeps the words for a retry when the reply after a dismissal fails', async () => {
-    submitMessage.mockRejectedValueOnce(new Error('Disconnected'));
-    await renderPane();
-    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
-      target: { value: 'Only the summary, please' },
+  it('keeps 見送る for words: it waits while files are attached', async () => {
+    const attachFile = vi.mocked(window.electron!.actions!.attachFile);
+    attachFile.mockResolvedValueOnce({
+      attachmentId: '00000000-0000-4000-8000-000000000001',
+      name: 'quote.pdf',
+      byteSize: 9,
     });
-    fireEvent.click(dismissButton());
-    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
+    await renderPane();
 
-    expect(submitMessage).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue(
-      'Only the summary, please'
-    );
-    expect(screen.getByRole('button', { name: 'Retry sending' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [new File(['%PDF-1.4\n'], 'quote.pdf', { type: 'application/pdf' })] },
+      });
+    });
+
+    await waitFor(() => expect(dismissButton()).toBeDisabled());
+    expect(acceptButton()).toBeEnabled();
   });
 
   it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {

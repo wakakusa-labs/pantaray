@@ -22,6 +22,7 @@ function snapshotPayload(
       suggestionText: '提案文',
       reactionState: null,
       reactionTimestamp: null,
+      dismissReason: null,
       actionPhase: 'idle',
       actionStatus: null,
       actionErrorCode: null,

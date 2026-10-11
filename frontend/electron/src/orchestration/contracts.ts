@@ -45,6 +45,8 @@ export type OverlaySnapshot = {
   suggestionText: string;
   reactionState: 'accepted' | 'rejected' | null;
   reactionTimestamp: string | null;
+  /** What the user wrote when they dismissed it. */
+  dismissReason: string | null;
   actionPhase: OverlayActionPhase;
   actionStatus: OverlayActionStatus | null;
   actionErrorCode: string | null;

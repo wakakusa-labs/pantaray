@@ -26,8 +26,8 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  /** 見送る; `withReply` when the composer's words follow the dismissal as a reply. */
-  onReject: (withReply: boolean) => void;
+  /** 見送る, with the composer's words as the reason, or null when there are none. */
+  onReject: (reason: string | null) => void;
   /** Shows this panel's task in the main window, which then closes the panel. */
   openTask: (actionId: string) => void;
   /** The main window could not be shown with this panel's task. */
@@ -329,7 +329,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  // A decided suggestion keeps no panel; one that says why, or asks for something else, stays.
+  // A decided suggestion keeps no panel; one dismissed with a reason stays to show it.
   useEffect(() => {
     const dismissed = closeAfterDismissalRef.current;
     if (dismissed === null) return;
@@ -338,17 +338,17 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     if (dismissed === state.suggestionId) window.electron?.agentOverlay?.hide();
   }, [state.suggestionId, state.reactionState]);
 
-  const onReject = useCallback((withReply: boolean) => {
+  const onReject = useCallback((reason: string | null) => {
     if (decisionLockedRef.current) return;
     if (interactionContractRef.current !== 'action_offer') return;
     if (reactionStateRef.current !== null) return;
     dispatch({ type: 'SET_DECISION_LOCKED', value: true });
     const sid = suggestionIdRef.current;
     if (sid) {
-      if (!withReply) closeAfterDismissalRef.current = sid;
+      if (reason === null) closeAfterDismissalRef.current = sid;
       window.electron?.orchestration?.send({
         event: 'dismiss_suggestion',
-        data: { suggestion_id: sid },
+        data: reason === null ? { suggestion_id: sid } : { suggestion_id: sid, reason },
       });
     }
   }, []);

@@ -3,7 +3,7 @@ import { ApprovalDecisionButton } from './ApprovalDecisionButton';
 
 /**
  * An unanswered offer's two answers, for the composer's right end: decline, then the way forward.
- * Both use what the user wrote: 承認 as the approval's extra conditions, 見送る as a reply.
+ * Both use what the user wrote: 承認 as the approval's extra conditions, 見送る as the reason.
  */
 export function SuggestionDecisionButtons({
   canDismiss,

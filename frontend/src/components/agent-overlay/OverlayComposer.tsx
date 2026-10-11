@@ -188,8 +188,6 @@ type OverlayComposerProps = {
   sendSuperseded?: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
-  /** The host's own wording for the empty field; otherwise the Overlay's for `action`. */
-  placeholder?: string;
   /** The @-mention list's "Add project" option; the host decides where projects are added. */
   onAddProject: () => void;
   onDraftChange: (value: string, mentions: ComposerMention[]) => void;
@@ -295,7 +293,6 @@ export function OverlayComposer({
   sendSuperseded = false,
   canResume,
   textareaRef,
-  placeholder,
   onAddProject,
   onDraftChange,
   onAttachFiles,
@@ -331,10 +328,7 @@ export function OverlayComposer({
         value={draft}
         mentions={mentions}
         readOnly={isReadOnly}
-        placeholder={
-          placeholder ??
-          t(decides ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')
-        }
+        placeholder={t(decides ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')}
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}

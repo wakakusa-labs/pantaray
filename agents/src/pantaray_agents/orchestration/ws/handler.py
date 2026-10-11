@@ -214,6 +214,7 @@ class WSOrchestrationHandler(
         update_action_failure_code: bool = False,
         accepted_at: str | None = None,
         rejected_at: str | None = None,
+        dismiss_reason: str | None = None,
     ) -> dict | None:
         """Suggestion/action 状態を永続化し、失敗時は明示例外を返す。"""
 
@@ -235,6 +236,7 @@ class WSOrchestrationHandler(
                     update_action_failure_code=update_action_failure_code,
                     accepted_at=accepted_at,
                     rejected_at=rejected_at,
+                    dismiss_reason=dismiss_reason,
                 )
             elif action_status is not None:
                 result = await repo.update_action_status(

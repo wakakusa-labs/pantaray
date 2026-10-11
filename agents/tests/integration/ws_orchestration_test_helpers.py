@@ -264,6 +264,7 @@ class _WsMockSuggestionRepository(MockSuggestionAgentRepository):
         update_action_failure_code: bool = False,
         accepted_at: str | None = None,
         rejected_at: str | None = None,
+        dismiss_reason: str | None = None,
     ) -> RepositoryResult[dict[str, object]]:
         row_result = await self.get_suggestion(
             user_id=user_id,
@@ -280,6 +281,7 @@ class _WsMockSuggestionRepository(MockSuggestionAgentRepository):
         else:
             row["rejected_at"] = rejected_at or datetime.now(UTC).isoformat()
             row["accepted_at"] = None
+            row["dismiss_reason"] = dismiss_reason
         if action_status is not None:
             row["action_status"] = action_status
         if update_action_failure_code:

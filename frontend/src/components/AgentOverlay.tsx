@@ -27,7 +27,7 @@ import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
 import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
-import { useReplyAfterDismissal } from './agent-overlay/useReplyAfterDismissal';
+import { useClearReasonOnDismissal } from './agent-overlay/useClearReasonOnDismissal';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -189,6 +189,10 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     isSuggestionAccepted:
       approvedSuggestion !== null ||
       (state.interactionContract === 'action_offer' && state.reactionState === 'accepted'),
+    dismissal:
+      state.interactionContract === 'action_offer' && state.reactionState === 'rejected'
+        ? { reason: state.dismissReason }
+        : null,
   };
   const canonicalPage =
     paging.currentPage?.action.action_id === conversationActionId ? paging.currentPage : null;
@@ -452,11 +456,15 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
       );
   };
-  const replyAfterDismissal = useReplyAfterDismissal(
+  const clearReasonOnDismissal = useClearReasonOnDismissal(
     state.suggestionId,
-    answersDismissal,
-    sendDraft
+    state.reactionState === 'rejected',
+    supplement,
+    () => changeDraft('', [])
   );
+  // 見送る takes only words, as the reason: attachments wait for a message of their own.
+  const canDismissSuggestion =
+    composer.attachments.length === 0 && composer.attachmentsInFlight === 0 && !supplementInvalid;
   const hasWords = composer.draft.trim() !== '';
   const acceptSuggestion = () => {
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
@@ -487,14 +495,11 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
             ? {
                 decision: (
                   <SuggestionDecisionButtons
-                    canDismiss={
-                      canDecide &&
-                      (!hasWords || (permissionsReady && composer.attachmentsInFlight === 0))
-                    }
+                    canDismiss={canDecide && canDismissSuggestion}
                     canAccept={canDecide && canAcceptSuggestion}
                     onDismiss={() => {
-                      replyAfterDismissal(hasWords);
-                      ctrl.onReject(hasWords);
+                      clearReasonOnDismissal(supplement);
+                      ctrl.onReject(supplement);
                     }}
                     onAccept={acceptSuggestion}
                   />
@@ -511,7 +516,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
         }
         textareaRef={standaloneComposerRef}
-        placeholder={answersDismissal ? t('overlay.composer.dismissedPlaceholder') : undefined}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={changeDraft}
         onAttachFiles={(files) => void attachFiles(files)}

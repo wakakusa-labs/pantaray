@@ -346,7 +346,7 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
                     ),
                 )
                 return
-            await handler.handle_dismiss(payload.suggestion_id)
+            await handler.handle_dismiss(payload.suggestion_id, reason=payload.reason)
 
         async def _handle_stop(data: dict) -> None:
             payload = StopProcessMessage(**data)

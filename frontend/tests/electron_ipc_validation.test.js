@@ -493,6 +493,30 @@ test('ws:send forwards a valid dismiss_suggestion event', async () => {
   assert.deepEqual(ctx.ws.send.calls[0][0], payload);
 });
 
+test('ws:send trims a dismissal reason and drops one over the supplement limit', async () => {
+  const { ctx, ipcMain } = buildCtx();
+  const listener = getListener(ipcMain, 'ws:send');
+  listener({ event: 'dismiss_suggestion', data: { suggestion_id: 's1', reason: ' done ' } });
+  await flushMicrotasks();
+  assert.deepEqual(ctx.ws.send.calls[0][0], {
+    event: 'dismiss_suggestion',
+    data: { suggestion_id: 's1', reason: 'done' },
+  });
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    listener({
+      event: 'dismiss_suggestion',
+      data: { suggestion_id: 's1', reason: '見'.repeat(8_001) },
+    });
+    await flushMicrotasks();
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(ctx.ws.send.calls.length, 1);
+});
+
 test('ws:send rejects a complete execute_action outside the dedicated IPC', async () => {
   const { ctx, ipcMain } = buildCtx();
   const listener = getListener(ipcMain, 'ws:send');

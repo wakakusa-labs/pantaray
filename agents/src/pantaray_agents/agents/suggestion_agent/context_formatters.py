@@ -86,6 +86,11 @@ def _format_recent_suggestion(row: SuggestionHistoryEntry) -> str:
     created_at = describe_utc_timestamp(row.created_at)
     lines.append(f"- [{created_at}] answer: {row.answer}")
     lines.append(f"  User reaction: {row.user_reaction or 'not recorded'}")
+    if row.dismiss_reason is not None:
+        reason = _bounded(
+            row.dismiss_reason, RECENT_SUGGESTION_REPLY_MAX_CHARS, "reason"
+        )
+        lines.append(f"  User's reason for dismissing: {reason}")
     if row.user_reply is not None:
         reply = _bounded(row.user_reply, RECENT_SUGGESTION_REPLY_MAX_CHARS, "reply")
         lines.append(f"  User reply: {reply}")
@@ -132,6 +137,7 @@ def normalize_recent_suggestion_entry(
             "created_at": created_at,
             "thinking": thinking,
             "user_reaction": row.get("user_reaction"),
+            "dismiss_reason": row.get("dismiss_reason"),
             "user_reply": row.get("user_reply"),
             "action_status": row.get("action_status"),
             "action_result": row.get("action_result"),

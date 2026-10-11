@@ -25,11 +25,18 @@ const IdString = z.string().trim().min(1).max(MAX_ID_LENGTH);
 const ReasonString = z.string().max(MAX_REASON_LENGTH);
 const ProcessKindSchema = z.enum(['suggestion', 'action']);
 
+// The composer's words, which 承認 sends as the supplement and 見送る as the reason.
+const ActionSupplementSchema = z
+  .string()
+  .transform(normalizeActionSupplement)
+  .refine((value) => value === null || isActionSupplementWithinLimit(value))
+  .nullable();
+
 const DismissSuggestionSchema = z.object({
   event: z.literal('dismiss_suggestion'),
   data: z.object({
     suggestion_id: IdString,
-    reason: ReasonString.optional(),
+    reason: ActionSupplementSchema.optional(),
   }),
 });
 
@@ -95,12 +102,6 @@ export const OrchestrationClientEventSchema = z.discriminatedUnion('event', [
   ResumeSessionSchema,
   AckEventSchema,
 ]);
-
-const ActionSupplementSchema = z
-  .string()
-  .transform(normalizeActionSupplement)
-  .refine((value) => value === null || isActionSupplementWithinLimit(value))
-  .nullable();
 
 export const AcceptActionRequestSchema = z
   .object({

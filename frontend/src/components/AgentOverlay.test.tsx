@@ -29,6 +29,7 @@ function createPendingSnapshot(): OverlaySnapshotPayload {
       suggestionText: 'Need approval',
       reactionState: 'accepted',
       reactionTimestamp: '2026-03-08T00:00:00Z',
+      dismissReason: null,
       actionPhase: 'processing',
       actionStatus: 'processing',
       actionErrorCode: null,
@@ -52,6 +53,7 @@ function createResumedSnapshot(): OverlaySnapshotPayload {
       suggestionText: 'Need approval',
       reactionState: 'accepted',
       reactionTimestamp: '2026-03-08T00:00:00Z',
+      dismissReason: null,
       actionPhase: 'processing',
       actionStatus: 'processing',
       actionErrorCode: null,
@@ -75,6 +77,7 @@ function createCommentOnlySnapshot(): OverlaySnapshotPayload {
       suggestionText: 'Just a comment, nothing to approve',
       reactionState: null,
       reactionTimestamp: null,
+      dismissReason: null,
       actionPhase: 'idle',
       actionStatus: null,
       actionErrorCode: null,
@@ -1453,10 +1456,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
     expect(screen.getByText('Draft the invoice?')).toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
-    expect(composer).toHaveAttribute(
-      'placeholder',
-      'Add a reason, or what you would like instead (optional)'
-    );
+    expect(composer).toHaveAttribute('placeholder', 'Send a message');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(sendOrchestration).toHaveBeenCalledTimes(1);
@@ -1482,10 +1482,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(acceptAction).not.toHaveBeenCalled();
   });
 
-  it('dismisses with the words in the composer, then sends them as a reply', async () => {
-    const messageId = '00000000-0000-4000-8000-000000000045';
-    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
-    submitMessage.mockResolvedValueOnce(createStartedResult('act-after-dismissal', messageId));
+  it('dismisses with the words as the reason, keeps the panel to show it, and starts nothing', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -1513,11 +1510,10 @@ describe('AgentOverlay broader E2E', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
     expect(sendOrchestration).toHaveBeenCalledWith({
       event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-offer' },
+      data: { suggestion_id: 'sug-offer', reason: 'Only the summary, please' },
     });
     expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Dismiss suggestion' })).toBeDisabled();
-    expect(submitMessage).not.toHaveBeenCalled();
     await act(async () =>
       eventListener?.({
         event: 'suggestion_reaction_committed',
@@ -1525,31 +1521,22 @@ describe('AgentOverlay broader E2E', () => {
           suggestion_id: 'sug-offer',
           reaction: 'rejected',
           committed_at: '2026-03-08T00:00:01Z',
+          reason: 'Only the summary, please',
         },
         meta: { suggestion_id: 'sug-offer' },
         sequence: 4,
       })
     );
 
-    expect(submitMessage).toHaveBeenCalledTimes(1);
-    expect(submitMessage).toHaveBeenCalledWith({
-      target: {
-        kind: 'new',
-        approval_mode: 'prompt_each_time',
-        reply_to_suggestion_id: 'sug-offer',
-      },
-      message: {
-        version: 1,
-        message_id: messageId,
-        content: 'Only the summary, please',
-        images: [],
-        language: 'en',
-        project_refs: [],
-        files: [],
-      },
-    });
+    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
+      'Only the summary, please'
+    );
+    expect(screen.getByText('Dismissed')).toBeInTheDocument();
+    // The reason was recorded, not sent: the composer is empty, and no run started.
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+    expect(submitMessage).not.toHaveBeenCalled();
     expect(acceptAction).not.toHaveBeenCalled();
-    // The words make it a reply, which keeps the panel.
+    expect(sendOrchestration).toHaveBeenCalledTimes(1);
     expect(hideOverlay).not.toHaveBeenCalled();
   });
 
@@ -1603,7 +1590,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => snapshotListener?.(dismissed));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Add a reason, or what you would like instead (optional)'
+      'Send a message'
     );
 
     const replied = structuredClone(dismissed);

@@ -157,7 +157,7 @@ export function HistoryProjectRow({
                   type="button"
                   className="history-project__folder-action"
                   aria-label={t('history.projects.openInFinder')}
-                  title={t('history.projects.openInFinder')}
+                  data-tooltip={t('history.projects.openInFinder')}
                   onClick={() => onOpenFolder(folder.folder_id)}
                 >
                   <FolderOpen size={13} aria-hidden="true" />

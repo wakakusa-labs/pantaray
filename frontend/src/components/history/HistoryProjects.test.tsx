@@ -8,6 +8,7 @@ import { clearWorkspaceSettingsCache } from '@/pages/settings/components/workspa
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
 import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
 import { HistoryProjects } from './HistoryProjects';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 const t = (key: string, vars?: Record<string, string | number>) =>
   vars ? `${key} ${JSON.stringify(vars)}` : key;
@@ -434,6 +435,9 @@ it('フォルダの行は横に流れず、パス・Finder・外すを並べ、�
     'history-project__folder-action',
   ]);
   expect(line.closest('ul.history-projects__list')).not.toBeNull();
+  // Finder and × name themselves in the app's tooltip, not a late native one.
+  expect(expectIconButtonTooltips(line)).toHaveLength(2);
+  expectTooltipIsName(within(line).getByRole('button', { name: 'history.projects.openInFinder' }));
   const path = within(line).getByRole('button', {
     name: '/Users/me/Developer/clients/acme/very-long-folder-name/own',
   });

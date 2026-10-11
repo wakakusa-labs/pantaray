@@ -14,6 +14,7 @@ from pantaray_agents.schema.agent.action_subagent import (
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
 from ..storage.transactions import SQLiteTransactionOwnershipError
+from .action_subagent_ownership import owned_child_sql
 from .action_subagent_terminal import (
     ActionSubagentTerminalResult,
     load_action_subagent_terminal_result_in_connection,
@@ -69,17 +70,18 @@ def collect_action_subagent_results_in_connection(
         raise ActionSubagentWaitAuthorityError("subagent collection is not terminal")
     child_process_ids = receipt.request.child_process_ids
     placeholders = ",".join("?" for _ in child_process_ids)
+    # The snapshot above proved ownership; a finished child is collected whichever
+    # run of this Action spawned it.
     updated = connection.execute(
         f"""UPDATE processes
         SET result_collected_at=COALESCE(result_collected_at, ?)
-        WHERE user_id=? AND action_id=? AND parent_process_id=?
+        WHERE user_id=? AND action_id=?
           AND kind='action_subagent' AND status IN ('completed','failed','canceled')
           AND process_id IN ({placeholders})""",
         (
             receipt.collected_at,
             receipt.request.user_id,
             receipt.request.action_id,
-            receipt.request.parent_process_id,
             *child_process_ids,
         ),
     )
@@ -120,7 +122,7 @@ def _read_snapshot_in_connection(
           AND job.job_type=? AND job.logical_key=job.job_id
         JOIN job_payloads AS payload ON payload.job_id=job.job_id
         WHERE child.user_id=? AND child.action_id=?
-          AND child.parent_process_id=? AND child.kind='action_subagent'
+          AND {owned_child_sql("?")} AND child.kind='action_subagent'
           AND child.process_id IN ({placeholders})
         """,
         (

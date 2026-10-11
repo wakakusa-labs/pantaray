@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
     require_string_arg,
@@ -11,8 +13,12 @@ from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
     ActionSubagentMessageRequest,
     send_action_subagent_message,
 )
+from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
+    read_action_subagent_wait_snapshot,
+)
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import (
@@ -20,6 +26,7 @@ from .shared import (
     ToolValidationError,
     UnprojectedToolExecutionResult,
 )
+from .subagent_wait import _build_wait_request
 
 
 async def run_send_message_to_subagent_tool(
@@ -50,7 +57,7 @@ async def run_send_message_to_subagent_tool(
     try:
         child_process_id = require_string_arg(args, "child_process_id")
         message_id = require_string_arg(args, "message_id")
-        send_action_subagent_message(
+        accepted = send_action_subagent_message(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             request=ActionSubagentMessageRequest(
@@ -65,11 +72,27 @@ async def run_send_message_to_subagent_tool(
         )
     except ActionSubagentMessageInputError as exc:
         raise ToolValidationError(str(exc)) from exc
+    if accepted:
+        return UnprojectedToolExecutionResult(
+            step_id=step_id,
+            tool_id=tool_def.tool_id,
+            status="success",
+            started_at=accepted_at,
+            completed_at=now_utc_iso(),
+            output=True,
+        )
+    # A finished child, of this run or of one the user stopped, takes no message:
+    # the parent gets its final result, as wait_subagents would give it. Collecting
+    # it stays with wait_subagents.
+    request = _build_wait_request(state=state, child_process_ids=(child_process_id,))
+    snapshot = read_action_subagent_wait_snapshot(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=request
+    )
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
         started_at=accepted_at,
         completed_at=now_utc_iso(),
-        output=True,
+        output=cast(JSONValue, snapshot.results[0]),
     )

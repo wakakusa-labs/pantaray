@@ -405,8 +405,8 @@ def test_child_message_replay_conflict_and_terminal_boundary(tmp_path: Path) -> 
         message_id: str,
         content: str,
         child_process_id: str = child.child_process_id,
-    ) -> None:
-        send_action_subagent_message(
+    ) -> bool:
+        return send_action_subagent_message(
             db_path=db_path,
             busy_timeout_ms=BUSY_TIMEOUT_MS,
             request=ActionSubagentMessageRequest(
@@ -431,9 +431,16 @@ def test_child_message_replay_conflict_and_terminal_boundary(tmp_path: Path) -> 
             "UPDATE processes SET status='completed' WHERE process_id=?",
             (child.child_process_id,),
         )
-    send("message-1", "Use the updated boundary")
-    with pytest.raises(ActionSubagentMessageInputError, match="terminal"):
-        send("message-2", "Too late")
+    assert send("message-1", "Use the updated boundary")
+    # A finished child takes no message; the tool reports its result instead.
+    assert send("message-2", "Too late") is False
+    # A finished child of another Action is still not this parent's.
+    with _connect(db_path) as connection, connection:
+        connection.execute(
+            "UPDATE processes SET status='completed' WHERE process_id='foreign-child'"
+        )
+    with pytest.raises(ActionSubagentMessageInputError, match="active parent"):
+        send("cross-action", "Wrong Action", "foreign-child")
 
     with _connect(db_path) as connection:
         event_count = connection.execute(

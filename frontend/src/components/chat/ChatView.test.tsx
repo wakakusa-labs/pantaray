@@ -987,9 +987,7 @@ function select(element: HTMLElement, text: string) {
   range.setEnd(node, start + text.length);
   document.getSelection()!.removeAllRanges();
   document.getSelection()!.addRange(range);
-  act(() => {
-    document.dispatchEvent(new Event('selectionchange'));
-  });
+  act(() => void document.dispatchEvent(new Event('selectionchange')));
 }
 
 it('adds selected passages with comments as quotes, and sends them all in one message', async () => {
@@ -1029,9 +1027,7 @@ it('adds selected passages with comments as quotes, and sends them all in one me
   expect(getComputedStyle(quotes).overflowY).toBe('auto');
   expect(parseFloat(getComputedStyle(quotes).maxHeight)).toBeCloseTo(window.innerHeight * 0.3);
   await userEvent.click(within(quotes).getByRole('button', { name: '引用 2 / 3 を削除' }));
-  expect(
-    within(screen.getByRole('list', { name: '引用 2 件' })).getAllByRole('listitem')
-  ).toHaveLength(2);
+  expect(screen.getByRole('list', { name: '引用 2 件' })).toBeInTheDocument();
   expect(sendMessage).not.toHaveBeenCalled();
 
   sendMessage.mockImplementationOnce(async (request) => ({

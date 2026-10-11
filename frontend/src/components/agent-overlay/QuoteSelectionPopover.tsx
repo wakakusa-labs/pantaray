@@ -51,20 +51,17 @@ const Surface = styled.div`
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 `;
 
-const AddButton = styled.button`
-  padding: 6px 10px;
+/** 「返信に追加」 on its own surface, or the popover's filled 「追加」. */
+const PopoverButton = styled.button<{ $primary?: boolean }>`
+  padding: 5px 12px;
   border: 0;
   border-radius: 8px;
-  color: var(--fog-text);
-  background: transparent;
+  color: ${({ $primary }) => ($primary ? '#12161c' : 'var(--fog-text)')};
+  background: ${({ $primary }) => ($primary ? 'rgba(255, 255, 255, 0.92)' : 'transparent')};
   font: inherit;
   font-size: 12px;
+  font-weight: ${({ $primary }) => ($primary ? 600 : 400)};
   cursor: pointer;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--fog-mist-strong);
-  }
 
   &:focus-visible {
     outline: none;
@@ -94,30 +91,13 @@ const Popover = styled(Surface)`
   input:focus-visible {
     box-shadow: var(--focus-ring);
   }
-`;
 
-const PopoverActions = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-
-  button {
-    padding: 4px 12px;
-    border: 0;
-    border-radius: 7px;
-    color: #12161c;
-    background: rgba(255, 255, 255, 0.92);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  button:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--fog-text-3);
+    font-size: var(--text-meta-size);
   }
 `;
 
@@ -133,14 +113,14 @@ export function AddToReplyButton({
   const ref = useBesideSelection(selection, selection.endRight, false);
   return (
     <Surface ref={ref}>
-      <AddButton
+      <PopoverButton
         type="button"
         // Pressing must not move focus or clear the selection before the click lands.
         onMouseDown={(event) => event.preventDefault()}
         onClick={onPress}
       >
         {t('overlay.composer.quote.add')}
-      </AddButton>
+      </PopoverButton>
     </Surface>
   );
 }
@@ -200,12 +180,12 @@ export function QuoteCommentPopover({
           onAdd(comment);
         }}
       />
-      <PopoverActions>
+      <div>
         <span>{t('overlay.composer.quote.cancelHint')}</span>
-        <button type="button" onClick={() => onAdd(comment)}>
+        <PopoverButton type="button" $primary onClick={() => onAdd(comment)}>
           {t('overlay.composer.quote.confirm')}
-        </button>
-      </PopoverActions>
+        </PopoverButton>
+      </div>
     </Popover>
   );
 }

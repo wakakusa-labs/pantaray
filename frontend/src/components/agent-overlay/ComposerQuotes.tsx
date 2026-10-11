@@ -135,30 +135,30 @@ export function ComposerQuotes({
           ref={listRef}
           aria-label={t('overlay.composer.quotes', { count: quotes.length })}
         >
-          {quotes.map((quote, index) => (
-            <QuoteCard key={quote.id}>
-              <div>
-                <blockquote>{quote.text}</blockquote>
-                {quote.comment.trim() !== '' ? <p>{quote.comment}</p> : null}
-              </div>
-              {readOnly ? null : (
-                <button
-                  type="button"
-                  aria-label={t('overlay.composer.quote.remove', {
-                    index: index + 1,
-                    count: quotes.length,
-                  })}
-                  title={t('overlay.composer.quote.remove', {
-                    index: index + 1,
-                    count: quotes.length,
-                  })}
-                  onClick={() => remove(quote.id, index)}
-                >
-                  <X size={14} aria-hidden="true" />
-                </button>
-              )}
-            </QuoteCard>
-          ))}
+          {quotes.map((quote, index) => {
+            const removeLabel = t('overlay.composer.quote.remove', {
+              index: index + 1,
+              count: quotes.length,
+            });
+            return (
+              <QuoteCard key={quote.id}>
+                <div>
+                  <blockquote>{quote.text}</blockquote>
+                  {quote.comment.trim() !== '' ? <p>{quote.comment}</p> : null}
+                </div>
+                {readOnly ? null : (
+                  <button
+                    type="button"
+                    aria-label={removeLabel}
+                    title={removeLabel}
+                    onClick={() => remove(quote.id, index)}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                )}
+              </QuoteCard>
+            );
+          })}
         </QuoteList>
       ) : null}
     </>

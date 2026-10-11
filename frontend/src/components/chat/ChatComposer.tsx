@@ -24,9 +24,8 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
 };
 
 /**
- * Where the user writes to Pantaray: the quoted message, the quoted passages, the attachments, the
- * text and the send button, docked under the chat. Enter sends and Shift+Enter starts a new line,
- * as in the Overlay.
+ * Where the user writes to Pantaray: the quoted message, the attachments, the text and the send
+ * button, docked under the chat. Enter sends and Shift+Enter starts a new line, as in the Overlay.
  */
 export function ChatComposer({
   composer,

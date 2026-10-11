@@ -1,9 +1,5 @@
-/**
- * Passages the user picked from a conversation, waiting in a composer to go out with its next
- * message. They travel as the message's own text, a Markdown blockquote of each passage followed
- * by what the user said about it: every model reads that as it is, the backend stores it as any
- * text, and a relayed message carries it along unchanged.
- */
+// Quotes travel as the message's own text, each passage a Markdown blockquote followed by the
+// comment: models read it as is, the backend stores plain text, and a relayed message keeps it.
 
 /** A passage the user picked, with what they want to say about it (possibly nothing). */
 export type ComposerQuote = Readonly<{ id: string; text: string; comment: string }>;

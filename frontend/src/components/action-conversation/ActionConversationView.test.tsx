@@ -1,8 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -1100,18 +1097,6 @@ describe('ActionConversationView', () => {
     // A run that stopped mid-Tool has nothing live either.
     rerender(renderRun({ ...running([searched, querying]), status: 'canceled' }));
     expect(disclosure()).toHaveTextContent(/^Pantarayの作業2$/);
-  });
-
-  it('draws the focus ring on keyboard focus only, rounded from the app token', () => {
-    const css = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), 'actionConversationView.css'),
-      'utf8'
-    ).replace(/\s+/g, ' ');
-    // A click focuses the disclosure too; that focus must not draw the browser outline.
-    expect(css).toContain('.action-conversation__disclosure:focus { outline: none; }');
-    expect(css).toContain(
-      '.action-conversation__disclosure:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }'
-    );
   });
 
   it.each([

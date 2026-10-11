@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Settings, UserRound } from 'lucide-react';
+import { House, Settings, UserRound } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/context/useI18n';
@@ -86,7 +86,7 @@ const Layout: React.FC = () => {
   const isSplitPage = location.pathname === '/history' || location.pathname === '/settings';
 
   const navItems = [
-    { path: '/history', label: t('nav.history'), Icon: Clock },
+    { path: '/history', label: t('nav.home'), Icon: House },
     { path: '/settings', label: t('nav.settings'), Icon: Settings },
   ];
 

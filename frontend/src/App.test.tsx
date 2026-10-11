@@ -78,7 +78,7 @@ it.each([
   // Projects live in History's sidebar; the rail has no page for them.
   expect(
     within(screen.getByRole('navigation')).getAllByRole('button', {
-      name: /^(履歴|設定|ワークスペース)$/,
+      name: /^(ホーム|設定|ワークスペース)$/,
     })
   ).toHaveLength(2);
   expect(startBrowserLogin).not.toHaveBeenCalled();

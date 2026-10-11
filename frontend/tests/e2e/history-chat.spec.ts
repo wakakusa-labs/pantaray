@@ -521,7 +521,7 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
     sessionStorage.setItem('read-seeded', '1');
   }, READ_POSITION_KEY);
   await installBridge(page);
-  const history = page.getByRole('button', { name: '履歴' });
+  const history = page.getByRole('button', { name: 'ホーム' });
   const chatRow = sidebarOf(page).getByRole('button', { name: 'チャット', exact: true });
 
   // The chat opens on its newest message, so everything is read.
@@ -585,7 +585,7 @@ test('a first run marks the existing chat read instead of showing it all as unre
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
     .toBe('9');
-  await expect(page.getByRole('button', { name: '履歴' })).not.toHaveAccessibleDescription(/未読/);
+  await expect(page.getByRole('button', { name: 'ホーム' })).not.toHaveAccessibleDescription(/未読/);
 });
 
 test('a suggestion the user has not answered has a dot and opens in the detail pane', async ({

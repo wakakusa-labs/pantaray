@@ -79,8 +79,15 @@ class WSHandlerProcessControlMixin:
                         return
                     if current_process and current_process.completed_at is not None:
                         return
-                if terminal.terminal_cursor is None:
-                    raise MigrationError("Action terminal cursor is unavailable")
+                    if terminal.terminal_cursor is None:
+                        # The Stop fence and its subagent cancel requests are
+                        # committed; the root terminal follows once the
+                        # children settle, through this run's relay.
+                        logger.info(
+                            "Bound Action stop is waiting for subagents: process_id=%s",
+                            process_id,
+                        )
+                        return
                 self._bind_action_process(
                     terminal.process_id,
                     terminal.suggestion_id,

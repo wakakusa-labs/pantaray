@@ -509,6 +509,42 @@ test('Opening an Action rejects when its page could not be read, so the window c
   assert.equal(await superseded('action:openConversation', { actionId: 'action-1' }), undefined);
 });
 
+test('Stopping a run rereads its page and live run, and rejects a Stop not accepted', async () => {
+  const calls = [];
+  const invoke = register({
+    stopAction: async (request) => calls.push(['stop', request]),
+    refreshAndResumeActionConversation: async (actionId) => {
+      calls.push(['refresh', actionId]);
+      return 'refreshed';
+    },
+  });
+  assert.equal(
+    await invoke('action:stop', { actionId: 'action-1', processId: 'run-1' }),
+    undefined
+  );
+  assert.deepEqual(calls, [
+    ['stop', { actionId: 'action-1', processId: 'run-1' }],
+    ['refresh', 'action-1'],
+  ]);
+  await assert.rejects(
+    async () => invoke('action:stop', { actionId: 'action-1', processId: ' run-1' }),
+    (error) => error?.name === 'IpcValidationError'
+  );
+
+  const refused = [];
+  const failing = register({
+    stopAction: async () => {
+      throw new LocalBackendRequestError('conflict', 409);
+    },
+    refreshAndResumeActionConversation: async (actionId) => refused.push(actionId),
+  });
+  await assert.rejects(
+    async () => failing('action:stop', { actionId: 'action-1', processId: 'run-1' }),
+    (error) => error instanceof LocalBackendRequestError
+  );
+  assert.deepEqual(refused, ['action-1']);
+});
+
 function validSubmit() {
   return {
     target: { kind: 'existing', action_id: 'action-1', expected_process_id: null },

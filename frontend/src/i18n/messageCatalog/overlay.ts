@@ -17,6 +17,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.send': 'Send',
     'overlay.composer.sending': 'Sending…',
     'overlay.composer.stop': 'Stop',
+    'overlay.composer.stopping': 'Stopping…',
+    'overlay.composer.stopFailed': 'The run could not be stopped. Try again.',
     'overlay.composer.resume': 'Resume',
     'overlay.composer.resumeFailed': 'The conversation could not be resumed. Try again.',
     'overlay.composer.sendSuperseded':
@@ -144,6 +146,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.send': '送信',
     'overlay.composer.sending': '送信中…',
     'overlay.composer.stop': '停止',
+    'overlay.composer.stopping': '停止しています…',
+    'overlay.composer.stopFailed': '停止できませんでした。再度お試しください。',
     'overlay.composer.resume': '再開',
     'overlay.composer.resumeFailed': '会話を再開できませんでした。再度お試しください。',
     'overlay.composer.sendSuperseded':

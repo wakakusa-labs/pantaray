@@ -48,6 +48,13 @@ class ActionCancelRequest(BaseModel):
         default=None,
         description="キャンセル理由（ログ用途。省略可）",
     )
+    expected_process_id: str | None = Field(
+        default=None,
+        description=(
+            "停止したい run の process_id。いまの run が別の run なら 409 を返し、"
+            "画面が見ていない run を止めない（省略時は照合しない）"
+        ),
+    )
 
 
 class ActionCancelResponse(BaseModel):
@@ -135,6 +142,7 @@ async def cancel_action(
         user_id=user_id,
         action_id=action_id,
         reason=body.reason if body else None,
+        expected_process_id=body.expected_process_id if body else None,
     )
     if not cleanup_complete:
         raise HTTPException(

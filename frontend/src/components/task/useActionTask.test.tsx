@@ -54,7 +54,7 @@ describe('useActionTask', () => {
   const submitMessage = vi.fn<Actions['submitMessage']>();
   const resumeAction = vi.fn<Actions['resumeAction']>();
   const readConversationPage = vi.fn<Actions['readConversationPage']>();
-  const sendOrchestration = vi.fn();
+  const stopAction = vi.fn<Actions['stopAction']>();
   const submitApprovalDecision = vi.fn();
 
   const emit = (next: ActionLiveUpdate) =>
@@ -74,7 +74,7 @@ describe('useActionTask', () => {
     submitMessage.mockReset().mockReturnValue(new Promise(() => {}));
     resumeAction.mockReset().mockReturnValue(new Promise(() => {}));
     readConversationPage.mockReset();
-    sendOrchestration.mockReset();
+    stopAction.mockReset().mockReturnValue(new Promise(() => {}));
     submitApprovalDecision.mockReset().mockResolvedValue(undefined);
     const bridge = createTaskDraftBridge();
     Object.defineProperty(window, 'electron', {
@@ -84,6 +84,7 @@ describe('useActionTask', () => {
           openConversation,
           submitMessage: bridge.sending(submitMessage),
           resumeAction,
+          stopAction,
           readConversationPage,
           readToolOutputPage: vi.fn(),
           ...bridge.window(),
@@ -93,7 +94,6 @@ describe('useActionTask', () => {
             return () => listeners.delete(callback);
           },
         },
-        orchestration: { send: sendOrchestration },
         agentOverlay: {
           submitApprovalDecision,
           getActionApprovalMode: vi.fn(async (actionId: string) => ({
@@ -143,10 +143,7 @@ describe('useActionTask', () => {
     const { result } = await renderTask();
     emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
     act(() => result.current.stop());
-    expect(sendOrchestration).toHaveBeenLastCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-1' },
-    });
+    expect(stopAction).toHaveBeenLastCalledWith({ actionId: 'act-1', processId: 'run-1' });
 
     emit(
       update(createActionPage('act-1', 'processing', 'run-1'), 1, {
@@ -154,14 +151,50 @@ describe('useActionTask', () => {
       })
     );
     act(() => result.current.stop());
-    expect(sendOrchestration).toHaveBeenLastCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-2' },
-    });
+    expect(stopAction).toHaveBeenLastCalledWith({ actionId: 'act-1', processId: 'run-2' });
 
     emit(update(createActionPage('act-1', 'success', 'run-2'), 2));
     act(() => result.current.stop());
-    expect(sendOrchestration).toHaveBeenCalledTimes(2);
+    expect(stopAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows an accepted Stop until the run ends, however long its subagents take', async () => {
+    stopAction.mockResolvedValue(undefined);
+    const { result } = await renderTask();
+    emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
+    await act(async () => result.current.stop());
+    expect(result.current.composer).toMatchObject({
+      action: 'stop',
+      canStop: false,
+      stopping: true,
+    });
+    // A second press while the run settles asks nothing more of the backend.
+    act(() => result.current.stop());
+    expect(stopAction).toHaveBeenCalledTimes(1);
+
+    emit(
+      update(createActionPage('act-1', 'processing', 'run-1'), 2, {
+        lifecycle: { processId: 'run-1', status: 'canceled' },
+      })
+    );
+    expect(result.current.composer).toMatchObject({ stopping: false, stopFailed: false });
+  });
+
+  it('says a Stop failed and lets it be pressed again while the run goes on', async () => {
+    stopAction.mockRejectedValueOnce(new Error('backend unavailable'));
+    const { result } = await renderTask();
+    emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
+    await act(async () => result.current.stop());
+    await waitFor(() => expect(result.current.composer.stopFailed).toBe(true));
+    expect(result.current.composer).toMatchObject({
+      action: 'stop',
+      canStop: true,
+      stopping: false,
+    });
+
+    act(() => result.current.stop());
+    expect(stopAction).toHaveBeenCalledTimes(2);
+    expect(result.current.composer).toMatchObject({ stopping: true, stopFailed: false });
   });
 
   it('sends a follow-up into the running run', async () => {

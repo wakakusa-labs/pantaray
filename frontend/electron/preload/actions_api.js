@@ -43,6 +43,8 @@ function createActionsApi({ ipcRenderer }) {
       withdrawMessage: (request) => ipcRenderer.invoke('action:withdrawMessage', request),
       // Main window only: show the Action in place; updates arrive on onConversationUpdated.
       openConversation: (request) => ipcRenderer.invoke('action:openConversation', request),
+      // Main window only: stop the run the task pane shows.
+      stopAction: (request) => ipcRenderer.invoke('action:stop', request),
       attachImage: (request) => ipcRenderer.invoke('action:attachImage', request),
       revealImage: (request) => ipcRenderer.invoke('actionImage:reveal', request),
       attachFile: (request) => ipcRenderer.invoke('action:attachFile', request),

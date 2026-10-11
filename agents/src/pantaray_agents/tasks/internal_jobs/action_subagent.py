@@ -20,6 +20,11 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input i
     SUBAGENT_ROLE,
     role_system_instruction,
 )
+from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    UNCANCELLABLE_TOOL_IDS,
+    ActionStopRequested,
+    ActionStopWatch,
+)
 from pantaray_agents.agents.action_agent.tools import (
     SUBMIT_SUBAGENT_REPORT_TOOL_ID,
     WRITE_SESSION_MEMORY_TOOL,
@@ -136,6 +141,40 @@ async def execute_action_subagent_job(
     busy_timeout_ms: int,
     broker_authority: ActionSubagentBrokerAuthority,
 ) -> ActionSubagentTerminalSuccess:
+    # The parent's Stop fences this child's job; the watch reads that fence while
+    # an LLM request or a tool is in flight and cancels it, as the parent's own
+    # THINK and tool calls are, instead of letting it run to its end.
+    stop_watch = ActionStopWatch(
+        probe=functools.partial(
+            action_subagent_cancellation_requested,
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            payload=payload,
+        )
+    )
+    async with stop_watch:
+        try:
+            return await _execute_action_subagent_job(
+                payload=payload,
+                runner=runner,
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                broker_authority=broker_authority,
+                stop_watch=stop_watch,
+            )
+        except ActionStopRequested as exc:
+            raise _ActionSubagentCancellationObserved from exc
+
+
+async def _execute_action_subagent_job(
+    *,
+    payload: ActionSubagentJobPayload,
+    runner: _ActionSubagentToolLlmRunner,
+    db_path: Path,
+    busy_timeout_ms: int,
+    broker_authority: ActionSubagentBrokerAuthority,
+    stop_watch: ActionStopWatch,
+) -> ActionSubagentTerminalSuccess:
     sink = CountingSink()
     tunables = load_local_runtime_tunables().action_agent
     check_cancel = functools.partial(
@@ -174,16 +213,19 @@ async def execute_action_subagent_job(
         # The saved gated request settles exactly once: the broker either runs
         # the approved call or reports the denial, which answers the call left
         # waiting.
-        settled = await execute_action_subagent_broker_tool(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            payload=payload,
-            authority=broker_authority,
-            tool_id=resumed.tool_id,
-            args=resumed.arguments,
-            tool_request_id=resumed.tool_request_id,
-            call_id=resumed.call_id,
-            agents_md=agents_md,
+        settled = await stop_watch.run(
+            execute_action_subagent_broker_tool(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                payload=payload,
+                authority=broker_authority,
+                tool_id=resumed.tool_id,
+                args=resumed.arguments,
+                tool_request_id=resumed.tool_request_id,
+                call_id=resumed.call_id,
+                agents_md=agents_md,
+            ),
+            cancellable=resumed.tool_id not in UNCANCELLABLE_TOOL_IDS,
         )
         writer.answer_waiting_call(resumed.call_id, resumed.tool_id, settled)
         history = load_history()
@@ -202,14 +244,16 @@ async def execute_action_subagent_job(
     )
 
     async def send(request: ConversationRequest) -> ActionTurnReply:
-        reply = await runner._generate_llm_action_turn(
-            sink=sink,
-            prompt=request.prompt,
-            tools=request.tools,
-            max_parallel_tool_calls=request.max_parallel_tool_calls,
-            system_instruction=request.system_instruction,
-            conversation=request.conversation,
-            before_attempt=check_cancel,
+        reply = await stop_watch.run(
+            runner._generate_llm_action_turn(
+                sink=sink,
+                prompt=request.prompt,
+                tools=request.tools,
+                max_parallel_tool_calls=request.max_parallel_tool_calls,
+                system_instruction=request.system_instruction,
+                conversation=request.conversation,
+                before_attempt=check_cancel,
+            )
         )
         check_cancel()
         return reply
@@ -246,7 +290,8 @@ async def execute_action_subagent_job(
             prompt=payload["action_context"],
             system_instruction=_subagent_system_instruction(),
             tools=tuple(
-                _checked(tool, check_cancel) for tool in (*tools, _SESSION_MEMORY_TOOL)
+                _checked(tool, check_cancel, stop_watch)
+                for tool in (*tools, _SESSION_MEMORY_TOOL)
             ),
             ending_tools=(_report_tool_definition(),),
             history=entries,
@@ -447,13 +492,19 @@ _SESSION_MEMORY_TOOL = ReactToolDefinition(
 
 
 def _checked(
-    tool: ReactToolDefinition, check_cancel: Callable[[], None]
+    tool: ReactToolDefinition,
+    check_cancel: Callable[[], None],
+    stop_watch: ActionStopWatch,
 ) -> ReactToolDefinition:
-    """The tool, run only while no cancel has been requested."""
+    """The tool, started only while no cancel has been requested, and cancelled
+    by one that arrives while it runs."""
 
     async def execute(call: ReactToolCall, step_number: int) -> ReactToolResult:
         check_cancel()
-        return await tool.execute(call, step_number)
+        return await stop_watch.run(
+            tool.execute(call, step_number),
+            cancellable=tool.name not in UNCANCELLABLE_TOOL_IDS,
+        )
 
     return replace(tool, execute=execute)
 

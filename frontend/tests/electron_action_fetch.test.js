@@ -716,3 +716,31 @@ test('new Action request forwards the selected initial approval mode', async () 
     ]
   );
 });
+
+test('Action stop names the run it stops and rejects an unexpected answer', async () => {
+  const requests = [];
+  let answer = { status: 'accepted' };
+  const fetcher = createActionFetcher({
+    getUserId: () => 'user 1',
+    requestJson: async (request) => {
+      requests.push(request);
+      return answer;
+    },
+  });
+
+  await fetcher.stopAction({ actionId: 'action/1', processId: 'run-1' });
+  assert.deepEqual(requests, [
+    {
+      path: '/v1/agents/users/user%201/actions/action%2F1/cancel',
+      method: 'POST',
+      body: { reason: 'user_stop', expected_process_id: 'run-1' },
+      timeoutMs: ACTION_CONVERSATION_REQUEST_TIMEOUT_MS,
+    },
+  ]);
+
+  answer = { status: 'queued' };
+  await assert.rejects(
+    fetcher.stopAction({ actionId: 'action-1', processId: 'run-1' }),
+    (error) => error instanceof ActionWireContractError
+  );
+});

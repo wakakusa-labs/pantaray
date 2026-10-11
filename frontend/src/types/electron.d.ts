@@ -24,6 +24,7 @@ import type {
   ActionMessageRequest,
   ActionMessageSubmitResult,
   ActionResumeRequest,
+  ActionStopRequest,
   ActionToolOutputDetail,
   ActionWithdrawMessageRequest,
   ActionWithdrawMessageResult,
@@ -275,6 +276,8 @@ declare global {
         ) => Promise<ActionWithdrawMessageResult>;
         /** Main window only: shows the Action in place; updates arrive on onConversationUpdated. */
         openConversation: (request: { actionId: string }) => Promise<void>;
+        /** Main window only: stops the run it shows; rejects when the Stop was not accepted. */
+        stopAction: (request: ActionStopRequest) => Promise<void>;
         attachImage: (request: {
           bytes: ArrayBuffer;
           declaredMimeType: ActionImageMimeType;

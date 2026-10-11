@@ -152,6 +152,11 @@ const ComposerPrimaryButton = styled.button`
   }
 `;
 
+const ComposerStatus = styled.span`
+  color: var(--text-secondary);
+  font-size: var(--text-meta-size);
+`;
+
 const MESSAGE_FIELD_ID = 'overlay-composer-message';
 const MESSAGE_ERROR_ID = 'overlay-composer-message-error';
 
@@ -185,6 +190,10 @@ type OverlayComposerProps = {
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
+  /** 停止を受け付け、run が止まりきるのを待っている。 */
+  stopping?: boolean;
+  /** 停止の要求が通らなかった。run はまだ動いている。 */
+  stopFailed?: boolean;
   sendSuperseded?: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -209,14 +218,25 @@ export const ComposerSubmissionRow = styled.div`
   gap: var(--space-sm);
 `;
 
-/** The one stop control. A live run is stopped from here and nowhere else. */
-export function ComposerStopButton({ onStop }: { onStop: () => void }) {
+/**
+ * The one stop control. A live run is stopped from here and nowhere else. While an accepted Stop
+ * waits for the run to end, it stays in place, disabled, and says so.
+ */
+export function ComposerStopButton({
+  onStop,
+  stopping = false,
+}: {
+  onStop: () => void;
+  stopping?: boolean;
+}) {
   const { t } = useI18n();
+  const label = t(stopping ? 'overlay.composer.stopping' : 'overlay.composer.stop');
   return (
     <ComposerPrimaryButton
       type="button"
-      aria-label={t('overlay.composer.stop')}
-      title={t('overlay.composer.stop')}
+      disabled={stopping}
+      aria-label={label}
+      title={label}
       onClick={onStop}
     >
       <Square
@@ -235,12 +255,14 @@ export function ComposerSubmissionStatus({
   onRetry,
   onRefresh,
   onStop,
+  stopping = false,
 }: {
   composer: Pick<ComposerState, 'submission' | 'failureKind' | 'refreshState'>;
   controlRef: RefObject<HTMLButtonElement>;
   onRetry: () => void;
   onRefresh: (button: HTMLButtonElement) => void;
   onStop?: () => void;
+  stopping?: boolean;
 }) {
   const { t } = useI18n();
   const { submission, failureKind, refreshState } = composer;
@@ -274,7 +296,7 @@ export function ComposerSubmissionStatus({
       ) : (
         <span role="status">{t('overlay.composer.sending')}</span>
       )}
-      {onStop && <ComposerStopButton onStop={onStop} />}
+      {onStop && <ComposerStopButton onStop={onStop} stopping={stopping} />}
     </ComposerSubmissionRow>
   );
 }
@@ -292,6 +314,8 @@ export function OverlayComposer({
   action,
   canSend,
   resumeFailed,
+  stopping = false,
+  stopFailed = false,
   sendSuperseded = false,
   canResume,
   textareaRef,
@@ -363,6 +387,12 @@ export function OverlayComposer({
       {resumeFailed ? (
         <ComposerAlert role="alert">{t('overlay.composer.resumeFailed')}</ComposerAlert>
       ) : null}
+      {stopping ? (
+        <ComposerStatus role="status">{t('overlay.composer.stopping')}</ComposerStatus>
+      ) : null}
+      {stopFailed ? (
+        <ComposerAlert role="alert">{t('overlay.composer.stopFailed')}</ComposerAlert>
+      ) : null}
       {sendSuperseded ? (
         <ComposerAlert role="alert">{t('overlay.composer.sendSuperseded')}</ComposerAlert>
       ) : null}
@@ -410,7 +440,7 @@ export function OverlayComposer({
                 <ArrowUp strokeWidth={2.25} aria-hidden />
               </ComposerPrimaryButton>
             ) : action === 'stop' ? (
-              <ComposerStopButton onStop={onStop} />
+              <ComposerStopButton onStop={onStop} stopping={stopping} />
             ) : (
               <ComposerPrimaryButton
                 type="button"

@@ -91,7 +91,6 @@ export function ActionTaskPane({
   );
 
   const liveStage = useHistoryLiveStages().get(actionId);
-  const canStop = status.kind === 'running' && status.stopTarget !== null;
   // A run that ended but whose page read failed leaves no answer; reopening reads it again.
   const runEndedUnread = lifecycle !== null && lifecycle.status !== 'processing';
   const showReopen =
@@ -297,7 +296,8 @@ export function ActionTaskPane({
                 controlRef={submissionControlRef}
                 onRetry={composer.retrySubmission}
                 onRefresh={(button) => void composer.refreshSubmission(button)}
-                onStop={canStop ? task.stop : undefined}
+                onStop={composer.canStop || composer.stopping ? task.stop : undefined}
+                stopping={composer.stopping}
               />
             ) : null
           }
@@ -309,6 +309,8 @@ export function ActionTaskPane({
           action={composer.action}
           canSend={composer.canSend}
           resumeFailed={draft.resume?.state === 'failed'}
+          stopping={composer.stopping}
+          stopFailed={composer.stopFailed}
           sendSuperseded={draft.failureKind === 'superseded'}
           canResume={composer.canResume}
           textareaRef={textareaRef}

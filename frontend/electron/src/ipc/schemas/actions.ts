@@ -4,6 +4,7 @@ import {
   ActionMessageRequestSchema,
   ActionResumeRequestSchema,
   ActionWithdrawMessageRequestSchema,
+  ActionStopRequestSchema,
 } from '../../actions/actionContracts';
 
 export const ACTION_CONVERSATION_MAX_PAGE_SIZE = 100;
@@ -23,6 +24,7 @@ const OpaqueCursorSchema = z
 export {
   ActionMessageRequestSchema,
   ActionResumeRequestSchema,
+  ActionStopRequestSchema,
   ActionWithdrawMessageRequestSchema,
 };
 

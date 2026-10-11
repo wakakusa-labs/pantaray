@@ -156,4 +156,5 @@ async def test_cancel_action_maps_incomplete_cleanup_to_service_unavailable(
         user_id="user-1",
         action_id="act-1",
         reason="user requested cancel",
+        expected_process_id=None,
     )

@@ -38,8 +38,7 @@ export type ActionTask = ReturnType<typeof useActionTask>;
 export function useActionTask(actionId: string) {
   const { language, t } = useI18n();
   const actions = window.electron?.actions;
-  const orchestration = window.electron?.orchestration;
-  if (!actions || !orchestration) throw new Error('Missing Actions bridge.');
+  if (!actions) throw new Error('Missing Actions bridge.');
 
   const [paging, setPaging] = useState(EMPTY_CONVERSATION_PAGING);
   const conversation = useMemo(() => createConversationPaging(actions, setPaging), [actions]);
@@ -53,6 +52,12 @@ export function useActionTask(actionId: string) {
     []
   );
   const appliedPageVersionRef = useRef(0);
+  // The run a Stop was asked of. It applies only while that run is still the one shown, so a run
+  // that ended, or the next one, starts with a Stop of its own.
+  const [stopRequest, setStopRequest] = useState<{
+    processId: string;
+    state: 'stopping' | 'failed';
+  } | null>(null);
   // Main resumes the Action's unfinished run only after reading its page, so a failed open leaves
   // no live updates at all; only another open recovers them.
   const [openState, setOpenState] = useState<'opening' | 'open' | 'failed'>('opening');
@@ -163,19 +168,37 @@ export function useActionTask(actionId: string) {
     composer.draft.trim() !== '' &&
     composer.attachmentsInFlight === 0 &&
     permissionsReady;
-  const canStop = status.kind === 'running' && status.stopTarget !== null;
+  const stopState =
+    stopRequest !== null && stopRequest.processId === status.stopTarget ? stopRequest.state : null;
+  // A run with subagents ends only once they have stopped too, so an accepted Stop stays visible
+  // until the run's terminal arrives.
+  const stopping = status.kind === 'running' && stopState === 'stopping';
+  const canStop = status.kind === 'running' && status.stopTarget !== null && !stopping;
   const canResume =
     status.resumable &&
     permissionsReady &&
     (composer.resume === null || composer.resume.state === 'failed');
   // The composer's primary button: send a draft, else stop the running run, else resume a stop.
   const composerAction: 'send' | 'stop' | 'resume' =
-    composer.draft.trim() !== '' ? 'send' : canStop ? 'stop' : status.resumable ? 'resume' : 'send';
+    composer.draft.trim() !== ''
+      ? 'send'
+      : canStop || stopping
+        ? 'stop'
+        : status.resumable
+          ? 'resume'
+          : 'send';
 
   const stop = () => {
     const processId = status.stopTarget;
-    if (canStop && processId !== null)
-      orchestration.send({ event: 'stop_process', data: { process_id: processId } });
+    if (!canStop || processId === null) return;
+    setStopRequest({ processId, state: 'stopping' });
+    actions
+      .stopAction({ actionId, processId })
+      .catch(() =>
+        setStopRequest((current) =>
+          current?.processId === processId ? { processId, state: 'failed' } : current
+        )
+      );
   };
   // A follow-up joins the running run: the backend rejects it if that run is no longer current.
   const send = () => {
@@ -233,6 +256,9 @@ export function useActionTask(actionId: string) {
       canAttach: composerControl.canAttach,
       canSend,
       canResume,
+      canStop,
+      stopping,
+      stopFailed: stopState === 'failed',
       action: composerAction,
       changeDraft: composerControl.changeDraft,
       attachFiles: composerControl.attachFiles,

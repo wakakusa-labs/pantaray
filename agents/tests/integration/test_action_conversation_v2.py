@@ -737,6 +737,36 @@ def test_a_not_executed_followup_leaves_the_stopped_run_resumable(
     assert _read_state(client, action_id)["action"]["resumable"] is True
 
 
+def test_a_stop_for_another_run_leaves_the_current_run_running(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """A Stop pressed on a run the window no longer shows must not stop the next one."""
+
+    client, db_path = runtime_client
+    started = client.post(
+        MESSAGES_PATH, json=_message("message-running", "実行する")
+    ).json()
+    _claim_and_prepare(db_path, claimed_by="worker:running")
+    action_id = str(started["action_id"])
+
+    stale = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={"reason": "user_stop", "expected_process_id": "another-run"},
+    )
+    assert stale.status_code == 409, stale.text
+    assert _read_state(client, action_id)["action"]["status"] == "processing"
+
+    current = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={
+            "reason": "user_stop",
+            "expected_process_id": str(started["process_id"]),
+        },
+    )
+    assert current.status_code == 202, current.text
+    assert _read_state(client, action_id)["action"]["status"] == "canceled"
+
+
 def test_a_checkpoint_this_build_cannot_restore_is_not_resumable(
     runtime_client: tuple[TestClient, Path],
 ) -> None:

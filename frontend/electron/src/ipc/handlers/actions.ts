@@ -15,6 +15,7 @@ import {
   ActionConversationPageRequestSchema,
   ActionMessageRequestSchema,
   ActionResumeRequestSchema,
+  ActionStopRequestSchema,
   ActionToolOutputRequestSchema,
   ActionWithdrawMessageRequestSchema,
 } from '../schemas/actions';
@@ -197,6 +198,17 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     }
     ctx.actions.refreshActionConversation(parsed.actionId);
     return result;
+  });
+  // The main window's Stop. The run ends once its subagents settle, so the page is read again and
+  // the live run kept attached: the terminal then reaches the window however long that takes. A
+  // refused Stop reads it too, since the run it named may already have ended.
+  registrar.handle('action:stop', async (_event, request) => {
+    const parsed = parseInput(ActionStopRequestSchema, 'action:stop', request);
+    try {
+      await ctx.actions.stopAction(parsed);
+    } finally {
+      await ctx.actions.refreshAndResumeActionConversation(parsed.actionId);
+    }
   });
   // The main window shows an Action in place: its page, and its live run if one is unfinished.
   // Without the page no run is resumed, so the window must hear of the failure to retry.

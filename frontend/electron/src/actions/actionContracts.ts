@@ -162,6 +162,14 @@ export const ActionWithdrawMessageRequestSchema = z
   })
   .strict();
 
+/** Stop names the run the window shows, so a Stop pressed late never ends the run after it. */
+export const ActionStopRequestSchema = z
+  .object({
+    actionId: CanonicalIdentitySchema,
+    processId: CanonicalIdentitySchema,
+  })
+  .strict();
+
 const ActionMessageResponseBaseSchema = z
   .object({
     action_id: CanonicalIdentitySchema,
@@ -487,6 +495,7 @@ export type ActionResumeRequest = z.infer<typeof ActionResumeRequestSchema>;
 export type ActionWithdrawMessageRequest = z.infer<typeof ActionWithdrawMessageRequestSchema>;
 /** `adopted`: a run took the message first, so it stays and now shows as run. */
 export type ActionWithdrawMessageResult = Readonly<{ kind: 'withdrawn' | 'adopted' }>;
+export type ActionStopRequest = z.infer<typeof ActionStopRequestSchema>;
 export type ActionMessageResponse = z.infer<typeof ActionMessageResponseSchema>;
 export type ActionMessageSubmitResult =
   | Readonly<{ kind: 'submitted'; response: ActionMessageResponse }>

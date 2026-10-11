@@ -68,7 +68,7 @@ export function ChatComposer({
               type="button"
               className="chat-icon-button"
               aria-label={t('history.chat.quote.clear')}
-              title={t('history.chat.quote.clear')}
+              data-tooltip={t('history.chat.quote.clear')}
               onClick={() => {
                 composer.setQuote(null);
                 textareaRef.current?.focus();
@@ -105,7 +105,7 @@ export function ChatComposer({
           className="chat-icon-button"
           disabled={!composer.canAttach}
           aria-label={t('overlay.composer.attach')}
-          title={t('overlay.composer.attach')}
+          data-tooltip={t('overlay.composer.attach')}
           onClick={() => fileInputRef.current?.click()}
         >
           <Plus size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -139,7 +139,7 @@ export function ChatComposer({
           className="chat-send"
           disabled={!composer.canSend}
           aria-label={t('overlay.composer.send')}
-          title={t('overlay.composer.send')}
+          data-tooltip={t('overlay.composer.send')}
         >
           <ArrowUp size={16} strokeWidth={2.25} aria-hidden="true" />
         </button>

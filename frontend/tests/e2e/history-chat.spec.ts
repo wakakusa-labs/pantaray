@@ -403,7 +403,7 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
   });
   await expect(retry).toBeVisible();
   await expect(retry).toHaveAttribute(
-    'title',
+    'data-tooltip',
     'AI に接続できず、返信できませんでした。もう一度送る'
   );
   // The time stays beside the bubble's bottom; the icon has its own row under the bubble.

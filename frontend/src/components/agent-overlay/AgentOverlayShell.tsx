@@ -19,12 +19,12 @@ import { MarkdownBlock } from './MarkdownRenderer';
 import { DismissalReason } from './DismissalReason';
 import { HeaderIconButton } from './IconButton';
 import {
-  ArrowUpRight,
   Check,
   ChevronDown,
   ChevronUp,
   CircleAlert,
   Clipboard,
+  Maximize2,
   MessageCircle,
   Minus,
 } from 'lucide-react';
@@ -265,7 +265,7 @@ const AgentOverlayShell = ({
             $visible={isVisible}
             onClick={() => void onShowChat({ actionId: chatActionId })}
             aria-label={t('overlay.showInChat')}
-            title={t('overlay.showInChat')}
+            data-tooltip={t('overlay.showInChat')}
           >
             <MessageCircle strokeWidth={1.75} aria-hidden />
           </ShowChatButton>
@@ -276,9 +276,10 @@ const AgentOverlayShell = ({
               $visible={isVisible}
               onClick={() => onOpenInMainWindow(chatActionId)}
               aria-label={t('overlay.openInMainWindow')}
-              title={t('overlay.openInMainWindow')}
+              data-tooltip={t('overlay.openInMainWindow')}
             >
-              <ArrowUpRight strokeWidth={1.75} aria-hidden />
+              {/* The pair of the main window's PictureInPicture2, which opens a task here. */}
+              <Maximize2 strokeWidth={1.75} aria-hidden />
             </HeaderIconButton>
           )}
           {conversationCopy && (
@@ -287,7 +288,7 @@ const AgentOverlayShell = ({
                 $visible={isVisible}
                 onClick={conversationCopy.copy}
                 aria-label={t('overlay.copyConversation')}
-                title={copyConversationFailed ?? t('overlay.copyConversation')}
+                data-tooltip={copyConversationFailed ?? t('overlay.copyConversation')}
               >
                 {conversationCopy.status === 'copied' ? (
                   <Check strokeWidth={1.75} />
@@ -308,7 +309,7 @@ const AgentOverlayShell = ({
               $visible={isVisible}
               onClick={onToggleExpand}
               aria-label={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
-              title={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
+              data-tooltip={isExpanded ? t('overlay.collapse') : t('overlay.expand')}
             >
               {isExpanded ? <ChevronUp strokeWidth={1.75} /> : <ChevronDown strokeWidth={1.75} />}
             </HeaderIconButton>
@@ -319,7 +320,7 @@ const AgentOverlayShell = ({
               onMouseDown={handleCloseMouseDown}
               onClick={handleCloseClick}
               aria-label={t('overlay.hideNotification')}
-              title={t('overlay.hideNotification')}
+              data-tooltip={t('overlay.hideNotification')}
             >
               <Minus strokeWidth={1.75} />
             </HeaderIconButton>

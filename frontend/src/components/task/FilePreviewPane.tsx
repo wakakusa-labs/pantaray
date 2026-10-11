@@ -204,7 +204,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
             type="button"
             className="task-file-preview__path"
             aria-label={`${copy.copyPath}: ${file.path}`}
-            title={file.path}
+            data-tooltip={file.path}
             onClick={() => void copyToClipboard(() => file.path)}
           >
             <span className="task-file-preview__path-text">{middleEllipsis(file.path)}</span>
@@ -227,7 +227,7 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
           type="button"
           className="task-file-preview__close"
           aria-label={copy.close}
-          title={copy.close}
+          data-tooltip={copy.close}
           onClick={onClose}
         >
           <X size={16} strokeWidth={1.8} aria-hidden />

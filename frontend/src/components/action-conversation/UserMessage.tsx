@@ -16,7 +16,7 @@ function WithdrawButton({ label, onWithdraw }: { label: string; onWithdraw: () =
       type="button"
       className="action-conversation__withdraw"
       aria-label={label}
-      title={label}
+      data-tooltip={label}
       aria-disabled={busy}
       onClick={() => {
         if (busy) return;

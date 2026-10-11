@@ -17,7 +17,7 @@ export function CopyAnswerButton({ markdown }: { markdown: string }) {
         // Stays clickable in the collapsed preview (useCollapsedFocusBoundary).
         data-collapsed-clickable
         aria-label={t('overlay.copyThisAnswer')}
-        title={failed ?? t('overlay.copyThisAnswer')}
+        data-tooltip={failed ?? t('overlay.copyThisAnswer')}
         onClick={() => void copy(() => markdown)}
       >
         <Icon size={14} strokeWidth={1.75} aria-hidden />

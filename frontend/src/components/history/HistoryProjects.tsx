@@ -122,7 +122,7 @@ export function HistoryProjects({
           ref={addButtonRef}
           className="history-projects__add"
           aria-label={t('history.projects.add')}
-          title={t('history.projects.add')}
+          data-tooltip={t('history.projects.add')}
           aria-busy={pending.has(workspacePendingKey.projectCreate)}
           disabled={settings === null}
           onClick={() => onCreatingChange(true)}

@@ -3,6 +3,7 @@ import { clearConversationScrollPositions } from './components/agent-overlay/con
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import './iconTooltip.css';
 import { AuthProvider } from './context/AuthContext';
 import { UiLanguageProvider } from './context/UiLanguageContext';
 import { resolveRendererInitialLanguage } from './i18n/initialLanguage';

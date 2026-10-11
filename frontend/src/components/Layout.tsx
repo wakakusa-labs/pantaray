@@ -108,7 +108,7 @@ const Layout: React.FC = () => {
                   .filter(Boolean)
                   .join(' ')}
                 aria-label={label}
-                title={label}
+                data-tooltip={label}
                 aria-current={isActive ? 'page' : undefined}
                 aria-describedby={unread ? 'app-rail-chat-unread' : undefined}
               >

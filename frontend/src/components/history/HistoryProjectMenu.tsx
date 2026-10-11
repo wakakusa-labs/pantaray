@@ -102,7 +102,7 @@ export function HistoryProjectMenu({
         id={buttonId}
         className="history-item-delete history-project__menu-button"
         aria-label={label}
-        title={label}
+        data-tooltip={label}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}

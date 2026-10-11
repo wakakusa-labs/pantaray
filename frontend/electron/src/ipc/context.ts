@@ -25,7 +25,7 @@ import type {
   ActionApprovalModeResponse,
 } from '../actions/actionApprovalModeFetch';
 import type { HistoryFetchResult } from '../history/historyFetch';
-import type { HistoryItemDeleteRequest } from '../history/historyContracts';
+import type { ConversationHistoryListItem, HistoryItemKey } from '../history/historyContracts';
 import type { HistoryItemDeleteResult } from '../history/historyItemDelete';
 import type { ActionCompletionViewedRequest } from '../history/actionReadState';
 import type {
@@ -161,7 +161,9 @@ export type MainContext = {
   history: {
     fetch: (params: unknown) => Promise<HistoryFetchResult>;
     markCompletionViewed: (request: ActionCompletionViewedRequest) => void;
-    deleteItem: (request: HistoryItemDeleteRequest) => Promise<HistoryItemDeleteResult>;
+    deleteItem: (request: HistoryItemKey) => Promise<HistoryItemDeleteResult>;
+    /** The row History shows for this item, or null when it holds none for this user. */
+    readItem: (request: HistoryItemKey) => Promise<ConversationHistoryListItem | null>;
   };
 
   actionFiles: {

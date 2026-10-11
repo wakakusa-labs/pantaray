@@ -102,6 +102,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'overlay:setActionApprovalMode',
     'clipboard:writeText',
     'history:markCompletionViewed',
+    'history:readItem',
     'action:readConversationPage',
     // The main window's chat attaches and shows attached images too.
     'action:attachImage',

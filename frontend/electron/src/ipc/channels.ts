@@ -127,6 +127,7 @@ export const validInvokeChannels = [
   'history:fetch',
   'history:markCompletionViewed',
   'history:deleteItem',
+  'history:readItem',
   'history:openNewConversation',
   'history:openConversation',
   'screenshot:getStatus',

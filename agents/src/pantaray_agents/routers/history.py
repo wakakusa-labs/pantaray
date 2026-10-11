@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
 from pantaray_agents.local_runtime.action_conversation.history_repository import (
+    read_conversation_history_item_in_connection,
     read_conversation_history_page_in_connection,
 )
 from pantaray_agents.local_runtime.runtime import runtime_env
@@ -28,7 +29,10 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.schema.agent.base import ErrorType
-from pantaray_agents.schema.conversation_history import ConversationHistoryPage
+from pantaray_agents.schema.conversation_history import (
+    ConversationHistoryListItem,
+    ConversationHistoryPage,
+)
 
 CONVERSATION_HISTORY_DEFAULT_PAGE_SIZE = 25
 CONVERSATION_HISTORY_MAX_PAGE_SIZE = 100
@@ -75,6 +79,35 @@ def list_conversation_history(
             "Conversation history read failed",
             error_code="CONVERSATION_HISTORY_INTEGRITY_ERROR",
         ) from exc
+
+
+@router.get("/items/{kind}/{item_id}", response_model=ConversationHistoryListItem)
+def read_conversation_history_item(
+    kind: HistoryItemKind,
+    item_id: str,
+    user_id: str = Depends(get_current_user_id_from_token),
+) -> ConversationHistoryListItem:
+    """The list's row for one item, as the list shows it; 404 when the list does
+    not hold it for this user (gone, another user's, or a suggestion now a task)."""
+
+    try:
+        db_path, busy_timeout_ms = runtime_env.read_local_runtime_db_config()
+        with closing(sqlite3.connect(db_path)) as connection:
+            connection.row_factory = sqlite3.Row
+            configure_connection(connection, busy_timeout_ms)
+            register_conversation_history_casefold_sqlite(connection)
+            connection.execute("BEGIN")
+            item = read_conversation_history_item_in_connection(
+                connection=connection, user_id=user_id, item=(kind, item_id)
+            )
+    except (MigrationError, sqlite3.Error, vector.SQLiteVectorExtensionError) as exc:
+        raise PublicAgentHTTPError(
+            "Conversation history read failed",
+            error_code="CONVERSATION_HISTORY_INTEGRITY_ERROR",
+        ) from exc
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "history item not found")
+    return item
 
 
 @router.delete("/items/{kind}/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

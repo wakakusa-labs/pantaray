@@ -53,6 +53,8 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
   'history:markCompletionViewed',
+  // Read-only: both windows' composers title a pasted task or suggestion link.
+  'history:readItem',
   // Written by main, so a window without focus still copies.
   'clipboard:writeText',
 ]);

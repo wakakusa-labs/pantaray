@@ -25,6 +25,7 @@ function createAuthHistoryApi({ ipcRenderer }) {
       markCompletionViewed: (request) =>
         ipcRenderer.invoke('history:markCompletionViewed', request),
       deleteItem: (request) => ipcRenderer.invoke('history:deleteItem', request),
+      readItem: (request) => ipcRenderer.invoke('history:readItem', request),
       openNewConversation: () => ipcRenderer.invoke('history:openNewConversation'),
       openConversation: (request) => ipcRenderer.invoke('history:openConversation', request),
       onChanged: (callback) => {

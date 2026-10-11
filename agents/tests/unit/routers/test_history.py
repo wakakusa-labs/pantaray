@@ -94,6 +94,39 @@ def test_history_reads_configured_snapshot_and_returns_strict_page(
     ]
 
 
+def test_history_item_reads_one_row_or_answers_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[tuple[object, object]] = []
+
+    def read_item(**kwargs: object) -> history.ConversationHistoryListItem | None:
+        connection = kwargs["connection"]
+        assert isinstance(connection, sqlite3.Connection)
+        assert connection.in_transaction
+        requests.append((kwargs["user_id"], kwargs["item"]))
+        return (
+            _PAGE.items[0] if kwargs["item"] == ("conversation", "action-1") else None
+        )
+
+    monkeypatch.setenv("LOCAL_DB_PATH", ":memory:")
+    monkeypatch.setattr(
+        history_router, "read_conversation_history_item_in_connection", read_item
+    )
+
+    with _client() as client:
+        found = client.get(f"{_PATH}/items/conversation/action-1")
+        missing = client.get(f"{_PATH}/items/suggestion/gone")
+        bad_kind = client.get(f"{_PATH}/items/folder/x")
+
+    assert found.json() == _PAGE.items[0].model_dump(mode="json")
+    assert missing.status_code == 404
+    assert bad_kind.status_code == 422
+    assert requests == [
+        ("user-123", ("conversation", "action-1")),
+        ("user-123", ("suggestion", "gone")),
+    ]
+
+
 def test_history_rejects_invalid_query_before_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

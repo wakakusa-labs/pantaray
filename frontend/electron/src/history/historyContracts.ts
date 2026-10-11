@@ -55,17 +55,20 @@ const SuggestionHistoryItemSchema = z
   })
   .strict();
 
+export const ConversationHistoryListItemSchema = z.discriminatedUnion('kind', [
+  ConversationHistoryItemSchema,
+  SuggestionHistoryItemSchema,
+]);
+
 export const ConversationHistoryPageSchema = z
   .object({
-    items: z.array(
-      z.discriminatedUnion('kind', [ConversationHistoryItemSchema, SuggestionHistoryItemSchema])
-    ),
+    items: z.array(ConversationHistoryListItemSchema),
     next_cursor: nonBlankTextSchema.nullable(),
   })
   .strict();
 
-/** One history row, named the way `DELETE /api/agent/history/items/{kind}/{id}` names it. */
-export const HistoryItemDeleteRequestSchema = z
+/** One history row, named the way `/api/agent/history/items/{kind}/{id}` names it. */
+export const HistoryItemKeySchema = z
   .object({
     kind: z.enum(['conversation', 'suggestion']),
     id: canonicalIdentitySchema,
@@ -77,4 +80,4 @@ export type ConversationHistoryListItem = z.infer<
   typeof ConversationHistoryPageSchema
 >['items'][number];
 export type ConversationHistoryRequest = z.infer<typeof ConversationHistoryRequestSchema>;
-export type HistoryItemDeleteRequest = z.infer<typeof HistoryItemDeleteRequestSchema>;
+export type HistoryItemKey = z.infer<typeof HistoryItemKeySchema>;

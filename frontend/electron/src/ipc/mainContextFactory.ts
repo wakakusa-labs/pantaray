@@ -56,6 +56,7 @@ export function buildMainContext(params: {
   historyFetch: MainContext['history']['fetch'];
   markCompletionViewed: MainContext['history']['markCompletionViewed'];
   historyDeleteItem: MainContext['history']['deleteItem'];
+  historyReadItem: MainContext['history']['readItem'];
   actionFiles: MainContext['actionFiles'];
   clipboard: MainContext['clipboard'];
   update: MainContext['update'];
@@ -276,6 +277,7 @@ export function buildMainContext(params: {
       fetch: async (p) => params.historyFetch(p),
       markCompletionViewed: params.markCompletionViewed,
       deleteItem: params.historyDeleteItem,
+      readItem: params.historyReadItem,
     },
 
     actionFiles: params.actionFiles,

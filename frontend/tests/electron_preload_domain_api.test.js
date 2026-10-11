@@ -78,6 +78,7 @@ test('Action preload API forwards typed invokes and retains the latest update pe
   await api.history.openNewConversation();
   await api.history.openConversation({ actionId: 'a1' });
   await api.history.deleteItem({ kind: 'conversation', id: 'a1' });
+  await api.history.readItem({ kind: 'suggestion', id: 's1' });
 
   assert.deepEqual(ipcRenderer.invoked, [
     ['action:submitMessage', submit],
@@ -91,6 +92,7 @@ test('Action preload API forwards typed invokes and retains the latest update pe
     ['history:openNewConversation'],
     ['history:openConversation', { actionId: 'a1' }],
     ['history:deleteItem', { kind: 'conversation', id: 'a1' }],
+    ['history:readItem', { kind: 'suggestion', id: 's1' }],
   ]);
 
   ipcRenderer.emit('action:conversationUpdated', actionUpdate('a1', 'queued'));

@@ -2,10 +2,17 @@ import { useEffect, useState, type RefObject } from 'react';
 
 import { quotedPassage } from './messageQuotes';
 
-/** Text selected inside the conversation, and where its last line ends on screen. */
+/** Text selected inside the conversation, and where it and the conversation are on screen. */
 export type QuotableSelection = Readonly<{
   text: string;
-  end: Readonly<{ top: number; bottom: number; right: number }>;
+  /** The selection's box; `endRight` is where its last line ends. */
+  top: number;
+  bottom: number;
+  left: number;
+  endRight: number;
+  /** The conversation's sides, which what is shown beside the selection stays within. */
+  paneLeft: number;
+  paneRight: number;
 }>;
 
 function readSelection(source: HTMLElement | null): QuotableSelection | null {
@@ -15,9 +22,18 @@ function readSelection(source: HTMLElement | null): QuotableSelection | null {
   if (!source.contains(range.commonAncestorContainer)) return null;
   const text = quotedPassage(selection.toString());
   if (text === null) return null;
+  const box = range.getBoundingClientRect();
   const rects = range.getClientRects();
-  const end = rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect();
-  return { text, end: { top: end.top, bottom: end.bottom, right: end.right } };
+  const pane = source.getBoundingClientRect();
+  return {
+    text,
+    top: box.top,
+    bottom: box.bottom,
+    left: box.left,
+    endRight: rects.length > 0 ? rects[rects.length - 1].right : box.right,
+    paneLeft: pane.left,
+    paneRight: pane.right,
+  };
 }
 
 /**

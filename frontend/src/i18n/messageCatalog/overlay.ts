@@ -35,7 +35,9 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.fileRemove': 'Remove {name}',
     'overlay.composer.quote.add': 'Add to reply',
     'overlay.composer.quote.comment': 'Comment on the selected text',
-    'overlay.composer.quote.placeholder': 'Add a comment and press Enter',
+    'overlay.composer.quote.placeholder': 'Comment (optional)',
+    'overlay.composer.quote.confirm': 'Add',
+    'overlay.composer.quote.cancelHint': 'Esc to cancel',
     'overlay.composer.quotes': 'Quotes, {count}',
     'overlay.composer.quote.remove': 'Remove quote {index} of {count}',
     'overlay.composer.attachFailed.unsupported_media_type':
@@ -170,7 +172,9 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.fileRemove': '{name} を削除',
     'overlay.composer.quote.add': '返信に追加',
     'overlay.composer.quote.comment': '選んだ部分へのコメント',
-    'overlay.composer.quote.placeholder': 'コメントを書いて Enter',
+    'overlay.composer.quote.placeholder': 'コメント（任意）',
+    'overlay.composer.quote.confirm': '追加',
+    'overlay.composer.quote.cancelHint': 'Esc でキャンセル',
     'overlay.composer.quotes': '引用 {count} 件',
     'overlay.composer.quote.remove': '引用 {index} / {count} を削除',
     'overlay.composer.attachFailed.unsupported_media_type':

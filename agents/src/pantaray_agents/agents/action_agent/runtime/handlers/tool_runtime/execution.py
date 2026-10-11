@@ -197,11 +197,13 @@ async def run_validated_tool_impl(
         )
     elif tool_def.tool_id == SEND_MESSAGE_TO_SUBAGENT_TOOL_ID:
         result = await run_send_message_to_subagent_tool(
+            agent,
             step_id=resolved_step_id,
             tool_def=tool_def,
             args=args,
             state=state,
             actor=actor,
+            origin=origin,
         )
     elif tool_def.tool_id == WAIT_SUBAGENTS_TOOL_ID:
         result = await run_wait_subagents_tool(

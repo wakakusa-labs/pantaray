@@ -7,7 +7,6 @@ import pytest
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
     subagent_cancel,
-    subagent_message,
     subagent_wait,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
@@ -15,7 +14,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
 )
 from pantaray_agents.agents.action_agent.tools import (
     CANCEL_SUBAGENT_TOOL,
-    SEND_MESSAGE_TO_SUBAGENT_TOOL,
     WAIT_SUBAGENTS_TOOL,
 )
 from pantaray_agents.local_runtime.agent_state import LocalActionRepository
@@ -294,7 +292,7 @@ async def test_a_resumed_run_hears_that_its_stopped_runs_child_was_stopped(
     """再開した run が、停止した run の子を名指ししても検証エラーにならない。
 
     停止で子は canceled に確定してから run が終わる。再開後の会話はその子の ID を
-    覚えているので、どのツールも「止まった」と答え、もう一度始めるかは親が決める。
+    覚えているので、待つ・止めるツールは「止まった」と答え、もう一度始めるかは親が決める。
     """
 
     db_path, children = _children(tmp_path, 1)
@@ -315,13 +313,6 @@ async def test_a_resumed_run_hears_that_its_stopped_runs_child_was_stopped(
             step_id="wait",
             tool_def=WAIT_SUBAGENTS_TOOL,
             args={"child_process_ids": [child_id]},
-            state=state,
-            actor="supervisor",  # type: ignore[arg-type]
-        )
-        messaged = await subagent_message.run_send_message_to_subagent_tool(
-            step_id="message",
-            tool_def=SEND_MESSAGE_TO_SUBAGENT_TOOL,
-            args={"child_process_id": child_id, "message_id": "m-1", "content": "go"},
             state=state,
             actor="supervisor",  # type: ignore[arg-type]
         )
@@ -347,7 +338,6 @@ async def test_a_resumed_run_hears_that_its_stopped_runs_child_was_stopped(
                 actor="supervisor",  # type: ignore[arg-type]
             )
     assert waited.output == {"results": [stopped]}
-    assert messaged.output == stopped
     assert canceled.output == stopped
     # The resumed run collects what it read, so nothing is left owed to it.
     assert waited.subagent_collection_receipt is not None
@@ -358,10 +348,3 @@ async def test_a_resumed_run_hears_that_its_stopped_runs_child_was_stopped(
         repository, step_id="wait-resumed", receipt=waited.subagent_collection_receipt
     )
     assert saved.error is None
-    with spawn._connect(db_path) as connection:
-        events = connection.execute(
-            "SELECT COUNT(*) FROM process_events WHERE process_id=? "
-            "AND event_name='action_subagent_message'",
-            (child_id,),
-        ).fetchone()[0]
-    assert events == 0

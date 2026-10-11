@@ -25,6 +25,18 @@ ACTION_SUBAGENT_MESSAGE_EVENT = "action_subagent_message"
 ACTION_SUBAGENT_TOOL_EVENT = "action_subagent_tool"
 # Every parent message before it went into the child's conversation here.
 ACTION_SUBAGENT_DELIVERED_EVENT = "action_subagent_messages_delivered"
+ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
+ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
+ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
+# The rows that rebuild the child's conversation, and nothing of its lifecycle.
+ACTION_SUBAGENT_HISTORY_EVENTS = (
+    ACTION_SUBAGENT_MESSAGE_EVENT,
+    ACTION_SUBAGENT_DELIVERED_EVENT,
+    ACTION_SUBAGENT_TURN_EVENT,
+    ACTION_SUBAGENT_TOOL_EVENT,
+    ACTION_SUBAGENT_NOTICE_EVENT,
+    ACTION_SUBAGENT_AGENTS_MD_EVENT,
+)
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled"})
 
 
@@ -99,6 +111,54 @@ def send_action_subagent_message(
                     created_at=now_utc_iso(),
                 )
     return True
+
+
+def continue_action_subagent_history_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    from_process_id: str,
+    to_process_id: str,
+    message_id: str,
+    content: str,
+    created_at: str,
+) -> None:
+    """Give a new child the finished child's conversation and the parent's message.
+
+    The finished child's rows stay as they are: they are read and appended to the
+    new child in order, then the message waits for the new child's first send.
+    The finished child's result is collected, since the new child carries on
+    its work.
+    """
+
+    placeholders = ",".join("?" * len(ACTION_SUBAGENT_HISTORY_EVENTS))
+    rows = connection.execute(
+        "SELECT event_id,event_name,payload_json FROM process_events "
+        f"WHERE process_id=? AND event_name IN ({placeholders}) ORDER BY event_seq",
+        (from_process_id, *ACTION_SUBAGENT_HISTORY_EVENTS),
+    ).fetchall()
+    for event_id, event_name, payload_json in rows:
+        payload: dict[str, object] = dict(_object(payload_json))
+        append_process_event_in_connection(
+            connection=connection,
+            process_id=to_process_id,
+            event_name=str(event_name),
+            event_id=str(event_id),
+            payload=payload,
+            created_at=created_at,
+        )
+    append_process_event_in_connection(
+        connection=connection,
+        process_id=to_process_id,
+        event_name=ACTION_SUBAGENT_MESSAGE_EVENT,
+        event_id=f"subagent-message:{message_id}",
+        payload={"message_id": message_id, "content": content},
+        created_at=created_at,
+    )
+    connection.execute(
+        "UPDATE processes SET result_collected_at=COALESCE(result_collected_at, ?) "
+        "WHERE process_id=? AND status IN ('completed','failed','canceled')",
+        (created_at, from_process_id),
+    )
 
 
 def append_action_subagent_event(

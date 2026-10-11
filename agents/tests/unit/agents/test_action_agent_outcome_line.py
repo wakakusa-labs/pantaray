@@ -51,6 +51,12 @@ from pantaray_agents.schema.agent.base import JSONValue
             {"results": [{"status": "completed"}, {"status": "running"}]},
             "wait_subagents: ok, 1 done, 1 running",
         ),
+        ("send_message_to_subagent", True, "send_message_to_subagent: ok"),
+        (
+            "send_message_to_subagent",
+            {"child_process_id": "child-2", "continues_child_process_id": "child-1"},
+            "send_message_to_subagent: ok, continued child-1 as new subagent child-2",
+        ),
         ("zanei_timeline", {"events": [{}]}, "zanei_timeline: ok, 1 event"),
         (
             "render_pdf_page",

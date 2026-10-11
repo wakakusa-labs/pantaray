@@ -252,6 +252,13 @@ def _create_schema(db_path: Path) -> None:
                 payload_json TEXT NOT NULL,
                 FOREIGN KEY(job_id) REFERENCES jobs(job_id)
             );
+            CREATE TABLE action_withdrawn_messages (
+                user_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                withdrawn_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, message_id)
+            );
             INSERT INTO users(user_id, ui_language, created_at, updated_at)
             VALUES ('user-1', 'ja', '2026-08-16T00:00:00Z', '2026-08-16T00:00:00Z');
             """

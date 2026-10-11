@@ -36,6 +36,7 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ActionNotFoundError,
     ExistingActionTarget,
     MessageIdentityConflictError,
+    MessageWithdrawnError,
     NewActionTarget,
     SubmitActionMessageCommand,
 )
@@ -387,6 +388,12 @@ def _submit(
         return _refused(tool, "UNKNOWN_TASK", "Not done: no task of yours has that id.")
     except ActionFileAttachmentUnavailableError:
         return _refused(tool, "ATTACHMENT_ALREADY_HANDED_OVER", _HANDED_OVER)
+    except MessageWithdrawnError:
+        return _refused(
+            tool,
+            "MESSAGE_WITHDRAWN",
+            "Not done: the user withdrew this message from the task. Do not send it again.",
+        )
     except ActionMessageConflictError:
         return _refused(
             tool,

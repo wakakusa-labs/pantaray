@@ -154,6 +154,14 @@ export const ActionResumeRequestSchema = z
   })
   .strict();
 
+/** A message no run has taken yet, by its `unadopted_messages` entry's step. */
+export const ActionWithdrawMessageRequestSchema = z
+  .object({
+    actionId: CanonicalIdentitySchema,
+    stepId: CanonicalIdentitySchema,
+  })
+  .strict();
+
 const ActionMessageResponseBaseSchema = z
   .object({
     action_id: CanonicalIdentitySchema,
@@ -476,13 +484,18 @@ const ActionToolOutputDetailSchema = z
 
 export type ActionMessageRequest = z.infer<typeof ActionMessageRequestSchema>;
 export type ActionResumeRequest = z.infer<typeof ActionResumeRequestSchema>;
+export type ActionWithdrawMessageRequest = z.infer<typeof ActionWithdrawMessageRequestSchema>;
+/** `adopted`: a run took the message first, so it stays and now shows as run. */
+export type ActionWithdrawMessageResult = Readonly<{ kind: 'withdrawn' | 'adopted' }>;
 export type ActionMessageResponse = z.infer<typeof ActionMessageResponseSchema>;
 export type ActionMessageSubmitResult =
   | Readonly<{ kind: 'submitted'; response: ActionMessageResponse }>
   | Readonly<{ kind: 'expected_process_conflict' }>
   | Readonly<{ kind: 'action_conflict' }>
   /** The suggestion replied to already has its conversation; this is its Action. */
-  | Readonly<{ kind: 'reply_exists'; actionId: string }>;
+  | Readonly<{ kind: 'reply_exists'; actionId: string }>
+  /** A retry of a message the user withdrew: nothing was registered and nothing runs. */
+  | Readonly<{ kind: 'withdrawn' }>;
 export type ActionConversationPage = z.infer<typeof ActionConversationPageSchema>;
 export type ActionImageReference = z.infer<typeof ImageReferenceSchema>;
 export type ActionProjectRef = z.infer<typeof ActionProjectRefsSchema>[number];

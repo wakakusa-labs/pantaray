@@ -215,6 +215,8 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/v1/agents/users/user-1/actions/action-1/approval-mode', 'GET'],
     ['/v1/agents/users/user-1/actions/action-1/approval-mode', 'PUT'],
     ['/v1/agents/users/user-1/actions/messages', 'POST'],
+    ['/v1/agents/users/user-1/actions/action-1/resume', 'POST'],
+    ['/v1/agents/users/user-1/actions/action-1/unadopted-messages/step-1', 'DELETE'],
     [ACTION_STATE_REQUEST.path, ACTION_STATE_REQUEST.method],
     ['/v1/agents/users/user-1/actions/action-1/steps/step-1/output', 'GET'],
     ['/v1/agents/users/user-1/workspace-settings', 'GET'],
@@ -230,14 +232,8 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/v1/agents/users/user-1/workspace-settings/projects/project-1/links', 'PUT'],
     ['/v1/agents/users/user-1/workspace-settings/folders/folder-1/links', 'PUT'],
     ['/v1/agents/users/user-1/workspace-settings/projects/project-1/name', 'PUT'],
-    [
-      '/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command',
-      'GET',
-    ],
-    [
-      '/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command',
-      'PUT',
-    ],
+    ['/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command', 'GET'],
+    ['/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command', 'PUT'],
   ];
 
   try {

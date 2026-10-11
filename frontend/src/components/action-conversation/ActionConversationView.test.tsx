@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1299,5 +1299,79 @@ describe('ActionConversationView', () => {
         'alert'
       );
     });
+  });
+});
+
+describe('withdrawing a message no run has taken', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  type Status = CanonicalUserItem['entry']['status'];
+  const user = (key: string, status: Status): CanonicalUserItem => {
+    const item = canonicalUser(key, `text ${key}`);
+    const step_number = status === 'adopted' ? 1 : null;
+    return { ...item, entry: { ...item.entry, status, step_number } };
+  };
+  const bubble = (key: string) => screen.getByText(`text ${key}`).closest('article')!;
+  const withdrawWith = (kind: 'withdrawn' | 'adopted') => {
+    const withdrawMessage = vi.fn(async () => ({ kind }));
+    vi.stubGlobal('electron', { actions: { withdrawMessage } });
+    return withdrawMessage;
+  };
+  const withdrawButton = () => screen.getByRole('button', { name: 'Withdraw this message' });
+
+  it('offers ✕ under each message no run has taken, outside its bubble', () => {
+    withdrawWith('withdrawn');
+    renderView(
+      viewWith([user('ran', 'adopted'), user('late', 'not_executed'), user('queued', 'pending')]),
+      'ja'
+    );
+
+    const buttons = screen.getAllByRole('button', { name: 'このメッセージを取り消す' });
+    expect(buttons).toHaveLength(2);
+    expect(within(bubble('late')).getByText('未実行')).toBeVisible();
+    // Each sits right after its bubble, not inside it; the status word stays inside.
+    for (const [key, button] of [
+      ['late', buttons[0]],
+      ['queued', buttons[1]],
+    ] as const) {
+      expect(within(bubble(key)).queryByRole('button')).toBeNull();
+      expect(bubble(key).nextElementSibling).toContainElement(button);
+    }
+    expect(bubble('ran').nextElementSibling).toBeNull();
+  });
+
+  it('withdraws the message and removes it at once', async () => {
+    const withdrawMessage = withdrawWith('withdrawn');
+    renderView(viewWith([user('ran', 'adopted'), user('late', 'not_executed')]));
+
+    await userEvent.click(withdrawButton());
+
+    expect(withdrawMessage).toHaveBeenCalledWith({ actionId: 'action-1', stepId: 'step-late' });
+    await waitFor(() => expect(screen.queryByText('text late')).toBeNull());
+    expect(screen.getByText('text ran')).toBeVisible();
+  });
+
+  it('keeps a message a run took first, which the refresh then shows as run', async () => {
+    withdrawWith('adopted');
+    const view = (status: Status) => (
+      <UiLanguageProvider initialLanguage="en">
+        <ActionConversationView
+          view={viewWith([user('late', status)])}
+          toolOutputLoader={EMPTY_TOOL_OUTPUT_LOADER}
+        />
+      </UiLanguageProvider>
+    );
+    const { rerender } = render(view('pending'));
+
+    await userEvent.click(withdrawButton());
+    await waitFor(() => expect(withdrawButton()).toHaveAttribute('aria-disabled', 'false'));
+    expect(screen.getByText('text late')).toBeVisible();
+
+    rerender(view('adopted'));
+    expect(screen.getByText('text late')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Withdraw this message' })).toBeNull();
   });
 });

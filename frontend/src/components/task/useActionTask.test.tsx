@@ -194,6 +194,24 @@ describe('useActionTask', () => {
     });
   });
 
+  it('settles a retry of a message withdrawn meanwhile, leaving nothing to send', async () => {
+    submitMessage
+      .mockRejectedValueOnce(new Error('socket hang up'))
+      .mockResolvedValueOnce({ kind: 'withdrawn' });
+    const { result } = await renderTask();
+    emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
+    act(() => result.current.composer.changeDraft('also check the tests', []));
+    act(() => result.current.send());
+    await waitFor(() => expect(result.current.composer.state.submission?.state).toBe('failed'));
+
+    act(() => result.current.composer.retrySubmission());
+
+    await waitFor(() => expect(result.current.composer.state.submission).toBeNull());
+    expect(submitMessage.mock.calls[1][0]).toEqual(submitMessage.mock.calls[0][0]);
+    expect(result.current.composer.state.draft).toBe('');
+    expect(result.current.view?.items.some((item) => item.kind === 'user')).toBe(false);
+  });
+
   it('resumes a stop once, even when pressed again before the answer', async () => {
     let answer: (value: Awaited<ReturnType<Actions['resumeAction']>>) => void = () => {};
     resumeAction.mockReturnValue(new Promise((resolve) => (answer = resolve)));

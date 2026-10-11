@@ -1,4 +1,4 @@
-import type { ActionMessageRequest } from './actionContracts';
+import type { ActionMessageRequest, ActionMessageSubmitResult } from './actionContracts';
 import type { TaskDraft, TaskDraftWork } from '../ipc/schemas/taskDrafts';
 
 /** What a composer hears: the task's draft as another window left it, or null once cleared. */
@@ -24,6 +24,18 @@ const isEmpty = (draft: TaskDraft) =>
 
 /** How a send ended, as main heard it from the backend. */
 export type TaskSendOutcome = 'sent' | 'refused' | 'unknown';
+
+/**
+ * How an answered send settles its draft. A withdrawn message is settled too: its retry must not
+ * come back as a draft.
+ */
+export function answeredSendOutcome(result: ActionMessageSubmitResult): TaskSendOutcome {
+  return result.kind === 'submitted' ||
+    result.kind === 'reply_exists' ||
+    result.kind === 'withdrawn'
+    ? 'sent'
+    : 'refused';
+}
 
 /** The task whose draft a send went out from. */
 export function sendWork(request: ActionMessageRequest): TaskDraftWork {

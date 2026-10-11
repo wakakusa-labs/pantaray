@@ -103,6 +103,8 @@ export const validInvokeChannels = [
   'clipboard:writeText',
   'action:submitMessage',
   'action:resume',
+  // Withdraw a message no run has taken yet
+  'action:withdrawMessage',
   // Main window: show an Action in place (refresh and live resume, no window)
   'action:openConversation',
   // Composer image attachments (write) and "reveal in Finder" for a stored image

@@ -1,4 +1,8 @@
-import { createTaskDraftStore, sendWork } from '../../electron/src/actions/taskDraftStore';
+import {
+  answeredSendOutcome,
+  createTaskDraftStore,
+  sendWork,
+} from '../../electron/src/actions/taskDraftStore';
 import type { TaskDraftChange } from '../../electron/src/actions/taskDraftStore';
 import type {
   ActionMessageRequest,
@@ -28,9 +32,7 @@ export function createTaskDraftBridge(owner = 'user-1') {
         store.clearForSend(owner, sendWork(request));
         try {
           const result = await submit(request);
-          settle(
-            result.kind === 'submitted' || result.kind === 'reply_exists' ? 'sent' : 'refused'
-          );
+          settle(answeredSendOutcome(result));
           return result;
         } catch (error) {
           settle('unknown');

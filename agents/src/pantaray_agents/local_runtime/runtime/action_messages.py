@@ -41,6 +41,7 @@ from .action_message_models import (
     ExistingActionTarget,
     ExpectedProcessConflictError,
     MessageIdentityConflictError,
+    MessageWithdrawnError,
     NewActionTarget,
     StartedActionMessageResult,
     SubmitActionMessageCommand,
@@ -56,6 +57,7 @@ from .action_message_replay import (
     _load_existing_submission,
     _validate_idempotent_replay,
 )
+from .action_message_withdrawal import refuse_withdrawn_message_in_connection
 from .action_prepare_failure_followup import (
     require_prepare_failure_followup_authority,
 )
@@ -111,6 +113,9 @@ def submit_action_message(
                     user_message_json=user_message_json,
                 )
                 return existing.result
+            refuse_withdrawn_message_in_connection(
+                connection=connection, command=command
+            )
 
             action_id, suggestion_id, action_status, process_disposition = (
                 _resolve_action_target(
@@ -589,6 +594,7 @@ __all__ = [
     "ExistingActionTarget",
     "ExpectedProcessConflictError",
     "MessageIdentityConflictError",
+    "MessageWithdrawnError",
     "NewActionTarget",
     "StartedActionMessageResult",
     "SubmitActionMessageCommand",

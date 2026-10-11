@@ -1,3 +1,6 @@
+import { X } from 'lucide-react';
+import { useState } from 'react';
+
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
@@ -5,7 +8,38 @@ import { AttachedImages } from './AttachedImages';
 import { ProjectRefText } from './ProjectRefText';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
-export function UserItem({ item }: { item: ActionConversationUserItem }) {
+/** No confirmation: the message has not run, so withdrawing it undoes nothing. */
+function WithdrawButton({ label, onWithdraw }: { label: string; onWithdraw: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="action-conversation__withdraw"
+      aria-label={label}
+      title={label}
+      aria-disabled={busy}
+      onClick={() => {
+        if (busy) return;
+        setBusy(true);
+        // A failed withdrawal leaves the message where it is, ready to try again.
+        onWithdraw()
+          .catch((error: unknown) => console.error('Failed to withdraw the message:', error))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <X size={14} strokeWidth={1.75} aria-hidden />
+    </button>
+  );
+}
+
+export function UserItem({
+  item,
+  onWithdraw,
+}: {
+  item: ActionConversationUserItem;
+  /** Offered only where the message can be withdrawn: a canonical one no run has taken. */
+  onWithdraw?: (stepId: string) => Promise<void>;
+}) {
   const { language } = useI18n();
   const copy = COPY[language];
   const content =
@@ -28,6 +62,13 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
         {copy.userStatus[status]}
       </span>
     ) : null;
+  // Under the message, at its right edge, as the copy button sits under an answer.
+  const withdraw =
+    item.source === 'canonical' && status !== 'adopted' && onWithdraw ? (
+      <div className="action-conversation__user-actions">
+        <WithdrawButton label={copy.withdraw} onWithdraw={() => onWithdraw(item.entry.step_id)} />
+      </div>
+    ) : null;
 
   // What Pantaray's chat wrote when it handed this over: Pantaray's, never a user bubble.
   const chatNote = item.source === 'canonical' ? item.entry.chat_note : null;
@@ -42,7 +83,14 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
         {hasUserPart ? null : state}
       </section>
     ) : null;
-  if (!hasUserPart) return note ?? state;
+  if (!hasUserPart) {
+    return (
+      <>
+        {note ?? state}
+        {withdraw}
+      </>
+    );
+  }
   return (
     <>
       <article className="action-conversation__user" aria-label={copy.you}>
@@ -68,6 +116,7 @@ export function UserItem({ item }: { item: ActionConversationUserItem }) {
         {state}
       </article>
       {note}
+      {withdraw}
     </>
   );
 }

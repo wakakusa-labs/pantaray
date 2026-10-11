@@ -7,6 +7,7 @@ import {
   type ActionMessageRequest,
   type ActionMessageResponse,
   type ActionResumeRequest,
+  type ActionWithdrawMessageRequest,
   type ActionToolOutputDetail,
   parseActionConversationPage,
   parseActionMessageResponse,
@@ -44,6 +45,7 @@ export function createActionFetcher(params: {
 }): {
   submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageResponse>;
   resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageResponse>;
+  withdrawMessage: (request: ActionWithdrawMessageRequest) => Promise<void>;
   readConversationPage: (request: ActionConversationPageRequest) => Promise<ActionConversationPage>;
   readToolOutputPage: (request: ActionToolOutputRequest) => Promise<ActionToolOutputDetail>;
 } {
@@ -83,6 +85,15 @@ export function createActionFetcher(params: {
         throw new ActionWireContractError('Action resume');
       }
       return response;
+    },
+    withdrawMessage: async (request): Promise<void> => {
+      const actionId = encodeURIComponent(request.actionId);
+      const stepId = encodeURIComponent(request.stepId);
+      await params.requestJson<void>({
+        path: `${userPath()}/${actionId}/unadopted-messages/${stepId}`,
+        method: 'DELETE',
+        timeoutMs: ACTION_CONVERSATION_REQUEST_TIMEOUT_MS,
+      });
     },
     readConversationPage: async (request): Promise<ActionConversationPage> => {
       const actionId = encodeURIComponent(request.actionId);

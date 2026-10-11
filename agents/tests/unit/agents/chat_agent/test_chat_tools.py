@@ -36,6 +36,9 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     NewActionTarget,
     SubmitActionMessageCommand,
 )
+from pantaray_agents.local_runtime.runtime.action_message_withdrawal import (
+    withdraw_action_message,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message,
 )
@@ -196,6 +199,35 @@ async def test_an_instruction_reaches_the_running_task_it_names(db_path: Path) -
         "chat-turn/a0/start_action/1",
         "chat-turn/a1/send_to_action/1",
     ]
+
+
+async def test_a_message_the_user_withdrew_is_not_sent_again(db_path: Path) -> None:
+    started = await _turn("a0")("start_action", relay=[], note="Draft it")
+    assert isinstance(started, dict)
+    payload = claim_next_pending_action_job(
+        db_path=db_path, busy_timeout_ms=1_000, owner_user_id=USER, claimed_by="w"
+    )
+    ActionJobRuntimeRepository(
+        db_path=db_path, busy_timeout_ms=1_000
+    ).prepare_execution(payload=payload, started_at=NOW)
+    action_id = str(started["action_id"])
+    await _turn("a1")("send_to_action", action_id=action_id, relay=[], note="Also this")
+    with sqlite3.connect(db_path) as connection:
+        (step_id,) = connection.execute(
+            "SELECT step_id FROM agent_action_steps WHERE step_number IS NULL"
+        ).fetchone()
+    withdraw_action_message(user_id=USER, action_id=action_id, step_id=step_id)
+
+    # The same turn run again after a restart.
+    rerun = await _turn("a1")(
+        "send_to_action", action_id=action_id, relay=[], note="Also this"
+    )
+
+    assert isinstance(rerun, dict) and rerun["error_code"] == "MESSAGE_WITHDRAWN"
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM agent_action_steps WHERE step_number IS NULL"
+        ).fetchone() == (0,)
 
 
 async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(

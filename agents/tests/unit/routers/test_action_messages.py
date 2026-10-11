@@ -13,6 +13,9 @@ from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
 )
+from pantaray_agents.local_runtime.runtime.action_message_withdrawal import (
+    ActionMessageAdoptedError,
+)
 from pantaray_agents.local_runtime.runtime.action_messages import (
     ActionMessageConflictError,
     ActionNotFoundError,
@@ -20,6 +23,7 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
     ExistingActionTarget,
     ExpectedProcessConflictError,
     MessageIdentityConflictError,
+    MessageWithdrawnError,
     NewActionTarget,
     StartedActionMessageResult,
     SubmitActionMessageCommand,
@@ -269,7 +273,12 @@ def test_openapi_publishes_required_typed_request_body() -> None:
     }
     assert set(
         responses["ActionMessageHttpConflictFailure"]["properties"]["type"]["enum"]
-    ) == {"ActionConflict", "MessageIdentityConflict", "ExpectedProcessConflict"}
+    ) == {
+        "ActionConflict",
+        "MessageIdentityConflict",
+        "ExpectedProcessConflict",
+        "MessageWithdrawn",
+    }
 
 
 @pytest.mark.parametrize("version", [True, 1.0])
@@ -685,6 +694,7 @@ def test_auth_503_hides_private_detail() -> None:
         (ActionMessageConflictError, 409, "ActionConflict"),
         (MessageIdentityConflictError, 409, "MessageIdentityConflict"),
         (ExpectedProcessConflictError, 409, "ExpectedProcessConflict"),
+        (MessageWithdrawnError, 409, "MessageWithdrawn"),
     ],
 )
 def test_typed_domain_failures_map_to_public_status(
@@ -748,3 +758,36 @@ def test_invalid_initial_mode_is_rejected_before_submission(
             "/v1/agents/users/user-1/actions/messages", json=_request(target=target)
         )
     assert response.status_code == 422
+
+
+WITHDRAW_PATH = "/v1/agents/users/user-1/actions/action-1/unadopted-messages/step-2"
+
+
+def test_withdraw_answers_204_and_a_typed_conflict_once_adopted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def withdraw(*, user_id: str, action_id: str, step_id: str) -> None:
+        calls.append((user_id, action_id, step_id))
+        if len(calls) > 1:
+            raise ActionMessageAdoptedError("adopted")
+
+    monkeypatch.setattr(router_module, "withdraw_action_message", withdraw)
+    with _client() as client:
+        withdrawn = client.delete(WITHDRAW_PATH)
+        adopted = client.delete(WITHDRAW_PATH)
+
+    assert withdrawn.status_code == 204
+    assert withdrawn.content == b""
+    assert adopted.status_code == 409
+    assert adopted.json() == {"type": "MessageAdopted"}
+    assert calls == [("user-1", "action-1", "step-2")] * 2
+
+
+def test_withdraw_refuses_another_users_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(router_module, "withdraw_action_message", pytest.fail)
+    with _client(resolved_user_id="user-2") as client:
+        response = client.delete(WITHDRAW_PATH)
+
+    assert response.status_code == 403

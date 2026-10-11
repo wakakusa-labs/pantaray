@@ -95,6 +95,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
   for (const channel of [
     'action:submitMessage',
     'action:resume',
+    'action:withdrawMessage',
     'overlay:submitApprovalDecision',
     'overlay:getActionApprovalMode',
     'overlay:setActionApprovalMode',

@@ -4,6 +4,9 @@
 .history-page {
   --history-card-gap: 6px;
   --history-card-radius: 12px;
+  /* The traffic lights' center line: trafficLightPosition's y (10px) plus half their 14px
+     frame. The sidebar toggle, and the detail headers while the sidebar is hidden, sit on it. */
+  --history-title-row-center: 17px;
   position: relative;
   display: flex;
   flex: 1;
@@ -38,6 +41,57 @@
   border-top-left-radius: var(--history-card-radius);
   border-bottom-left-radius: var(--history-card-radius);
   background: rgba(170, 186, 212, 0.03);
+}
+
+/* Hidden by the toggle, the card holds the detail pane alone and keeps its rounded corners. */
+.history-sidebar[hidden] {
+  display: none;
+}
+
+/* In the title bar row, right of the traffic lights (they end near the rail's edge) and centered
+   on their line. It rises above the drag strip so it takes the click. */
+.history-sidebar-toggle {
+  position: absolute;
+  top: calc(var(--history-title-row-center) - 28px / 2);
+  left: 16px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #7d889c;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.history-sidebar-toggle:hover {
+  background: var(--fog-mist);
+  color: var(--fog-text);
+}
+
+.history-sidebar-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* With the sidebar hidden, each detail header joins the toggle's row: the bottom padding lifts
+   its content's center onto the title row's center line, and the header starts after the toggle
+   (its right edge at 44px) and the headers' 10px item gap. The header keeps its height, so its
+   bottom line stays the card's top edge.
+   The header must start clear of the toggle rather than pad its title past it: Electron makes a
+   point draggable when the last app-region box over it in document order is a drag one, whatever
+   the z-index, so a drag header reaching under the toggle turns a click on it into a window drag. */
+.history-page--sidebar-hidden
+  .history-detail
+  :is(.history-pane-header, .action-task__header, .suggestion-task__header) {
+  margin-left: 54px;
+  padding-bottom: calc(var(--app-pane-header-height) - 2 * var(--history-title-row-center));
+  padding-left: 0;
 }
 
 /* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */

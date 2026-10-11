@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -89,8 +89,16 @@ const ITEMS: ConversationHistoryListItem[] = [
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
 const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
 
+const stored = new Map<string, string>();
+
 beforeEach(() => {
+  stored.clear();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => stored.set(key, value),
+  });
   window.electron = {
+    process: { platform: 'darwin' },
     history: {
       fetch: vi.fn(async () => ({
         data: ITEMS,
@@ -125,6 +133,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function LocationProbe() {
@@ -273,4 +282,50 @@ it('writes the selection as `?item=kind:id`, encoding only the id', () => {
   expect(historySelectionSearch('chat')).toBe('?item=chat');
   expect(historySelectionSearch('action:a b&c:d')).toBe('?item=action:a%20b%26c%3Ad');
   expect(parseHistorySelection(historySelectionSearch('action:a b&c:d'))).toBe('action:a b&c:d');
+});
+
+const SIDEBAR = { name: 'チャットと作業' } as const;
+
+it('hides the sidebar and shows it again, keeping the detail pane and the choice', async () => {
+  renderPage(['/history?item=action:A1']);
+  const toggle = screen.getByRole('button', { name: 'サイドバーを隠す' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle).toHaveAttribute('aria-controls', screen.getByRole('complementary', SIDEBAR).id);
+
+  await userEvent.click(toggle);
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+  expect(toggle).toHaveAccessibleName('サイドバーを表示');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  // The choice survives a restart.
+  cleanup();
+  renderPage(['/history?item=action:A1']);
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'サイドバーを表示' }));
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+});
+
+it('⌘B hides the sidebar and moves focus out of it to the toggle', async () => {
+  renderPage(['/history']);
+  const search = screen.getByRole('searchbox', { name: '作業を検索' });
+  search.focus();
+
+  fireEvent.keyDown(search, { key: 'b', metaKey: true });
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  expect(screen.getByRole('button', { name: 'サイドバーを表示' })).toHaveFocus();
+
+  fireEvent.keyDown(document.body, { key: 'b', metaKey: true });
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+});
+
+it('starts with the sidebar shown when storage is unavailable', () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => {
+      throw new DOMException('blocked', 'SecurityError');
+    },
+  });
+  renderPage(['/history']);
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });

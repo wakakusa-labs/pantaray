@@ -90,6 +90,7 @@ function Sidebar() {
       onCreatingProjectChange={mocks.startCreatingProject}
       selected={mocks.selected}
       onSelect={mocks.select}
+      hidden={false}
     />
   );
 }

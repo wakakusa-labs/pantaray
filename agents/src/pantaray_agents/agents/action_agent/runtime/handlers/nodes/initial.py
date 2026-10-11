@@ -151,7 +151,14 @@ async def initialize_context(
         step_number=request.user_step_number,
         local_step_number=request.user_step_local_step_number,
         short_step_id=request.user_step_short_id,
-        request_text=render_action_user_request_text(current_user_message),
+        request_text="\n\n".join(
+            section
+            for section in (
+                render_action_user_request_text(current_user_message),
+                request.stopped_run_note,
+            )
+            if section is not None
+        ),
         occurred_at=request.user_step_created_at,
         history_phase="init",
         attachments=build_user_image_attachments(

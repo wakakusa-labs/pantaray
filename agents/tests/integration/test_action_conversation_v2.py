@@ -42,8 +42,18 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
 from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
 )
+from pantaray_agents.local_runtime.runtime.action_stopped_run_note import (
+    ACTION_STOPPED_RUN_NOTE,
+    ACTION_STOPPED_SUBAGENTS_NOTE,
+)
+from pantaray_agents.local_runtime.runtime.action_subagent_queue import (
+    enqueue_action_subagent_job_in_connection,
+)
 from pantaray_agents.local_runtime.runtime.action_terminal_repository import (
     ActionTerminalRepository,
+)
+from pantaray_agents.local_runtime.runtime.job_payload_builder import (
+    build_action_subagent_job_payload,
 )
 from pantaray_agents.local_runtime.runtime.job_queue_runtime import (
     claim_next_pending_action_job,
@@ -61,6 +71,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
 )
+from pantaray_agents.local_runtime.storage.migrations.connection import (
+    configure_connection,
+)
 from pantaray_agents.local_runtime.suggestion_state.public_process_events import (
     append_public_process_event,
 )
@@ -76,6 +89,7 @@ from pantaray_agents.schema.action_conversation import (
 from pantaray_agents.schema.agent.action import RuntimeStateCheckpointPayload
 from pantaray_agents.tasks.types import ActionJobRuntimePayload
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
@@ -615,6 +629,8 @@ async def test_success_then_followup_projects_two_runs_and_one_history_item(
             for message in second_preparation.context.preceding_assistant_messages
         ] == ["**先ほどの発言**"]
     assert followup_result["process_id"] == second_payload["process_id"]
+    # A run after one that ended on its own is told nothing about a stop.
+    assert second_preparation.context.stopped_run_note is None
 
     current = _read_state(client, first_result["action_id"])
     assert current["action"] == {
@@ -954,6 +970,75 @@ def test_resume_opens_a_new_run_the_stop_control_can_reach(
     assert [(run["run_id"], run["status"]) for run in after_stop["runs"]] == [
         (resumed_run["process_id"], "canceled")
     ]
+
+
+@pytest.mark.parametrize("opened_by", ("resume", "message"))
+def test_the_run_after_a_stop_is_told_which_subagents_were_stopped(
+    runtime_client: tuple[TestClient, Path],
+    opened_by: str,
+) -> None:
+    """The run a Resume or a later message opens learns what the Stop ended.
+
+    Its subagents stopped with the run and do not continue by themselves, so
+    the parent is told which they were and how to continue one.
+    """
+
+    client, db_path = runtime_client
+    started = client.post(
+        MESSAGES_PATH, json=_message("message-running", "実行する")
+    ).json()
+    payload, preparation = _claim_and_prepare(db_path, claimed_by="worker:running")
+    action_id = str(started["action_id"])
+    _insert_private_tool_state(
+        db_path,
+        action_id,
+        _terminal_checkpoint(preparation, action_id, now_utc_iso(), ""),
+    )
+    child = build_action_subagent_job_payload(
+        {
+            "job_id": "child-job",
+            "process_id": "child-process",
+            "user_id": USER_ID,
+            "action_id": action_id,
+            "parent_process_id": str(payload["process_id"]),
+            "inference_profile_id": SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            "action_context": "parent context",
+            "task": "Survey the API boundary\nRead src/api and report the routes.",
+            "context_refs": [],
+            "resource_claim_ids": [],
+        }
+    )
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, BUSY_TIMEOUT_MS)
+        with connection:
+            enqueue_action_subagent_job_in_connection(
+                connection=connection, payload=child, scheduled_at=now_utc_iso()
+            )
+    stopped = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={"reason": "user_stop"},
+    )
+    assert stopped.status_code == 202, stopped.text
+
+    opened = (
+        _resume(client, action_id, "message-resume")
+        if opened_by == "resume"
+        else client.post(
+            MESSAGES_PATH,
+            json=_message("message-next", "続けて", action_id=action_id),
+        )
+    )
+    assert opened.status_code == 200, opened.text
+    _, next_run = _claim_and_prepare(db_path, claimed_by="worker:next")
+
+    subagents = (
+        f"{ACTION_STOPPED_SUBAGENTS_NOTE}\n- child-process: Survey the API boundary"
+    )
+    assert next_run.context.stopped_run_note == (
+        subagents
+        if opened_by == "resume"
+        else f"{ACTION_STOPPED_RUN_NOTE}\n\n{subagents}"
+    )
 
 
 def test_resume_is_never_shown_as_a_message(

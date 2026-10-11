@@ -25,6 +25,8 @@ const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
 const CHAT_UNREAD_ID = 'history-chat-unread';
 const NEW_TASK_BUTTON_ID = 'history-new-task';
+/** How far below the visible tasks the next page starts loading, so it is there on arrival. */
+const LOAD_AHEAD_MARGIN = '0px 0px 160px 0px';
 const MAX_SHOWN_UNREAD = 99;
 
 /**
@@ -170,6 +172,30 @@ export function HistorySidebar({
   const [deletingIdentity, setDeletingIdentity] = useState<string | null>(null);
   const [focusTargetId, setFocusTargetId] = useState<string | null>(null);
   const shortcutHint = useGlobalShortcutHint();
+  const tasksRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  // The observer reads these when the end comes into view, not when it was set up.
+  const latestLoad = useRef({ loadingMore, loadMore });
+  useEffect(() => {
+    latestLoad.current = { loadingMore, loadMore };
+  });
+  // Scrolling near the end of the tasks loads the next page. A new observer reports where the
+  // end is right away, so one is set up again whenever a page arrives or a sync ends: a short
+  // list keeps loading until it fills the view. A failed load waits for the end to come back.
+  const loadedCount = items.length;
+  useEffect(() => {
+    const end = endRef.current;
+    if (!end || !hasMore || isRealtimeSyncing) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !latestLoad.current.loadingMore)
+          void latestLoad.current.loadMore();
+      },
+      { root: tasksRef.current, rootMargin: LOAD_AHEAD_MARGIN }
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, [hasMore, isRealtimeSyncing, loadedCount]);
   // A delete answers after the user may have moved on: its outcome reads the page as it is then.
   const latest = useRef({ items, selected, onSelect });
   useEffect(() => {
@@ -237,7 +263,7 @@ export function HistorySidebar({
     const headingsPerDay = new Map<string, number>();
     return (
       <>
-        <ul className="history-list">
+        <ul className="history-list" aria-busy={loadingMore}>
           {groupHistoryByDay(
             items,
             new Date(),
@@ -316,16 +342,7 @@ export function HistorySidebar({
             {error}
           </div>
         ) : null}
-        {hasMore ? (
-          <button
-            type="button"
-            className="history-filter-button history-load-more"
-            disabled={loadingMore || isRealtimeSyncing}
-            onClick={() => void loadMore()}
-          >
-            {loadingMore ? t('history.loadingMore') : t('history.loadMore')}
-          </button>
-        ) : null}
+        {hasMore ? <div ref={endRef} className="history-list-end" aria-hidden="true" /> : null}
       </>
     );
   };
@@ -363,7 +380,9 @@ export function HistorySidebar({
             <SquarePen size={15} aria-hidden="true" />
           </button>
         </div>
-        <div className="history-sidebar__tasks">{renderContent()}</div>
+        <div ref={tasksRef} className="history-sidebar__tasks">
+          {renderContent()}
+        </div>
       </section>
       {confirmingDelete ? (
         <HistoryDeleteDialog

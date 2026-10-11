@@ -35,9 +35,11 @@ export const ChatMessageRequestSchema = z
     quote_item_id: ActionMessageIdSchema.nullable(),
     images: z.array(ImageReferenceSchema).max(ACTION_MESSAGE_MAX_IMAGES),
     files: ActionFileAttachmentsSchema,
-    // Workspace projects named with @, in the Action message's shape: code-point spans into
-    // the trimmed text. The backend checks each span names its project.
+    // Workspace projects named with @, and tasks and suggestions named by their chips, in the
+    // Action message's shape: code-point spans into the trimmed text. The backend checks each
+    // span names its project or title.
     project_refs: ActionProjectRefsSchema,
+    work_refs: ActionWorkRefsSchema,
   })
   .strict();
 
@@ -127,7 +129,15 @@ const ChatItemPageSchema = z
 export const ChatMessageRejectedSchema = z
   .object({
     type: z.literal('ChatMessageRejected'),
-    field: z.enum(['body', 'text', 'quote_item_id', 'images', 'files', 'project_refs']),
+    field: z.enum([
+      'body',
+      'text',
+      'quote_item_id',
+      'images',
+      'files',
+      'project_refs',
+      'work_refs',
+    ]),
   })
   .strict();
 

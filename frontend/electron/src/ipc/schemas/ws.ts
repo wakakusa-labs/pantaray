@@ -13,6 +13,7 @@ import {
   ActionFileAttachmentsSchema,
   ActionMessageRequestSchema,
   ActionProjectRefsSchema,
+  ActionWorkRefsSchema,
 } from '../../actions/actionContracts';
 
 import {
@@ -101,6 +102,7 @@ export const AcceptActionRequestSchema = z
     commandId: IdString.nullable(),
     supplement: ActionSupplementSchema,
     supplementProjectRefs: ActionProjectRefsSchema,
+    supplementWorkRefs: ActionWorkRefsSchema,
     approvalMode: z.enum(['prompt_each_time', 'always_allow']),
     images: ActionMessageRequestSchema.shape.message.shape.images,
     files: ActionFileAttachmentsSchema.optional(),

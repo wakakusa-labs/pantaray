@@ -189,6 +189,7 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     images: [],
     files: [],
     project_refs: [],
+    work_refs: [],
   };
 
   await ipc.invoke('chat:sendMessage', valid);
@@ -211,6 +212,10 @@ test('chat IPC validates the renderer payload before anything reaches the backen
     // A named project has the Action message's shape: a code-point span and its folders.
     { ...valid, project_refs: [{ project_id: 'p-1', display_name: 'hello', start: 0, end: 5 }] },
     { ...valid, project_refs: undefined },
+    // A named task or suggestion: its kind, id, title and span, and nothing else.
+    { ...valid, work_refs: [{ kind: 'task', id: 'a-1', title: 'hello', start: 0, end: 5 }] },
+    { ...valid, work_refs: [{ kind: 'action', id: 'a-1', title: ' ', start: 0, end: 1 }] },
+    { ...valid, work_refs: undefined },
   ]) {
     await assert.rejects(ipc.invoke('chat:sendMessage', payload), IpcValidationError);
   }

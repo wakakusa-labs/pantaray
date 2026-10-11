@@ -103,7 +103,14 @@ describe('a task draft shared by its composers', () => {
     const task = { suggestionId: 'sug-1' };
     const panel = await opened(composerIn(bridge.window(), task));
     const main = await opened(composerIn(bridge.window(), task));
-    const aurora = { projectId: 'p-1', displayName: 'Aurora', paths: ['/a'], start: 4, end: 10 };
+    const aurora = {
+      kind: 'project' as const,
+      projectId: 'p-1',
+      displayName: 'Aurora',
+      paths: ['/a'],
+      start: 4,
+      end: 10,
+    };
 
     act(() => panel.result.current.quoting.onAdd('合計が違う', '直して'));
     act(() => panel.result.current.quoting.onAdd('税込み', ''));

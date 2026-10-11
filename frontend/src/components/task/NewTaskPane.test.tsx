@@ -82,6 +82,7 @@ it('shows an empty composer whose send opens a new Action and hands the pane to 
       images: [],
       language: 'en',
       project_refs: [],
+      work_refs: [],
       files: [],
     },
   });

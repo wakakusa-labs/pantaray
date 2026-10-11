@@ -21,6 +21,7 @@ const PROBLEM_KEYS: Record<ChatSendProblem, MessageKey> = {
   images: 'history.chat.composer.attachmentsRejected',
   files: 'history.chat.composer.attachmentsRejected',
   project_refs: 'history.chat.composer.projectsRejected',
+  work_refs: 'history.chat.composer.workRejected',
 };
 
 /**
@@ -131,7 +132,7 @@ export function ChatComposer({
             mentions={state.mentions}
             readOnly={readOnly}
             placeholder={t('overlay.composer.placeholder')}
-            invalid={state.problem === 'text' || state.problem === 'project_refs'}
+            invalid={['text', 'project_refs', 'work_refs'].includes(state.problem ?? '')}
             describedBy={state.problem ? PROBLEM_ID : undefined}
             onChange={composer.setDraft}
             onAddProject={onAddProject}

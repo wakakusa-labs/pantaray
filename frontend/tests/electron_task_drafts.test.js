@@ -163,9 +163,25 @@ test('draft requests are checked at the boundary', async () => {
       attachments: [{ kind: 'file', attachmentId: 'not-a-uuid', name: 'a', byteSize: 1 }],
     },
     { ...draft('x'), attachments: [{ kind: 'image', storagePath: 'a', bytes: 'AAAA' }] },
+    // A named task or suggestion carries its id and title, never folders.
+    {
+      ...draft('Q3'),
+      mentions: [{ kind: 'action', id: 'a2', displayName: 'Q3', paths: [], start: 0, end: 2 }],
+    },
+    { ...draft('Q3'), mentions: [{ kind: 'task', id: 'a2', displayName: 'Q3', start: 0, end: 2 }] },
   ]) {
     assert.throws(() => app.update(1, 'action:a1', value), IpcValidationError);
   }
+  const named = {
+    ...draft('Q3 と Aurora'),
+    mentions: [
+      { kind: 'action', id: 'a2', displayName: 'Q3', start: 0, end: 2 },
+      { kind: 'project', projectId: 'p1', displayName: 'Aurora', paths: ['/a'], start: 5, end: 11 },
+    ],
+  };
+  app.open(1, 'action:a1');
+  app.update(1, 'action:a1', named);
+  assert.deepEqual(app.open(2, 'action:a1'), named);
   // A small window no longer registered as a conversation is not a composer.
   const stale = app.windowOf(9);
   stale.registered = false;

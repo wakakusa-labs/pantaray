@@ -12,6 +12,9 @@ from pantaray_agents.local_runtime.runtime.action_logical_run_authority import (
     ActionLogicalRunSelection,
     select_action_logical_run_authorities_in_connection,
 )
+from pantaray_agents.local_runtime.runtime.action_queued_message_adoption import (
+    next_run_takes_messages_after_in_connection,
+)
 from pantaray_agents.schema.action_conversation import (
     ActionConversationPage,
     ActionConversationSummary,
@@ -87,8 +90,11 @@ def read_action_conversation_page_in_connection(
         if history.scope == "unadopted":
             runs: tuple[ActionRun, ...] = ()
             user_rows = cast(tuple[ActionHistoryUserRow, ...], history.rows)
+            takes_after = next_run_takes_messages_after_in_connection(
+                connection=connection, user_id=user_id, action_id=action_id
+            )
             unadopted = tuple(
-                project_action_user_entry(row)
+                project_action_user_entry(row, next_run_takes_after=takes_after)
                 for row in user_rows
                 if action_user_row_is_visible(row)
             )

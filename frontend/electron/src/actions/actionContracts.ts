@@ -205,7 +205,7 @@ const UserEntrySchema = z
     files: z
       .array(z.object({ name: z.string(), byte_size: z.number().int().positive() }).strict())
       .optional(),
-    status: z.enum(['adopted', 'pending', 'not_executed']),
+    status: z.enum(['adopted', 'pending', 'runs_with_next_message', 'not_executed']),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -381,7 +381,7 @@ const ActionConversationPageSchema = z
     if (
       page.unadopted_messages.some(
         (entry) =>
-          (entry.status !== 'pending' && entry.status !== 'not_executed') ||
+          entry.status === 'adopted' ||
           (entry.status === 'pending' && TERMINAL_CONVERSATION_STATUSES.has(page.action.status))
       )
     ) {

@@ -7,7 +7,12 @@ type UserMessageCopy = {
   userImages: ImageGridCopy;
   userFiles: (count: number) => string;
   userStatus: Record<
-    'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
+    | 'pending'
+    | 'runs_with_next_message'
+    | 'not_executed'
+    | 'submitting'
+    | 'awaiting_refresh'
+    | 'failed',
     string
   >;
 };
@@ -31,6 +36,7 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
     userFiles: (count) => `${count} attached file${count === 1 ? '' : 's'}`,
     userStatus: {
       pending: 'Pending',
+      runs_with_next_message: 'Runs with your next message',
       not_executed: 'Not executed',
       submitting: 'Sending',
       awaiting_refresh: 'Sent, updating',
@@ -54,6 +60,7 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
     userFiles: (count) => `添付ファイル ${count} 件`,
     userStatus: {
       pending: '保留',
+      runs_with_next_message: '次の送信で実行',
       not_executed: '未実行',
       submitting: '送信中',
       awaiting_refresh: '送信済み・更新中',

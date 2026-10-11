@@ -72,8 +72,14 @@ def action_user_row_is_visible(row: ActionHistoryUserRow) -> bool:
     return row.step_name != ACTION_RESUME_STEP_NAME
 
 
-def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
-    """Project one adopted or unadopted durable USER row."""
+def project_action_user_entry(
+    row: ActionHistoryUserRow, *, next_run_takes_after: int | None = None
+) -> UserEntry:
+    """Project one adopted or unadopted durable USER row.
+
+    ``next_run_takes_after`` is where the next run starts taking not-executed
+    messages (``None`` when it takes none); see the queued-message adoption.
+    """
 
     message_id = row.user_message_id
     try:
@@ -116,9 +122,12 @@ def project_action_user_entry(row: ActionHistoryUserRow) -> UserEntry:
     status: UserEntryStatus = (
         "adopted"
         if row.adopted_process_id is not None
-        else "not_executed"
-        if row.adoption_canceled_at is not None
         else "pending"
+        if row.adoption_canceled_at is None
+        else "runs_with_next_message"
+        if next_run_takes_after is not None
+        and row.accepted_sequence > next_run_takes_after
+        else "not_executed"
     )
     try:
         return UserEntry(

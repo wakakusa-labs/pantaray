@@ -50,6 +50,30 @@ from .action_user_adoption import (
 )
 
 
+def next_run_takes_messages_after_in_connection(
+    *, connection: sqlite3.Connection, user_id: str, action_id: str
+) -> int | None:
+    """The ``accepted_sequence`` after which the next run takes not-executed
+    messages (the latest run's root), or ``None`` when it takes none.
+
+    The conversation labels a waiting message by this same answer.
+    """
+
+    if not action_latest_run_has_restorable_checkpoint(
+        connection=connection, user_id=user_id, action_id=action_id
+    ):
+        return None
+    (latest_root,) = connection.execute(
+        """SELECT COALESCE(MAX(root), 0) FROM (
+            SELECT MIN(accepted_sequence) AS root FROM agent_action_steps
+            WHERE user_id = ? AND action_id = ? AND step_type = 'user_request'
+              AND status = 'success' AND adopted_process_id IS NOT NULL
+            GROUP BY adopted_process_id)""",
+        (user_id, action_id),
+    ).fetchone()
+    return int(latest_root)
+
+
 class WaitingMessages:
     """The not-executed messages one new run takes before the message starting it.
 
@@ -87,23 +111,16 @@ class WaitingMessages:
     ) -> WaitingMessages | None:
         """The messages the next run takes, or ``None`` when there are none."""
 
-        if not action_latest_run_has_restorable_checkpoint(
+        after = next_run_takes_messages_after_in_connection(
             connection=connection, user_id=user_id, action_id=action_id
-        ):
+        )
+        if after is None:
             return None
-        (latest_root,) = connection.execute(
-            """SELECT COALESCE(MAX(root), 0) FROM (
-                SELECT MIN(accepted_sequence) AS root FROM agent_action_steps
-                WHERE user_id = ? AND action_id = ? AND step_type = 'user_request'
-                  AND status = 'success' AND adopted_process_id IS NOT NULL
-                GROUP BY adopted_process_id)""",
-            (user_id, action_id),
-        ).fetchone()
         steps = load_not_executed_action_user_steps_in_connection(
             connection=connection,
             user_id=user_id,
             action_id=action_id,
-            after_accepted_sequence=int(latest_root),
+            after_accepted_sequence=after,
         )
         if not steps:
             return None
@@ -203,4 +220,4 @@ class WaitingMessages:
         )
 
 
-__all__ = ["WaitingMessages"]
+__all__ = ["WaitingMessages", "next_run_takes_messages_after_in_connection"]

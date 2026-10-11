@@ -1096,7 +1096,7 @@ def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
     assert [
         (message["message_id"], message["status"])
         for message in _all_unadopted(client, action_id)
-    ] == [("message-queued", "not_executed")]
+    ] == [("message-queued", "runs_with_next_message")]
 
     followup = client.post(
         MESSAGES_PATH,

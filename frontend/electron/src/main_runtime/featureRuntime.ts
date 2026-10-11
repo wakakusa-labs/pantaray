@@ -31,7 +31,7 @@ import { createHistoryItemDeleter } from '../history/historyItemDelete';
 import { createHistoryItemReader } from '../history/historyItemRead';
 import type { MainContext } from '../ipc/context';
 import { createOverlayBootstrapFetcher } from '../history/overlayBootstrapFetch';
-import { startMainIpcRuntime } from './ipcBootstrap';
+import { startMainIpcRuntime, type MainIpcRuntime } from './ipcBootstrap';
 import { createLocalBackendClient } from '../localBackend/client';
 import type { NotificationWindowApi, UiLanguage } from '../orchestration/contracts';
 import {
@@ -333,7 +333,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     actionReadState.setSubject(owner.id);
   };
 
-  const registerMainIpc = (): void => {
+  const registerMainIpc = (): MainIpcRuntime =>
     startMainIpcRuntime({
       notificationWindow: params.notificationWindow,
       context: {
@@ -472,7 +472,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         createNotificationIpcHandlers: params.notificationWindow.createNotificationIpcHandlers,
       },
     });
-  };
 
   return {
     applyLocalOwner,

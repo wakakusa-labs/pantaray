@@ -16,6 +16,11 @@ from typing import Final
 
 from .job_payload_models import MEMORY_UPDATE_SOURCE_MAX_ITEMS
 
+# Design limit: as with the chat, one run reads at most this many characters of
+# suggestion text and reasons, and a longer backlog waits for the next runs.
+# Raise it if dismissal backlogs are seen to lag behind by several runs.
+MEMORY_DISMISSAL_MAX_CHARS: Final[int] = 60_000
+
 # A reply after a dismissal is recorded as an Action step that names the
 # suggestion, and that Action reaches memory on its own.
 _DISMISSED_WITHOUT_REPLY_SQL: Final[str] = """
@@ -48,7 +53,11 @@ class DismissedSuggestion:
 def pending_dismissals(
     connection: sqlite3.Connection, *, user_id: str
 ) -> PendingDismissals | None:
-    """The dismissals after the cursor that fit one run, or None when none wait."""
+    """The dismissals after the cursor that fit one run, or None when none wait.
+
+    A dismissal longer than the character bound still goes alone, so the
+    cursor always moves.
+    """
 
     cursor = connection.execute(
         """
@@ -60,7 +69,9 @@ def pending_dismissals(
     after = ("", "") if cursor is None else (str(cursor[0]), str(cursor[1]))
     rows = connection.execute(
         f"""
-        SELECT suggestions.suggestion_id, suggestions.rejected_at
+        SELECT suggestions.suggestion_id, suggestions.rejected_at,
+               LENGTH(suggestions.answer)
+                   + COALESCE(LENGTH(suggestions.dismiss_reason), 0)
         FROM agent_suggestions AS suggestions
         WHERE {_DISMISSED_WITHOUT_REPLY_SQL}
           AND (suggestions.rejected_at, suggestions.suggestion_id) > (?, ?)
@@ -71,11 +82,18 @@ def pending_dismissals(
     ).fetchall()
     if not rows:
         return None
+    handed = rows[:1]
+    total = int(rows[0][2])
+    for row in rows[1:]:
+        total += int(row[2])
+        if total > MEMORY_DISMISSAL_MAX_CHARS:
+            break
+        handed.append(row)
     return PendingDismissals(
-        suggestion_ids=tuple(str(row[0]) for row in rows),
-        oldest_rejected_at=str(rows[0][1]),
-        through_rejected_at=str(rows[-1][1]),
-        through_suggestion_id=str(rows[-1][0]),
+        suggestion_ids=tuple(str(row[0]) for row in handed),
+        oldest_rejected_at=str(handed[0][1]),
+        through_rejected_at=str(handed[-1][1]),
+        through_suggestion_id=str(handed[-1][0]),
     )
 
 
@@ -135,6 +153,7 @@ def read_dismissed_suggestions(
 
 
 __all__ = [
+    "MEMORY_DISMISSAL_MAX_CHARS",
     "DismissedSuggestion",
     "PendingDismissals",
     "advance_dismissal_cursor",

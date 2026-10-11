@@ -22,6 +22,7 @@ from pantaray_agents.local_runtime.runtime.memory_agent_triggers import (
     insert_pending_memory_agent_trigger,
 )
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
+    MEMORY_DISMISSAL_MAX_CHARS,
     read_dismissed_suggestions,
 )
 from pantaray_agents.local_runtime.runtime.session_store import import_desktop_session
@@ -181,6 +182,26 @@ def test_dismissals_ride_along_once_and_the_cursor_moves_on(tmp_path: Path) -> N
     _dispatch(db_path, NOW + timedelta(hours=2))
 
     assert _handed(db_path) == [["s-1"], ["s-2"], None]
+
+
+def test_a_long_reason_backlog_is_split_across_runs_without_skipping(
+    tmp_path: Path,
+) -> None:
+    db_path = _db(tmp_path)
+    half = "x" * (MEMORY_DISMISSAL_MAX_CHARS // 2)
+    _dismiss(db_path, "s-1", "Draft it?", minutes_ago=40, reason=half)
+    _dismiss(db_path, "s-2", "File it?", minutes_ago=39, reason=half)
+    _dismiss(db_path, "s-3", "Book it?", minutes_ago=38, reason=half)
+    oversized = "y" * (MEMORY_DISMISSAL_MAX_CHARS + 1)
+    _dismiss(db_path, "s-4", "Send it?", minutes_ago=37, reason=oversized)
+    _dismiss(db_path, "s-5", "Plan it?", minutes_ago=36)
+
+    for _ in range(5):
+        _dispatch(db_path)
+        _finish_memory_jobs(db_path)
+
+    # A dismissal over the bound on its own still goes, alone.
+    assert _handed(db_path) == [["s-1"], ["s-2"], ["s-3"], ["s-4"], ["s-5"]]
 
 
 def test_a_dismissal_the_user_replied_to_is_not_handed(tmp_path: Path) -> None:

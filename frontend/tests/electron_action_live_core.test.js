@@ -469,26 +469,27 @@ test('refresh coordinator はActionごとのflightをshared readerへjoinさせA
 
   const firstA = coordinator.refresh('action-a');
   const onlyB = coordinator.refresh('action-b');
-  const dirtyA = coordinator.refresh('action-a');
+  const laterA = coordinator.refresh('action-a');
   await new Promise(setImmediate);
   assert.deepStrictEqual(
     reads.map((read) => read.actionId),
     ['action-a', 'action-b']
   );
 
+  // The first read of A is published as it lands; the later request reads A again.
   reads[0].pending.resolve(conversationPage('action-a'));
-  await new Promise(setImmediate);
+  await firstA;
   assert.deepStrictEqual(
     reads.map((read) => read.actionId),
     ['action-a', 'action-b', 'action-a']
   );
   reads[1].pending.resolve(conversationPage('action-b'));
   reads[2].pending.resolve(conversationPage('action-a'));
-  await Promise.all([firstA, onlyB, dirtyA]);
+  await Promise.all([onlyB, laterA]);
 
   assert.deepStrictEqual(
     published.map((update) => update.snapshot.actionId),
-    ['action-b', 'action-a']
+    ['action-a', 'action-b', 'action-a']
   );
 });
 
@@ -520,7 +521,7 @@ test('refresh failure はdirtyなしで終了し、後続triggerだけが再開�
   assert.equal(published.at(-1).snapshot.page.action.action_id, 'action-a');
 });
 
-test('shared dirty reader はrenderer join後の最終pageをpublishして全callerを待たせる', async () => {
+test('shared reader はreadごとにpublishし、read中に来たcallerは次の1回で揃う', async () => {
   const firstRead = deferred();
   const secondRead = deferred();
   const errors = [];
@@ -539,26 +540,57 @@ test('shared dirty reader はrenderer join後の最終pageをpublishして全cal
   const firstCaller = coordinator.refresh('action-a');
   const rendererCaller = latestPageReader.read('action-a');
   const joinedCaller = coordinator.handleEvent(processEvent('process_completed')).refreshDone;
-  let settled = false;
-  void firstCaller.then(() => {
-    settled = true;
-  });
   firstRead.resolve(conversationPage('action-a'));
-  await new Promise(setImmediate);
+  assert.equal(await firstCaller, 'refreshed');
+  assert.equal(published.at(-1).snapshot.page.action.action_id, 'action-a');
 
   assert.equal(reads, 2);
-  assert.equal(errors.length, 0);
-  assert.equal(settled, false);
-  assert.deepStrictEqual(published.at(-1).snapshot.lifecycle, {
-    processId: 'process-a',
-    status: 'success',
+  let joinedSettled = false;
+  void Promise.all([rendererCaller, joinedCaller]).then(() => {
+    joinedSettled = true;
   });
-  secondRead.resolve(conversationPage('action-a', null, 'process-a', 'success'));
-  await Promise.all([firstCaller, rendererCaller, joinedCaller]);
-  assert.equal(settled, true);
+  await new Promise(setImmediate);
+  assert.equal(joinedSettled, false);
+  const latest = conversationPage('action-a', null, 'process-a', 'success');
+  secondRead.resolve(latest);
+  assert.deepStrictEqual(await rendererCaller, latest);
+  assert.equal(await joinedCaller, 'refreshed');
   assert.equal(reads, 2);
-  assert.equal(published.at(-1).snapshot.lifecycle, null);
-  assert.equal(published.at(-1).snapshot.page.action.action_id, 'action-a');
+  assert.equal(errors.length, 0);
+  assert.equal(published.at(-1).snapshot.page, latest);
+});
+
+test('read中に更新が届き続けても、各readの結果が届いた順にpublishされる', async () => {
+  // A running Action reports finished Tools faster than one read takes: every read is
+  // joined before it lands. Each landed read is still published, so a window opened on the
+  // running Action shows its conversation without waiting for the updates to stop.
+  const reads = [];
+  const published = [];
+  const latestPageReader = createActionLatestPageReader(() => {
+    const pending = deferred();
+    reads.push(pending);
+    return pending.promise;
+  });
+  const coordinator = createActionLiveCoordinator({
+    readLatestPage: latestPageReader.read,
+    publish: (update) => update.kind === 'action_updated' && update.snapshot.page && published.push(update),
+    surfaceRefreshError: (_actionId, error) => assert.fail(error),
+  });
+
+  const opened = coordinator.refresh('action-a');
+  let openedOutcome = null;
+  void opened.then((outcome) => {
+    openedOutcome = outcome;
+  });
+  for (let index = 0; index < 40; index += 1) {
+    coordinator.refresh('action-a');
+    await new Promise(setImmediate);
+    reads[index].resolve(conversationPage('action-a', null, `run-${index}`, 'processing'));
+    await new Promise(setImmediate);
+    assert.equal(published.length, index + 1);
+    assert.equal(published.at(-1).snapshot.page.action.latest_run_id, `run-${index}`);
+  }
+  assert.equal(openedOutcome, 'refreshed');
 });
 
 test('dirty 中の旧terminal pageは適用せず新runのtransientを保持する', async () => {
@@ -643,9 +675,9 @@ test('canonical Tool status precedence はlogical run内だけでtransientを照
 });
 
 test('refreshはread中のtransientを保持し次の明示refreshでpage外terminalを除く', async () => {
-  // A finished Tool that joins an in-flight read asks the reader again. The shared
-  // reader turns that into a dirty re-read; this bare reader leaves it pending, so
-  // each flight is resolved through its own first read and the joins are skipped.
+  // A finished Tool that arrives during a read asks the reader again. The shared reader
+  // queues that as the next read; this bare reader starts it at once and leaves it pending,
+  // so each flight here is resolved through its own read.
   const reads = [];
   const updates = [];
   const coordinator = createActionLiveCoordinator({
@@ -693,7 +725,9 @@ test('refreshはread中のtransientを保持し次の明示refreshでpage外term
   await new Promise(setImmediate);
   coordinator.handleEvent(actionStep('success', 'process-c', 'step-3'));
   assert.equal(reads.length, 7);
+  // A terminal page read while a newer read was asked for is left to that newer read.
   reads[5].resolve(conversationPage('action-a', null, 'run-1', 'success'));
+  reads[6].resolve(conversationPage('action-a', null, 'run-1', 'success'));
   await terminalBoundary;
   assert.deepStrictEqual(updates.at(-1).snapshot.transientToolSteps, []);
 });

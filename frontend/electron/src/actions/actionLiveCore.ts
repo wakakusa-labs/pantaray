@@ -331,7 +331,12 @@ export function createActionLiveCoordinator(params: {
   // Action id -> root relay process id, so an approval resume can reattach to the
   // root stream even after a reconnect dropped the transport's own registries.
   const rootProcessIds = new Map<string, string>();
-  const flights = new Map<string, Promise<ActionLiveRefreshOutcome>>();
+  // The read each refresh applies. The shared reader hands callers that join one read the same
+  // promise, so they share one application of its page instead of publishing it twice.
+  const flights = new Map<
+    string,
+    { read: Promise<ActionConversationPage>; outcome: Promise<ActionLiveRefreshOutcome> }
+  >();
   let generation = 0;
   let pageVersion = 0;
 
@@ -346,25 +351,27 @@ export function createActionLiveCoordinator(params: {
   };
 
   const refresh = (actionId: string): Promise<ActionLiveRefreshOutcome> => {
-    const existing = flights.get(actionId);
-    if (existing) {
-      void params.readLatestPage(actionId);
-      return existing;
-    }
+    const pagePromise = params.readLatestPage(actionId);
+    const joined = flights.get(actionId);
+    if (joined?.read === pagePromise) return joined.outcome;
     const startedGeneration = generation;
     const terminalAtReadStart = new Set(
       (snapshots.get(actionId)?.transientToolSteps ?? [])
         .filter((step) => step.entry.status !== 'processing')
         .map(transientToolStepKey)
     );
-    const pagePromise = params.readLatestPage(actionId);
     const promise = (async (): Promise<ActionLiveRefreshOutcome> => {
       try {
         const page = await pagePromise;
         if (startedGeneration !== generation) return 'superseded';
         if (page.action.action_id !== actionId) throw new ActionLiveIdentityError('page');
-        const current = snapshots.get(actionId);
         const actionIsTerminal = ['success', 'error', 'canceled'].includes(page.action.status);
+        // Events asked for a newer read while this one was out, so a terminal page here may be
+        // the previous run's end, read before the next run started. Ending the Action on it
+        // would drop that run's transients and window binding; the newer read decides instead.
+        const newer = flights.get(actionId);
+        if (actionIsTerminal && newer && newer.read !== pagePromise) return await newer.outcome;
+        const current = snapshots.get(actionId);
         const transientToolSteps = actionIsTerminal
           ? []
           : (current?.transientToolSteps ?? []).filter(
@@ -396,9 +403,9 @@ export function createActionLiveCoordinator(params: {
         return 'failed';
       }
     })().finally(() => {
-      if (flights.get(actionId) === promise) flights.delete(actionId);
+      if (flights.get(actionId)?.outcome === promise) flights.delete(actionId);
     });
-    flights.set(actionId, promise);
+    flights.set(actionId, { read: pagePromise, outcome: promise });
     return promise;
   };
 

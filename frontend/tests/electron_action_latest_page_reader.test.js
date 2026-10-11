@@ -33,7 +33,7 @@ function deferred() {
 
 const flush = () => new Promise(setImmediate);
 
-test('同じActionの並行callerはdirty後の最新pageを共有する', async () => {
+test('read中に来たcallerは後続の1回のreadを共有し、最初のcallerは自分のreadで返る', async () => {
   const reads = [];
   const reader = createActionLatestPageReader(() => {
     const pending = deferred();
@@ -43,20 +43,50 @@ test('同じActionの並行callerはdirty後の最新pageを共有する', async
 
   const firstCaller = reader.read('action-a');
   const joinedCaller = reader.read('action-a');
-  assert.equal(firstCaller, joinedCaller);
+  const secondJoinedCaller = reader.read('action-a');
+  assert.notEqual(firstCaller, joinedCaller);
+  assert.equal(joinedCaller, secondJoinedCaller);
   await flush();
   assert.equal(reads.length, 1);
 
-  reads[0].resolve(conversationPage('action-a', 'run-old'));
+  const older = conversationPage('action-a', 'run-old');
+  reads[0].resolve(older);
+  assert.deepStrictEqual(await firstCaller, older);
   await flush();
   assert.equal(reads.length, 2);
   const latest = conversationPage('action-a', 'run-new');
   reads[1].resolve(latest);
 
-  assert.deepStrictEqual(await Promise.all([firstCaller, joinedCaller]), [latest, latest]);
+  assert.deepStrictEqual(await Promise.all([joinedCaller, secondJoinedCaller]), [latest, latest]);
+  await flush();
+  assert.equal(reads.length, 2);
 });
 
-test('dirty中のread失敗は同じflightの次readで収束する', async () => {
+test('callerは更新が続いても高々2回のreadで返る', async () => {
+  const reads = [];
+  const reader = createActionLatestPageReader(() => {
+    const pending = deferred();
+    reads.push(pending);
+    return pending.promise;
+  });
+  const page = (index) => conversationPage('action-a', `run-${index}`);
+
+  reader.read('action-a');
+  // Every read is joined before it lands, as while a running Action keeps reporting.
+  for (let inFlight = 0; inFlight < 40; inFlight += 1) {
+    const caller = reader.read('action-a');
+    reads[inFlight].resolve(page(inFlight));
+    await flush();
+    assert.equal(reads.length, inFlight + 2);
+    reads[inFlight + 1].resolve(page(inFlight + 1));
+    assert.deepStrictEqual(await caller, page(inFlight + 1));
+    reader.read('action-a');
+    await flush();
+    inFlight += 1;
+  }
+});
+
+test('read失敗は最初のcallerに返り、read中に来たcallerは次のreadを受け取る', async () => {
   const reads = [];
   const reader = createActionLatestPageReader(() => {
     const pending = deferred();
@@ -66,14 +96,15 @@ test('dirty中のread失敗は同じflightの次readで収束する', async () =
 
   const firstCaller = reader.read('action-a');
   const joinedCaller = reader.read('action-a');
-  await flush();
-  reads[0].reject(new Error('first read failed'));
+  const failure = new Error('first read failed');
+  reads[0].reject(failure);
+  await assert.rejects(firstCaller, (error) => error === failure);
   await flush();
   assert.equal(reads.length, 2);
 
   const recovered = conversationPage('action-a', 'run-recovered');
   reads[1].resolve(recovered);
-  assert.deepStrictEqual(await Promise.all([firstCaller, joinedCaller]), [recovered, recovered]);
+  assert.deepStrictEqual(await joinedCaller, recovered);
 });
 
 test('dirtyなしの失敗はsurfaceし、後続readを新しいflightで開始する', async () => {
@@ -124,19 +155,22 @@ test('clearは旧flightを切り離し、旧完了処理は新flightを削除し
   assert.equal(reads.length, 1);
   reader.clear();
   const newSubject = reader.read('action-a');
+  const joinedNewSubject = reader.read('action-a');
+  assert.equal(reads.length, 2);
+
+  // The old subject's callers take its read; nothing is read again for it.
+  const oldPage = conversationPage('action-a', 'run-old-subject');
+  reads[0].resolve(oldPage);
+  assert.deepStrictEqual(await Promise.all([oldSubject, joinedOldSubject]), [oldPage, oldPage]);
   await flush();
   assert.equal(reads.length, 2);
 
-  reads[0].resolve(conversationPage('action-a', 'run-old-subject'));
-  await Promise.all([oldSubject, joinedOldSubject]);
-  assert.equal(reads.length, 2);
-  const joinedNewSubject = reader.read('action-a');
-  assert.equal(joinedNewSubject, newSubject);
-
-  reads[1].resolve(conversationPage('action-a', 'run-new-subject-old-page'));
+  const newPage = conversationPage('action-a', 'run-new-subject');
+  reads[1].resolve(newPage);
+  assert.deepStrictEqual(await newSubject, newPage);
   await flush();
   assert.equal(reads.length, 3);
   const latest = conversationPage('action-a', 'run-new-subject-latest');
   reads[2].resolve(latest);
-  assert.deepStrictEqual(await Promise.all([newSubject, joinedNewSubject]), [latest, latest]);
+  assert.deepStrictEqual(await joinedNewSubject, latest);
 });

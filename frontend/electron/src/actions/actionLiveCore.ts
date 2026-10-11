@@ -360,6 +360,7 @@ export function createActionLiveCoordinator(params: {
         .filter((step) => step.entry.status !== 'processing')
         .map(transientToolStepKey)
     );
+    const lifecycleAtReadStart = snapshots.get(actionId)?.lifecycle ?? null;
     const promise = (async (): Promise<ActionLiveRefreshOutcome> => {
       try {
         const page = await pagePromise;
@@ -379,6 +380,11 @@ export function createActionLiveCoordinator(params: {
                 !terminalAtReadStart.has(transientToolStepKey(step)) &&
                 !isActionTransientToolStepSuperseded(page, step)
             );
+        // A lifecycle notification that arrived during this read is newer than its page, so it
+        // stays until a read that began after it lands.
+        const currentLifecycle = current?.lifecycle ?? null;
+        const lifecycleAfterRead =
+          currentLifecycle === lifecycleAtReadStart ? null : currentLifecycle;
         // The conversation page carries no blockers, and the latest run status only
         // reflects the root process, so a nonterminal refresh keeps the WS snapshot
         // intact: subagent blockers stay visible while the root run keeps running.
@@ -388,7 +394,7 @@ export function createActionLiveCoordinator(params: {
           pageVersion: ++pageVersion,
           transientToolSteps,
           approvalBlockers: actionIsTerminal ? [] : (current?.approvalBlockers ?? []),
-          lifecycle: null,
+          lifecycle: lifecycleAfterRead,
         };
         snapshots.set(actionId, snapshot);
         params.publish({ kind: 'action_updated', snapshot });

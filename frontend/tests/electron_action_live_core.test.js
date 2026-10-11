@@ -593,6 +593,58 @@ test('read中に更新が届き続けても、各readの結果が届いた順に
   assert.equal(openedOutcome, 'refreshed');
 });
 
+test('read中に届いた終了通知は、その前に始まったreadのpageで消えず、後続read失敗後も残る', async () => {
+  const reads = [];
+  const updates = [];
+  const errors = [];
+  const latestPageReader = createActionLatestPageReader(() => {
+    const pending = deferred();
+    reads.push(pending);
+    return pending.promise;
+  });
+  const coordinator = createActionLiveCoordinator({
+    readLatestPage: latestPageReader.read,
+    publish: (update) => updates.push(update),
+    surfaceRefreshError: (_actionId, error) => errors.push(error),
+  });
+
+  const stale = coordinator.refresh('action-a');
+  await new Promise(setImmediate);
+  const failed = processEvent('process_completed');
+  failed.data.status = 'error';
+  const completion = coordinator.handleEvent(failed).refreshDone;
+  assert.deepStrictEqual(updates.at(-1).snapshot.lifecycle, {
+    processId: 'process-a',
+    status: 'error',
+  });
+
+  // The page read before the run ended still says processing; the end it missed stays.
+  reads[0].resolve(conversationPage('action-a'));
+  assert.equal(await stale, 'refreshed');
+  assert.equal(updates.at(-1).snapshot.page.action.status, 'processing');
+  assert.deepStrictEqual(updates.at(-1).snapshot.lifecycle, {
+    processId: 'process-a',
+    status: 'error',
+  });
+
+  await new Promise(setImmediate);
+  reads[1].reject(new Error('backend unavailable'));
+  assert.equal(await completion, 'failed');
+  assert.equal(errors.length, 1);
+  assert.deepStrictEqual(coordinator.getSnapshot('action-a').lifecycle, {
+    processId: 'process-a',
+    status: 'error',
+  });
+
+  // A read that began after the notification is authoritative again.
+  const settled = coordinator.refresh('action-a');
+  await new Promise(setImmediate);
+  reads[2].resolve(conversationPage('action-a', null, 'run-1', 'error'));
+  assert.equal(await settled, 'refreshed');
+  assert.equal(updates.at(-1).snapshot.lifecycle, null);
+  assert.equal(updates.at(-1).snapshot.page.action.status, 'error');
+});
+
 test('dirty 中の旧terminal pageは適用せず新runのtransientを保持する', async () => {
   const reads = [];
   const updates = [];

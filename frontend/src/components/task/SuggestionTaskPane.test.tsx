@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -219,6 +219,44 @@ describe('SuggestionTaskPane', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('pantaray://suggestion/sug-1'));
+  });
+
+  it('opens the suggestion small, from between the link and the copy, once it is read', async () => {
+    const showHistory = vi.fn();
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { ...window.electron, agentOverlay: { showHistory } },
+    });
+    let answer: (snapshot: OverlaySnapshot) => void = () => undefined;
+    read.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await renderPane();
+
+    const header = within(screen.getByRole('banner'));
+    expect(header.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Copy link',
+      'Open small',
+      'Copy suggestion',
+    ]);
+    const small = screen.getByRole('button', { name: 'Open small' });
+    expectTooltipIsName(small);
+    expect(small.querySelector('svg.lucide-picture-in-picture-2')).not.toBeNull();
+    // Nothing to show until the suggestion is read.
+    expect(small).toBeDisabled();
+
+    await act(async () => answer(suggestion()));
+    fireEvent.click(small);
+    expect(showHistory).toHaveBeenCalledExactlyOnceWith({
+      suggestionId: 'sug-1',
+      initialUiState: { expand: true },
+    });
+  });
+
+  it('keeps Open small disabled when the suggestion could not be read', async () => {
+    read.mockRejectedValueOnce(new Error('unavailable'));
+    await renderPane();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load this suggestion.');
+    expect(screen.getByRole('button', { name: 'Open small' })).toBeDisabled();
   });
 
   it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {

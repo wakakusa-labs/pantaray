@@ -74,14 +74,14 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
     const { refreshActionConversation, resumeLiveProcess, resolveOverlayBootstrap } = options;
 
     return {
+      // `settled` marks the height the renderer's content is laid out at, so a window waiting for
+      // its layout is shown only after it has that size.
       onResizeNotificationWindow: (event, payload) => {
-        const targetId = payload && typeof payload === 'object' ? payload.id : null;
-        const requestedHeight = payload && typeof payload === 'object' ? payload.height : payload;
-        if (targetId) {
-          resizeWindow(screen, windows.getOverlay(String(targetId)), requestedHeight);
-          return;
-        }
-        resizeWindow(screen, findSenderWindow(BrowserWindow, event), requestedHeight);
+        const win = findSenderWindow(BrowserWindow, event);
+        resizeWindow(screen, win, payload?.height);
+        if (payload?.settled !== true || !win) return;
+        const overlayId = windows.findOverlayIdByWindow(win);
+        if (overlayId) windows.reveal(overlayId);
       },
       onNotificationActionAccept: (_event, data) => {
         console.log('Notification Accepted:', data);

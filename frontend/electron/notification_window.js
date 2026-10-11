@@ -86,7 +86,7 @@ const overlayWindowSlots = new WeakMap();
 
 // Suggestions and History windows take the lowest free slot of their cell's stack, so the two
 // never open exactly on top of each other when they share a cell (by default, the top-right).
-// A slot is held by a window in that cell that is shown or still loading to be shown; a closed
+// A slot is held by a window in that cell that is shown or still waiting to be shown; a closed
 // (hidden) one frees it. A task the user starts always opens in its cell itself.
 function stackPlacement(placementKind) {
   const cell = overlayCellFor(placementKind);
@@ -99,7 +99,7 @@ function stackPlacement(placementKind) {
       placed.cell.row === cell.row &&
       placed.cell.column === cell.column &&
       !win.isDestroyed() &&
-      (win.isVisible() || overlayState.get(id)?.readyToShow === false)
+      (win.isVisible() || awaitsFirstShow(overlayState.get(id)))
     ) {
       heldSlots.add(placed.stackIndex);
     }
@@ -147,11 +147,18 @@ function getOverlayRuntimeState(id) {
   const created = {
     ready: false,
     readyToShow: false,
+    // An Action's conversation window stays hidden until its conversation is laid out.
+    awaitsLayout: false,
     queue: [],
     shellMode: PASSIVE_SHELL_MODE,
   };
   overlayState.set(normalizedId, created);
   return created;
+}
+
+// Not shown yet: still loading, or waiting for its conversation to be laid out.
+function awaitsFirstShow(runtime) {
+  return Boolean(runtime) && (!runtime.readyToShow || runtime.awaitsLayout);
 }
 
 function setLocalOwnerIdGetter(getter) {
@@ -296,18 +303,35 @@ function createHistoryOverlayWindow(id) {
   });
 }
 
+// A window opened for an existing Action first paints before its conversation is read, as a
+// bare header that grows once the conversation arrives. It is shown only when its renderer
+// reports the conversation laid out at its final size, or when main gives up on the read.
 function createStandaloneConversationOverlayWindow(id, actionId) {
   const runtime = getOverlayRuntimeState(id);
   if (!runtime) return null;
   runtime.shellMode = INTERACTIVE_SHELL_MODE;
+  runtime.awaitsLayout = Boolean(actionId);
   return createMappedOverlayWindow(id, {
     actionId,
     conversation: true,
     entryMode: 'standalone',
     interactive: true,
     placementKind: standalonePlacementKind(actionId),
-    onReadyToShow: showInteractiveOverlayWindow,
+    onReadyToShow: (win, state) => {
+      if (!state.awaitsLayout) showInteractiveOverlayWindow(win);
+    },
   });
+}
+
+/** Shows a conversation window that waited for its layout; any other window is left as it is. */
+function revealOverlayWindow(id) {
+  const normalizedId = normalizeId(id);
+  const runtime = normalizedId ? overlayState.get(normalizedId) : null;
+  if (!runtime?.awaitsLayout) return;
+  runtime.awaitsLayout = false;
+  const win = overlayWindows.get(normalizedId);
+  // Before ready-to-show, that event shows it.
+  if (runtime.readyToShow && win && !win.isDestroyed()) showInteractiveOverlayWindow(win);
 }
 
 function getOrCreateOverlayWindow(id) {
@@ -346,7 +370,7 @@ function openStandaloneConversationOverlay(id, actionId = null) {
   if (!runtime) throw new Error('Standalone Overlay state is unavailable.');
   const existing = overlayWindows.get(normalizedId);
   if (existing && !existing.isDestroyed()) {
-    if (!runtime.ready || !runtime.readyToShow) return 'loading';
+    if (!runtime.ready || awaitsFirstShow(runtime)) return 'loading';
     placeHiddenOverlayWindow(existing, standalonePlacementKind(actionId));
     showInteractiveOverlayWindow(existing, { explicitFocus: true });
     existing.webContents.send('overlay:focusComposer');
@@ -443,6 +467,7 @@ const createNotificationIpcHandlers = createNotificationIpcHandlerFactory({
     getOverlay: (id) => overlayWindows.get(id) || null,
     hide: hideNotification,
     normalizeId,
+    reveal: revealOverlayWindow,
     setSnapshot: setOverlaySnapshot,
     showHistory: getOrCreateHistoryOverlayWindow,
   },
@@ -471,6 +496,7 @@ module.exports = {
   resolveOverlayId,
   resolveOverlayIdForSender,
   openStandaloneConversationOverlay,
+  revealOverlayWindow,
   hasOverlayWindow,
   destroyOverlayWindow,
   dispatchEventToOverlay,

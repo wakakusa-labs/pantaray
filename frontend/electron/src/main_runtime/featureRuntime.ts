@@ -126,6 +126,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     hasOverlayWindow: params.notificationWindow.hasOverlayWindow,
     refreshAndResumeConversation: (actionId) =>
       orchestration.refreshAndResumeActionConversation(actionId),
+    revealOverlay: params.notificationWindow.revealOverlayWindow,
     holdsCaptureOsPermissions,
     // The main window is where the recording screen lives, and it reads the pending
     // request set just above — so a window the user closed is created rather than

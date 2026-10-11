@@ -32,6 +32,11 @@ export type AgentOverlayController = {
   openTask: (actionId: string) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed: boolean;
+  /**
+   * Whether the content this panel opened for is rendered. Until it is, no measured height is
+   * reported as settled, so main keeps a window that waits for its layout hidden.
+   */
+  setContentReady: (ready: boolean) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,6 +77,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
+  const [contentReady, setContentReady] = useState(false);
+  const contentReadyRef = useRef(false);
 
   // 最新値参照用（stale closure回避）
   const suggestionIdRef = useRef<string | null>(null);
@@ -91,6 +98,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     historyExpandOverrideRef.current = state.historyExpandOverride;
     isExpandedRef.current = state.isExpanded;
     isActionPhaseRef.current = effectiveActionPhase;
+    contentReadyRef.current = contentReady;
   }, [
     state.suggestionId,
     state.currentProcessId,
@@ -103,6 +111,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     state.historyExpandOverride,
     state.isExpanded,
     effectiveActionPhase,
+    contentReady,
   ]);
 
   const measureAndResize = useCallback((options?: { manual?: boolean }) => {
@@ -165,16 +174,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       : SUGGESTION_RESIZE_BUFFER_PX;
     const targetHeight = Math.min(maxHeight, Math.max(MIN_HEIGHT, needed + resizeBufferPx));
 
-    try {
-      window.electron?.agentOverlay?.resize(targetHeight);
-    } catch {
-      // no-op
-    }
-
-    if (options?.manual) return;
-
     // Auto expand/collapse (既存挙動互換)
-    if (historyExpandOverrideRef.current === null && !manualResizeRef.current) {
+    let shouldExpand = isExpandedRef.current;
+    if (!options?.manual && historyExpandOverrideRef.current === null && !manualResizeRef.current) {
       const collapsedPreviewHeight = scrollableEl
         ? getCollapsedPreviewHeightPx(px(window.getComputedStyle(scrollableEl).lineHeight))
         : MIN_HEIGHT;
@@ -183,11 +185,21 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
         collapsedPreviewHeightPx: collapsedPreviewHeight,
         thresholdPx: RESIZE_EXPAND_THRESHOLD_PX,
       });
-      const shouldExpand =
+      shouldExpand =
         contentRequiresExpansion || targetHeight > MIN_HEIGHT + RESIZE_EXPAND_THRESHOLD_PX;
-      if (shouldExpand !== isExpandedRef.current) {
-        dispatch({ type: 'SET_EXPANDED', value: shouldExpand });
-      }
+    }
+    // A height measured just before an automatic expand or collapse is not the one the panel
+    // settles at: the change re-measures it.
+    const settled = contentReadyRef.current && shouldExpand === isExpandedRef.current;
+
+    try {
+      window.electron?.agentOverlay?.resize(targetHeight, { settled });
+    } catch {
+      // no-op
+    }
+
+    if (shouldExpand !== isExpandedRef.current) {
+      dispatch({ type: 'SET_EXPANDED', value: shouldExpand });
     }
   }, []);
 
@@ -245,6 +257,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     state.isSuggestionStreamFinished,
     state.isActionStreamFinished,
     state.reactionState,
+    contentReady,
     measureAndResize,
   ]);
 
@@ -408,5 +421,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     openTask,
     openTaskFailed:
       openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,
+    setContentReady,
   };
 }

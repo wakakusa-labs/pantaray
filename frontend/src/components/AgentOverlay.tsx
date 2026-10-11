@@ -46,7 +46,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
 }) => {
   const ctrl = useAgentOverlayController(entryMode === 'standalone');
   const headerDrag = useOverlayHeaderDrag();
-  const { state } = ctrl;
+  const { state, setContentReady } = ctrl;
   const { language, t } = useI18n();
   const actions = window.electron?.actions;
   if (window.electron && !actions) throw new Error('Missing Actions bridge.');
@@ -350,6 +350,8 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         : 'send';
   const awaitsBoundConversation =
     conversationActionId !== null && canonicalPage === null && composer.submission === null;
+  // An Action's window is shown once its conversation is laid out, not as a bare header first.
+  useEffect(() => setContentReady(!awaitsBoundConversation));
   useEffect(() => {
     if (composer.submission?.state === 'submitting' && document.activeElement === document.body) {
       restoreComposerFocusRef.current = true;
@@ -537,9 +539,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     <AgentOverlayShell
       isVisible={entryMode === 'standalone' || state.isOverlayVisible}
       isContentVisible={entryMode === 'standalone' || state.isOverlayVisible}
-      isExpanded={
-        state.historyExpandOverride !== null ? state.historyExpandOverride : state.isExpanded
-      }
+      isExpanded={state.historyExpandOverride ?? state.isExpanded}
       content={state.content}
       {...suggestionDisplay}
       actionText={operationalError}

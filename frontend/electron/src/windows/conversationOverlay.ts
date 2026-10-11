@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { CaptureGateState } from '../ipc/context';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 
@@ -19,7 +20,9 @@ export function createConversationOverlayOwner(params: {
   bindActionToOverlay: (actionId: string, overlayId: string) => void;
   resolveOverlayIdForAction: (actionId: string) => string | null;
   hasOverlayWindow: (overlayId: string) => boolean;
-  refreshAndResumeConversation: (actionId: string) => void;
+  refreshAndResumeConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
+  /** Shows a window that waits for its conversation to be laid out. */
+  revealOverlay: (overlayId: string) => void;
   /** Whether macOS grants this app the permissions the recorder needs. */
   holdsCaptureOsPermissions: () => boolean;
   /** Brings the main window forward, where the recording screen is shown. */
@@ -134,7 +137,17 @@ export function createConversationOverlayOwner(params: {
       params.bindActionToOverlay(normalizedActionId, overlayId);
     }
     const result = params.openOverlay(overlayId, normalizedActionId);
-    params.refreshAndResumeConversation(normalizedActionId);
+    // A read conversation reaches the window, which shows itself once it is laid out. Without
+    // one, the window is shown anyway with its own retry rather than staying hidden.
+    void params.refreshAndResumeConversation(normalizedActionId).then(
+      (outcome) => {
+        if (outcome !== 'refreshed') params.revealOverlay(overlayId);
+      },
+      (error: unknown) => {
+        console.error('Failed to read the conversation for its window:', error);
+        params.revealOverlay(overlayId);
+      }
+    );
     return result;
   };
 

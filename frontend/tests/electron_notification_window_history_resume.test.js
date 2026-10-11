@@ -960,6 +960,10 @@ test('an open overlay of any kind leaves the main window able to take typing', a
       win.webContentsEvents.emit('did-finish-load');
       win.windowEvents.emit('ready-to-show');
     }
+    handlers.onResizeNotificationWindow(
+      { sender: instances[3].webContents },
+      { height: 400, settled: true }
+    );
     handlers.onOverlayInteraction({ sender: instances[0].webContents });
     notificationWindow.hideOverlay('S1');
     handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
@@ -970,6 +974,66 @@ test('an open overlay of any kind leaves the main window able to take typing', a
   } finally {
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   }
+});
+
+test('a window opened for an Action is first shown at its laid-out size, not before', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const handlers = notificationWindow.createNotificationIpcHandlers({
+    resumeLiveProcess: () => {},
+    refreshActionConversation: () => {},
+    resolveOverlayBootstrap: async () => null,
+  });
+  const shownHeights = [];
+  const openReady = (id, actionId) => {
+    notificationWindow.openStandaloneConversationOverlay(id, actionId);
+    const win = instances[instances.length - 1];
+    for (const method of ['show', 'showInactive']) {
+      const original = win[method].bind(win);
+      win[method] = () => {
+        shownHeights.push([id, win.getBounds().height]);
+        original();
+      };
+    }
+    win.webContentsEvents.emit('did-finish-load');
+    win.windowEvents.emit('ready-to-show');
+    return win;
+  };
+  const resize = (win, payload) =>
+    handlers.onResizeNotificationWindow({ sender: win.webContents }, payload);
+
+  // A new conversation has its composer from the first paint, so it shows at once.
+  openReady('standalone:1', null);
+  assert.deepEqual(shownHeights, [['standalone:1', 120]]);
+
+  const conversation = openReady('conversation:A1', 'A1');
+  assert.equal(conversation.isVisible(), false);
+  // Asking again while it waits does not show it early.
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'), 'loading');
+  // Heights measured before the conversation is laid out, collapsed or not, keep it hidden.
+  resize(conversation, { height: 160, settled: false });
+  assert.equal(conversation.isVisible(), false);
+  resize(conversation, { height: 640, settled: true });
+  assert.equal(conversation.isVisible(), true);
+  assert.deepEqual(shownHeights.at(-1), ['conversation:A1', 640]);
+
+  // Once shown, it is the user's: later reports neither show nor hide it again.
+  const shownCount = shownHeights.length;
+  resize(conversation, { height: 700, settled: true });
+  notificationWindow.revealOverlayWindow('conversation:A1');
+  assert.equal(shownHeights.length, shownCount);
+  assert.equal(conversation.getBounds().height, 700);
+});
+
+test('a window whose conversation could not be read is shown with its retry', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+
+  notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
+  // Main gives up before the window finished loading: ready-to-show shows it.
+  notificationWindow.revealOverlayWindow('conversation:A1');
+  assert.equal(instances[0].isVisible(), false);
+  instances[0].webContentsEvents.emit('did-finish-load');
+  instances[0].windowEvents.emit('ready-to-show');
+  assert.equal(instances[0].isVisible(), true);
 });
 
 test('closing a conversation Overlay destroys it and releases its Action association', () => {
@@ -1211,6 +1275,7 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
   // A Suggestion arriving stacks upward over the one shown in its cell only; a moved setting
   // applies to the next window only.
   for (const win of instances) win.windowEvents.emit('ready-to-show');
+  notificationWindow.revealOverlayWindow('conversation:A1');
   assert.equal(instances.filter((win) => win.isVisible()).length, 4);
   notificationWindow.showNotification('S3');
   assert.deepEqual(position(instances[4]), { x: 20, y: 772 - 132 });

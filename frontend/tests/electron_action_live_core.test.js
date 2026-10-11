@@ -12,6 +12,19 @@ const {
   createActionLatestPageReader,
 } = require('../electron/dist/actions/actionLatestPageReader.js');
 
+
+// Starts each read as soon as it is asked for, as the shared reader does with no other caller.
+function immediateLatestPages(readPage) {
+  let readsStarted = 0;
+  return {
+    read: (actionId) => {
+      const readNumber = ++readsStarted;
+      return Promise.resolve(readPage(actionId)).then((page) => ({ page, readNumber }));
+    },
+    readsStarted: () => readsStarted,
+  };
+}
+
 function actionMeta(actionId = 'action-a', processId = 'process-a') {
   return {
     kind: 'action',
@@ -135,7 +148,7 @@ test('assistant event refreshes the durable message once per page without a tool
     content: '原因を特定しました。依存する設定を確認します。',
   };
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => conversationPage('action-a', { entry }),
+    latestPages: immediateLatestPages(async () => conversationPage('action-a', { entry })),
     publish: () => {},
     surfaceRefreshError: (_id, error) => { throw error; },
   });
@@ -311,7 +324,7 @@ test('approval blocker はpauseだけが生成しcanonical statusとprocess deci
   let page = conversationPage('action-a', null, 'process-a');
   const updates = [];
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => page,
+    latestPages: immediateLatestPages(async () => page),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -355,7 +368,7 @@ test('並列approval blockerはnonterminal refreshを越えて残り決定ごと
   // root process は running のまま subagent だけが承認待ちの状態を再現する。
   const page = conversationPage('action-a', canonicalStep, 'logical-run-a');
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => page,
+    latestPages: immediateLatestPages(async () => page),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -403,9 +416,9 @@ test('root process_completed はrefresh失敗時でも子blockerごと同期的�
   const updates = [];
   const errors = [];
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => {
+    latestPages: immediateLatestPages(async () => {
       throw new Error('conversation read failed');
-    },
+    }),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => errors.push(error),
   });
@@ -428,7 +441,7 @@ test('root process_completed はrefresh失敗時でも子blockerごと同期的�
 test('決定settleはblockerの子processではなくroot transport process idを返す', async () => {
   const page = conversationPage('action-a', null, 'logical-run-a');
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => page,
+    latestPages: immediateLatestPages(async () => page),
     publish: () => {},
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -462,7 +475,7 @@ test('refresh coordinator はActionごとのflightをshared readerへjoinさせA
     return pending.promise;
   });
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: latestPageReader.read,
+    latestPages: latestPageReader,
     publish: (update) => published.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -499,12 +512,12 @@ test('refresh failure はdirtyなしで終了し、後続triggerだけが再開�
   const published = [];
   let attempt = 0;
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => {
+    latestPages: immediateLatestPages(async () => {
       attempt += 1;
       if (attempt === 1) throw networkError;
       if (attempt === 2) return conversationPage('wrong-action');
       return conversationPage('action-a');
-    },
+    }),
     publish: (update) => published.push(update),
     surfaceRefreshError: (actionId, error) => errors.push({ actionId, error }),
   });
@@ -532,7 +545,7 @@ test('shared reader はreadごとにpublishし、read中に来たcallerは次の
     return reads === 1 ? firstRead.promise : secondRead.promise;
   });
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: latestPageReader.read,
+    latestPages: latestPageReader,
     publish: (update) => published.push(update),
     surfaceRefreshError: (_actionId, error) => errors.push(error),
   });
@@ -553,7 +566,7 @@ test('shared reader はreadごとにpublishし、read中に来たcallerは次の
   assert.equal(joinedSettled, false);
   const latest = conversationPage('action-a', null, 'process-a', 'success');
   secondRead.resolve(latest);
-  assert.deepStrictEqual(await rendererCaller, latest);
+  assert.deepStrictEqual((await rendererCaller).page, latest);
   assert.equal(await joinedCaller, 'refreshed');
   assert.equal(reads, 2);
   assert.equal(errors.length, 0);
@@ -572,7 +585,7 @@ test('read中に更新が届き続けても、各readの結果が届いた順に
     return pending.promise;
   });
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: latestPageReader.read,
+    latestPages: latestPageReader,
     publish: (update) => update.kind === 'action_updated' && update.snapshot.page && published.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -593,57 +606,131 @@ test('read中に更新が届き続けても、各readの結果が届いた順に
   assert.equal(openedOutcome, 'refreshed');
 });
 
-test('read中に届いた終了通知は、その前に始まったreadのpageで消えず、後続read失敗後も残る', async () => {
-  const reads = [];
-  const updates = [];
-  const errors = [];
-  const latestPageReader = createActionLatestPageReader(() => {
-    const pending = deferred();
-    reads.push(pending);
-    return pending.promise;
-  });
-  const coordinator = createActionLiveCoordinator({
-    readLatestPage: latestPageReader.read,
-    publish: (update) => updates.push(update),
-    surfaceRefreshError: (_actionId, error) => errors.push(error),
-  });
+// Live notifications against the page reads that may or may not include them. A page whose
+// read started after a notification takes over from it; an earlier page leaves it in place,
+// whatever happens to the read queued after it.
+const completed = (status) => {
+  const event = processEvent('process_completed');
+  event.data.status = status;
+  return event;
+};
+const assistantStep = () => {
+  const event = actionStep('success');
+  event.data = {
+    action_id: 'action-a', process_id: 'process-a', step_kind: 'assistant',
+    step_id: 'message-1', step_number: 3, status: 'success',
+  };
+  return event;
+};
+const processingPage = () => conversationPage('action-a');
+const endedPage = (status) => {
+  const page = conversationPage('action-a', null, 'run-1', status);
+  page.action.resumable = status === 'canceled';
+  return page;
+};
+const ERROR_LIFECYCLE = { processId: 'process-a', status: 'error' };
 
-  const stale = coordinator.refresh('action-a');
-  await new Promise(setImmediate);
-  const failed = processEvent('process_completed');
-  failed.data.status = 'error';
-  const completion = coordinator.handleEvent(failed).refreshDone;
-  assert.deepStrictEqual(updates.at(-1).snapshot.lifecycle, {
-    processId: 'process-a',
-    status: 'error',
-  });
+const INTERLEAVINGS = [
+  {
+    name: 'an end observed before the read started is cleared by its page',
+    steps: [['event', completed('error')], ['land', 0, endedPage('error')]],
+    lifecycle: null,
+  },
+  {
+    name: 'an end observed during a read survives that read’s older page',
+    steps: [['open'], ['event', completed('error')], ['land', 0, processingPage()]],
+    lifecycle: ERROR_LIFECYCLE,
+  },
+  {
+    name: 'an end observed during a read survives when the read after it fails',
+    steps: [
+      ['open'],
+      ['event', completed('error')],
+      ['land', 0, processingPage()],
+      ['fail', 1],
+    ],
+    lifecycle: ERROR_LIFECYCLE,
+  },
+  {
+    name: 'an end observed during a read is cleared by the read that started after it',
+    steps: [
+      ['open'],
+      ['event', completed('error')],
+      ['land', 0, processingPage()],
+      ['land', 1, endedPage('error')],
+    ],
+    lifecycle: null,
+  },
+  {
+    // The completion joins a read an earlier message already queued; that read still starts
+    // after the completion, so its page clears it and the task can be resumed.
+    name: 'an end that joins an already queued read is cleared by that read',
+    steps: [
+      ['open'],
+      ['event', assistantStep()],
+      ['event', completed('canceled')],
+      ['land', 0, processingPage()],
+      ['land', 1, endedPage('canceled')],
+    ],
+    lifecycle: null,
+    resumable: true,
+  },
+  {
+    name: 'an end observed after the last read stays until a read reflects it',
+    steps: [['open'], ['land', 0, processingPage()], ['event', completed('error')], ['fail', 1]],
+    lifecycle: ERROR_LIFECYCLE,
+  },
+  {
+    name: 'a finished Tool observed during a read survives that read’s older page',
+    steps: [['open'], ['event', actionStep('success')], ['land', 0, processingPage()]],
+    lifecycle: null,
+    transients: ['success'],
+  },
+  {
+    name: 'a finished Tool is dropped by the read that started after it',
+    steps: [
+      ['open'],
+      ['event', actionStep('success')],
+      ['land', 0, processingPage()],
+      ['land', 1, processingPage()],
+    ],
+    lifecycle: null,
+    transients: [],
+  },
+];
 
-  // The page read before the run ended still says processing; the end it missed stays.
-  reads[0].resolve(conversationPage('action-a'));
-  assert.equal(await stale, 'refreshed');
-  assert.equal(updates.at(-1).snapshot.page.action.status, 'processing');
-  assert.deepStrictEqual(updates.at(-1).snapshot.lifecycle, {
-    processId: 'process-a',
-    status: 'error',
+for (const row of INTERLEAVINGS) {
+  test(`live notification vs read: ${row.name}`, async () => {
+    const gets = [];
+    const updates = [];
+    const coordinator = createActionLiveCoordinator({
+      latestPages: createActionLatestPageReader(() => {
+        const pending = deferred();
+        gets.push(pending);
+        return pending.promise;
+      }),
+      publish: (update) => updates.push(update),
+      surfaceRefreshError: () => {},
+    });
+    for (const [kind, ...args] of row.steps) {
+      if (kind === 'open') void coordinator.refresh('action-a');
+      if (kind === 'event') coordinator.handleEvent(args[0]);
+      if (kind === 'land') gets[args[0]].resolve(args[1]);
+      if (kind === 'fail') gets[args[0]].reject(new Error('read failed'));
+      await new Promise(setImmediate);
+    }
+    const shown = updates.at(-1).snapshot;
+    assert.deepStrictEqual(shown.lifecycle, row.lifecycle);
+    if (row.transients) {
+      assert.deepStrictEqual(
+        shown.transientToolSteps.map((step) => step.entry.status),
+        row.transients
+      );
+    }
+    // Both windows offer Resume only without a lifecycle notification on a resumable page.
+    if (row.resumable) assert.equal(shown.page.action.resumable, true);
   });
-
-  await new Promise(setImmediate);
-  reads[1].reject(new Error('backend unavailable'));
-  assert.equal(await completion, 'failed');
-  assert.equal(errors.length, 1);
-  assert.deepStrictEqual(coordinator.getSnapshot('action-a').lifecycle, {
-    processId: 'process-a',
-    status: 'error',
-  });
-
-  // A read that began after the notification is authoritative again.
-  const settled = coordinator.refresh('action-a');
-  await new Promise(setImmediate);
-  reads[2].resolve(conversationPage('action-a', null, 'run-1', 'error'));
-  assert.equal(await settled, 'refreshed');
-  assert.equal(updates.at(-1).snapshot.lifecycle, null);
-  assert.equal(updates.at(-1).snapshot.page.action.status, 'error');
-});
+}
 
 test('dirty 中の旧terminal pageは適用せず新runのtransientを保持する', async () => {
   const reads = [];
@@ -654,7 +741,7 @@ test('dirty 中の旧terminal pageは適用せず新runのtransientを保持す�
     return pending.promise;
   });
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: latestPageReader.read,
+    latestPages: latestPageReader,
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -686,7 +773,7 @@ test('canonical Tool status precedence はlogical run内だけでtransientを照
   ).transientEffect.step;
   let page = conversationPage('action-a', canonicalProcessing, 'logical-run-root');
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => page,
+    latestPages: immediateLatestPages(async () => page),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -733,11 +820,11 @@ test('refreshはread中のtransientを保持し次の明示refreshでpage外term
   const reads = [];
   const updates = [];
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: () => {
+    latestPages: immediateLatestPages(() => {
       const pending = deferred();
       reads.push(pending);
       return pending.promise;
-    },
+    }),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -785,29 +872,26 @@ test('refreshはread中のtransientを保持し次の明示refreshでpage外term
 });
 
 test('process terminalはrefresh成功までtransientを保持しresetは旧subject結果を破棄する', async () => {
-  const terminalRead = deferred();
   const staleRead = deferred();
   const updates = [];
   const errors = [];
   let reads = 0;
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: (actionId) => {
+    latestPages: createActionLatestPageReader(async (actionId) => {
       reads += 1;
-      // The finished Tool starts the read and the completion joins that same read.
-      if (reads <= 2) return terminalRead.promise;
-      if (reads === 3) return Promise.resolve(conversationPage(actionId, null, 'run-1', 'success'));
+      // The finished Tool starts a read and the completion queues the next; both fail.
+      if (reads <= 2) throw new Error('terminal refresh failed');
+      if (reads === 3) return conversationPage(actionId, null, 'run-1', 'success');
       return staleRead.promise;
-    },
+    }),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => errors.push(error),
   });
 
   coordinator.handleEvent(actionStep('success'));
   const terminal = coordinator.handleEvent(processEvent('process_completed'));
-  await new Promise(setImmediate);
-  terminalRead.reject(new Error('terminal refresh failed'));
   await terminal.refreshDone;
-  assert.equal(errors.length, 1);
+  assert.equal(errors.length, 2);
   assert.equal(updates.at(-1).snapshot.transientToolSteps[0].entry.status, 'success');
 
   await coordinator.refresh('action-a');
@@ -832,7 +916,7 @@ test('1 THINK の並列 tool step は step_id 単位でupsertされ部分canonic
   const read = deferred();
   const updates = [];
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: () => read.promise,
+    latestPages: immediateLatestPages(() => read.promise),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -897,7 +981,7 @@ test('canonical page version advances for identical reads but not transient publ
   const page = conversationPage('action-a', null, 'run-1');
   const updates = [];
   const coordinator = createActionLiveCoordinator({
-    readLatestPage: async () => page,
+    latestPages: immediateLatestPages(async () => page),
     publish: (update) => updates.push(update),
     surfaceRefreshError: (_actionId, error) => assert.fail(error),
   });
@@ -919,7 +1003,7 @@ for (const status of ['error', 'timeout', 'canceled', 'success']) {
     const page = conversationPage('action-a', null, 'process-a');
     let read = async () => page;
     const coordinator = createActionLiveCoordinator({
-      readLatestPage: () => read(),
+      latestPages: immediateLatestPages(() => read()),
       publish: (update) => updates.push(update),
       surfaceRefreshError: (_actionId, error) => errors.push(error),
     });

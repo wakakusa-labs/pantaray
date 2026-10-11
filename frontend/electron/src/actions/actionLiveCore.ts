@@ -1,4 +1,5 @@
 import type { ActionConversationPage } from './actionContracts';
+import type { ActionLatestPageRead, ActionLatestPages } from './actionLatestPageReader';
 import {
   isProcessCompletedActionEvent,
   isProcessStartedActionEvent,
@@ -303,7 +304,7 @@ function transientToolStepKey(step: ActionTransientToolStep): string {
 }
 
 export function createActionLiveCoordinator(params: {
-  readLatestPage: (actionId: string) => Promise<ActionConversationPage>;
+  latestPages: ActionLatestPages;
   publish: (update: ActionLiveUpdate) => void;
   surfaceRefreshError: (actionId: string, error: unknown) => void;
 }): {
@@ -335,8 +336,19 @@ export function createActionLiveCoordinator(params: {
   // promise, so they share one application of its page instead of publishing it twice.
   const flights = new Map<
     string,
-    { read: Promise<ActionConversationPage>; outcome: Promise<ActionLiveRefreshOutcome> }
+    { read: Promise<ActionLatestPageRead>; outcome: Promise<ActionLiveRefreshOutcome> }
   >();
+  // When each live notification was observed, as the number of page reads started by then. A
+  // page whose read started after it (stamp < readNumber) reflects it and takes over; an earlier
+  // page does not, so it neither clears that lifecycle nor drops that finished Tool.
+  const observedAt = new Map<string, { lifecycle: number; steps: Map<string, number> }>();
+  const observe = (actionId: string) => {
+    const existing = observedAt.get(actionId);
+    if (existing) return existing;
+    const created = { lifecycle: 0, steps: new Map<string, number>() };
+    observedAt.set(actionId, created);
+    return created;
+  };
   let generation = 0;
   let pageVersion = 0;
 
@@ -346,24 +358,24 @@ export function createActionLiveCoordinator(params: {
       return;
     }
     const next = reduceActionLiveSnapshot(current, actionId, effect);
+    const key = transientToolStepKey(effect.step);
+    const previous = current?.transientToolSteps.find((step) => transientToolStepKey(step) === key);
+    // A repeated report of the same status is not news: the page that showed it still does.
+    if (previous?.entry.status !== effect.step.entry.status) {
+      observe(actionId).steps.set(key, params.latestPages.readsStarted());
+    }
     snapshots.set(actionId, next);
     params.publish({ kind: 'action_updated', snapshot: next });
   };
 
   const refresh = (actionId: string): Promise<ActionLiveRefreshOutcome> => {
-    const pagePromise = params.readLatestPage(actionId);
+    const pageRead = params.latestPages.read(actionId);
     const joined = flights.get(actionId);
-    if (joined?.read === pagePromise) return joined.outcome;
+    if (joined?.read === pageRead) return joined.outcome;
     const startedGeneration = generation;
-    const terminalAtReadStart = new Set(
-      (snapshots.get(actionId)?.transientToolSteps ?? [])
-        .filter((step) => step.entry.status !== 'processing')
-        .map(transientToolStepKey)
-    );
-    const lifecycleAtReadStart = snapshots.get(actionId)?.lifecycle ?? null;
     const promise = (async (): Promise<ActionLiveRefreshOutcome> => {
       try {
-        const page = await pagePromise;
+        const { page, readNumber } = await pageRead;
         if (startedGeneration !== generation) return 'superseded';
         if (page.action.action_id !== actionId) throw new ActionLiveIdentityError('page');
         const actionIsTerminal = ['success', 'error', 'canceled'].includes(page.action.status);
@@ -371,20 +383,22 @@ export function createActionLiveCoordinator(params: {
         // the previous run's end, read before the next run started. Ending the Action on it
         // would drop that run's transients and window binding; the newer read decides instead.
         const newer = flights.get(actionId);
-        if (actionIsTerminal && newer && newer.read !== pagePromise) return await newer.outcome;
+        if (actionIsTerminal && newer && newer.read !== pageRead) return await newer.outcome;
         const current = snapshots.get(actionId);
+        const observed = observedAt.get(actionId);
+        const reflects = (stamp: number | undefined) => stamp !== undefined && stamp < readNumber;
+        // A finished Tool is durable before its event, so a page read after the event shows it.
         const transientToolSteps = actionIsTerminal
           ? []
           : (current?.transientToolSteps ?? []).filter(
               (step) =>
-                !terminalAtReadStart.has(transientToolStepKey(step)) &&
-                !isActionTransientToolStepSuperseded(page, step)
+                !(
+                  step.entry.status !== 'processing' &&
+                  reflects(observed?.steps.get(transientToolStepKey(step)))
+                ) && !isActionTransientToolStepSuperseded(page, step)
             );
-        // A lifecycle notification that arrived during this read is newer than its page, so it
-        // stays until a read that began after it lands.
-        const currentLifecycle = current?.lifecycle ?? null;
         const lifecycleAfterRead =
-          currentLifecycle === lifecycleAtReadStart ? null : currentLifecycle;
+          current?.lifecycle && !reflects(observed?.lifecycle) ? current.lifecycle : null;
         // The conversation page carries no blockers, and the latest run status only
         // reflects the root process, so a nonterminal refresh keeps the WS snapshot
         // intact: subagent blockers stay visible while the root run keeps running.
@@ -400,6 +414,7 @@ export function createActionLiveCoordinator(params: {
         params.publish({ kind: 'action_updated', snapshot });
         if (actionIsTerminal) {
           snapshots.delete(actionId);
+          observedAt.delete(actionId);
           rootProcessIds.delete(actionId);
         }
         return 'refreshed';
@@ -411,7 +426,7 @@ export function createActionLiveCoordinator(params: {
     })().finally(() => {
       if (flights.get(actionId)?.outcome === promise) flights.delete(actionId);
     });
-    flights.set(actionId, { read: pagePromise, outcome: promise });
+    flights.set(actionId, { read: pageRead, outcome: promise });
     return promise;
   };
 
@@ -443,6 +458,9 @@ export function createActionLiveCoordinator(params: {
           effect.kind === 'replace'
             ? (current?.approvalBlockers.length ?? 0) > 0 || approvalBlockers.length > 0
             : approvalBlockers.length !== (current?.approvalBlockers.length ?? 0);
+        if (lifecycle !== (current?.lifecycle ?? null)) {
+          observe(route.actionId).lifecycle = params.latestPages.readsStarted();
+        }
         if (changed || lifecycle !== (current?.lifecycle ?? null)) {
           const snapshot: ActionLiveSnapshot = {
             actionId: route.actionId,
@@ -489,6 +507,7 @@ export function createActionLiveCoordinator(params: {
     clearAll: () => {
       generation += 1;
       snapshots.clear();
+      observedAt.clear();
       rootProcessIds.clear();
       flights.clear();
       params.publish({ kind: 'reset' });

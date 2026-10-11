@@ -5,6 +5,19 @@ const {
   createOrchestrationManager,
 } = require('../electron/dist/orchestration/orchestrationManager.js');
 
+
+// Starts each read as soon as it is asked for, as the shared reader does with no other caller.
+function immediateLatestPages(readPage) {
+  let readsStarted = 0;
+  return {
+    read: (actionId) => {
+      const readNumber = ++readsStarted;
+      return Promise.resolve(readPage(actionId)).then((page) => ({ page, readNumber }));
+    },
+    readsStarted: () => readsStarted,
+  };
+}
+
 function createFakeTimers() {
   /** @type {Array<{ id: number, ms: number, fn: Function }>} */
   const timeouts = [];
@@ -62,7 +75,7 @@ function createManagerHarness(overrides = {}) {
     getOwnerId: () => 'user-1',
     getRuntimeState: () => ({ status: 'ready', message: null }),
     getUiLanguage: () => 'en',
-    readLatestActionConversationPage: async (actionId) => ({
+    latestActionPages: immediateLatestPages(async (actionId) => ({
       action: {
         action_id: actionId,
         suggestion_id: 'sug-1',
@@ -85,7 +98,7 @@ function createManagerHarness(overrides = {}) {
       ],
       unadopted_messages: [],
       next_cursor: null,
-    }),
+    })),
     resolveOverlayBootstrap: overrides.resolveOverlayBootstrap,
     timers,
   });

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 
 import type { BrowserWindow } from 'electron';
 
-import type { ActionConversationPage } from '../actions/actionContracts';
+import type { ActionLatestPages } from '../actions/actionLatestPageReader';
 import {
   createActionLiveCoordinator,
   type ActionLiveEventRoute,
@@ -40,7 +40,7 @@ type TimerApi = {
 export function createOrchestrationRendererBridge(params: {
   notificationWindow: NotificationWindowApi;
   getMainWindow: () => BrowserWindow | null;
-  readLatestActionConversationPage: (actionId: string) => Promise<ActionConversationPage>;
+  latestActionPages: ActionLatestPages;
   sendFromRenderer: (message: unknown) => Promise<void>;
   requestResume: (request: ResumeProcessRequest) => void;
   getUiLanguage: () => 'en' | 'ja';
@@ -95,7 +95,7 @@ export function createOrchestrationRendererBridge(params: {
   }
 
   const actionLive = createActionLiveCoordinator({
-    readLatestPage: params.readLatestActionConversationPage,
+    latestPages: params.latestActionPages,
     publish: sendActionLiveUpdate,
     surfaceRefreshError: (actionId, error) => {
       console.error(`Failed to refresh Action conversation ${actionId}:`, error);

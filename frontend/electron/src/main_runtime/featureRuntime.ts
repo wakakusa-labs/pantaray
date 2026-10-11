@@ -169,7 +169,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getOwnerId: params.supabaseWiring.getLocalOwnerId,
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     getUiLanguage: params.getUiLanguage,
-    readLatestActionConversationPage: latestActionPageReader.read,
+    latestActionPages: latestActionPageReader,
     // `requestJson` is defined just below; the responder only calls it once a
     // capture request actually arrives, long after this module finished loading.
     respondToScreenCapture: createScreenCaptureResponder({
@@ -377,7 +377,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           ...actions,
           readConversationPage: (request) =>
             request.cursor === null && request.limit === ACTION_CONVERSATION_LATEST_PAGE_LIMIT
-              ? latestActionPageReader.read(request.actionId)
+              ? latestActionPageReader.read(request.actionId).then(({ page }) => page)
               : actions.readConversationPage(request),
           getCurrentSubjectId: getUserId,
           resolveOverlayIdForSender: params.notificationWindow.resolveOverlayIdForSender,

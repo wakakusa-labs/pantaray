@@ -4,6 +4,19 @@ const Module = require('module');
 
 process.env.FRONTEND_PORT = '3001';
 
+
+// Starts each read as soon as it is asked for, as the shared reader does with no other caller.
+function immediateLatestPages(readPage) {
+  let readsStarted = 0;
+  return {
+    read: (actionId) => {
+      const readNumber = ++readsStarted;
+      return Promise.resolve(readPage(actionId)).then((page) => ({ page, readNumber }));
+    },
+    readsStarted: () => readsStarted,
+  };
+}
+
 function createEmitter() {
   const listeners = new Map();
   return {
@@ -1082,7 +1095,7 @@ function createActionLiveBridge(notificationWindow) {
       isDestroyed: () => false,
       webContents: { send: (channel, payload) => mainSent.push({ channel, payload }) },
     }),
-    readLatestActionConversationPage: async (actionId) => ({
+    latestActionPages: immediateLatestPages(async (actionId) => ({
       action: {
         action_id: actionId,
         suggestion_id: 'S1',
@@ -1105,7 +1118,7 @@ function createActionLiveBridge(notificationWindow) {
       ],
       unadopted_messages: [],
       next_cursor: null,
-    }),
+    })),
     sendFromRenderer: async () => {},
     requestResume: () => {},
     getUiLanguage: () => 'en',

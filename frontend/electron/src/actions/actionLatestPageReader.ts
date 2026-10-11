@@ -1,8 +1,21 @@
 import type { ActionConversationPage } from './actionContracts';
 
+/**
+ * A latest page and the number its read was given when it started. Reads are numbered across
+ * all Actions in the order they start, so a live event observed while `readsStarted()` was
+ * below `readNumber` happened before this read began and is reflected in its page.
+ */
+export type ActionLatestPageRead = { page: ActionConversationPage; readNumber: number };
+
+export type ActionLatestPages = {
+  read: (actionId: string) => Promise<ActionLatestPageRead>;
+  /** How many reads have started so far; a live event is stamped with it. */
+  readsStarted: () => number;
+};
+
 type Follower = {
-  promise: Promise<ActionConversationPage>;
-  resolve: (page: ActionConversationPage) => void;
+  promise: Promise<ActionLatestPageRead>;
+  resolve: (read: ActionLatestPageRead) => void;
   reject: (error: unknown) => void;
 };
 type Flight = { follower: Follower | null };
@@ -10,7 +23,7 @@ type Flight = { follower: Follower | null };
 function createFollower(): Follower {
   let resolve!: Follower['resolve'];
   let reject!: Follower['reject'];
-  const promise = new Promise<ActionConversationPage>((onResolve, onReject) => {
+  const promise = new Promise<ActionLatestPageRead>((onResolve, onReject) => {
     resolve = onResolve;
     reject = onReject;
   });
@@ -25,19 +38,18 @@ function createFollower(): Follower {
  */
 export function createActionLatestPageReader(
   readLatestPage: (actionId: string) => Promise<ActionConversationPage>
-): {
-  read: (actionId: string) => Promise<ActionConversationPage>;
-  clear: () => void;
-} {
+): ActionLatestPages & { clear: () => void } {
   const flights = new Map<string, Flight>();
+  let readsStarted = 0;
 
-  const begin = (actionId: string): Promise<ActionConversationPage> => {
+  const begin = (actionId: string): Promise<ActionLatestPageRead> => {
     const flight: Flight = { follower: null };
     flights.set(actionId, flight);
+    const readNumber = ++readsStarted;
     // The executor turns a synchronous throw into this read's rejection.
     const read = new Promise<ActionConversationPage>((resolve) =>
       resolve(readLatestPage(actionId))
-    );
+    ).then((page) => ({ page, readNumber }));
     const advance = (settleDetached: (follower: Follower) => void) => {
       const { follower } = flight;
       if (flights.get(actionId) !== flight) {
@@ -53,13 +65,13 @@ export function createActionLatestPageReader(
       begin(actionId).then(follower.resolve, follower.reject);
     };
     read.then(
-      (page) => advance((follower) => follower.resolve(page)),
+      (result) => advance((follower) => follower.resolve(result)),
       (error: unknown) => advance((follower) => follower.reject(error))
     );
     return read;
   };
 
-  const read = (actionId: string): Promise<ActionConversationPage> => {
+  const read = (actionId: string): Promise<ActionLatestPageRead> => {
     const flight = flights.get(actionId);
     if (!flight) return begin(actionId);
     flight.follower ??= createFollower();
@@ -68,6 +80,7 @@ export function createActionLatestPageReader(
 
   return {
     read,
+    readsStarted: () => readsStarted,
     clear: () => flights.clear(),
   };
 }

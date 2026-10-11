@@ -1,24 +1,41 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING
 
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+    frozen_executing_head,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
     require_string_arg,
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.action_subagent_continue import (
+    ActionSubagentContinueInputError,
+    ActionSubagentContinueRequest,
+    continue_action_subagent,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
     ActionSubagentMessageInputError,
     ActionSubagentMessageRequest,
     send_action_subagent_message,
 )
-from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
-    read_action_subagent_wait_snapshot,
+from pantaray_agents.local_runtime.runtime.action_subagent_spawn import (
+    ActionSubagentSpawnRequestError,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_action_storage_paths,
+)
+from pantaray_agents.local_runtime.tooling.action_subagent_resource_claims import (
+    ActionSubagentResourceClaimConflictError,
+)
+from pantaray_agents.local_runtime.tooling.action_subagent_resource_identity import (
+    ActionSubagentResourceIdentityError,
+)
+from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import (
@@ -26,19 +43,27 @@ from .shared import (
     ToolValidationError,
     UnprojectedToolExecutionResult,
 )
-from .subagent_wait import _build_wait_request
+
+if TYPE_CHECKING:  # pragma: no cover
+    from pantaray_agents.agents.action_agent import ActionAgent
 
 
 async def run_send_message_to_subagent_tool(
+    agent: ActionAgent,
     *,
     step_id: str,
     tool_def: ToolDefinition,
     args: ToolArgs,
     state: ActionAgentState,
     actor: ToolExecutionActor,
+    origin: ActionToolCallOrigin | None,
 ) -> UnprojectedToolExecutionResult:
     if actor != "supervisor":
         raise ToolValidationError("Only the Supervisor can send subagent messages.")
+    if origin is None:
+        raise ToolValidationError(
+            "send_message_to_subagent requires an adopted call origin."
+        )
     trace = get_trace_context()
     process_id = trace.extra.get("process_id") if trace is not None else None
     if (
@@ -54,45 +79,73 @@ async def run_send_message_to_subagent_tool(
 
     accepted_at = now_utc_iso()
     db_path, busy_timeout_ms = read_local_runtime_db_config()
+    user_id = state["user_id"]
+    action_id = state["action_id"]
+    child_process_id = require_string_arg(args, "child_process_id")
+    message_id = require_string_arg(args, "message_id")
+    content = require_string_arg(args, "content")
     try:
-        child_process_id = require_string_arg(args, "child_process_id")
-        message_id = require_string_arg(args, "message_id")
-        accepted = send_action_subagent_message(
+        delivered = send_action_subagent_message(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             request=ActionSubagentMessageRequest(
-                user_id=state["user_id"],
-                action_id=state["action_id"],
+                user_id=user_id,
+                action_id=action_id,
                 parent_process_id=process_id,
                 parent_job_id=trace.local_job_id,
                 child_process_id=child_process_id,
                 message_id=message_id,
-                content=require_string_arg(args, "content"),
+                content=content,
             ),
         )
-    except ActionSubagentMessageInputError as exc:
-        raise ToolValidationError(str(exc)) from exc
-    if accepted:
-        return UnprojectedToolExecutionResult(
-            step_id=step_id,
-            tool_id=tool_def.tool_id,
-            status="success",
-            started_at=accepted_at,
-            completed_at=now_utc_iso(),
-            output=True,
+        if delivered:
+            return UnprojectedToolExecutionResult(
+                step_id=step_id,
+                tool_id=tool_def.tool_id,
+                status="success",
+                started_at=accepted_at,
+                completed_at=now_utc_iso(),
+                output=True,
+            )
+        # A child that stopped or finished takes no message: a new child carries
+        # on its conversation with this message, and the parent uses its id.
+        continued = continue_action_subagent(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            request=ActionSubagentContinueRequest(
+                user_id=user_id,
+                action_id=action_id,
+                parent_process_id=process_id,
+                parent_job_id=trace.local_job_id,
+                root_execution_session_id=state["execution_session_id"],
+                manifest_id=state["manifest_id"],
+                origin=origin,
+                action_context=frozen_executing_head(agent, state),
+                current_cwd=resolve_action_storage_paths(
+                    db_path=db_path, user_id=user_id, action_id=action_id
+                ).workspace,
+                child_process_id=child_process_id,
+                message_id=message_id,
+                content=content,
+                continued_at=accepted_at,
+            ),
         )
-    # A finished child, of this run or of one the user stopped, takes no message:
-    # the parent gets its final result, as wait_subagents would give it. Collecting
-    # it stays with wait_subagents.
-    request = _build_wait_request(state=state, child_process_ids=(child_process_id,))
-    snapshot = read_action_subagent_wait_snapshot(
-        db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=request
-    )
+    except (
+        ActionSubagentMessageInputError,
+        ActionSubagentContinueInputError,
+        ActionSubagentSpawnRequestError,
+        ActionSubagentResourceClaimConflictError,
+        ActionSubagentResourceIdentityError,
+    ) as exc:
+        raise ToolValidationError(str(exc)) from exc
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,
         status="success",
         started_at=accepted_at,
         completed_at=now_utc_iso(),
-        output=cast(JSONValue, snapshot.results[0]),
+        output={
+            "child_process_id": continued.child_process_id,
+            "continues_child_process_id": child_process_id,
+        },
     )

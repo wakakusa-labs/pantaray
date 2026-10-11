@@ -126,6 +126,13 @@ class ActionAgentRequest(AgentRequest):
         description="USER stepから復元した型付きメッセージ"
     )
     preceding_assistant_messages: tuple[ActionAssistantMessageStep, ...] = ()
+    stopped_run_note: str | None = Field(
+        default=None,
+        description=(
+            "停止された直前の run について、この run の最初の USER step に添える事実"
+            "（止まった subagent の一覧を含む）。直前の run が停止でなければ None。"
+        ),
+    )
     execution_target: ActionExecutionTarget = Field(
         default_factory=ActionScratchExecutionTarget,
         description="Action tool execution target.",

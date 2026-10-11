@@ -20,9 +20,13 @@ from pantaray_agents.conversation.budget import ContextBudget, InputBaseline
 from pantaray_agents.conversation.loop import NOT_RUN_ERROR_CODE, RecordedTurn
 from pantaray_agents.conversation.window import ConversationEntry, WindowState
 from pantaray_agents.local_runtime.runtime.action_subagent_messages import (
+    ACTION_SUBAGENT_AGENTS_MD_EVENT,
     ACTION_SUBAGENT_DELIVERED_EVENT,
+    ACTION_SUBAGENT_HISTORY_EVENTS,
     ACTION_SUBAGENT_MESSAGE_EVENT,
+    ACTION_SUBAGENT_NOTICE_EVENT,
     ACTION_SUBAGENT_TOOL_EVENT,
+    ACTION_SUBAGENT_TURN_EVENT,
     action_subagent_message_content,
     append_action_subagent_event,
     deliver_action_subagent_messages,
@@ -42,17 +46,6 @@ from pantaray_llm.contracts.conversation import (
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
-ACTION_SUBAGENT_TURN_EVENT = "action_subagent_turn"
-ACTION_SUBAGENT_NOTICE_EVENT = "action_subagent_notice"
-ACTION_SUBAGENT_AGENTS_MD_EVENT = "action_subagent_agents_md"
-_HISTORY_EVENTS = (
-    ACTION_SUBAGENT_MESSAGE_EVENT,
-    ACTION_SUBAGENT_DELIVERED_EVENT,
-    ACTION_SUBAGENT_TURN_EVENT,
-    ACTION_SUBAGENT_TOOL_EVENT,
-    ACTION_SUBAGENT_NOTICE_EVENT,
-    ACTION_SUBAGENT_AGENTS_MD_EVENT,
-)
 _INTERRUPTED = (
     "Not run: this call was interrupted before it was answered. "
     "Request it again in a later turn if it is still needed."
@@ -172,7 +165,7 @@ def load_subagent_history(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         process_id=process_id,
-        event_names=_HISTORY_EVENTS,
+        event_names=ACTION_SUBAGENT_HISTORY_EVENTS,
     ):
         name, payload = event.event_name, event.payload
         if name == ACTION_SUBAGENT_MESSAGE_EVENT:

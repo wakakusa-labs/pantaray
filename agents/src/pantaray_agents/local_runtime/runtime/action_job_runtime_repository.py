@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
@@ -40,6 +40,8 @@ from pantaray_agents.tasks.types import (
 from .action_assistant_messages import read_preceding_assistant_messages
 from .action_checkpoint_retention import load_tool_approval_resume_anchor_in_connection
 from .action_job_recovery import is_recovered_user_step_resume
+from .action_message_models import ACTION_RESUME_STEP_NAME
+from .action_stopped_run_note import read_stopped_run_note
 from .action_suggestion_adapter import project_suggestion_action_started
 from .job_payload_models import parse_action_job_payload_json
 from .process_events import append_process_event_in_connection
@@ -67,6 +69,7 @@ class ActionJobExecutionContext:
     approval_session_id: str | None = None
     approval_tool_request_id: str | None = None
     checkpoint_step_id: str | None = None
+    stopped_run_note: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,6 +293,16 @@ def _prepare_user_step(
             before_step_number=step_row["step_number"],
         ),
     )
+    context = replace(
+        context,
+        stopped_run_note=read_stopped_run_note(
+            connection,
+            user_id=payload["user_id"],
+            action_id=payload["action_id"],
+            process_id=payload["process_id"],
+            resumed=step_row["step_name"] == ACTION_RESUME_STEP_NAME,
+        ),
+    )
     action_status = str(action_row["action_status"])
     if action_status == "processing":
         if is_recovered_user_step_resume(
@@ -428,7 +441,7 @@ def _load_user_step(
     row = connection.execute(
         """
         SELECT step_id, step_number, local_step_number, short_step_id,
-               step_type, status, user_message_id, user_message_json,
+               step_type, step_name, status, user_message_id, user_message_json,
                user_request_text, created_at
         FROM agent_action_steps
         WHERE step_id = ? AND action_id = ? AND user_id = ?

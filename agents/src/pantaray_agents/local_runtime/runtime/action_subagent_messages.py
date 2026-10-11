@@ -13,6 +13,7 @@ from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
 from ..storage.transactions import immediate_transaction
+from .action_subagent_ownership import owned_child_sql
 from .job_types import LOCAL_ACTION_JOB_TYPE
 from .process_events import append_process_event_in_connection
 from .utc_timestamps import now_utc_iso
@@ -56,7 +57,9 @@ class ActionSubagentMessageRequest:
 
 def send_action_subagent_message(
     *, db_path: Path, busy_timeout_ms: int, request: ActionSubagentMessageRequest
-) -> None:
+) -> bool:
+    """Accept the message, or report ``False`` for a finished child, which takes none."""
+
     if busy_timeout_ms <= 0:
         raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
     _validate_request(request)
@@ -82,9 +85,7 @@ def send_action_subagent_message(
                         "message_id is already bound to different content"
                     )
             elif child_status in _TERMINAL_STATUSES:
-                raise ActionSubagentMessageInputError(
-                    "terminal Action subagent cannot accept a new message"
-                )
+                return False
             else:
                 append_process_event_in_connection(
                     connection=connection,
@@ -97,6 +98,7 @@ def send_action_subagent_message(
                     },
                     created_at=now_utc_iso(),
                 )
+    return True
 
 
 def append_action_subagent_event(
@@ -210,9 +212,9 @@ def _require_authority(
     connection: sqlite3.Connection, request: ActionSubagentMessageRequest
 ) -> str:
     row = connection.execute(
-        """
+        f"""
         SELECT child.status,
-               child.parent_process_id=parent.process_id
+               {owned_child_sql("parent.process_id")}
                AND child.action_id=parent.action_id
                AND child.user_id=parent.user_id
                AND child.kind='action_subagent' AS owned_child

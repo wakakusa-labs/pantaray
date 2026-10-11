@@ -184,7 +184,10 @@ SEND_MESSAGE_TO_SUBAGENT_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id=SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
         name="Send Message to Subagent",
-        description="Durably send one bounded private message to an active subagent.",
+        description=(
+            "Durably send one bounded private message to an active subagent. A "
+            "finished subagent takes no message; its final result is returned instead."
+        ),
         guide=ToolGuideSpec(
             what="Send correction or additional context to one owned subagent.",
             when="Use when the child should consider new information on its next turn.",
@@ -224,7 +227,7 @@ SEND_MESSAGE_TO_SUBAGENT_TOOL = ToolDefinition.from_spec(
             ),
             description="Durably accept one private parent-to-child message.",
         ),
-        output_schema={"const": True},
+        output_schema={"oneOf": [{"const": True}, _wait_result_union_schema()]},
     )
 )
 

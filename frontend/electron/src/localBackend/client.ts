@@ -72,6 +72,10 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     methods: new Set(['POST']),
   },
   {
+    path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/cancel$/,
+    methods: new Set(['POST']),
+  },
+  {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/unadopted-messages\/[^/]+$/,
     methods: new Set(['DELETE']),
   },

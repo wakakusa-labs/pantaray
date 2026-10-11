@@ -216,6 +216,7 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/v1/agents/users/user-1/actions/action-1/approval-mode', 'PUT'],
     ['/v1/agents/users/user-1/actions/messages', 'POST'],
     ['/v1/agents/users/user-1/actions/action-1/resume', 'POST'],
+    ['/v1/agents/users/user-1/actions/action-1/cancel', 'POST'],
     ['/v1/agents/users/user-1/actions/action-1/unadopted-messages/step-1', 'DELETE'],
     [ACTION_STATE_REQUEST.path, ACTION_STATE_REQUEST.method],
     ['/v1/agents/users/user-1/actions/action-1/steps/step-1/output', 'GET'],
@@ -369,6 +370,34 @@ test('workspace settings の名前変更と同名の作成は allowlist を通�
       ]
     );
     assert.deepEqual(JSON.parse(requested[0].body), { display_name: 'Aurora' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Stop reaches the backend through the allowlist', async () => {
+  const { createActionFetcher } = require('../electron/dist/actions/actionFetch.js');
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url, options) => {
+    requested.push({ url: String(url), method: options.method, body: options.body });
+    return new Response(JSON.stringify({ status: 'accepted' }), { status: 202 });
+  };
+  const fetcher = createActionFetcher({
+    requestJson: readyClient.requestJson,
+    getUserId: () => 'user-1',
+  });
+
+  try {
+    await fetcher.stopAction({ actionId: 'action-1', processId: 'run-1' });
+    assert.deepEqual(
+      requested.map(({ url, method }) => [method, new URL(url).pathname]),
+      [['POST', '/v1/agents/users/user-1/actions/action-1/cancel']]
+    );
+    assert.deepEqual(JSON.parse(requested[0].body), {
+      reason: 'user_stop',
+      expected_process_id: 'run-1',
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

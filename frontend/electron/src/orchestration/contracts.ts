@@ -1,3 +1,4 @@
+import type { SuggestionOverlayOpenRequest } from '../ipc/schemas/overlay';
 import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
 
 import type {
@@ -110,7 +111,8 @@ export type NotificationIpcHandlers = {
   onOverlayDragStart: (event: unknown, payload: unknown) => void;
   onOverlayDragMove: (event: unknown, payload: unknown) => void;
   onOverlayDragEnd: (event: unknown) => void;
-  onHistoryOpenOverlay: (event: unknown, payload: unknown) => void;
+  /** Opens the suggestion in a panel; rejects when it was not opened. */
+  onHistoryOpenOverlay: (event: unknown, request: SuggestionOverlayOpenRequest) => Promise<void>;
 };
 
 export type CreateNotificationIpcHandlers = (options: {

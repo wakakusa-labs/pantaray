@@ -122,8 +122,11 @@ type AgentOverlayShellProps = {
   actionId?: string | null;
   /** The suggestion shown, whose link is copied until an Action takes its place. */
   suggestionId?: string | null;
-  /** Moves that Action to the main window, which then closes this panel. */
-  onOpenInMainWindow?: (actionId: string) => void;
+  /**
+   * Moves the Action, or the suggestion until an Action takes it up, to the main window, which
+   * then closes this panel.
+   */
+  onOpenInMainWindow?: (work: { kind: WorkRefKind; id: string }) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed?: boolean;
   fadeDurationMs?: number;
@@ -216,6 +219,13 @@ const AgentOverlayShell = ({
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
   const { t } = useI18n();
+  // The work this panel stands for: its Action, or the suggestion until one exists.
+  const work: { kind: WorkRefKind; id: string } | null =
+    actionId !== null
+      ? { kind: 'action', id: actionId }
+      : suggestionId !== null
+        ? { kind: 'suggestion', id: suggestionId }
+        : null;
   const showApprovalPanel = approvalUiState === 'approval_pending' && approvalBlockers.length > 0;
   const copyConversationFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
@@ -283,15 +293,13 @@ const AgentOverlayShell = ({
           <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>
         )}
         <HeaderButtonGroup>
-          {actionId !== null ? (
-            <CopyLinkButton visible={isVisible} kind="action" id={actionId} />
-          ) : suggestionId !== null ? (
-            <CopyLinkButton visible={isVisible} kind="suggestion" id={suggestionId} />
+          {work !== null ? (
+            <CopyLinkButton visible={isVisible} kind={work.kind} id={work.id} />
           ) : null}
-          {actionId !== null && onOpenInMainWindow && (
+          {work !== null && onOpenInMainWindow && (
             <HeaderIconButton
               $visible={isVisible}
-              onClick={() => onOpenInMainWindow(actionId)}
+              onClick={() => onOpenInMainWindow(work)}
               aria-label={t('overlay.openInMainWindow')}
               data-tooltip={t('overlay.openInMainWindow')}
             >
@@ -423,7 +431,15 @@ const AgentOverlayShell = ({
             ))}
           </ApprovalDock>
         ) : null}
-        {openTaskFailed ? <p role="alert">{t('overlay.openTaskFailed')}</p> : null}
+        {openTaskFailed ? (
+          <p role="alert">
+            {t(
+              work?.kind === 'suggestion'
+                ? 'overlay.openSuggestionFailed'
+                : 'overlay.openTaskFailed'
+            )}
+          </p>
+        ) : null}
         {composer}
       </ComposerDock>
     </PopupContainer>

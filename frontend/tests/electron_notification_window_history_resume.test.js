@@ -321,7 +321,7 @@ test('history requests started before an owner switch cannot reopen or resume af
     refreshActionConversation: id => refreshed.push(id),
     resumeLiveProcess: request => resumed.push(request),
   });
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
+  const request = handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   owner = null;
   windows.clearForOwnerChange();
   owner = 'owner-b';
@@ -331,7 +331,8 @@ test('history requests started before an owner switch cannot reopen or resume af
     snapshot: createSnapshot({ actionId: 'old-action' }),
     liveResume: { kind: 'action', processId: 'old-process', actionId: 'old-action', commandId: 'old-command' },
   }));
-  await new Promise(resolve => setImmediate(resolve));
+  // The main window hears that the panel did not open.
+  await assert.rejects(request, /Local owner changed/);
   assert.equal(instances.length, 0);
   assert.deepEqual(refreshed, []);
   assert.deepEqual(resumed, []);
@@ -340,7 +341,18 @@ test('history requests started before an owner switch cannot reopen or resume af
   assert.deepEqual(instances[0].sent, []);
 });
 
-test('unavailable owners cannot open windows or fetch history while same-owner refresh keeps existing windows', async t => {
+test('a suggestion that cannot be read opens no panel, and the request says so', async () => {
+  const { notificationWindow: windows, instances } = loadNotificationWindowModule();
+  const handlers = windows.createNotificationIpcHandlers({
+    resolveOverlayBootstrap: async () => null,
+    refreshActionConversation: () => {},
+    resumeLiveProcess: () => {},
+  });
+  await assert.rejects(handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' }), /Suggestion bootstrap is unavailable/);
+  assert.equal(instances.length, 0);
+});
+
+test('unavailable owners cannot open windows or fetch history while same-owner refresh keeps existing windows', async () => {
   let owner = 'owner-a';
   const { notificationWindow: windows, instances } = loadNotificationWindowModule(() => owner);
   windows.openStandaloneConversationOverlay('conversation');
@@ -351,15 +363,10 @@ test('unavailable owners cannot open windows or fetch history while same-owner r
   assert.throws(() => windows.openStandaloneConversationOverlay('other'), /Local owner is unavailable/);
   assert.throws(() => windows.showNotification('other'), /Local owner is unavailable/);
   const requests = [];
-  const errors = [];
-  t.mock.method(console, 'error', (...args) => errors.push(args));
   const handlers = windows.createNotificationIpcHandlers({
     resolveOverlayBootstrap: async id => { requests.push(id); return createBootstrapResponse(); },
   });
-  handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(errors.length, 1);
-  assert.match(errors[0][1].message, /Local owner is unavailable/);
+  await assert.rejects(handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' }), /Local owner is unavailable/);
   assert.deepEqual(requests, []);
   assert.equal(instances.length, 1);
   assert.equal(existing.isDestroyed(), false);

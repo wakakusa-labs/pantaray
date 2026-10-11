@@ -1,5 +1,5 @@
 import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
@@ -25,6 +25,7 @@ const COPY = {
     notStarted: 'This could not be started. Try again.',
     dismissFailed: 'Could not dismiss this suggestion. Try again.',
     copySuggestion: 'Copy suggestion',
+    openSmallFailed: 'Could not open this suggestion in a small window.',
   },
   ja: {
     loading: '提案を読み込んでいます',
@@ -34,6 +35,7 @@ const COPY = {
     notStarted: '開始できませんでした。もう一度お試しください。',
     dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
     copySuggestion: '提案をコピー',
+    openSmallFailed: 'この提案を小さく開けませんでした。',
   },
 } as const;
 
@@ -74,6 +76,17 @@ export function SuggestionTaskPane({
   const link = useCopyWorkLink('suggestion', suggestionId);
   const suggestionText = snapshot?.suggestionText ?? '';
   const { composer: draft, setComposer } = composer;
+  const [openSmallFailed, setOpenSmallFailed] = useState(false);
+  // The small window shows it with its decision, as when it arrived; this pane stays.
+  const openSmall = () => {
+    setOpenSmallFailed(false);
+    window.electron?.agentOverlay
+      ?.showHistory?.({ suggestionId, initialUiState: { expand: true } })
+      .catch((error: unknown) => {
+        console.error('Failed to open the suggestion in a small window:', error);
+        setOpenSmallFailed(true);
+      });
+  };
 
   const onStartedRef = useRef(onStarted);
   useEffect(() => {
@@ -117,19 +130,13 @@ export function SuggestionTaskPane({
               {link.failed}
             </span>
           ) : null}
-          {/* The small window shows it with its decision, as when it arrived; this pane stays. */}
           <button
             type="button"
             className="action-task__icon-button"
             aria-label={t('history.openSmall')}
             data-tooltip={t('history.openSmall')}
             disabled={snapshot === null}
-            onClick={() =>
-              window.electron?.agentOverlay?.showHistory?.({
-                suggestionId,
-                initialUiState: { expand: true },
-              })
-            }
+            onClick={openSmall}
           >
             <PictureInPicture2 size={17} strokeWidth={1.8} aria-hidden />
           </button>
@@ -149,6 +156,11 @@ export function SuggestionTaskPane({
               <Clipboard size={17} strokeWidth={1.8} aria-hidden />
             )}
           </button>
+          {openSmallFailed ? (
+            <p className="action-task__state" role="alert">
+              {copy.openSmallFailed}
+            </p>
+          ) : null}
         </div>
       </header>
       <div className="suggestion-task__scroll">

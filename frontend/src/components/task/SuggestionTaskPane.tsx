@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clipboard } from 'lucide-react';
+import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
@@ -117,6 +117,22 @@ export function SuggestionTaskPane({
               {link.failed}
             </span>
           ) : null}
+          {/* The small window shows it with its decision, as when it arrived; this pane stays. */}
+          <button
+            type="button"
+            className="action-task__icon-button"
+            aria-label={t('history.openSmall')}
+            data-tooltip={t('history.openSmall')}
+            disabled={snapshot === null}
+            onClick={() =>
+              window.electron?.agentOverlay?.showHistory?.({
+                suggestionId,
+                initialUiState: { expand: true },
+              })
+            }
+          >
+            <PictureInPicture2 size={17} strokeWidth={1.8} aria-hidden />
+          </button>
           <button
             type="button"
             className="action-task__icon-button"

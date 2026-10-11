@@ -67,7 +67,7 @@ describe('resolveToolDisplay', () => {
     // live イベントは ToolDefinition.name を載せてくるので、同じツールに畳まれる必要がある。
     ['Recent Computer Activity', '最近の操作を確認', 'Check recent activity'],
     ['zanei_query', '操作の詳細を確認', 'Check activity details'],
-    ['draft_final_answer', '回答を作成', 'Draft the answer'],
+    ['draft_final_answer', '回答案を作成', 'Draft the answer'],
     ['capture_screen', 'ウィンドウを撮影', 'Capture a window'],
     ['bash', 'コマンドを実行', 'Run a command'],
     // PDF だけでなく Office 文書のページも描くので、名前は「PDF」に限らない。
@@ -110,7 +110,7 @@ describe('resolveToolLine', () => {
     ['capture_screen', 'Google Chrome', 'Google Chrome を撮影しました'],
     // 引数を持たないツールは主語なしで完結する。
     ['zanei_timeline', null, '最近の操作を確認しました'],
-    ['draft_final_answer', null, '回答を作成しました'],
+    ['draft_final_answer', null, '回答案を作成しました'],
     // 引数の残っていない古い行は動詞の文を作らず、ツール名だけを出す。
     ['read', null, 'ファイルを読む'],
   ])('says what %s did', (label, subject, expected) => {

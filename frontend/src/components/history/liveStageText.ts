@@ -2,7 +2,7 @@ import { resolveToolLine } from '@/components/action-conversation/toolDisplayNam
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import type { MessageKey } from '@/i18n/types';
 
-/** A running Action's live line, worded the same in the sidebar row and the task pane. */
+/** A running Action's live line, worded the same in the sidebar row, the task pane, and its live work. */
 export function liveStageText(
   stage: HistoryLiveStage,
   language: 'en' | 'ja',

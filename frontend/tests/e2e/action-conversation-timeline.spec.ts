@@ -204,7 +204,8 @@ for (const language of ['ja', 'en'] as const) {
     // Only the live work sweeps, and reduced motion (the English run) keeps it still.
     const shimmer = page.locator('.action-conversation__shimmer');
     await expect(shimmer).toHaveCount(1);
-    await expect(shimmer).toHaveText(language === 'ja' ? 'Pantarayの作業' : "Pantaray's work");
+    // Between Tools the live work's label says the model is thinking.
+    await expect(shimmer).toHaveText(language === 'ja' ? '考えています' : 'Thinking');
     expect(await work.nth(2).locator('.action-conversation__shimmer').count()).toBe(1);
     expect(await shimmer.evaluate((element) => getComputedStyle(element).animationName)).toBe(
       language === 'ja' ? 'action-conversation-shimmer' : 'none'

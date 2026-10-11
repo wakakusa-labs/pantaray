@@ -10,6 +10,7 @@ import type { ActionLiveSnapshot } from '../../../electron/src/actions/actionLiv
 import type { ActionToolOutputLoader } from '../../../electron/src/actions/actionToolOutputLoader';
 
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
+import { liveStageText } from '@/components/history/liveStageText';
 import { useI18n } from '@/context/useI18n';
 
 import type { ImageGridCopy } from './AttachedImages';
@@ -333,14 +334,31 @@ function WorkSection({
   onFocusedContentUnmount: (key: string) => void;
   registerDisclosure: (key: string, element: HTMLButtonElement | null) => void;
 }) {
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const copy = COPY[language];
   const rootRef = useRef<HTMLDivElement>(null);
   const [expansion, setExpansion] = useState({ key: expansionKey, expanded: false });
   const expanded = expansion.key === expansionKey && expansion.expanded;
   const count = section.lines.filter((line) => line.kind === 'tool').length;
-  // The section the running Tool belongs to shimmers; it is the on-screen sign of progress.
-  const live = !awaitingApproval && section.lines.some((line) => line.key === liveToolKey);
+  // The section holding the run's latest Tool is live: it shimmers, the on-screen sign of progress.
+  const liveTool = awaitingApproval
+    ? undefined
+    : section.lines.find(
+        (line): line is ActionConversationToolItem =>
+          line.kind === 'tool' && line.key === liveToolKey
+      );
+  // While live, the label says what is happening now in the words the Tool's own row uses. The
+  // accessible name stays fixed, so the label does not announce every step.
+  const label =
+    liveTool === undefined
+      ? copy.agentWork
+      : liveStageText(
+          liveTool.entry.status === 'processing'
+            ? { kind: 'tool', ...liveTool.entry }
+            : { kind: 'thinking' },
+          language,
+          t
+        );
   const disclosureRef = useCallback(
     (element: HTMLButtonElement | null) => registerDisclosure(section.key, element),
     [registerDisclosure, section.key]
@@ -361,7 +379,11 @@ function WorkSection({
         aria-expanded={expanded}
         onClick={() => setExpansion({ key: expansionKey, expanded: !expanded })}
       >
-        <span className={live ? 'action-conversation__shimmer' : undefined}>{copy.agentWork}</span>
+        <span
+          className={`action-conversation__work-label${liveTool ? ' action-conversation__shimmer' : ''}`}
+        >
+          {label}
+        </span>
         {count > 0 ? (
           <span className="action-conversation__count" aria-hidden>
             {count}
@@ -432,7 +454,9 @@ export function RunItem({
     else disclosures.current.delete(key);
   }, []);
   const toolLines = run.lines.filter((line) => line.kind === 'tool');
-  const liveToolKey = isLatest && !settled ? toolLines[toolLines.length - 1]?.key : undefined;
+  // Once the final answer shows, the work behind it is no longer what is happening now.
+  const liveToolKey =
+    isLatest && !settled && !finalAnswerVisible ? toolLines[toolLines.length - 1]?.key : undefined;
   // A run waiting for approval has paused its whole process, so none of its
   // processing Tools is actually running.
   const awaitingApproval = run.status === 'approval_pending' && !settled;

@@ -2053,12 +2053,12 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => conversationListener?.(createConversationUpdate(null, true)));
     expect(screen.getByText('Thinking')).toBeInTheDocument();
 
-    // ツールは一瞬で終わる。最初のツールが出たら、以降は作業の件数が進みを示す。
+    // ツールは一瞬で終わる。最初のツールが出たら、以降は作業の見出しが考えていることを示す。
     const withTool = createConversationUpdate(null, true);
     // prettier-ignore
     withTool.snapshot.page.runs[0].entries.push({ step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null });
     await act(async () => conversationListener?.(withTool));
-    expect(screen.queryByText('Thinking')).toBeNull();
+    expect(screen.getByText('Thinking')).toHaveClass('action-conversation__work-label');
 
     // 続けて送った依頼は新しい実行になり、その最初のツールまでまた出す。
     const nextRun = createConversationUpdate(null, true);

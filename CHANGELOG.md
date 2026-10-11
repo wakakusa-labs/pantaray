@@ -3,6 +3,116 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.5.0
+
+- History is now Home: a sidebar lists the chat, your projects and your tasks, and the one you
+  pick opens beside it.
+- Hide or show the sidebar with the button at the top of the window, or with ⌘B.
+- Two buttons next to Tasks start a new task in the main window or in a small window.
+- Move a task or suggestion between the two windows yourself: "Open small" in the main window,
+  "Open in main window" in the small one. Nothing moves on its own.
+- An unsent message stays when you switch to something else, and a task's small window and the
+  main window share the same draft.
+- Manage projects in the sidebar: name a new one with ＋ and then add its folders, and rename it,
+  set its organization or delete it from its … menu.
+- Expand a project to see its folders, open each one in Finder or remove it, and drag projects to
+  reorder them.
+- The Workspace page is gone. A folder that was in no project now has a project of its own, named
+  after the folder.
+- "Copy link" copies a task's or suggestion's link. Paste it into a message and it becomes a chip
+  with the item's title, so Pantaray knows which one you mean; "Show as text" turns it back.
+- Click a task or suggestion named in a sent message to open it. A Pantaray link opened from
+  another app goes straight to that item in the main window.
+- Select text in a conversation and press "Add to reply" to quote it, with a comment if you like.
+  A message can carry several quotes.
+- File edits show as a diff, with the lines added and removed.
+- Files a task creates or links appear under its answer. Open one to preview it beside the
+  conversation: Markdown, text, images, PDF, HTML, Word documents and patch files show there, and
+  the Open menu has Show in Finder, Quick Look, Open in default app, Open with… and Copy path.
+- Stop now also stops the work handed to subagents right away, and shows "Stopping…" until the
+  task has stopped. If a stop fails, you are told and can try again.
+- When you continue a stopped task, Pantaray can pick up the subagents the stop ended.
+- Messages a task never got to before you stopped it now run with your next message, and say
+  "Runs with your next message".
+- Withdraw a message that has not run yet with the ✕ under it.
+- While a task works, its folded "Pantaray's work" line shows what it is doing right now.
+- The Accept and Dismiss suggestion buttons now sit where the send button is. Words you write
+  before dismissing are kept as your reason and start no task, and the small window closes.
+- A task started from a suggestion shows the suggestion first, marked Approved, in the main window
+  too.
+- Suggestions vary more, learn from the reasons you give when you dismiss one, and no longer treat
+  a mail or chat message as unanswered just because Pantaray did not see the reply.
+- Until you choose otherwise, Pantaray edits files and runs commands in your workspace without
+  asking. Work outside your workspace or outside the protected environment, and screen capture,
+  still ask. To be asked every time, choose Ask under File edits and commands in Settings.
+- Settings lists every model you can choose for your AI connection, and with OpenAI you can also
+  enter another model name.
+- The main window opens larger, and its conversations use the small window's larger text.
+- Sidebar rows show only a white dot when something needs you: an approval, a suggestion waiting
+  for your answer, or a finished task you have not looked at yet.
+- The task list loads more as you scroll.
+- Home goes back to what you had open before you went to Settings.
+- Icon buttons show their names sooner when you point at them.
+- A single line break in an answer now shows as a line break.
+- The button that showed a task in the chat is gone; open the task in the main window instead.
+- If a newer release comes out while an update is waiting, Pantaray gets the newer one, so one
+  restart brings you up to date.
+- Includes security updates.
+- Fixed Pantaray being unable to start after it quit while a task was continuing after an
+  approval.
+- Fixed the chat getting only the beginning of a long answer from a task.
+- Fixed chat replies sometimes quoting "An earlier message" that could not be shown.
+- Fixed a suggestion's card in the chat saying "Waiting for approval" instead of "Suggestion".
+- Fixed the note on a stopped or failed task not following the app's language.
+- Fixed a small window opened from the main window appearing folded for a moment.
+- Fixed a link in an answer sometimes replacing the app's page. Web links open in your browser.
+- Fixed pasting text copied from Quick Look attaching a file instead.
+- Fixed deleting a task removing an image the chat still shows.
+
+---
+
+- 「履歴」は「ホーム」になりました。サイドバーにチャット・プロジェクト・作業が並び、選んだものが隣に開きます。
+- サイドバーは、ウィンドウ上部のボタンか ⌘B で隠したり出したりできます。
+- 「作業」の横の 2 つのボタンで、新しい作業をメイン画面で始めるか、小さなウィンドウで始めるかを選べるようになりました。
+- 作業や提案を、メイン画面では「小さく開く」、小さなウィンドウでは「メイン画面で開く」で行き来できるようになりました。頼まない限り、勝手に移りません。
+- 送る前の文章は、ほかの項目に切り替えても残ります。同じ作業の小さなウィンドウとメイン画面では、書きかけの文章が共有されます。
+- サイドバーでプロジェクトを管理できるようになりました。＋で名前を付けて作り、あとからフォルダを足します。名前の変更・組織の設定・削除は「…」のメニューからできます。
+- プロジェクトを開くとフォルダが並び、フォルダごとに Finder で開いたり外したりできます。プロジェクトはドラッグで並べ替えられます。
+- 「ワークスペース」の画面をなくしました。どのプロジェクトにも入っていなかったフォルダは、そのフォルダの名前で自分のプロジェクトを持つようになりました。
+- 「リンクをコピー」で、作業や提案のリンクをコピーできるようになりました。メッセージに貼ると題名で表示され、どれのことか Pantaray に伝わります。「テキストに戻す」でリンクに戻せます。
+- 送ったメッセージに入っている作業や提案を押すと、それが開くようになりました。ほかのアプリで Pantaray のリンクを開くと、メイン画面でその項目が開きます。
+- 会話の文章を選んで「返信に追加」を押すと、引用して返信できるようになりました。ひと言添えることもでき、1 つのメッセージに何か所でも引用できます。
+- ファイルの編集が、足した行と消した行の差分で表示されるようになりました。
+- 作業が作ったファイルや回答で示したファイルが、回答の下に並ぶようになりました。押すと会話の隣にプレビューが開き、Markdown・テキスト・画像・PDF・HTML・Word の文書・パッチファイルをそこで見られます。「開く」のメニューから、Finder で表示・Quick Look で見る・既定のアプリで開く・アプリを選んで開く・パスをコピーもできます。
+- 停止を押すと、サブエージェントの作業もすぐに止まり、止まるまで「停止しています…」と出るようになりました。止められなかったときはそう伝え、もう一度押せます。
+- 停止した作業を続けるとき、止めたサブエージェントの作業を Pantaray が引き継げるようになりました。
+- 停止する前に作業が手を付けていなかったメッセージは、次に送るメッセージと一緒に実行されるようになり、「次の送信で実行」と表示されます。
+- まだ実行されていないメッセージは、下の ✕ で取り消せるようになりました。
+- 作業中は、たたんだ「Pantarayの作業」の行に、いま何をしているかが出るようになりました。
+- 「承認」と「見送る」を、送信ボタンの位置に置きました。「見送る」の前に書いた文章は見送る理由として残り、作業は始まらず、小さなウィンドウは閉じます。
+- 提案から始めた作業は、メイン画面でも最初にその提案を「承認済み」の印付きで表示するようになりました。
+- 提案の幅が広がり、見送るときに書いた理由から学ぶようになりました。また、メールやチャットの返信が見えないだけで、まだ返していないと決めつけなくなりました。
+- 設定を選ぶまでは、ワークスペースの中でのファイルの編集とコマンドの実行を、確認せずに進めるようになりました。ワークスペースの外や安全な実行環境の外での作業、画面の取り込みは、これまでどおり確認します。毎回確認してほしいときは、設定の「ファイル編集・コマンド実行」で「確認」を選んでください。
+- 設定で、AI 接続で選べるモデルがすべて一覧に出るようになりました。OpenAI では、ほかのモデル名も入力できます。
+- メイン画面が大きめに開くようになり、会話の文字も小さなウィンドウと同じ大きさになりました。
+- サイドバーの各行は、確認が必要なときだけ白い点を出すようになりました。許可を待っているとき、提案が返事を待っているとき、終わった作業をまだ見ていないときです。
+- 作業の一覧は、下までスクロールすると続きを読み込むようになりました。
+- 「ホーム」を押すと、設定に移る前に開いていたものに戻るようになりました。
+- アイコンのボタンに指していると、名前が早く出るようになりました。
+- 回答の中の 1 つだけの改行も、そのまま改行として表示するようになりました。
+- 作業をチャットで表示するボタンをなくしました。メイン画面で作業を開いてください。
+- 更新が入るのを待っている間に新しい版が出ると、新しいほうを取ってくるようになりました。1 回の再起動で最新になります。
+- セキュリティの更新を取り込みました。
+- 承認のあとで続きを進めている作業の途中でアプリが終了すると、Pantaray が起動できなくなる問題を直しました。
+- 作業の長い回答が、チャットには最初の部分しか届かない問題を直しました。
+- チャットの返信が、表示できない「以前のメッセージ」を引用することがある問題を直しました。
+- チャットの提案のカードに、「提案」ではなく「確認待ち」と出る問題を直しました。
+- 停止や失敗した作業に出る文が、アプリの言語に合っていなかった問題を直しました。
+- メイン画面から小さなウィンドウを開くと、一瞬たたまれた形で出る問題を直しました。
+- 回答の中のリンクを押すと、アプリの画面が置き換わることがある問題を直しました。Web のリンクはブラウザで開きます。
+- Quick Look からコピーした文章を貼ると、ファイルが添付されてしまう問題を直しました。
+- 作業を削除すると、チャットにまだ表示している画像まで消えてしまう問題を直しました。
+
 ## 0.4.0
 
 - You can now chat with Pantaray: one ongoing conversation where you ask questions and hand over

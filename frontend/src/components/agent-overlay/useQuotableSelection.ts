@@ -36,10 +36,8 @@ function readSelection(source: HTMLElement | null): QuotableSelection | null {
   };
 }
 
-/**
- * The text selected inside `source`, by mouse or keyboard, kept in step as it changes or scrolls.
- * Null while nothing there is selected, or while `active` is false.
- */
+// The text selected inside `source`, by mouse or keyboard, kept in step as it changes or scrolls.
+// Null while nothing there is selected, or while `active` is false.
 export function useQuotableSelection(
   source: RefObject<HTMLElement>,
   active: boolean

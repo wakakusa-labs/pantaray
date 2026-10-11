@@ -5,11 +5,9 @@ import './quotedMessageText.css';
 
 type ProjectRefSpan = Readonly<{ start: number; end: number }>;
 
-/**
- * A user's message text: each passage they quoted as a blockquote, their own words as paragraphs
- * with the projects they named. Ref spans index the whole text; a ref inside a quoted passage
- * (typed by hand after a `>`) shows as plain text.
- */
+// A user's message text: each passage they quoted as a blockquote, their own words as paragraphs
+// with the projects they named. Ref spans index the whole text; a ref inside a quoted passage
+// (typed by hand after a `>`) shows as plain text.
 export function QuotedMessageText({
   text,
   refs,

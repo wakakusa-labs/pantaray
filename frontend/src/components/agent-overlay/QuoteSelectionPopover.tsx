@@ -10,11 +10,9 @@ const EDGE_MARGIN_PX = 8;
 const SELECTION_GAP_PX = 6;
 const POPOVER_MAX_WIDTH_PX = 420;
 
-/**
- * Below the selection, or above it where the window has no room below, so the selected lines stay
- * visible; sideways within the conversation and the window. The containing block differs per
- * host, so the element is moved by the distance between where it is and where it should be.
- */
+// Below the selection, or above it where the window has no room below, so the selected lines stay
+// visible; sideways within the conversation and the window. The containing block differs per
+// host, so the element is moved by the distance between where it is and where it should be.
 function useBesideSelection(selection: QuotableSelection, x: number, fitWidth: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -38,17 +36,18 @@ function useBesideSelection(selection: QuotableSelection, x: number, fitWidth: b
   return ref;
 }
 
-// The app's menu surface (the task file and project menus).
+// The tones of the composer it opens from, which sets them; the blur keeps it readable over text.
 const Surface = styled.div`
   position: absolute;
   top: 0;
   left: 0;
   z-index: 20;
   box-sizing: border-box;
-  border: 1px solid var(--border-color-hover);
+  border: 1px solid var(--composer-border);
   border-radius: 10px;
-  background: #20252d;
+  background: var(--composer-surface);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(24px);
 `;
 
 /** 「返信に追加」 on its own surface, or the popover's filled 「追加」. */
@@ -88,7 +87,17 @@ const Popover = styled(Surface)`
     -webkit-line-clamp: 2;
   }
 
+  input {
+    padding: 8px 10px;
+    border: 1px solid var(--composer-border);
+    border-radius: 9px;
+    color: var(--text-primary);
+    background: var(--composer-surface);
+    font: inherit;
+  }
+
   input:focus-visible {
+    outline: none;
     box-shadow: var(--focus-ring);
   }
 
@@ -125,10 +134,8 @@ export function AddToReplyButton({
   );
 }
 
-/**
- * What is being quoted and an optional comment on it. Enter or 「追加」 adds the quote; Esc, or
- * focus leaving the popover, cancels.
- */
+// What is being quoted and an optional comment on it. Enter or 「追加」 adds the quote; Esc, or
+// focus leaving the popover, cancels.
 export function QuoteCommentPopover({
   selection,
   onAdd,
@@ -159,7 +166,6 @@ export function QuoteCommentPopover({
       <blockquote id={quoteId}>{selection.text}</blockquote>
       <input
         ref={inputRef}
-        className="history-filter-input"
         type="text"
         value={comment}
         aria-label={t('overlay.composer.quote.comment')}

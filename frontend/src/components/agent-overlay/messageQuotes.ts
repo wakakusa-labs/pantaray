@@ -4,10 +4,8 @@
 /** A passage the user picked, with what they want to say about it (possibly nothing). */
 export type ComposerQuote = Readonly<{ id: string; text: string; comment: string }>;
 
-/**
- * The passage as it is quoted: lines kept, trailing spaces and the blank lines around it dropped.
- * Null when nothing but whitespace was picked.
- */
+// The passage as it is quoted: lines kept, trailing spaces and the blank lines around it dropped.
+// Null when nothing but whitespace was picked.
 export function quotedPassage(selected: string): string | null {
   const passage = selected
     .replace(/\r\n?/g, '\n')
@@ -25,11 +23,9 @@ function blockquote(passage: string): string {
     .join('\n');
 }
 
-/**
- * The text a message carries: each quote in the order added, then the draft. `draftOffset` is
- * where the draft starts in it, in UTF-16 units, so spans into the draft (its @ mentions) can be
- * moved into the message. With no quotes the draft goes out as it is.
- */
+// The text a message carries: each quote in the order added, then the draft. `draftOffset` is
+// where the draft starts in it, in UTF-16 units, so spans into the draft (its @ mentions) can be
+// moved into the message. With no quotes the draft goes out as it is.
 export function composeQuotedMessage(
   quotes: readonly ComposerQuote[],
   draft: string
@@ -56,10 +52,8 @@ export type QuotedTextBlock = Readonly<
 // A Markdown blockquote line: up to three spaces, `>`, and an optional space that is not content.
 const QUOTE_LINE = /^ {0,3}> ?/;
 
-/**
- * A sent message split into its quoted passages and the user's own words, in order, for drawing.
- * Blank lines between blocks only separate them and are dropped.
- */
+// A sent message split into its quoted passages and the user's own words, in order, for drawing.
+// Blank lines between blocks only separate them and are dropped.
 export function splitQuotedText(text: string): QuotedTextBlock[] {
   const blocks: QuotedTextBlock[] = [];
   let lines: string[] = [];

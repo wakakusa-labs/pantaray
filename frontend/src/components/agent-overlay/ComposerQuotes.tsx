@@ -16,10 +16,8 @@ export type ComposerQuoting = Readonly<{
   onRemove: (id: string) => void;
 }>;
 
-/**
- * Scrolls on its own past a third of the window, so however many quotes there are, the message
- * field and its send and stop buttons stay in view, also beside an approval's 45vh dock.
- */
+// Scrolls on its own past a third of the window, so however many quotes there are, the message
+// field and its send and stop buttons stay in view, also beside an approval's 45vh dock.
 const QuoteList = styled.ul`
   display: grid;
   gap: 6px;
@@ -60,10 +58,6 @@ const QuoteCard = styled.li`
     color: var(--text-secondary);
   }
 
-  p {
-    margin-top: 2px;
-  }
-
   button {
     flex: none;
     display: inline-flex;
@@ -81,11 +75,9 @@ const QuoteCard = styled.li`
   }
 `;
 
-/**
- * A composer's quotes: the 「返信に追加」 button below text selected in the conversation, the
- * popover it opens for a comment, and a removable card for each quote above the message field. All of
- * them go out with the next message, in the order they were added.
- */
+// A composer's quotes: the 「返信に追加」 button below text selected in the conversation, the
+// popover it opens for a comment, and a removable card for each quote above the message field. All
+// of them go out with the next message, in the order they were added.
 export function ComposerQuotes({
   quoting,
   readOnly,

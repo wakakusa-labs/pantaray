@@ -15,7 +15,6 @@ export const validSendChannels = [
   'overlay:dragMove',
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
-  'history:openOverlay',
   'open-external-url',
   // WebSocket bridge (connect/disconnect は main に統一のため未公開)
   'ws:send',
@@ -157,7 +156,9 @@ export const validInvokeChannels = [
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
-  // Overlay → main window: the panel closes and the main window opens the task it started
+  // Main window → panel: a suggestion opens small
+  'history:openOverlay',
+  // Panel → main window: the panel closes and the main window opens its Action or suggestion
   'overlay:openTask',
   // Shared task drafts, for every composer that shows a task
   'action:openDraft',

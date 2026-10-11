@@ -60,10 +60,9 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
       },
     },
     agentOverlay: {
-      showHistory: (payload) => {
-        if (isValidSendChannel('history:openOverlay')) {
-          ipcRenderer.send('history:openOverlay', payload);
-        }
+      showHistory: (request) => {
+        assertValidInvokeChannel('history:openOverlay');
+        return ipcRenderer.invoke('history:openOverlay', request);
       },
       onSnapshot: snapshotChannel.subscribe,
       resize: (height, options) => {

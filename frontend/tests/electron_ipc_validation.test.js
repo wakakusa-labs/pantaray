@@ -57,7 +57,7 @@ function validIdeFileRules() {
   };
 }
 
-function buildCtx(overrides = {}) {
+function buildCtx(overrides = {}, openOverlay = asyncSpy(undefined)) {
   const ipcMain = createFakeIpcMain();
   const ctx = {
     ipcMain,
@@ -160,7 +160,7 @@ function buildCtx(overrides = {}) {
         onOverlayDragStart: () => {},
         onOverlayDragMove: () => {},
         onOverlayDragEnd: () => {},
-        onHistoryOpenOverlay: () => {},
+        onHistoryOpenOverlay: openOverlay,
       }),
     },
     ...overrides,
@@ -760,4 +760,25 @@ test('workspaceSettings:updateCommandNetwork accepts booleans and rejects coerci
     ctx.workspaceSettings.updateCommandNetwork.calls.map((call) => call[0]),
     [false, true]
   );
+});
+
+test('history:openOverlay passes a valid request on and moves nothing for a malformed one', async () => {
+  const openOverlay = asyncSpy(undefined);
+  const { ipcMain } = buildCtx({}, openOverlay);
+  const invoke = getInvoke(ipcMain, 'history:openOverlay');
+  const request = { suggestionId: 'sug-1', initialUiState: { expand: true } };
+  await invoke(request);
+  assert.deepEqual(openOverlay.calls, [[{}, request]]);
+
+  for (const invalid of [
+    { suggestionId: ' sug-1' },
+    { suggestionId: '' },
+    { id: 'sug-1' },
+    { suggestionId: 'sug-1', initialUiState: { expand: 'yes' } },
+    { suggestionId: 'sug-1', extra: true },
+    'sug-1',
+  ]) {
+    await assert.rejects(invoke(invalid), rejectsValidation('history:openOverlay'));
+  }
+  assert.equal(openOverlay.calls.length, 1);
 });

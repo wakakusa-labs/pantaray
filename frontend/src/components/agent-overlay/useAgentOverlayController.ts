@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { MIN_HEIGHT, getMaxHeight } from './Styled';
 import type { AgentOverlayState, OverlaySnapshotPayload } from './model/overlayTypes';
 import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model/reducer';
+import type { WorkRefKind } from '@/history/workRefLink';
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
@@ -28,8 +29,8 @@ export type AgentOverlayController = {
   acceptFailed: boolean;
   /** 見送る, with the composer's words as the reason, or null when there are none. */
   onReject: (reason: string | null) => void;
-  /** Shows this panel's task in the main window, which then closes the panel. */
-  openTask: (actionId: string) => void;
+  /** Shows this panel's Action or suggestion in the main window, which then closes the panel. */
+  openTask: (work: { kind: WorkRefKind; id: string }) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed: boolean;
   /**
@@ -69,7 +70,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [failedSuggestionId, setFailedSuggestionId] = useState<string | null>(null);
-  // The suggestion (none in a new-task panel) whose task the main window could not show.
+  // The suggestion (none in a new-task panel) whose work the main window could not show.
   const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
     suggestionId: string | null;
   } | null>(null);
@@ -386,9 +387,9 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   }, []);
 
   // Main closes the panel once the main window shows the task; a failure keeps it, saying so.
-  const openTask = useCallback((actionId: string) => {
+  const openTask = useCallback((work: { kind: WorkRefKind; id: string }) => {
     const suggestionId = suggestionIdRef.current;
-    void window.electron?.agentOverlay?.openTask?.({ actionId }).then(
+    void window.electron?.agentOverlay?.openTask?.(work).then(
       () => setOpenTaskFailedFor(null),
       (error: unknown) => {
         console.error('Failed to open the task in the main window:', error);

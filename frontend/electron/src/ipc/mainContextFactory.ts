@@ -211,9 +211,9 @@ export function buildMainContext(params: {
           // no-op
         }
       },
-      showTask: async (actionId) => {
+      showTask: async ({ kind, id }) => {
         // The same `?item=` the renderer writes (historySelectionSearch).
-        const route = `/history?item=action:${encodeURIComponent(actionId)}`;
+        const route = `/history?item=${kind}:${encodeURIComponent(id)}`;
         const mainWindow = params.getMainWindow();
         if (mainWindow && !mainWindow.isDestroyed()) {
           // A loaded page selects it in place: a load would drop its chat and task drafts. A page
@@ -224,7 +224,7 @@ export function buildMainContext(params: {
             restoreAndFocusWindow(mainWindow);
             await loaded;
           } else {
-            mainWindow.webContents.send('history:showItem', { item: `action:${actionId}` });
+            mainWindow.webContents.send('history:showItem', { item: `${kind}:${id}` });
             restoreAndFocusWindow(mainWindow);
           }
           return;

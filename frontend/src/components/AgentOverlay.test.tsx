@@ -1726,11 +1726,41 @@ describe('AgentOverlay broader E2E', () => {
       );
     const openInMain = () => screen.queryByRole('button', { name: 'Open in main window' });
 
-    it('keeps an approved suggestion in the panel, which then offers to move it', async () => {
+    it('moves a suggestion no Action has taken yet, whatever its phase', async () => {
+      const dismissed = createCommentOnlySnapshot();
+      Object.assign(dismissed.snapshot, {
+        interactionContract: 'action_offer',
+        reactionState: 'rejected',
+        isLive: false,
+      });
+      const phases = [
+        { snapshot: offer(), shown: () => screen.getByRole('button', { name: 'Accept' }) },
+        {
+          snapshot: createCommentOnlySnapshot(),
+          shown: () => screen.getByRole('button', { name: 'Reply to this suggestion' }),
+        },
+        { snapshot: dismissed, shown: () => screen.getByRole('textbox', { name: 'Message' }) },
+      ];
+      for (const { snapshot, shown } of phases) {
+        renderPanel();
+        await act(async () => snapshotListener?.(snapshot));
+        expect(shown()).toBeInTheDocument();
+        fireEvent.click(openInMain()!);
+        cleanup();
+      }
+
+      expect(openTask.mock.calls).toEqual([
+        [{ kind: 'suggestion', id: 'sug-comment' }],
+        [{ kind: 'suggestion', id: 'sug-comment' }],
+        [{ kind: 'suggestion', id: 'sug-comment' }],
+      ]);
+      // Main closes the panel once the main window shows it; the panel does not hide itself.
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
+    it('keeps an approved suggestion in the panel, which then offers to move its Action', async () => {
       renderPanel();
       await act(async () => snapshotListener?.(offer()));
-      // Nothing to move before an Action exists.
-      expect(openInMain()).toBeNull();
       await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Accept' })));
       // prettier-ignore
       await emit({ event: 'process_started', data: { kind: 'action', process_id: 'run-9', suggestion_id: 'sug-comment', action_id: 'act-1', command_id: 'cmd-9', accepted_at: '2026-10-10T00:00:01Z', started_at: '2026-10-10T00:00:02Z' }, meta: { ...actionMeta, process_id: 'run-9', action_id: 'act-1' }, sequence: 5 } as OrchestrationServerEvent);
@@ -1739,8 +1769,7 @@ describe('AgentOverlay broader E2E', () => {
       expect(openTask).not.toHaveBeenCalled();
       expect(hideOverlay).not.toHaveBeenCalled();
       fireEvent.click(openInMain()!);
-      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
-      // Main closes the panel once the main window shows the task; the panel does not hide itself.
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ kind: 'action', id: 'act-1' });
       expect(hideOverlay).not.toHaveBeenCalled();
     });
 
@@ -1776,7 +1805,21 @@ describe('AgentOverlay broader E2E', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent(
         'Could not open this task in the main window.'
       );
-      expect(openTask).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
+      expect(openTask).toHaveBeenCalledExactlyOnceWith({ kind: 'action', id: 'act-1' });
+      expect(hideOverlay).not.toHaveBeenCalled();
+    });
+
+    it('keeps the panel, saying so, when the main window cannot show the suggestion', async () => {
+      openTask.mockRejectedValueOnce(new Error('The main window could not be opened.'));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      renderPanel();
+      await act(async () => snapshotListener?.(offer()));
+
+      fireEvent.click(openInMain()!);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Could not open this suggestion in the main window.'
+      );
       expect(hideOverlay).not.toHaveBeenCalled();
     });
   });

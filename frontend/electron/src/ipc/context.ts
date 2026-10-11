@@ -11,6 +11,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { OverlayOpenTaskRequest } from './schemas/overlay';
 import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
 
@@ -134,10 +135,10 @@ export type MainContext = {
     openNewConversationOverlay: () => void;
     openActionConversationOverlay: (actionId: string) => void;
     /**
-     * Brings the main window forward on History with this Action selected, creating the window
-     * when there is none. Rejects when no main window could be shown or its load failed.
+     * Brings the main window forward on History with this Action or suggestion selected, creating
+     * the window when there is none. Rejects when no main window could be shown or its load failed.
      */
-    showTask: (actionId: string) => Promise<void>;
+    showTask: (task: OverlayOpenTaskRequest) => Promise<void>;
   };
 
   auth: {

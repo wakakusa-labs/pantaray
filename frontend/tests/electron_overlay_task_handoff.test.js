@@ -10,8 +10,8 @@ const {
 } = require('../electron/dist/ipc/senderTrust.js');
 const { createNotificationIpcHandlerFactory } = require('../electron/notification_window_ipc.js');
 
-// Work a panel started continues in the main window: the main window comes forward on the task,
-// and only then does the panel close.
+// Work a panel shows continues in the main window: the main window comes forward on its Action or
+// suggestion, and only then does the panel close.
 
 function createMainWindow(steps, { loading = false, loadError = null, loaded = null } = {}) {
   return {
@@ -83,11 +83,26 @@ test('a loaded main window selects the task in place, then the panel closes', as
   const steps = [];
   const openTask = createHandoff(steps, { mainWindow: createMainWindow(steps) });
 
-  await openTask({ actionId: 'act-1' });
+  await openTask({ kind: 'action', id: 'act-1' });
 
   // A message to the loaded page, never a load that would drop its drafts.
   assert.deepEqual(steps, [
     ['history:showItem', { item: 'action:act-1' }],
+    'restore',
+    'show',
+    'focus',
+    ['hide', 'sug-1'],
+  ]);
+});
+
+test('a suggestion no Action has taken yet is selected the same way, then the panel closes', async () => {
+  const steps = [];
+  const openTask = createHandoff(steps, { mainWindow: createMainWindow(steps) });
+
+  await openTask({ kind: 'suggestion', id: 'sug-1' });
+
+  assert.deepEqual(steps, [
+    ['history:showItem', { item: 'suggestion:sug-1' }],
     'restore',
     'show',
     'focus',
@@ -101,7 +116,7 @@ test('a main window still loading loads on the task, then the panel closes', asy
     mainWindow: createMainWindow(steps, { loading: true }),
   });
 
-  await openTask({ actionId: 'act-1' });
+  await openTask({ kind: 'action', id: 'act-1' });
 
   assert.deepEqual(steps, [
     ['loadURL', 'file:///tmp/index.html#/history?item=action:act-1'],
@@ -121,7 +136,7 @@ test('the panel stays, and the request fails, when the loading main window fails
     }),
   });
 
-  await assert.rejects(openTask({ actionId: 'act-1' }), /ERR_FILE_NOT_FOUND/);
+  await assert.rejects(openTask({ kind: 'action', id: 'act-1' }), /ERR_FILE_NOT_FOUND/);
   assert.equal(
     steps.some((step) => Array.isArray(step) && step[0] === 'hide'),
     false
@@ -142,7 +157,7 @@ test('a panel closed while the main window loads is not replaced by another in t
     panels,
   });
 
-  const request = openTask({ actionId: 'act-1' });
+  const request = openTask({ kind: 'action', id: 'act-1' });
   // Meanwhile the user closes that panel and the same suggestion opens in a new one.
   sender.destroy();
   panels.byWebContents.delete(2);
@@ -159,24 +174,29 @@ test('a panel closed while the main window loads is not replaced by another in t
 });
 
 test('without a main window one is created on the task, then the panel closes', async () => {
-  const steps = [];
-  const openTask = createHandoff(steps, { createMainWindow: () => createMainWindow(steps) });
+  for (const kind of ['action', 'suggestion']) {
+    const steps = [];
+    const openTask = createHandoff(steps, { createMainWindow: () => createMainWindow(steps) });
 
-  await openTask({ actionId: 'act 1' });
+    await openTask({ kind, id: 'work 1' });
 
-  assert.deepEqual(steps, [
-    ['createMainWindow', '/history?item=action:act%201'],
-    'restore',
-    'show',
-    'focus',
-    ['hide', 'sug-1'],
-  ]);
+    assert.deepEqual(steps, [
+      ['createMainWindow', `/history?item=${kind}:work%201`],
+      'restore',
+      'show',
+      'focus',
+      ['hide', 'sug-1'],
+    ]);
+  }
 });
 
 test('the panel stays, and the request fails, when no main window can be shown', async () => {
   const steps = [];
   const openTask = createHandoff(steps);
-  await assert.rejects(openTask({ actionId: 'act-1' }), /main window could not be opened/);
+  await assert.rejects(
+    openTask({ kind: 'action', id: 'act-1' }),
+    /main window could not be opened/
+  );
   assert.deepEqual(steps, [['createMainWindow', '/history?item=action:act-1']]);
 
   const failing = [];
@@ -185,7 +205,7 @@ test('the panel stays, and the request fails, when no main window can be shown',
       throw new Error('window create failed');
     },
   });
-  await assert.rejects(openTaskThrough({ actionId: 'act-1' }), /window create failed/);
+  await assert.rejects(openTaskThrough({ kind: 'action', id: 'act-1' }), /window create failed/);
   assert.deepEqual(failing, [['createMainWindow', '/history?item=action:act-1']]);
 });
 
@@ -194,10 +214,12 @@ test('overlay:openTask moves nothing for a malformed request', async () => {
   const openTask = createHandoff(steps, { mainWindow: createMainWindow(steps) });
 
   for (const payload of [
-    { actionId: ' act-1' },
-    { actionId: '' },
-    { actionId: 'act-1', extra: 1 },
-    'act-1',
+    { kind: 'action', id: ' act-1' },
+    { kind: 'suggestion', id: '' },
+    { kind: 'conversation', id: 'act-1' },
+    { kind: 'action', id: 'act-1', extra: 1 },
+    { actionId: 'act-1' },
+    'action:act-1',
     null,
   ]) {
     await assert.rejects(openTask(payload), IpcValidationError);

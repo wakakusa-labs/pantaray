@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the overlay approval IPC payloads.
+ * Zod schemas for the overlay IPC payloads.
  *
  * Shapes mirror `SubmitApprovalDecisionPayload` in
  * `actions/actionApprovalDecisionFetch.ts` and the Action approval mode
@@ -9,6 +9,7 @@
 import { z } from 'zod';
 
 import { OVERLAY_APPROVAL_DECISIONS } from '../../actions/actionApprovalDecisionFetch';
+import { CanonicalIdentitySchema } from '../../actions/actionContracts';
 import { IdSchema } from './workspaceSettings';
 
 export const SubmitApprovalDecisionPayloadSchema = z
@@ -27,3 +28,24 @@ export const ActionApprovalModeUpdateSchema = z
     approvalMode: z.enum(['prompt_each_time', 'always_allow']),
   })
   .strict();
+
+/** The work a panel hands to the main window: an Action, or a suggestion no Action took up yet. */
+export const OverlayOpenTaskRequestSchema = z
+  .object({
+    kind: z.enum(['action', 'suggestion']),
+    id: CanonicalIdentitySchema,
+  })
+  .strict();
+
+export type OverlayOpenTaskRequest = z.infer<typeof OverlayOpenTaskRequestSchema>;
+
+/** The main window's request to show a suggestion in a panel. */
+export const SuggestionOverlayOpenRequestSchema = z
+  .object({
+    suggestionId: CanonicalIdentitySchema,
+    initialUiState: z.object({ expand: z.boolean().optional() }).strict().nullable().optional(),
+    fromStart: z.boolean().optional(),
+  })
+  .strict();
+
+export type SuggestionOverlayOpenRequest = z.infer<typeof SuggestionOverlayOpenRequestSchema>;

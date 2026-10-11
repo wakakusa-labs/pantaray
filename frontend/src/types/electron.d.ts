@@ -406,12 +406,12 @@ declare global {
         onCaptureSettingsUpdated?: (cb: (settings: CapturePrivacySettings) => void) => () => void;
       };
       agentOverlay?: {
-        /** 履歴オーバーレイ表示（main 側で通知ウィンドウを開く） */
-        showHistory?: (payload: {
+        /** Opens this suggestion in a panel; rejects when it was not opened. */
+        showHistory?: (request: {
           suggestionId: string;
           initialUiState?: { expand?: boolean } | null;
           fromStart?: boolean;
-        }) => void;
+        }) => Promise<void>;
         close: () => Promise<unknown>;
         /** `settled`: the content is laid out at this height, so a window waiting for it may show. */
         resize: (height: number, options: { settled: boolean }) => void;
@@ -436,8 +436,8 @@ declare global {
         dragEnd?: () => void;
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
-        /** Closes this panel and brings the main window forward with the Action selected. */
-        openTask?: (request: { actionId: string }) => Promise<void>;
+        /** Closes this panel and brings the main window forward with its work selected. */
+        openTask?: (request: { kind: 'action' | 'suggestion'; id: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
         hide: () => void;
       };

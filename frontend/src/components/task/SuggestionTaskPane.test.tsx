@@ -222,7 +222,7 @@ describe('SuggestionTaskPane', () => {
   });
 
   it('opens the suggestion small, from between the link and the copy, once it is read', async () => {
-    const showHistory = vi.fn();
+    const showHistory = vi.fn(async () => undefined);
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: { ...window.electron, agentOverlay: { showHistory } },
@@ -249,6 +249,29 @@ describe('SuggestionTaskPane', () => {
       suggestionId: 'sug-1',
       initialUiState: { expand: true },
     });
+  });
+
+  it('says so when the suggestion could not be opened small, until it opens', async () => {
+    const showHistory = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('Suggestion bootstrap is unavailable.'))
+      .mockResolvedValueOnce(undefined);
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { ...window.electron, agentOverlay: { showHistory } },
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await renderPane();
+    const small = screen.getByRole('button', { name: 'Open small' });
+
+    await act(async () => fireEvent.click(small));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not open this suggestion in a small window.'
+    );
+
+    await act(async () => fireEvent.click(small));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(showHistory).toHaveBeenCalledTimes(2);
   });
 
   it('keeps Open small disabled when the suggestion could not be read', async () => {

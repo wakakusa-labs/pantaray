@@ -208,7 +208,7 @@ export function ProjectNameField({
   return (
     <input
       type="text"
-      className="history-project__rename"
+      className="history-filter-input history-project__rename"
       aria-label={label}
       placeholder={label}
       value={name}

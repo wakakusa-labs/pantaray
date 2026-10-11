@@ -206,9 +206,12 @@ class UserEntryProjectRef(_ActionConversationModel):
 class UserEntryWorkRef(_ActionConversationModel):
     """A task or suggestion named in ``UserEntry.content``, titled as when sent.
 
+    ``kind`` and ``id`` name the item, so the conversation can open it.
     ``start`` and ``end`` are Unicode code-point offsets into that content.
     """
 
+    kind: Literal["action", "suggestion"]
+    id: ActionConversationIdentity
     title: NonBlankText
     start: NonNegativeInt
     end: NonNegativeInt

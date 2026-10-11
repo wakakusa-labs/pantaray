@@ -5,6 +5,7 @@ import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/c
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
 import { AttachedImages } from '@/components/action-conversation/AttachedImages';
 import { QuotedMessageText } from '@/components/action-conversation/QuotedMessageText';
+import { sentMessageRefs } from '@/components/action-conversation/sentMessageRefs';
 import { USER_MESSAGE_COPY } from '@/components/action-conversation/userMessageCopy';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { useI18n } from '@/context/useI18n';
@@ -128,16 +129,7 @@ export function ChatMessage({
           {mine ? (
             <QuotedMessageText
               text={content.text}
-              refs={[
-                ...content.project_refs,
-                ...(content.work_refs ?? []).map((ref) => ({
-                  ...ref,
-                  open: {
-                    label: t('history.chat.workRef.open', { title: ref.title }),
-                    onOpen: () => onOpenWork(`${ref.kind}:${ref.id}`),
-                  },
-                })),
-              ]}
+              refs={sentMessageRefs(content.project_refs, content.work_refs ?? [], t, onOpenWork)}
               className="chat-bubble__text"
             />
           ) : (

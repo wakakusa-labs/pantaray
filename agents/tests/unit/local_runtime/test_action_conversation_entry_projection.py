@@ -166,7 +166,7 @@ def test_named_projects_and_work_follow_the_text_the_entry_shows(
         {"display_name": "Demo App", "start": 6, "end": 14}
     ]
     assert entry.model_dump(mode="json")["work_refs"] == [
-        {"title": "Check", "start": 0, "end": 5}
+        {"kind": "action", "id": "action-2", "title": "Check", "start": 0, "end": 5}
     ]
 
 

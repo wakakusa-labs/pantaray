@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -99,6 +99,9 @@ function renderView(
   );
 }
 
+/** A Tool row's own text, as opposed to live work's collapsed label that may repeat it. */
+const TOOL_TEXT = '.action-conversation__tool-text';
+
 /** 行そのもの。状態語は行の本体の外に置くので、本文の親を辿るだけでは届かない。 */
 function toolLineOf(node: HTMLElement): HTMLElement {
   const line = node.closest<HTMLElement>('.action-conversation__tool-line');
@@ -107,7 +110,10 @@ function toolLineOf(node: HTMLElement): HTMLElement {
 }
 
 describe('ActionConversationView', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it.each([
     ['ja', '次の送信で実行', '未実行'],
@@ -393,7 +399,7 @@ describe('ActionConversationView', () => {
       update();
       const disclosure = screen.getByRole('button', { name: new RegExp(`^Pantaray's work ${i},`) });
       expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-      expect(screen.queryByText(`Work ${i}`)).toBeNull();
+      expect(screen.queryByText(`Work ${i}`, { selector: TOOL_TEXT })).toBeNull();
       run = {
         ...run,
         lines: [...run.lines.slice(0, -1), tool(`step-${i}`, `Work ${i}`, 'success', i)],
@@ -402,7 +408,7 @@ describe('ActionConversationView', () => {
       expect(screen.getByRole('button', { name: new RegExp(`^Pantaray's work ${i},`) })).toBe(
         disclosure
       );
-      expect(screen.queryByText(`Work ${i}`)).toBeNull();
+      expect(screen.queryByText(`Work ${i}`, { selector: TOOL_TEXT })).toBeNull();
     }
     await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work 3,/ }));
     run = { ...run, lines: [...run.lines, tool('step-4', 'Work 4', 'processing', 4)] };
@@ -411,7 +417,7 @@ describe('ActionConversationView', () => {
       'aria-expanded',
       'true'
     );
-    expect(screen.getByText('Work 4')).toBeVisible();
+    expect(screen.getByText('Work 4', { selector: TOOL_TEXT })).toBeVisible();
   });
 
   it("moves only inner Tool focus to Pantaray's work before terminal auto-collapse", async () => {
@@ -456,7 +462,7 @@ describe('ActionConversationView', () => {
     const { rerender, unmount } = renderView(viewWith([active, older]), 'en', loader);
     // 実行中の行も同じ見出しに入り、明示的に開いたときだけ見える。
     expect(screen.queryByText('Read database')).toBeNull();
-    expect(screen.queryByText('Query database')).toBeNull();
+    expect(screen.queryByText('Query database', { selector: TOOL_TEXT })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work 2, Run 1:/ }));
     expect(screen.getByText('Read database')).toBeVisible();
     // 実行状態はオーバーレイのヘッダーが持つ。会話が目に見える形で重ねて出すのは行の状態語だけで、
@@ -471,7 +477,9 @@ describe('ActionConversationView', () => {
     const disclosure = screen.getByRole('button', { name: /^Pantaray's work 2, Run 1:/ });
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     expect(
-      within(toolLineOf(screen.getByText('Query database'))).getByRole('status')
+      within(toolLineOf(screen.getByText('Query database', { selector: TOOL_TEXT }))).getByRole(
+        'status'
+      )
     ).toHaveTextContent('Running');
 
     const failedTool = {
@@ -720,7 +728,7 @@ describe('ActionConversationView', () => {
     // 失敗・結果未取得も含む全 7 件が親の開閉に従う。
     expect(screen.queryByText('失敗')).toBeNull();
     expect(screen.queryByText('結果未取得')).toBeNull();
-    expect(screen.queryByText('回答を作成しました')).toBeNull();
+    expect(screen.queryByText('回答案を作成しました')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 7, 実行 1:/ }));
 
     const group = screen.getByRole('button', { name: /^最近の操作を確認 4, 実行 1:/ });
@@ -730,7 +738,7 @@ describe('ActionConversationView', () => {
     // 失敗した行と、1件しかないツールは畳まない。
     expect(screen.getByText('操作の詳細を確認')).toBeVisible();
     expect(screen.getByText('失敗')).toHaveClass('action-conversation__state--failed');
-    expect(screen.getByText('回答を作成しました')).toBeVisible();
+    expect(screen.getByText('回答案を作成しました')).toBeVisible();
     expect(screen.getByText('結果未取得')).toBeVisible();
     // 行そのものが開閉ボタンなので、「ツール出力」の行はどこにも無い。
     expect(screen.queryByRole('button', { name: /^ツール出力/ })).toBeNull();
@@ -1024,10 +1032,10 @@ describe('ActionConversationView', () => {
         node.closest('.action-conversation__tool') ? 'tool' : node.textContent
       );
 
-    expect(shimmering()).toEqual(["Pantaray's work"]);
+    expect(shimmering()).toEqual(['Read a file']);
     await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work 2,/ }));
     // Only the running Tool's line sweeps; the finished one stays still.
-    expect(shimmering()).toEqual(["Pantaray's work", 'tool']);
+    expect(shimmering()).toEqual(['Read a file', 'tool']);
     expect(
       toolLineOf(
         container.querySelector('.action-conversation__shimmer.action-conversation__tool-text')!
@@ -1039,6 +1047,98 @@ describe('ActionConversationView', () => {
     expect(shimmering()).toEqual([]);
     rerender(renderRun({ ...running, status: 'success', lines: [tool('listed', 'List files')] }));
     expect(shimmering()).toEqual([]);
+  });
+
+  it('holds live work labels steady, and folds back to the work count at once', () => {
+    vi.useFakeTimers();
+    const lines: ActionConversationRunItem['lines'][number][] = [];
+    const run = (status: ActionConversationRunItem['status'] = 'running') => (
+      <UiLanguageProvider initialLanguage="ja">
+        <ActionConversationView
+          view={viewWith(
+            [
+              {
+                kind: 'run',
+                runId: 'run-1',
+                status,
+                startedAt: '2026-08-30T00:00:00.000000Z',
+                completedAt: null,
+                lines: [...lines],
+              },
+            ],
+            status === 'running' ? 'processing' : 'success'
+          )}
+          toolOutputLoader={EMPTY_TOOL_OUTPUT_LOADER}
+        />
+      </UiLanguageProvider>
+    );
+    // Each step runs, then finishes; a finished step replaces its running line.
+    const step = (label: string, subject: string, done = false) => {
+      const number = lines.filter((line) => line.kind === 'tool').length + (done ? 0 : 1);
+      const item = tool(`t${number}`, label, done ? 'success' : 'processing', number, [], subject);
+      if (done) lines[lines.length - 1] = item;
+      else lines.push(item);
+      rerender(run());
+    };
+    const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+    const { container, rerender } = render(run());
+    const label = () => container.querySelector('.action-conversation__work-label')!.textContent;
+
+    step('memory_sql', 'SELECT 1');
+    // The label is the running Tool's own row text.
+    expect(label()).toBe('記憶を絞り込んでいます SELECT 1');
+    fireEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 1,/ }));
+    expect(
+      within(
+        toolLineOf(screen.getByText('記憶を絞り込んでいます SELECT 1', { selector: TOOL_TEXT }))
+      ).getByText('実行中')
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 1,/ }));
+
+    // A fast run of steps keeps the shown label for its hold, then jumps to the latest one.
+    step('memory_sql', 'SELECT 1', true);
+    step('read', 'a.md');
+    wait(300);
+    step('read', 'a.md', true);
+    step('grep', 'b');
+    wait(899);
+    expect(label()).toBe('記憶を絞り込んでいます SELECT 1');
+    wait(1);
+    expect(label()).toBe('b を検索しています');
+
+    // A quick hop to the next Tool never blinks to thinking.
+    wait(1200);
+    step('grep', 'b', true);
+    wait(300);
+    step('read', 'c.md');
+    wait(0);
+    expect(label()).toBe('c.md を読み取っています');
+
+    // A longer gap shows thinking.
+    wait(1200);
+    step('read', 'c.md', true);
+    wait(599);
+    expect(label()).toBe('c.md を読み取っています');
+    wait(1);
+    expect(label()).toBe('考えています');
+
+    // The final answer ends the label at once, even during a hold.
+    step('read', 'd.md');
+    lines.push({
+      kind: 'final_output',
+      runId: 'run-1',
+      status: 'success',
+      visibility: 'always',
+      text: '答え',
+    });
+    rerender(run());
+    expect(label()).toBe('Pantarayの作業');
+
+    // So does a run that stops.
+    lines.pop();
+    rerender(run());
+    rerender(run('canceled'));
+    expect(label()).toBe('Pantarayの作業');
   });
 
   it.each([
@@ -1256,13 +1356,13 @@ describe('ActionConversationView', () => {
     };
     renderView(viewWith([run]), 'ja');
     await userEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 4, 実行 1:/ }));
-    const command = screen.getByText("PYTHONPATH=src python - <<'PY'…");
+    const command = screen.getByText("PYTHONPATH=src python - <<'PY'…", { selector: TOOL_TEXT });
     expect(within(toolLineOf(command)).getByText('実行中')).toBeVisible();
 
     expect(screen.getByText('tests/test_retrieval.py を読み取りました')).toBeVisible();
     expect(screen.getByText('ウェブを検索しました 日本語の情報検索')).toBeVisible();
     // 引数を持たない行だけが結果の頭を添える。
-    expect(screen.getByText('回答を作成しました')).toBeVisible();
+    expect(screen.getByText('回答案を作成しました')).toBeVisible();
     expect(screen.getByText('Drafted 3 sections')).toHaveClass('action-conversation__tool-preview');
     // 実行中の行は進行形で、コマンドはそのまま等幅で出る。
     expect(command).toHaveClass('action-conversation__tool-text--mono');

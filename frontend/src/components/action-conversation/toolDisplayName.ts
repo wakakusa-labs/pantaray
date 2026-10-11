@@ -255,10 +255,11 @@ const TOOL_DISPLAY_NAMES = {
   draft_final_answer: {
     agentName: 'Draft Final Answer',
     icon: MessageSquare,
-    ja: '回答を作成',
+    // 送る前にまだ見直せるので、「回答」ではなく「回答案」と言う。
+    ja: '回答案を作成',
     en: 'Draft the answer',
-    jaDone: '回答を作成しました',
-    jaRunning: '回答を作成しています',
+    jaDone: '回答案を作成しました',
+    jaRunning: '回答案を作成しています',
     enDone: 'Drafted the answer',
     enRunning: 'Drafting the answer',
   },

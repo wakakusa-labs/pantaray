@@ -220,9 +220,32 @@
   font-size: var(--text-meta-size);
 }
 
+/* A click focuses a disclosure too; only keyboard focus draws the ring. */
+.action-conversation__disclosure:focus {
+  outline: none;
+}
+
 .action-conversation__disclosure:focus-visible {
-  outline: 2px solid currentcolor;
-  outline-offset: 3px;
+  border-radius: 4px;
+  box-shadow: var(--focus-ring);
+}
+
+/* A live label can be a long command; it shortens instead of wrapping, and the count stays. */
+.action-conversation__work > .action-conversation__disclosure {
+  display: flex;
+  align-items: baseline;
+}
+
+.action-conversation__work > .action-conversation__disclosure::before,
+.action-conversation__work .action-conversation__count {
+  flex: none;
+}
+
+.action-conversation__work-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .action-conversation__tool,

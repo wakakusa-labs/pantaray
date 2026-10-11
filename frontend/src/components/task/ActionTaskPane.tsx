@@ -13,7 +13,7 @@ import { useConversationCopy } from '@/components/agent-overlay/conversationCopy
 import { useCompletionViewed } from '@/components/agent-overlay/useCompletionViewed';
 import { useConversationScroll } from '@/components/agent-overlay/useConversationScroll';
 import { useI18n } from '@/context/useI18n';
-import { liveStageText } from '@/components/history/liveStageText';
+import { useLiveStageText } from '@/components/history/liveStageText';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 
 import { useActionTask } from './useActionTask';
@@ -51,7 +51,7 @@ export function ActionTaskPane({
   onAddProject,
   renderFileChips,
 }: ActionTaskPaneProps) {
-  const { language, t } = useI18n();
+  const { t } = useI18n();
   const titleId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -90,7 +90,7 @@ export function ActionTaskPane({
     true
   );
 
-  const liveStage = useHistoryLiveStages().get(actionId);
+  const liveText = useLiveStageText(useHistoryLiveStages().get(actionId) ?? null);
   // A run that ended but whose page read failed leaves no answer; reopening reads it again.
   const runEndedUnread = lifecycle !== null && lifecycle.status !== 'processing';
   const showReopen =
@@ -136,10 +136,10 @@ export function ActionTaskPane({
         <h1 id={titleId}>{title}</h1>
         {status.kind === 'approval_pending' ? (
           <p className="action-task__state">{t('history.status.approvalPending')}</p>
-        ) : liveStage ? (
+        ) : liveText !== null ? (
           // Visual only: it changes on every step, and the conversation announces the run.
           <p className="action-task__state" aria-hidden="true">
-            {liveStageText(liveStage, language, t)}
+            {liveText}
           </p>
         ) : null}
         <div className="action-task__header-actions">

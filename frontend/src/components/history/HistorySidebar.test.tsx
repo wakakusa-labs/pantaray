@@ -113,6 +113,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   if (originalShowModal) {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   } else {
@@ -552,6 +553,7 @@ function liveUpdate(
 }
 
 it('実行中の会話だけ行の下に今の動きを1行で出し、終われば消す。行は作り直さない', () => {
+  vi.useFakeTimers();
   const listeners = new Set<(update: ActionLiveUpdate) => void>();
   window.electron = {
     actions: {
@@ -606,6 +608,9 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
     )
   );
   publish(liveUpdate(livePage('A2', 'queued', [])));
+  // A step shows at once; thinking waits a moment, so a quick hop between steps does not blink.
+  expect(lines()).toEqual(['notes.md を読み取っています', null]);
+  act(() => vi.advanceTimersByTime(600));
   expect(lines()).toEqual(['notes.md を読み取っています', 'overlay.thinking']);
   // Visual only: the line stays out of the row's accessible name and is not a live region.
   expect(row).toHaveAccessibleName(/^A1/);
@@ -616,7 +621,10 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
     { step_kind: 'assistant', step_id: 'assistant-3', step_number: 3, content: 'Found it\nmore' },
   ]);
   publish(liveUpdate(found));
+  // A finished run's line goes at once; the shown step holds before the next one replaces it.
   publish(liveUpdate(livePage('A2', 'success', [])));
+  expect(lines()).toEqual(['notes.md を読み取っています', null]);
+  act(() => vi.advanceTimersByTime(600));
   expect(lines()).toEqual(['Found it', null]);
   expect(screen.getByRole('button', { name: /^A1/ })).toBe(row);
   expect(row).toHaveFocus();

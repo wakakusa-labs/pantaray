@@ -2,6 +2,9 @@ import { useEffect, useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
+import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import type { WorkKey } from '@/components/chat/chatTimeline';
+import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import type { WorkRefKind } from '@/history/workRefLink';
 import { PopupContainer } from './OverlayBackground';
@@ -226,6 +229,9 @@ const AgentOverlayShell = ({
       : suggestionId !== null
         ? { kind: 'suggestion', id: suggestionId }
         : null;
+  const openWork = onOpenInMainWindow
+    ? (key: WorkKey) => onOpenInMainWindow(splitWorkKey(key))
+    : null;
   const showApprovalPanel = approvalUiState === 'approval_pending' && approvalBlockers.length > 0;
   const copyConversationFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
@@ -399,10 +405,17 @@ const AgentOverlayShell = ({
             {(conversationContent || actionText || showThinking) && (
               <ContentWrapper>
                 <AnswerArea ref={answerAreaRef} tabIndex={-1}>
-                  {conversationContent ??
-                    (actionText ? (
-                      <MarkdownBlock text={actionText} isStreamFinished={isActionStreamFinished} />
-                    ) : null)}
+                  {/* A task or suggestion named in a sent message opens in the main window, as
+                      Open in main window does. */}
+                  <OpenWorkContext.Provider value={openWork}>
+                    {conversationContent ??
+                      (actionText ? (
+                        <MarkdownBlock
+                          text={actionText}
+                          isStreamFinished={isActionStreamFinished}
+                        />
+                      ) : null)}
+                  </OpenWorkContext.Provider>
                   {showThinking ? (
                     <ThinkingLine aria-hidden>{t('overlay.thinking')}</ThinkingLine>
                   ) : null}

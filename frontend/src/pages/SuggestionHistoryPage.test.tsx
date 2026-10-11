@@ -4,7 +4,9 @@ import { forwardRef, useImperativeHandle } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import type { ActionConversationUserItem } from '../../electron/src/actions/actionConversationModel';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
+import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSession';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
@@ -34,6 +36,7 @@ vi.mock('@/components/task/TaskWorkspace', () => ({
   }) => (
     <section aria-label={`action ${actionId}`}>
       <h1>{title}</h1>
+      <UserItem item={SENT_NAMING_SUGGESTION} />
       <button type="button" onClick={onAddProject}>
         add project
       </button>
@@ -68,6 +71,30 @@ vi.mock('@/components/task/NewTaskPane', () => ({
     </section>
   ),
 }));
+
+// A sent message in the task's conversation that names the suggestion S1.
+const SENT_NAMING_SUGGESTION: ActionConversationUserItem = {
+  kind: 'user',
+  source: 'canonical',
+  key: 'sent',
+  visibility: 'always',
+  entry: {
+    step_kind: 'user',
+    chat_note: null,
+    approved_suggestion: null,
+    step_id: 'step-sent',
+    step_number: 1,
+    message_id: 'message-sent',
+    accepted_sequence: 1,
+    content: '請求書 を見て',
+    images: [],
+    project_refs: [],
+    work_refs: [
+      { kind: 'suggestion', id: 'S1', title: '請求書を作りましょうか', start: 0, end: 3 },
+    ],
+    status: 'adopted',
+  },
+};
 
 const ITEMS: ConversationHistoryListItem[] = [
   {
@@ -259,6 +286,13 @@ it('moves the selection off a deleted task in place of its history entry', async
 
   await userEvent.click(screen.getByRole('button', { name: 'back' }));
   expect(location()).toHaveTextContent('/history?item=chat');
+});
+
+it("opens a task's sent work chip in place, as the chat's", async () => {
+  renderPage(['/history?item=chat', '/history?item=action:A1']);
+  await userEvent.click(screen.getByRole('link', { name: '「請求書を作りましょうか」を開く' }));
+  expect(location()).toHaveTextContent('/history?item=suggestion:S1');
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
 const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;

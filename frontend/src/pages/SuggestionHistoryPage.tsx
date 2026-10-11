@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
+import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HISTORY_SIDEBAR_ID, HistorySidebar } from '@/components/history/HistorySidebar';
@@ -176,7 +177,10 @@ const SuggestionHistoryPage = () => {
         onSelect={select}
         hidden={sidebarHidden}
       />
-      <div className="history-detail">{renderDetail()}</div>
+      <div className="history-detail">
+        {/* A task or suggestion named in a task's sent message opens here, as the chat's do. */}
+        <OpenWorkContext.Provider value={select}>{renderDetail()}</OpenWorkContext.Provider>
+      </div>
     </div>
   );
 };

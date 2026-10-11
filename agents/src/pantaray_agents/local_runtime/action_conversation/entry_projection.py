@@ -152,7 +152,13 @@ def project_action_user_entry(
                 for ref in project_refs
             ),
             work_refs=tuple(
-                UserEntryWorkRef(title=ref.title, start=ref.start, end=ref.end)
+                UserEntryWorkRef(
+                    kind=ref.kind,
+                    id=ref.id,
+                    title=ref.title,
+                    start=ref.start,
+                    end=ref.end,
+                )
                 for ref in work_refs
             ),
             files=tuple(

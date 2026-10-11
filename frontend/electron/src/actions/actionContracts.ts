@@ -242,6 +242,8 @@ const UserEntrySchema = z
       .array(
         z
           .object({
+            kind: z.enum(['action', 'suggestion']),
+            id: CanonicalIdentitySchema,
             title: NonBlankTextSchema,
             start: CodePointOffsetSchema,
             end: CodePointOffsetSchema,

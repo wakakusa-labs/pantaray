@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
+import { UserItem } from '@/components/action-conversation/UserMessage';
 import AgentOverlayShell from './AgentOverlayShell';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
@@ -373,5 +375,53 @@ describe('AgentOverlayShell', () => {
     fireEvent.click(button);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("opens a sent message's task in the main window, as Open in main window does", () => {
+    const onOpenInMainWindow = vi.fn();
+    const sent: ActionConversationUserItem = {
+      kind: 'user',
+      source: 'canonical',
+      key: 'sent',
+      visibility: 'always',
+      entry: {
+        step_kind: 'user',
+        chat_note: null,
+        approved_suggestion: null,
+        step_id: 'step-sent',
+        step_number: 1,
+        message_id: 'message-sent',
+        accepted_sequence: 1,
+        content: 'Check the quote',
+        images: [],
+        project_refs: [],
+        work_refs: [{ kind: 'action', id: 'action-2', title: 'Fix the quote', start: 10, end: 15 }],
+        status: 'adopted',
+      },
+    };
+    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
+    const { container } = render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={true}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          actionId="action-1"
+          onOpenInMainWindow={onOpenInMainWindow}
+          conversationContent={<UserItem item={sent} />}
+          onToggleExpand={() => {}}
+        />
+      </UiLanguageProvider>
+    );
+
+    fireEvent.click(within(container).getByRole('link', { name: 'Open Fix the quote' }));
+
+    expect(onOpenInMainWindow).toHaveBeenCalledExactlyOnceWith({ kind: 'action', id: 'action-2' });
   });
 });

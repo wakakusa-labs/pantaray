@@ -1,11 +1,12 @@
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages } from './AttachedImages';
 import { QuotedMessageText } from './QuotedMessageText';
+import { OpenWorkContext, sentMessageRefs } from './sentMessageRefs';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
 /** No confirmation: the message has not run, so withdrawing it undoes nothing. */
@@ -40,22 +41,14 @@ export function UserItem({
   /** Offered only where the message can be withdrawn: a canonical one no run has taken. */
   onWithdraw?: (stepId: string) => Promise<void>;
 }) {
-  const { language } = useI18n();
+  const { language, t } = useI18n();
+  const openWork = useContext(OpenWorkContext);
   const copy = COPY[language];
-  const content =
-    item.source === 'canonical' ? item.entry.content : item.submission.request.message.content;
+  const message = item.source === 'canonical' ? item.entry : item.submission.request.message;
+  const { content, images } = message;
+  const files = message.files ?? [];
   const status = item.source === 'canonical' ? item.entry.status : item.submission.state;
-  const images =
-    item.source === 'canonical' ? item.entry.images : item.submission.request.message.images;
-  const files =
-    (item.source === 'canonical' ? item.entry.files : item.submission.request.message.files) ?? [];
-  const refs =
-    item.source === 'canonical'
-      ? [...item.entry.project_refs, ...(item.entry.work_refs ?? [])]
-      : [
-          ...(item.submission.request.message.project_refs ?? []),
-          ...(item.submission.request.message.work_refs ?? []),
-        ];
+  const refs = sentMessageRefs(message.project_refs ?? [], message.work_refs ?? [], t, openWork);
   const state =
     status !== 'adopted' ? (
       <span

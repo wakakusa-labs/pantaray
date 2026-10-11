@@ -1050,6 +1050,65 @@ describe('ActionConversationView', () => {
     }
   );
 
+  it.each([
+    [
+      'canceled',
+      'ACTION_CANCELED_BY_USER',
+      'Action execution was canceled.',
+      'ja',
+      '停止しました。',
+    ],
+    ['canceled', 'ACTION_CANCELED_BY_USER', 'Action execution was canceled.', 'en', 'Stopped.'],
+    [
+      'error',
+      'LLM_PROVIDER_ERROR',
+      'Action execution failed.',
+      'ja',
+      'エラーが発生し、処理が終了しました。',
+    ],
+    [
+      'error',
+      'ACTION_PROCESS_HEARTBEAT_STALE',
+      'Action execution became unrecoverable before completion.',
+      'en',
+      'An error occurred and execution stopped.',
+    ],
+    // A message the user can act on arrives in their language and is shown as sent.
+    [
+      'error',
+      'ACTION_SIGN_IN_EXPIRED',
+      'ログインの有効期限が切れました。ログインし直してください。',
+      'ja',
+      'ログインの有効期限が切れました。ログインし直してください。',
+    ],
+  ] as const)(
+    'shows a %s run’s fixed %s message in the UI language (%s)',
+    (status, code, message, language, shown) => {
+      const run: ActionConversationRunItem = {
+        kind: 'run',
+        runId: 'run-1',
+        status,
+        startedAt: '2026-08-30T00:00:00.000000Z',
+        completedAt: '2026-08-30T00:00:01.000000Z',
+        lines: [
+          {
+            kind: 'terminal_outcome',
+            runId: 'run-1',
+            status,
+            visibility: 'always',
+            code,
+            text: message,
+          },
+        ],
+      };
+      renderView(viewWith([run], status), language);
+
+      const outcome = screen.getByText(shown);
+      expect(outcome.closest('section')).toHaveClass('action-conversation__outcome');
+      if (shown !== message) expect(screen.queryByText(message)).toBeNull();
+    }
+  );
+
   const withImages = (
     key: string,
     images: CanonicalUserItem['entry']['images']

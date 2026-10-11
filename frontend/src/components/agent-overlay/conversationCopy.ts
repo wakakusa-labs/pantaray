@@ -3,6 +3,7 @@ import {
   type ActionConversationView,
 } from '../../../electron/src/actions/actionConversationModel';
 import { groupAgentWork } from '../action-conversation/actionWork';
+import { terminalOutcomeText } from '../action-conversation/terminalOutcomeText';
 import { useI18n } from '@/context/useI18n';
 import { readWholeConversation } from './conversationPaging';
 import { useClipboardCopy } from './useClipboardCopy';
@@ -14,6 +15,8 @@ export type TranscriptCopy = Readonly<{
   pantaray: string;
   /** The line that stands for a message's attached images, which text cannot carry. */
   images: (count: number) => string;
+  /** A canceled or failed run's message, as the conversation shows it. */
+  outcome: (message: string) => string;
 }>;
 
 /**
@@ -45,11 +48,9 @@ export function formatConversationTranscript(
         if (line.source === 'canonical' && line.entry.chat_note !== null) {
           add(copy.pantaray, [line.entry.chat_note]);
         }
-      } else if (
-        line.kind === 'assistant' ||
-        line.kind === 'final_output' ||
-        line.kind === 'terminal_outcome'
-      ) {
+      } else if (line.kind === 'terminal_outcome') {
+        add(copy.pantaray, [copy.outcome(line.text)]);
+      } else if (line.kind === 'assistant' || line.kind === 'final_output') {
         add(copy.pantaray, [line.text]);
       }
     }
@@ -82,6 +83,7 @@ export function useConversationCopy(
               t(count === 1 ? 'overlay.transcript.image' : 'overlay.transcript.images', {
                 count,
               }),
+            outcome: (message) => terminalOutcomeText(message, t),
           })
         );
       }),

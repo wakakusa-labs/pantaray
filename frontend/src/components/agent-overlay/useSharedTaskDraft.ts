@@ -11,7 +11,13 @@ type DraftActions = Pick<
 // Typing is shared once it pauses this long; a composer that goes sends what is pending first.
 const SHARE_DELAY_MS = 150;
 
-const EMPTY_DRAFT: TaskDraft = { text: '', mentions: [], attachments: [], retry: null };
+const EMPTY_DRAFT: TaskDraft = {
+  text: '',
+  mentions: [],
+  quotes: [],
+  attachments: [],
+  retry: null,
+};
 
 /**
  * The composer's draft as the task holds it. A send that failed without an answer is the task's
@@ -23,6 +29,7 @@ function draftOf(composer: ComposerState): TaskDraft {
   return {
     text: composer.draft,
     mentions: composer.mentions.map((mention) => ({ ...mention, paths: [...mention.paths] })),
+    quotes: composer.quotes.map((quote) => ({ ...quote })),
     attachments: [...composer.attachments],
     retry: holdsRetry(composer) && composer.submission ? composer.submission.request : null,
   };
@@ -33,6 +40,7 @@ function draftKey(draft: TaskDraft): string {
   return JSON.stringify([
     draft.text,
     draft.mentions.map((m) => [m.projectId, m.displayName, m.paths, m.start, m.end]),
+    draft.quotes.map((q) => [q.id, q.text, q.comment]),
     draft.attachments.map((a) =>
       a.kind === 'image' ? [a.storagePath] : [a.attachmentId, a.name, a.byteSize]
     ),
@@ -49,6 +57,7 @@ function withDraft(composer: ComposerState, draft: TaskDraft): ComposerState {
     ...composer,
     draft: draft.text,
     mentions: draft.mentions,
+    quotes: draft.quotes,
     attachments: draft.attachments,
   };
   if (draft.retry) {
@@ -75,7 +84,7 @@ const holdsRetry = (composer: ComposerState) =>
   composer.submission?.state === 'failed' && composer.failureKind === 'transport';
 
 /**
- * Keeps this composer's unsent words, mentions and attachments in the task's one draft in main,
+ * Keeps this composer's unsent words, quotes, mentions and attachments in the task's one draft in main,
  * which every window showing the task shares: what is typed here appears there, and the reverse.
  * Main clears the task's draft as a send takes its words, and settles it as the send ends,
  * keeping a newer draft from another window over them; the composer writes nothing meanwhile,

@@ -81,6 +81,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     submitDraft,
     requestResume,
     changeDraft,
+    quoting,
+    clearMessage,
+    hasMessage: hasWords,
     attachFiles,
     removeAttachment,
     refreshSubmission,
@@ -338,14 +341,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   );
   // 入力欄の主ボタンが今どの操作なのか。書きかけがあれば送信、なければ動いている
   // ものを止めるか、直前に止めたものを再開する。
-  const composerAction: 'send' | 'stop' | 'resume' =
-    composer.draft.trim() !== ''
-      ? 'send'
-      : stopShown
-        ? 'stop'
-        : !lifecycle && canonicalPage?.action.resumable === true
-          ? 'resume'
-          : 'send';
+  const composerAction: 'send' | 'stop' | 'resume' = hasWords
+    ? 'send'
+    : stopShown
+      ? 'stop'
+      : !lifecycle && canonicalPage?.action.resumable === true
+        ? 'resume'
+        : 'send';
   const awaitsBoundConversation =
     conversationActionId !== null && canonicalPage === null && composer.submission === null;
   useEffect(() => {
@@ -457,12 +459,11 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     state.suggestionId,
     state.reactionState === 'rejected',
     supplement,
-    () => changeDraft('', [])
+    clearMessage
   );
   // 見送る takes only words, as the reason: attachments wait for a message of their own.
   const canDismissSuggestion =
     composer.attachments.length === 0 && composer.attachmentsInFlight === 0 && !supplementInvalid;
-  const hasWords = composer.draft.trim() !== '';
   const acceptSuggestion = () => {
     if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
     ctrl.onAccept({
@@ -481,6 +482,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         approvalMode={approvalMode}
         draft={composer.draft}
         mentions={composer.mentions}
+        quoting={{ ...quoting, sourceRef: ctrl.contentInnerRef }}
         submissionControls={submissionControls}
         retryAcceptance={offersDecision && ctrl.acceptFailed}
         attachments={composer.attachments}

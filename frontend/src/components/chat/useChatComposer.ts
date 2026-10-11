@@ -18,6 +18,7 @@ import {
   type ComposerAttachment,
 } from '@/components/agent-overlay/attachmentStaging';
 import type { ComposerMention } from '@/components/agent-overlay/composerMentions';
+import { composeQuotedMessage, type ComposerQuote } from '@/components/agent-overlay/messageQuotes';
 
 import type { ChatMessageItem } from './chatTimeline';
 
@@ -29,6 +30,8 @@ type ChatComposerState = {
   /** Workspace projects named in `draft` with @, in text order. */
   mentions: readonly ComposerMention[];
   quote: ChatMessageItem | null;
+  /** Passages picked from the chat, in the order added; they go out before `draft`. */
+  quotes: readonly ComposerQuote[];
   attachments: readonly ComposerAttachment[];
   /** Attach round trips still running; sending waits for them. */
   attachmentsInFlight: number;
@@ -45,6 +48,7 @@ const EMPTY: ChatComposerState = {
   draft: '',
   mentions: [],
   quote: null,
+  quotes: [],
   attachments: [],
   attachmentsInFlight: 0,
   attachmentFailure: null,
@@ -103,18 +107,24 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
     );
   };
 
+  const message = composeQuotedMessage(state.quotes, state.draft);
+
   const send = () => {
     if (state.pending !== null || state.attachmentsInFlight > 0) return;
     const parsed = ChatMessageRequestSchema.safeParse({
       message_id: crypto.randomUUID(),
-      text: state.draft,
+      text: message.text,
       quote_item_id: state.quote?.item_id ?? null,
       ...attachmentPayload(state.attachments),
       project_refs: state.mentions.map((mention) => ({
         project_id: mention.projectId,
         display_name: mention.displayName,
         paths: [...mention.paths],
-        ...codePointSpanInTrimmedText(state.draft, mention.start, mention.end),
+        ...codePointSpanInTrimmedText(
+          message.text,
+          mention.start + message.draftOffset,
+          mention.end + message.draftOffset
+        ),
       })),
     });
     if (!parsed.success) {
@@ -162,7 +172,8 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
   return {
     state,
     canAttach: canAttachMore(state.attachments) && state.pending === null,
-    canSend: state.pending === null && state.attachmentsInFlight === 0 && state.draft.trim() !== '',
+    canSend:
+      state.pending === null && state.attachmentsInFlight === 0 && message.text.trim() !== '',
     setDraft: (draft: string, mentions: readonly ComposerMention[]) =>
       setState((current) => ({
         ...current,
@@ -178,6 +189,21 @@ export function useChatComposer({ onSent }: { onSent: (item: ChatItem) => void }
         quote,
         problem: current.problem === 'quote_item_id' ? null : current.problem,
       })),
+    quoting: {
+      quotes: state.quotes,
+      onAdd: (text: string, comment: string) =>
+        setState((current) => ({
+          ...current,
+          quotes: [...current.quotes, { id: crypto.randomUUID(), text, comment }],
+          problem: current.problem === 'text' ? null : current.problem,
+        })),
+      onRemove: (id: string) =>
+        setState((current) => ({
+          ...current,
+          quotes: current.quotes.filter((quote) => quote.id !== id),
+          problem: current.problem === 'text' ? null : current.problem,
+        })),
+    },
     send,
     retry,
     attachFiles,

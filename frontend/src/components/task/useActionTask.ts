@@ -160,7 +160,7 @@ export function useActionTask(actionId: string) {
     composer.submission === null && visiblePages !== null && canonicalPage !== null;
   const canSend =
     canCompose &&
-    composer.draft.trim() !== '' &&
+    composerControl.hasMessage &&
     composer.attachmentsInFlight === 0 &&
     permissionsReady;
   const { stopShown, stopState, stop } = useActionStop({
@@ -173,14 +173,13 @@ export function useActionTask(actionId: string) {
     permissionsReady &&
     (composer.resume === null || composer.resume.state === 'failed');
   // The composer's primary button: send a draft, else stop the running run, else resume a stop.
-  const composerAction: 'send' | 'stop' | 'resume' =
-    composer.draft.trim() !== ''
-      ? 'send'
-      : stopShown
-        ? 'stop'
-        : status.resumable
-          ? 'resume'
-          : 'send';
+  const composerAction: 'send' | 'stop' | 'resume' = composerControl.hasMessage
+    ? 'send'
+    : stopShown
+      ? 'stop'
+      : status.resumable
+        ? 'resume'
+        : 'send';
 
   // A follow-up joins the running run: the backend rejects it if that run is no longer current.
   const send = () => {
@@ -242,6 +241,7 @@ export function useActionTask(actionId: string) {
       stopState,
       action: composerAction,
       changeDraft: composerControl.changeDraft,
+      quoting: composerControl.quoting,
       attachFiles: composerControl.attachFiles,
       removeAttachment: composerControl.removeAttachment,
       retrySubmission: composerControl.retrySubmission,

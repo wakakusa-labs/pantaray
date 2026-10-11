@@ -9,6 +9,7 @@ import { ComposerMessageField } from './ComposerMessageField';
 import type { ComposerMention } from './composerMentions';
 import type { ActionApprovalModeControl } from './useActionApprovalMode';
 import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
+import { ComposerQuotes, type ComposerQuoting } from './ComposerQuotes';
 import type { ActionStopState } from './useActionStop';
 import {
   ATTACHMENT_ACCEPT,
@@ -174,6 +175,8 @@ type OverlayComposerProps = {
   approvalMode: ActionApprovalModeControl;
   draft: string;
   mentions: readonly ComposerMention[];
+  /** Quotes picked from the conversation above; absent where there is no conversation. */
+  quoting?: ComposerQuoting;
   /** Keep the unconfirmed message selectable while its exact request is retried. */
   submissionControls: ReactNode;
   retryAcceptance: boolean;
@@ -302,6 +305,7 @@ export function OverlayComposer({
   approvalMode,
   draft,
   mentions,
+  quoting,
   submissionControls,
   retryAcceptance,
   attachments,
@@ -344,6 +348,9 @@ export function OverlayComposer({
       <ScreenReaderOnly htmlFor={MESSAGE_FIELD_ID}>
         {t(decides ? 'overlay.supplement.label' : 'overlay.composer.label')}
       </ScreenReaderOnly>
+      {quoting ? (
+        <ComposerQuotes quoting={quoting} readOnly={isReadOnly} textareaRef={textareaRef} />
+      ) : null}
       <ComposerMessageField
         id={MESSAGE_FIELD_ID}
         textareaRef={textareaRef}

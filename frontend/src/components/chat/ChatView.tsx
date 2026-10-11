@@ -144,6 +144,7 @@ export const ChatView = forwardRef<
   });
   const returnTo = jump?.shown ? jump.returnTo : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   // Back at the newest message the reader sees it, so the existing check marks it read.
   useImperativeHandle(ref, () => ({
     showNewest: () => {
@@ -238,7 +239,7 @@ export const ChatView = forwardRef<
           markRead();
         }}
       >
-        <div className="chat-column">
+        <div className="chat-column" ref={columnRef}>
           {chat.hasOlder ? (
             <button
               ref={scroll.olderTriggerRef}
@@ -295,6 +296,7 @@ export const ChatView = forwardRef<
       ) : null}
       <ChatComposer
         composer={composer}
+        quoteSourceRef={columnRef}
         textareaRef={textareaRef}
         t={t}
         onAddProject={onAddProject}

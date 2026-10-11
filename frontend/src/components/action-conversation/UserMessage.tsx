@@ -5,7 +5,7 @@ import type { ActionConversationUserItem } from '../../../electron/src/actions/a
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages } from './AttachedImages';
-import { ProjectRefText } from './ProjectRefText';
+import { QuotedMessageText } from './QuotedMessageText';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
 /** No confirmation: the message has not run, so withdrawing it undoes nothing. */
@@ -94,11 +94,7 @@ export function UserItem({
   return (
     <>
       <article className="action-conversation__user" aria-label={copy.you}>
-        {content !== null ? (
-          <p>
-            <ProjectRefText text={content} refs={projectRefs} />
-          </p>
-        ) : null}
+        {content !== null ? <QuotedMessageText text={content} refs={projectRefs} /> : null}
         {images.length > 0 ? <AttachedImages images={images} copy={copy.userImages} /> : null}
         {files.length > 0 ? (
           <ul

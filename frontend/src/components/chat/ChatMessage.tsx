@@ -4,7 +4,7 @@ import { useId } from 'react';
 import type { ChatCard as ChatCardData, ChatItem } from '../../../electron/src/chat/chatContracts';
 import { AttachedFileChip } from '@/components/action-conversation/AttachedFileChip';
 import { AttachedImages } from '@/components/action-conversation/AttachedImages';
-import { ProjectRefText } from '@/components/action-conversation/ProjectRefText';
+import { QuotedMessageText } from '@/components/action-conversation/QuotedMessageText';
 import { USER_MESSAGE_COPY } from '@/components/action-conversation/userMessageCopy';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { useI18n } from '@/context/useI18n';
@@ -126,9 +126,11 @@ export function ChatMessage({
             <QuotedMessage quoted={quoted} t={t} onJump={() => onJumpToQuote(quoteItemId)} />
           ) : null}
           {mine ? (
-            <p className="chat-bubble__text">
-              <ProjectRefText text={content.text} refs={content.project_refs} />
-            </p>
+            <QuotedMessageText
+              text={content.text}
+              refs={content.project_refs}
+              className="chat-bubble__text"
+            />
           ) : (
             <MarkdownBlock text={content.text} isStreamFinished />
           )}

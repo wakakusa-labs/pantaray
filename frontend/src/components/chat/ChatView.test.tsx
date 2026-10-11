@@ -977,3 +977,72 @@ it('drops the way back to the quote once the user sends a message', async () => 
   expect(sendMessage).toHaveBeenCalledOnce();
   expect(screen.queryByRole('button', { name: '元のメッセージに戻る' })).not.toBeInTheDocument();
 });
+
+// Selects `text` inside `element`'s text, as a drag or Shift+arrows would.
+function select(element: HTMLElement, text: string) {
+  const node = element.firstChild!;
+  const start = node.textContent!.indexOf(text);
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, start + text.length);
+  document.getSelection()!.removeAllRanges();
+  document.getSelection()!.addRange(range);
+  act(() => {
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+}
+
+it('adds selected passages with comments as quotes, and sends them all in one message', async () => {
+  pages = [{ items: [reply(1, 'A案は安い。B案は速い。C案は確実。')], next_cursor: null }];
+  renderPage();
+  const answer = await screen.findByText('A案は安い。B案は速い。C案は確実。');
+  const input = screen.getByRole('textbox', { name: 'メッセージ' });
+  const addQuote = async (text: string, comment: string) => {
+    select(answer, text);
+    await userEvent.click(screen.getByRole('button', { name: '返信に追加' }));
+    const field = screen.getByRole('textbox', { name: '選んだ部分へのコメント' });
+    expect(field).toHaveFocus();
+    if (comment) await userEvent.type(field, comment);
+    return field;
+  };
+
+  await addQuote('A案は安い。', 'もっと安く');
+  await userEvent.keyboard('{Enter}');
+  expect(input).toHaveFocus();
+  // Esc cancels: nothing is added, and focus returns to the message.
+  await addQuote('B案は速い。', '');
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('textbox', { name: '選んだ部分へのコメント' })).toBeNull();
+  expect(input).toHaveFocus();
+  // Enter that confirms an IME conversion adds nothing.
+  const field = await addQuote('B案は速い。', 'はやい');
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })
+  );
+  expect(screen.getByRole('list', { name: '引用 1 件' })).toBeInTheDocument();
+  await userEvent.keyboard('{Enter}');
+  await addQuote('C案は確実。', '');
+  await userEvent.keyboard('{Enter}');
+
+  const quotes = screen.getByRole('list', { name: '引用 3 件' });
+  await userEvent.click(within(quotes).getByRole('button', { name: '引用 2 / 3 を削除' }));
+  expect(
+    within(screen.getByRole('list', { name: '引用 2 件' })).getAllByRole('listitem')
+  ).toHaveLength(2);
+  expect(sendMessage).not.toHaveBeenCalled();
+
+  sendMessage.mockImplementationOnce(async (request) => ({
+    kind: 'sent',
+    item: userMessage(2, request.text),
+  }));
+  await userEvent.type(input, 'どれがいい？{Enter}');
+
+  expect(sendMessage.mock.calls[0][0]).toMatchObject({
+    text: '> A案は安い。\n\nもっと安く\n\n> C案は確実。\n\nどれがいい？',
+    quote_item_id: null,
+  });
+  const mine = await screen.findByRole('article', { name: 'あなた' });
+  expect(mine.querySelector('blockquote')).toHaveTextContent('A案は安い。');
+  expect(within(mine).getByText('どれがいい？')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: /引用/ })).toBeNull();
+});

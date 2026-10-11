@@ -33,6 +33,11 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.attachmentAlt': 'Attached image {index} of {count}',
     'overlay.composer.attachmentRemove': 'Remove attached image {index} of {count}',
     'overlay.composer.fileRemove': 'Remove {name}',
+    'overlay.composer.quote.add': 'Add to reply',
+    'overlay.composer.quote.comment': 'Comment on the selected text',
+    'overlay.composer.quote.placeholder': 'Add a comment and press Enter',
+    'overlay.composer.quotes': 'Quotes, {count}',
+    'overlay.composer.quote.remove': 'Remove quote {index} of {count}',
     'overlay.composer.attachFailed.unsupported_media_type':
       'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, and notebook files.',
     'overlay.composer.attachFailed.too_large': 'Each image must be 8 MB or smaller.',
@@ -163,6 +168,11 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.attachmentAlt': '添付画像 {index} / {count}',
     'overlay.composer.attachmentRemove': '添付画像 {index} / {count} を削除',
     'overlay.composer.fileRemove': '{name} を削除',
+    'overlay.composer.quote.add': '返信に追加',
+    'overlay.composer.quote.comment': '選んだ部分へのコメント',
+    'overlay.composer.quote.placeholder': 'コメントを書いて Enter',
+    'overlay.composer.quotes': '引用 {count} 件',
+    'overlay.composer.quote.remove': '引用 {index} / {count} を削除',
     'overlay.composer.attachFailed.unsupported_media_type':
       '添付できるのは PNG / JPEG / GIF / WebP の画像と、PDF / Word / Excel / PowerPoint / ノートブックのファイルです。',
     'overlay.composer.attachFailed.too_large': '画像 1 枚あたり 8 MB までです。',

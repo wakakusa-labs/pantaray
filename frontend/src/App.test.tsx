@@ -84,6 +84,21 @@ it.each([
   expect(startBrowserLogin).not.toHaveBeenCalled();
 });
 
+it('reopens what History last showed from Home, and leaves it as it is on History', async () => {
+  const user = userEvent.setup();
+  window.history.replaceState(null, '', '/#/history?item=action:task-1');
+  render(subject());
+  const rail = within(await screen.findByRole('navigation'));
+  await user.click(rail.getByRole('button', { name: 'ホーム' }));
+  expect(window.location.hash).toBe('#/history?item=action:task-1');
+
+  await user.click(rail.getByRole('button', { name: '設定' }));
+  expect(await screen.findByRole('heading', { name: 'Local settings' })).toBeVisible();
+  await user.click(rail.getByRole('button', { name: 'ホーム' }));
+  expect(await screen.findByRole('heading', { name: 'Local history' })).toBeVisible();
+  expect(window.location.hash).toBe('#/history?item=action:task-1');
+});
+
 it('offers optional Pantaray login and lets a guest return without starting authentication', async () => {
   const user = userEvent.setup();
   render(subject());

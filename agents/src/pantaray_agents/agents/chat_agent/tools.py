@@ -59,6 +59,7 @@ from pantaray_agents.local_runtime.tooling.repository import (
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionUserMessageInput,
+    ActionWorkRef,
     ChatHandoffInput,
     FileAttachmentInput,
 )
@@ -197,6 +198,7 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             # What the user added to their yes, in their own words.
             supplement=relayed.text,
             supplement_project_refs=relayed.project_refs,
+            supplement_work_refs=relayed.work_refs,
             images=relayed.images,
             files=relayed.files,
             chat_handoff=ChatHandoffInput(
@@ -367,6 +369,7 @@ def _submit(
                 images=images,
                 files=files,
                 project_refs=relayed.project_refs,
+                work_refs=relayed.work_refs,
                 chat_handoff=ChatHandoffInput(
                     relayed_item_ids=tuple(relay),
                     note=note if relayed.text is not None else None,
@@ -423,6 +426,7 @@ class _Relayed:
     images: tuple[ImageInput, ...]
     files: tuple[FileAttachmentInput, ...]
     project_refs: tuple[ActionProjectRef, ...]
+    work_refs: tuple[ActionWorkRef, ...]
 
 
 def _relayed(
@@ -430,13 +434,15 @@ def _relayed(
 ) -> _Relayed | ReactToolResult:
     """The user's messages ``item_ids`` in their own words, one after another.
 
-    Each named project keeps its span, moved by where its message lands.
+    Each named project, task and suggestion keeps its span, moved by where its
+    message lands.
     """
 
     texts: list[str] = []
     images: list[ImageInput] = []
     files: list[FileAttachmentInput] = []
     project_refs: list[ActionProjectRef] = []
+    work_refs: list[ActionWorkRef] = []
     for item_id in item_ids:
         message = read_user_message(user_id=plan.user_id, item_id=item_id)
         if message is None:
@@ -449,17 +455,23 @@ def _relayed(
         texts.append(message.text)
         images.extend(message.images)
         files.extend(message.files)
-        project_refs.extend(
-            ref.model_copy(
-                update={"start": ref.start + offset, "end": ref.end + offset}
-            )
-            for ref in message.project_refs
-        )
+        project_refs.extend(_shifted(message.project_refs, offset))
+        work_refs.extend(_shifted(message.work_refs, offset))
     return _Relayed(
         text=_RELAY_SEPARATOR.join(texts) if texts else None,
         images=tuple(images),
         files=tuple(files),
         project_refs=tuple(project_refs),
+        work_refs=tuple(work_refs),
+    )
+
+
+def _shifted[RefT: (ActionProjectRef, ActionWorkRef)](
+    refs: tuple[RefT, ...], offset: int
+) -> tuple[RefT, ...]:
+    return tuple(
+        ref.model_copy(update={"start": ref.start + offset, "end": ref.end + offset})
+        for ref in refs
     )
 
 

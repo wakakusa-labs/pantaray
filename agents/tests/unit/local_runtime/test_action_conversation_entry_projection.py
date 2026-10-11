@@ -43,6 +43,7 @@ from pantaray_agents.schema.action_conversation import ActionStepStatus
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionUserMessageInput,
+    ActionWorkRef,
     ChatHandoffInput,
     FileAttachmentInput,
     SuggestionApprovalInput,
@@ -125,6 +126,9 @@ _DEMO_REF = ActionProjectRef(
 )
 
 
+_CHECK_REF = ActionWorkRef(kind="action", id="action-2", title="Check", start=0, end=5)
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -132,19 +136,21 @@ _DEMO_REF = ActionProjectRef(
             message_id="message-1",
             content="Check Demo App",
             project_refs=(_DEMO_REF,),
+            work_refs=(_CHECK_REF,),
         ),
         ActionUserMessageInput(
             message_id="message-1",
             content="Apply the change",
             supplement="Check Demo App",
             supplement_project_refs=(_DEMO_REF,),
+            supplement_work_refs=(_CHECK_REF,),
             suggestion_approval=SuggestionApprovalInput(
                 suggestion_id="suggestion-1", approved_at="2026-08-30T00:00:00Z"
             ),
         ),
     ],
 )
-def test_project_refs_follow_the_text_the_entry_shows(
+def test_named_projects_and_work_follow_the_text_the_entry_shows(
     message: ActionUserMessageInput,
 ) -> None:
     row = replace(
@@ -158,6 +164,9 @@ def test_project_refs_follow_the_text_the_entry_shows(
     assert entry.content == "Check Demo App"
     assert entry.model_dump(mode="json")["project_refs"] == [
         {"display_name": "Demo App", "start": 6, "end": 14}
+    ]
+    assert entry.model_dump(mode="json")["work_refs"] == [
+        {"title": "Check", "start": 0, "end": 5}
     ]
 
 

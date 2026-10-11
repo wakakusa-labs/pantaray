@@ -402,6 +402,39 @@ def test_project_refs_reach_the_canonical_command_as_code_point_spans(
     assert refs[0].paths == ("/workspace/demo-app",)
 
 
+def test_work_refs_reach_the_canonical_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[SubmitActionMessageCommand] = []
+
+    def submit(command: SubmitActionMessageCommand) -> StartedActionMessageResult:
+        commands.append(command)
+        return _started(command, inserted=True)
+
+    monkeypatch.setattr(router_module, "submit_canonical_action_message", submit)
+    body = _request()
+    message = body["message"]
+    assert isinstance(message, dict)
+    message["content"] = "  Q3 report を確認\n"
+    ref = {
+        "kind": "suggestion",
+        "id": "s-1",
+        "title": "Q3 report",
+        "start": 0,
+        "end": 9,
+    }
+    message["work_refs"] = [ref]
+
+    with _client() as client:
+        response = client.post("/v1/agents/users/user-1/actions/messages", json=body)
+        message["work_refs"] = [{**ref, "start": 1, "end": 10}]
+        message["message_id"] = "message-2"
+        rejected = client.post("/v1/agents/users/user-1/actions/messages", json=body)
+
+    assert response.status_code == 200, response.text
+    assert [r.model_dump() for r in commands[0].message.work_refs] == [ref]
+    assert rejected.status_code == 422
+    assert rejected.json()["field"] == "message.work_refs"
+
+
 @pytest.mark.parametrize(
     ("project_refs", "field", "reason"),
     [

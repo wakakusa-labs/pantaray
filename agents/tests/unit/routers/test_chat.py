@@ -246,3 +246,18 @@ def test_a_named_project_follows_the_action_message_contract(
     for rejected in (off_span, relative):
         assert rejected.status_code == 400
         assert rejected.json()["field"] == "project_refs"
+
+
+def test_a_named_task_is_kept_with_the_message(client: TestClient) -> None:
+    ref = {"kind": "action", "id": "a-1", "title": "Q3 report", "start": 0, "end": 9}
+    sent = client.post(
+        MESSAGES, json=_message(text="Q3 report を見て", work_refs=[ref])
+    )
+    off_span = client.post(
+        MESSAGES, json=_message("m-2", text="See Q3 report", work_refs=[ref])
+    )
+
+    assert sent.status_code == 200
+    assert client.get(ITEMS).json()["items"][0]["content"]["work_refs"] == [ref]
+    assert off_span.status_code == 400
+    assert off_span.json()["field"] == "work_refs"

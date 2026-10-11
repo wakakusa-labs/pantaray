@@ -31,7 +31,8 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message as submit_canonical_action_message,
 )
-from pantaray_agents.schema.agent.action_message import (
+from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.agent.action_message_http import (
     ActionMessageHttpConflictFailure,
     ActionMessageHttpDefaultErrorDetail,
     ActionMessageHttpDeferredResponse,
@@ -47,7 +48,6 @@ from pantaray_agents.schema.agent.action_message import (
     ActionMessageValidationUnit,
     ActionMessageWithdrawConflictFailure,
     ActionResumeHttpRequest,
-    ActionUserMessageInput,
 )
 from pantaray_agents.security.storage_paths import validate_image_storage_path
 
@@ -292,6 +292,7 @@ def _canonical_command(
             language=message.language,
             project_refs=message.project_refs,
             files=message.files,
+            work_refs=message.work_refs,
         ),
     )
 

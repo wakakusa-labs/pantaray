@@ -478,7 +478,8 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
         "end": 10,
     }
     earlier = _say_with("m-1", "前回の見積もりの件", ())
-    named = _say_with("m-2", "Aurora Web で作り直して", (ref,))
+    task = {"kind": "action", "id": "a-9", "title": "Q3", "start": 13, "end": 15}
+    named = _say_with("m-2", "Aurora Web で Q3 を作り直して", (ref,), (task,))
 
     turn = _turn("a0")
     relayed = await turn("start_action", relay=[earlier, named], note=None)
@@ -492,9 +493,12 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
 
     first, second, third = _sent_messages(db_path, action_id)
     # Relayed: the user's words, verbatim and in order, with their project's span moved.
-    assert first.content == "前回の見積もりの件\n\nAurora Web で作り直して"
+    assert first.content == "前回の見積もりの件\n\nAurora Web で Q3 を作り直して"
     (project,) = first.project_refs
     assert first.content[project.start : project.end] == "Aurora Web"
+    (named_task,) = first.work_refs
+    assert first.content[named_task.start : named_task.end] == "Q3"
+    assert (named_task.kind, named_task.id) == ("action", "a-9")
     assert project.paths == ("/Users/me/aurora",)
     assert first.chat_handoff == ChatHandoffInput(relayed_item_ids=(earlier, named))
     # The chat's own instruction is the message, marked as relaying none of theirs.
@@ -509,7 +513,12 @@ async def test_the_users_words_go_in_as_theirs_and_the_chats_as_its_note(
     assert isinstance(nothing, dict) and nothing["error_code"] == "NOTHING_TO_SEND"
 
 
-def _say_with(message_id: str, text: str, refs: tuple[dict[str, object], ...]) -> str:
+def _say_with(
+    message_id: str,
+    text: str,
+    refs: tuple[dict[str, object], ...],
+    work_refs: tuple[dict[str, object], ...] = (),
+) -> str:
     return append_chat_item(
         user_id=USER,
         message_id=message_id,
@@ -522,6 +531,7 @@ def _say_with(message_id: str, text: str, refs: tuple[dict[str, object], ...]) -
                     "images": [],
                     "files": [],
                     "project_refs": list(refs),
+                    "work_refs": list(work_refs),
                 }
             )
         ),

@@ -26,9 +26,11 @@ from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_MAX_IMAGES,
     ActionMessageId,
     ActionProjectRef,
+    ActionWorkRef,
     FileAttachmentInput,
     bounded_project_refs,
-    require_project_ref_spans,
+    bounded_work_refs,
+    require_ref_spans,
 )
 from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.conversation_history import ConversationHistoryTimestamp
@@ -91,7 +93,13 @@ type ChatCard = Annotated[
 def _project_refs_in_text(
     refs: tuple[ActionProjectRef, ...], info: ValidationInfo
 ) -> tuple[ActionProjectRef, ...]:
-    return require_project_ref_spans(refs, info, text_field="text")
+    return require_ref_spans(refs, info, text_field="text")
+
+
+def _work_refs_in_text(
+    refs: tuple[ActionWorkRef, ...], info: ValidationInfo
+) -> tuple[ActionWorkRef, ...]:
+    return require_ref_spans(refs, info, text_field="text", beside_field="project_refs")
 
 
 class UserMessageContent(_ChatModel):
@@ -100,14 +108,18 @@ class UserMessageContent(_ChatModel):
     quote_item_id: ActionMessageId | None
     images: ChatImages
     files: ChatFiles
-    # Workspace projects named with @, as an Action message names them; after
-    # ``text``, which their spans point into.
+    # Workspace projects named with @, and tasks and suggestions named by their
+    # chips, as an Action message names them; after ``text``, which their spans
+    # point into.
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
 
     _bound_project_refs = field_validator("project_refs", mode="before")(
         bounded_project_refs
     )
+    _bound_work_refs = field_validator("work_refs", mode="before")(bounded_work_refs)
     _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
+    _span_work_refs = field_validator("work_refs")(_work_refs_in_text)
 
 
 class AssistantMessageContent(_ChatModel):
@@ -165,15 +177,18 @@ class ChatMessageHttpRequest(_ChatModel):
     images: ChatImages = ()
     files: ChatFiles = ()
     project_refs: tuple[ActionProjectRef, ...] = ()
+    work_refs: tuple[ActionWorkRef, ...] = ()
 
     _bound_project_refs = field_validator("project_refs", mode="before")(
         bounded_project_refs
     )
+    _bound_work_refs = field_validator("work_refs", mode="before")(bounded_work_refs)
     _span_project_refs = field_validator("project_refs")(_project_refs_in_text)
+    _span_work_refs = field_validator("work_refs")(_work_refs_in_text)
 
 
 type ChatMessageRejectedField = Literal[
-    "body", "text", "quote_item_id", "images", "files", "project_refs"
+    "body", "text", "quote_item_id", "images", "files", "project_refs", "work_refs"
 ]
 
 

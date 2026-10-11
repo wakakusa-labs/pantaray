@@ -203,6 +203,17 @@ class UserEntryProjectRef(_ActionConversationModel):
     end: NonNegativeInt
 
 
+class UserEntryWorkRef(_ActionConversationModel):
+    """A task or suggestion named in ``UserEntry.content``, titled as when sent.
+
+    ``start`` and ``end`` are Unicode code-point offsets into that content.
+    """
+
+    title: NonBlankText
+    start: NonNegativeInt
+    end: NonNegativeInt
+
+
 class UserEntryFile(_ActionConversationModel):
     """A document attached to the message, as it was named when sent."""
 
@@ -224,6 +235,7 @@ class UserEntry(_ActionConversationModel):
     chat_note: NonBlankText | None = None
     images: tuple[ImageInput, ...]
     project_refs: tuple[UserEntryProjectRef, ...]
+    work_refs: tuple[UserEntryWorkRef, ...] = ()
     files: tuple[UserEntryFile, ...]
     status: UserEntryStatus
 

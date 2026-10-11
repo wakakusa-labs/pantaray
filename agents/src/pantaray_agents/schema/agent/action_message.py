@@ -103,6 +103,7 @@ type ActionMessageFailureType = Literal[
     "ActionConflict",
     "MessageIdentityConflict",
     "ExpectedProcessConflict",
+    "MessageWithdrawn",
 ]
 type ActionMessageValidationReason = Literal[
     "blank",
@@ -495,7 +496,14 @@ class ActionMessageHttpConflictFailure(_ActionMessageHttpModel):
         "ActionConflict",
         "MessageIdentityConflict",
         "ExpectedProcessConflict",
+        "MessageWithdrawn",
     ]
+
+
+class ActionMessageWithdrawConflictFailure(_ActionMessageHttpModel):
+    """A run adopted the message before it could be withdrawn."""
+
+    type: Literal["MessageAdopted"]
 
 
 class ActionMessageHttpErrorDetail(_ActionMessageHttpModel):
@@ -569,6 +577,7 @@ __all__ = [
     "ActionMessageHttpTarget",
     "ActionMessageId",
     "ActionMessageValidationError",
+    "ActionMessageWithdrawConflictFailure",
     "ActionMessageValidationReason",
     "ActionMessageValidationUnit",
     "ActionProjectRef",

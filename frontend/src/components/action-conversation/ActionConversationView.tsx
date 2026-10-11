@@ -503,7 +503,23 @@ export function ActionConversationView({
   const copy = COPY[language];
   const conversationRef = useRef<HTMLElement>(null);
   const actionId = view.action?.action_id ?? null;
-  const runs = view.items.filter((item): item is ActionConversationRunItem => item.kind === 'run');
+  // Hidden as soon as it is withdrawn: a page read before then can still hold it.
+  const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(() => new Set());
+  const withdrawMessage = useCallback(
+    async (stepId: string) => {
+      const actions = window.electron?.actions;
+      if (actionId === null || !actions) return;
+      const result = await actions.withdrawMessage({ actionId, stepId });
+      // A run took it first: main has refreshed the conversation, which shows it as run.
+      if (result.kind === 'withdrawn') setWithdrawn((current) => new Set(current).add(stepId));
+    },
+    [actionId]
+  );
+  const items = view.items.filter(
+    (item) =>
+      !(item.kind === 'user' && item.source === 'canonical' && withdrawn.has(item.entry.step_id))
+  );
+  const runs = items.filter((item): item is ActionConversationRunItem => item.kind === 'run');
   const restoreConversationFocus = useCallback(() => conversationRef.current?.focus(), []);
   const latestRun = runs.find((run) => run.runId === view.action?.latest_run_id) ?? null;
   // 実行が始まったことと、確認を待っていることは、ツール行が 1 つも出ていなくても伝わらないと
@@ -528,7 +544,7 @@ export function ActionConversationView({
         {announcedRunStatus}
       </span>
       <ol className="action-conversation__items">
-        {view.items.map((item) => (
+        {items.map((item) => (
           <li key={item.kind === 'run' ? `run:${item.runId}` : item.key}>
             {item.kind === 'run' ? (
               <RunItem
@@ -544,7 +560,7 @@ export function ActionConversationView({
                 onFocusedRunUnmount={restoreConversationFocus}
               />
             ) : (
-              <UserItem item={item} />
+              <UserItem item={item} onWithdraw={withdrawMessage} />
             )}
           </li>
         ))}

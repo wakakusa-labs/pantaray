@@ -10,6 +10,8 @@ type UserMessageCopy = {
     'pending' | 'not_executed' | 'submitting' | 'awaiting_refresh' | 'failed',
     string
   >;
+  /** The ✕ beside a message no run has taken yet. */
+  withdraw: string;
 };
 /** The labels of a user's message and its attachments, shared by the Overlay and the chat. */
 export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
@@ -36,6 +38,7 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
       awaiting_refresh: 'Sent, updating',
       failed: 'Send failed',
     },
+    withdraw: 'Withdraw this message',
   },
   ja: {
     you: 'あなた',
@@ -59,5 +62,6 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
       awaiting_refresh: '送信済み・更新中',
       failed: '送信失敗',
     },
+    withdraw: 'このメッセージを取り消す',
   },
 };

@@ -349,6 +349,29 @@ test('How a send ends settles the task draft, also with its window gone', async 
   assert.deepEqual(taskDrafts.open('user-1', 'action:action-1', { id: 9, send() {} }), newer);
 });
 
+test('A retry of a withdrawn message is settled: nothing runs and no draft offers it', async () => {
+  const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
+  const heard = [];
+  taskDrafts.open('user-1', 'action:action-1', { id: 7, send: (_c, change) => heard.push(change) });
+  const send = (submitMessage) =>
+    register({ submitMessage }, {}, null, taskDrafts)('action:submitMessage', validSubmit());
+  // The response was lost, so the draft offers this exact request as a retry ...
+  await assert.rejects(
+    send(async () => {
+      throw new Error('socket hang up');
+    })
+  );
+  assert.equal(heard.at(-1).draft.retry.message.message_id, 'message-1');
+
+  // ... and another window withdrew the message before the retry went out.
+  const result = await send(async () => {
+    throw new LocalBackendRequestError('withdrawn', 409, 'MessageWithdrawn');
+  });
+
+  assert.deepEqual(result, { kind: 'withdrawn' });
+  assert.deepEqual(heard.at(-1), { work: 'action:action-1', draft: null });
+});
+
 test("Only the main window's new-task send touches the new task's draft", async () => {
   const taskDrafts = createTaskDraftStore({ discardStagedFile: () => {} });
   const newTask = { text: 'Tidy the notes', mentions: [], attachments: [], retry: null };
@@ -566,4 +589,33 @@ test('A reply refused because the suggestion has its conversation opens that con
       assert.deepEqual(calls, ['read:sug-1']);
     }
   }
+});
+
+test('Withdrawing validates the request, maps a run that took it first, and refreshes', async () => {
+  const adopted = new LocalBackendRequestError('adopted', 409, 'MessageAdopted');
+  const failure = new LocalBackendRequestError('unavailable', 503);
+  const calls = [];
+  const answers = [undefined, adopted, failure];
+  const invoke = register({
+    withdrawMessage: async (request) => {
+      calls.push(`withdraw:${request.stepId}`);
+      const answer = answers.shift();
+      if (answer) throw answer;
+    },
+    refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+  });
+  const withdraw = (stepId) => invoke('action:withdrawMessage', { actionId: 'action-1', stepId });
+
+  await assert.rejects(invoke('action:withdrawMessage', { actionId: 'action-1' }));
+  await assert.rejects(withdraw(' step-2'));
+  assert.deepEqual(await withdraw('step-2'), { kind: 'withdrawn' });
+  assert.deepEqual(await withdraw('step-2'), { kind: 'adopted' });
+  await assert.rejects(withdraw('step-2'), (error) => error === failure);
+  assert.deepEqual(calls, [
+    'withdraw:step-2',
+    'refresh:action-1',
+    'withdraw:step-2',
+    'refresh:action-1',
+    'withdraw:step-2',
+  ]);
 });

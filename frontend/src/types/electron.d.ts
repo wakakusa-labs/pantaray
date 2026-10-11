@@ -25,6 +25,8 @@ import type {
   ActionMessageSubmitResult,
   ActionResumeRequest,
   ActionToolOutputDetail,
+  ActionWithdrawMessageRequest,
+  ActionWithdrawMessageResult,
 } from '../../electron/src/actions/actionContracts';
 import type {
   ActionConversationPageReadResult,
@@ -268,6 +270,9 @@ declare global {
       actions?: {
         submitMessage: (request: ActionMessageRequest) => Promise<ActionMessageSubmitResult>;
         resumeAction: (request: ActionResumeRequest) => Promise<ActionMessageSubmitResult>;
+        withdrawMessage: (
+          request: ActionWithdrawMessageRequest
+        ) => Promise<ActionWithdrawMessageResult>;
         /** Main window only: shows the Action in place; updates arrive on onConversationUpdated. */
         openConversation: (request: { actionId: string }) => Promise<void>;
         attachImage: (request: {

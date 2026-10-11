@@ -153,6 +153,12 @@ class ExpectedProcessConflictError(ActionMessageConflictError):
     failure_type: ActionMessageFailureType = "ExpectedProcessConflict"
 
 
+class MessageWithdrawnError(ActionMessageConflictError):
+    """The user withdrew this message before any run took it; it never runs."""
+
+    failure_type: ActionMessageFailureType = "MessageWithdrawn"
+
+
 __all__ = [
     "ACTION_RESUME_REQUEST_TEXT",
     "ACTION_RESUME_STEP_NAME",
@@ -165,6 +171,7 @@ __all__ = [
     "ExistingActionTarget",
     "ExpectedProcessConflictError",
     "MessageIdentityConflictError",
+    "MessageWithdrawnError",
     "NewActionTarget",
     "StartedActionMessageResult",
     "SubmitActionMessageCommand",

@@ -47,6 +47,7 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   // window sent it before it delivers anything.
   'action:submitMessage',
   'action:resume',
+  'action:withdrawMessage',
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',

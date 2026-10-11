@@ -192,6 +192,24 @@ export function useOverlayComposerController({
           );
           return;
         }
+        if (result.kind === 'withdrawn') {
+          // A retry of a send the user withdrew meanwhile: it is settled, and nothing runs.
+          setComposer((current) =>
+            current.submissionStartFence?.messageId === messageId
+              ? {
+                  ...current,
+                  draft: '',
+                  mentions: [],
+                  attachments: [],
+                  submission: null,
+                  submissionStartFence: null,
+                  failureKind: null,
+                  refreshState: 'idle',
+                }
+              : current
+          );
+          return;
+        }
         if (result.kind !== 'submitted') {
           setComposer((current) => {
             if (current.submissionStartFence?.messageId !== messageId) return current;

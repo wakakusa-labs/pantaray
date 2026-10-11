@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ActionMessageRequestSchema,
   ActionResumeRequestSchema,
+  ActionWithdrawMessageRequestSchema,
 } from '../../actions/actionContracts';
 
 export const ACTION_CONVERSATION_MAX_PAGE_SIZE = 100;
@@ -19,7 +20,11 @@ const OpaqueCursorSchema = z
   .refine((value) => value === value.trim(), 'cursor must be canonical')
   .nullable();
 
-export { ActionMessageRequestSchema, ActionResumeRequestSchema };
+export {
+  ActionMessageRequestSchema,
+  ActionResumeRequestSchema,
+  ActionWithdrawMessageRequestSchema,
+};
 
 export const ActionConversationPageRequestSchema = z
   .object({

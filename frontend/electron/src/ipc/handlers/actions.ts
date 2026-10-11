@@ -6,6 +6,7 @@ import { IpcSenderRejectedError, type IpcSenderIdentity } from '../senderTrust';
 import type {
   ActionMessageResponse,
   ActionMessageSubmitResult,
+  ActionWithdrawMessageResult,
 } from '../../actions/actionContracts';
 import { LocalBackendRequestError } from '../../localBackend/client';
 import { sendWork, type TaskSendOutcome } from '../../actions/taskDraftStore';
@@ -15,6 +16,7 @@ import {
   ActionMessageRequestSchema,
   ActionResumeRequestSchema,
   ActionToolOutputRequestSchema,
+  ActionWithdrawMessageRequestSchema,
 } from '../schemas/actions';
 import { parseInput } from '../schemas/error';
 
@@ -67,6 +69,9 @@ async function openUserTurn(
     if (error instanceof LocalBackendRequestError && error.status === 409) {
       if (error.errorCode === 'ExpectedProcessConflict') {
         return { kind: 'expected_process_conflict' } satisfies ActionMessageSubmitResult;
+      }
+      if (error.errorCode === 'MessageWithdrawn') {
+        return { kind: 'withdrawn' } satisfies ActionMessageSubmitResult;
       }
       if (error.errorCode === 'ActionConflict') {
         // A reply refused because the suggestion already has its conversation opens that one.
@@ -150,7 +155,12 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
         () => ctx.actions.submitMessage(parsed),
         replyTo
       );
-      settle(result.kind === 'submitted' || result.kind === 'reply_exists' ? 'sent' : 'refused');
+      // A withdrawn message is settled too: its retry must not come back as a draft.
+      settle(
+        result.kind === 'submitted' || result.kind === 'reply_exists' || result.kind === 'withdrawn'
+          ? 'sent'
+          : 'refused'
+      );
       return result;
     } catch (error) {
       // The backend answered with a refusal, or the outcome is unknown and only a retry of
@@ -172,6 +182,27 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
       null
     )
   );
+  // Either answer changed the conversation, so every window showing it reads it again.
+  registrar.handle('action:withdrawMessage', async (_event, request) => {
+    const parsed = parseInput(
+      ActionWithdrawMessageRequestSchema,
+      'action:withdrawMessage',
+      request
+    );
+    let result: ActionWithdrawMessageResult = { kind: 'withdrawn' };
+    try {
+      await ctx.actions.withdrawMessage(parsed);
+    } catch (error) {
+      const adopted =
+        error instanceof LocalBackendRequestError &&
+        error.status === 409 &&
+        error.errorCode === 'MessageAdopted';
+      if (!adopted) throw error;
+      result = { kind: 'adopted' };
+    }
+    ctx.actions.refreshActionConversation(parsed.actionId);
+    return result;
+  });
   // The main window shows an Action in place: its page, and its live run if one is unfinished.
   // Without the page no run is resumed, so the window must hear of the failure to retry.
   registrar.handle('action:openConversation', async (_event, request) => {

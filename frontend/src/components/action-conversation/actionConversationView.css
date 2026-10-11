@@ -80,7 +80,8 @@
   margin-top: var(--space-xs);
 }
 
-.action-conversation__copy {
+.action-conversation__copy,
+.action-conversation__withdraw {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -92,7 +93,8 @@
   cursor: pointer;
 }
 
-.action-conversation__copy:hover {
+.action-conversation__copy:hover,
+.action-conversation__withdraw:hover {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.08);
 }
@@ -101,7 +103,8 @@
  * ヘッダーのアイコンボタンと同じ色と太さのフォーカスの輪。本文の左端に接していて外側へ出すと
  * スクロール領域に切られるので、ボタンの内側に描く。
  */
-.action-conversation__copy:focus-visible {
+.action-conversation__copy:focus-visible,
+.action-conversation__withdraw:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: -2px;
   background: rgba(255, 255, 255, 0.08);
@@ -170,6 +173,27 @@
 }
 
 .action-conversation__retry[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 未実行・保留の語と、その横に置く取り消しの ✕。 */
+.action-conversation__state-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: var(--space-xs);
+}
+
+.action-conversation__state-line > .action-conversation__state {
+  margin-top: 0;
+}
+
+.action-conversation__withdraw {
+  padding: 2px;
+}
+
+.action-conversation__withdraw[aria-disabled='true'] {
   cursor: default;
   opacity: 0.5;
 }

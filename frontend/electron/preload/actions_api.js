@@ -40,6 +40,7 @@ function createActionsApi({ ipcRenderer }) {
     actions: {
       submitMessage: (request) => ipcRenderer.invoke('action:submitMessage', request),
       resumeAction: (request) => ipcRenderer.invoke('action:resume', request),
+      withdrawMessage: (request) => ipcRenderer.invoke('action:withdrawMessage', request),
       // Main window only: show the Action in place; updates arrive on onConversationUpdated.
       openConversation: (request) => ipcRenderer.invoke('action:openConversation', request),
       attachImage: (request) => ipcRenderer.invoke('action:attachImage', request),

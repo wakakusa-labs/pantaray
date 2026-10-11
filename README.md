@@ -11,11 +11,11 @@
 </div>
 
 Pantaray is an intelligence that thinks and acts for you. It understands your work, brings
-perspectives and ideas worth your time, and proposes the work that matters. Approve a proposal and
+perspectives and ideas worth your time, and suggests the work that matters. Approve a suggestion and
 Pantaray takes it on and sees it through. You can also ask it for anything, any time.
 
-- **It thinks ahead.** From what you are working on, it proposes the work that matters before you ask.
-- **It finishes the job.** Approve a proposal, or ask for something yourself, and Pantaray carries it
+- **It thinks ahead.** From what you are working on, it suggests the work that matters before you ask.
+- **It finishes the job.** Approve a suggestion, or ask for something yourself, and Pantaray carries it
   through to the result.
 - **You choose the AI.** Your own OpenAI, Anthropic, or Fireworks AI key, or your ChatGPT account.
 
@@ -30,7 +30,7 @@ drag Pantaray into your Applications folder. Builds are signed and notarized, an
 1. Open **Settings → AI connection** and choose how to connect: your own API key or your ChatGPT
    account.
 2. Press **Start recording** and allow the macOS permissions Pantaray asks for.
-3. Proposals arrive as you work. To ask for something yourself, press the **New task**
+3. Suggestions arrive as you work. To ask for something yourself, press the **New task**
    shortcut from any app.
 
 ## Privacy
@@ -38,7 +38,7 @@ drag Pantaray into your Applications folder. Builds are signed and notarized, an
 With your permission, Pantaray records the apps you use, your window titles, the text on screen,
 and what you type. The raw recording is an encrypted file on this Mac and is deleted after 48
 hours. The summaries of your work made from it stay on this Mac.
-Password managers, and sign-in and payment pages, are never recorded. Only what a proposal or a
+Password managers, and sign-in and payment pages, are never recorded. Only what a suggestion or a
 request needs is sent to the AI you chose; the recording file itself never leaves this Mac.
 Pantaray has no analytics and no usage tracking.
 

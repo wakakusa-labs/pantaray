@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -15,6 +16,11 @@ LLM_FILE_INPUT_MAX_BYTES = 20 * 1024 * 1024
 type MultipartFile = tuple[str, tuple[str, bytes, str]]
 _DIRECTORY_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _FILE_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+# What opening a path component reports once the file it named is gone or
+# replaced: missing (ENOENT), a file where a directory was (ENOTDIR), or a link
+# that O_NOFOLLOW refuses (ELOOP). A directory or a FIFO in the file's place
+# opens and is caught by its mode instead.
+_GONE_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ELOOP})
 
 
 class FileInputAccessError(RuntimeError):
@@ -176,10 +182,13 @@ def _read_workspace_file_input(
             raise changed
         payload = _read_bounded_file_descriptor(file_fd)
     except OSError as exc:
-        # Missing, or a link, a directory or a file now in its place: every
-        # component was opened without following a link, so none of these read
-        # anything outside the root.
-        raise changed from exc
+        if exc.errno in _GONE_ERRNOS:
+            raise changed from exc
+        # Permissions, descriptors or the disk: the file may be unchanged, so
+        # the turn fails and can be retried rather than lose the image.
+        raise FileInputAccessError(
+            f"LLM workspace file input could not be read: {application_ref}"
+        ) from exc
     finally:
         if file_fd is not None:
             os.close(file_fd)

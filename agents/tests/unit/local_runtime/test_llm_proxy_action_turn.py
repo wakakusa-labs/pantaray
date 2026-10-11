@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import json
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -479,3 +481,42 @@ def test_a_workspace_file_input_with_an_unsafe_path_still_fails(tmp_path: Path) 
 
     with pytest.raises(FileInputAccessError, match="unsafe path component"):
         _build({**file_data, "workspace_relative_path": "../shot.png"}, tool_use)
+
+
+def _fail_opening_the_image(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    real_open = os.open
+
+    def open_failing(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if path == "shot.png":
+            raise OSError(code, os.strerror(code))
+        return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", open_failing)
+
+
+@pytest.mark.parametrize("code", [errno.ENOENT, errno.ENOTDIR, errno.ELOOP])
+def test_an_image_whose_file_is_gone_or_replaced_is_a_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    file_data, tool_use = _legacy_workspace_turn(tmp_path, conversation=True)
+    _fail_opening_the_image(monkeypatch, code)
+
+    built = _build(file_data, tool_use)
+
+    assert built.multipart_files == []
+
+
+@pytest.mark.parametrize("code", [errno.EACCES, errno.EMFILE, errno.EIO])
+def test_a_failure_to_read_an_unchanged_image_fails_the_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """A retryable failure must not drop the image for a note that it changed."""
+
+    file_data, tool_use = _legacy_workspace_turn(tmp_path, conversation=True)
+    _fail_opening_the_image(monkeypatch, code)
+
+    with pytest.raises(FileInputAccessError) as failed:
+        _build(file_data, tool_use)
+
+    assert isinstance(failed.value.__cause__, OSError)
+    assert failed.value.__cause__.errno == code

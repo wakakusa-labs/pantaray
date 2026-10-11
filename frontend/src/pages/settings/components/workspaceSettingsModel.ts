@@ -137,9 +137,12 @@ export function displayNameFromPath(realPath: string): string {
   return parts[parts.length - 1] || normalized;
 }
 
+/** The folders a path goes through, and its last name, which stays when a short line cuts it. */
 export function splitPathForMiddleEllipsis(realPath: string): [string, string] {
-  const midpoint = Math.ceil(realPath.length / 2);
-  return [realPath.slice(0, midpoint), realPath.slice(midpoint)];
+  const lastSeparator = realPath.replace(/[\\/]+$/u, '').search(/[\\/][^\\/]*$/u);
+  return lastSeparator < 0
+    ? ['', realPath]
+    : [realPath.slice(0, lastSeparator + 1), realPath.slice(lastSeparator + 1)];
 }
 
 export function compareOrganizations(

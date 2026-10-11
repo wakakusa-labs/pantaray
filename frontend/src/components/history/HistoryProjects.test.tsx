@@ -398,19 +398,56 @@ it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻
   expect(screen.getByRole('textbox', { name: 'history.projects.nameLabel' })).toHaveValue('b');
 });
 
-it('Finder で開くは最初のフォルダを開き、フォルダのないプロジェクトでは押せない', async () => {
-  store.folders = [folder('own', ['a'])];
-  installApi();
+it('Finder で開くはメニューに無く、フォルダの行ごとにそのフォルダを開く', async () => {
   await renderProjects();
 
-  await chooseFromMenu('a', 'history.projects.openInFinder');
-  expect(api.openFolder).toHaveBeenCalledWith('own');
-
-  await userEvent.click(screen.getByRole('button', { name: 'history.projects.menu {"name":"b"}' }));
-  expect(screen.getByRole('menuitem', { name: 'history.projects.openInFinder' })).toBeDisabled();
+  await userEvent.click(screen.getByRole('button', { name: 'history.projects.menu {"name":"a"}' }));
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).not.toContain(
+    'history.projects.openInFinder'
+  );
   await userEvent.keyboard('{Escape}');
-  expect(screen.queryByRole('menu')).toBeNull();
-  expect(screen.getByRole('button', { name: 'history.projects.menu {"name":"b"}' })).toHaveFocus();
+
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+  const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
+  const shared = folders.getAllByRole('listitem')[1];
+  await userEvent.click(
+    within(shared).getByRole('button', { name: 'history.projects.openInFinder' })
+  );
+  expect(api.openFolder).toHaveBeenCalledOnce();
+  expect(api.openFolder).toHaveBeenCalledWith('shared');
+});
+
+it('フォルダの行は横に流れず、パス・Finder・外すを並べ、パスを押すと全体を折り返して見せる', async () => {
+  store.folders = [folder('own', ['a'])];
+  store.folders[0].real_path = '/Users/me/Developer/clients/acme/very-long-folder-name/own';
+  installApi();
+  await renderProjects();
+  await userEvent.click(screen.getByRole('button', { name: 'a' }));
+
+  const line = within(screen.getByRole('list', { name: 'history.projects.folders' })).getByRole(
+    'listitem'
+  );
+  // The cut path takes what is left of the line; the two buttons keep their place at its end.
+  expect([...line.children].map((child) => child.className)).toEqual([
+    'history-project__path',
+    'history-project__folder-action',
+    'history-project__folder-action',
+  ]);
+  expect(line.closest('ul.history-projects__list')).not.toBeNull();
+  const path = within(line).getByRole('button', {
+    name: '/Users/me/Developer/clients/acme/very-long-folder-name/own',
+  });
+  expect(path.querySelector('.history-project__path-end')).toHaveTextContent(/^own$/u);
+  expect(path).toHaveAttribute(
+    'title',
+    '/Users/me/Developer/clients/acme/very-long-folder-name/own'
+  );
+
+  expect(path).toHaveAttribute('aria-expanded', 'false');
+  await userEvent.click(path);
+  expect(path).toHaveAttribute('aria-expanded', 'true');
+  await userEvent.click(path);
+  expect(path).toHaveAttribute('aria-expanded', 'false');
 });
 
 it('プロジェクトは確認してから削除し、キャンセルならメニューのボタンへ戻る', async () => {

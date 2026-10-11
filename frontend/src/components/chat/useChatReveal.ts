@@ -1,8 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
 
-/** A request from the Overlay to show this Action's latest card; `key` tells requests apart. */
-export type ChatReveal = Readonly<{ actionId: string; key: string }>;
-
 /**
  * A place in the chat to bring into view: `key` tells requests apart, and `elementId` is null
  * while the item it belongs to is on a page not read yet.

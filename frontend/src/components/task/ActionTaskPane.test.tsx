@@ -52,7 +52,6 @@ const submitMessage = vi.fn<Actions['submitMessage']>();
 const stopAction = vi.fn<NonNullable<NonNullable<Window['electron']>['actions']>['stopAction']>();
 const submitApprovalDecision = vi.fn();
 const writeText = vi.fn<(text: string) => Promise<void>>();
-const onShowInChat = vi.fn();
 // The history → small window path, which opens or focuses the one that shows an Action.
 const openSmall = vi.fn<(request: { actionId: string }) => Promise<void>>();
 const onAddProject = vi.fn();
@@ -67,7 +66,6 @@ async function renderPane(props: Partial<Parameters<typeof ActionTaskPane>[0]> =
       <ActionTaskPane
         actionId="act-1"
         title="Rebuild the quote"
-        onShowInChat={onShowInChat}
         onAddProject={onAddProject}
         {...props}
       />
@@ -84,12 +82,7 @@ const primaryButton = (name: string) => screen.getByRole('button', { name });
 const renderHeldPane = () =>
   render(
     <UiLanguageProvider initialLanguage="en">
-      <ActionTaskPane
-        actionId="act-1"
-        title="Rebuild the quote"
-        onShowInChat={onShowInChat}
-        onAddProject={onAddProject}
-      />
+      <ActionTaskPane actionId="act-1" title="Rebuild the quote" onAddProject={onAddProject} />
     </UiLanguageProvider>
   );
 
@@ -102,7 +95,6 @@ beforeEach(() => {
   stopAction.mockReset().mockReturnValue(new Promise(() => {}));
   submitApprovalDecision.mockReset().mockResolvedValue(undefined);
   writeText.mockReset().mockResolvedValue(undefined);
-  onShowInChat.mockReset();
   onAddProject.mockReset();
   openSmall.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(window, 'electron', {
@@ -170,14 +162,11 @@ describe('ActionTaskPane', () => {
     expect(state()).toBeNull();
   });
 
-  it('names the task, and shows it in the chat or copies it', async () => {
+  it('names the task, and copies its conversation or its link', async () => {
     readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
     await renderPane();
     expect(screen.getByRole('region', { name: 'Rebuild the quote' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1, name: 'Rebuild the quote' })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show in chat' }));
-    expect(onShowInChat).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy conversation' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
@@ -185,6 +174,17 @@ describe('ActionTaskPane', () => {
       expect.objectContaining({ actionId: 'act-1' })
     );
     expect(writeText.mock.calls[0][0]).toContain('answer of run-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('pantaray://task/act-1'));
+  });
+
+  it('says so when the link could not be copied', async () => {
+    readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
+    await renderPane();
+    writeText.mockRejectedValueOnce(new Error('clipboard busy'));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t copy the link.');
   });
 
   it('opens the task small on request, and says so when it cannot', async () => {
@@ -198,9 +198,16 @@ describe('ActionTaskPane', () => {
     const small = screen.getByRole('button', { name: 'Open small' });
     expectTooltipIsName(small);
     expect(small.querySelector('svg.lucide-picture-in-picture-2')).not.toBeNull();
-    for (const name of ['Show in chat', 'Copy conversation']) {
+    for (const name of ['Copy link', 'Copy conversation']) {
       expectTooltipIsName(screen.getByRole('button', { name }));
     }
+    // Three header icons: the link, the small window, the copy.
+    const header = within(screen.getByRole('banner'));
+    expect(header.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Copy link',
+      'Open small',
+      'Copy conversation',
+    ]);
 
     fireEvent.click(small);
     expect(openSmall).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });

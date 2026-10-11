@@ -578,10 +578,10 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
           : undefined
       }
       onOpenWorkspaceSettings={window.electron?.agentOverlay?.openWorkspaceSettings}
-      chatActionId={currentView?.action?.action_id ?? null}
+      actionId={currentView?.action?.action_id ?? null}
+      suggestionId={state.suggestionId}
       onOpenInMainWindow={ctrl.openTask}
       openTaskFailed={ctrl.openTaskFailed}
-      onShowChat={window.electron?.agentOverlay?.showChat}
       conversationCopy={conversationCopy}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}
       onHeaderPointerMove={headerDrag.onHeaderPointerMove}

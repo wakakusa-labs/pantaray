@@ -17,7 +17,6 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import { ChatComposer } from './ChatComposer';
 import { ChatMessage } from './ChatMessage';
 import {
-  cardElementId,
   cardWorkKey,
   isChatMessage,
   latestCardPositions,
@@ -27,7 +26,7 @@ import {
 } from './chatTimeline';
 import type { ChatComposerControl } from './useChatComposer';
 import { useChatReadMark } from './useChatReadMark';
-import { useChatReveal, type ChatReveal } from './useChatReveal';
+import { useChatReveal } from './useChatReveal';
 import { useChatScroll } from './useChatScroll';
 
 import './chatView.css';
@@ -53,29 +52,16 @@ export const ChatView = forwardRef<
     /** The chat and its composer outlive this view, so leaving the page loses neither. */
     chat: ChatItemsResult;
     composer: ChatComposerControl;
-    /** The Action whose latest card the Overlay or its task pane asked to show, or null. */
-    reveal: ChatReveal | null;
     /** A card selects its work for the detail pane. */
     onOpenWork: (work: WorkKey) => void;
     /** The composer's "Add project". */
     onAddProject: () => void;
   }
->(function ChatView({ notice: pageNotice, chat, composer, reveal, onOpenWork, onAddProject }, ref) {
+>(function ChatView({ notice: pageNotice, chat, composer, onOpenWork, onAddProject }, ref) {
   const { t, language } = useI18n();
   const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
-  // The work whose card was asked to be shown; its card is outlined.
-  const [openWork, setOpenWork] = useState<WorkKey | null>(null);
-  const [revealSeen, setRevealSeen] = useState<string | null>(null);
   const [jump, setJump] = useState<ChatJump | null>(null);
-  // An Overlay request the reader left for the newest message; only a new request shows a card.
-  const [revealDropped, setRevealDropped] = useState<string | null>(null);
-  if (reveal && reveal.key !== revealSeen) {
-    setRevealSeen(reveal.key);
-    setOpenWork(`action:${reveal.actionId}`);
-    // The Overlay's request is the newer one; a jump still looking for its message gives way.
-    setJump(null);
-  }
   const ready = !chat.loading;
   const scroll = useChatScroll({
     items: chat.items,
@@ -118,17 +104,6 @@ export const ChatView = forwardRef<
     loadOlder: scroll.loadOlderKeepingPlace,
     readPlace: scroll.readPlace,
   };
-  const revealCard = reveal ? latestCards.get(`action:${reveal.actionId}`) : undefined;
-  useChatReveal({
-    ...reading,
-    target:
-      reveal && reveal.key !== revealDropped
-        ? {
-            key: reveal.key,
-            elementId: revealCard === undefined ? null : cardElementId(revealCard),
-          }
-        : null,
-  });
   const jumpCount = useRef(0);
   const jumpTo = (itemId: string, returnTo: string | null) => {
     jumpCount.current += 1;
@@ -149,7 +124,6 @@ export const ChatView = forwardRef<
   useImperativeHandle(ref, () => ({
     showNewest: () => {
       setJump(null);
-      setRevealDropped(reveal?.key ?? null);
       scroll.followNewest();
       markRead();
     },
@@ -193,9 +167,9 @@ export const ChatView = forwardRef<
             time={formatTime.format(new Date(item.created_at))}
             latestCards={latestCards}
             works={works}
-            openWork={openWork}
             t={t}
             onOpenCard={(card) => onOpenWork(cardWorkKey(card))}
+            onOpenWork={onOpenWork}
             onJumpToQuote={(quoteItemId) => jumpTo(quoteItemId, item.item_id)}
             found={jump?.shown === true && jump.itemId === item.item_id}
             onQuote={

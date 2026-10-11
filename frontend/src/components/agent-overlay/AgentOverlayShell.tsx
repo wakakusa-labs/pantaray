@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
+import { useCopyWorkLink } from '@/history/useCopyWorkLink';
+import type { WorkRefKind } from '@/history/workRefLink';
 import { PopupContainer } from './OverlayBackground';
 import HeaderRow, { HeaderButtonGroup } from './HeaderBar';
 import { ApprovalPanel as ApprovalPanelView } from './ApprovalPanel';
@@ -25,7 +27,6 @@ import {
   CircleAlert,
   Clipboard,
   Maximize2,
-  MessageCircle,
   Minus,
 } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
@@ -45,11 +46,6 @@ const SuggestionDecisionStatus = styled.span`
 `;
 
 const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
-
-/** The chat button holds the header's left end; the other buttons stay right. */
-const ShowChatButton = styled(HeaderIconButton)`
-  margin-right: auto;
-`;
 
 const VisuallyHidden = styled.span`
   position: absolute;
@@ -122,9 +118,10 @@ type AgentOverlayShellProps = {
    */
   showBusyIndicator: boolean;
   showThinking?: boolean;
-  /** The Action the main window's chat can show; null until one exists. */
-  chatActionId?: string | null;
-  onShowChat?: (request: { actionId: string }) => Promise<void>;
+  /** The Action shown; null until one exists. */
+  actionId?: string | null;
+  /** The suggestion shown, whose link is copied until an Action takes its place. */
+  suggestionId?: string | null;
   /** Moves that Action to the main window, which then closes this panel. */
   onOpenInMainWindow?: (actionId: string) => void;
   /** The main window could not be shown with this panel's task. */
@@ -148,6 +145,31 @@ type AgentOverlayShellProps = {
   containerRef?: RefObject<HTMLDivElement>;
 };
 
+function CopyLinkButton({
+  visible,
+  kind,
+  id,
+}: {
+  visible: boolean;
+  kind: WorkRefKind;
+  id: string;
+}) {
+  const link = useCopyWorkLink(kind, id);
+  return (
+    <>
+      <HeaderIconButton
+        $visible={visible}
+        onClick={link.copy}
+        aria-label={link.label}
+        data-tooltip={link.title}
+      >
+        <link.Icon strokeWidth={1.75} />
+      </HeaderIconButton>
+      {link.failed ? <VisuallyHidden role="alert">{link.failed}</VisuallyHidden> : null}
+    </>
+  );
+}
+
 /** Electron通知とWebモーダルで共有するAgentOverlayの表示・操作シェル。 */
 const AgentOverlayShell = ({
   isVisible,
@@ -168,8 +190,8 @@ const AgentOverlayShell = ({
   approvalErrorMessage = null,
   showBusyIndicator,
   showThinking = false,
-  chatActionId = null,
-  onShowChat,
+  actionId = null,
+  suggestionId = null,
   onOpenInMainWindow,
   openTaskFailed = false,
   fadeDurationMs = 600,
@@ -260,21 +282,16 @@ const AgentOverlayShell = ({
         {showBusyIndicator && (
           <VisuallyHidden role="status">{t('overlay.actioning')}</VisuallyHidden>
         )}
-        {chatActionId !== null && onShowChat && (
-          <ShowChatButton
-            $visible={isVisible}
-            onClick={() => void onShowChat({ actionId: chatActionId })}
-            aria-label={t('overlay.showInChat')}
-            data-tooltip={t('overlay.showInChat')}
-          >
-            <MessageCircle strokeWidth={1.75} aria-hidden />
-          </ShowChatButton>
-        )}
         <HeaderButtonGroup>
-          {chatActionId !== null && onOpenInMainWindow && (
+          {actionId !== null ? (
+            <CopyLinkButton visible={isVisible} kind="action" id={actionId} />
+          ) : suggestionId !== null ? (
+            <CopyLinkButton visible={isVisible} kind="suggestion" id={suggestionId} />
+          ) : null}
+          {actionId !== null && onOpenInMainWindow && (
             <HeaderIconButton
               $visible={isVisible}
-              onClick={() => onOpenInMainWindow(chatActionId)}
+              onClick={() => onOpenInMainWindow(actionId)}
               aria-label={t('overlay.openInMainWindow')}
               data-tooltip={t('overlay.openInMainWindow')}
             >

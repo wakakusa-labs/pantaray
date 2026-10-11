@@ -7,7 +7,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSession';
-import type { ChatReveal } from '@/components/chat/useChatReveal';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { historySelectionSearch, parseHistorySelection } from '@/history/historySelection';
@@ -18,31 +17,23 @@ const mocks = vi.hoisted(() => ({ showNewest: vi.fn() }));
 // The panes and the chat have their own tests; here they only show what the page gave them.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 vi.mock('@/components/chat/ChatView', () => ({
-  ChatView: forwardRef<ChatViewHandle, { reveal: ChatReveal | null }>(function ChatView(
-    { reveal },
-    ref
-  ) {
+  ChatView: forwardRef<ChatViewHandle>(function ChatView(_props, ref) {
     useImperativeHandle(ref, () => ({ showNewest: mocks.showNewest }));
-    return <section aria-label="chat">{reveal ? `reveal ${reveal.actionId}` : null}</section>;
+    return <section aria-label="chat" />;
   }),
 }));
 vi.mock('@/components/task/TaskWorkspace', () => ({
   TaskWorkspace: ({
     actionId,
     title,
-    onShowInChat,
     onAddProject,
   }: {
     actionId: string;
     title: string;
-    onShowInChat: () => void;
     onAddProject: () => void;
   }) => (
     <section aria-label={`action ${actionId}`}>
       <h1>{title}</h1>
-      <button type="button" onClick={onShowInChat}>
-        show in chat
-      </button>
       <button type="button" onClick={onAddProject}>
         add project
       </button>
@@ -264,13 +255,8 @@ it('moves the selection off a deleted task in place of its history entry', async
 const PROJECT_NAME = /^(プロジェクト名|Project name)$/u;
 const NEW_TASK = /^(新しい作業|New task)$/u;
 
-it('the Action pane shows its card in the chat and starts naming a project in place', async () => {
+it('the Action pane starts naming a project in place', async () => {
   renderPage(['/history?item=action:A1']);
-  await userEvent.click(screen.getByRole('button', { name: 'show in chat' }));
-  expect(location()).toHaveTextContent('/history?item=chat');
-  expect(screen.getByRole('region', { name: 'chat' })).toHaveTextContent('reveal A1');
-
-  await userEvent.click(screen.getByRole('button', { name: 'back' }));
   await userEvent.click(screen.getByRole('button', { name: 'add project' }));
   expect(screen.getByRole('textbox', { name: PROJECT_NAME })).toHaveFocus();
   expect(selectFolder).not.toHaveBeenCalled();

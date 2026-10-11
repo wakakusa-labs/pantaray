@@ -220,10 +220,6 @@ async function installBridge(
             onChanged: () => noop,
             openNewConversation: async () => undefined,
             deleteItem: async () => ({ ok: true }),
-            onShowChat: (callback: (payload: { actionId: string }) => void) => {
-              Object.defineProperty(window, 'e2eShowChat', { value: callback, configurable: true });
-              return noop;
-            },
           },
           // The detail pane's reads stay pending: these tests look at what selects it.
           suggestions: { read: () => new Promise(() => {}), onSnapshot: () => noop },
@@ -369,21 +365,6 @@ test('composer: quote a message, attach a document, send with Enter', async ({ p
   await expect(page.getByRole('button', { name: '引用をやめる' })).toHaveCount(0);
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('chat-after-send.png') });
-});
-
-test('the Overlay’s chat button opens the chat at that Action’s latest card', async ({ page }) => {
-  await page.setViewportSize({ width: 1200, height: 520 });
-  await installBridge(page);
-  await expect(page.getByRole('searchbox')).toBeVisible();
-  await page.evaluate(() =>
-    (window as unknown as { e2eShowChat: (p: { actionId: string }) => void }).e2eShowChat({
-      actionId: 'slides',
-    })
-  );
-  const card = page.getByRole('button', { name: '登壇資料のスライドを下書きする を開く' });
-  await expect(card).toBeFocused();
-  await expect(card).toBeInViewport();
-  await expect(card).toHaveAttribute('aria-current', 'true');
 });
 
 test('a running turn shows the typing bubble; a failed turn offers to try again', async ({
@@ -585,7 +566,9 @@ test('a first run marks the existing chat read instead of showing it all as unre
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
     .toBe('9');
-  await expect(page.getByRole('button', { name: 'ホーム' })).not.toHaveAccessibleDescription(/未読/);
+  await expect(page.getByRole('button', { name: 'ホーム' })).not.toHaveAccessibleDescription(
+    /未読/
+  );
 });
 
 test('a suggestion the user has not answered has a dot and opens in the detail pane', async ({

@@ -11,7 +11,6 @@ type TaskWorkspaceProps = {
   /** The workspace holds one Action's preview, so the page keys it by this id. */
   actionId: string;
   title: string;
-  onShowInChat: () => void;
   onAddProject: () => void;
 };
 
@@ -20,13 +19,12 @@ type TaskWorkspaceProps = {
  * on the left with the conversation narrowed to a column on the right. A file link in an answer
  * opens its preview, as its chip does.
  */
-export function TaskWorkspace({ actionId, title, onShowInChat, onAddProject }: TaskWorkspaceProps) {
+export function TaskWorkspace({ actionId, title, onAddProject }: TaskWorkspaceProps) {
   const [previewFile, setPreviewFile] = useState<TaskFile | null>(null);
   const pane = (
     <ActionTaskPane
       actionId={actionId}
       title={title}
-      onShowInChat={onShowInChat}
       onAddProject={onAddProject}
       renderPreview={(view) =>
         previewFile ? (

@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { Check, CircleAlert, Clipboard, MessageCircle, PictureInPicture2 } from 'lucide-react';
+import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 
 import type { ActionConversationView as ActionConversationViewModel } from '../../../electron/src/actions/actionConversationModel';
 import { ActionConversationView } from '@/components/action-conversation/ActionConversationView';
@@ -13,6 +13,7 @@ import { useConversationCopy } from '@/components/agent-overlay/conversationCopy
 import { useCompletionViewed } from '@/components/agent-overlay/useCompletionViewed';
 import { useConversationScroll } from '@/components/agent-overlay/useConversationScroll';
 import { useI18n } from '@/context/useI18n';
+import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import { useLiveStageText } from '@/components/history/liveStageText';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 
@@ -31,7 +32,6 @@ type ActionTaskPaneProps = {
    * can follow the Action's later edits.
    */
   renderPreview?: (view: ActionConversationViewModel | null) => ReactNode;
-  onShowInChat: () => void;
   /** Where projects are added: the composer's @-mention option and an approval's folder hint. */
   onAddProject: () => void;
   /** Content under the latest answer, such as the files it produced. */
@@ -47,7 +47,6 @@ export function ActionTaskPane({
   actionId,
   title,
   renderPreview,
-  onShowInChat,
   onAddProject,
   renderFileChips,
 }: ActionTaskPaneProps) {
@@ -72,6 +71,7 @@ export function ActionTaskPane({
   const { view, lifecycle, status, conversation, approval, composer } = task;
   const draft = composer.state;
   const conversationCopy = useConversationCopy(window.electron?.actions, actionId);
+  const link = useCopyWorkLink('action', actionId);
   const copyFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
   useConversationScroll({
@@ -146,12 +146,17 @@ export function ActionTaskPane({
           <button
             type="button"
             className="action-task__icon-button"
-            aria-label={t('overlay.showInChat')}
-            data-tooltip={t('overlay.showInChat')}
-            onClick={onShowInChat}
+            aria-label={link.label}
+            data-tooltip={link.title}
+            onClick={link.copy}
           >
-            <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
+            <link.Icon size={17} strokeWidth={1.8} aria-hidden />
           </button>
+          {link.failed ? (
+            <span className="action-task__sr-only" role="alert">
+              {link.failed}
+            </span>
+          ) : null}
           {/* The small window follows the task while the user works elsewhere; this one stays. */}
           <button
             type="button"

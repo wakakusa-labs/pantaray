@@ -225,8 +225,6 @@ declare global {
           'created' | 'loading' | 'focused' | 'initializing' | 'login' | 'recording_intro'
         >;
         onChanged?: (cb: (payload: unknown) => void) => () => void;
-        /** The Overlay asked to show this Action's latest card in the chat. */
-        onShowChat?: (cb: (payload: { actionId: string }) => void) => () => void;
         /** Main asked to select this work in History; the payload is checked where it lands. */
         onShowItem?: (cb: (payload: unknown) => void) => () => void;
       };
@@ -437,8 +435,6 @@ declare global {
         dragEnd?: () => void;
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
-        /** Brings the main window forward on this Action's latest chat card. */
-        showChat?: (request: { actionId: string }) => Promise<void>;
         /** Closes this panel and brings the main window forward with the Action selected. */
         openTask?: (request: { actionId: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;

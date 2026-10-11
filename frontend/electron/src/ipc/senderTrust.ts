@@ -68,7 +68,6 @@ const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([
   'overlay:dragMove',
   'overlay:dragEnd',
   'overlay:openWorkspaceSettings',
-  'overlay:showChat',
   'overlay:openTask',
 ]);
 

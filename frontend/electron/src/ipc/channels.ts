@@ -35,10 +35,9 @@ export const validReceiveChannels = [
   'action:conversationUpdated',
   // Main window only: a suggestion record main holds changed, or is about to be cleared
   'suggestion:snapshot',
-  // Main window only: an item appended to the user's chat, and the overlay's "show in chat"
+  // Main window only: an item appended to the user's chat, and whether a turn is answering
   'chat:itemAppended',
   'chat:turnState',
-  'history:showChat',
   // Main window only: select this work in History (a task a panel started)
   'history:showItem',
   // A task's shared draft as another window changed it
@@ -158,8 +157,6 @@ export const validInvokeChannels = [
   'overlay:submitApprovalDecision',
   'overlay:getActionApprovalMode',
   'overlay:setActionApprovalMode',
-  // Overlay → main window: show this Action's latest card in the chat
-  'overlay:showChat',
   // Overlay → main window: the panel closes and the main window opens the task it started
   'overlay:openTask',
   // Shared task drafts, for every composer that shows a task

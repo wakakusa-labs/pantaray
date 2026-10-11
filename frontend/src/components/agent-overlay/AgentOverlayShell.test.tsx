@@ -150,43 +150,6 @@ describe('AgentOverlayShell', () => {
     expect(shell.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 
-  it('opens the shown Action in the main chat from the header once the Action exists', async () => {
-    const onShowChat = vi.fn(async () => undefined);
-    const renderShell = (chatActionId: string | null) => (
-      <UiLanguageProvider initialLanguage="ja">
-        <AgentOverlayShell
-          isVisible={true}
-          isContentVisible={true}
-          isExpanded={true}
-          content={null}
-          suggestionText=""
-          isSuggestionStreamFinished={true}
-          actionText=""
-          isActionStreamFinished={false}
-          approvalUiState="hidden"
-          showBusyIndicator={true}
-          chatActionId={chatActionId}
-          onShowChat={onShowChat}
-        />
-      </UiLanguageProvider>
-    );
-    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
-    const { container, rerender } = render(renderShell(null));
-    const shell = within(container);
-    // A Suggestion not yet accepted has no Action to show.
-    expect(shell.queryByRole('button', { name: 'チャットで見る' })).toBeNull();
-
-    rerender(renderShell('action-1'));
-    const button = shell.getByRole('button', { name: 'チャットで見る' });
-    expectTooltipIsName(button);
-    expect(button).toHaveTextContent('');
-    button.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(onShowChat).toHaveBeenCalledWith({ actionId: 'action-1' });
-    // The busy dots are gone, but the running state is still announced.
-    expect(shell.getByRole('status')).toHaveTextContent('実行中');
-  });
-
   it('names each header button in its tooltip, and opens the main window with the pair of Open small', () => {
     // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
     const { container } = render(
@@ -202,8 +165,7 @@ describe('AgentOverlayShell', () => {
           isActionStreamFinished={false}
           approvalUiState="hidden"
           showBusyIndicator={false}
-          chatActionId="action-1"
-          onShowChat={async () => undefined}
+          actionId="action-1"
           onOpenInMainWindow={() => {}}
           conversationCopy={{ status: 'idle', copy: () => {} }}
           onToggleExpand={() => {}}
@@ -212,18 +174,54 @@ describe('AgentOverlayShell', () => {
       </UiLanguageProvider>
     );
     const header = within(container);
-    expect(expectIconButtonTooltips(container)).toHaveLength(5);
-    for (const name of [
-      'チャットで見る',
+    // The link, the main window, the copy; then the panel's own expand and hide.
+    const buttons = expectIconButtonTooltips(container);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'リンクをコピー',
       'メイン画面で開く',
       '会話をコピー',
       '展開する',
       '非表示',
-    ]) {
-      expectTooltipIsName(header.getByRole('button', { name }));
-    }
+    ]);
+    buttons.forEach(expectTooltipIsName);
     const openInMain = header.getByRole('button', { name: 'メイン画面で開く' });
     expect(openInMain.querySelector('svg.lucide-maximize-2')).not.toBeNull();
+  });
+
+  it('copies the link of the suggestion it shows, then of the Action that took its place', async () => {
+    const writeText = vi.fn(async () => undefined);
+    window.electron = { clipboard: { writeText } } as unknown as Window['electron'];
+    const renderShell = (actionId: string | null, suggestionId: string | null) => (
+      <UiLanguageProvider initialLanguage="ja">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={true}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          actionId={actionId}
+          suggestionId={suggestionId}
+        />
+      </UiLanguageProvider>
+    );
+    const { container, rerender } = render(renderShell(null, null));
+    const shell = within(container);
+    expect(shell.queryByRole('button', { name: 'リンクをコピー' })).toBeNull();
+
+    rerender(renderShell(null, 'sug-1'));
+    await userEvent.click(shell.getByRole('button', { name: 'リンクをコピー' }));
+    rerender(renderShell('action-1', 'sug-1'));
+    await userEvent.click(shell.getByRole('button', { name: 'リンクをコピー' }));
+    expect(writeText.mock.calls).toEqual([
+      ['pantaray://suggestion/sug-1'],
+      ['pantaray://task/action-1'],
+    ]);
+    delete (window as { electron?: unknown }).electron;
   });
 
   it('keeps the composer out of the scrolling conversation and never puts Stop in the header', () => {

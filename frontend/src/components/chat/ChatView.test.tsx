@@ -14,7 +14,6 @@ import type { ConversationHistoryListItem } from '../../../electron/src/history/
 import type { OrchestrationStatus } from '../../../electron/src/orchestration/eventContracts';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { showChatState } from '@/history/historyViewMode';
 import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
@@ -28,21 +27,16 @@ const panes = vi.hoisted(() => ({ drafts: [] as unknown[] }));
 vi.mock('@/components/task/TaskWorkspace', () => ({
   TaskWorkspace: ({
     actionId,
-    onShowInChat,
     onAddProject,
     drafts,
   }: {
     actionId: string;
-    onShowInChat: () => void;
     onAddProject: () => void;
     drafts: unknown;
   }) => {
     panes.drafts.push(drafts);
     return (
       <section aria-label={`action ${actionId}`}>
-        <button type="button" onClick={onShowInChat}>
-          show in chat
-        </button>
         <button type="button" onClick={onAddProject}>
           add project
         </button>
@@ -357,6 +351,38 @@ it('a card selects its work for the detail pane, without opening an Overlay', as
   expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
 });
 
+it('a task or suggestion named in a sent message opens it in the detail pane', async () => {
+  pages = [
+    {
+      items: [
+        item(1, {
+          kind: 'user_message',
+          text: 'Q3 と 案 を比べて',
+          quote_item_id: null,
+          images: [],
+          files: [],
+          project_refs: [],
+          work_refs: [
+            { kind: 'action', id: 'A1', title: 'Q3', start: 0, end: 2 },
+            { kind: 'suggestion', id: 'S1', title: '案', start: 5, end: 6 },
+          ],
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+  const task = await screen.findByRole('link', { name: '「Q3」を開く' });
+  expect(task.textContent).toBe('Q3');
+  task.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  await userEvent.click(await screen.findByRole('link', { name: '「案」を開く' }));
+  expect(screen.getByRole('region', { name: 'suggestion S1' })).toBeInTheDocument();
+});
+
 it('a task pane’s Add project names a new project in the sidebar', async () => {
   pages = [{ items: [], next_cursor: null }];
   renderPage({ pathname: '/history', search: '?item=action:A1' });
@@ -369,24 +395,6 @@ it('a task pane’s Add project names a new project in the sidebar', async () =>
   expect(createProject).toHaveBeenCalledWith({ displayName: 'aurora', organizationIds: [] });
   expect(selectFolder).not.toHaveBeenCalled();
   expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
-});
-
-it('the Action pane’s show-in-chat opens the chat on that Action’s latest card', async () => {
-  pages = [
-    {
-      items: [
-        reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }]),
-        reply(2, '直しました。', [{ action_id: 'A1', summary: '最新のカード' }]),
-        userMessage(3, 'ありがとう'),
-      ],
-      next_cursor: null,
-    },
-  ];
-  renderPage({ pathname: '/history', search: '?item=action:A1' });
-  await userEvent.click(screen.getByRole('button', { name: 'show in chat' }));
-  const cards = await screen.findAllByRole('button', { name: '見積書のたたき台を作る を開く' });
-  await waitFor(() => expect(cards[1]).toHaveFocus());
-  expect(cards[1]).toHaveAttribute('aria-current', 'true');
 });
 
 it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
@@ -485,27 +493,6 @@ it('the Chat row keeps the chat at the newest message when an older page lands a
   // Still following: a reply that arrives is at the bottom, so it is read.
   act(() => appendItem(reply(6, '次の返信')));
   expect(localStorage.getItem('pantaray.chat-read:account:user-1')).toBe('6');
-});
-
-it('the Chat row drops an Overlay request still reading older pages for its card', async () => {
-  pages = [{ items: [userMessage(3, 'ほかの話')], next_cursor: 3 }];
-  let landOlder!: (page: ChatItemPage) => void;
-  listItems.mockImplementationOnce(async () => pages.shift()!);
-  listItems.mockImplementationOnce(() => new Promise((resolve) => (landOlder = resolve)));
-  renderPage({ pathname: '/history', state: showChatState('A1') });
-  await waitFor(() => expect(listItems).toHaveBeenLastCalledWith({ before: 3, limit: 50 }));
-
-  const chatRow = screen.getByRole('button', { name: 'チャット' });
-  await userEvent.click(chatRow);
-  await act(async () =>
-    landOlder({
-      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
-      next_cursor: null,
-    })
-  );
-  const card = screen.getByRole('button', { name: '見積書のたたき台を作る を開く' });
-  expect(card).not.toHaveFocus();
-  expect(chatRow).toHaveFocus();
 });
 
 it('stops loading older pages on its own after a failure until the reader asks again', async () => {
@@ -630,21 +617,6 @@ it('resends a failed message with the same message_id and points at a refused fi
   );
   expect(input).not.toHaveAttribute('readonly');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-});
-
-it('opens on the chat at the Action’s latest card when the Overlay asks, reading older pages', async () => {
-  pages = [
-    { items: [userMessage(3, 'ほかの話'), userMessage(2, 'まだほかの話')], next_cursor: 2 },
-    {
-      items: [reply(1, '始めます。', [{ action_id: 'A1', summary: '最初のカード' }])],
-      next_cursor: null,
-    },
-  ];
-  renderPage({ pathname: '/history', state: showChatState('A1') });
-  const card = await screen.findByRole('button', { name: '見積書のたたき台を作る を開く' });
-  await waitFor(() => expect(card).toHaveFocus());
-  expect(card).toHaveAttribute('aria-current', 'true');
-  expect(listItems).toHaveBeenLastCalledWith({ before: 2, limit: 50 });
 });
 
 it('discards a document whose write finishes after the page closed', async () => {

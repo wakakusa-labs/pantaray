@@ -133,8 +133,6 @@ export type MainContext = {
     showMainRoute: (route: MainWindowRoute) => void;
     openNewConversationOverlay: () => void;
     openActionConversationOverlay: (actionId: string) => void;
-    /** Brings the main window forward and asks it to show this Action's latest chat card. */
-    showChat: (actionId: string) => void;
     /**
      * Brings the main window forward on History with this Action selected, creating the window
      * when there is none. Rejects when no main window could be shown or its load failed.

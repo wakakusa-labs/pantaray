@@ -10,6 +10,7 @@ import type {
 } from '../../../electron/src/orchestration/contracts';
 import { SuggestionTaskPane } from './SuggestionTaskPane';
 import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
+import { expectTooltipIsName } from '@/tests/iconTooltip';
 
 type ElectronBridge = NonNullable<Window['electron']>;
 
@@ -80,7 +81,6 @@ const acceptAction = vi.fn<NonNullable<ElectronBridge['orchestration']>['acceptA
 const send = vi.fn();
 const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
 const onStarted = vi.fn();
-const onShowInChat = vi.fn();
 
 const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
@@ -93,7 +93,6 @@ async function renderPane(suggestionId = 'sug-1') {
         suggestionId={suggestionId}
         title="Invoice draft"
         onStarted={onStarted}
-        onShowInChat={onShowInChat}
         onAddProject={() => undefined}
       />
     </UiLanguageProvider>
@@ -205,7 +204,7 @@ describe('SuggestionTaskPane', () => {
     expect(acceptButton()).toBeEnabled();
   });
 
-  it('offers the same header buttons as a task: show in chat, and copy the suggestion', async () => {
+  it('offers the same header buttons as a task: copy the link, and copy the suggestion', async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(window, 'electron', {
       configurable: true,
@@ -213,12 +212,13 @@ describe('SuggestionTaskPane', () => {
     });
     await renderPane();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show in chat' }));
-    expect(onShowInChat).toHaveBeenCalledTimes(1);
+    expectTooltipIsName(screen.getByRole('button', { name: 'Copy link' }));
     fireEvent.click(screen.getByRole('button', { name: 'Copy suggestion' }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith('Draft the invoice before month end?')
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('pantaray://suggestion/sug-1'));
   });
 
   it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {

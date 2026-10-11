@@ -211,12 +211,6 @@ export function buildMainContext(params: {
           // no-op
         }
       },
-      showChat: (actionId) => {
-        const mainWindow = params.getMainWindow();
-        // On macOS closing the main window hides it, so it exists while the app runs.
-        if (!mainWindow || !restoreAndFocusWindow(mainWindow)) return;
-        mainWindow.webContents.send('history:showChat', { actionId });
-      },
       showTask: async (actionId) => {
         // The same `?item=` the renderer writes (historySelectionSearch).
         const route = `/history?item=action:${encodeURIComponent(actionId)}`;

@@ -10,7 +10,7 @@ import type { ActionLiveSnapshot } from '../../../electron/src/actions/actionLiv
 import type { ActionToolOutputLoader } from '../../../electron/src/actions/actionToolOutputLoader';
 
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
-import { liveStageText } from '@/components/history/liveStageText';
+import { useLiveStageText } from '@/components/history/liveStageText';
 import { useI18n } from '@/context/useI18n';
 
 import type { ImageGridCopy } from './AttachedImages';
@@ -334,7 +334,7 @@ function WorkSection({
   onFocusedContentUnmount: (key: string) => void;
   registerDisclosure: (key: string, element: HTMLButtonElement | null) => void;
 }) {
-  const { language, t } = useI18n();
+  const { language } = useI18n();
   const copy = COPY[language];
   const rootRef = useRef<HTMLDivElement>(null);
   const [expansion, setExpansion] = useState({ key: expansionKey, expanded: false });
@@ -350,15 +350,13 @@ function WorkSection({
   // While live, the label says what is happening now in the words the Tool's own row uses. The
   // accessible name stays fixed, so the label does not announce every step.
   const label =
-    liveTool === undefined
-      ? copy.agentWork
-      : liveStageText(
-          liveTool.entry.status === 'processing'
-            ? { kind: 'tool', ...liveTool.entry }
-            : { kind: 'thinking' },
-          language,
-          t
-        );
+    useLiveStageText(
+      liveTool === undefined
+        ? null
+        : liveTool.entry.status === 'processing'
+          ? { kind: 'tool', ...liveTool.entry }
+          : { kind: 'thinking' }
+    ) ?? copy.agentWork;
   const disclosureRef = useCallback(
     (element: HTMLButtonElement | null) => registerDisclosure(section.key, element),
     [registerDisclosure, section.key]

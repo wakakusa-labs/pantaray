@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -110,7 +110,10 @@ function toolLineOf(node: HTMLElement): HTMLElement {
 }
 
 describe('ActionConversationView', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it.each([
     ['ja', '次の送信で実行', '未実行'],
@@ -1046,57 +1049,96 @@ describe('ActionConversationView', () => {
     expect(shimmering()).toEqual([]);
   });
 
-  it('labels live work with what runs now, then folds it back to the work count', async () => {
-    const running = (lines: ActionConversationRunItem['lines']): ActionConversationRunItem => ({
-      kind: 'run',
-      runId: 'run-1',
-      status: 'running',
-      startedAt: '2026-08-30T00:00:00.000000Z',
-      completedAt: null,
-      lines,
-    });
-    const renderRun = (run: ActionConversationRunItem) => (
+  it('holds live work labels steady, and folds back to the work count at once', () => {
+    vi.useFakeTimers();
+    const lines: ActionConversationRunItem['lines'][number][] = [];
+    const run = (status: ActionConversationRunItem['status'] = 'running') => (
       <UiLanguageProvider initialLanguage="ja">
         <ActionConversationView
-          view={viewWith([run], run.status === 'running' ? 'processing' : 'success')}
+          view={viewWith(
+            [
+              {
+                kind: 'run',
+                runId: 'run-1',
+                status,
+                startedAt: '2026-08-30T00:00:00.000000Z',
+                completedAt: null,
+                lines: [...lines],
+              },
+            ],
+            status === 'running' ? 'processing' : 'success'
+          )}
           toolOutputLoader={EMPTY_TOOL_OUTPUT_LOADER}
         />
       </UiLanguageProvider>
     );
-    const searched = tool('searched', 'memory_search', 'success', 1, [], '請求書');
-    const querying = tool('querying', 'memory_sql', 'processing', 2, [], 'SELECT 1');
-    const { rerender } = render(renderRun(running([searched, querying])));
-    const disclosure = () => screen.getByRole('button', { name: /^Pantarayの作業 2,/ });
+    // Each step runs, then finishes; a finished step replaces its running line.
+    const step = (label: string, subject: string, done = false) => {
+      const number = lines.filter((line) => line.kind === 'tool').length + (done ? 0 : 1);
+      const item = tool(`t${number}`, label, done ? 'success' : 'processing', number, [], subject);
+      if (done) lines[lines.length - 1] = item;
+      else lines.push(item);
+      rerender(run());
+    };
+    const wait = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+    const { container, rerender } = render(run());
+    const label = () => container.querySelector('.action-conversation__work-label')!.textContent;
 
-    // The collapsed label is the running Tool's own row text, next to the count.
-    expect(disclosure()).toHaveTextContent(/^記憶を絞り込んでいます SELECT 12$/);
-    await userEvent.click(disclosure());
+    step('memory_sql', 'SELECT 1');
+    // The label is the running Tool's own row text.
+    expect(label()).toBe('記憶を絞り込んでいます SELECT 1');
+    fireEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 1,/ }));
     expect(
       within(
         toolLineOf(screen.getByText('記憶を絞り込んでいます SELECT 1', { selector: TOOL_TEXT }))
       ).getByText('実行中')
     ).toBeVisible();
-    await userEvent.click(disclosure());
+    fireEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 1,/ }));
 
-    // Between Tools the model is thinking.
-    const queried = tool('querying', 'memory_sql', 'success', 2, [], 'SELECT 1');
-    rerender(renderRun(running([searched, queried])));
-    expect(disclosure()).toHaveTextContent(/^考えています2$/);
+    // A fast run of steps keeps the shown label for its hold, then jumps to the latest one.
+    step('memory_sql', 'SELECT 1', true);
+    step('read', 'a.md');
+    wait(300);
+    step('read', 'a.md', true);
+    step('grep', 'b');
+    wait(899);
+    expect(label()).toBe('記憶を絞り込んでいます SELECT 1');
+    wait(1);
+    expect(label()).toBe('b を検索しています');
 
-    // The final answer ends the live label even before the run reports it finished.
-    const answer = {
+    // A quick hop to the next Tool never blinks to thinking.
+    wait(1200);
+    step('grep', 'b', true);
+    wait(300);
+    step('read', 'c.md');
+    wait(0);
+    expect(label()).toBe('c.md を読み取っています');
+
+    // A longer gap shows thinking.
+    wait(1200);
+    step('read', 'c.md', true);
+    wait(599);
+    expect(label()).toBe('c.md を読み取っています');
+    wait(1);
+    expect(label()).toBe('考えています');
+
+    // The final answer ends the label at once, even during a hold.
+    step('read', 'd.md');
+    lines.push({
       kind: 'final_output',
       runId: 'run-1',
       status: 'success',
       visibility: 'always',
       text: '答え',
-    } as const;
-    rerender(renderRun(running([searched, queried, answer])));
-    expect(disclosure()).toHaveTextContent(/^Pantarayの作業2$/);
+    });
+    rerender(run());
+    expect(label()).toBe('Pantarayの作業');
 
-    // A run that stopped mid-Tool has nothing live either.
-    rerender(renderRun({ ...running([searched, querying]), status: 'canceled' }));
-    expect(disclosure()).toHaveTextContent(/^Pantarayの作業2$/);
+    // So does a run that stops.
+    lines.pop();
+    rerender(run());
+    rerender(run('canceled'));
+    expect(label()).toBe('Pantarayの作業');
   });
 
   it.each([

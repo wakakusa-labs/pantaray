@@ -10,6 +10,7 @@ import {
 } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
+import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import { historyItemSelection, type HistorySelection } from '@/history/historySelection';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, type useSuggestionHistory } from '@/hooks/useSuggestionHistory';
@@ -19,7 +20,7 @@ import type { MessageKey } from '@/i18n/types';
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
 import HistorySearchField from './HistorySearchField';
-import { liveStageText } from './liveStageText';
+import { useLiveStageText } from './liveStageText';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
@@ -28,6 +29,16 @@ const NEW_TASK_BUTTON_ID = 'history-new-task';
 /** How far below the visible tasks the next page starts loading, so it is there on arrival. */
 const LOAD_AHEAD_MARGIN = '0px 0px 160px 0px';
 const MAX_SHOWN_UNREAD = 99;
+
+/** Visual only: it changes on every step. */
+function LiveStageLine({ stage }: { stage: HistoryLiveStage }) {
+  const text = useLiveStageText(stage);
+  return text === null ? null : (
+    <span className="history-item-live" aria-hidden="true">
+      {text}
+    </span>
+  );
+}
 
 /**
  * Why a row needs the user's eye, for its dot: an Action waiting for approval, a suggestion waiting
@@ -299,12 +310,7 @@ export function HistorySidebar({
                         />
                       ) : null}
                     </span>
-                    {liveStage ? (
-                      // Visual only: it changes on every step.
-                      <span className="history-item-live" aria-hidden="true">
-                        {liveStageText(liveStage, language, t)}
-                      </span>
-                    ) : null}
+                    {liveStage ? <LiveStageLine stage={liveStage} /> : null}
                   </>
                 );
 

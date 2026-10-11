@@ -1,9 +1,28 @@
-/* History: the sidebar, then the detail pane, edge to edge beside the rail. */
+/* History: the sidebar, then the detail pane, beside the rail. Below the title bar the two sit
+   in one card with a small gap to the window's right and bottom edges, like a desktop app's
+   workspace; the title bar above stays one band with the traffic lights clear of any edge. */
 .history-page {
+  --history-card-gap: 6px;
+  --history-card-radius: 12px;
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+/* The card's outline, drawn once over both columns so its corners stay round. Its top edge is
+   the detail headers' bottom line. */
+.history-page::after {
+  content: '';
+  position: absolute;
+  top: calc(var(--app-pane-header-height) - 1px);
+  left: 0;
+  right: var(--history-card-gap);
+  bottom: var(--history-card-gap);
+  border: 1px solid var(--fog-line);
+  border-radius: var(--history-card-radius);
+  pointer-events: none;
 }
 
 .history-sidebar {
@@ -13,8 +32,12 @@
   flex-direction: column;
   min-width: 240px;
   min-height: 0;
-  border-left: 1px solid var(--fog-line);
+  margin-top: calc(var(--app-pane-header-height) - 1px);
+  margin-bottom: var(--history-card-gap);
   border-right: 1px solid var(--fog-line);
+  border-top-left-radius: var(--history-card-radius);
+  border-bottom-left-radius: var(--history-card-radius);
+  background: rgba(170, 186, 212, 0.03);
 }
 
 /* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */
@@ -22,7 +45,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 52px 14px 10px;
+  padding: 12px 14px 10px;
 }
 
 .history-sidebar__chat {
@@ -76,6 +99,9 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* Inside the card: clear of its right and bottom edges. */
+  margin-right: var(--history-card-gap);
+  margin-bottom: var(--history-card-gap);
 }
 
 .history-container {
@@ -92,7 +118,7 @@
   display: flex;
   flex: none;
   align-items: center;
-  height: 52px;
+  height: var(--app-pane-header-height);
   padding: 0 24px;
   border-bottom: 1px solid var(--fog-line);
 }
@@ -405,4 +431,13 @@
 
 .history-delete-dialog__confirm {
   color: var(--danger-color);
+}
+
+/* The card's top edge is the line under the detail headers; their own lines would run straight
+   past its rounded corner. */
+.history-detail .history-pane-header,
+.history-detail .action-task__header,
+.history-detail .suggestion-task__header,
+.history-detail .task-file-preview__header {
+  border-bottom: 0;
 }

@@ -48,6 +48,7 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
   let openNewConversationCalls = 0;
   const openActionConversationCalls = [];
   const deleteItemCalls = [];
+  const readItemCalls = [];
   const shortcutInputs = [];
   const placementUpdates = [];
   const updateCalls = [];
@@ -88,6 +89,10 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
       deleteItem: async (request) => {
         deleteItemCalls.push(request);
         return { ok: true };
+      },
+      readItem: async (request) => {
+        readItemCalls.push(request);
+        return null;
       },
     },
     ui: {
@@ -206,6 +211,11 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
     await assert.rejects(async () => deleteItem({}, invalid), /history:deleteItem/);
   }
   assert.deepEqual(deleteItemCalls, [{ kind: 'suggestion', id: 'suggestion-1' }]);
+
+  const readItem = fakeIpc.invokeHandlers.get('history:readItem');
+  assert.equal(await readItem({}, { kind: 'conversation', id: 'action-1' }), null);
+  await assert.rejects(async () => readItem({}, { kind: 'task', id: 'a' }), /history:readItem/);
+  assert.deepEqual(readItemCalls, [{ kind: 'conversation', id: 'action-1' }]);
 
   const setShortcut = fakeIpc.invokeHandlers.get('shortcut:setAccelerator');
   assert.deepEqual(await setShortcut({}, '  Command+K  '), {

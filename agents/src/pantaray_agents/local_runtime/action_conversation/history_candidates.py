@@ -63,6 +63,8 @@ class SuggestionHistoryCandidate:
 
 
 type ConversationHistoryCandidate = ActionHistoryCandidate | SuggestionHistoryCandidate
+# One row of the list by its kind and id, as ``DELETE .../items/{kind}/{id}`` names it.
+type ConversationHistoryItemKey = tuple[Literal["conversation", "suggestion"], str]
 
 CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION: Final[str] = (
     "pantaray_conversation_history_casefold"
@@ -92,7 +94,15 @@ class ConversationHistoryCandidatePage:
     next_cursor: str | None
 
 
-def _candidate_query(*, cursor_bound: bool) -> str:
+def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:
+    action_item, suggestion_item = (
+        (
+            "AND :item_kind='conversation' AND action.action_id=:item_id",
+            "AND :item_kind='suggestion' AND suggestion.suggestion_id=:item_id",
+        )
+        if item_bound
+        else ("", "")
+    )
     cursor_predicate = (
         """AND (raw_updated_at<:before_updated_at
       OR (raw_updated_at=:before_updated_at
@@ -204,7 +214,7 @@ WITH action_source AS (
                        THEN json_extract(searched_user.user_message_json,'$.chat_handoff.note') ELSE '' END)
                    LIKE :search_pattern ESCAPE '\')))
     ORDER BY searched_user.accepted_sequence DESC,searched_user.step_id DESC LIMIT 1)
-  WHERE action.user_id=:user_id
+  WHERE action.user_id=:user_id {action_item}
 ), action_evidence AS (
   SELECT 'conversation' AS kind,action_id AS stable_id,
     action_updated_at AS raw_updated_at,
@@ -258,6 +268,7 @@ WITH action_source AS (
   LEFT JOIN agent_actions AS linked
     ON linked.suggestion_id=suggestion.suggestion_id
   WHERE suggestion.user_id=:user_id AND suggestion.has_suggestion=1
+    {suggestion_item}
     AND linked.action_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM agent_action_steps AS reply
       WHERE reply.user_id=suggestion.user_id
@@ -297,8 +308,12 @@ def read_conversation_history_candidates_in_connection(
     search_text: str,
     cursor: str | None,
     limit: int,
+    item: ConversationHistoryItemKey | None = None,
 ) -> ConversationHistoryCandidatePage:
-    """Select a page after the caller registers this module's casefold function."""
+    """Select a page after the caller registers this module's casefold function.
+
+    ``item`` narrows the list to that one row, which it holds or not.
+    """
 
     if not connection.in_transaction:
         raise MigrationError("Conversation history requires a caller-owned transaction")
@@ -314,7 +329,7 @@ def read_conversation_history_candidates_in_connection(
         normalized_search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     )
     rows = connection.execute(
-        _candidate_query(cursor_bound=anchor is not None),
+        _candidate_query(cursor_bound=anchor is not None, item_bound=item is not None),
         {
             "user_id": user_id,
             "search_text": normalized_search,
@@ -324,6 +339,8 @@ def read_conversation_history_candidates_in_connection(
             "before_kind": anchor.kind if anchor else None,
             "before_id": anchor.stable_id if anchor else None,
             "fetch_limit": limit + 1,
+            "item_kind": item[0] if item else None,
+            "item_id": item[1] if item else None,
         },
     ).fetchall()
     candidates = tuple(_candidate(tuple(row)) for row in rows[:limit])
@@ -404,6 +421,7 @@ __all__ = [
     "ActionHistoryCandidate",
     "ConversationHistoryCandidate",
     "ConversationHistoryCandidatePage",
+    "ConversationHistoryItemKey",
     "SuggestionHistoryCandidate",
     "read_conversation_history_candidates_in_connection",
     "register_conversation_history_casefold_sqlite",

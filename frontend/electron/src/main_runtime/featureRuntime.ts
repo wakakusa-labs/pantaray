@@ -28,6 +28,7 @@ import { createActionReadState } from '../history/actionReadState';
 import { broadcastHistoryChanged } from '../orchestration/historyNotifications';
 import { createHistoryFetcher } from '../history/historyFetch';
 import { createHistoryItemDeleter } from '../history/historyItemDelete';
+import { createHistoryItemReader } from '../history/historyItemRead';
 import type { MainContext } from '../ipc/context';
 import { createOverlayBootstrapFetcher } from '../history/overlayBootstrapFetch';
 import { startMainIpcRuntime } from './ipcBootstrap';
@@ -193,6 +194,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     getCompletionUnreadSnapshot: actionReadState.snapshotCompletionUnread,
   });
+  const historyReadItem = createHistoryItemReader({ requestJson });
   const historyDeleteItem = createHistoryItemDeleter({
     requestJson,
     closeConversationWindow: ({ kind, id }) => {
@@ -353,6 +355,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         startBrowserLogin: params.authCoordinator.startBrowserLogin,
         historyFetch,
         historyDeleteItem,
+        historyReadItem,
         markCompletionViewed: (request) => {
           actionReadState.markCompletionViewed(request);
           broadcastHistoryChanged(params.getMainWindow(), { source: 'read_state' });

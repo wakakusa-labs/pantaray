@@ -49,7 +49,7 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   { path: /^\/api\/agent\/history$/, methods: new Set(['GET']) },
   {
     path: /^\/api\/agent\/history\/items\/(conversation|suggestion)\/[^/]+$/,
-    methods: new Set(['DELETE']),
+    methods: new Set(['GET', 'DELETE']),
   },
   {
     path: /^\/api\/agent\/history\/[^/]+\/overlay-bootstrap$/,

@@ -162,9 +162,10 @@ test('local backend client は未許可 path/method を token 送信前に拒否
     await assert.rejects(() =>
       client.requestJson({ path: '/v1/agents/users/user-1/actions/messages', method: 'GET' })
     );
-    // Deleting a history row is DELETE on a conversation or a Suggestion, and nothing else.
+    // A history row is read or deleted on a conversation or a Suggestion, and nothing else.
     for (const [path, method] of [
-      ['/api/agent/history/items/conversation/action-1', 'GET'],
+      ['/api/agent/history/items/conversation/action-1', 'PUT'],
+      ['/api/agent/history/items/process/process-1', 'GET'],
       ['/api/agent/history/items/process/process-1', 'DELETE'],
       ['/api/agent/history/items/conversation/action-1/extra', 'DELETE'],
       ['/api/agent/history', 'DELETE'],
@@ -211,6 +212,8 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/api/agent/history/suggestion-1/overlay-bootstrap', 'GET'],
     ['/api/agent/history/items/conversation/action-1', 'DELETE'],
     ['/api/agent/history/items/suggestion/suggestion-1', 'DELETE'],
+    ['/api/agent/history/items/conversation/action-1', 'GET'],
+    ['/api/agent/history/items/suggestion/suggestion-1', 'GET'],
     ['/v1/agents/users/user-1/actions/action-1/approvals', 'POST'],
     ['/v1/agents/users/user-1/actions/action-1/approval-mode', 'GET'],
     ['/v1/agents/users/user-1/actions/action-1/approval-mode', 'PUT'],

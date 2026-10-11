@@ -204,7 +204,8 @@ def test_large_lanes_filter_and_seek_before_bounded_outer_sort(
     details = tuple(
         str(row[3])
         for row in history_connection.execute(
-            "EXPLAIN QUERY PLAN " + _candidate_query(cursor_bound=True),
+            "EXPLAIN QUERY PLAN "
+            + _candidate_query(cursor_bound=True, item_bound=False),
             {
                 "user_id": "user-1",
                 "search_text": "",

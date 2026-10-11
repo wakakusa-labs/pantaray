@@ -1,5 +1,5 @@
 import { LocalBackendRequestError } from '../localBackend/client';
-import type { HistoryItemDeleteRequest } from './historyContracts';
+import type { HistoryItemKey } from './historyContracts';
 
 const HISTORY_DELETE_TIMEOUT_MS = 30_000;
 
@@ -18,8 +18,8 @@ type HistoryDeleteRequestJson = <T>(request: {
 export function createHistoryItemDeleter(params: {
   requestJson: HistoryDeleteRequestJson;
   /** Closes the window still showing the conversation that is now gone. */
-  closeConversationWindow: (request: HistoryItemDeleteRequest) => void;
-}): (request: HistoryItemDeleteRequest) => Promise<HistoryItemDeleteResult> {
+  closeConversationWindow: (request: HistoryItemKey) => void;
+}): (request: HistoryItemKey) => Promise<HistoryItemDeleteResult> {
   return async (request) => {
     try {
       await params.requestJson<void>({

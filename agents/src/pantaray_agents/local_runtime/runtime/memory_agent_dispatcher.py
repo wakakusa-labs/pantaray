@@ -26,6 +26,11 @@ from .memory_agent_triggers import (
     MemoryAgentTriggerKind,
 )
 from .memory_chat_range import PendingChat, advance_chat_cursor, pending_chat
+from .memory_dismissal_range import (
+    PendingDismissals,
+    advance_dismissal_cursor,
+    pending_dismissals,
+)
 from .memory_update_queue import (
     PendingMemoryTrigger,
     build_coalesced_memory_update_payload,
@@ -40,9 +45,10 @@ _JOB_ENQUEUED: Final[str] = "JOB_ENQUEUED"
 MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS: Final[float] = 30.0
 
 MEMORY_UPDATE_MAX_COALESCED_TRIGGERS: Final[int] = MEMORY_UPDATE_SOURCE_MAX_ITEMS
-# Finished Action turns and chat messages ride along with the next Insight or
-# summary run instead of starting one each. One Insight window bounds the wait,
-# which matters when recording is off and no Insight run comes.
+# Finished Action turns, chat messages and dismissed suggestions ride along with
+# the next Insight or summary run instead of starting one each. One Insight
+# window bounds the wait, which matters when recording is off and no Insight run
+# comes.
 ACTION_TERMINAL_MAX_DEFERRAL: Final[timedelta] = timedelta(
     seconds=SHORT_INSIGHT_WINDOW_SECONDS
 )
@@ -104,13 +110,17 @@ def _dispatch_coalesced_memory_update(
         return ()
     pending = _select_pending_unified_triggers(connection=connection, user_id=user_id)
     chat = pending_chat(connection, user_id=user_id)
-    if not _is_due(pending, chat, now=now):
+    dismissals = pending_dismissals(connection, user_id=user_id)
+    if not _is_due(pending, chat, dismissals, now=now):
         return ()
     payload = build_coalesced_memory_update_payload(
         user_id=user_id,
         enqueued_at=handled_at,
         pending=pending,
         chat=None if chat is None else chat.range,
+        dismissed_suggestion_ids=(
+            () if dismissals is None else dismissals.suggestion_ids
+        ),
     )
     job_id = enqueue_memory_update_job_in_connection(
         connection=connection, payload=payload
@@ -132,6 +142,10 @@ def _dispatch_coalesced_memory_update(
             after_sequence=chat.range["after_sequence"],
             through_sequence=chat.range["through_sequence"],
         )
+    if dismissals is not None:
+        advance_dismissal_cursor(
+            connection, user_id=user_id, dismissals=dismissals, at=handled_at
+        )
     return tuple(
         _mark_dispatched(connection, entry.trigger, job_id, handled_at)
         for entry in pending
@@ -141,6 +155,7 @@ def _dispatch_coalesced_memory_update(
 def _is_due(
     pending: tuple[PendingMemoryTrigger, ...],
     chat: PendingChat | None,
+    dismissals: PendingDismissals | None,
     *,
     now: datetime,
 ) -> bool:
@@ -152,6 +167,8 @@ def _is_due(
     deferred = [entry.created_at for entry in pending]
     if chat is not None:
         deferred.append(chat.oldest_created_at)
+    if dismissals is not None:
+        deferred.append(dismissals.oldest_rejected_at)
     if not deferred:
         return False
     oldest = min(datetime.fromisoformat(created_at) for created_at in deferred)

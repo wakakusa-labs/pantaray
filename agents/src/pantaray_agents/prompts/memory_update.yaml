@@ -335,6 +335,13 @@ prompt: |
   {chat_messages}
   </chat_messages>
 
+  ## Dismissed suggestions
+  Suggestions the user dismissed without replying since the last memory run, with
+  any reason they gave: weak evidence, as How suggestions landed says.
+  <dismissed_suggestions>
+  {dismissed_suggestions}
+  </dismissed_suggestions>
+
   ## Memory Draft Manifest
   File names and sizes only, across all three categories. Read what this update
   needs with `read_file`.

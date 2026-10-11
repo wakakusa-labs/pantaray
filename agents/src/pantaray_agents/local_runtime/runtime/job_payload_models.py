@@ -170,6 +170,7 @@ def parse_memory_update_job_payload_json(
             "summary_ids",
             "action_terminals",
             "chat",
+            "dismissed_suggestion_ids",
         },
         payload_name="Memory update job payload",
     )
@@ -184,11 +185,17 @@ def parse_memory_update_job_payload_json(
     }
     if "chat" in payload:
         parsed["chat"] = _require_chat_range(payload["chat"])
+    if "dismissed_suggestion_ids" in payload:
+        dismissed = _require_source_ids(payload, "dismissed_suggestion_ids")
+        if not dismissed:
+            raise MigrationError("Memory update dismissed_suggestion_ids is empty")
+        parsed["dismissed_suggestion_ids"] = dismissed
     if not (
         parsed["short_insight_ids"]
         or parsed["summary_ids"]
         or parsed["action_terminals"]
         or "chat" in parsed
+        or "dismissed_suggestion_ids" in parsed
     ):
         raise MigrationError("Memory update job payload has no source")
     return parsed

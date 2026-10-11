@@ -26,7 +26,7 @@ class UnprojectedBrokerToolOutcome:
 
 
 def read_tool_outcome(result: ReadToolResult) -> UnprojectedBrokerToolOutcome:
-    """A read/list/glob/grep result as the outcome the Action stores."""
+    """A read/list/glob/grep result with no image, as the outcome the Action stores."""
 
     return UnprojectedBrokerToolOutcome(
         status="success",
@@ -34,7 +34,6 @@ def read_tool_outcome(result: ReadToolResult) -> UnprojectedBrokerToolOutcome:
         search_text=result.search_text,
         file_paths=result.file_paths,
         file_reference_paths=result.file_reference_paths,
-        attachments=result.attachments,
     )
 
 

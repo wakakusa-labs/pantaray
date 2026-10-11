@@ -13,7 +13,7 @@ import hashlib
 import os
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -51,6 +51,7 @@ from .attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
     ATTACHMENT_ID_HEX_LENGTH,
     TOOL_ATTACHMENT_REF_PREFIX,
+    ReadImage,
 )
 from .discovery import GREP_MAX_OUTPUT_BYTES, run_glob, run_grep, run_list
 from .grep_lines import GREP_MAX_LINE_CHARS
@@ -95,6 +96,7 @@ type _RunCall = Callable[[ReactToolCall, BaseModel], Awaitable[ReactToolResult]]
 RENDER_PDF_PAGE_TOOL_NAME = "render_pdf_page"
 # Inside the run's own folder, so both go with it when the run ends.
 _PAGES_DIRNAME = "rendered_pages"
+_READ_IMAGES_DIRNAME = "read_images"
 _CONVERTED_DIRNAME = "converted_documents"
 
 
@@ -373,21 +375,13 @@ class _ReadOnlyFileTools:
         )
 
     def _keep_pages(self, drawn: DrawnDocument) -> tuple[ToolImage, ...]:
-        """Write each page into the run's folder, the file its image is sent from."""
+        """Keep each page in the run's folder, the file its image is sent from."""
 
-        pages_dir = self.spill_root / _PAGES_DIRNAME
-        pages_dir.mkdir(mode=_SPILL_ROOT_MODE, exist_ok=True)
         images = []
         for page in drawn.pages:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
             name = f"page-{page.number}-{attachment_id}.png"
-            # Lens runs of one Suggestion share this folder and may draw the
-            # same page at once; the file is sent from, so never half-written.
-            handle, temp_path = tempfile.mkstemp(prefix=".page-", dir=pages_dir)
-            with os.fdopen(handle, "wb") as temp_file:
-                temp_file.write(page.payload)
-            os.replace(temp_path, pages_dir / name)
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
@@ -397,19 +391,73 @@ class _ReadOnlyFileTools:
                     byte_size=len(page.payload),
                     sha256=sha256,
                     workspace_root_path=str(self.spill_root),
-                    workspace_relative_path=f"{_PAGES_DIRNAME}/{name}",
+                    workspace_relative_path=self._keep(
+                        _PAGES_DIRNAME, name, page.payload
+                    ),
                 )
             )
         return tuple(images)
+
+    def _keep_read_image(self, image: ReadImage) -> ToolImage:
+        """Keep the bytes ``read`` returned, which every later request sends.
+
+        Pointing at the file that was read would send whatever it holds by the
+        next request, or fail the run once something rewrote or removed it.
+        """
+
+        return ToolImage(
+            ref=image.ref,
+            blob_ref=image.blob_ref,
+            display_path=image.display_path,
+            mime_type=image.mime_type,
+            byte_size=image.byte_size,
+            sha256=image.sha256,
+            workspace_root_path=str(self.spill_root),
+            # The name is the bytes' own, so keeping the same read twice
+            # rewrites the same file with the same bytes.
+            workspace_relative_path=self._keep(
+                _READ_IMAGES_DIRNAME, image.blob_ref, image.payload
+            ),
+        )
+
+    def _keep(self, dirname: str, name: str, payload: bytes) -> str:
+        """Write one image into the run's folder; its path relative to the folder."""
+
+        directory = self.spill_root / dirname
+        directory.mkdir(mode=_SPILL_ROOT_MODE, exist_ok=True)
+        # Lens runs of one Suggestion share this folder and may keep the same
+        # image at once; the file is sent from, so never half-written.
+        handle, temp_path = tempfile.mkstemp(prefix=".image-", dir=directory)
+        with os.fdopen(handle, "wb") as temp_file:
+            temp_file.write(payload)
+        os.replace(temp_path, directory / name)
+        return f"{dirname}/{name}"
 
     def _run(
         self, call: ReactToolCall, body: _Body, request: BaseModel
     ) -> ReactToolResult:
         result = body(scope=self.scope, request=request)
+        output = result.output
+        images: tuple[ToolImage, ...] = ()
+        if result.image is not None:
+            kept = self._keep_read_image(result.image)
+            images = (kept,)
+            output = {
+                **output,
+                "attachments": [
+                    {
+                        "type": "file",
+                        "mime_type": kept.mime_type,
+                        "path": kept.display_path,
+                        "ref": kept.ref,
+                        "byte_size": kept.byte_size,
+                    }
+                ],
+            }
         stored = store_tool_result(
             action_tool_results_path=self.spill_root,
             invocation_id=uuid.uuid4().hex,
-            output=result.output,
+            output=output,
         )
         release_error = release_stored_tool_result(stored)
         if release_error is not None:
@@ -418,7 +466,7 @@ class _ReadOnlyFileTools:
             tool_name=call.tool_name,
             status="success",
             output=stored.output_json,
-            images=tuple(_image(attachment) for attachment in result.attachments),
+            images=images,
         )
 
 
@@ -455,21 +503,6 @@ def _definition(
         ),
         execute=execute,
         concurrency=concurrency,
-    )
-
-
-def _image(attachment: Mapping[str, JSONValue]) -> ToolImage:
-    """An image ``read`` attached, as the workspace file it read."""
-
-    return ToolImage(
-        ref=str(attachment["ref"]),
-        blob_ref=str(attachment["blob_ref"]),
-        display_path=str(attachment["display_path"]),
-        mime_type=str(attachment["mime_type"]),
-        byte_size=cast(int, attachment["byte_size"]),
-        sha256=str(attachment["sha256"]),
-        workspace_root_path=str(attachment["workspace_root_path"]),
-        workspace_relative_path=str(attachment["workspace_relative_path"]),
     )
 
 

@@ -196,18 +196,20 @@ async def test_documents_and_text_files_are_read_as_text(
 
 @pytest.mark.asyncio
 async def test_an_image_comes_back_as_an_image_to_look_at(tmp_path: Path) -> None:
-    registry, folder, _storage, _spill = _tools(tmp_path)
+    registry, folder, _storage, spill = _tools(tmp_path)
     (folder / "chart.png").write_bytes(PIXEL_PNG)
 
     result = await _call(registry, "read", {"path": str(folder / "chart.png")})
+    # Rewritten after the read, as a regenerated screenshot is.
+    (folder / "chart.png").write_bytes(PIXEL_PNG + b"later")
 
     assert result.status == "success"
     (image,) = result.images
     assert (image.mime_type, image.byte_size) == ("image/png", len(PIXEL_PNG))
-    # The file the request reads the bytes from again, and the ref it names.
-    assert Path(image.workspace_root_path, image.workspace_relative_path) == (
-        folder / "chart.png"
-    )
+    # Every later request reads the run's own copy, which still holds the read.
+    kept = Path(image.workspace_root_path, image.workspace_relative_path)
+    assert kept.is_relative_to(spill.resolve())
+    assert kept.read_bytes() == PIXEL_PNG
     assert result.output["attachments"][0]["ref"] == image.ref
     assert "data:" not in str(result.output)
 

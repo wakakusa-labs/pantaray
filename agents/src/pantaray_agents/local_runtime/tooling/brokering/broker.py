@@ -11,7 +11,6 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.discovery import run_glob, run_grep, run_list
-from pantaray_agents.tools.files.read import run_read
 from pantaray_agents.tools.files.read_contract import (
     GlobToolArgs,
     GrepToolArgs,
@@ -65,6 +64,7 @@ from .broker_direct import (
     resolve_patch_mount_plan,
     run_apply_patch_executor,
 )
+from .broker_direct_read import run_read_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
 from .broker_failure_finalization import (
     finalize_broker_invocation_error,
@@ -444,12 +444,11 @@ async def execute_broker_tool(
                 request=validated,
             )
         elif isinstance(validated, ValidatedReadRequest):
-            outcome = read_tool_outcome(
-                await asyncio.to_thread(
-                    run_read,
-                    scope=_checked_read_scope(context),
-                    request=validated.args,
-                )
+            outcome = await asyncio.to_thread(
+                run_read_executor,
+                scope=_checked_read_scope(context),
+                request=validated.args,
+                user_id=context.execution_session.user_id,
             )
         elif isinstance(validated, ValidatedRenderPdfPageRequest):
             # Drawing already waits on a child process, so it is awaited here

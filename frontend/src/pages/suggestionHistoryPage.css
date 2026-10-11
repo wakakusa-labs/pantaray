@@ -351,9 +351,10 @@
   color: #e9c98b;
 }
 
-.history-load-more {
-  align-self: center;
-  margin-top: 14px;
+/* Where the next page starts loading; it takes no room. */
+.history-list-end {
+  height: 1px;
+  flex: none;
 }
 
 /* Shown while the row is pointed at or holds keyboard focus, so titles keep the sidebar's width.

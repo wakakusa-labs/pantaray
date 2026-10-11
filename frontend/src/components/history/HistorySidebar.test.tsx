@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   error: 'history.error.fetchFailed' as string | null,
   itemsOverride: null as ConversationHistoryListItem[] | null,
   loading: false,
+  loadingMore: false,
+  hasMore: true,
   loadMore: vi.fn(),
   markCompletionViewed: vi.fn(async () => undefined),
   removeItem: vi.fn(),
@@ -59,13 +61,13 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
       },
     ],
     loading: mocks.loading,
-    loadingMore: false,
+    loadingMore: mocks.loadingMore,
     error: mocks.error,
     isRealtimeSyncing: false,
     searchText: '',
     setSearchText: mocks.setSearchText,
     loadMore: mocks.loadMore,
-    hasMore: true,
+    hasMore: mocks.hasMore,
     isUnread: (item: { action_id?: string }) => item.action_id === mocks.unreadActionId,
     removeItem: mocks.removeItem,
   }),
@@ -119,6 +121,8 @@ afterEach(() => {
   mocks.error = 'history.error.fetchFailed';
   mocks.itemsOverride = null;
   mocks.loading = false;
+  mocks.loadingMore = false;
+  mocks.hasMore = true;
   mocks.unreadActionId = 'A1';
   mocks.chatUnread = 0;
   mocks.selected = 'chat';
@@ -308,14 +312,81 @@ it('履歴の取得失敗は読み上げソフトに届くalertとして出す',
   expect(screen.getByRole('alert')).toHaveTextContent('history.error.fetchFailed');
 });
 
-it('追加読み込みと検索に応答する', async () => {
+it('作業の終わりが見えると次を一度だけ読み、読み込み中は読まず、最後まで来たら止める', () => {
+  const observers: {
+    callback: IntersectionObserverCallback;
+    options?: IntersectionObserverInit;
+    target?: Element;
+    disconnected: boolean;
+  }[] = [];
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      private record;
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        this.record = { callback, options, disconnected: false } as (typeof observers)[number];
+        observers.push(this.record);
+      }
+      observe(target: Element) {
+        this.record.target = target;
+      }
+      disconnect() {
+        this.record.disconnected = true;
+      }
+    }
+  );
+  const reach = (isIntersecting: boolean) => {
+    const live = observers.filter((observer) => !observer.disconnected);
+    act(() =>
+      live.forEach(({ callback }) =>
+        callback([{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver)
+      )
+    );
+  };
+  window.electron = {} as unknown as Window['electron'];
+  mocks.error = null;
+  mocks.unreadActionId = null;
+  try {
+    const { container, rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
+    const end = container.querySelector('.history-list-end');
+    const live = observers.filter((observer) => !observer.disconnected);
+    expect(live).toHaveLength(1);
+    expect(live[0].target).toBe(end);
+    expect(live[0].options?.root).toBe(container.querySelector('.history-sidebar__tasks'));
+    expect(live[0].options?.rootMargin).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /history\.load/u })).toBeNull();
+
+    reach(false);
+    expect(mocks.loadMore).not.toHaveBeenCalled();
+    reach(true);
+    expect(mocks.loadMore).toHaveBeenCalledOnce();
+
+    // While the page is on its way, the list says so to assistive technology and loads no more.
+    mocks.loadingMore = true;
+    rerender(<Sidebar />);
+    expect(container.querySelector('.history-list')).toHaveAttribute('aria-busy', 'true');
+    reach(true);
+    expect(mocks.loadMore).toHaveBeenCalledOnce();
+
+    // The last page arrived: nothing is left to watch.
+    mocks.loadingMore = false;
+    mocks.hasMore = false;
+    rerender(<Sidebar />);
+    expect(container.querySelector('.history-list-end')).toBeNull();
+    expect(observers.every((observer) => observer.disconnected)).toBe(true);
+    reach(true);
+    expect(mocks.loadMore).toHaveBeenCalledOnce();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('検索に応答する', async () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = null;
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
-  fireEvent.click(screen.getByRole('button', { name: 'history.loadMore' }));
-  expect(mocks.loadMore).toHaveBeenCalledOnce();
   const search = screen.getByRole('searchbox', { name: 'history.search' });
   fireEvent.change(search, { target: { value: `${'😀'.repeat(256)}x` } });
   expect(search).toHaveValue('😀'.repeat(256));

@@ -47,8 +47,9 @@
   pointer-events: none;
 }
 
-/* A button whose menu or popover is open already shows what it opened. */
-[data-tooltip]:is(:hover, :focus-visible):not([aria-expanded='true'])::after {
+/* A button whose menu or popover is open already shows what it opened. A disclosure that opens
+   nothing over it (History's sidebar toggle) keeps its label. */
+[data-tooltip]:is(:hover, :focus-visible):not([aria-haspopup][aria-expanded='true'])::after {
   display: block;
   animation: icon-tooltip-reveal 120ms ease-out 300ms both;
 }
@@ -61,7 +62,7 @@
 
 /* Still after the same pause, but at once rather than fading in. */
 @media (prefers-reduced-motion: reduce) {
-  [data-tooltip]:is(:hover, :focus-visible):not([aria-expanded='true'])::after {
+  [data-tooltip]:is(:hover, :focus-visible):not([aria-haspopup][aria-expanded='true'])::after {
     animation-duration: 0s;
   }
 }

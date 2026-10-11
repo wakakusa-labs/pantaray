@@ -40,6 +40,49 @@
   background: rgba(170, 186, 212, 0.03);
 }
 
+/* Hidden by the toggle, the card holds the detail pane alone and keeps its rounded corners. */
+.history-sidebar[hidden] {
+  display: none;
+}
+
+/* In the title bar row, right of the traffic lights (they end near the rail's edge). It rises
+   above the drag strip and the detail headers, which reach under it while the sidebar is hidden. */
+.history-sidebar-toggle {
+  position: absolute;
+  top: 3px;
+  left: 16px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #7d889c;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.history-sidebar-toggle:hover {
+  background: var(--fog-mist);
+  color: var(--fog-text);
+}
+
+.history-sidebar-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The headers' titles start clear of the toggle above them. */
+.history-page--sidebar-hidden
+  .history-detail
+  :is(.history-pane-header, .action-task__header, .suggestion-task__header) {
+  padding-left: 56px;
+}
+
 /* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */
 .history-sidebar__head {
   display: flex;

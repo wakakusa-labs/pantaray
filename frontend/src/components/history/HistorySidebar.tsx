@@ -24,6 +24,7 @@ import { useLiveStageText } from './liveStageText';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
+export const HISTORY_SIDEBAR_ID = 'history-sidebar';
 const CHAT_UNREAD_ID = 'history-chat-unread';
 const NEW_TASK_BUTTON_ID = 'history-new-task';
 /** How far below the visible tasks the next page starts loading, so it is there on arrival. */
@@ -151,6 +152,7 @@ export function HistorySidebar({
   onCreatingProjectChange,
   selected,
   onSelect,
+  hidden,
 }: {
   /** The page reads the list too, for the selected task's title. */
   history: ReturnType<typeof useSuggestionHistory>;
@@ -160,6 +162,8 @@ export function HistorySidebar({
   onCreatingProjectChange: (creating: boolean) => void;
   selected: HistorySelection;
   onSelect: (selection: HistorySelection, options?: { replace: true }) => void;
+  /** Hidden by the page's toggle; it stays mounted, so its search and scroll are kept. */
+  hidden: boolean;
 }) {
   const {
     items,
@@ -354,7 +358,12 @@ export function HistorySidebar({
   };
 
   return (
-    <aside className="history-sidebar" aria-label={t('history.sidebar.label')}>
+    <aside
+      id={HISTORY_SIDEBAR_ID}
+      className="history-sidebar"
+      aria-label={t('history.sidebar.label')}
+      hidden={hidden}
+    >
       <div className="history-sidebar__head">
         <NewTaskShortcutHint state={shortcutHint} t={t} />
         <HistorySearchField searchText={searchText} onSearch={setSearchText} />

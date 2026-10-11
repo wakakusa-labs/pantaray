@@ -95,6 +95,7 @@ export function HistoryProjectRow({
         className="history-project__handle"
         disabled={dragDisabled}
         aria-label={t('settings.workspace.drag.handle', { name: project.display_name })}
+        data-tooltip={t('settings.workspace.drag.handle', { name: project.display_name })}
         {...attributes}
         onKeyDown={(event) => listeners?.onKeyDown?.(event)}
       >
@@ -166,7 +167,7 @@ export function HistoryProjectRow({
                   id={folderRemoveId(project.project_id, folder.folder_id)}
                   className="history-project__folder-action"
                   aria-label={t('history.projects.removeFolder', { name: folder.display_name })}
-                  title={t('history.projects.removeFolder', { name: folder.display_name })}
+                  data-tooltip={t('history.projects.removeFolder', { name: folder.display_name })}
                   aria-busy={isFolderPending(folder.folder_id)}
                   disabled={isFolderPending(folder.folder_id)}
                   onClick={() => void removeFolder(folder.folder_id)}

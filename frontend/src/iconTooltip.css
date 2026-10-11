@@ -1,0 +1,67 @@
+/*
+ * An icon-only button names itself in a small dark label, shortly after the pointer rests on it or
+ * keyboard focus reaches it. The app draws it instead of `title`: a native tooltip comes after
+ * about a second, and never in the small window, a non-activating panel.
+ *
+ * The label is anchored to its own button and fixed to the window, so a scrolling list or a
+ * clipped header does not cut it. It prefers below, right edges aligned, and flips sideways or
+ * above at the window's edges. A transform or `overflow: hidden` on the button itself would trap
+ * it, so tooltip buttons carry neither.
+ *
+ * Visual only: the empty alternative text keeps it out of the accessibility tree, where the
+ * button's aria-label already names it.
+ */
+[data-tooltip] {
+  anchor-name: --icon-tooltip;
+  anchor-scope: --icon-tooltip;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip) / '';
+  display: none;
+  position: fixed;
+  position-anchor: --icon-tooltip;
+  position-area: bottom span-left;
+  position-try-fallbacks:
+    flip-inline,
+    flip-block,
+    flip-block flip-inline;
+  z-index: 10000;
+  width: max-content;
+  max-width: 280px;
+  margin: 6px 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(14, 17, 23, 0.96);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  color: #f3f6fb;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-align: start;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+/* A button whose menu or popover is open already shows what it opened. */
+[data-tooltip]:is(:hover, :focus-visible):not([aria-expanded='true'])::after {
+  display: block;
+  animation: icon-tooltip-reveal 120ms ease-out 300ms both;
+}
+
+@keyframes icon-tooltip-reveal {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Still after the same pause, but at once rather than fading in. */
+@media (prefers-reduced-motion: reduce) {
+  [data-tooltip]:is(:hover, :focus-visible):not([aria-expanded='true'])::after {
+    animation-duration: 0s;
+  }
+}

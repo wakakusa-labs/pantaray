@@ -233,7 +233,7 @@ export function ComposerStopButton({
       type="button"
       disabled={stopping}
       aria-label={label}
-      title={label}
+      data-tooltip={label}
       onClick={onStop}
     >
       <Square
@@ -414,7 +414,7 @@ export function OverlayComposer({
               type="button"
               disabled={!canAttach}
               aria-label={t('overlay.composer.attach')}
-              title={t('overlay.composer.attach')}
+              data-tooltip={t('overlay.composer.attach')}
               onClick={() => attachInputRef.current?.click()}
             >
               <Plus strokeWidth={1.75} aria-hidden />
@@ -427,7 +427,7 @@ export function OverlayComposer({
                 type="submit"
                 disabled={!canSend}
                 aria-label={t('overlay.composer.send')}
-                title={t('overlay.composer.send')}
+                data-tooltip={t('overlay.composer.send')}
               >
                 <ArrowUp strokeWidth={2.25} aria-hidden />
               </ComposerPrimaryButton>
@@ -438,7 +438,7 @@ export function OverlayComposer({
                 type="button"
                 disabled={!canResume}
                 aria-label={t('overlay.composer.resume')}
-                title={t('overlay.composer.resume')}
+                data-tooltip={t('overlay.composer.resume')}
                 onClick={onResume}
               >
                 <Play strokeWidth={2.25} fill="currentColor" aria-hidden />

@@ -324,7 +324,7 @@ export function HistorySidebar({
                       id={deleteButtonId(identity)}
                       className="history-item-delete"
                       aria-label={`${t('common.delete')} ${item.title}`}
-                      title={t('common.delete')}
+                      data-tooltip={t('common.delete')}
                       aria-busy={deletingIdentity === identity}
                       disabled={isDeleteBlocked(item) || deletingIdentity !== null}
                       onClick={() => setConfirmingDelete(item)}
@@ -373,7 +373,7 @@ export function HistorySidebar({
             id={NEW_TASK_BUTTON_ID}
             className="history-projects__add"
             aria-label={t('history.newConversation')}
-            title={t('history.newConversation')}
+            data-tooltip={t('history.newConversation')}
             aria-current={selected === 'new' ? 'page' : undefined}
             onClick={() => onSelect('new')}
           >

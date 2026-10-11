@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import AgentOverlayShell from './AgentOverlayShell';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 describe('AgentOverlayShell', () => {
   it('removes collapsed conversation controls from tab order without hiding the preview', async () => {
@@ -177,13 +178,52 @@ describe('AgentOverlayShell', () => {
 
     rerender(renderShell('action-1'));
     const button = shell.getByRole('button', { name: 'チャットで見る' });
-    expect(button).toHaveAttribute('title', 'チャットで見る');
+    expectTooltipIsName(button);
     expect(button).toHaveTextContent('');
     button.focus();
     await userEvent.keyboard('{Enter}');
     expect(onShowChat).toHaveBeenCalledWith({ actionId: 'action-1' });
     // The busy dots are gone, but the running state is still announced.
     expect(shell.getByRole('status')).toHaveTextContent('実行中');
+  });
+
+  it('names each header button in its tooltip, and opens the main window with the pair of Open small', () => {
+    // このファイルは自動 cleanup を持たない。クエリはこの render の container に限定する。
+    const { container } = render(
+      <UiLanguageProvider initialLanguage="ja">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={false}
+          content={null}
+          suggestionText=""
+          isSuggestionStreamFinished={true}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          chatActionId="action-1"
+          onShowChat={async () => undefined}
+          onOpenInMainWindow={() => {}}
+          conversationCopy={{ status: 'idle', copy: () => {} }}
+          onToggleExpand={() => {}}
+          onClose={() => {}}
+        />
+      </UiLanguageProvider>
+    );
+    const header = within(container);
+    expect(expectIconButtonTooltips(container)).toHaveLength(5);
+    for (const name of [
+      'チャットで見る',
+      'メイン画面で開く',
+      '会話をコピー',
+      '展開する',
+      '非表示',
+    ]) {
+      expectTooltipIsName(header.getByRole('button', { name }));
+    }
+    const openInMain = header.getByRole('button', { name: 'メイン画面で開く' });
+    expect(openInMain.querySelector('svg.lucide-maximize-2')).not.toBeNull();
   });
 
   it('keeps the composer out of the scrolling conversation and never puts Stop in the header', () => {

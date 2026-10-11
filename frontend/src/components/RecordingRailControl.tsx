@@ -30,7 +30,7 @@ export function RecordingRailControl() {
         type="button"
         className="app-rail-item"
         aria-label={label}
-        title={label}
+        data-tooltip={label}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         aria-controls={isOpen ? POPOVER_ID : undefined}

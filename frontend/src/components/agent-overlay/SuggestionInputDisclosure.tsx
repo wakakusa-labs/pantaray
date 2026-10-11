@@ -63,7 +63,7 @@ export function SuggestionInputDisclosure({
       <ReplyButton
         type="button"
         aria-label={label}
-        title={label}
+        data-tooltip={label}
         aria-expanded={false}
         aria-controls={inputId}
         onClick={() => setExpanded(true)}

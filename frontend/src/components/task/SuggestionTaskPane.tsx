@@ -106,7 +106,7 @@ export function SuggestionTaskPane({
             type="button"
             className="action-task__icon-button"
             aria-label={t('overlay.showInChat')}
-            title={t('overlay.showInChat')}
+            data-tooltip={t('overlay.showInChat')}
             onClick={onShowInChat}
           >
             <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
@@ -115,7 +115,7 @@ export function SuggestionTaskPane({
             type="button"
             className="action-task__icon-button"
             aria-label={copy.copySuggestion}
-            title={copy.copySuggestion}
+            data-tooltip={copy.copySuggestion}
             disabled={suggestionText === ''}
             onClick={() => void copyToClipboard(() => suggestionText)}
           >

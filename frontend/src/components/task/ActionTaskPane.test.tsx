@@ -11,6 +11,7 @@ import type {
 } from '../../../electron/src/actions/actionLiveCore';
 import { ActionTaskPane } from './ActionTaskPane';
 import { createActionPage } from './actionTaskFixtures';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 
 type Actions = NonNullable<NonNullable<Window['electron']>['actions']>;
@@ -189,9 +190,19 @@ describe('ActionTaskPane', () => {
   it('opens the task small on request, and says so when it cannot', async () => {
     readConversationPage.mockResolvedValue(createActionPage('act-1', 'success'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await renderPane();
+    const { container } = await renderPane();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open small' }));
+    // The header's and the composer's icon buttons name themselves in the app's tooltip, and
+    // Open small keeps its picture-in-picture icon, the pair of the small window's Maximize2.
+    expectIconButtonTooltips(container);
+    const small = screen.getByRole('button', { name: 'Open small' });
+    expectTooltipIsName(small);
+    expect(small.querySelector('svg.lucide-picture-in-picture-2')).not.toBeNull();
+    for (const name of ['Show in chat', 'Copy conversation']) {
+      expectTooltipIsName(screen.getByRole('button', { name }));
+    }
+
+    fireEvent.click(small);
     expect(openSmall).toHaveBeenCalledExactlyOnceWith({ actionId: 'act-1' });
 
     openSmall.mockRejectedValueOnce(new Error('Local runtime is unavailable.'));

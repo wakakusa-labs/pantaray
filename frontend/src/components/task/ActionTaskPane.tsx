@@ -147,7 +147,7 @@ export function ActionTaskPane({
             type="button"
             className="action-task__icon-button"
             aria-label={t('overlay.showInChat')}
-            title={t('overlay.showInChat')}
+            data-tooltip={t('overlay.showInChat')}
             onClick={onShowInChat}
           >
             <MessageCircle size={17} strokeWidth={1.8} aria-hidden />
@@ -157,7 +157,7 @@ export function ActionTaskPane({
             type="button"
             className="action-task__icon-button"
             aria-label={t('history.openSmall')}
-            title={t('history.openSmall')}
+            data-tooltip={t('history.openSmall')}
             onClick={openSmall}
           >
             <PictureInPicture2 size={17} strokeWidth={1.8} aria-hidden />
@@ -167,7 +167,7 @@ export function ActionTaskPane({
               type="button"
               className="action-task__icon-button"
               aria-label={t('overlay.copyConversation')}
-              title={copyFailed ?? t('overlay.copyConversation')}
+              data-tooltip={copyFailed ?? t('overlay.copyConversation')}
               onClick={conversationCopy.copy}
             >
               {conversationCopy.status === 'copied' ? (

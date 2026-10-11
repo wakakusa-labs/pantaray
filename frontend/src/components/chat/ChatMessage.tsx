@@ -154,7 +154,7 @@ export function ChatMessage({
             type="button"
             className="chat-retry"
             aria-label={retry.label}
-            title={retry.label}
+            data-tooltip={retry.label}
             disabled={retry.disabled}
             onClick={retry.onRetry}
           >
@@ -187,7 +187,7 @@ export function ChatMessage({
           type="button"
           className="chat-reply"
           aria-label={t('history.chat.quote.reply')}
-          title={t('history.chat.quote.reply')}
+          data-tooltip={t('history.chat.quote.reply')}
           onClick={onQuote}
         >
           <Reply size={15} aria-hidden="true" />

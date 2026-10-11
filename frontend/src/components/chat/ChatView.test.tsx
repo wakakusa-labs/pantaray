@@ -15,6 +15,7 @@ import type { OrchestrationStatus } from '../../../electron/src/orchestration/ev
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { showChatState } from '@/history/historyViewMode';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 import SuggestionHistoryPage from '@/pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './ChatSessionProvider';
 import { ChatUnreadTracker } from './ChatUnreadTracker';
@@ -295,8 +296,16 @@ it('shows messages and cards, with a work’s status on its latest card only', a
     within(mine).getByRole('button', {
       name: 'AI に接続できず、返信できませんでした。もう一度送る',
     })
-  ).toHaveAttribute('title', 'AI に接続できず、返信できませんでした。もう一度送る');
+  ).toHaveAttribute('data-tooltip', 'AI に接続できず、返信できませんでした。もう一度送る');
   expect(screen.queryByRole('status', { name: '入力中' })).not.toBeInTheDocument();
+
+  // Every icon-only button on the page, the sidebar's and the composer's too, names itself in the
+  // app's own tooltip.
+  expectIconButtonTooltips(document.body);
+  for (const name of ['ファイルを追加', '送信', '新しい作業', 'プロジェクトを追加']) {
+    expectTooltipIsName(screen.getByRole('button', { name }));
+  }
+  expectTooltipIsName(within(chat).getAllByRole('button', { name: '引用して返信' })[0]);
 });
 
 it('merges live items once and reads the newest page again when the session starts over', async () => {

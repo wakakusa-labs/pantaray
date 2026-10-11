@@ -128,7 +128,7 @@ async def cancel_action(
 ) -> ActionCancelResponse:
     """Action 実行中のアクションをキャンセルする内部専用 API。
 
-    - オーケストレーション層の `stop_process` からのみ呼び出されることを想定。
+    - デスクトップの「停止」（メインウィンドウと小ウィンドウ）が呼ぶ唯一の停止経路。
     - DB-first で canonical terminal を確定し、その後に WebSocket 側が
       `process_completed(status="canceled")` を配信する。
     """

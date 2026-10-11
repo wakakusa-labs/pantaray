@@ -221,10 +221,6 @@ export function createOrchestrationManager(params: {
             reason: typeof data.reason === 'string' ? data.reason : undefined,
           },
         };
-      case 'stop_process':
-        return typeof data.process_id === 'string'
-          ? { event, data: { process_id: data.process_id } }
-          : null;
       case 'resume_process':
         return {
           event,

@@ -126,11 +126,6 @@ export type RejectSuggestionClientEvent = {
   data: { suggestion_id: string; reason?: string };
 };
 
-export type StopProcessClientEvent = {
-  event: 'stop_process';
-  data: { process_id: string };
-};
-
 export type ResumeProcessClientEvent = {
   event: 'resume_process';
   data: {
@@ -169,7 +164,6 @@ export type AckEventClientEvent = {
 export type RendererOrchestrationClientEvent =
   | DismissSuggestionClientEvent
   | RejectSuggestionClientEvent
-  | StopProcessClientEvent
   | ResumeProcessClientEvent
   | ResumeSessionClientEvent
   | AckEventClientEvent;

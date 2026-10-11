@@ -296,8 +296,8 @@ export function ActionTaskPane({
                 controlRef={submissionControlRef}
                 onRetry={composer.retrySubmission}
                 onRefresh={(button) => void composer.refreshSubmission(button)}
-                onStop={composer.canStop || composer.stopping ? task.stop : undefined}
-                stopping={composer.stopping}
+                onStop={composer.stopShown ? task.stop : undefined}
+                stopState={composer.stopState}
               />
             ) : null
           }
@@ -309,8 +309,7 @@ export function ActionTaskPane({
           action={composer.action}
           canSend={composer.canSend}
           resumeFailed={draft.resume?.state === 'failed'}
-          stopping={composer.stopping}
-          stopFailed={composer.stopFailed}
+          stopState={composer.stopState}
           sendSuperseded={draft.failureKind === 'superseded'}
           canResume={composer.canResume}
           textareaRef={textareaRef}

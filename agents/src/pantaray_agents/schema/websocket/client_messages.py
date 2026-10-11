@@ -86,18 +86,6 @@ class RejectSuggestionMessage(DismissSuggestionMessage):
     """
 
 
-class StopProcessMessage(BaseModel):
-    """進行中の処理を中断するメッセージ
-
-    WebSocket event: "stop_process"
-
-    Attributes:
-        process_id (str): 中断する処理のID（UUIDv4、必須）
-    """
-
-    process_id: str = Field(description="中断する処理のID（UUIDv4、必須）")
-
-
 class ResumeSessionMessage(BaseModel):
     """セッション再開の要求メッセージ
 

@@ -9,6 +9,7 @@ import { ComposerMessageField } from './ComposerMessageField';
 import type { ComposerMention } from './composerMentions';
 import type { ActionApprovalModeControl } from './useActionApprovalMode';
 import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
+import type { ActionStopState } from './useActionStop';
 import {
   ATTACHMENT_ACCEPT,
   type AttachmentFailure,
@@ -190,10 +191,8 @@ type OverlayComposerProps = {
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
-  /** 停止を受け付け、run が止まりきるのを待っている。 */
-  stopping?: boolean;
-  /** 停止の要求が通らなかった。run はまだ動いている。 */
-  stopFailed?: boolean;
+  /** 停止を受け付けて run が止まりきるのを待っている（stopping）か、通らなかった（failed）。 */
+  stopState?: ActionStopState | null;
   sendSuperseded?: boolean;
   canResume: boolean;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -253,14 +252,14 @@ export function ComposerSubmissionStatus({
   onRetry,
   onRefresh,
   onStop,
-  stopping = false,
+  stopState = null,
 }: {
   composer: Pick<ComposerState, 'submission' | 'failureKind' | 'refreshState'>;
   controlRef: RefObject<HTMLButtonElement>;
   onRetry: () => void;
   onRefresh: (button: HTMLButtonElement) => void;
   onStop?: () => void;
-  stopping?: boolean;
+  stopState?: ActionStopState | null;
 }) {
   const { t } = useI18n();
   const { submission, failureKind, refreshState } = composer;
@@ -294,7 +293,7 @@ export function ComposerSubmissionStatus({
       ) : (
         <span role="status">{t('overlay.composer.sending')}</span>
       )}
-      {onStop && <ComposerStopButton onStop={onStop} stopping={stopping} />}
+      {onStop && <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />}
     </ComposerSubmissionRow>
   );
 }
@@ -312,8 +311,7 @@ export function OverlayComposer({
   action,
   canSend,
   resumeFailed,
-  stopping = false,
-  stopFailed = false,
+  stopState = null,
   sendSuperseded = false,
   canResume,
   textareaRef,
@@ -381,10 +379,10 @@ export function OverlayComposer({
       {resumeFailed ? (
         <ComposerAlert role="alert">{t('overlay.composer.resumeFailed')}</ComposerAlert>
       ) : null}
-      {stopping ? (
+      {stopState === 'stopping' ? (
         <ComposerStatus role="status">{t('overlay.composer.stopping')}</ComposerStatus>
       ) : null}
-      {stopFailed ? (
+      {stopState === 'failed' ? (
         <ComposerAlert role="alert">{t('overlay.composer.stopFailed')}</ComposerAlert>
       ) : null}
       {sendSuperseded ? (
@@ -434,7 +432,7 @@ export function OverlayComposer({
                 <ArrowUp strokeWidth={2.25} aria-hidden />
               </ComposerPrimaryButton>
             ) : action === 'stop' ? (
-              <ComposerStopButton onStop={onStop} stopping={stopping} />
+              <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />
             ) : (
               <ComposerPrimaryButton
                 type="button"

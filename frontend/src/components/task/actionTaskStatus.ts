@@ -1,6 +1,7 @@
 import type { ActionConversationPage } from '../../../electron/src/actions/actionContracts';
 import type { ActionConversationView } from '../../../electron/src/actions/actionConversationModel';
 import type { ActionLiveSnapshot } from '../../../electron/src/actions/actionLiveCore';
+import { actionStopTarget } from '../agent-overlay/useActionStop';
 
 export type ActionTaskStatusKind = 'running' | 'approval_pending' | 'idle' | 'failed';
 
@@ -39,13 +40,7 @@ export function deriveActionTaskStatus({
   const pageStatus = page?.action.status;
   const runStatus =
     lifecycle?.status ?? (pageStatus === 'queued' ? 'processing' : (pageStatus ?? null));
-  const stopTarget = lifecycle
-    ? lifecycle.status === 'processing'
-      ? lifecycle.processId
-      : null
-    : page && (pageStatus === 'queued' || pageStatus === 'processing')
-      ? page.action.latest_run_id
-      : null;
+  const stopTarget = actionStopTarget(lifecycle, page, null);
   const kind: ActionTaskStatusKind = approvalPending
     ? 'approval_pending'
     : runStatus === 'processing'

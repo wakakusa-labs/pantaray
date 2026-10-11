@@ -276,7 +276,7 @@ declare global {
         ) => Promise<ActionWithdrawMessageResult>;
         /** Main window only: shows the Action in place; updates arrive on onConversationUpdated. */
         openConversation: (request: { actionId: string }) => Promise<void>;
-        /** Main window only: stops the run it shows; rejects when the Stop was not accepted. */
+        /** Stops the run the window shows; rejects when the Stop was not accepted. */
         stopAction: (request: ActionStopRequest) => Promise<void>;
         attachImage: (request: {
           bytes: ArrayBuffer;
@@ -440,7 +440,6 @@ declare global {
         openTask?: (request: { actionId: string }) => Promise<void>;
         acceptAction: (data: unknown) => void;
         hide: () => void;
-        stopAction: () => void;
       };
       orchestration?: {
         send: (message: RendererOrchestrationClientEvent) => void;

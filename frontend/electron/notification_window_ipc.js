@@ -90,7 +90,6 @@ function createNotificationIpcHandlerFactory({ BrowserWindow, screen, windows, i
         if (!hideSenderWindow(BrowserWindow, windows, event)) hideLastWindow(windows);
       },
       captureSenderOverlay: (event) => captureSenderOverlay(BrowserWindow, windows, event),
-      onNotificationStopAction: () => {},
       onOverlayInteraction: (event) => {
         const win = findSenderWindow(BrowserWindow, event);
         if (!interactions.activationTracker.isOverlayWindow(win)) return;

@@ -285,6 +285,7 @@ describe('AgentOverlay broader E2E', () => {
   beforeEach(() => {
     submitApprovalDecision.mockClear();
     submitMessage.mockReset();
+    stopAction.mockReset().mockReturnValue(new Promise(() => {}));
     resumeAction.mockReset();
     resumeAction.mockResolvedValue({
       kind: 'submitted',
@@ -321,7 +322,6 @@ describe('AgentOverlay broader E2E', () => {
     discardAttachment.mockReset().mockResolvedValue(undefined);
     drafts = createTaskDraftBridge();
     const { openDraft, updateDraft, closeDraft, onDraftChanged } = drafts.window();
-    stopAction.mockReset();
     sendOrchestration.mockReset();
     acceptAction.mockReset().mockResolvedValue(null);
     resizeOverlay.mockReset();
@@ -379,7 +379,6 @@ describe('AgentOverlay broader E2E', () => {
           resize: resizeOverlay,
           hide: hideOverlay,
           openTask,
-          stopAction,
           getActionApprovalMode,
           setActionApprovalMode,
           openWorkspaceSettings,
@@ -398,6 +397,7 @@ describe('AgentOverlay broader E2E', () => {
         actions: {
           submitMessage: drafts.sending(submitMessage),
           resumeAction,
+          stopAction,
           attachImage,
           attachFile,
           discardAttachment,
@@ -602,11 +602,7 @@ describe('AgentOverlay broader E2E', () => {
       },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(stopAction).toHaveBeenCalledTimes(1);
-    expect(sendOrchestration).toHaveBeenCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-1' },
-    });
+    expect(stopAction).toHaveBeenCalledWith({ actionId: 'act-1', processId: 'run-1' });
     expect(submitMessage).toHaveBeenCalledTimes(1);
 
     await act(async () => resolveSubmit(createSubmittedResult('act-1', messageId)));
@@ -1044,10 +1040,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByLabelText('Message')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     await waitFor(() =>
-      expect(sendOrchestration).toHaveBeenCalledWith({
-        event: 'stop_process',
-        data: { process_id: 'new-process' },
-      })
+      expect(stopAction).toHaveBeenCalledWith({ actionId: 'act-1', processId: 'new-process' })
     );
     Object.assign(running.snapshot, {
       lastSequence: 13,
@@ -1245,10 +1238,7 @@ describe('AgentOverlay broader E2E', () => {
 
     expect(screen.queryByText('Could not save the final result.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(sendOrchestration).toHaveBeenLastCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-2' },
-    });
+    expect(stopAction).toHaveBeenLastCalledWith({ actionId: 'act-1', processId: 'run-2' });
 
     const completedSnapshot = { snapshot: { ...failedSnapshot.snapshot, lastSequence: 13 } };
     await act(async () => snapshotListener?.(completedSnapshot));
@@ -1972,10 +1962,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => conversationListener?.(started));
     expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(sendOrchestration).toHaveBeenLastCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-2' },
-    });
+    expect(stopAction).toHaveBeenLastCalledWith({ actionId: 'act-1', processId: 'run-2' });
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'Update the current work' },
     });
@@ -2727,16 +2714,38 @@ describe('AgentOverlay broader E2E', () => {
     const message = await screen.findByLabelText('Message');
     const box = message.closest('form.overlay-composer') as HTMLElement;
     fireEvent.click(within(box).getByRole('button', { name: 'Stop' }));
-    expect(stopAction).toHaveBeenCalledTimes(1);
     // 止める先は会話が今名乗っている run。再開した run もここに現れる。
-    expect(sendOrchestration).toHaveBeenCalledWith({
-      event: 'stop_process',
-      data: { process_id: 'run-1' },
-    });
+    expect(stopAction).toHaveBeenCalledWith({ actionId: 'act-1', processId: 'run-1' });
 
     fireEvent.change(message, { target: { value: 'more' } });
     expect(within(box).queryByRole('button', { name: 'Stop' })).toBeNull();
     expect(within(box).getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('shows Stopping until the run ends, and lets a refused Stop be pressed again', async () => {
+    stopAction.mockRejectedValueOnce(new Error('backend unavailable'));
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    await act(async () => snapshotListener?.(createResumedSnapshot()));
+    await act(async () => conversationListener?.(createConversationUpdate(null, true)));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    const box = (await screen.findByLabelText('Message')).closest('form') as HTMLElement;
+
+    fireEvent.click(within(box).getByRole('button', { name: 'Stop' }));
+    expect(await within(box).findByRole('alert')).toHaveTextContent(
+      'The run could not be stopped. Try again.'
+    );
+    fireEvent.click(within(box).getByRole('button', { name: 'Stop' }));
+    expect(stopAction).toHaveBeenCalledTimes(2);
+    expect(within(box).getByRole('button', { name: 'Stopping…' })).toBeDisabled();
+    expect(within(box).queryByRole('alert')).toBeNull();
+
+    await act(async () => conversationListener?.(createStoppedUpdate()));
+    expect(screen.queryByRole('button', { name: 'Stopping…' })).toBeNull();
+    expect(screen.queryByText('Stopping…')).toBeNull();
   });
 
   it('offers Resume on a stopped conversation and opens one follow-up turn', async () => {

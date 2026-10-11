@@ -163,11 +163,7 @@ describe('useActionTask', () => {
     const { result } = await renderTask();
     emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
     await act(async () => result.current.stop());
-    expect(result.current.composer).toMatchObject({
-      action: 'stop',
-      canStop: false,
-      stopping: true,
-    });
+    expect(result.current.composer).toMatchObject({ action: 'stop', stopState: 'stopping' });
     // A second press while the run settles asks nothing more of the backend.
     act(() => result.current.stop());
     expect(stopAction).toHaveBeenCalledTimes(1);
@@ -177,7 +173,7 @@ describe('useActionTask', () => {
         lifecycle: { processId: 'run-1', status: 'canceled' },
       })
     );
-    expect(result.current.composer).toMatchObject({ stopping: false, stopFailed: false });
+    expect(result.current.composer).toMatchObject({ stopShown: false, stopState: null });
   });
 
   it('says a Stop failed and lets it be pressed again while the run goes on', async () => {
@@ -185,16 +181,12 @@ describe('useActionTask', () => {
     const { result } = await renderTask();
     emit(update(createActionPage('act-1', 'processing', 'run-1'), 1));
     await act(async () => result.current.stop());
-    await waitFor(() => expect(result.current.composer.stopFailed).toBe(true));
-    expect(result.current.composer).toMatchObject({
-      action: 'stop',
-      canStop: true,
-      stopping: false,
-    });
+    await waitFor(() => expect(result.current.composer.stopState).toBe('failed'));
+    expect(result.current.composer).toMatchObject({ action: 'stop', stopShown: true });
 
     act(() => result.current.stop());
     expect(stopAction).toHaveBeenCalledTimes(2);
-    expect(result.current.composer).toMatchObject({ stopping: true, stopFailed: false });
+    expect(result.current.composer).toMatchObject({ stopState: 'stopping' });
   });
 
   it('sends a follow-up into the running run', async () => {

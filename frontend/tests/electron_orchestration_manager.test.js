@@ -1199,7 +1199,7 @@ test('OrchestrationManager: an existing transport cannot send or queue work whil
   h.manager.ensureConnected();
   owner = null;
   await assert.rejects(
-    h.manager.sendFromRenderer({ event: 'stop_process', data: { process_id: 'old-run' } }),
+    h.manager.sendFromRenderer({ event: 'dismiss_suggestion', data: { suggestion_id: 's-1' } }),
     /owner is unavailable/
   );
   assert.throws(

@@ -106,7 +106,6 @@ export type NotificationIpcHandlers = {
   onNotificationHide: (event: unknown) => void;
   /** Holds the sending panel; the returned closer hides it if it is still that open panel. */
   captureSenderOverlay: (event: unknown) => () => void;
-  onNotificationStopAction: (event: unknown) => void;
   onOverlayInteraction: (event: unknown) => void;
   onOverlayDragStart: (event: unknown, payload: unknown) => void;
   onOverlayDragMove: (event: unknown, payload: unknown) => void;

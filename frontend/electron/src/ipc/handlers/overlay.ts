@@ -75,7 +75,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
   registrar.on('resize-notification-window', handlers.onResizeNotificationWindow);
   registrar.on('notification-action-accept', handlers.onNotificationActionAccept);
   registrar.on('notification-hide', handlers.onNotificationHide);
-  registrar.on('notification-stop-action', handlers.onNotificationStopAction);
   registrar.on('overlay:recordInteraction', handlers.onOverlayInteraction);
   registrar.on('overlay:dragStart', handlers.onOverlayDragStart);
   registrar.on('overlay:dragMove', handlers.onOverlayDragMove);

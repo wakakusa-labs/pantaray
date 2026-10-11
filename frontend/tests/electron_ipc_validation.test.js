@@ -156,7 +156,6 @@ function buildCtx(overrides = {}) {
         onResizeNotificationWindow: () => {},
         onNotificationActionAccept: () => {},
         onNotificationHide: () => {},
-        onNotificationStopAction: () => {},
         onOverlayInteraction: () => {},
         onOverlayDragStart: () => {},
         onOverlayDragMove: () => {},

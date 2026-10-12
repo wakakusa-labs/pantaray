@@ -138,8 +138,16 @@ async def test_a_kept_tag_keeps_its_stored_note(merged: str) -> None:
             _UNCLOSED_TAG_LINES,
             "ref tags span lines: ref_a",
         ),
+        (
+            (
+                # Only a note-less tag can be swallowed: a note's own opening
+                # quote would end the run-on note.
+                '- SQLite and WAL. [[ref:ref_a note:"retyped [[ref:ref_b]]"]]',
+            ),
+            "ref tags swallow another tag: ref_a",
+        ),
     ],
-    ids=["repeated", "invented", "from_another_file", "unclosed"],
+    ids=["repeated", "invented", "from_another_file", "unclosed", "unclosed_in_line"],
 )
 async def test_a_tag_that_cannot_be_kept_is_named(
     added: tuple[str, ...], named: str

@@ -12,7 +12,6 @@ shrink its file, publishes nothing and leaves the update's revision current.
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Protocol
@@ -41,10 +40,6 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
-from pantaray_agents.local_runtime.memory_references.reference_parser import (
-    REFERENCE_PATTERN,
-    extract_markdown_references,
-)
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
 )
@@ -53,6 +48,10 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     LocalMemoryFileEditorRuntime,
     MemoryDraftToolSession,
+)
+from pantaray_agents.local_runtime.tooling.memory_file_editor.reference_tags import (
+    misused_reference_ids,
+    restore_reference_tags,
 )
 from pantaray_agents.local_runtime.tooling.memory_file_editor.tool_support import (
     args_object,
@@ -323,41 +322,6 @@ def rewrite_file_tool(
     )
 
 
-def restore_reference_tags(*, before: str, after: str) -> str:
-    """Put back the stored tag of every ref the rewrite keeps.
-
-    A ref's note belongs to its link, so a tag written without its note, or with
-    the note retyped, still keeps that ref instead of failing validation. An ID
-    the file does not have is left as written for validation to refuse.
-    """
-
-    stored = {
-        occurrence.local_ref_id: before[occurrence.match_start : occurrence.match_end]
-        for occurrence in extract_markdown_references(before)
-    }
-    return REFERENCE_PATTERN.sub(
-        lambda match: stored.get(match.group("local_ref_id"), match.group(0)), after
-    )
-
-
-def misused_reference_ids(*, before: str, after: str) -> str | None:
-    """Name the ref IDs a rewrite repeats or invents, which validation refuses.
-
-    Validation alone says only that tags and links disagree; a rewrite of a
-    file with dozens of refs needs the IDs to fix, or it drops every ref.
-    """
-
-    kept = [item.local_ref_id for item in extract_markdown_references(after)]
-    known = {item.local_ref_id for item in extract_markdown_references(before)}
-    repeated = sorted(ref_id for ref_id, count in Counter(kept).items() if count > 1)
-    unknown = sorted(set(kept) - known)
-    problems = [
-        *([f"used more than once: {', '.join(repeated)}"] if repeated else []),
-        *([f"not in this file: {', '.join(unknown)}"] if unknown else []),
-    ]
-    return "; ".join(f"ref IDs {problem}" for problem in problems) or None
-
-
 def _content(draft: MemoryDraftCheckpoint, path: str) -> str:
     return next(
         document.content for document in draft.documents if document.source_path == path
@@ -372,7 +336,5 @@ __all__ = [
     "MemoryConsolidationTarget",
     "consolidate_memory_files",
     "consolidation_targets",
-    "misused_reference_ids",
-    "restore_reference_tags",
     "rewrite_file_tool",
 ]

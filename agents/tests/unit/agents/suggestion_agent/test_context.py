@@ -45,6 +45,8 @@ from pantaray_agents.schema.agent.suggestion import (
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
 
+_NOW = datetime(2026, 9, 12, tzinfo=UTC)
+
 _STABLE_MEMORY = SuggestionStableMemoryContext(
     prompt="Stable memory summary",
     has_facts=True,
@@ -66,6 +68,7 @@ def test_normalize_recent_suggestion_entry_coerces_to_history_entry() -> None:
     entry = normalize_recent_suggestion_entry(
         {
             "answer": 123,
+            "interaction_contract": "action_offer",
             "created_at": None,
             "thinking": {"note": "x"},
         }
@@ -714,6 +717,7 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
             data=[
                 {
                     "answer": "Repeat the review?",
+                    "interaction_contract": "action_offer",
                     "created_at": "2026-09-10T00:00:00Z",
                     "user_reaction": "rejected",
                     "user_reply": "The review is complete.",
@@ -753,9 +757,7 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
     ) in prompt
 
 
-def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejection() -> (
-    None
-):
+def test_reply_and_result_previews_are_bounded() -> None:
     from pantaray_agents.agents.suggestion_agent.context_formatters import (
         RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS,
         RECENT_SUGGESTION_REPLY_MAX_CHARS,
@@ -764,14 +766,14 @@ def test_reply_and_result_previews_are_bounded_and_missing_reaction_is_not_rejec
     entry = normalize_recent_suggestion_entry(
         {
             "answer": "A suggestion",
+            "interaction_contract": "message_only",
             "created_at": "2026-09-10T00:00:00Z",
             "user_reply": "x" * (RECENT_SUGGESTION_REPLY_MAX_CHARS + 100),
             "action_result": "y" * (RECENT_SUGGESTION_ACTION_RESULT_MAX_CHARS + 100),
         }
     )
     assert entry is not None
-    rendered = format_recent_suggestions([entry])
-    assert "User reaction: not recorded" in rendered
+    rendered = format_recent_suggestions([entry], _NOW)
     assert "[reply truncated]" in rendered
     assert "x" * (RECENT_SUGGESTION_REPLY_MAX_CHARS + 1) not in rendered
     assert "[result truncated]" in rendered
@@ -782,6 +784,7 @@ def test_a_dismissal_reason_reads_as_the_users_own_reason() -> None:
     entry = normalize_recent_suggestion_entry(
         {
             "answer": "Repeat the review?",
+            "interaction_contract": "action_offer",
             "created_at": "2026-09-10T00:00:00Z",
             "user_reaction": "rejected",
             "dismiss_reason": "Already reviewed this morning.",
@@ -791,7 +794,72 @@ def test_a_dismissal_reason_reads_as_the_users_own_reason() -> None:
     assert (
         "  User reaction: rejected\n"
         "  User's reason for dismissing: Already reviewed this morning."
-    ) in format_recent_suggestions([entry])
+    ) in format_recent_suggestions([entry], _NOW)
+
+
+@pytest.mark.parametrize(
+    ("age", "reaction"),
+    [
+        (
+            timedelta(hours=6) - timedelta(seconds=1),
+            "none yet (offered under 6 hours ago)",
+        ),
+        (timedelta(hours=6), "none for 6+ hours"),
+        (timedelta(hours=12) - timedelta(seconds=1), "none for 6+ hours"),
+        (timedelta(hours=12), "none for 12+ hours"),
+        (timedelta(hours=24) - timedelta(seconds=1), "none for 12+ hours"),
+        (timedelta(hours=24), "none for 24+ hours"),
+        (timedelta(days=20), "none for 24+ hours"),
+    ],
+)
+def test_an_unanswered_offer_shows_how_long_it_went_without_a_reaction(
+    age: timedelta, reaction: str
+) -> None:
+    entry = normalize_recent_suggestion_entry(
+        {
+            "answer": "Fix the flaky test?",
+            "interaction_contract": "action_offer",
+            "created_at": (_NOW - age).isoformat(),
+        }
+    )
+    assert entry is not None
+    assert f"  User reaction: {reaction}\n" in (
+        format_recent_suggestions([entry], _NOW) + "\n"
+    )
+
+
+def test_silence_on_a_message_only_suggestion_is_not_an_unanswered_offer() -> None:
+    entries = [
+        normalize_recent_suggestion_entry(
+            {
+                "answer": answer,
+                "interaction_contract": "message_only",
+                "created_at": (_NOW - timedelta(days=2)).isoformat(),
+                "user_reply": reply,
+            }
+        )
+        for answer, reply in (("Heads-up A", None), ("Heads-up B", "Thanks."))
+    ]
+    rendered = format_recent_suggestions([e for e in entries if e], _NOW)
+    assert rendered.count("  User reaction: none asked for (message only)") == 2
+    assert "hours" not in rendered
+    assert "  User reply: Thanks." in rendered
+
+
+@pytest.mark.parametrize("reaction", ["accepted", "rejected"])
+def test_a_recorded_reaction_is_shown_as_is_whatever_its_age(reaction: str) -> None:
+    entry = normalize_recent_suggestion_entry(
+        {
+            "answer": "Fix the flaky test?",
+            "interaction_contract": "action_offer",
+            "created_at": (_NOW - timedelta(days=2)).isoformat(),
+            "user_reaction": reaction,
+        }
+    )
+    assert entry is not None
+    assert format_recent_suggestions([entry], _NOW).endswith(
+        f"  User reaction: {reaction}"
+    )
 
 
 def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None:
@@ -803,6 +871,7 @@ def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None
         normalize_recent_suggestion_entry(
             {
                 "answer": f"Suggestion {number:02d} " + "a" * 500,
+                "interaction_contract": "action_offer",
                 "created_at": "2026-09-10T00:00:00Z",
                 "user_reply": "x" * 3_000,
                 "action_status": "success",
@@ -812,7 +881,7 @@ def test_twelve_full_entries_keep_the_newest_within_the_history_budget() -> None
         )
         for number in range(12)  # newest first, as the repository returns them
     ]
-    rendered = format_recent_suggestions([e for e in entries if e is not None])
+    rendered = format_recent_suggestions([e for e in entries if e is not None], _NOW)
     assert len(rendered) <= RECENT_SUGGESTIONS_MAX_CHARS
     assert "Suggestion 00" in rendered
     assert "Suggestion 04" in rendered
@@ -834,11 +903,16 @@ def test_suggestion_context_shows_the_local_date_of_each_stored_instant() -> Non
         [{"summary": "S1H", "source_ids": ["log-1"], **period}]
     ) == (f"[{local_period}] S1H")
     entry = normalize_recent_suggestion_entry(
-        {"answer": "A suggestion", "created_at": "2026-09-26T21:50:00.123Z"}
+        {
+            "answer": "A suggestion",
+            "interaction_contract": "message_only",
+            "created_at": "2026-09-26T21:50:00.123Z",
+        }
     )
     assert entry is not None
-    assert format_recent_suggestions([entry]).startswith(
-        "- [2026-09-27T06:50+09:00] answer: A suggestion"
+    assert (
+        "\n- [2026-09-27T06:50+09:00] answer: A suggestion\n"
+        in format_recent_suggestions([entry], _NOW)
     )
 
     body = build_recent_activity_summaries_24h_1w_1m(

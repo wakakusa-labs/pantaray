@@ -271,6 +271,7 @@ class MockSuggestionAgentRepository(
             normalized.append(
                 {
                     "answer": item.get("answer", ""),
+                    "interaction_contract": item.get("interaction_contract"),
                     "thinking": item.get("thinking"),
                     "created_at": created_at,
                     "user_id": item.get("user_id"),

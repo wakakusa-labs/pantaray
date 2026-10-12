@@ -232,7 +232,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             raise TypeError("Request must be of type SuggestionAgentRequest")
         suggestion_request = request
 
-        # 直近のanswer（最新12件）を取得（thinkingは含めない）
+        # 直近のanswer（最新20件）を取得（thinkingは含めない）
         # 期間は広め（30日）に設定し、limitで20件に絞る
         recent_suggestion_rows = repository_data_or_raise(
             await self.repository.get_recent_suggestions(
@@ -245,7 +245,10 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             normalized = normalize_recent_suggestion_entry(row)
             if normalized is not None:
                 recent_entries.append(normalized)
-        recent_suggestions_text = format_recent_suggestions(recent_entries)
+        reference_time = self._get_reference_time()
+        recent_suggestions_text = format_recent_suggestions(
+            recent_entries, reference_time
+        )
 
         # 直近のActivity Descriptionを3件取得し、実際の対象期間を表示する。
         recent_activity_description_rows = repository_data_or_raise(
@@ -271,7 +274,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         summary_1h_row = summary_1h_rows[0] if summary_1h_rows else None
 
         # 追加: Activity Summary（24h/1w/1m）を取得し、ended_ago 付きで整形する
-        reference_time = self._get_reference_time()
         rows_by_type = await fetch_summary_rows_by_type(
             repository=self.repository,
             user_id=suggestion_request.user_id,

@@ -27,8 +27,13 @@ system_instruction: |
   - Preserve which organization, project, workspace, or repository a piece of
     knowledge belongs to. Do not generalize workspace-specific knowledge into a
     global preference, and do not carry it into an unrelated workspace.
-  - Keep `facts/index.md`, `insights/index.md` as entry points, and organize
-    initiative-specific content as `Organization -> Project`.
+  - Keep `facts/index.md` and `insights/index.md` as entry points, and organize
+    initiative-specific content as `Organization -> Project`. Each index opens
+    with a `## Overview` section a later agent reads before anything else: in
+    facts, who the user is and the endeavors they are working on, by name; in
+    insights, what they are after in each, how they work, and what help works
+    for them. Keep it to a few lines, and update it only when this run's
+    changes alter it.
 
   ## Category boundaries
   - A fact belongs in `facts/`, its interpretation in `insights/`. Do not copy one
@@ -357,6 +362,14 @@ prompt: |
   {memory_file_manifest}
   </memory_file_manifest>
 
+  ## Memory indexes
+  <facts_index path="facts/index.md">
+  {facts_index}
+  </facts_index>
+  <insights_index path="insights/index.md">
+  {insights_index}
+  </insights_index>
+
   ## Workspace Structure
   Organization/project/registered-root structure, not file content.
   <workspace_structure>
@@ -379,3 +392,4 @@ prompt: |
 
   Each editing tool states the exact paths this run may write; a category
   missing from them is already published and is not part of this run.
+  {overview_request}

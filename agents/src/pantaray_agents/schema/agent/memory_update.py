@@ -24,6 +24,9 @@ class MemoryUpdateContext(BaseModel):
     dismissed_suggestions: str
     local_time_note: str = Field(min_length=1)
     memory_file_manifest: str = Field(min_length=1)
+    facts_index: str
+    insights_index: str
+    overview_request: str
     workspace_context_prompt: str
     new_experience_ids: tuple[str, ...]
     draft_revision: str = Field(pattern="^sha256:")

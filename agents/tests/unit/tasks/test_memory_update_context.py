@@ -6,6 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
+    FactArtifactPublication,
+    publish_fact_artifact,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -18,8 +22,18 @@ from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
+from pantaray_agents.local_runtime.runtime.job_claim import claim_next_pending_job
+from pantaray_agents.local_runtime.runtime.job_enqueue import (
+    enqueue_local_job_with_connection,
+)
+from pantaray_agents.local_runtime.runtime.job_types import (
+    LOCAL_MEMORY_UPDATE_JOB_TYPE,
+)
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     append_memory_category_published_in_connection,
+)
+from pantaray_agents.local_runtime.runtime.memory_update_queue import (
+    build_local_memory_update_enqueue_request,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
@@ -223,6 +237,82 @@ def test_a_published_experience_category_offers_no_new_entry_ids(
 
     assert prepared.editable_sources == ("fact", "long_term_insight")
     assert prepared.context.new_experience_ids == ()
+
+
+def test_the_next_run_sees_the_published_index_and_its_overview(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    _bootstrap(runtime.db_path)
+    facts_index = (
+        "# Facts\n\n## Overview\nThe user builds Pantaray.\n\n## Wakakusa\n- Pantaray\n"
+    )
+    first: MemoryUpdateJobPayload = {
+        **_payload(),
+        "job_id": "job-0",
+        "process_id": "process-0",
+    }
+    enqueue_local_job_with_connection(
+        db_path=str(runtime.db_path),
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        request=build_local_memory_update_enqueue_request(first),
+    )
+    assert claim_next_pending_job(
+        db_path=str(runtime.db_path),
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        job_type=LOCAL_MEMORY_UPDATE_JOB_TYPE,
+        owner_user_id=USER_ID,
+        claimed_by="worker-1",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    with MemoryRunWorkspaceScope() as scope:
+        prepared = prepare_memory_update_run(
+            runtime=runtime, payload=first, workspace_scope=scope
+        )
+        assert (prepared.context.facts_index, prepared.context.insights_index) == (
+            "",
+            "",
+        )
+        assert prepared.context.overview_request.count("has no overview yet") == 2
+        prepared.router.replace_document(
+            expected_revision=prepared.router.draft.draft_revision,
+            path="facts/index.md",
+            expected_text="",
+            content=facts_index,
+        )
+        publish_fact_artifact(
+            db_path=runtime.db_path,
+            busy_timeout_ms=runtime.busy_timeout_ms,
+            artifact_root=runtime.artifact_root,
+            publication=FactArtifactPublication(
+                user_id=USER_ID,
+                fact_id=prepared.fact_id,
+                memory_run=memory_run_binding_from_payload(first),
+                draft=next(
+                    route.session.draft
+                    for route in prepared.router.routes
+                    if route.source == "fact"
+                ),
+                profile_brief="## Profile Brief\n- builds Pantaray",
+                prompt_name="memory_update",
+                prompt_version="1.0",
+                source_insight_ids=("insight-1",),
+                created_at=NOW,
+            ),
+        )
+
+    with MemoryRunWorkspaceScope() as scope:
+        later = prepare_memory_update_run(
+            runtime=runtime, payload=_payload(), workspace_scope=scope
+        )
+
+    assert later.context.facts_index == facts_index
+    assert later.context.insights_index == ""
+    assert later.context.overview_request == (
+        "`insights/index.md` has no overview yet: write its `## Overview` in this"
+        " run from the index and the files it names."
+    )
 
 
 def test_action_terminals_expose_scoped_history_tools(tmp_path: Path) -> None:

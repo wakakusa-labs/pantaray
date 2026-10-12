@@ -15,6 +15,7 @@ from pantaray_agents.schema.repositories.repository import DBRow
 _RECENT_SUGGESTION_HISTORY_SQL = """
         WITH recent AS (
             SELECT suggestions.user_id, suggestions.answer,
+                   suggestions.interaction_contract,
                    suggestions.created_at, suggestions.user_reaction,
                    suggestions.dismiss_reason,
                    (
@@ -42,7 +43,8 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
             ORDER BY suggestions.created_at DESC
             LIMIT ?
         )
-        SELECT recent.answer, recent.created_at, recent.user_reaction,
+        SELECT recent.answer, recent.interaction_contract,
+               recent.created_at, recent.user_reaction,
                recent.dismiss_reason,
                actions.status AS action_status,
                initial.user_message_json AS user_reply_json,

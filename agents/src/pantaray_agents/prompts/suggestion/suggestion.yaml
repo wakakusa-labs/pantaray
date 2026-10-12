@@ -188,7 +188,7 @@ prompt: |
   ## Recent Activity Summaries (24h/1w/1m)
   {recent_activity_summaries_24h_1w_1m}
 
-  ## Recent Suggestions and their Actions (latest 12)
+  ## Recent Suggestions and their Actions (up to the latest 20)
   Recorded proposals, reactions and first replies, with each Action's status, the
   user's later instructions and the latest result. Treat an item that has a result as
   already handled; a later instruction sets the current scope of that work.

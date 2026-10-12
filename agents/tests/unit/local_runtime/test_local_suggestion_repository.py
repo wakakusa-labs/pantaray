@@ -558,6 +558,9 @@ async def test_recent_suggestions_include_the_actual_user_reply_and_reaction(
     assert recent.error is None
     assert recent.data is not None and len(recent.data) == 1
     entry = recent.data[0]
+    assert entry["interaction_contract"] == (
+        "action_offer" if action_offer else "message_only"
+    )
     assert entry["user_reaction"] == ("accepted" if action_offer else None)
     # An approval's content repeats the Suggestion; only the supplement is the reply.
     assert entry["user_reply"] == ("Prepare a draft only." if action_offer else content)

@@ -20,6 +20,7 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    SemanticSearchInput,
     merge_memory_search_context,
     search_memory_catalog,
 )
@@ -135,7 +136,7 @@ def _search_result(
             "source_path": f"facts/{fragment_id}.md",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": item.item.context_handle,
         }
     ], epoch
@@ -330,9 +331,8 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
             connection=connection,
             user_id="user-1",
             run_id="suggestion-1",
-            query="durableobsolete",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("durableobsolete",),
+            semantic=SemanticSearchInput(embedding_generation, None, QUERY_EMBEDDING),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -343,9 +343,8 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
             connection=connection,
             user_id="user-1",
             run_id="current-search",
-            query="durableobsolete",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("durableobsolete",),
+            semantic=SemanticSearchInput(embedding_generation, None, QUERY_EMBEDDING),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -356,7 +355,7 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
     assert "Durableobsolete marker" in [row["content"] for row in pinned]
     assert {item.revision_id for item in epoch.items} == {first_revision.revision_id}
     assert current
-    assert all(row["match_kind"] == "semantic" for row in current)
+    assert all(row["matched_by"] == "query" for row in current)
 
 
 def test_snapshot_pins_nothing_for_a_preparing_node(
@@ -531,9 +530,8 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             connection=connection,
             user_id="user-1",
             run_id="suggestion-1",
-            query="retryparallelism",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("retryparallelism",),
+            semantic=None,
             focus="agent_work",
             center_time=None,
             radius_hours=None,
@@ -544,9 +542,8 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             connection=connection,
             user_id="user-1",
             run_id="current-search",
-            query="retryparallelism",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("retryparallelism",),
+            semantic=None,
             focus="agent_work",
             center_time=None,
             radius_hours=None,
@@ -818,7 +815,7 @@ async def test_suggestion_reads_memory_through_memory_search_not_read(
             "source_path": "activity/entry",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": item.item.context_handle,
         },
     )

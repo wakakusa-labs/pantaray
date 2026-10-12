@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    SemanticSearchInput,
     search_memory_catalog,
 )
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
@@ -164,9 +165,10 @@ def test_action_file_read_migration_preserves_catalog_and_backfills_reads(
             connection=connection,
             user_id="user-1",
             run_id="fact-run-after-upgrade",
-            query="historical evidence",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("historical evidence",),
+            semantic=SemanticSearchInput(
+                embedding_generation, QUERY_EMBEDDING, QUERY_EMBEDDING
+            ),
             focus="all",
             center_time=None,
             radius_hours=None,
@@ -189,7 +191,7 @@ def test_action_file_read_migration_preserves_catalog_and_backfills_reads(
     assert results
     assert results[0]["source"] == "action_file_read"
     assert results[0]["record_id"] == "historical-read-1"
-    assert results[0]["match_kind"] == "corroborated"
+    assert results[0]["matched_by"] == "both"
     assert results[0]["observed_at"] == "2026-08-01T09:03:00Z"
     assert preserved is not None
     assert preserved["current_revision_id"] == existing_revision.revision_id

@@ -23,6 +23,18 @@ from pantaray_agents.schema.memory_embeddings import (
     MEMORY_SEARCH_SEMANTIC_STATUS_VALUES,
 )
 from pantaray_agents.tools.contract import ToolConcurrency
+from pantaray_agents.tools.memory.search_contract import (
+    KEYWORDS_DESCRIPTION,
+    MEMORY_SEARCH_AVOID,
+    MEMORY_SEARCH_DESCRIPTION,
+    MEMORY_SEARCH_PURPOSE,
+    MEMORY_SEARCH_WHEN,
+    QUERY_DESCRIPTION,
+    focus_description,
+    keywords_schema,
+    parse_memory_search_input,
+    query_schema,
+)
 from pantaray_agents.utils.strict_numbers import is_strict_int
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
@@ -39,17 +51,18 @@ ACTION_MEMORY_SEARCH_FOCUS_VALUES = MEMORY_SEARCH_FOCUS_VALUES
 
 
 def validate_memory_search_args(args: Mapping[str, JSONValue]) -> None:
-    query = args.get("query")
-    if not isinstance(query, str) or not query.strip():
+    try:
+        parse_memory_search_input(args)
+    except ValueError as exc:
         raise ToolPolicyValidationError(
-            "query is required.",
+            str(exc),
             details={
-                "code": "INVALID_MEMORY_SEARCH_QUERY",
-                "reason": "memory_search requires a non-empty natural-language query.",
-                "path": ["query"],
-                "message": "query is required.",
+                "code": "INVALID_MEMORY_SEARCH_INPUT",
+                "reason": str(exc),
+                "path": [],
+                "message": str(exc),
             },
-        )
+        ) from exc
 
     focus = args.get("focus", "all")
     if focus not in ACTION_MEMORY_SEARCH_FOCUS_VALUES:
@@ -134,58 +147,11 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id="memory_search",
         name="Memory Search",
-        description=(
-            "Search current active Memory Catalog fragments with exact, lexical, and "
-            "semantic retrieval. "
-            "Use this for recall by words and meaning across stock knowledge, "
-            "flow knowledge, and prior agent work, including a topic tied to a "
-            "time, which goes in time_hint. Use memory_sql only to strictly "
-            "filter, order, or count rows of its tables."
-        ),
+        description=MEMORY_SEARCH_DESCRIPTION,
         guide=ToolGuideSpec(
-            what=(
-                "Broad deterministic recall over current local memory. It can retrieve "
-                "organized stock knowledge (long-term insights and structured facts), "
-                "timestamped flow knowledge (activity descriptions, activity summaries, "
-                "and short-term insights), and prior agent work records. The "
-                "implementation preserves exact anchors, corroborates lexical and "
-                "semantic matches, and uses optional time-hint ranking for activity "
-                "memory. Tombstoned, corrupt, and historical revisions are excluded."
-            ),
-            when=(
-                "Use before answering when prior user, project, workspace, activity, "
-                "or agent-work context may materially affect the answer or action. "
-                "Search by shared anchors such as project names, repo paths, file "
-                "paths, issue IDs, people, and domain terms. Use "
-                "focus='agent_work' for actions and their evidence, "
-                "focus='stable_knowledge' "
-                "for organized stock context, focus='activity' for recent flow "
-                "context, and focus='all' when the same topic may span both. If "
-                "a result contains a note-bearing ref, use get_memory_reference with "
-                "that result's context_handle to follow the exact immutable link. "
-                "When a question names both a topic and a time, such as the "
-                "estimate document seen yesterday, search here with time_hint to "
-                "find candidates. When it is bounded only by time, such as what "
-                "happened in a window, or rows of memory_sql's tables must be "
-                "ordered or counted, use memory_sql. For the exact time something "
-                "was observed, use the Observed: line of each quote in source_records "
-                "results, or memory_sql's source_records table; the result's "
-                "observed_at is the latest time in its run."
-            ),
-            pitfalls=(
-                "Do not treat one source as complete by itself. Stock knowledge can be "
-                "stale; flow knowledge is fresher but noisier and less organized. "
-                "When context matters, reconcile stock and flow evidence. time_hint "
-                "only ranks results near a time and does not filter them; to "
-                "strictly restrict rows of memory_sql's tables to a time range or "
-                "type, use memory_sql. Write the query with concrete names, IDs, "
-                "paths, errors, and both Japanese/English terms when useful. Words "
-                "are matched from three characters; below that, single characters "
-                "are not matched, and two-letter ASCII words only whole and when "
-                "written in capitals (PR, UI) or with a digit (#7, v2). notes in "
-                "the result name any query term that was not matched and say when "
-                "the result list was full, so more may match."
-            ),
+            what=MEMORY_SEARCH_PURPOSE,
+            when=MEMORY_SEARCH_WHEN,
+            pitfalls=MEMORY_SEARCH_AVOID,
         ),
         # Reads memory_context_epoch and writes the extended epoch back; two at
         # once would lose one extension and leave later handles unresolvable.
@@ -197,10 +163,12 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
         input_spec=InputSpec(
             fields=(
                 field_spec(
-                    name="query",
-                    schema={"type": "string", "minLength": 1},
-                    required=True,
-                    description="Natural-language or keyword query for memory recall.",
+                    name="keywords",
+                    schema=keywords_schema(),
+                    description=KEYWORDS_DESCRIPTION,
+                ),
+                field_spec(
+                    name="query", schema=query_schema(), description=QUERY_DESCRIPTION
                 ),
                 field_spec(
                     name="focus",
@@ -208,9 +176,8 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                         "type": "string",
                         "enum": list(ACTION_MEMORY_SEARCH_FOCUS_VALUES),
                     },
-                    description=(
-                        "Optional broad search focus. Default all. This is a source "
-                        "selection hint, not a table name."
+                    description=focus_description(
+                        ACTION_MEMORY_SEARCH_FOCUS_VALUES, "all"
                     ),
                 ),
                 field_spec(
@@ -228,8 +195,9 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                         },
                     },
                     description=(
-                        "Optional ranking hint. Results near center are boosted, but "
-                        "other relevant results can still appear."
+                        "Optional ranking hint: results near center rank higher, "
+                        "and nothing is filtered out. To keep strictly to a time "
+                        "range, use memory_sql."
                     ),
                     children=(
                         field_spec(
@@ -288,14 +256,9 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                             "source_path": {"type": "string"},
                             "heading_path": {"type": ["string", "null"]},
                             "observed_at": {"type": "string"},
-                            "match_kind": {
+                            "matched_by": {
                                 "type": "string",
-                                "enum": [
-                                    "exact",
-                                    "corroborated",
-                                    "lexical",
-                                    "semantic",
-                                ],
+                                "enum": ["keywords", "query", "both"],
                             },
                             "context_handle": {"type": "string", "minLength": 1},
                         },
@@ -306,7 +269,7 @@ MEMORY_SEARCH_TOOL = ToolDefinition.from_spec(
                             "source_path",
                             "heading_path",
                             "observed_at",
-                            "match_kind",
+                            "matched_by",
                             "context_handle",
                         ],
                         "additionalProperties": False,

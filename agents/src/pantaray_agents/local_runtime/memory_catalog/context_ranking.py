@@ -1,24 +1,30 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
 from .models import (
     MemoryFragment,
     MemoryNode,
-    MemorySearchMatchKind,
+    MemorySearchMatchedBy,
     MemorySearchSource,
 )
-
-SearchLane = Literal["exact", "lexical", "semantic"]
 
 ACTIVITY_SOURCES = frozenset(
     {"activity_log", "activity_summary", "short_term_insight", "source_records"}
 )
 TEMPORAL_RERANK_WINDOW = 3
+# Reciprocal rank fusion adds weight / (RRF_K + rank) per lane, so lanes whose
+# scores are not comparable (bm25, cosine distance) are combined by rank alone.
+# 60 is the constant of the original RRF paper.
+RRF_K = 60
+# Keywords are matched as written first; their embedding only lifts the word
+# matches that also mean what the keywords mean. Measured on 50 recorded
+# searches: 0.3 and 0.5 tie, and 0 loses about half a relevant result in eight.
+KEYWORD_SEMANTIC_WEIGHT = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,159 +42,130 @@ class RankedMemoryCandidate:
     fragment: MemoryFragment
     label: MemorySearchSource
     updated_at: str
-    exact_rank: int | None = None
-    lexical_rank: int | None = None
-    semantic_rank: int | None = None
-    match_kind: MemorySearchMatchKind | None = None
+    matched_by: MemorySearchMatchedBy
 
 
-def merge_candidate_lanes(
+def rank_keyword_hits(
     *,
-    exact: tuple[MemoryCandidateHit, ...],
-    lexical: tuple[MemoryCandidateHit, ...],
-    semantic: tuple[MemoryCandidateHit, ...],
-) -> tuple[RankedMemoryCandidate, ...]:
-    merged: dict[str, RankedMemoryCandidate] = {}
-    lanes: tuple[
-        tuple[SearchLane, tuple[MemoryCandidateHit, ...]],
-        ...,
-    ] = (
-        ("exact", exact),
-        ("lexical", lexical),
-        ("semantic", semantic),
-    )
-    for lane, hits in lanes:
-        for hit in hits:
-            fragment_id = hit.fragment.fragment_id
-            existing = merged.get(fragment_id)
-            if existing is None:
-                existing = RankedMemoryCandidate(
-                    node=hit.node,
-                    fragment=hit.fragment,
-                    label=hit.label,
-                    updated_at=hit.updated_at,
-                )
-            else:
-                _require_same_candidate(existing=existing, hit=hit)
-            merged[fragment_id] = _with_lane_rank(
-                candidate=existing,
-                lane=lane,
-                rank=hit.rank,
-            )
-    return tuple(merged.values())
-
-
-def rank_memory_candidates(
-    *,
-    candidates: tuple[RankedMemoryCandidate, ...],
+    exact: Sequence[MemoryCandidateHit],
+    lexical: Sequence[MemoryCandidateHit],
+    semantic: Sequence[MemoryCandidateHit],
     center_time: datetime | None,
     radius_hours: int | None,
+) -> tuple[MemoryCandidateHit, ...]:
+    """Exact identity matches first, then the fused word and meaning matches."""
+
+    exact_ids = {hit.fragment.fragment_id for hit in exact}
+    fused = _fuse(
+        (
+            (
+                1.0,
+                tuple(
+                    hit for hit in lexical if hit.fragment.fragment_id not in exact_ids
+                ),
+            ),
+            (
+                KEYWORD_SEMANTIC_WEIGHT,
+                tuple(
+                    hit for hit in semantic if hit.fragment.fragment_id not in exact_ids
+                ),
+            ),
+        )
+    )
+    return (
+        *exact,
+        *_rerank_activity_windows(
+            candidates=fused, center_time=center_time, radius_hours=radius_hours
+        ),
+    )
+
+
+def rank_query_hits(
+    *,
+    semantic: Sequence[MemoryCandidateHit],
+    center_time: datetime | None,
+    radius_hours: int | None,
+) -> tuple[MemoryCandidateHit, ...]:
+    return _rerank_activity_windows(
+        candidates=tuple(semantic), center_time=center_time, radius_hours=radius_hours
+    )
+
+
+def select_memory_candidates(
+    *,
+    keyword_hits: Sequence[MemoryCandidateHit],
+    query_hits: Sequence[MemoryCandidateHit],
     limit: int,
 ) -> tuple[RankedMemoryCandidate, ...]:
+    """Half the slots from the top of each list, never re-sorted across them.
+
+    A fragment both lists hold takes one slot, and a list that runs short leaves
+    its slots to the other.
+    """
     if limit <= 0:
         raise ValueError("memory search limit must be positive")
-    if (center_time is None) != (radius_hours is None):
-        raise ValueError("memory search time hint must be complete")
-    if radius_hours is not None and radius_hours <= 0:
-        raise ValueError("memory search time hint radius must be positive")
-
-    classified = tuple(_classify(candidate) for candidate in candidates)
-    exact = _rank_kind(
-        candidates=classified,
-        match_kind="exact",
-        center_time=None,
-        radius_hours=None,
-        apply_time_prior=False,
+    keyword_ids = {hit.fragment.fragment_id for hit in keyword_hits}
+    query_ids = {hit.fragment.fragment_id for hit in query_hits}
+    keyword_share = limit - limit // 2 if query_hits else limit
+    picked = list(keyword_hits[:keyword_share])
+    taken = {hit.fragment.fragment_id for hit in picked}
+    picked_query = [hit for hit in query_hits if hit.fragment.fragment_id not in taken][
+        : limit - len(picked)
+    ]
+    taken.update(hit.fragment.fragment_id for hit in picked_query)
+    picked.extend(
+        [hit for hit in keyword_hits if hit.fragment.fragment_id not in taken][
+            : limit - len(picked) - len(picked_query)
+        ]
     )
-    corroborated = _rank_kind(
-        candidates=classified,
-        match_kind="corroborated",
-        center_time=center_time,
-        radius_hours=radius_hours,
-        apply_time_prior=True,
-    )
-    lexical = _rank_kind(
-        candidates=classified,
-        match_kind="lexical",
-        center_time=center_time,
-        radius_hours=radius_hours,
-        apply_time_prior=True,
-    )
-    semantic = _rank_kind(
-        candidates=classified,
-        match_kind="semantic",
-        center_time=center_time,
-        radius_hours=radius_hours,
-        apply_time_prior=True,
-    )
-    return (*exact, *corroborated, *lexical, *semantic)[:limit]
-
-
-def _classify(candidate: RankedMemoryCandidate) -> RankedMemoryCandidate:
-    if candidate.exact_rank is not None:
-        match_kind: MemorySearchMatchKind = "exact"
-    elif candidate.lexical_rank is not None and candidate.semantic_rank is not None:
-        match_kind = "corroborated"
-    elif candidate.lexical_rank is not None:
-        match_kind = "lexical"
-    elif candidate.semantic_rank is not None:
-        match_kind = "semantic"
-    else:
-        raise ValueError("memory search candidate has no retrieval lane")
-    return replace(candidate, match_kind=match_kind)
-
-
-def _rank_kind(
-    *,
-    candidates: tuple[RankedMemoryCandidate, ...],
-    match_kind: MemorySearchMatchKind,
-    center_time: datetime | None,
-    radius_hours: int | None,
-    apply_time_prior: bool,
-) -> tuple[RankedMemoryCandidate, ...]:
-    ordered = tuple(
-        sorted(
-            (item for item in candidates if item.match_kind == match_kind),
-            key=_base_rank_key,
+    picked.extend(picked_query)
+    return tuple(
+        RankedMemoryCandidate(
+            node=hit.node,
+            fragment=hit.fragment,
+            label=hit.label,
+            updated_at=hit.updated_at,
+            matched_by=_matched_by(
+                hit.fragment.fragment_id, keyword_ids=keyword_ids, query_ids=query_ids
+            ),
         )
-    )
-    if not apply_time_prior:
-        return ordered
-    return _rerank_activity_windows(
-        candidates=ordered,
-        center_time=center_time,
-        radius_hours=radius_hours,
+        for hit in picked
     )
 
 
-def _base_rank_key(candidate: RankedMemoryCandidate) -> tuple[int, int, str]:
-    if candidate.match_kind == "exact":
-        assert candidate.exact_rank is not None
-        return candidate.exact_rank, 0, candidate.fragment.fragment_id
-    if candidate.match_kind == "corroborated":
-        assert candidate.lexical_rank is not None
-        assert candidate.semantic_rank is not None
-        return (
-            candidate.lexical_rank + candidate.semantic_rank,
-            candidate.lexical_rank,
-            candidate.fragment.fragment_id,
-        )
-    if candidate.match_kind == "lexical":
-        assert candidate.lexical_rank is not None
-        return candidate.lexical_rank, 0, candidate.fragment.fragment_id
-    if candidate.match_kind == "semantic":
-        assert candidate.semantic_rank is not None
-        return candidate.semantic_rank, 0, candidate.fragment.fragment_id
-    raise ValueError("memory search candidate has no match kind")
+def _fuse(
+    weighted_lanes: tuple[tuple[float, tuple[MemoryCandidateHit, ...]], ...],
+) -> tuple[MemoryCandidateHit, ...]:
+    scores: dict[str, float] = {}
+    hits: dict[str, MemoryCandidateHit] = {}
+    for weight, lane in weighted_lanes:
+        for hit in lane:
+            fragment_id = hit.fragment.fragment_id
+            scores[fragment_id] = scores.get(fragment_id, 0.0) + weight / (
+                RRF_K + hit.rank + 1
+            )
+            hits.setdefault(fragment_id, hit)
+    return tuple(
+        hits[fragment_id]
+        for fragment_id in sorted(scores, key=lambda key: (-scores[key], key))
+    )
+
+
+def _matched_by(
+    fragment_id: str, *, keyword_ids: set[str], query_ids: set[str]
+) -> MemorySearchMatchedBy:
+    if fragment_id in keyword_ids and fragment_id in query_ids:
+        return "both"
+    return "keywords" if fragment_id in keyword_ids else "query"
 
 
 def _rerank_activity_windows(
     *,
-    candidates: tuple[RankedMemoryCandidate, ...],
+    candidates: tuple[MemoryCandidateHit, ...],
     center_time: datetime | None,
     radius_hours: int | None,
-) -> tuple[RankedMemoryCandidate, ...]:
-    reranked: list[RankedMemoryCandidate] = []
+) -> tuple[MemoryCandidateHit, ...]:
+    reranked: list[MemoryCandidateHit] = []
     for start in range(0, len(candidates), TEMPORAL_RERANK_WINDOW):
         window = list(candidates[start : start + TEMPORAL_RERANK_WINDOW])
         activity_positions = [
@@ -215,7 +192,7 @@ def _rerank_activity_windows(
 
 def _time_prior_key(
     *,
-    candidate: RankedMemoryCandidate,
+    candidate: MemoryCandidateHit,
     center_time: datetime | None,
     radius_hours: int | None,
 ) -> tuple[int, float]:
@@ -225,30 +202,3 @@ def _time_prior_key(
     distance_seconds = abs((updated_at - center_time).total_seconds())
     radius_seconds = radius_hours * 3600
     return (0 if distance_seconds <= radius_seconds else 1, distance_seconds)
-
-
-def _with_lane_rank(
-    *,
-    candidate: RankedMemoryCandidate,
-    lane: SearchLane,
-    rank: int,
-) -> RankedMemoryCandidate:
-    if rank < 0:
-        raise ValueError("memory search lane rank must not be negative")
-    if lane == "exact":
-        return replace(candidate, exact_rank=rank)
-    if lane == "lexical":
-        return replace(candidate, lexical_rank=rank)
-    return replace(candidate, semantic_rank=rank)
-
-
-def _require_same_candidate(
-    *, existing: RankedMemoryCandidate, hit: MemoryCandidateHit
-) -> None:
-    if (
-        existing.node != hit.node
-        or existing.fragment != hit.fragment
-        or existing.label != hit.label
-        or existing.updated_at != hit.updated_at
-    ):
-        raise ValueError("memory search lanes disagree on fragment identity")

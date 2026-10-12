@@ -17,12 +17,15 @@ function createApp({ isPackaged }) {
       setPath: (name, value) => {
         calls.push({ name, value });
       },
+      setAppLogsPath: (value) => {
+        calls.push({ name: 'logs', value });
+      },
     },
     calls,
   };
 }
 
-test('applyDevUserDataDirOverride は development で userData を env 指定先へ差し替える', () => {
+test('applyDevUserDataDirOverride は development で userData とログの置き場所を env 指定先へ差し替える', () => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-user-data-'));
   const { app, calls } = createApp({ isPackaged: false });
 
@@ -32,7 +35,10 @@ test('applyDevUserDataDirOverride は development で userData を env 指定先
   });
 
   assert.equal(applied, userDataDir);
-  assert.deepEqual(calls, [{ name: 'userData', value: userDataDir }]);
+  assert.deepEqual(calls, [
+    { name: 'userData', value: userDataDir },
+    { name: 'logs', value: path.join(userDataDir, 'logs') },
+  ]);
 });
 
 test('applyDevUserDataDirOverride は missing directory を作成する', () => {

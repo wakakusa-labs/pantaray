@@ -123,6 +123,7 @@ function loadNotificationWindowModule(
       this.destroyed = false;
       this.visible = options.show !== false;
       this.focusable = options.focusable;
+      this.focusableChanges = [];
       this.bounds = {
         x: Number(options.x || 0),
         y: Number(options.y || 0),
@@ -170,7 +171,13 @@ function loadNotificationWindowModule(
     }
     hide() {
       this.hideCalls = (this.hideCalls || 0) + 1;
+      this.recordOthersFocusableAtClose();
       this.visible = false;
+    }
+    recordOthersFocusableAtClose() {
+      this.othersFocusableAtClose = instances
+        .filter((other) => other !== this)
+        .map((other) => other.focusable);
     }
     getBounds() {
       return { ...this.bounds };
@@ -184,6 +191,7 @@ function loadNotificationWindowModule(
     moveTop() {}
     setFocusable(value) {
       this.focusable = value;
+      this.focusableChanges.push(value);
     }
     setAlwaysOnTop(value, level) {
       this.alwaysOnTop = value;
@@ -200,6 +208,7 @@ function loadNotificationWindowModule(
       return this.destroyed;
     }
     destroy() {
+      this.recordOthersFocusableAtClose();
       this.destroyed = true;
       this.windowEvents.emit('closed');
     }
@@ -431,6 +440,49 @@ test('a newly loaded panel does not take keyboard focus after another app become
   instances[0].webContentsEvents.emit('did-finish-load');
   assert.equal(notificationWindow.openStandaloneConversationOverlay('standalone:late'), 'focused');
   assert.equal(instances[0].focusCalls, 1);
+});
+
+test('closing a panel keeps every other visible panel from becoming key meanwhile', (t) => {
+  if (process.platform !== 'darwin') return t.skip('macOS panel behavior');
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  notificationWindow.showNotification('S1');
+  notificationWindow.showNotification('S2');
+  for (const win of instances) win.windowEvents.emit('ready-to-show');
+  const [closing, other] = instances;
+  const otherChangesBefore = other.focusableChanges.length;
+  const closingChangesBefore = closing.focusableChanges.length;
+
+  notificationWindow.hideOverlay('S1');
+
+  assert.equal(closing.hideCalls, 1);
+  assert.deepEqual(closing.othersFocusableAtClose, [false]);
+  assert.deepEqual(other.focusableChanges.slice(otherChangesBefore), [false, true]);
+  assert.equal(other.focusable, true);
+  assert.equal(closing.focusableChanges.length, closingChangesBefore);
+
+  // A conversation window is destroyed rather than hidden, with the same guard.
+  notificationWindow.openStandaloneConversationOverlay('standalone:1');
+  const conversation = instances[2];
+  conversation.webContentsEvents.emit('did-finish-load');
+  conversation.windowEvents.emit('ready-to-show');
+  notificationWindow.hideOverlay('standalone:1');
+  assert.equal(conversation.destroyed, true);
+  assert.deepEqual(conversation.othersFocusableAtClose, [true, false]);
+  assert.equal(other.focusable, true);
+});
+
+test('closing the only visible panel changes no panel focusability', (t) => {
+  if (process.platform !== 'darwin') return t.skip('macOS panel behavior');
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  notificationWindow.showNotification('S1');
+  const [panel] = instances;
+  panel.windowEvents.emit('ready-to-show');
+  const changesBefore = panel.focusableChanges.length;
+
+  notificationWindow.hideOverlay('S1');
+
+  assert.equal(panel.hideCalls, 1);
+  assert.equal(panel.focusableChanges.length, changesBefore);
 });
 
 test('a delayed history lookup does not focus its existing panel over another app', async (t) => {

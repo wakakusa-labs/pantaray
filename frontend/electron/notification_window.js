@@ -317,8 +317,10 @@ function createStandaloneConversationOverlayWindow(id, actionId) {
     entryMode: 'standalone',
     interactive: true,
     placementKind: standalonePlacementKind(actionId),
+    // An empty conversation is opened only to be typed into — usually from the global shortcut
+    // while another app is frontmost, when no Pantaray window has focus — so it takes the keyboard.
     onReadyToShow: (win, state) => {
-      if (!state.awaitsLayout) showInteractiveOverlayWindow(win);
+      if (!state.awaitsLayout) showInteractiveOverlayWindow(win, { explicitFocus: !actionId });
     },
   });
 }

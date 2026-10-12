@@ -102,8 +102,10 @@ function loadNotificationWindowModule(
 
   const instances = [];
   const registeredIpcSenders = new Set();
-  let appActive = true;
-  // The main window, focused while Pantaray is the active app: the History list and its chat.
+  // Whether a Pantaray window is the key window. It is not whenever another app is frontmost,
+  // which is where the global shortcut is usually pressed.
+  let pantarayWindowFocused = true;
+  // The main window, the focused Pantaray window here: the History list and its chat.
   const mainWindow = {
     id: 'main-window',
     focusableChanges: [],
@@ -145,9 +147,8 @@ function loadNotificationWindowModule(
       instances.push(this);
     }
 
-    // Another Pantaray window (the history list) holds focus while Pantaray is the active app.
     static getFocusedWindow() {
-      return appActive ? mainWindow : null;
+      return pantarayWindowFocused ? mainWindow : null;
     }
 
     static fromWebContents(webContents) {
@@ -245,8 +246,8 @@ function loadNotificationWindowModule(
       instances,
       registeredIpcSenders,
       mainWindow,
-      setAppActive: (active) => {
-        appActive = active;
+      setPantarayWindowFocused: (focused) => {
+        pantarayWindowFocused = focused;
       },
     };
   } finally {
@@ -417,25 +418,49 @@ test('standalone conversation reuses the canonical ready Overlay registry and cl
   assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1050, y: 30 }), false);
 });
 
-test('a newly loaded panel does not take keyboard focus after another app becomes active', (t) => {
+test('a new empty conversation takes keyboard focus even when no Pantaray window has it', (t) => {
   if (process.platform !== 'darwin') return t.skip('macOS panel behavior');
-  const { notificationWindow, instances, setAppActive } = loadNotificationWindowModule();
-  assert.equal(notificationWindow.openStandaloneConversationOverlay('standalone:late'), 'created');
-  setAppActive(false);
+  const { notificationWindow, instances, setPantarayWindowFocused } =
+    loadNotificationWindowModule();
+  // The global shortcut pressed while another app is frontmost.
+  setPantarayWindowFocused(false);
+  assert.equal(notificationWindow.openStandaloneConversationOverlay('standalone:new'), 'created');
+  instances[0].webContentsEvents.emit('did-finish-load');
+  instances[0].windowEvents.emit('ready-to-show');
+  assert.equal(instances[0].showInactiveCalls || 0, 0);
+  assert.equal(instances[0].showCalls, 1);
+  assert.equal(instances[0].focusCalls, 1);
+});
+
+test('an existing conversation that loads after another app becomes active does not take keyboard focus', (t) => {
+  if (process.platform !== 'darwin') return t.skip('macOS panel behavior');
+  const { notificationWindow, instances, setPantarayWindowFocused } =
+    loadNotificationWindowModule();
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'),
+    'created'
+  );
+  instances[0].webContentsEvents.emit('did-finish-load');
+  // Its conversation is laid out before the window is ready, so ready-to-show shows it.
+  notificationWindow.revealOverlayWindow('conversation:A1');
+  setPantarayWindowFocused(false);
   instances[0].windowEvents.emit('ready-to-show');
   assert.equal(instances[0].showInactiveCalls, 1);
   assert.equal(instances[0].showCalls || 0, 0);
   assert.equal(instances[0].focusCalls || 0, 0);
 
-  // An explicit reopen of the already loaded panel still focuses it immediately.
-  instances[0].webContentsEvents.emit('did-finish-load');
-  assert.equal(notificationWindow.openStandaloneConversationOverlay('standalone:late'), 'focused');
+  // An explicit reopen of the already shown panel still focuses it immediately.
+  assert.equal(
+    notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1'),
+    'focused'
+  );
   assert.equal(instances[0].focusCalls, 1);
 });
 
 test('a delayed history lookup does not focus its existing panel over another app', async (t) => {
   if (process.platform !== 'darwin') return t.skip('macOS panel behavior');
-  const { notificationWindow, instances, setAppActive } = loadNotificationWindowModule();
+  const { notificationWindow, instances, setPantarayWindowFocused } =
+    loadNotificationWindowModule();
   notificationWindow.showNotification('S1');
   const panel = instances[0];
   panel.windowEvents.emit('ready-to-show');
@@ -448,7 +473,7 @@ test('a delayed history lookup does not focus its existing panel over another ap
       }),
   });
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
-  setAppActive(false);
+  setPantarayWindowFocused(false);
   resolveBootstrap(createBootstrapResponse());
   await new Promise((resolve) => setImmediate(resolve));
 

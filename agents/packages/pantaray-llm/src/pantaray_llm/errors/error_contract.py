@@ -102,6 +102,11 @@ PROXY_OUTCOME_MODEL_OUTPUT_REJECTED: ProxyResultOutcome = "model_output_rejected
 
 PROXY_ERROR_SEVERITY = "error"
 
+# The model declined to answer: PROXY_UPSTREAM_FORBIDDEN with this
+# `response_status`. A FORBIDDEN without it is an access denial (an HTTP 403),
+# which the user cannot fix by changing the model or starting over.
+MODEL_REFUSAL_RESPONSE_STATUS = "refusal"
+
 _VALID_ERROR_CODES: frozenset[str] = frozenset(get_args(ProxyErrorCode.__value__))
 _VALID_SUGGESTED_ACTIONS: frozenset[str] = frozenset(
     get_args(ProxySuggestedAction.__value__)
@@ -462,6 +467,7 @@ def _invalid_input_message(surface_id: ProxySurfaceId) -> str:
 
 
 __all__ = [
+    "MODEL_REFUSAL_RESPONSE_STATUS",
     "PROXY_CONNECTION_NOT_CONFIGURED",
     "PROXY_CONTINUATION_PROVIDER_MISMATCH",
     "PROXY_MODEL_CAPABILITY_UNSUPPORTED",

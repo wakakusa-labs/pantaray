@@ -40,6 +40,7 @@ from pantaray_llm.errors import (
     PROXY_INSUFFICIENT_BALANCE,
     PROXY_INVALID_INPUT,
     PROXY_REQUEST_FAILED,
+    PROXY_UPSTREAM_FORBIDDEN,
     LlmProxyExecutionError,
 )
 
@@ -813,6 +814,53 @@ async def test_refused_route_message_follows_the_request_language(
     assert run_result.failure_message_public == (
         "AI接続が設定されていません。設定のAI接続で接続方法を選んでください。"
     )
+
+
+@pytest.mark.parametrize(
+    ("slug", "response_status", "expected_code", "expected_message"),
+    [
+        (
+            "model-refusal",
+            "refusal",
+            "ACTION_LLM_REFUSED",
+            "AI が回答を断りました。モデルを変えるか、新しい作業で頼み直してください。",
+        ),
+        # An HTTP 403 is an access denial, not a refusal to answer: changing the
+        # model or starting over would not help, so it keeps the generic terminal.
+        (
+            "access-denied",
+            None,
+            "ACTION_LLM_RESPONSE_ERROR",
+            "Action execution failed.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_only_a_refusal_to_answer_tells_the_user_to_change_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    slug: str,
+    response_status: str | None,
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    run_result = await _terminal_of_refused_route(
+        monkeypatch,
+        tmp_path,
+        slug=slug,
+        error=LlmProxyExecutionError(
+            error_code=PROXY_UPSTREAM_FORBIDDEN,
+            error_message="The model provider refused the request.",
+            retryable=False,
+            suggested_action="adjust_input",
+            upstream_provider="anthropic",
+            response_status=response_status,
+        ),
+        language="ja",
+    )
+
+    assert run_result.action_failure_code == expected_code
+    assert run_result.failure_message_public == expected_message
 
 
 @pytest.mark.asyncio

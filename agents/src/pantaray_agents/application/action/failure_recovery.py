@@ -10,6 +10,7 @@ from pantaray_agents.action_status import (
     ACTION_FAILURE_CODE_CONNECTION_REJECTED,
     ACTION_FAILURE_CODE_IMAGE_INPUT_INVALID,
     ACTION_FAILURE_CODE_IMAGE_INPUT_TOO_LARGE,
+    ACTION_FAILURE_CODE_LLM_REFUSED,
     ACTION_FAILURE_CODE_SIGN_IN_EXPIRED,
 )
 from pantaray_agents.agents.action_agent.runtime.steps.counters import (
@@ -19,9 +20,11 @@ from pantaray_agents.proxy_errors import build_llm_proxy_agent_error
 from pantaray_agents.schema.agent.action import ActionAgentRequest
 from pantaray_agents.schema.agent.base import AgentError
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_AUTHENTICATION_FAILED,
     PROXY_CONNECTION_NOT_CONFIGURED,
     PROXY_INVALID_INPUT,
+    PROXY_UPSTREAM_FORBIDDEN,
     LlmProxyExecutionError,
 )
 
@@ -64,10 +67,11 @@ _CONNECTION_FAILURE_CODE_BY_PROXY_DETAILS: dict[tuple[str, str], str] = {
 }
 
 
-def action_connection_failure_code(error: AgentError) -> str | None:
-    """Classify a terminal the user repairs in their connection settings.
+def action_public_failure_code(error: AgentError) -> str | None:
+    """Classify a terminal the user can act on: a refusal or a broken connection.
 
-    An authentication failure the raiser left generic (`abort`, or no suggested
+    A refusal is left to the user, who can change the model or start over. An
+    authentication failure the raiser left generic (`abort`, or no suggested
     action at all) names no remedy, so it keeps the generic terminal.
     """
 
@@ -75,6 +79,11 @@ def action_connection_failure_code(error: AgentError) -> str | None:
     if details is None:
         return None
     proxy_error_code = details.get("proxy_error_code")
+    if (
+        proxy_error_code == PROXY_UPSTREAM_FORBIDDEN
+        and details.get("response_status") == MODEL_REFUSAL_RESPONSE_STATUS
+    ):
+        return ACTION_FAILURE_CODE_LLM_REFUSED
     suggested_action = details.get("suggested_action")
     if not isinstance(proxy_error_code, str) or not isinstance(suggested_action, str):
         return None
@@ -176,7 +185,7 @@ def build_action_runtime_failure_error(
 
 __all__ = [
     "ActionRuntimeApplicationFailure",
-    "action_connection_failure_code",
+    "action_public_failure_code",
     "action_image_input_failure_code",
     "ActionRuntimeFailureStage",
     "build_action_runtime_failure_error",

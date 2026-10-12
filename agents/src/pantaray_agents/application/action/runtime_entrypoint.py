@@ -24,7 +24,7 @@ from pantaray_agents.application.action.execution_service import (
 )
 from pantaray_agents.application.action.failure_recovery import (
     ActionRuntimeApplicationFailure,
-    action_connection_failure_code,
+    action_public_failure_code,
 )
 from pantaray_agents.application.action.ports import ActionStepEmitter
 from pantaray_agents.application.action.response_service import ActionResponseService
@@ -222,7 +222,7 @@ class ActionRuntimeEntrypoint:
         # The public terminal carries a code and one sentence, so a cause the
         # user can repair has to be named here; `error_payload` keeps the
         # diagnostic error exactly as the agent raised it.
-        failure_code = action_connection_failure_code(error) or error.error_code
+        failure_code = action_public_failure_code(error) or error.error_code
         return ActionExecutionResult(
             run_result=ActionRunResult(
                 action_id=str(request.action_id),

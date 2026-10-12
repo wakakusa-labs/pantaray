@@ -637,9 +637,7 @@ async def test_openai_response_failure_for_all_output_contracts(
         assert private_text not in error.message
         assert private_text not in json.dumps(error.details)
     assert error.details["response_status"] == (
-        "incomplete:content_filter"
-        if response_kind == "content_filter"
-        else "completed"
+        "completed" if response_kind == "empty" else "refusal"
     )
     assert error.details["upstream_request_id"] == "resp_openai_1"
     assert error.details["total_tokens"] == 132
@@ -1866,10 +1864,15 @@ async def test_openai_provider_rejects_failed_provider_envelope(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("upstream_code", "expected_code", "expected_retryable"),
+    ("upstream_code", "expected_code", "expected_retryable", "expected_status"),
     (
-        ("image_content_policy_violation", "PROXY_UPSTREAM_FORBIDDEN", False),
-        ("server_error", "PROXY_UPSTREAM_INTERNAL_ERROR", True),
+        (
+            "image_content_policy_violation",
+            "PROXY_UPSTREAM_FORBIDDEN",
+            False,
+            "refusal",
+        ),
+        ("server_error", "PROXY_UPSTREAM_INTERNAL_ERROR", True, "failed"),
     ),
 )
 async def test_openai_provider_classifies_failed_native_tool_envelope(
@@ -1877,6 +1880,7 @@ async def test_openai_provider_classifies_failed_native_tool_envelope(
     upstream_code: str,
     expected_code: str,
     expected_retryable: bool,
+    expected_status: str,
 ) -> None:
     responses = _FakeToolResponses(
         response_status="failed",
@@ -1901,7 +1905,7 @@ async def test_openai_provider_classifies_failed_native_tool_envelope(
     assert is_retryable_proxy_error_code(exc_info.value.code) is expected_retryable
     assert exc_info.value.details is not None
     assert exc_info.value.details["upstream_code"] == upstream_code
-    assert exc_info.value.details["response_status"] == "failed"
+    assert exc_info.value.details["response_status"] == expected_status
 
 
 @pytest.mark.asyncio

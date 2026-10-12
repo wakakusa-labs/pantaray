@@ -7,6 +7,7 @@ from tests.unit.agents.action_agent.fixtures import base_state
 from pantaray_agents.agents.action_agent import ActionAgent
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
     ToolRuntimeContext,
+    ToolValidationError,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.validation import (
     validate_tool_args,
@@ -22,7 +23,7 @@ from pantaray_agents.local_runtime.memory_catalog.search_service import (
     MemorySearchRequest,
     MemorySearchResponse,
 )
-from pantaray_agents.schema.agent.base import StatusType
+from pantaray_agents.schema.agent.base import JSONValue, StatusType
 
 
 def test_memory_search_accepts_agent_experience_focus() -> None:
@@ -30,6 +31,14 @@ def test_memory_search_accepts_agent_experience_focus() -> None:
         MEMORY_SEARCH_TOOL,
         {"query": "reusable procedure", "focus": "agent_experience"},
     )
+
+
+@pytest.mark.parametrize("args", ({}, {"keywords": [" "]}, {"query": " "}))
+def test_memory_search_rejects_a_call_without_keywords_or_query(
+    args: dict[str, JSONValue],
+) -> None:
+    with pytest.raises(ToolValidationError):
+        validate_tool_args(MEMORY_SEARCH_TOOL, args)
 
 
 @pytest.mark.asyncio
@@ -76,7 +85,8 @@ async def test_memory_search_populates_results(
         step_id="step-ms",
         tool_def=MEMORY_SEARCH_TOOL,
         args={
-            "query": "長期インサイト",
+            "keywords": ["長期インサイト", " 長期インサイト "],
+            "query": "what the user plans long term",
             "focus": "stable_knowledge",
             "time_hint": {
                 "center": "2026-08-09T00:00:00Z",
@@ -107,7 +117,8 @@ async def test_memory_search_populates_results(
     request = captured[0]
     assert request.user_id == state["user_id"]
     assert request.run_id == "step-ms"
-    assert request.query == "長期インサイト"
+    assert request.keywords == ("長期インサイト",)
+    assert request.query == "what the user plans long term"
     assert request.focus == "stable_knowledge"
     assert request.center_time == "2026-08-09T00:00:00Z"
     assert request.radius_hours == 24

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
@@ -9,8 +10,9 @@ from pantaray_agents.utils.timestamps import parse_iso8601_utc
 from .context_ranking import (
     MemoryCandidateHit,
     RankedMemoryCandidate,
-    merge_candidate_lanes,
-    rank_memory_candidates,
+    rank_keyword_hits,
+    rank_query_hits,
+    select_memory_candidates,
 )
 from .embedding_generations import EmbeddingGeneration
 from .epoch import build_memory_context_epoch, merge_memory_context_epochs
@@ -38,9 +40,18 @@ from .search_policy import (
 from .semantic_index import (
     MemoryEmbeddingIndexUnavailableError,
 )
-from .semantic_search import search_semantic_fragments
+from .semantic_search import SemanticFragmentMatch, search_semantic_fragments
 
 LEXICAL_CANDIDATE_POOL_MULTIPLIER = 3
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticSearchInput:
+    """The embeddings of one search, all made by the generation's model."""
+
+    generation: EmbeddingGeneration
+    keywords_embedding: Sequence[float] | None
+    query_embedding: Sequence[float] | None
 
 
 def search_memory_catalog(
@@ -48,9 +59,8 @@ def search_memory_catalog(
     connection: sqlite3.Connection,
     user_id: str,
     run_id: str,
-    query: str,
-    query_embedding: Sequence[float] | None,
-    embedding_generation: EmbeddingGeneration | None,
+    keywords: tuple[str, ...],
+    semantic: SemanticSearchInput | None,
     focus: MemorySearchFocus,
     center_time: str | None,
     radius_hours: int | None,
@@ -59,75 +69,70 @@ def search_memory_catalog(
 ) -> tuple[list[MemorySearchResult], MemoryContextEpoch]:
     if limit <= 0:
         raise ValueError("memory search limit must be positive")
-    normalized_query = query.strip()
-    if not normalized_query:
-        raise ValueError("memory search query must not be empty")
     sources = _sources_for_focus(focus)
     if (center_time is None) != (radius_hours is None):
         raise ValueError("memory search time hint must be complete")
-    if (query_embedding is None) != (embedding_generation is None):
-        raise ValueError(
-            "query embedding and embedding generation must be provided together"
-        )
+    if radius_hours is not None and radius_hours <= 0:
+        raise ValueError("memory search time hint radius must be positive")
     parsed_center_time = (
         parse_iso8601_utc(center_time) if center_time is not None else None
     )
 
     candidate_limit = limit * LEXICAL_CANDIDATE_POOL_MULTIPLIER
-    exact_hits = _exact_hits(
+    exact_hits = (
+        _exact_hits(
+            connection=connection,
+            user_id=user_id,
+            keywords=keywords,
+            sources=sources,
+            pinned_revisions=pinned_revisions,
+            candidate_limit=candidate_limit,
+        )
+        if keywords
+        else ()
+    )
+    # A fragment ID names one fragment; it is not a word to match elsewhere.
+    fragment_ids = {hit.fragment.fragment_id for hit in exact_hits}
+    word_keywords = tuple(word for word in keywords if word not in fragment_ids)
+    keyword_semantic, query_semantic = _semantic_hits(
         connection=connection,
         user_id=user_id,
-        query=normalized_query,
+        semantic=semantic,
+        embeddings=(
+            semantic.keywords_embedding if semantic and word_keywords else None,
+            semantic.query_embedding if semantic else None,
+        ),
         sources=sources,
         pinned_revisions=pinned_revisions,
         candidate_limit=candidate_limit,
     )
-    fragment_lookup = (
-        len(exact_hits) == 1 and exact_hits[0].fragment.fragment_id == normalized_query
-    )
-    lexical_hits = (
-        ()
-        if fragment_lookup
-        else _lexical_hits(
-            connection=connection,
-            user_id=user_id,
-            query=normalized_query,
-            sources=sources,
-            pinned_revisions=pinned_revisions,
-            candidate_limit=candidate_limit,
-        )
-    )
-    semantic_hits = (
-        ()
-        if fragment_lookup or embedding_generation is None or query_embedding is None
-        else _semantic_hits(
-            connection=connection,
-            user_id=user_id,
-            visible_revision_ids=_load_visible_revision_ids(
+    keyword_hits = rank_keyword_hits(
+        exact=exact_hits,
+        lexical=(
+            _lexical_hits(
                 connection=connection,
                 user_id=user_id,
+                query=" ".join(word_keywords),
                 sources=sources,
                 pinned_revisions=pinned_revisions,
-            ),
-            query_embedding=query_embedding,
-            embedding_generation=embedding_generation,
-            sources=sources,
-            pinned_revisions=pinned_revisions,
-            candidate_limit=candidate_limit,
-        )
-    )
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(
-            exact=exact_hits,
-            lexical=lexical_hits,
-            semantic=semantic_hits,
+                candidate_limit=candidate_limit,
+            )
+            if word_keywords
+            else ()
         ),
+        semantic=keyword_semantic,
         center_time=parsed_center_time,
         radius_hours=radius_hours,
-        limit=limit,
+    )
+    query_hits = rank_query_hits(
+        semantic=query_semantic,
+        center_time=parsed_center_time,
+        radius_hours=radius_hours,
     )
     return _build_results_and_epoch(
-        ranked=ranked,
+        ranked=select_memory_candidates(
+            keyword_hits=keyword_hits, query_hits=query_hits, limit=limit
+        ),
         run_id=run_id,
         user_id=user_id,
     )
@@ -198,7 +203,7 @@ def _exact_hits(
     *,
     connection: sqlite3.Connection,
     user_id: str,
-    query: str,
+    keywords: tuple[str, ...],
     sources: tuple[MemorySource, ...],
     pinned_revisions: Mapping[MemorySource, str | None] | None,
     candidate_limit: int,
@@ -208,6 +213,7 @@ def _exact_hits(
         sources=sources,
         pinned_revisions=pinned_revisions,
     )
+    placeholders = ", ".join("?" for _ in keywords)
     rows = connection.execute(
         f"""
         SELECT {MEMORY_FRAGMENT_COLUMNS}
@@ -215,30 +221,19 @@ def _exact_hits(
         {VISIBLE_FRAGMENT_JOINS}
         WHERE {visibility}
           AND (
-            fragments.fragment_id = ? OR fragments.revision_id = ?
-            OR nodes.node_id = ? OR nodes.source_record_id = ?
-            OR fragments.source_path = ?
+            fragments.fragment_id IN ({placeholders})
+            OR fragments.revision_id IN ({placeholders})
+            OR nodes.node_id IN ({placeholders})
+            OR nodes.source_record_id IN ({placeholders})
+            OR fragments.source_path IN ({placeholders})
           )
-        ORDER BY CASE WHEN fragments.fragment_id = ? THEN 0 ELSE 1 END,
+        ORDER BY CASE WHEN fragments.fragment_id IN ({placeholders}) THEN 0 ELSE 1 END,
                  fragments.source_path, fragments.block_index
         LIMIT ?
         """,
-        (
-            *visibility_parameters,
-            query,
-            query,
-            query,
-            query,
-            query,
-            query,
-            candidate_limit,
-        ),
+        (*visibility_parameters, *(keywords * 6), candidate_limit),
     ).fetchall()
-    fragment_id_rows = tuple(row for row in rows if str(row["fragment_id"]) == query)
-    selected_rows = fragment_id_rows[:1] if fragment_id_rows else tuple(rows)
-    return tuple(
-        _candidate_hit(row=row, rank=rank) for rank, row in enumerate(selected_rows)
-    )
+    return tuple(_candidate_hit(row=row, rank=rank) for rank, row in enumerate(rows))
 
 
 def _lexical_hits(
@@ -265,21 +260,53 @@ def _semantic_hits(
     *,
     connection: sqlite3.Connection,
     user_id: str,
-    visible_revision_ids: tuple[str, ...],
-    query_embedding: Sequence[float],
-    embedding_generation: EmbeddingGeneration,
+    semantic: SemanticSearchInput | None,
+    embeddings: tuple[Sequence[float] | None, ...],
     sources: tuple[MemorySource, ...],
     pinned_revisions: Mapping[MemorySource, str | None] | None,
     candidate_limit: int,
-) -> tuple[MemoryCandidateHit, ...]:
-    matches = search_semantic_fragments(
-        connection,
-        user_id=user_id,
-        visible_revision_ids=visible_revision_ids,
-        query_embedding=query_embedding,
-        embedding_generation=embedding_generation,
-        candidate_limit=candidate_limit,
+) -> tuple[tuple[MemoryCandidateHit, ...], ...]:
+    """One hit list per embedding; an absent embedding gets an empty list."""
+    present = tuple(embedding for embedding in embeddings if embedding is not None)
+    if semantic is None or not present:
+        return tuple(() for _ in embeddings)
+    lanes = iter(
+        search_semantic_fragments(
+            connection,
+            user_id=user_id,
+            visible_revision_ids=_load_visible_revision_ids(
+                connection=connection,
+                user_id=user_id,
+                sources=sources,
+                pinned_revisions=pinned_revisions,
+            ),
+            query_embeddings=present,
+            embedding_generation=semantic.generation,
+            candidate_limit=candidate_limit,
+        )
     )
+    return tuple(
+        _visible_hits(
+            connection=connection,
+            user_id=user_id,
+            matches=next(lanes),
+            sources=sources,
+            pinned_revisions=pinned_revisions,
+        )
+        if embedding is not None
+        else ()
+        for embedding in embeddings
+    )
+
+
+def _visible_hits(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    matches: tuple[SemanticFragmentMatch, ...],
+    sources: tuple[MemorySource, ...],
+    pinned_revisions: Mapping[MemorySource, str | None] | None,
+) -> tuple[MemoryCandidateHit, ...]:
     rows = _load_visible_fragment_matches(
         connection=connection,
         user_id=user_id,
@@ -359,8 +386,6 @@ def _build_results_and_epoch(
     )
     results: list[MemorySearchResult] = []
     for candidate, item in zip(ranked, epoch.items, strict=True):
-        if candidate.match_kind is None:
-            raise ValueError("ranked memory candidate has no match kind")
         results.append(
             {
                 "source": candidate.label,
@@ -369,7 +394,7 @@ def _build_results_and_epoch(
                 "source_path": candidate.fragment.source_path,
                 "heading_path": candidate.fragment.heading_path,
                 "observed_at": candidate.updated_at,
-                "match_kind": candidate.match_kind,
+                "matched_by": candidate.matched_by,
                 "context_handle": item.item.context_handle,
             }
         )

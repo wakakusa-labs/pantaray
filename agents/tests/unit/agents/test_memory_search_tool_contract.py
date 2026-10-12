@@ -132,7 +132,7 @@ async def test_memory_search_merges_epoch_and_reuses_visible_handle(
             "source_path": "facts.md",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": duplicate.item.context_handle,
         },
         {
@@ -142,7 +142,7 @@ async def test_memory_search_merges_epoch_and_reuses_visible_handle(
             "source_path": "insights.md",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": new_item.item.context_handle,
         },
     ]
@@ -272,7 +272,7 @@ async def test_memory_search_preserves_repository_relevance_order(
             "source_path": "actions/old.md",
             "heading_path": None,
             "observed_at": "2024-01-01T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
         },
         {
             "source": "action",
@@ -281,7 +281,7 @@ async def test_memory_search_preserves_repository_relevance_order(
             "source_path": "actions/new.md",
             "heading_path": None,
             "observed_at": "2026-01-01T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
         },
     )
     monkeypatch.setattr(

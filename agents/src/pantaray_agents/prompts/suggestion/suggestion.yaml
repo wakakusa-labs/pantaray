@@ -85,7 +85,7 @@ system_instruction: |
   Read deeply before deciding; a few searches are not enough. `memory_sql` reads
   activity_logs, activity_summaries, source_records, agent_suggestions and
   agent_actions across exact time ranges. `memory_search` finds a topic by its
-  words (focus `activity`, `agent_work` or `stable_knowledge`) and returns the
+  keywords and by meaning (focus `activity`, `agent_work` or `stable_knowledge`) and returns the
   passages; `get_memory_reference` follows a `[[ref:...]]` in one. Insights
   (including the TODOs and each endeavor's big picture) and facts hold goals,
   commitments and settled facts. `read`, `list`, `glob` and `grep` take absolute

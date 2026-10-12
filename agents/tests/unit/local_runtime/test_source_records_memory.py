@@ -158,9 +158,8 @@ def test_search_keeps_source_boundary_and_observation_time(
             connection=conn,
             user_id="user-1",
             run_id="search",
-            query=query,
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=(query,),
+            semantic=None,
             focus=parse_memory_search_focus(focus),
             center_time=None,
             radius_hours=None,
@@ -203,7 +202,7 @@ async def test_suggestion_memory_search_returns_only_the_users_evidence(
     ).build_tool_definitions(user_id="user-1", run_id="search")
     tools = {definition.name: definition for definition in definitions}
     searched = await tools["memory_search"].execute(
-        _call("memory_search", {"query": "見積資料", "focus": "all", "limit": 8}),
+        _call("memory_search", {"keywords": ["見積資料"], "focus": "all", "limit": 8}),
         1,
     )
     assert searched.status == "success"

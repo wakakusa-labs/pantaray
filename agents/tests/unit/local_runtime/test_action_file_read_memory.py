@@ -10,6 +10,7 @@ from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     serialize_memory_epoch,
 )
 from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    SemanticSearchInput,
     search_memory_catalog,
 )
 from pantaray_agents.local_runtime.memory_catalog.embedding_generations import (
@@ -121,9 +122,10 @@ def test_completed_file_read_is_searchable_without_mutating_action_data(
             connection=connection,
             user_id=USER_ID,
             run_id="fact-run-1",
-            query="durable boundary",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("durable boundary",),
+            semantic=SemanticSearchInput(
+                embedding_generation, QUERY_EMBEDDING, QUERY_EMBEDDING
+            ),
             focus="all",
             center_time=None,
             radius_hours=None,
@@ -148,7 +150,7 @@ def test_completed_file_read_is_searchable_without_mutating_action_data(
     assert results
     assert results[0]["source"] == "action_file_read"
     assert results[0]["record_id"] == INVOCATION_ID
-    assert results[0]["match_kind"] == "corroborated"
+    assert results[0]["matched_by"] == "both"
     assert results[0]["source_path"] == "Project/config.md#L4-L4"
     assert results[0]["observed_at"] == COMPLETED_AT
     assert results[0]["context_handle"] == epoch.items[0].item.context_handle

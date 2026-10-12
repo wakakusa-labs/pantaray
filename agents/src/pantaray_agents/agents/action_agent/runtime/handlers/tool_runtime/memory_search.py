@@ -12,9 +12,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     require_int_arg as _require_int_arg,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
-    require_string_arg as _require_string_arg,
-)
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
@@ -37,6 +34,7 @@ from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_d
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.repositories.repository import DBRow
+from pantaray_agents.tools.memory.search_contract import parse_memory_search_input
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 from ..tool_args import to_json_value
@@ -67,7 +65,7 @@ async def run_memory_search_tool(
     default_limit = _required_runtime_limit(runtime_cfg.get("default_limit"))
     max_limit = _required_runtime_limit(runtime_cfg.get("max_limit"))
 
-    query = _require_string_arg(args, "query")
+    search_input = parse_memory_search_input(args)
     focus = _optional_string_arg(args, "focus") or "all"
     time_hint = _optional_object_arg(args, "time_hint")
     limit = _require_int_arg(args, "limit", default_limit)
@@ -81,7 +79,8 @@ async def run_memory_search_tool(
         request=MemorySearchRequest(
             user_id=user_id,
             run_id=run_id,
-            query=query,
+            keywords=search_input.keywords,
+            query=search_input.query,
             focus=parse_memory_search_focus(focus),
             center_time=(
                 str(time_hint["center"])

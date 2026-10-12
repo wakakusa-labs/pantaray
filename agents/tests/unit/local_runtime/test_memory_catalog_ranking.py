@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pantaray_agents.local_runtime.memory_catalog.context_ranking import (
     MemoryCandidateHit,
-    merge_candidate_lanes,
-    rank_memory_candidates,
+    rank_keyword_hits,
+    rank_query_hits,
+    select_memory_candidates,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryFragment,
@@ -11,55 +12,76 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
 )
 
 
-def test_ranking_keeps_match_classes_separate_without_raw_score_fusion() -> None:
-    exact = _hit("exact", source="fact", rank=8)
-    corroborated_lexical = _hit("both", source="fact", rank=3)
-    corroborated_semantic = _hit("both", source="fact", rank=1)
-    lexical = _hit("lexical", source="fact", rank=0)
-    semantic = _hit("semantic", source="fact", rank=0)
+def _ids(hits: tuple[MemoryCandidateHit, ...]) -> list[str]:
+    return [hit.fragment.fragment_id for hit in hits]
 
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(
-            exact=(exact,),
-            lexical=(corroborated_lexical, lexical),
-            semantic=(corroborated_semantic, semantic),
+
+def test_keyword_list_puts_exact_first_and_fuses_word_and_meaning_ranks() -> None:
+    ranked = rank_keyword_hits(
+        exact=(_hit("exact", source="fact", rank=0),),
+        lexical=(
+            _hit("words-only", source="fact", rank=0),
+            _hit("both", source="fact", rank=1),
+            _hit("exact", source="fact", rank=2),
         ),
+        semantic=(_hit("both", source="fact", rank=0),),
         center_time=None,
         radius_hours=None,
-        limit=10,
     )
 
-    assert [item.fragment.fragment_id for item in ranked] == [
-        "fragment-exact",
-        "fragment-both",
-        "fragment-lexical",
-        "fragment-semantic",
+    assert _ids(ranked) == ["fragment-exact", "fragment-both", "fragment-words-only"]
+
+
+def test_selection_takes_half_from_each_list_and_counts_a_shared_hit_once() -> None:
+    keyword_hits = tuple(
+        _hit(name, source="fact", rank=0) for name in ("k1", "shared", "k2", "k3")
+    )
+    query_hits = tuple(
+        _hit(name, source="fact", rank=0) for name in ("shared", "q1", "q2", "q3")
+    )
+
+    selected = select_memory_candidates(
+        keyword_hits=keyword_hits, query_hits=query_hits, limit=4
+    )
+
+    assert [item.fragment.fragment_id for item in selected] == [
+        "fragment-k1",
+        "fragment-shared",
+        "fragment-q1",
+        "fragment-q2",
     ]
-    assert [item.match_kind for item in ranked] == [
-        "exact",
-        "corroborated",
-        "lexical",
-        "semantic",
+    assert [item.matched_by for item in selected] == [
+        "keywords",
+        "both",
+        "query",
+        "query",
     ]
 
 
-def test_ranking_fills_remaining_limit_with_semantic_results() -> None:
-    semantic = tuple(
-        _hit(f"semantic-{index}", source="fact", rank=index) for index in range(4)
+def test_selection_gives_a_short_list_s_slots_to_the_other() -> None:
+    keyword_hits = tuple(
+        _hit(f"k{index}", source="fact", rank=index) for index in range(4)
     )
 
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(exact=(), lexical=(), semantic=semantic),
-        center_time=None,
-        radius_hours=None,
-        limit=10,
+    selected = select_memory_candidates(
+        keyword_hits=keyword_hits,
+        query_hits=(_hit("q0", source="fact", rank=0),),
+        limit=4,
+    )
+    query_only = select_memory_candidates(
+        keyword_hits=(), query_hits=keyword_hits, limit=3
     )
 
-    assert [item.fragment.fragment_id for item in ranked] == [
-        "fragment-semantic-0",
-        "fragment-semantic-1",
-        "fragment-semantic-2",
-        "fragment-semantic-3",
+    assert [item.fragment.fragment_id for item in selected] == [
+        "fragment-k0",
+        "fragment-k1",
+        "fragment-k2",
+        "fragment-q0",
+    ]
+    assert [item.fragment.fragment_id for item in query_only] == [
+        "fragment-k0",
+        "fragment-k1",
+        "fragment-k2",
     ]
 
 
@@ -83,18 +105,13 @@ def test_time_prior_reorders_only_activity_candidates_in_bounded_window() -> Non
         updated_at="2026-02-01T00:00:00Z",
     )
 
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(
-            exact=(),
-            lexical=(old_activity, stable_fact, new_activity),
-            semantic=(),
-        ),
+    ranked = rank_query_hits(
+        semantic=(old_activity, stable_fact, new_activity),
         center_time=None,
         radius_hours=None,
-        limit=10,
     )
 
-    assert [item.fragment.fragment_id for item in ranked] == [
+    assert _ids(ranked) == [
         "fragment-new-activity",
         "fragment-stable-fact",
         "fragment-old-activity",
@@ -117,14 +134,9 @@ def test_time_prior_keeps_relevance_order_for_activity_with_equal_times() -> Non
         updated_at="2026-01-01T00:00:00.000Z",
     )
 
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(exact=(), lexical=(), semantic=(near, far)),
-        center_time=None,
-        radius_hours=None,
-        limit=10,
-    )
+    ranked = rank_query_hits(semantic=(near, far), center_time=None, radius_hours=None)
 
-    assert [item.fragment.fragment_id for item in ranked] == [
+    assert _ids(ranked) == [
         "fragment-z-near",
         "fragment-a-far",
     ]
@@ -144,18 +156,15 @@ def test_time_prior_never_reorders_exact_activity_candidates() -> None:
         updated_at="2026-02-01T00:00:00Z",
     )
 
-    ranked = rank_memory_candidates(
-        candidates=merge_candidate_lanes(
-            exact=(old_activity, new_activity),
-            lexical=(),
-            semantic=(),
-        ),
+    ranked = rank_keyword_hits(
+        exact=(old_activity, new_activity),
+        lexical=(),
+        semantic=(),
         center_time=None,
         radius_hours=None,
-        limit=10,
     )
 
-    assert [item.fragment.fragment_id for item in ranked] == [
+    assert _ids(ranked) == [
         "fragment-old-activity",
         "fragment-new-activity",
     ]

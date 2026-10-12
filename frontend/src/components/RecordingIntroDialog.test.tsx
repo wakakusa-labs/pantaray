@@ -161,7 +161,7 @@ describe('RecordingIntroDialog', () => {
 
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     await screen.findByText(
-      'アクセシビリティなどの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。'
+      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
     expect(dismissIntro).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '記録を始める' })).toBeEnabled();
@@ -327,7 +327,7 @@ describe('RecordingIntroDialog', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
     await screen.findByText(
-      'アクセシビリティなどの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。'
+      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
 
     grantPermissions();
@@ -338,7 +338,7 @@ describe('RecordingIntroDialog', () => {
     expect(await screen.findByText('記録を始める', { selector: 'h2' })).toBeInTheDocument();
     expect(
       screen.queryByText(
-        'アクセシビリティなどの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。'
+        'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
       )
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'システム設定を開く' })).toBeNull();

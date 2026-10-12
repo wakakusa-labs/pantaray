@@ -19,11 +19,12 @@ export type CapturePermission =
   | 'read_accessibility_tree'
   | 'observe_input'
   | 'automate_browser'
-  | 'automate_safari';
+  | 'automate_safari'
+  | 'capture_screen';
 export class ZaneiPermissionRequired extends Error {
   constructor(readonly missing: CapturePermission[]) {
     super(
-      'Grant Pantaray Accessibility, Input Monitoring and required browser Automation permissions, then start recording again.'
+      'Grant Pantaray Accessibility, Input Monitoring, Screen Recording and required browser Automation permissions, then start recording again.'
     );
   }
 }
@@ -35,6 +36,12 @@ export function createZaneiProcess(params: {
   userId: string;
   onExit: () => void;
   requestPermissions: (missing: CapturePermission[]) => Promise<void>;
+  /**
+   * Screen Recording, which recording requires although the recorder treats it as
+   * optional. The recorder reports it only once it runs, too late to keep a recorder
+   * without it from starting, so this process reads it instead.
+   */
+  holdsScreenRecording: () => boolean;
   spawnProcess?: typeof spawn;
   runCommand?: typeof execFile;
 }) {
@@ -76,12 +83,13 @@ export function createZaneiProcess(params: {
       process.stdin?.end(input);
     });
   }
+  /** `permissions_ok` also covers Screen Recording, which the recorder leaves out. */
   async function status(): Promise<ZaneiStatus> {
     const report = JSON.parse(await command(['status', '--json'])) as ZaneiStatus;
     if (typeof report.running !== 'boolean' || typeof report.permissions_ok !== 'boolean') {
       throw new Error('Invalid Zanei status response.');
     }
-    return report;
+    return { ...report, permissions_ok: report.permissions_ok && params.holdsScreenRecording() };
   }
   /**
    * Recording turned off: capture stops while the recorder keeps running, so what
@@ -132,7 +140,7 @@ export function createZaneiProcess(params: {
     const doctor = JSON.parse(await command(['doctor', '--json'])) as {
       capabilities: Partial<Record<CapturePermission, { required: boolean; state: string }>>;
     };
-    const missing = (
+    const missing: CapturePermission[] = (
       ['read_accessibility_tree', 'observe_input', 'automate_browser', 'automate_safari'] as const
     ).filter(
       (key) =>
@@ -143,6 +151,7 @@ export function createZaneiProcess(params: {
           doctor.capabilities[key]?.state === 'deferred'
         )
     );
+    if (!params.holdsScreenRecording()) missing.push('capture_screen');
     if (missing.length) {
       if (!manual) throw new ZaneiPermissionRequired([...missing]);
       await params.requestPermissions([...missing]);

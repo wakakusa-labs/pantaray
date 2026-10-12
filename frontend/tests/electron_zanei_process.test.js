@@ -20,6 +20,7 @@ function fixture(t, options = {}) {
     heartbeat_freshness: 'fresh', store_write_state: 'healthy', instance: '42@2026-09-07', degraded: {} };
   const manager = createZaneiProcess({ manifest, userId: 'alice', onExit: () => { exitCalls++; },
     requestPermissions: async missing => { calls.push({ permissionRequest: missing }); },
+    holdsScreenRecording: () => options.screenRecording ?? true,
     spawnProcess: (binary, args, opts) => { calls.push({ binary, args, opts }); return child; },
     runCommand: (binary, args, opts, callback) => {
       const request = new PassThrough();
@@ -82,6 +83,24 @@ test('auto start with missing permissions does not spawn or request OS permissio
   await assert.rejects(f.manager.start('[capture]\n'), ZaneiPermissionRequired);
   assert.ok(!f.calls.some(call => call.args?.includes('start')));
   assert.ok(!f.calls.some(call => call.permissionRequest));
+});
+
+test('auto start without Screen Recording neither spawns nor asks, though the recorder treats it as optional', async t => {
+  const f = fixture(t, { screenRecording: false });
+  const failure = await f.manager.start('[capture]\n').catch(error => error);
+  assert.ok(failure instanceof ZaneiPermissionRequired);
+  assert.deepEqual(failure.missing, ['capture_screen']);
+  assert.ok(!f.calls.some(call => call.args?.includes('start')));
+  assert.ok(!f.calls.some(call => call.permissionRequest));
+});
+
+test('manual start without Screen Recording asks for it and is not ready while the recorder reports ready', async t => {
+  const f = fixture(t, { screenRecording: false });
+  const result = await f.manager.start('[capture]\n', true);
+  assert.deepEqual(f.calls.find(call => call.permissionRequest).permissionRequest, ['capture_screen']);
+  assert.equal(result.permissionsReady, false);
+  assert.equal((await f.manager.status()).permissions_ok, false);
+  f.child.emit('close', 0);
 });
 
 test('manual start requests only required missing capabilities and still checks recorder readiness', async t => {

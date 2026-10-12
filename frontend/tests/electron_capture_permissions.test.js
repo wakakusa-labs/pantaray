@@ -2,8 +2,14 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 const { test } = require('node:test');
 
-function loadPermissions({ error = null, isPackaged = false, accessibilityTrusted = false } = {}) {
+// Electron adds `process.getSystemVersion`; plain Node, which runs these tests, has none.
+let systemVersion = '15.0.0';
+process.getSystemVersion = () => systemVersion;
+
+function loadPermissions({ error = null, isPackaged = false, accessibilityTrusted = false,
+  screenRecording = 'granted', macosVersion = '15.0.0' } = {}) {
   const calls = [];
+  systemVersion = macosVersion;
   const target = require.resolve('../electron/dist/windows/macosPermissions');
   delete require.cache[target];
   const load = Module._load;
@@ -13,7 +19,7 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
       shell: { openExternal: async url => { calls.push(url); } },
       systemPreferences: { isTrustedAccessibilityClient: prompt => {
         calls.push({ ax: prompt }); return accessibilityTrusted;
-      } },
+      }, getMediaAccessStatus: media => { calls.push({ media }); return screenRecording; } },
     };
     if (request === 'node:child_process') return {
       execFile: (binary, args, options, callback) => {
@@ -89,8 +95,38 @@ test('the E2E override stands in for TCC only in an unpackaged build', () => {
   }
 });
 
-test('the recording screen opens the pane the gate permission is granted in', async () => {
+test('the recording screen opens the pane of the gate permission still missing', async () => {
   const f = loadPermissions();
   await f.openSettings();
-  assert.deepEqual(f.calls, ['x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility']);
+  assert.match(f.calls.at(-1), /Privacy_Accessibility$/);
+
+  const screen = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied' });
+  await screen.openSettings();
+  assert.match(screen.calls.at(-1), /Privacy_ScreenCapture$/);
+});
+
+test('the capture gate also requires Screen Recording where macOS can grant it', () => {
+  const denied = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied' });
+  assert.equal(onDarwin(denied.holds), false);
+  const undecided = loadPermissions({ accessibilityTrusted: true, screenRecording: 'not-determined' });
+  assert.equal(onDarwin(undecided.holds), false);
+  const granted = loadPermissions({ accessibilityTrusted: true, screenRecording: 'granted' });
+  assert.equal(onDarwin(granted.holds), true);
+  assert.deepEqual(granted.calls, [{ ax: false }, { media: 'screen' }]);
+
+  // Below macOS 14 the recorder cannot use it, so there is nothing to grant and
+  // recording must not wait on it.
+  const older = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied',
+    macosVersion: '13.6.1' });
+  assert.equal(onDarwin(older.holds), true);
+  assert.deepEqual(older.calls, [{ ax: false }]);
+});
+
+test('a start missing Screen Recording opens its pane only after the required ones', async () => {
+  const f = loadPermissionRequester();
+  await f.request(['capture_screen']);
+  assert.deepEqual(f.calls, ['x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture']);
+  const both = loadPermissionRequester();
+  await both.request(['observe_input', 'capture_screen']);
+  assert.match(both.calls.at(-1), /Privacy_ListenEvent$/);
 });

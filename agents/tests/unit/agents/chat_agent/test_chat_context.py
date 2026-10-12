@@ -53,7 +53,7 @@ from pantaray_llm.contracts.conversation import (
 )
 
 USER = "user-1"
-_NO_WORK = ChatWorkList(tasks=(), more_tasks=0, suggestions=())
+_NO_WORK = ChatWorkList(tasks=(), more_tasks=0)
 _NOW = "2026-10-09T00:49+09:00 (Asia/Tokyo)"
 
 

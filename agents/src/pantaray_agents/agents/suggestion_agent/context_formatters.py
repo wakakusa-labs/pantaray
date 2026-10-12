@@ -44,6 +44,9 @@ _UNANSWERED_OFFER_AGE_STEPS = (
 )
 _UNANSWERED_OFFER_RECENT = "none yet (offered under 6 hours ago)"
 _MESSAGE_ONLY_REACTION = "none asked for (message only)"
+# The history's period; the prompt lists the latest RECENT_SUGGESTIONS_SHOWN.
+SUGGESTION_HISTORY_DAYS = 28
+RECENT_SUGGESTIONS_SHOWN = 20
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +95,7 @@ def format_recent_suggestions(
     blocks: list[str] = [RECENT_SUGGESTIONS_READING_NOTE]
     total = len(RECENT_SUGGESTIONS_READING_NOTE) + 1
     for row in rows:
-        block = _format_recent_suggestion(row, now)
+        block = format_recent_suggestion(row, now)
         total += len(block) + 1
         if len(blocks) > 1 and total > RECENT_SUGGESTIONS_MAX_CHARS:
             break
@@ -112,7 +115,7 @@ def _reaction_text(row: SuggestionHistoryEntry, now: datetime) -> str:
     return _UNANSWERED_OFFER_RECENT
 
 
-def _format_recent_suggestion(row: SuggestionHistoryEntry, now: datetime) -> str:
+def format_recent_suggestion(row: SuggestionHistoryEntry, now: datetime) -> str:
     lines: list[str] = []
     created_at = describe_utc_timestamp(row.created_at)
     lines.append(f"- [{created_at}] answer: {row.answer}")

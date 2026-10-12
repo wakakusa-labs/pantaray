@@ -17,6 +17,7 @@ from pantaray_agents.schema.agent.suggestion import SuggestionExtraction
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
+from .nudges import PastSuggestions
 from .output import parse_suggestion_output
 from .react import (
     SuggestionStepRecorder,
@@ -119,9 +120,11 @@ async def decide_with_lenses(
     system_instruction: str,
     current_time: str,
     recent_suggestions: str,
+    past: PastSuggestions,
     lenses: Sequence[str],
     lens_config: PromptConfig,
     selector_config: PromptConfig,
+    nudge_config: PromptConfig,
     research_tools: SuggestionResearchTools,
     send_turn: SuggestionTurnSender,
     generate_tool_call: SuggestionToolCallGenerator,
@@ -146,9 +149,11 @@ async def decide_with_lenses(
             lens=_lens_section(lens_config, lens),
             system_instruction=system_instruction,
             research_tools=research_tools,
+            nudge_config=nudge_config,
             send_turn=send_turn,
             parse_output=parse_suggestion_output,
             record_step=record,
+            past=past,
         )
 
     tasks = [

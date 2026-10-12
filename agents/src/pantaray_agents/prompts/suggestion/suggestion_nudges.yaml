@@ -1,0 +1,20 @@
+# What the host says when a Suggestion run's submission shows a misjudgment
+# the model is known to make. Each condition (a key of `role_rules`) is judged
+# from what the run submitted and the Suggestions the user was already shown,
+# and its text is sent at most once per run, in place of accepting the call it
+# answers. `prompt` wraps them.
+prompt: |
+  Not accepted yet.
+  {notice}
+  Then call `{tool}` again with your decision.
+
+role_rules:
+  repeated_suggestion: |
+    The user was already shown suggestions close to this one and did not
+    accept them:
+    {earlier}
+    Offer this again only if something material has changed since then, such
+    as a new fact the user cannot know yet, and say in key_point what changed.
+    Rewording it, offering another document for the same topic, or a deadline
+    that is only closer than before is not a change. Otherwise submit
+    has_suggestion=false rather than a weaker candidate.

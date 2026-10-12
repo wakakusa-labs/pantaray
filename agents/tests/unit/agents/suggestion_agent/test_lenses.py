@@ -1,10 +1,15 @@
 """Lens runs look for one pattern each; the selector picks one candidate or none."""
 
 import asyncio
+import itertools
 import random
+from datetime import UTC, datetime
 
 import pytest
-from tests.unit.agents.suggestion_agent.prompt_support import NO_SUGGESTION
+from tests.unit.agents.suggestion_agent.prompt_support import (
+    NO_SUGGESTION,
+    NUDGE_CONFIG,
+)
 
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
@@ -19,6 +24,7 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     decide_with_lenses,
     sample_lenses,
 )
+from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_LLM_TURNS
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationRequest
@@ -56,13 +62,14 @@ def _lens_of(request: ConversationRequest) -> str:
 
 def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
     selector_prompts: list[str] = []
+    call_ids = itertools.count()
 
     async def send(request: ConversationRequest, _sink: object) -> ActionTurnReply:
         lens = next(
             lens for lens in LENSES if f"### {lens.title()}" in _lens_of(request)
         )
         call = LlmToolCall(
-            call_id="c",
+            call_id=f"c{next(call_ids)}",
             name="submit_suggestion",
             arguments=submissions.get(lens, NO_SUGGESTION),
         )
@@ -103,9 +110,11 @@ async def _decide(model, steps: list[int]):
         system_instruction="rules",
         current_time="now",
         recent_suggestions="earlier ideas",
+        past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
         lenses=LENSES,
         lens_config=lens_config,
         selector_config=loader.load_config(SUGGESTION_SELECTOR_PROMPT_NAME),
+        nudge_config=NUDGE_CONFIG,
         research_tools=build_mock_suggestion_research_tools(),
         send_turn=send,
         generate_tool_call=generate,

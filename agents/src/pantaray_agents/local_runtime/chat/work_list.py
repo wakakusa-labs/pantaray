@@ -1,11 +1,10 @@
-"""The work a chat turn is shown: its tasks and its open suggestions.
+"""The work a chat turn is shown: its tasks.
 
 Pantaray is one: every task the user has is its own work, wherever it was
 started -- the chat, the Overlay, a shortcut or a suggestion. The list shows
 every task still in hand and the latest finished ones, newest first; older
-ones are found by searching. The suggestions are the action offers the user
-has not reacted to. The ids shown are what a turn routes to, after the items
-that named them have left its window.
+ones are found by searching. The ids shown are what a turn routes to, after the
+items that named them have left its window.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from pantaray_agents.tasks.action_user_message import (
 # The whole list, however many tasks the user has: those in hand first, then the
 # latest finished. The rest are found with search_tasks.
 CHAT_WORK_LIST_MAX_TASKS: Final[int] = 10
-CHAT_WORK_LIST_MAX_SUGGESTIONS: Final[int] = 5
 # One line each: enough to tell two tasks apart, short enough for every turn.
 _LINE_MAX_CHARS: Final[int] = 120
 
@@ -48,16 +46,9 @@ class ChatTask:
 
 
 @dataclass(frozen=True, slots=True)
-class ChatSuggestion:
-    suggestion_id: str
-    title: str
-
-
-@dataclass(frozen=True, slots=True)
 class ChatWorkList:
     tasks: tuple[ChatTask, ...]
     more_tasks: int  # past the cap, for search_tasks to find
-    suggestions: tuple[ChatSuggestion, ...]
 
 
 _IN_HAND = "actions.status IN ('queued', 'processing')"
@@ -93,28 +84,7 @@ def read_chat_work_list(*, user_id: str) -> ChatWorkList:
         (total,) = connection.execute(
             "SELECT COUNT(*) FROM agent_actions WHERE user_id = ?", (user_id,)
         ).fetchone()
-        suggestion_rows = connection.execute(
-            """
-            SELECT suggestion_id, COALESCE(suggestion_summary, answer)
-            FROM agent_suggestions
-            WHERE user_id = ? AND status = 'success' AND user_reaction IS NULL
-              AND interaction_contract = 'action_offer'
-            ORDER BY created_at DESC, suggestion_id
-            LIMIT ?
-            """,
-            (user_id, CHAT_WORK_LIST_MAX_SUGGESTIONS),
-        ).fetchall()
-    return ChatWorkList(
-        tasks=tasks,
-        more_tasks=int(total) - len(tasks),
-        suggestions=tuple(
-            ChatSuggestion(
-                suggestion_id=str(suggestion_id),
-                title=_line(text or "") or "(untitled)",
-            )
-            for suggestion_id, text in suggestion_rows
-        ),
-    )
+    return ChatWorkList(tasks=tasks, more_tasks=int(total) - len(tasks))
 
 
 def search_tasks(
@@ -322,9 +292,7 @@ def _line(text: str) -> str | None:
 
 
 __all__ = [
-    "CHAT_WORK_LIST_MAX_SUGGESTIONS",
     "CHAT_WORK_LIST_MAX_TASKS",
-    "ChatSuggestion",
     "ChatTask",
     "ChatWorkList",
     "SubmittedMessage",

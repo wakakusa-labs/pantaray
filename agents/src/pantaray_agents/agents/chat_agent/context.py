@@ -109,10 +109,6 @@ def turn_context(
         f": {task.title}" + ("" if task.latest is None else f" / {task.latest}")
         for task in work.tasks
     ]
-    suggestions = [
-        f"- {suggestion.suggestion_id}: {suggestion.title}"
-        for suggestion in work.suggestions
-    ]
     ids = ", ".join(item.item_id for item in waiting)
     return _user_item(
         f"{TURN_CONTEXT_HEADING}Now: {now}.\n"
@@ -131,8 +127,6 @@ def turn_context(
                 ),
             ]
         )
-        + "\n"
-        + "\n".join(["Your open suggestions:", *(suggestions or ["(none)"])])
         + f"\nWaiting for your reply: {ids}."
     )
 

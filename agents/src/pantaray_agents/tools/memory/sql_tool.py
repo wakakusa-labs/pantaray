@@ -36,7 +36,9 @@ MEMORY_SQL_TOOL_NAME: Final[str] = "memory_sql"
 _TABLE_GUIDE = "\n".join(
     [
         "Readable memory tables:",
-        "- agent_suggestions: suggestion records; key columns suggestion_id, user_id, answer, status, created_at, updated_at, "
+        "- agent_suggestions: suggestion records; key columns suggestion_id, user_id, answer (what the user was shown), "
+        "suggestion_summary (the brief for whoever does the work), status, created_at, updated_at, interaction_contract "
+        "(action_offer for work that can be taken up, message_only for information, or NULL when no suggestion was made), "
         "user_reaction (accepted, rejected for a dismissed suggestion, or NULL when the user has not answered), accepted_at, "
         "rejected_at, dismiss_reason (the user's own words when dismissing, or NULL).",
         "- agent_actions: executed action results; key columns action_id, suggestion_id, user_id, final_output, status, created_at, updated_at.",

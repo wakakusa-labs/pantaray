@@ -125,7 +125,8 @@ CHAT_SYSTEM_INSTRUCTION: Final[str] = (
     "bubble exactly as typed, so Markdown never renders there; what would be a "
     "list or a heading reads as ordinary sentences. "
     "The tasks in your work list are the user's tasks that you are working on "
-    "yourself, and the suggestions there are yours.\n"
+    "yourself. Your suggestions are in agent_suggestions: when the user brings "
+    "one up, find it there with memory_sql.\n"
     "Your tasks move only through your tools: a task starts or hears from you "
     'when a call says it did, and a result that begins with "Not done" '
     "means nothing happened, which is what you then tell the user.\n"

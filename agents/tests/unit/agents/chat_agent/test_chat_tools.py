@@ -13,6 +13,7 @@ import pytest
 
 from pantaray_agents.agents.chat_agent import tools
 from pantaray_agents.agents.chat_agent.context import turn_context
+from pantaray_agents.agents.chat_agent.reply import check_reply
 from pantaray_agents.agents.chat_agent.tools import chat_tools
 from pantaray_agents.agents.chat_agent.turn import ChatTurnPlan
 from pantaray_agents.local_runtime.action_conversation.history_candidates import (
@@ -59,7 +60,7 @@ from pantaray_agents.schema.agent.action_message_codec import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
-from pantaray_agents.schema.chat import UserMessageContent
+from pantaray_agents.schema.chat import AssistantMessageContent, UserMessageContent
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -277,18 +278,50 @@ async def test_a_file_goes_to_one_task_and_the_second_hand_off_says_so(
     assert len(_actions(db_path)) == 1
 
 
+def _suggestions(db_path: Path, where: str) -> list[dict[str, JSONValue]]:
+    """The user's suggestions as the chat looks them up, with memory_sql."""
+
+    found = execute_memory_sql(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        sql="SELECT suggestion_id, interaction_contract, user_reaction, "
+        "(SELECT action_id FROM agent_actions AS a "
+        "WHERE a.suggestion_id = s.suggestion_id) AS action_id "
+        f"FROM agent_suggestions AS s WHERE {where}",
+        limit=5,
+    )
+    assert found.data is not None
+    return found.data["rows"]
+
+
 async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
             "suggestion_summary, interaction_contract, has_suggestion, created_at, "
             "updated_at) VALUES ('sug-1', ?, 'success', 'Tidy the invoice template.', "
-            "'Tidy the invoice template', 'action_offer', 1, ?, ?)",
+            "'### Target\nThe invoice template', 'action_offer', 1, ?, ?)",
             (USER, NOW, NOW),
         )
-    assert [s.suggestion_id for s in read_chat_work_list(user_id=USER).suggestions] == [
-        "sug-1"
-    ]
+    # The chat finds the suggestion the user brings up, and can show its card.
+    (found,) = _suggestions(db_path, "suggestion_summary LIKE '%invoice%'")
+    assert found == {
+        "suggestion_id": "sug-1",
+        "interaction_contract": "action_offer",
+        "user_reaction": None,
+        "action_id": None,
+    }
+    card = {"kind": "suggestion", "suggestion_id": found["suggestion_id"]}
+    shown = check_reply(
+        user_id=USER,
+        arguments={
+            "text": "This one?",
+            "quote_item_id": None,
+            "cards": [{**card, "summary": "Invoice"}],
+        },
+    )
+    assert isinstance(shown, AssistantMessageContent)
 
     yes = _say_with("m-0", "Yes", ())
     pictured = append_chat_item(
@@ -338,7 +371,9 @@ async def test_a_yes_takes_up_the_open_suggestion_once(db_path: Path) -> None:
     assert json.loads(message_json)["images"] == [IMAGE]
     assert _actions(db_path) == [(taken["action_id"], "sug-1")]
     assert isinstance(gone, dict) and gone["status"] == "error"
-    assert read_chat_work_list(user_id=USER).suggestions == ()
+    assert _suggestions(db_path, "suggestion_id = 'sug-1'") == [
+        {**found, "user_reaction": "accepted", "action_id": taken["action_id"]}
+    ]
 
 
 def _overlay_task(message_id: str, text: str) -> str:
@@ -375,6 +410,13 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
             "UPDATE processes SET status = 'paused' WHERE action_id = ?", (waiting,)
         )
     started = await _turn("a0")("start_action", relay=[], note="Draft the Q3 report")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer, "
+            "interaction_contract, has_suggestion, created_at, updated_at) VALUES "
+            "('sug-open', ?, 'success', 'Tidy the invoice?', 'action_offer', 1, ?, ?)",
+            (USER, NOW, NOW),
+        )
 
     work = read_chat_work_list(user_id=USER)
     shown = turn_context(
@@ -390,6 +432,8 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
     ]
     assert (len(work.tasks), work.more_tasks) == (10, 4)
     assert "waiting for approval" in shown and "4 older tasks not listed here" in shown
+    # Suggestions are looked up when the user brings one up, not listed.
+    assert "sug-open" not in shown
 
 
 @pytest.mark.usefixtures("tokyo_local_zone")

@@ -21,6 +21,7 @@ async def send_anthropic_message(
     *,
     api_key: str,
     body: dict[str, JSONValue],
+    betas: tuple[str, ...],
     client: httpx.AsyncClient | None = None,
 ) -> httpx.Response:
     session = (
@@ -28,13 +29,14 @@ async def send_anthropic_message(
         if client is not None
         else httpx.AsyncClient(timeout=ANTHROPIC_REQUEST_TIMEOUT_SECONDS)
     )
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION_HEADER,
+        "content-type": "application/json",
+    }
+    if betas:
+        headers["anthropic-beta"] = ",".join(betas)
     async with session as active_client:
         return await active_client.post(
-            ANTHROPIC_MESSAGES_URL,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": ANTHROPIC_VERSION_HEADER,
-                "content-type": "application/json",
-            },
-            json=body,
+            ANTHROPIC_MESSAGES_URL, headers=headers, json=body
         )

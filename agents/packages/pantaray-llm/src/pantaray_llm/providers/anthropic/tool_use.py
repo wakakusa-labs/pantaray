@@ -26,8 +26,10 @@ from pantaray_llm.errors import (
     ProviderError,
 )
 from pantaray_llm.providers.anthropic.wire import (
+    AnthropicContentBlock,
     AnthropicMessageResponse,
     AnthropicTextBlock,
+    AnthropicThinkingBlock,
     AnthropicToolUseBlock,
 )
 from pantaray_llm.providers.tool_call_contract import (
@@ -38,6 +40,12 @@ from pantaray_llm.providers.tool_call_contract import (
 )
 
 type AnthropicToolRequest = LlmToolUseRequest | LlmActionTurnRequest
+
+# The exact text of a progress block that stands in for unfinished work when a
+# response stops soon after a tool call or result.
+_INTERRUPTED_PROGRESS_UPDATE_TEXT = (
+    "This part of the response was interrupted before it finished."
+)
 
 
 def build_anthropic_tools(tool_use: AnthropicToolRequest) -> list[JSONValue]:
@@ -103,6 +111,7 @@ def extract_anthropic_tool_response(
     message: AnthropicMessageResponse,
     tool_use: AnthropicToolRequest,
     sent_messages: list[dict[str, JSONValue]],
+    progress_updates: bool,
     error_context: ToolCallErrorContext,
 ) -> LlmToolUseResponse | LlmActionTurnResponse:
     blocks = [
@@ -130,7 +139,9 @@ def extract_anthropic_tool_response(
     dropped_call_names = [block.name for block in dropped_blocks]
     if isinstance(tool_use, LlmActionTurnRequest):
         messages = _extract_action_messages(
-            message=message, error_context=error_context
+            message=message,
+            progress_updates=progress_updates,
+            error_context=error_context,
         )
         if not messages and not calls:
             raise _invalid_action_turn(
@@ -188,11 +199,15 @@ def _extract_tool_call(
 
 
 def _extract_action_messages(
-    *, message: AnthropicMessageResponse, error_context: ToolCallErrorContext
+    *,
+    message: AnthropicMessageResponse,
+    progress_updates: bool,
+    error_context: ToolCallErrorContext,
 ) -> list[LlmCommentary]:
     messages: list[LlmCommentary] = []
     for index, block in enumerate(message.content):
-        if not isinstance(block, AnthropicTextBlock) or not block.text.strip():
+        text = _spoken_text(block, progress_updates=progress_updates)
+        if text is None:
             continue
         try:
             commentary = LlmCommentary(
@@ -200,7 +215,7 @@ def _extract_action_messages(
                 # Messages API は text ブロックに ID を付けない。呼び出し元は
                 # この値からターン内で一意な発話 ID を導くので、位置で識別する。
                 source_message_id=f"{message.id}:{index}",
-                text=block.text,
+                text=text,
             )
         except ValidationError as exc:
             raise _invalid_action_turn(
@@ -210,6 +225,26 @@ def _extract_action_messages(
             ) from exc
         messages.append(commentary)
     return messages
+
+
+def _spoken_text(block: AnthropicContentBlock, *, progress_updates: bool) -> str | None:
+    """What a block says to the user, if anything.
+
+    With progress updates requested, a thinking block with text is a note the
+    model wrote between tool calls, and the reasoning blocks come back empty;
+    without them a thinking block's text could be reasoning and stays private.
+    """
+
+    if isinstance(block, AnthropicTextBlock):
+        text = block.text
+    elif progress_updates and isinstance(block, AnthropicThinkingBlock):
+        text = block.thinking
+        # Stands in for work a response cut short, not something to tell anyone.
+        if text == _INTERRUPTED_PROGRESS_UPDATE_TEXT:
+            return None
+    else:
+        return None
+    return text if text.strip() else None
 
 
 def _invalid_action_turn(

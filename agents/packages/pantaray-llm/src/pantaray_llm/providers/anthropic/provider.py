@@ -76,6 +76,8 @@ MISSING_CALL_REPAIR_LIMIT = 2
 MISSING_CALL_REPAIR_TEXT = (
     "Your reply did not call a tool. Respond by calling one of the provided tools."
 )
+# Without it the API rejects `display: "updates"` as an unknown value.
+THINKING_DISPLAY_UPDATES_BETA = "thinking-display-updates-2026-08-18"
 
 
 async def execute_anthropic_request(
@@ -122,9 +124,22 @@ async def execute_anthropic_request(
             }
         ]
     output_config: dict[str, JSONValue] = {}
+    # Under the default display the notes the model writes between tool calls
+    # come back as empty thinking blocks, so an Action turn would never see
+    # them; "updates" returns them as text while the reasoning stays hidden.
+    progress_updates = (
+        isinstance(tool_use, LlmActionTurnRequest)
+        and isinstance(profile.thinking, AnthropicAdaptiveThinking)
+        and profile.thinking.progress_updates
+    )
     if isinstance(profile.thinking, AnthropicAdaptiveThinking):
-        body["thinking"] = {"type": "adaptive"}
+        body["thinking"] = (
+            {"type": "adaptive", "display": "updates"}
+            if progress_updates
+            else {"type": "adaptive"}
+        )
         output_config["effort"] = profile.thinking.effort
+    betas = (THINKING_DISPLAY_UPDATES_BETA,) if progress_updates else ()
     if compiled_schema is not None:
         schema = cast(JSONValue, compiled_schema.wire_schema)
         output_config["format"] = {"type": "json_schema", "schema": schema}
@@ -135,7 +150,11 @@ async def execute_anthropic_request(
         body["tool_choice"] = build_anthropic_tool_choice(tool_use)
 
     exchange = await _send_message(
-        body=body, request=request, api_key=api_key, http_client=http_client
+        body=body,
+        betas=betas,
+        request=request,
+        api_key=api_key,
+        http_client=http_client,
     )
     if isinstance(tool_use, LlmToolUseRequest):
         for _ in range(MISSING_CALL_REPAIR_LIMIT):
@@ -152,6 +171,7 @@ async def execute_anthropic_request(
             body = {**body, "messages": cast(JSONValue, messages)}
             exchange = await _send_message(
                 body=body,
+                betas=betas,
                 request=request,
                 api_key=api_key,
                 http_client=http_client,
@@ -184,6 +204,7 @@ async def execute_anthropic_request(
                 message=message,
                 tool_use=tool_use,
                 sent_messages=messages,
+                progress_updates=progress_updates,
                 error_context=ToolCallErrorContext(
                     provider="anthropic",
                     local_job_id=request.trace.local_job_id,
@@ -237,6 +258,7 @@ class _Exchange:
 async def _send_message(
     *,
     body: dict[str, JSONValue],
+    betas: tuple[str, ...],
     request: LlmRequest,
     api_key: str,
     http_client: httpx.AsyncClient | None,
@@ -244,7 +266,7 @@ async def _send_message(
 ) -> _Exchange:
     try:
         http_response = await send_anthropic_message(
-            api_key=api_key, body=body, client=http_client
+            api_key=api_key, body=body, betas=betas, client=http_client
         )
     except UnicodeEncodeError as exc:
         # httpx は本文を UTF-8 で符号化する。孤立サロゲートは JSON 入力として

@@ -45,6 +45,7 @@ from pantaray_agents.tools.contract import (
     ToolCallEnvelope,
     resolve_react_tool_definitions,
 )
+from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.conversation import (
     LlmTurnItem,
     LlmTurnToolResultItem,
@@ -58,6 +59,12 @@ from pantaray_llm.contracts.tool_use import (
 from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles import SUGGESTION_PROFILE_ID
 
+from .nudges import (
+    REPEATED_SUGGESTION,
+    PastSuggestions,
+    nudge_text,
+    render_nudge,
+)
 from .research import SuggestionResearchTools
 
 # Deep research is the point of the run: quality comes before cost or duration.
@@ -233,11 +240,17 @@ async def run_suggestion_react(
     lens: str,
     system_instruction: str,
     research_tools: SuggestionResearchTools,
+    nudge_config: PromptConfig,
     send_turn: SuggestionTurnSender,
     parse_output: SuggestionOutputParser,
     record_step: SuggestionStepRecorder,
+    past: PastSuggestions,
 ) -> SuggestionExtraction:
-    """Research behind ``context`` for ``lens`` until a submission is accepted."""
+    """Research behind ``context`` for ``lens`` until a submission is accepted.
+
+    A submission that shows a known misjudgment, judged against ``past``, is
+    sent back once per condition with its notice.
+    """
 
     definitions = research_tools.build_tool_definitions(
         user_id=user_id,
@@ -256,6 +269,7 @@ async def run_suggestion_react(
     prompt_text = f"{context.rstrip()}\n\n{lens}"
     sink = CountingSink()
     steps = _RunSteps(run_id=suggestion_id, record=record_step, prompt=prompt_text)
+    sent: set[str] = set()  # the conditions this run was already sent back for
 
     async def send(request: ConversationRequest) -> TurnReply:
         try:
@@ -263,6 +277,20 @@ async def run_suggestion_react(
         except LlmProxyExecutionError as exc:
             await steps.failed_send(exc)
             raise
+
+    def _due_notices(extraction: SuggestionExtraction) -> list[str]:
+        decided = extraction["decided"]
+        if decided is None or REPEATED_SUGGESTION in sent:
+            return []
+        earlier = past.repeated(decided["key_point"])
+        if not earlier:
+            return []
+        sent.add(REPEATED_SUGGESTION)
+        return [
+            nudge_text(
+                nudge_config, REPEATED_SUGGESTION, earlier=past.describe(earlier)
+            )
+        ]
 
     def decide(turn: IdleTurn) -> Finish[SuggestionExtraction] | Continue:
         if turn.ending_call is None:
@@ -275,6 +303,12 @@ async def run_suggestion_react(
         except ValueError as exc:
             return Continue(
                 f"{SUBMIT_SUGGESTION_TOOL_NAME} was rejected: {str(exc)[:1200]}"
+            )
+        # A last turn's Continue fails the run, so no notice goes to one.
+        notices = [] if turn.final else _due_notices(extraction)
+        if notices:
+            return Continue(
+                render_nudge(nudge_config, SUBMIT_SUGGESTION_TOOL_NAME, *notices)
             )
         extraction["thinking"] = None
         extraction["prompt_text"] = prompt_text

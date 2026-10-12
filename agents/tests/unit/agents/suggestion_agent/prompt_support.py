@@ -7,8 +7,11 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
 )
+from pantaray_agents.agents.suggestion_agent.nudges import (
+    SUGGESTION_NUDGES_PROMPT_NAME,
+)
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
-from pantaray_agents.utils.prompt_loader import PromptConfig
+from pantaray_agents.utils.prompt_loader import PromptConfig, PromptLoader
 
 LENS_CONFIG = PromptConfig(
     prompt="Lens: {lens}",
@@ -19,6 +22,8 @@ SELECTOR_CONFIG = PromptConfig(
     system_instruction="Choose one.",
 )
 
+NUDGE_CONFIG = PromptLoader().load_config(SUGGESTION_NUDGES_PROMPT_NAME)
+
 
 def prompt_configs(
     test_prompt: str, extra: dict[str, PromptConfig] | None = None
@@ -28,6 +33,7 @@ def prompt_configs(
     configs = {
         SUGGESTION_LENS_PROMPT_NAME: LENS_CONFIG,
         SUGGESTION_SELECTOR_PROMPT_NAME: SELECTOR_CONFIG,
+        SUGGESTION_NUDGES_PROMPT_NAME: NUDGE_CONFIG,
         **(extra or {}),
     }
     return lambda name: configs.get(

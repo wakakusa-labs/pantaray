@@ -43,6 +43,7 @@ def load_test_prompt_config(prompt_name: str) -> PromptConfig:
     if prompt_name in (
         "suggestion/suggestion_lenses",
         "suggestion/suggestion_selector",
+        "suggestion/suggestion_nudges",
     ):
         return PromptLoader().load_config(prompt_name)
     raise AssertionError(f"Unexpected prompt requested in E2E test: {prompt_name}")

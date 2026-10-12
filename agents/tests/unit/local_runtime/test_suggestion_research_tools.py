@@ -1410,8 +1410,14 @@ _NO_SUGGESTION = {
 async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     tmp_path: Path,
 ) -> None:
+    from datetime import UTC, datetime
+
     from pantaray_agents.agents.artifact_react import ReactLoopStep
     from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
+    from pantaray_agents.agents.suggestion_agent.nudges import (
+        SUGGESTION_NUDGES_PROMPT_NAME,
+        PastSuggestions,
+    )
     from pantaray_agents.agents.suggestion_agent.output import (
         parse_suggestion_output,
     )
@@ -1419,6 +1425,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         SUBMIT_SUGGESTION_TOOL_NAME,
         run_suggestion_react,
     )
+    from pantaray_agents.utils.prompt_loader import PromptLoader
     from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
     from pantaray_llm.contracts.tool_use import LlmToolCall
 
@@ -1463,9 +1470,11 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
             snapshot=_snapshot(db_path=db_path),
             activity_start=None,
         ),
+        nudge_config=PromptLoader().load_config(SUGGESTION_NUDGES_PROMPT_NAME),
         send_turn=send_turn,
         parse_output=parse_suggestion_output,
         record_step=record_step,
+        past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
     )
 
     assert result["has_suggestion"] is False

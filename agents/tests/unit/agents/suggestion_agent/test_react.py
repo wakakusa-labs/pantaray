@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
+from tests.unit.agents.suggestion_agent.prompt_support import NUDGE_CONFIG
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.agents.suggestion_agent import react
+from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.agents.suggestion_agent.react import (
     SUBMIT_SUGGESTION_TOOL_NAME,
@@ -29,7 +32,10 @@ from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
 )
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.agent.suggestion import SuggestionExtraction
+from pantaray_agents.schema.agent.suggestion import (
+    SuggestionExtraction,
+    SuggestionHistoryEntry,
+)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
@@ -52,6 +58,9 @@ from pantaray_llm.contracts.tool_use import LlmToolCall
 class _Reply:
     response: LlmActionTurnResponse
     provider_turn: LlmProviderTurn | None = None
+
+
+_NOW = datetime(2026, 10, 12, tzinfo=UTC)
 
 
 def _reply(*calls: tuple[str, str, dict[str, JSONValue]], text: str = "") -> _Reply:
@@ -144,6 +153,7 @@ async def _run(
     *,
     tools: FixedSuggestionResearchTools | None = None,
     steps: list[ReactLoopStep] | None = None,
+    past: PastSuggestions | None = None,
 ) -> SuggestionExtraction:
     async def record_step(step: ReactLoopStep) -> None:
         if steps is not None:
@@ -156,9 +166,11 @@ async def _run(
         lens="## The kind of suggestion for this run",
         system_instruction="system",
         research_tools=tools or _tools(),
+        nudge_config=NUDGE_CONFIG,
         send_turn=model,
         parse_output=parse_suggestion_output,
         record_step=record_step,
+        past=past or PastSuggestions((), _NOW),
     )
 
 
@@ -365,3 +377,71 @@ async def test_raw_activity_reaches_the_model_but_no_stored_step() -> None:
         "first_observed_at": "2026-09-28T02:56:50+09:00",
         "last_observed_at": "2026-09-28T02:56:50+09:00",
     }
+
+
+def _shown(
+    answer: str, *, reaction: str | None = None, reason: str | None = None
+) -> SuggestionHistoryEntry:
+    return SuggestionHistoryEntry(
+        answer=answer,
+        interaction_contract="action_offer",
+        created_at="2026-10-10T00:00:00Z",
+        user_reaction=reaction,
+        dismiss_reason=reason,
+    )
+
+
+def _topic_embed(texts: Sequence[str]) -> list[list[float]]:
+    # Unit vectors by topic: the same topic is a cosine of 1, another one 0.
+    return [[1.0, 0.0] if "pypdf" in text else [0.0, 1.0] for text in texts]
+
+
+def _past(*rows: SuggestionHistoryEntry) -> PastSuggestions:
+    return PastSuggestions(
+        rows, _NOW, _topic_embed, tuple(_topic_embed([row.answer for row in rows]))
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("key_point", "reaction", "sent_back"),
+    [
+        ("Update pypdf in SpeckCheck to 6.20.0 with its tests.", "rejected", True),
+        # Unanswered counts as not accepted.
+        ("Update pypdf in SpeckCheck to 6.20.0 with its tests.", None, True),
+        # A follow-up to accepted work is welcome.
+        ("Update pypdf in SpeckCheck to 6.20.0 with its tests.", "accepted", False),
+        ("Add a beat map for the launch film's music.", "rejected", False),
+    ],
+)
+async def test_a_suggestion_close_to_an_unaccepted_one_is_sent_back_once(
+    key_point: str, reaction: str | None, sent_back: bool
+) -> None:
+    payload = {**_terminal_payload(), "key_point": key_point}
+    model = _scripted(_submit("submit-1", payload), _submit("submit-2", payload))
+    past = _past(
+        _shown("Update pypdf to 6.20.0?", reaction=reaction, reason="Already did")
+        if reaction == "rejected"
+        else _shown("Update pypdf to 6.20.0?", reaction=reaction)
+    )
+
+    result = await _run(model, past=past)
+
+    assert result["has_suggestion"] is True
+    assert len(model.requests) == (2 if sent_back else 1)
+    if sent_back:
+        notice = str(_results(model.requests[1])["submit-1"])
+        # The earlier suggestion and why the user turned it down.
+        assert "Update pypdf to 6.20.0?" in notice
+        if reaction == "rejected":
+            assert "Already did" in notice
+
+
+@pytest.mark.asyncio
+async def test_without_the_embedding_model_no_repeat_is_judged() -> None:
+    payload = {**_terminal_payload(), "key_point": "Update pypdf again."}
+    model = _scripted(_submit("submit-1", payload))
+
+    await _run(model, past=PastSuggestions((_shown("Update pypdf?"),), _NOW))
+
+    assert len(model.requests) == 1

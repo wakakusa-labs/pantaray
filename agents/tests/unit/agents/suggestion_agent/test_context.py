@@ -933,3 +933,39 @@ def test_suggestion_context_shows_the_local_date_of_each_stored_instant() -> Non
         "- [24h] period: 2026-09-26T06:00+09:00 .. 2026-09-27T06:00+09:00"
         " | ended_ago: 50m (3000s) | summary: S24",
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_history_reads_four_weeks_while_the_prompt_lists_the_latest(
+    suggestion_agent,
+) -> None:
+    rows = [
+        {
+            "answer": f"Suggestion {number}",
+            "interaction_contract": contract,
+            "created_at": f"2026-09-{28 - number % 20:02d}T00:00:00Z",
+            "user_reaction": reaction,
+        }
+        for number, (contract, reaction) in enumerate(
+            [("action_offer", "accepted")] * 3
+            + [("action_offer", "rejected")] * 12
+            + [("action_offer", None)] * 4
+            + [("message_only", None)] * 6
+        )
+    ]
+    get_recent = AsyncMock(return_value=RepositoryResult(data=rows))
+    suggestion_agent.repository.get_recent_suggestions = get_recent
+
+    context = await suggestion_agent._fetch_context_data(
+        SuggestionAgentRequest(
+            user_id="user-1",
+            suggestion_id="sug-1",
+            short_term_insight="Currently coding.",
+            reconsideration_reason="Periodic review.",
+        )
+    )
+
+    assert get_recent.await_args.kwargs["days"] == 28
+    assert context["recent_suggestions"].count("] answer: Suggestion") == 20
+    assert "Suggestion 20" not in context["recent_suggestions"]
+    assert len(suggestion_agent._past_suggestions.rows) == len(rows)

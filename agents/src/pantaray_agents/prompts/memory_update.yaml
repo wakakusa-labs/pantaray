@@ -29,10 +29,11 @@ system_instruction: |
     global preference, and do not carry it into an unrelated workspace.
   - Keep `facts/index.md` and `insights/index.md` as entry points, and organize
     initiative-specific content as `Organization -> Project`. Each index opens
-    with a `## Overview` section a later agent reads before anything else: in
-    facts, who the user is and the endeavors they are working on, by name; in
-    insights, what they are after in each, how they work, and what help works
-    for them. Keep it to a few lines, and update it only when this run's
+    with a `## Overview` section about the user that a later agent reads
+    before anything else: in facts, who the user is and their role, and the
+    endeavors they are working on, by name; in insights, what they ultimately
+    want, what they are after in each endeavor, how they work, and what help
+    works for them. Keep it to a few lines, and update it only when this run's
     changes alter it.
 
   ## Category boundaries

@@ -76,10 +76,7 @@ from pantaray_agents.tasks.experience_consolidation import (
     last_consolidated_applies_when_chars,
     merge_experiences_tool,
 )
-from pantaray_agents.tasks.memory_update_completion import (
-    ProfileBriefBuilder,
-    publish_memory_draft,
-)
+from pantaray_agents.tasks.memory_update_completion import publish_memory_draft
 from pantaray_agents.tasks.memory_update_context import PreparedMemoryUpdateRun
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
 from pantaray_agents.tools.contract import (
@@ -200,7 +197,6 @@ async def consolidate_memory_files(
     fact_id: str,
     targets: tuple[MemoryConsolidationTarget, ...],
     agent: MemoryConsolidationAgent,
-    build_profile_brief: ProfileBriefBuilder,
 ) -> None:
     for target in targets:
         try:
@@ -210,7 +206,6 @@ async def consolidate_memory_files(
                 fact_id=fact_id,
                 target=target,
                 agent=agent,
-                build_profile_brief=build_profile_brief,
             )
         # The update this follows is already complete, so its job would end as
         # a success over any error raised here: this is the boundary that
@@ -239,7 +234,6 @@ async def _consolidate_file(
     fact_id: str,
     target: MemoryConsolidationTarget,
     agent: MemoryConsolidationAgent,
-    build_profile_brief: ProfileBriefBuilder,
 ) -> None:
     user_id = payload["user_id"]
     run_id = payload["job_id"]
@@ -316,7 +310,7 @@ async def _consolidate_file(
             f"consolidation left {after_chars} of {before_chars} characters"
         )
     await require_current_route_identity()
-    await publish_memory_draft(
+    publish_memory_draft(
         runtime=runtime,
         payload=payload,
         source=target.source,
@@ -325,7 +319,6 @@ async def _consolidate_file(
         draft=session.draft,
         prompt_name=MEMORY_CONSOLIDATION_PROMPT_NAME,
         prompt_version=MEMORY_CONSOLIDATION_PROMPT_VERSION,
-        build_profile_brief=build_profile_brief,
     )
     log_structured_event(
         logger,

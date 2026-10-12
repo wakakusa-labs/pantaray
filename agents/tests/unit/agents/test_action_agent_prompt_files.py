@@ -189,7 +189,7 @@ def test_action_prompts_treat_request_summary_as_handoff_note() -> None:
 _CHANGING_PROMPT_FIELDS = frozenset(
     field for _, fields in WORLD_STATE_SECTIONS for field in fields
 )
-# Fixed for the whole Action. The profile briefs are read once, when the Action
+# Fixed for the whole Action. The memory indexes are read once, when the Action
 # starts; Pantaray's default AGENTS.md ships with the app.
 _FIXED_PROMPT_FIELDS = frozenset(
     {
@@ -198,8 +198,7 @@ _FIXED_PROMPT_FIELDS = frozenset(
         "request_summary",
         "target_context",
         "memory_context_model",
-        "insight_data",
-        "structured_fact_data",
+        "memory_indexes",
     }
 )
 

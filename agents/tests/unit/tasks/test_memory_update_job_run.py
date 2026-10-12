@@ -31,7 +31,6 @@ from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
 )
-from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.memory_catalog.search_policy import (
     parse_memory_search_focus,
 )
@@ -95,7 +94,6 @@ class _ScriptedMemoryAgent:
         self._edits = edits
         self.applied_memory_request_ids = applied_memory_request_ids
         self.contexts: list[MemoryUpdateContext] = []
-        self.briefs: list[MemorySource] = []
 
     async def update(
         self,
@@ -130,12 +128,6 @@ class _ScriptedMemoryAgent:
         return MemoryUpdateAgentResult(
             applied_memory_request_ids=self.applied_memory_request_ids,
         )
-
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        self.briefs.append(source)
-        return f"## Profile Brief\n- {source}: {memory_text[:20]}"
 
 
 def _bootstrap(tmp_path: Path) -> LocalMemoryFileEditorRuntime:
@@ -232,8 +224,7 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
     with sqlite3.connect(runtime.db_path) as connection:
         heads = connection.execute(
             """
-            SELECT nodes.source_type, nodes.lifecycle,
-                   revisions.profile_brief IS NOT NULL
+            SELECT nodes.source_type, nodes.lifecycle
             FROM memory_nodes AS nodes
             JOIN memory_revisions AS revisions
               ON revisions.revision_id = nodes.current_revision_id
@@ -249,11 +240,10 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
         ).fetchall()
 
     assert heads == [
-        ("agent_experience", "active", 0),
-        ("fact", "active", 1),
-        ("long_term_insight", "active", 1),
+        ("agent_experience", "active"),
+        ("fact", "active"),
+        ("long_term_insight", "active"),
     ]
-    assert agent.briefs == ["fact", "long_term_insight"]
     assert len(completed) == 1
     assert json.loads(str(completed[0][0])) == {
         "published_sources": ["agent_experience", "fact", "long_term_insight"]
@@ -304,12 +294,6 @@ class _AgentThatReplacesTheRoute:
             session_version="2",
         )
         return MemoryUpdateAgentResult(applied_memory_request_ids=())
-
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        del source, memory_text
-        raise AssertionError("a replaced route must not reach publication")
 
 
 @pytest.mark.asyncio

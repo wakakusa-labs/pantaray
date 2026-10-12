@@ -433,7 +433,6 @@ def _build_revision(
         artifact_root_path=artifact_root_path,
         fragment_schema_version=MEMORY_FRAGMENT_SCHEMA_VERSION,
         content_sha256=artifact_content_sha256(request.draft.documents),
-        profile_brief=None,
         created_at=now_utc_iso(),
     )
 

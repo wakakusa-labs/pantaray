@@ -67,10 +67,6 @@ class MemoryUpdateWorkerAgent(Protocol):
         tool_result_directory_fd: int,
     ) -> None: ...
 
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str: ...
-
 
 type MemoryUpdateAgentBuilder = Callable[[], Awaitable[MemoryUpdateWorkerAgent]]
 
@@ -127,13 +123,12 @@ async def execute_memory_update_job(
             # the edits become the owner's memory, so the route they were made
             # on has to still be current.
             await require_current_route_identity()
-            await publish_memory_update_run(
+            publish_memory_update_run(
                 runtime=runtime,
                 payload=payload,
                 prepared=prepared,
                 prompt_name=MemoryUpdateAgent.PROMPT_NAME,
                 prompt_version=MemoryUpdateAgent.PROMPT_VERSION,
-                build_profile_brief=agent.generate_profile_brief,
                 applied_memory_request_ids=applied_memory_request_ids,
             )
         # After completion: a crash from here leaves the update complete, and
@@ -144,7 +139,6 @@ async def execute_memory_update_job(
             fact_id=prepared.fact_id,
             targets=consolidation_targets(prepared, runtime=runtime),
             agent=agent,
-            build_profile_brief=agent.generate_profile_brief,
         )
 
     await run_memory_update_job(

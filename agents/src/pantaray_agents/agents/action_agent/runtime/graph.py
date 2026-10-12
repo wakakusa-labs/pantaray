@@ -44,6 +44,7 @@ from ..support.status import ACTION_TERMINAL_STATUSES
 from .error_redaction import emit_redacted_agent_error
 from .handlers.nodes import (
     action_step,
+    ensure_memory_indexes,
     execution_think_step,
     finalize_step,
     initialize_context,
@@ -264,6 +265,7 @@ class ActionGraphRuntime:
     async def resume_gate(self, state: ActionAgentState) -> ActionAgentState:
         """fresh run / restored run 共通の入口ノード。"""
 
+        ensure_memory_indexes(state, user_id=str(self.request.user_id))
         return state
 
     def route_from_resume(self, state: ActionAgentState) -> ResumeRouteName:

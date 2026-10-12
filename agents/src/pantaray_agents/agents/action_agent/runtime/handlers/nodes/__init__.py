@@ -6,10 +6,11 @@ from .common import (
 )
 from .executing import execution_think_step
 from .finalize import finalize_step
-from .initial import initialize_context
+from .initial import ensure_memory_indexes, initialize_context
 
 __all__ = [
     "_build_tool_error_payload",
+    "ensure_memory_indexes",
     "initialize_context",
     "execution_think_step",
     "action_step",

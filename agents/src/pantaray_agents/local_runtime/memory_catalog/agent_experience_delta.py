@@ -58,10 +58,14 @@ def rebuild_agent_experience_index(
     )
 
 
-def applies_when_chars(documents: tuple[MemoryDocument, ...]) -> int:
-    """Characters of every lesson's `Applies when`, the part Action is handed."""
+def lesson_situations(documents: tuple[MemoryDocument, ...]) -> tuple[str, ...]:
+    """Every lesson's `Applies when`, the part Action and Suggestion are handed."""
 
-    return sum(len(entry.applies_when) for entry in _parse_entries(documents))
+    return tuple(entry.applies_when for entry in _parse_entries(documents))
+
+
+def applies_when_chars(documents: tuple[MemoryDocument, ...]) -> int:
+    return sum(len(situation) for situation in lesson_situations(documents))
 
 
 def validate_agent_experience_tree_change(
@@ -177,6 +181,7 @@ def _validate_tree_paths(documents: dict[str, str]) -> None:
 __all__ = [
     "AgentExperienceTreeChange",
     "applies_when_chars",
+    "lesson_situations",
     "parse_agent_experience_tree",
     "rebuild_agent_experience_index",
     "validate_agent_experience_tree_change",

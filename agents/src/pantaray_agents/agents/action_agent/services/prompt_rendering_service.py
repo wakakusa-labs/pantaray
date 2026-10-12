@@ -49,9 +49,6 @@ class PromptRenderingService:
     def __init__(self, deps: PromptRenderingDeps) -> None:
         self._deps = deps
 
-    def build_insight_text(self, profile_brief: str | None) -> str:
-        return self._deps.formatter.build_insight_text(profile_brief)
-
     def render_workspace_context_prompt(
         self,
         state: ActionAgentState | None = None,

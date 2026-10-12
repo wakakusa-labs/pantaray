@@ -161,8 +161,10 @@ prompt: |
   {current_time}. Count days to deadlines from this date.
 
   ## Stable Memory
-  Long-term direction and facts from the run-start snapshot. Read leaf documents if
-  their details could change the decision.
+  The facts and insights indexes and the situations past lessons apply to, as of
+  this run's start. Read a file an index links if its details could change the
+  decision: pass its path from the memory root (such as `facts/<linked path>`) to
+  `memory_search` as a keyword.
   {stable_memory_context}
 
   ## Current work context (short-term Insight)

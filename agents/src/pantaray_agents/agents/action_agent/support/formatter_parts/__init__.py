@@ -1,4 +1,3 @@
-from .goal import GoalFormattingMixin
 from .history import HistoryFormattingMixin
 from .shared import (
     HistoryDisplayEntry,
@@ -7,7 +6,6 @@ from .shared import (
 )
 
 __all__ = [
-    "GoalFormattingMixin",
     "HistoryDisplayEntry",
     "HistoryFormattingMixin",
     "format_tool_summary_list",

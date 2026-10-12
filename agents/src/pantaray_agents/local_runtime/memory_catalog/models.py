@@ -67,7 +67,6 @@ class MemoryRevision:
     artifact_root_path: str | None
     fragment_schema_version: int
     content_sha256: str
-    profile_brief: str | None
     created_at: str
 
 

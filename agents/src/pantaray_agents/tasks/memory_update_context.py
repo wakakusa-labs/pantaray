@@ -11,7 +11,6 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from typing import Final
 
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AGENT_EXPERIENCE_ENTRIES_ROOT,
@@ -25,6 +24,12 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
 )
 from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
     render_artifact_manifest,
+)
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    FACTS_INDEX_PATH,
+    INDEX_OVERVIEW_HEADING,
+    INSIGHTS_INDEX_PATH,
+    opens_with_overview,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
@@ -86,10 +91,6 @@ from pantaray_agents.utils.local_time import (
     local_time_note,
     local_zone_name,
 )
-
-FACTS_INDEX_PATH: Final[str] = "facts/index.md"
-INSIGHTS_INDEX_PATH: Final[str] = "insights/index.md"
-INDEX_OVERVIEW_HEADING: Final[str] = "## Overview"
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,17 +361,18 @@ def _overview_request(documents: tuple[MemoryDocument, ...]) -> str:
     for path in (FACTS_INDEX_PATH, INSIGHTS_INDEX_PATH):
         if not any(item.source_path == path for item in documents):
             continue
-        headings = (
-            line
-            for line in _index_text(documents, path).splitlines()
-            if line.startswith("## ")
-        )
-        if next(headings, None) != INDEX_OVERVIEW_HEADING:
+        if not opens_with_overview(_index_text(documents, path)):
             requests.append(
                 f"`{path}` has no overview yet: write its `{INDEX_OVERVIEW_HEADING}`"
-                " in this run from the index and the files it names."
+                " too, from the index and the files it names."
             )
-    return " ".join(requests)
+    # Worded as an addition: asked alone, the model wrote the overview and
+    # called `completed` without the updates the evidence called for.
+    return (
+        "Besides the updates this run's evidence calls for, " + " ".join(requests)
+        if requests
+        else ""
+    )
 
 
 def _category_plan(

@@ -62,6 +62,7 @@ from .read_gate import (
     merge_read_snapshot,
     read_snapshot_is_valid,
 )
+from .reference_tags import misused_reference_ids, restore_reference_tags
 from .tool_support import FILE_TOOL_ERRORS
 from .tool_support import (
     args_object as _args_object,
@@ -154,7 +155,8 @@ class LocalMemoryFileEditorTools:
                     "text file. Registered workspace roots are read-only. If the target "
                     "file has not been read in the current run, the patch is not applied; "
                     "the tool returns current text for a fresh patch. Existing refs may stay "
-                    "while their text or headings change or move within this file. "
+                    "while their text or headings change or move within this file; a kept "
+                    "tag keeps its stored note even if the note is retyped or left out. "
                     "Deleting a complete ref tag also unlinks it; the diff summary "
                     "reports removed ref IDs. Use link_memory to add refs. "
                     f"Editable paths: {self._editable_scope}."
@@ -396,7 +398,12 @@ class LocalMemoryFileEditorTools:
                     step_number=_step_number,
                 )
                 return _success(call.tool_name, output)
-            updated_text = apply_memory_patch(base_text, chunks)
+            updated_text = restore_reference_tags(
+                before=base_text, after=apply_memory_patch(base_text, chunks)
+            )
+            misused = misused_reference_ids(before=base_text, after=updated_text)
+            if misused is not None:
+                raise MemoryLinkValidationError(misused)
             revision = self.memory_session.replace_document(
                 path=canonical_path,
                 content=updated_text,
@@ -422,8 +429,9 @@ class LocalMemoryFileEditorTools:
                 message=str(exc),
                 details={
                     "path": path,
-                    "retry_advice": "Use link_memory to add refs or recreate them in another file. "
-                    "Preserve existing tags intact and unique, or remove complete tags to unlink them. "
+                    "retry_advice": "Keep each named ref tag at most once and only in its "
+                    "own file, or remove the complete tag to unlink it. Use link_memory to "
+                    "add refs or recreate them in another file. "
                     "Agent Experience evidence is host-owned.",
                 },
             )

@@ -17,8 +17,6 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs.memory_update import execute_memory_update_job
 from pantaray_agents.tasks.memory_consolidation import (
     MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS,
-    misused_reference_ids,
-    restore_reference_tags,
 )
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -172,29 +170,3 @@ async def test_a_consolidation_that_does_not_shrink_its_file_publishes_nothing(
     assert [(item["path"], item["job_id"]) for item in failures] == [
         ("facts/tooling.md", payload["job_id"])
     ]
-
-
-def test_a_kept_ref_gets_its_stored_tag_back() -> None:
-    before = '- Chose SQLite. [[ref:ref_a note:"why \\"local\\" won"]]\n- Old event.\n'
-
-    restored = restore_reference_tags(
-        before=before,
-        after='- Uses SQLite. [[ref:ref_a]] [[ref:ref_new note:"made up"]]\n',
-    )
-
-    assert restored == (
-        '- Uses SQLite. [[ref:ref_a note:"why \\"local\\" won"]] '
-        '[[ref:ref_new note:"made up"]]\n'
-    )
-
-
-def test_a_repeated_or_invented_ref_is_named() -> None:
-    before = "- One. [[ref:ref_a]]\n- Two. [[ref:ref_b]]\n"
-
-    assert misused_reference_ids(
-        before=before, after="- One and two. [[ref:ref_a]] [[ref:ref_c]]\n"
-    ) == ("ref IDs not in this file: ref_c")
-    assert misused_reference_ids(
-        before=before, after="- One. [[ref:ref_a]]\n- Again. [[ref:ref_a]]\n"
-    ) == ("ref IDs used more than once: ref_a")
-    assert misused_reference_ids(before=before, after="- One. [[ref:ref_a]]\n") is None

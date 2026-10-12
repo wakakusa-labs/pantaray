@@ -48,6 +48,7 @@ import {
 } from '../screenshot/screenshotSync';
 import {
   holdsCaptureOsPermissions,
+  holdsScreenRecording,
   openCapturePermissionSettings,
   requestCapturePermissions,
 } from '../windows/macosPermissions';
@@ -265,6 +266,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     isBackendRuntimeReady: () => params.supabaseWiring.getLocalOwnerId() !== null,
     getManifestPath: params.desktopRuntime.getAppRuntimeManifestPath,
     requestPermissions: requestCapturePermissions,
+    holdsScreenRecording,
     readSource: (userId) =>
       requestJson({
         path: `/v1/agents/users/${encodeURIComponent(userId)}/context-source`,

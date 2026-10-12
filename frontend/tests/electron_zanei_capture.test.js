@@ -45,6 +45,7 @@ function fixture(t, overrides = {}) {
     isBackendRuntimeReady: () => true,
     capturePrivacy: privacy,
     getManifestPath: () => manifestPath,
+    holdsScreenRecording: () => true,
     readSource: async () => { await backendGate; return state; },
     transitionSource: async (user, request) => {
       await backendGate;
@@ -643,6 +644,26 @@ test('a start left waiting for permission stores nothing until a later start rec
   assert.equal(await f.manager.start(), 'started');
   assert.equal(f.stored(), true);
   assert.equal(f.enabled(), true);
+});
+
+test('a start waiting on Screen Recording stores the "on", so the reopened app resumes it', async t => {
+  // macOS applies a Screen Recording grant only once the app reopens, so this start
+  // can never finish in this run; without the stored "on" the reopened app would
+  // come back with recording off.
+  let screenRecording = false;
+  const f = fixture(t, { holdsScreenRecording: () => screenRecording });
+  f.process.start = async () => { f.calls.push('start'); return {
+    binding: { store_id: 'store', protocol_version: 1 }, permissionsReady: screenRecording,
+  }; };
+  assert.equal(await f.manager.start(), 'permission_pending');
+  assert.equal(f.enabled(), true);
+
+  await f.manager.pause('shutdown');
+  screenRecording = true;
+  f.calls.length = 0;
+  await f.manager.restoreRecorder();
+  assert.deepEqual(f.calls.slice(-2), ['start', 'activate']);
+  assert.equal(f.manager.getStatus(), true);
 });
 
 test('a start is reported once it actually runs, and once per owner in a run', async t => {

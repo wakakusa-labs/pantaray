@@ -58,30 +58,6 @@ def memory_embedding_chunk_at(
     )
 
 
-def memory_embedding_chunk_count(
-    content_text: str,
-    *,
-    max_text_chars: int,
-) -> int:
-    return memory_embedding_chunk_count_from_length(
-        len(content_text),
-        max_text_chars=max_text_chars,
-    )
-
-
-def memory_embedding_chunk_count_from_length(
-    content_length: int,
-    *,
-    max_text_chars: int,
-) -> int:
-    if isinstance(content_length, bool) or content_length < 0:
-        raise ValueError("embedding content length must not be negative")
-    if content_length == 0:
-        return 0
-    chunk_size = _require_max_text_chars(max_text_chars)
-    return (content_length + chunk_size - 1) // chunk_size
-
-
 def validate_memory_embedding_chunk(
     *,
     fragment_content_text: str,
@@ -112,8 +88,6 @@ def _require_max_text_chars(max_text_chars: int) -> int:
 __all__ = [
     "MemoryEmbeddingChunk",
     "memory_embedding_chunk_at",
-    "memory_embedding_chunk_count",
-    "memory_embedding_chunk_count_from_length",
     "split_memory_embedding_chunks",
     "validate_memory_embedding_chunk",
 ]

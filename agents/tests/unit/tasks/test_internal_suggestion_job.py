@@ -667,7 +667,7 @@ async def test_run_suggestion_job_defers_transient_semantic_search_failure(
         raise locked
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_locked,
     )
 

@@ -9,11 +9,6 @@ from pantaray_agents.schema.repository_errors import (
     is_retryable_repository_exception,
 )
 
-from .embedding_chunks import (
-    memory_embedding_chunk_count_from_length,
-    validate_memory_embedding_chunk,
-)
-from .embedding_consistency import UNEMBEDDABLE_CHUNK_SQL
 from .embedding_generations import (
     EmbeddingGeneration,
     generation_entry_table,
@@ -25,7 +20,6 @@ from .semantic_index import (
     encode_embedding,
 )
 
-_SQLITE_REVISION_ID_CHUNK_SIZE = 500
 # sqlite-vec limits each KNN query to k <= 4096.
 _SQLITE_VEC_MAX_K = 4_096
 
@@ -54,11 +48,7 @@ def search_semantic_fragments(
     embedding_generation: EmbeddingGeneration,
     candidate_limit: int,
 ) -> tuple[tuple[SemanticFragmentMatch, ...], ...]:
-    """One ranked match list per query embedding, in the order given.
-
-    The index is verified once, which costs more than a nearest-neighbour pass,
-    and every embedding is then ranked against the verified entries.
-    """
+    """One ranked match list per query embedding, in the order given."""
     if candidate_limit <= 0:
         raise ValueError("semantic candidate_limit must be positive")
     if not embedding_generation.specification.normalized:
@@ -83,22 +73,16 @@ def search_semantic_fragments(
     entries = generation_entry_table(embedding_generation.generation_id)
     vectors = generation_vector_table(embedding_generation.generation_id)
     try:
-        batches: list[tuple[_ProjectedEmbedding, ...]] = []
-        for offset in range(0, len(revision_ids), _SQLITE_REVISION_ID_CHUNK_SIZE):
-            projected = _verify_projected_chunk(
-                connection,
-                entries=entries,
-                user_id=user_id,
-                generation_id=embedding_generation.generation_id,
-                revision_ids=revision_ids[
-                    offset : offset + _SQLITE_REVISION_ID_CHUNK_SIZE
-                ],
-                max_text_chars=embedding_generation.specification.max_text_chars,
-            )
-            batches.extend(
-                projected[start : start + _SQLITE_VEC_MAX_K]
-                for start in range(0, len(projected), _SQLITE_VEC_MAX_K)
-            )
+        projected = _projected_entries(
+            connection,
+            entries=entries,
+            user_id=user_id,
+            revision_ids=revision_ids,
+        )
+        batches = tuple(
+            projected[start : start + _SQLITE_VEC_MAX_K]
+            for start in range(0, len(projected), _SQLITE_VEC_MAX_K)
+        )
 
         return tuple(
             _rank_matches(
@@ -149,125 +133,42 @@ def _rank_matches(
     return tuple(ranked[:candidate_limit])
 
 
-def _verify_projected_chunk(
+def _projected_entries(
     connection: sqlite3.Connection,
     *,
     entries: str,
     user_id: str,
-    generation_id: int,
     revision_ids: Sequence[str],
-    max_text_chars: int,
 ) -> tuple[_ProjectedEmbedding, ...]:
-    placeholders = ", ".join("?" for _ in revision_ids)
-    parameters = (user_id, *revision_ids)
-    entry_rows = connection.execute(
-        f"""
-        SELECT entries.fragment_id, entries.chunk_index,
-               entries.fragment_content_sha256,
-               entries.chunk_content_sha256,
-               fragments.content_text, fragments.content_sha256,
-               entries.embedding_id, entries.revision_id
-        FROM {entries} AS entries
-        LEFT JOIN memory_fragments AS fragments
-          ON fragments.user_id = entries.user_id
-         AND fragments.fragment_id = entries.fragment_id
-         AND fragments.revision_id = entries.revision_id
-         AND fragments.content_sha256 = entries.fragment_content_sha256
-         AND fragments.block_kind NOT IN ('record_root', 'document_root')
-        WHERE entries.user_id = ?
-          AND entries.revision_id IN ({placeholders})
-        ORDER BY entries.embedding_id
-        """,
-        parameters,
-    ).fetchall()
-    for row in entry_rows:
-        if row[4] is None or row[5] is None:
-            raise MemoryEmbeddingIndexUnavailableError(
-                "memory embedding index has stale projected rows"
-            )
-        try:
-            validate_memory_embedding_chunk(
-                fragment_content_text=str(row[4]),
-                fragment_content_sha256=str(row[5]),
-                chunk_index=int(row[1]),
-                chunk_content_sha256=str(row[3]),
-                max_text_chars=max_text_chars,
-            )
-        except ValueError as exc:
-            raise MemoryEmbeddingIndexUnavailableError(
-                "memory embedding index has invalid chunk projection"
-            ) from exc
-    entry_keys = {(str(row[0]), int(row[1])) for row in entry_rows}
-    expected_keys = _expected_visible_chunk_keys(
-        connection,
-        user_id=user_id,
-        revision_ids=revision_ids,
-        max_text_chars=max_text_chars,
-    )
-    work_rows = connection.execute(
-        f"""
-        SELECT work.fragment_id, work.chunk_index,
-               CASE WHEN {UNEMBEDDABLE_CHUNK_SQL} THEN 1 ELSE 0 END
-        FROM memory_embedding_work AS work
-        JOIN memory_fragments AS fragments
-          ON fragments.user_id = work.user_id
-         AND fragments.fragment_id = work.fragment_id
-        WHERE work.user_id = ? AND work.generation_id = ?
-          AND fragments.revision_id IN ({placeholders})
-          AND fragments.block_kind NOT IN ('record_root', 'document_root')
-        """,
-        (user_id, generation_id, *revision_ids),
-    ).fetchall()
-    work_keys = {(str(row[0]), int(row[1])) for row in work_rows if not row[2]}
-    # A chunk this model cannot embed is neither projected nor still owed, so it
-    # drops out of what the index is expected to cover.
-    unembeddable_keys = {(str(row[0]), int(row[1])) for row in work_rows if row[2]}
-    if (
-        entry_keys & (work_keys | unembeddable_keys)
-        or expected_keys != entry_keys | work_keys | unembeddable_keys
-    ):
-        raise MemoryEmbeddingIndexUnavailableError(
-            "memory embedding index has missing or duplicate chunk projections"
-        )
-    return tuple(
-        _ProjectedEmbedding(
-            embedding_id=int(row[6]),
-            fragment_id=str(row[0]),
-            content_sha256=str(row[2]),
-            revision_id=str(row[7]),
-        )
-        for row in entry_rows
-    )
-
-
-def _expected_visible_chunk_keys(
-    connection: sqlite3.Connection,
-    *,
-    user_id: str,
-    revision_ids: Sequence[str],
-    max_text_chars: int,
-) -> set[tuple[str, int]]:
-    placeholders = ", ".join("?" for _ in revision_ids)
+    # Read without re-checking against fragment text: the writer validates each
+    # chunk before storing it, fragment text never changes in place, deleting a
+    # fragment cascades to its entries, and activation checks the whole
+    # generation once. Re-checking here cost more than the nearest-neighbour
+    # pass; the caller still matches each returned candidate's hash.
+    #
+    # NOT INDEXED: one rowid-order scan beats fetching each row through the
+    # (user_id, ...) index and needs no sort for ORDER BY embedding_id.
+    # Design limit: it reads every entry, visible or not (about 70 ms at 150k
+    # entries); index revision_id when this read passes 300 ms.
     rows = connection.execute(
         f"""
-        SELECT fragment_id, length(content_text)
-        FROM memory_fragments
-        WHERE user_id = ? AND revision_id IN ({placeholders})
-          AND block_kind NOT IN ('record_root', 'document_root')
+        SELECT embedding_id, fragment_id, fragment_content_sha256, revision_id
+        FROM {entries} NOT INDEXED
+        WHERE user_id = ?
+          AND revision_id IN (SELECT value FROM json_each(?))
+        ORDER BY embedding_id
         """,
-        (user_id, *revision_ids),
+        (user_id, json.dumps(revision_ids)),
     ).fetchall()
-    expected: set[tuple[str, int]] = set()
-    for row in rows:
-        fragment_id = str(row[0])
-        chunk_count = memory_embedding_chunk_count_from_length(
-            int(row[1]),
-            max_text_chars=max_text_chars,
+    return tuple(
+        _ProjectedEmbedding(
+            embedding_id=int(row[0]),
+            fragment_id=str(row[1]),
+            content_sha256=str(row[2]),
+            revision_id=str(row[3]),
         )
-        expected.update(
-            (fragment_id, chunk_index) for chunk_index in range(chunk_count)
-        )
-    return expected
+        for row in rows
+    )
 
 
 def _search_embedding_batch(

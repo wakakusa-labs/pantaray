@@ -82,7 +82,7 @@ def test_semantic_search_preserves_retryable_operational_error(
 ) -> None:
     locked = sqlite3.OperationalError("database is locked")
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_operational_error(locked),
     )
 
@@ -108,7 +108,7 @@ def test_semantic_search_maps_missing_schema_to_index_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_operational_error(
             sqlite3.OperationalError("no such table: memory_embedding_entries_g1")
         ),
@@ -1095,7 +1095,9 @@ def test_exact_fragment_id_is_single_and_record_results_use_source_order(
     assert [row["content"] for row in fragment_results] == ["First paragraph."]
 
 
-def test_semantic_search_rejects_stale_projected_content_hash(tmp_path: Path) -> None:
+def test_semantic_search_rejects_a_candidate_projected_from_other_content(
+    tmp_path: Path,
+) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):
         register_inline_domain_memory(
@@ -1115,47 +1117,16 @@ def test_semantic_search_rejects_stale_projected_content_hash(tmp_path: Path) ->
             ("f" * 64,),
         )
 
+        # Search trusts the writer for the index as a whole but still matches
+        # every candidate it returns against the fragment's current hash.
         with pytest.raises(
             MemoryEmbeddingIndexUnavailableError,
-            match="stale",
+            match="no longer visible",
         ):
             search_memory_catalog(
                 connection=connection,
                 user_id="user-1",
                 run_id="corrupt-search",
-                keywords=("unrelated",),
-                semantic=SemanticSearchInput(generation, _vector(0), None),
-                focus="stable_knowledge",
-                center_time=None,
-                radius_hours=None,
-                limit=8,
-            )
-
-
-def test_semantic_search_rejects_missing_completed_projection(tmp_path: Path) -> None:
-    connection = _connection(tmp_path)
-    with immediate_transaction(connection):
-        register_inline_domain_memory(
-            connection=connection,
-            user_id="user-1",
-            source="fact",
-            source_record_id="missing-projection",
-            content="projected fact",
-        )
-        _index_pending_fragments(connection)
-        generation = _active_generation(connection)
-        connection.execute(
-            f"DELETE FROM memory_embedding_entries_g{generation.generation_id}"
-        )
-
-        with pytest.raises(
-            MemoryEmbeddingIndexUnavailableError,
-            match="missing or duplicate",
-        ):
-            search_memory_catalog(
-                connection=connection,
-                user_id="user-1",
-                run_id="missing-projection-search",
                 keywords=("unrelated",),
                 semantic=SemanticSearchInput(generation, _vector(0), None),
                 focus="stable_knowledge",
@@ -1198,45 +1169,6 @@ def test_semantic_search_rejects_a_projected_entry_without_its_vector(
                 radius_hours=None,
                 limit=8,
             )
-
-
-def test_semantic_search_accepts_an_unembeddable_chunk(tmp_path: Path) -> None:
-    connection = _connection(tmp_path)
-    with immediate_transaction(connection):
-        activate_embedding_generation_in_transaction(
-            connection,
-            user_id="user-1",
-            generation_id=_scoped_generation_id(connection),
-            activated_at="2026-07-18T00:00:00Z",
-        )
-        revision = register_inline_domain_memory(
-            connection=connection,
-            user_id="user-1",
-            source="fact",
-            source_record_id="failed-projection",
-            content="unavailable semantic fact",
-        )
-        connection.execute(
-            """
-            UPDATE memory_embedding_work
-            SET state = 'failed', last_error_code = ?
-            WHERE user_id = 'user-1'
-            """,
-            ("MEMORY_EMBEDDING_CONTENT_EMPTY",),
-        )
-
-        # A chunk the model cannot embed is left out of the index rather than
-        # taking semantic search down with it.
-        (results,) = search_semantic_fragments(
-            connection,
-            user_id="user-1",
-            visible_revision_ids=(revision.revision_id,),
-            query_embeddings=(_vector(0),),
-            embedding_generation=_active_generation(connection),
-            candidate_limit=8,
-        )
-
-    assert results == ()
 
 
 def test_catalog_search_supports_all_declared_focus_values(tmp_path: Path) -> None:

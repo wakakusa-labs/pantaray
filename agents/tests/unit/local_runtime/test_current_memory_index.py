@@ -24,6 +24,9 @@ from pantaray_agents.local_runtime.memory_catalog.embedding_generations import (
     ensure_user_embedding_generation,
     generation_entry_table,
 )
+from pantaray_agents.local_runtime.memory_catalog.embedding_work import (
+    claim_due_embeddings,
+)
 from pantaray_agents.local_runtime.memory_catalog.epoch import (
     append_memory_context_item,
     build_memory_context_epoch,
@@ -52,6 +55,8 @@ from pantaray_agents.local_runtime.memory_catalog.resolver import (
     follow_memory_reference,
 )
 from pantaray_agents.local_runtime.memory_catalog.semantic_index import (
+    commit_embedding_projection_batch,
+    encode_embedding,
     store_embedding_success,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
@@ -191,6 +196,68 @@ def test_external_edits_update_existing_index_and_keep_unchanged_embeddings(
     assert [
         item.relative_to(root).as_posix() for item in root.rglob("*") if item.is_file()
     ] == [path]
+
+
+def test_a_block_edited_while_it_is_embedded_is_not_indexed(
+    tmp_path: Path, connection: sqlite3.Connection
+) -> None:
+    # Search no longer re-checks the index, so the writer is the one place a
+    # vector computed from text that has since changed must be turned away.
+    db_path = tmp_path / "runtime.db"
+    root = create_editable_memory_root(artifact_root=tmp_path, user_id="user-1")
+    generation = ensure_user_embedding_generation(
+        db_path=db_path,
+        busy_timeout_ms=1000,
+        user_id="user-1",
+        specification=TEST_EMBEDDING_SPECIFICATION,
+    )
+    path = "facts/project.md"
+    with locked_memory_files(artifact_root=tmp_path, user_id="user-1") as files:
+        files.write(path=path, text="oldterm", expected_text=None)
+        with immediate_transaction(connection):
+            refresh_current_memory_index(connection=connection, files=files)
+    claimed = claim_due_embeddings(
+        db_path=db_path,
+        busy_timeout_ms=1000,
+        user_id="user-1",
+        generation_id=generation.generation_id,
+        now="2026-01-01T00:00:00Z",
+    )
+    assert [item.content_text for item in claimed] == ["oldterm"]
+    (root / path).write_text("newterm")
+    with locked_memory_files(artifact_root=tmp_path, user_id="user-1") as files:
+        with immediate_transaction(connection):
+            refresh_current_memory_index(connection=connection, files=files)
+
+    indexed = commit_embedding_projection_batch(
+        db_path=db_path,
+        busy_timeout_ms=1000,
+        documents=claimed,
+        encoded_vectors=(
+            encode_embedding(
+                (1.0, *((0.0,) * (MEMORY_EMBEDDING_DIMENSIONS - 1))),
+                dimensions=MEMORY_EMBEDDING_DIMENSIONS,
+            ),
+        ),
+        created_at="2026-01-01T00:00:01Z",
+    )
+
+    entries = generation_entry_table(generation.generation_id)
+    assert indexed == 0
+    assert connection.execute(f"SELECT COUNT(*) FROM {entries}").fetchone()[0] == 0
+    new = next(
+        item
+        for item in _fragments(connection, path)
+        if item.block_kind != "document_root"
+    )
+    assert new.content_text == "newterm"
+    assert (
+        connection.execute(
+            "SELECT state FROM memory_embedding_work WHERE fragment_id = ?",
+            (new.fragment_id,),
+        ).fetchone()[0]
+        == "pending"
+    )
 
 
 @pytest.mark.parametrize("target_changes", [True, False])

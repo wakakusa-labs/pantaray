@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_gate import SourceInvalidated
+from pantaray_agents.local_runtime.context.source_protocol import (
+    PageReadRequest,
+    PageResponse,
+)
+from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.context.source_transport import source_scope
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.job_control import DeferredLocalJob
@@ -154,20 +160,19 @@ async def _insight_activity_start(
     )
 
 
-async def _process_while_readable(
+async def _run_while_readable[T](
     *,
-    agent,
-    request: SuggestionAgentRequest,
     activity_start: InsightActivityStart | None,
-):
-    """Run the agent, or return None when the activity permit was revoked meanwhile.
+    run: Callable[[], Awaitable[T]],
+) -> T | None:
+    """Await `run`, or return None when the activity permit was revoked meanwhile.
 
-    As in the short Insight, a run that can read raw activity runs under
+    As in the short Insight, work that can read raw activity runs under
     `SourceGate.track` and `source_scope`: revoking the permit cancels it, model
     calls and run-step writes included, and nothing it produced is published.
     """
     if activity_start is None:
-        return await agent.process(request)
+        return await run()
     gate = context_source_control.gate
     source = activity_start.source
     try:
@@ -175,7 +180,7 @@ async def _process_while_readable(
             # Guards each model request's send, so a revocation that lands
             # before the cancel reaches this task still stops the next send.
             with source_scope(gate, source):
-                return await agent.process(request)
+                return await run()
     except asyncio.CancelledError:
         # `SourceGate.revoke` drops the permit before it cancels this task; a
         # permit that still matches means the job itself was cancelled.
@@ -187,6 +192,31 @@ async def _process_while_readable(
         return None
     except SourceInvalidated:
         return None
+
+
+async def _recorded_nothing_since(
+    *, activity_start: InsightActivityStart | None, cursor: str | None
+) -> bool:
+    """Whether the recorder holds no event after `cursor`, asked now.
+
+    `cursor` is where the triggering Insight began reading, so an empty answer
+    means nothing was recorded during its window or since. A gap, a failed read
+    or a revoked permit proves nothing, so each counts as activity and the run
+    goes ahead as before.
+    """
+    if activity_start is None or cursor is None:
+        return False
+    source = activity_start.source
+    reader = SourceReader(context_source_control.gate)
+    page = await _run_while_readable(
+        activity_start=activity_start,
+        run=lambda: reader.read_page(
+            source, PageReadRequest(cursor=cursor, upper_bound=None, limit=1)
+        ),
+    )
+    return (
+        isinstance(page, PageResponse) and not page.observations and not page.has_more
+    )
 
 
 async def _publish_while_readable(
@@ -264,6 +294,18 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
         activity_start = await _insight_activity_start(
             user_id=payload["user_id"], cursor=insight.source_cursor
         )
+        # Nobody is at the computer, so a review now would only restate the
+        # last one: the agent does not start. The next Insight that sees
+        # activity queues a Suggestion from the fresh situation.
+        if await _recorded_nothing_since(
+            activity_start=activity_start, cursor=insight.previous_source_cursor
+        ):
+            await _discard_suggestion(
+                repository=repository,
+                payload=payload,
+                reason="nothing was recorded since the previous Insight",
+            )
+            return
         workspace_settings = list_workspace_settings(
             db_path=db_path,
             busy_timeout_ms=timeout_ms,
@@ -334,8 +376,8 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
                 scheduled_at=format_utc_iso(decision),
             )
         try:
-            response = await _process_while_readable(
-                agent=agent, request=request, activity_start=activity_start
+            response = await _run_while_readable(
+                activity_start=activity_start, run=lambda: agent.process(request)
             )
         finally:
             discard_suggestion_tool_results(

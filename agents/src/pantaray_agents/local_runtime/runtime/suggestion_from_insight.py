@@ -43,6 +43,9 @@ class ReconsideredInsight:
     # The context-read cursor committed with this Insight; None for a row
     # written before the cursor was stored.
     source_cursor: str | None
+    # The cursor the Insight before it committed, where this one began reading;
+    # None when there is no earlier Insight or it predates stored cursors.
+    previous_source_cursor: str | None
 
 
 def _derived_id(kind: str, *, insight_id: str) -> str:
@@ -126,15 +129,21 @@ def read_reconsidered_insight(
     ) as connection:
         row = connection.execute(
             """
-            SELECT short_term_insight_data, reconsideration_reason, source_cursor
-            FROM agent_insights
-            WHERE user_id = ? AND insight_id = ?
+            SELECT insight.short_term_insight_data, insight.reconsideration_reason,
+                   insight.source_cursor,
+                   (SELECT previous.source_cursor FROM agent_insights AS previous
+                    WHERE previous.user_id = insight.user_id
+                      AND previous.status = 'success'
+                      AND previous.created_at < insight.created_at
+                    ORDER BY previous.created_at DESC LIMIT 1)
+            FROM agent_insights AS insight
+            WHERE insight.user_id = ? AND insight.insight_id = ?
             """,
             (user_id, insight_id),
         ).fetchone()
     if row is None:
         raise MissingReconsideredInsight(f"short Insight not found: {insight_id}")
-    insight, reason, cursor = row[0], row[1], row[2]
+    insight, reason, cursor, previous_cursor = row
     if not insight:
         raise MissingReconsideredInsight(f"short Insight is empty: {insight_id}")
     return ReconsideredInsight(
@@ -145,6 +154,9 @@ def read_reconsidered_insight(
             else "Periodic review of pending work and long-term direction after Memory updated."
         ),
         source_cursor=None if cursor is None else str(cursor),
+        previous_source_cursor=(
+            None if previous_cursor is None else str(previous_cursor)
+        ),
     )
 
 

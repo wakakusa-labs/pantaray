@@ -156,6 +156,40 @@ def test_unchanged_insight_is_a_valid_periodic_review_input(tmp_path: Path) -> N
     assert "Periodic review" in source.reconsideration_reason
 
 
+def test_an_insight_carries_the_cursor_its_own_read_began_at(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    rows = [
+        # (insight_id, user_id, status, source_cursor, minutes after NOW)
+        ("first", "user-1", "success", "cursor-1", 0),
+        ("other-user", "user-2", "success", "cursor-other", 10),
+        ("failed", "user-1", "error", None, 20),
+        ("current", "user-1", "success", "cursor-2", 30),
+    ]
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(
+            """INSERT INTO agent_insights(insight_id,user_id,status,
+               short_term_insight_data,facts,source_cursor,prompt_name,prompt_version,
+               created_at,updated_at)
+               VALUES (?,?,?,'Insight','',?,'insight','2.2',?,?)""",
+            [
+                (insight_id, user, status, cursor, at, at)
+                for insight_id, user, status, cursor, minutes in rows
+                for at in [(NOW + timedelta(minutes=minutes)).isoformat()]
+            ],
+        )
+
+    def _read(insight_id: str):
+        return read_reconsidered_insight(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            insight_id=insight_id,
+        )
+
+    assert _read("current").previous_source_cursor == "cursor-1"
+    assert _read("first").previous_source_cursor is None
+
+
 def test_the_welcome_neither_delays_nor_supersedes_the_first_real_suggestion(
     tmp_path: Path,
 ) -> None:

@@ -135,6 +135,7 @@ def _prepare_job(
             short_term_insight="The user is reviewing the parser.",
             reconsideration_reason="The review stalled.",
             source_cursor=None,
+            previous_source_cursor=None,
         ),
         "deps.get_suggestion_agent": AsyncMock(return_value=agent),
         "deps.get_suggestion_repository": AsyncMock(return_value=repository),

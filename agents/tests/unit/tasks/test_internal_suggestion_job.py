@@ -15,6 +15,10 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_gate import SourceGate
+from pantaray_agents.local_runtime.context.source_protocol import (
+    GapResponse,
+    PageResponse,
+)
 from pantaray_agents.local_runtime.context.source_transport import source_http_request
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
@@ -138,6 +142,7 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
             short_term_insight="# Insight\nFixing the parser.",
             reconsideration_reason="The user switched goals.",
             source_cursor=None,
+            previous_source_cursor=None,
         ),
     )
     monkeypatch.setattr(
@@ -1106,7 +1111,10 @@ async def test_a_suggestion_answered_on_a_replaced_route_is_never_published(
 
 
 def _readable_insight_job(
-    monkeypatch: pytest.MonkeyPatch, *, process
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    process,
+    previous_source_cursor: str | None = None,
 ) -> tuple[SimpleNamespace, AsyncMock, SourceGate]:
     """A job whose Insight committed a cursor while recording is readable."""
     gate = SourceGate()
@@ -1129,6 +1137,7 @@ def _readable_insight_job(
             short_term_insight="# Insight\nFixing the parser.",
             reconsideration_reason="The user switched goals.",
             source_cursor="insight-cursor",
+            previous_source_cursor=previous_source_cursor,
         ),
     )
     repository = SimpleNamespace(
@@ -1185,6 +1194,99 @@ async def test_the_run_reads_activity_from_the_cursor_its_insight_committed(
     start = get_agent.await_args.kwargs["activity_start"]
     assert start.cursor == "insight-cursor"
     assert start.source == gate.current("user-1")
+    repository.save_suggestion.assert_awaited_once()
+
+
+def _recorder_answers(monkeypatch: pytest.MonkeyPatch, answer: object) -> list:
+    """Make the recorder return `answer` to every page read; returns the reads."""
+    reads: list = []
+
+    class _Reader:
+        def __init__(self, gate: SourceGate) -> None:
+            self.gate = gate
+
+        async def read_page(self, source, request):
+            reads.append((source, request))
+            return answer
+
+    monkeypatch.setattr(
+        "pantaray_agents.tasks.internal_jobs.suggestion.SourceReader", _Reader
+    )
+    return reads
+
+
+_EMPTY_PAGE = PageResponse.model_construct(observations=(), has_more=False)
+
+
+@pytest.mark.asyncio
+async def test_nothing_recorded_since_the_previous_insight_starts_no_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = AsyncMock(return_value=SimpleNamespace(status="success"))
+    repository, get_agent, gate = _readable_insight_job(
+        monkeypatch, process=process, previous_source_cursor="previous-cursor"
+    )
+    reads = _recorder_answers(monkeypatch, _EMPTY_PAGE)
+
+    await _run_suggestion_job(_payload())
+
+    # The Insight began reading at the previous cursor; one event is enough to
+    # tell whether anything happened since.
+    [(source, request)] = reads
+    assert source == gate.current("user-1")
+    assert (request.cursor, request.limit) == ("previous-cursor", 1)
+    get_agent.assert_not_awaited()
+    process.assert_not_awaited()
+    repository.save_suggestion.assert_not_awaited()
+    repository.discard_suggestion_if_processing.assert_awaited_once()
+    repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(
+            PageResponse.model_construct(observations=("event",), has_more=False),
+            id="an_event_was_recorded",
+        ),
+        pytest.param(
+            PageResponse.model_construct(observations=(), has_more=True),
+            id="more_pages_follow",
+        ),
+        pytest.param(GapResponse.model_construct(), id="the_store_changed"),
+        pytest.param(SimpleNamespace(), id="the_read_failed"),
+    ],
+)
+async def test_a_review_runs_unless_the_recorder_shows_nothing_happened(
+    monkeypatch: pytest.MonkeyPatch, answer: object
+) -> None:
+    """Once the user is back, the next Insight's review runs as before."""
+    process = AsyncMock(return_value=SimpleNamespace(status="success"))
+    repository, get_agent, _gate = _readable_insight_job(
+        monkeypatch, process=process, previous_source_cursor="previous-cursor"
+    )
+    _recorder_answers(monkeypatch, answer)
+
+    await _run_suggestion_job(_payload())
+
+    process.assert_awaited_once()
+    repository.save_suggestion.assert_awaited_once()
+    repository.discard_suggestion_if_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_first_insight_runs_without_asking_the_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _get_agent, _gate = _readable_insight_job(
+        monkeypatch, process=AsyncMock(return_value=SimpleNamespace(status="success"))
+    )
+    reads = _recorder_answers(monkeypatch, _EMPTY_PAGE)
+
+    await _run_suggestion_job(_payload())
+
+    assert reads == []
     repository.save_suggestion.assert_awaited_once()
 
 
@@ -1324,6 +1426,7 @@ async def test_a_run_that_lost_its_access_is_discarded_not_requeued(
                 short_term_insight="# Insight",
                 reconsideration_reason="The user switched goals.",
                 source_cursor="insight-cursor",
+                previous_source_cursor=None,
             ),
         )
     recording_reads: list[bool] = []

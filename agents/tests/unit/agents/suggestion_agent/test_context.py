@@ -797,6 +797,28 @@ def test_a_dismissal_reason_reads_as_the_users_own_reason() -> None:
     ) in format_recent_suggestions([entry], _NOW)
 
 
+def test_a_suggestion_shows_the_lens_it_came_from_when_one_was_recorded() -> None:
+    entries = [
+        normalize_recent_suggestion_entry(
+            {
+                "answer": answer,
+                "interaction_contract": "action_offer",
+                "created_at": "2026-09-10T00:00:00Z",
+                "user_reaction": "rejected",
+                "lens": lens,
+            }
+        )
+        for answer, lens in (("Take over the report?", "take_over"), ("Old", None))
+    ]
+    rendered = format_recent_suggestions([e for e in entries if e], _NOW)
+    assert (
+        "answer: Take over the report?\n"
+        "  Kind of suggestion: take_over\n"
+        "  User reaction: rejected\n"
+    ) in rendered
+    assert rendered.count("Kind of suggestion") == 1
+
+
 @pytest.mark.parametrize(
     ("age", "reaction"),
     [

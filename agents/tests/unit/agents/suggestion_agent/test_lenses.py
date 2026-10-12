@@ -11,6 +11,7 @@ from tests.unit.agents.suggestion_agent.prompt_support import (
     NUDGE_CONFIG,
 )
 
+from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
     LlmToolCallTurn,
@@ -93,15 +94,15 @@ def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
     return (send, generate), selector_prompts
 
 
-async def _decide(model, steps: list[int]):
+async def _decide(model, steps: list[ReactLoopStep]):
     send, generate = model
     loader = PromptLoader()
     lens_config = loader.load_config(SUGGESTION_LENS_PROMPT_NAME)
     # Title each lens by its key so the fake model can tell the runs apart.
     lens_config.role_rules = {lens: f"### {lens.title()}" for lens in LENSES}
 
-    async def record(step) -> None:
-        steps.append(step.step_number)
+    async def record(step: ReactLoopStep) -> None:
+        steps.append(step)
 
     return await decide_with_lenses(
         user_id="user",
@@ -146,7 +147,7 @@ async def test_the_selector_choice_maps_to_that_candidate() -> None:
             "perspective": _suggestion("third idea"),
         },
     )
-    steps: list[int] = []
+    steps: list[ReactLoopStep] = []
 
     decision = await _decide(generate, steps)
 
@@ -159,7 +160,9 @@ async def test_the_selector_choice_maps_to_that_candidate() -> None:
     assert "earlier ideas" in selector_prompts[0]
     assert "take_over" not in selector_prompts[0].lower().replace(" ", "_")
     # Each run records in its own step range; the selector after all of them.
-    assert {1, 10_001, 20_001, 30_001} <= set(steps)
+    assert {1, 10_001, 20_001, 30_001} <= {step.step_number for step in steps}
+    # The selector's record keeps the lens of the Suggestion it chose.
+    assert steps[-1].tool_output == {"selected_lens": "perspective"}
 
 
 def test_a_lens_run_cannot_record_into_the_next_runs_step_range() -> None:
@@ -172,10 +175,12 @@ def test_a_lens_run_cannot_record_into_the_next_runs_step_range() -> None:
 @pytest.mark.asyncio
 async def test_the_selector_can_decline_every_candidate() -> None:
     generate, _ = _model(None, {"likely_forgotten": _suggestion("only idea")})
+    steps: list[ReactLoopStep] = []
 
-    decision = await _decide(generate, [])
+    decision = await _decide(generate, steps)
 
     assert decision.selected_lens is None
+    assert steps[-1].tool_output == {"selected_lens": None}
     assert decision.extraction["has_suggestion"] is False
     assert decision.extraction["decided"] is None
 

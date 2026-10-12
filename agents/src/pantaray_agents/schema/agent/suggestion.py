@@ -205,6 +205,10 @@ class SuggestionHistoryEntry(BaseModel):
         default_factory=list,
         description="Action の途中でユーザーが送った指示（古い順、最初の依頼を除く）",
     )
+    lens: str | None = Field(
+        default=None,
+        description="提案を選んだレンズ。selector の記録が無い提案は null",
+    )
 
 
 # 提案履歴のリスト型（ユースケースの明確化のための別名）

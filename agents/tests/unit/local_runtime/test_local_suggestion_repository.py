@@ -670,6 +670,52 @@ async def test_recent_suggestions_keep_dismissal_distinct_from_no_reply(
 
 
 @pytest.mark.asyncio
+async def test_recent_suggestions_carry_the_lens_the_selector_recorded(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    db_path = _bootstrap_db(tmp_path)
+    repo = _repo(db_path)
+    now = datetime.now(UTC)
+    for offset, suggestion_id in enumerate(("sug-old", "sug-lens")):
+        await repo.create_processing_suggestion_row(
+            user_id=USER_ID,
+            suggestion_id=suggestion_id,
+            created_at=(now + timedelta(seconds=offset)).isoformat(),
+        )
+        saved = await repo.save_suggestion(
+            _success_response(answer=suggestion_id).model_copy(
+                update={"suggestion_id": suggestion_id}
+            ),
+            prompt_name="suggestion",
+            prompt_version="react_v3",
+        )
+        assert saved.error is None
+    # The selector's record, then the writer's step after it.
+    for step_number, tool_output in (
+        (30_001, {"selected_lens": "take_over"}),
+        (30_002, None),
+    ):
+        step = await repo.save_suggestion_run_step(
+            suggestion_id="sug-lens",
+            step_number=step_number,
+            step_kind="llm",
+            status="success",
+            tool_output=tool_output,
+        )
+        assert step.error is None
+
+    recent = await repo.get_recent_suggestions(USER_ID)
+
+    assert recent.data is not None
+    assert [(row["answer"], row["lens"]) for row in recent.data] == [
+        ("sug-lens", "take_over"),
+        ("sug-old", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dismissal_keeps_the_users_reason_for_the_next_suggestion_run(
     tmp_path: Path,
 ) -> None:

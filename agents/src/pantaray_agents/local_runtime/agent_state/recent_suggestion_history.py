@@ -14,7 +14,8 @@ from pantaray_agents.schema.repositories.repository import DBRow
 
 _RECENT_SUGGESTION_HISTORY_SQL = """
         WITH recent AS (
-            SELECT suggestions.user_id, suggestions.answer,
+            SELECT suggestions.user_id, suggestions.suggestion_id,
+                   suggestions.answer,
                    suggestions.interaction_contract,
                    suggestions.created_at, suggestions.user_reaction,
                    suggestions.dismiss_reason,
@@ -68,7 +69,18 @@ _RECENT_SUGGESTION_HISTORY_SQL = """
                    ) AS later
                ) AS followups_json,
                json_extract(result_event.payload_json, '$.final_output')
-                   AS action_result
+                   AS action_result,
+               -- The selector's step records the lens it chose; Suggestions
+               -- from before it recorded one have none.
+               (
+                   SELECT json_extract(step.tool_output_json, '$.selected_lens')
+                   FROM agent_suggestion_run_steps AS step
+                   WHERE step.suggestion_id = recent.suggestion_id
+                     AND step.step_kind = 'llm'
+                     AND step.tool_output_json IS NOT NULL
+                   ORDER BY step.step_number DESC
+                   LIMIT 1
+               ) AS lens
         FROM recent
         LEFT JOIN agent_actions AS actions
           ON actions.user_id = recent.user_id

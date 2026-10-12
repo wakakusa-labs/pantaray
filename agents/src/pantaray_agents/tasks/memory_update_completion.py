@@ -41,6 +41,7 @@ from pantaray_agents.local_runtime.memory_catalog.draft import replace_draft_doc
 from pantaray_agents.local_runtime.memory_catalog.lifecycle import archive_memory
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     MemoryRunBinding,
+    consolidated_experience_ids,
     derived_experience_ids,
     memory_run_binding_from_payload,
 )
@@ -194,7 +195,11 @@ def _publish_agent_experience(
     validate_agent_experience_tree_change(
         base_documents=base.documents,
         published_documents=indexed.documents,
-        allowed_new_experience_ids=derived_experience_ids(binding.job_id),
+        # The job owns both namespaces; each writer is handed only its own.
+        allowed_new_experience_ids=(
+            *derived_experience_ids(binding.job_id),
+            *consolidated_experience_ids(binding.job_id),
+        ),
     )
     publish_agent_experience_artifact(
         db_path=runtime.db_path,

@@ -142,7 +142,7 @@ async def execute_memory_update_job(
             runtime=runtime,
             payload=payload,
             fact_id=prepared.fact_id,
-            targets=consolidation_targets(prepared),
+            targets=consolidation_targets(prepared, runtime=runtime),
             agent=agent,
             build_profile_brief=agent.generate_profile_brief,
         )

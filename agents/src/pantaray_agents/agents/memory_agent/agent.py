@@ -70,9 +70,10 @@ class MemoryUpdateAgentResult:
 
 @dataclass(frozen=True, slots=True)
 class MemoryConsolidationRequest:
-    """One oversized memory file, rewritten on its own."""
+    """One oversized memory file, or Agent Experience, consolidated on its own."""
 
     run_id: str
+    prompt_name: str
     path: str
     content: str
     limit_chars: int
@@ -177,7 +178,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
     ) -> None:
         """Rewrite one file through the given tools; the caller judges the result."""
 
-        config = prompt_loader.load_config(MEMORY_CONSOLIDATION_PROMPT_NAME)
+        config = prompt_loader.load_config(request.prompt_name)
         initial_prompt = config.prompt.format(
             today=request.today,
             path=request.path,

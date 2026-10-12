@@ -1,4 +1,4 @@
-"""apply_patch keeps the refs a model rewrites and names the ones it cannot keep."""
+"""Memory edits keep the refs a model rewrites and name the ones they cannot keep."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     build_local_memory_file_tools,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tasks.memory_consolidation import rewrite_file_tool
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -29,6 +30,11 @@ from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 _POLICY = EditablePathPolicy(("facts/**",))
 _SQLITE = '- Chose SQLite. [[ref:ref_a note:"why \\"local\\" won"]]'
 _WAL = '- Uses WAL. [[ref:ref_b note:"bench"]]'
+_UNCLOSED_TAG_LINES = (
+    '- SQLite. [[ref:ref_a note:"retyped',
+    "- Important new fact. [[ref:ref_b]]",
+    '"]]',
+)
 
 
 def _session() -> MemoryDraftToolSession:
@@ -126,8 +132,14 @@ async def test_a_kept_tag_keeps_its_stored_note(merged: str) -> None:
             ('- SQLite. [[ref:ref_a]] [[ref:ref_b]] [[ref:ref_c note:"c"]]',),
             "ref IDs not in this file: ref_c",
         ),
+        (
+            # A tag left unclosed runs on to the next closing quote, so it
+            # matches as one tag that has swallowed a line and another ref.
+            _UNCLOSED_TAG_LINES,
+            "ref tags span lines: ref_a",
+        ),
     ],
-    ids=["repeated", "invented", "from_another_file"],
+    ids=["repeated", "invented", "from_another_file", "unclosed"],
 )
 async def test_a_tag_that_cannot_be_kept_is_named(
     added: tuple[str, ...], named: str
@@ -140,6 +152,22 @@ async def test_a_tag_that_cannot_be_kept_is_named(
     assert result.status == "error"
     assert result.output["error_code"] == "MEMORY_LINK_INVALID"
     assert result.output["message"] == named
+    assert session.draft == before
+
+
+@pytest.mark.asyncio
+async def test_a_consolidation_rewrite_refuses_an_unclosed_tag_too() -> None:
+    session = _session()
+    before = session.draft
+    rewrite = rewrite_file_tool(session=session, path="facts/a.md")
+    text = "# A\n\n" + "\n".join(_UNCLOSED_TAG_LINES) + "\n"
+
+    result = await rewrite.execute(_call(rewrite.name, {"text": text}), 1)
+
+    assert result.status == "error"
+    assert result.output["message"] == (
+        "The file was not changed: ref tags span lines: ref_a"
+    )
     assert session.draft == before
 
 

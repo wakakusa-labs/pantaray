@@ -8,6 +8,7 @@ model meant to keep and name what it cannot do.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 from pantaray_agents.local_runtime.memory_references.reference_parser import (
@@ -28,27 +29,47 @@ def restore_reference_tags(*, before: str, after: str) -> str:
         occurrence.local_ref_id: before[occurrence.match_start : occurrence.match_end]
         for occurrence in extract_markdown_references(before)
     }
-    return REFERENCE_PATTERN.sub(
-        lambda match: stored.get(match.group("local_ref_id"), match.group(0)), after
-    )
+
+    def restored(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        # A tag whose closing quote went missing swallows the lines up to the
+        # next closing quote; putting the stored tag back would drop them.
+        return (
+            tag if _spans_lines(tag) else stored.get(match.group("local_ref_id"), tag)
+        )
+
+    return REFERENCE_PATTERN.sub(restored, after)
 
 
 def misused_reference_ids(*, before: str, after: str) -> str | None:
-    """Name the ref IDs a rewrite repeats or brings in, which validation refuses.
+    """Name the ref IDs a rewrite breaks, repeats or brings in.
 
     An ID the file did not have is either invented or carried from another file;
     neither keeps a ref, since a ref belongs to the file it was linked in.
     """
 
-    kept = [item.local_ref_id for item in extract_markdown_references(after)]
+    tags = extract_markdown_references(after)
+    kept = [item.local_ref_id for item in tags]
     known = {item.local_ref_id for item in extract_markdown_references(before)}
+    broken = sorted(
+        {
+            item.local_ref_id
+            for item in tags
+            if _spans_lines(after[item.match_start : item.match_end])
+        }
+    )
     repeated = sorted(ref_id for ref_id, count in Counter(kept).items() if count > 1)
     unknown = sorted(set(kept) - known)
     problems = [
-        *([f"used more than once: {', '.join(repeated)}"] if repeated else []),
-        *([f"not in this file: {', '.join(unknown)}"] if unknown else []),
+        *([f"ref tags span lines: {', '.join(broken)}"] if broken else []),
+        *([f"ref IDs used more than once: {', '.join(repeated)}"] if repeated else []),
+        *([f"ref IDs not in this file: {', '.join(unknown)}"] if unknown else []),
     ]
-    return "; ".join(f"ref IDs {problem}" for problem in problems) or None
+    return "; ".join(problems) or None
+
+
+def _spans_lines(tag: str) -> bool:
+    return "\n" in tag or "\r" in tag
 
 
 __all__ = ["misused_reference_ids", "restore_reference_tags"]

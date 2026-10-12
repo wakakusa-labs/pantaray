@@ -1498,7 +1498,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
     expect(screen.getByText('Draft the invoice?')).toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
-    expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    expect(composer).toHaveAttribute('placeholder', 'Send a message, or ask about your screen');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(submitMessage).not.toHaveBeenCalled();
     expect(sendOrchestration).toHaveBeenCalledTimes(1);
@@ -1700,7 +1700,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.getByText('canonical final output')).toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
     expect(composer).toHaveValue('Also this');
-    expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    expect(composer).toHaveAttribute('placeholder', 'Send a message, or ask about your screen');
     submitMessage.mockResolvedValueOnce(createSubmittedResult('act-existing', 'follow-up'));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(submitMessage.mock.calls[1][0].target).toEqual({
@@ -1725,7 +1725,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => snapshotListener?.(dismissed));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Send a message'
+      'Send a message, or ask about your screen'
     );
 
     const replied = structuredClone(dismissed);
@@ -1739,7 +1739,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.getByText('canonical final output')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Send a message'
+      'Send a message, or ask about your screen'
     );
     expect(submitMessage).not.toHaveBeenCalled();
   });

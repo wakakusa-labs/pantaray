@@ -31,7 +31,7 @@ drag Pantaray into your Applications folder. Builds are signed and notarized, an
    account.
 2. Press **Start recording** and allow the macOS permissions Pantaray asks for.
 3. Suggestions arrive as you work. To ask for something yourself, press the **New task**
-   shortcut from any app.
+   shortcut from any app. You can also ask about what is on your screen.
 
 ## Privacy
 

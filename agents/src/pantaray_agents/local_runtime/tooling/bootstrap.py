@@ -51,7 +51,7 @@ from .repository import (
 )
 from .repository.executions import create_execution_session_in_connection
 from .repository.manifests import (
-    _prepare_agent_experience_root,
+    _prepare_memory_folders,
     ensure_action_workspace_manifest_in_connection,
 )
 from .resources.resource_db_support import configure_connection
@@ -342,7 +342,7 @@ def _persist_action_execution_context(
 ) -> str:
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
-        agent_experience_root = _prepare_agent_experience_root(
+        memory_folders = _prepare_memory_folders(
             connection=connection,
             user_id=user_id,
             action_id=action_id,
@@ -396,7 +396,7 @@ def _persist_action_execution_context(
                 manifest_id=f"manifest:{action_id}",
                 scratch_real_path=str(workspace_path),
                 tool_results_real_path=str(tool_results_path),
-                agent_experience_root=agent_experience_root,
+                memory_folders=memory_folders,
                 created_at=started_at,
             )
 

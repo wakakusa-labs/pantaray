@@ -2,7 +2,8 @@
 
 A run is handed the facts and insights indexes, which open with an overview
 and link the files that hold the detail, and the situation each Agent
-Experience lesson applies to. Everything else it reads when the task needs it.
+Experience lesson applies to. Everything else it reads when the task needs it,
+from the same revisions' folders, which it may read but not change.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from pantaray_agents.local_runtime.artifacts.paths import resolve_artifact_path
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .agent_experience_content import AGENT_EXPERIENCE_INDEX_PATH
@@ -19,7 +21,7 @@ from .agent_experience_delta import lesson_situations
 from .artifact_workspace import read_artifact_revision_documents
 from .connection import open_memory_catalog_connection
 from .errors import MemoryCatalogIntegrityError
-from .models import MemoryDocument, MemorySource
+from .models import MemoryDocument, MemoryRevision, MemorySource
 from .repository import load_latest_active_node_by_source, load_revision
 from .resolver import enqueue_memory_repair
 from .revision_inspection import REVISION_INTEGRITY_ERRORS
@@ -36,10 +38,21 @@ _ENTRY_PATHS: Final[dict[MemorySource, str]] = {
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryFolder:
+    """One source's folder in its current revision, as a run may read it."""
+
+    source: MemorySource
+    revision_id: str
+    # The folder an index's links are relative to, such as <revision>/facts.
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryHead:
     source: MemorySource
     revision_id: str
     documents: tuple[MemoryDocument, ...]
+    folder: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +110,58 @@ def load_memory_heads(
     return MemoryHeads(
         heads=heads, unreadable=tuple(failure.source for failure in failures)
     )
+
+
+def load_memory_folders(
+    *,
+    connection: sqlite3.Connection,
+    artifact_root: Path,
+    user_id: str,
+) -> tuple[MemoryFolder, ...]:
+    """The current facts, insights and Agent Experience folders, without reading them.
+
+    A folder missing from its revision is left out: the index read reports that
+    tree as unreadable and queues its repair.
+    """
+
+    folders: list[MemoryFolder] = []
+    for source in _ENTRY_PATHS:
+        node = load_latest_active_node_by_source(
+            connection=connection, user_id=user_id, source=source
+        )
+        if node is None or node.current_revision_id is None:
+            continue
+        revision = load_revision(
+            connection=connection,
+            user_id=user_id,
+            revision_id=node.current_revision_id,
+        )
+        if revision is None:
+            raise MemoryCatalogIntegrityError(
+                f"{source} memory head has no current revision"
+            )
+        path = _revision_folder(
+            artifact_root=artifact_root, revision=revision, source=source
+        )
+        if path.is_dir():
+            folders.append(
+                MemoryFolder(source=source, revision_id=revision.revision_id, path=path)
+            )
+    return tuple(folders)
+
+
+def _revision_folder(
+    *, artifact_root: Path, revision: MemoryRevision, source: MemorySource
+) -> Path:
+    if revision.artifact_root_path is None:
+        raise MemoryCatalogIntegrityError(f"{source} memory head is not a file tree")
+    revision_root = resolve_artifact_path(
+        root_path=artifact_root, relative_path=revision.artifact_root_path
+    )
+    folder = (revision_root / Path(_ENTRY_PATHS[source]).parent).resolve()
+    if not folder.is_relative_to(revision_root):
+        raise MemoryCatalogIntegrityError(f"{source} folder escapes its revision")
+    return folder
 
 
 def render_memory_indexes(memory: MemoryHeads) -> str:
@@ -200,7 +265,12 @@ def _load_head(
     if not any(item.source_path == _ENTRY_PATHS[source] for item in documents):
         return failure
     return MemoryHead(
-        source=source, revision_id=revision.revision_id, documents=documents
+        source=source,
+        revision_id=revision.revision_id,
+        documents=documents,
+        folder=_revision_folder(
+            artifact_root=artifact_root, revision=revision, source=source
+        ),
     )
 
 
@@ -208,8 +278,10 @@ __all__ = [
     "FACTS_INDEX_PATH",
     "INDEX_OVERVIEW_HEADING",
     "INSIGHTS_INDEX_PATH",
+    "MemoryFolder",
     "MemoryHead",
     "MemoryHeads",
+    "load_memory_folders",
     "load_memory_heads",
     "opens_with_overview",
     "render_memory_indexes",

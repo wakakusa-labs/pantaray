@@ -83,6 +83,11 @@ _MEMORY_NOTE = (
     "activity) is not a file here: read it with memory_search and "
     "get_memory_reference."
 )
+_MEMORY_FOLDERS_NOTE = (
+    "Pantaray's memory folders are readable too: {folders}. A facts/ or "
+    "insights/ path in the memory indexes is under the folder of that name. "
+    "Read activity with memory_search and get_memory_reference."
+)
 _SPILL_NOTE = (
     "A result too large to show inline is saved to a file instead; the result "
     "then gives its path, a preview and how to read the rest with read or grep."
@@ -107,13 +112,15 @@ def build_read_only_file_tools(
     read_access_scope: ReadAccessScope,
     app_storage_roots: tuple[Path, ...],
     spill_root: Path,
+    memory_folders: tuple[Path, ...] = (),
 ) -> tuple[ReactToolDefinition, ...]:
-    """The tools over ``folders``, which they only read.
+    """The tools over ``folders`` and ``memory_folders``, which they only read.
 
     Paths are absolute: there is no current directory and no scratch workspace.
-    ``app_storage_roots`` stay hidden except ``spill_root``, created here: the
-    run's own folder, where a large result is written and read back from and
-    drawn pages and converted documents are kept, all removed with it.
+    ``app_storage_roots`` stay hidden except ``memory_folders`` and
+    ``spill_root``, created here: the run's own folder, where a large result is
+    written and read back from and drawn pages and converted documents are
+    kept, all removed with it.
     """
 
     spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
@@ -123,6 +130,10 @@ def build_read_only_file_tools(
         manifest_roots=(
             _read_only_root("tool_results", spill_path),
             *(
+                _read_only_root(f"memory:{index}", folder)
+                for index, folder in enumerate(memory_folders)
+            ),
+            *(
                 _read_only_root(f"folder:{index}", folder)
                 for index, folder in enumerate(folders)
             ),
@@ -131,11 +142,19 @@ def build_read_only_file_tools(
         read_access_scope=read_access_scope,
         scratch_root_path=None,
         private_storage=PrivateAppStorage(
-            storage_roots=app_storage_roots, readable_roots=(spill_path,)
+            storage_roots=app_storage_roots,
+            readable_roots=(spill_path, *memory_folders),
         ),
     )
+    memory_note = (
+        _MEMORY_FOLDERS_NOTE.format(
+            folders=", ".join(f"`{folder}`" for folder in memory_folders)
+        )
+        if memory_folders
+        else _MEMORY_NOTE
+    )
     return _ReadOnlyFileTools(
-        db_path=db_path, scope=scope, spill_root=spill_path
+        db_path=db_path, scope=scope, spill_root=spill_path, memory_note=memory_note
     ).definitions()
 
 
@@ -159,6 +178,7 @@ class _ReadOnlyFileTools:
     db_path: Path  # where the Office converter is installed from
     scope: ReadScope
     spill_root: Path
+    memory_note: str
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
         where = (
@@ -166,7 +186,7 @@ class _ReadOnlyFileTools:
             if self.scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
             else "Readable paths are inside the registered folders"
         ) + "; Pantaray's own storage is hidden."
-        notes = f"{where} {_MEMORY_NOTE} {_SPILL_NOTE}"
+        notes = f"{where} {self.memory_note} {_SPILL_NOTE}"
         return (
             _definition(
                 name="read",
@@ -304,8 +324,8 @@ class _ReadOnlyFileTools:
                 details: dict[str, JSONValue] = {}
                 if exc.code == PATH_NOT_ABSOLUTE:
                     # A relative path here is often a memory path such as
-                    # insights/todos.md, which these tools cannot open.
-                    details["fix_hint"] = f"{exc.fix_hint} {_MEMORY_NOTE}"
+                    # insights/todos.md.
+                    details["fix_hint"] = f"{exc.fix_hint} {self.memory_note}"
                 elif exc.fix_hint:
                     details["fix_hint"] = exc.fix_hint
                 if exc.examples:

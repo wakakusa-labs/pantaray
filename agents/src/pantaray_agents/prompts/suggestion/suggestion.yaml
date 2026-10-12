@@ -162,9 +162,9 @@ prompt: |
 
   ## Stable Memory
   The facts and insights indexes and the situations past lessons apply to, as of
-  this run's start. Read a file an index links if its details could change the
-  decision: pass its path from the memory root (such as `facts/<linked path>`) to
-  `memory_search` as a keyword.
+  this run's start. If a linked file's details could change the decision, `read`
+  it whole: an index's links are relative to its folder, which the file tools
+  name.
   {stable_memory_context}
 
   ## Current work context (short-term Insight)

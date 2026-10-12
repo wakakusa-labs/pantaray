@@ -142,7 +142,7 @@ prompt: |
   {memory_context_model}
 
   ## Memory Indexes
-  The user's facts and insights indexes and the situations past lessons apply to, as of when this Action started. Read a file an index links when the task needs its details: pass its path from the memory root (such as `facts/<linked path>`) to `memory_search` as a keyword. When a lesson fits the task, read it before you start: `grep` the agent experience folder for its words. Recent insights and activity are not listed here: look them up with `memory_search`, `memory_sql`, `zanei_timeline` or `zanei_query` when the task needs them.
+  The user's facts and insights indexes and the situations past lessons apply to, as of when this Action started. When the task needs a linked file's details, `read` it whole: an index's links are relative to its folder, listed under Workspace Roots. When a lesson fits the task, read it before you start: `grep` the agent experience folder for its words. Recent insights and activity are not listed here: look them up with `memory_search`, `memory_sql`, `zanei_timeline` or `zanei_query` when the task needs them.
 
   {memory_indexes}
 

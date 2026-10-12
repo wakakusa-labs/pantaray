@@ -218,6 +218,49 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     )
 
 
+@pytest.mark.asyncio
+async def test_suggestion_reads_a_linked_fact_file_whole_from_the_snapshot_revision(
+    tmp_path: Path,
+) -> None:
+    db_path, artifact_root = _runtime(tmp_path)
+    leaf = "# Project\n\n" + "\n\n".join(f"- Detail {n}" for n in range(40))
+    draft = replace_draft_documents(
+        draft=_fact_draft(db_path),
+        documents=(
+            MemoryDocument("facts/index.md", "# Facts\n- [Project](project.md)\n"),
+            MemoryDocument("facts/project.md", leaf),
+        ),
+    )
+    publish_fact_artifact(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        artifact_root=artifact_root,
+        publication=_publication(draft),
+    )
+    snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
+    (facts,) = snapshot.memory_folders
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=snapshot,
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    read = await registry.execute(
+        _tool_call("read", {"path": str(facts / "project.md")}), 1
+    )
+    # The revision's other files stay in the hidden app storage.
+    outside = await registry.execute(
+        _tool_call("read", {"path": str(facts.parent / "manifest.json")}), 2
+    )
+
+    assert facts.name == "facts"
+    assert read.output["content"].rstrip("\n").endswith("- Detail 39")
+    assert outside.output["error_code"] == "READ_PATH_DENIED"
+
+
 def test_published_insight_snapshot_seeds_index_and_reads_leaf(
     tmp_path: Path,
 ) -> None:

@@ -127,7 +127,7 @@ def _seed_cleanup_authority(
                 manifest_id="manifest:action-1",
                 scratch_real_path=str(paths.workspace),
                 tool_results_real_path=str(paths.tool_results),
-                agent_experience_root=None,
+                memory_folders=(),
                 created_at=STARTED_AT,
             )
     complete_execution_session(

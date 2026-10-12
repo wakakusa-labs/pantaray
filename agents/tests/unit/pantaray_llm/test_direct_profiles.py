@@ -92,6 +92,29 @@ def test_anthropic_uses_the_purpose_effort_with_adaptive_thinking(
     assert profile.max_output_tokens == 65536
 
 
+# Asking any other model for progress updates is a 400.
+@pytest.mark.parametrize(
+    ("model", "progress_updates"),
+    [
+        ("claude-opus-5-5", True),
+        ("claude-sonnet-5-5", True),
+        ("claude-fable-5-1", True),
+        ("claude-haiku-5-5", False),
+        ("claude-opus-5", False),
+        ("claude-sonnet-5", False),
+    ],
+)
+def test_anthropic_progress_updates_follow_the_model(
+    model: str, progress_updates: bool
+) -> None:
+    profile = resolve_direct_profile(
+        provider="anthropic", model=model, request=_request()
+    )
+    assert isinstance(profile, AnthropicLlmProfile)
+    assert isinstance(profile.thinking, AnthropicAdaptiveThinking)
+    assert profile.thinking.progress_updates is progress_updates
+
+
 @pytest.mark.parametrize(
     "provider", ["openai", "openai_codex", "anthropic", "fireworks"]
 )

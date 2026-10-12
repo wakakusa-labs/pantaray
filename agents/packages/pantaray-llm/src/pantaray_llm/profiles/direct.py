@@ -71,13 +71,19 @@ def resolve_direct_profile(
     )
     if provider == "anthropic":
         thinking = None
-        if entry is not None and entry.reasoning == "adaptive":
+        if entry is not None and entry.reasoning in (
+            "adaptive",
+            "adaptive_progress_updates",
+        ):
             # Purpose effort is a preference; adaptive models have no none
             # level, so their lowest effort represents that preference.
             effort = purpose.reasoning_effort
             if effort == "none":
                 effort = "low"
-            thinking = AnthropicAdaptiveThinking(effort=effort)
+            thinking = AnthropicAdaptiveThinking(
+                effort=effort,
+                progress_updates=entry.reasoning == "adaptive_progress_updates",
+            )
         return AnthropicLlmProfile(
             provider=provider,
             profile_id=purpose.id,

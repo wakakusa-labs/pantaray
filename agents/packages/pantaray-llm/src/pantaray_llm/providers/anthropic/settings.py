@@ -7,6 +7,9 @@ from typing import Literal
 @dataclass(frozen=True, slots=True)
 class AnthropicAdaptiveThinking:
     effort: Literal["low", "medium", "high", "xhigh", "max"]
+    # Whether the model returns its notes between tool calls as progress-update
+    # thinking blocks, which an Action turn asks to read as commentary.
+    progress_updates: bool = False
 
 
 @dataclass(frozen=True, slots=True)

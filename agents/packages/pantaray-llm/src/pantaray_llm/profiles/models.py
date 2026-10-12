@@ -13,7 +13,10 @@ class ModelCatalogEntry:
     provider: LlmProvider
     model: str
     capabilities: Mapping[LlmCapability, bool]
-    reasoning: Literal["effort", "adaptive", "none"]
+    # "adaptive_progress_updates": adaptive thinking whose notes between tool
+    # calls come back as progress-update thinking blocks, readable only when the
+    # request asks for them.
+    reasoning: Literal["effort", "adaptive", "adaptive_progress_updates", "none"]
     max_output_tokens: int | None
 
 
@@ -60,13 +63,22 @@ MODEL_CATALOG = {
         ),
         *(
             ModelCatalogEntry(
+                "anthropic",
+                model,
+                _MULTIMODAL_CAPABILITIES,
+                "adaptive_progress_updates",
+                128000,
+            )
+            # The models that accept `thinking.display: "updates"` (beta
+            # thinking-display-updates-2026-08-18); any other model rejects it.
+            for model in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1")
+        ),
+        *(
+            ModelCatalogEntry(
                 "anthropic", model, _MULTIMODAL_CAPABILITIES, "adaptive", 128000
             )
             for model in (
-                "claude-opus-5-5",
-                "claude-sonnet-5-5",
                 "claude-haiku-5-5",
-                "claude-fable-5-1",
                 # No longer offered in settings, but still served, and a saved
                 # connection may name them.
                 "claude-opus-5",

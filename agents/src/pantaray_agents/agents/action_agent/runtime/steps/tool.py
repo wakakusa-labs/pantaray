@@ -12,7 +12,7 @@ from pantaray_agents.agents.action_agent.runtime.checkpoint import (
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.runtime.steps.persistence import (
     ActionStepPersistenceError,
-    save_action_step_with_retry,
+    persist_action_step,
 )
 from pantaray_agents.agents.action_agent.support.severity import NON_FATAL_SEVERITIES
 from pantaray_agents.application.action.ports import (
@@ -170,7 +170,7 @@ async def record_tool_step(
 
     persistence = project_tool_step_for_persistence(result)
 
-    async def _save_once() -> RepositoryResult[DBRow]:
+    async def _save() -> RepositoryResult[DBRow]:
         return await agent.repository.save_action_step(
             step_id=step_id,
             action_id=action_id,
@@ -201,8 +201,8 @@ async def record_tool_step(
         )
 
     try:
-        await save_action_step_with_retry(
-            save_once=_save_once,
+        await persist_action_step(
+            save=_save,
             step_name=step_name,
             step_id=step_id,
         )

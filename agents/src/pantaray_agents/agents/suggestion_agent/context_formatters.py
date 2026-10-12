@@ -119,6 +119,9 @@ def format_recent_suggestion(row: SuggestionHistoryEntry, now: datetime) -> str:
     lines: list[str] = []
     created_at = describe_utc_timestamp(row.created_at)
     lines.append(f"- [{created_at}] answer: {row.answer}")
+    if row.lens is not None:
+        # The lens prompt calls a lens the kind of suggestion for the run.
+        lines.append(f"  Kind of suggestion: {row.lens}")
     lines.append(f"  User reaction: {_reaction_text(row, now)}")
     if row.dismiss_reason is not None:
         reason = _bounded(
@@ -177,5 +180,6 @@ def normalize_recent_suggestion_entry(
             "action_status": row.get("action_status"),
             "action_result": row.get("action_result"),
             "action_followups": row.get("action_followups") or [],
+            "lens": row.get("lens"),
         }
     )

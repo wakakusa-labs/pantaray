@@ -208,6 +208,8 @@ async def decide_with_lenses(
         raise ValueError(
             f"The Suggestion selector chose an unknown candidate: {choice}"
         )
+    chosen = None if choice is None else candidates[choice - 1]
+    selected_lens = None if chosen is None else chosen.lens
     await record_step(
         ReactLoopStep(
             run_id=suggestion_id,
@@ -216,13 +218,14 @@ async def decide_with_lenses(
             status="success",
             prompt_text=prompt,
             response_text=f"choice={choice}; {reason}",
+            # The recent-Suggestion history reads the shown Suggestion's lens here.
+            tool_output={"selected_lens": selected_lens},
         )
     )
-    if choice is None:
+    if chosen is None:
         declined = _declined(candidates[0].extraction)
         return LensDecision(declined, candidates, None)
-    chosen = candidates[choice - 1]
-    return LensDecision(chosen.extraction, candidates, chosen.lens)
+    return LensDecision(chosen.extraction, candidates, selected_lens)
 
 
 def _declined(extraction: SuggestionExtraction) -> SuggestionExtraction:

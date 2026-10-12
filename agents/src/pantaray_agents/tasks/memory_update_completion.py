@@ -79,67 +79,23 @@ async def publish_memory_update_run(
     build_profile_brief: ProfileBriefBuilder,
     applied_memory_request_ids: tuple[str, ...],
 ) -> None:
-    binding = memory_run_binding_from_payload(payload)
     for route in prepared.router.routes:
         base = prepared.base_draft(route.source)
         draft = route.session.draft
         if draft.draft_revision == base.draft_revision:
             _discard_unpublished_node(runtime=runtime, draft=draft)
             continue
-        draft = _without_deleted_targets(runtime=runtime, draft=draft)
-        if route.source == "agent_experience":
-            _publish_agent_experience(
-                runtime=runtime,
-                binding=binding,
-                base=base,
-                draft=draft,
-            )
-        elif route.source == "fact":
-            publish_fact_artifact(
-                db_path=runtime.db_path,
-                busy_timeout_ms=runtime.busy_timeout_ms,
-                artifact_root=runtime.artifact_root,
-                publication=FactArtifactPublication(
-                    user_id=binding.user_id,
-                    fact_id=prepared.fact_id,
-                    memory_run=binding,
-                    draft=draft,
-                    profile_brief=await build_profile_brief(
-                        "fact", render_artifact_documents(draft.documents)
-                    ),
-                    prompt_name=prompt_name,
-                    prompt_version=prompt_version,
-                    source_insight_ids=tuple(payload["short_insight_ids"]),
-                    created_at=payload["enqueued_at"],
-                ),
-            )
-        else:
-            long_term_text = render_artifact_documents(
-                tuple(
-                    document
-                    for document in draft.documents
-                    if document.source_path != TODO_DOCUMENT_PATH
-                    and document.content.strip()
-                )
-            )
-            publish_long_term_insight_artifact(
-                db_path=runtime.db_path,
-                busy_timeout_ms=runtime.busy_timeout_ms,
-                artifact_root=runtime.artifact_root,
-                publication=LongTermInsightArtifactPublication(
-                    user_id=binding.user_id,
-                    memory_run=binding,
-                    source_run_id=binding.job_id,
-                    draft=draft,
-                    profile_brief=(
-                        await build_profile_brief("long_term_insight", long_term_text)
-                        if long_term_text
-                        else "No durable long-term insights recorded."
-                    ),
-                    prompt_name=prompt_name,
-                    prompt_version=prompt_version,
-                ),
-            )
+        await publish_memory_draft(
+            runtime=runtime,
+            payload=payload,
+            source=route.source,
+            fact_id=prepared.fact_id,
+            base=base,
+            draft=draft,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            build_profile_brief=build_profile_brief,
+        )
     complete_memory_update_run(
         runtime=runtime,
         payload=payload,
@@ -150,6 +106,77 @@ async def publish_memory_update_run(
             if request.request_id in applied_memory_request_ids
         ),
     )
+
+
+async def publish_memory_draft(
+    *,
+    runtime: LocalMemoryFileEditorRuntime,
+    payload: MemoryUpdateJobPayload,
+    source: MemorySource,
+    fact_id: str,
+    base: MemoryDraftCheckpoint,
+    draft: MemoryDraftCheckpoint,
+    prompt_name: str,
+    prompt_version: str,
+    build_profile_brief: ProfileBriefBuilder,
+) -> None:
+    """Activate one changed category draft as a revision bound to the run."""
+
+    binding = memory_run_binding_from_payload(payload)
+    draft = _without_deleted_targets(runtime=runtime, draft=draft)
+    if source == "agent_experience":
+        _publish_agent_experience(
+            runtime=runtime,
+            binding=binding,
+            base=base,
+            draft=draft,
+        )
+    elif source == "fact":
+        publish_fact_artifact(
+            db_path=runtime.db_path,
+            busy_timeout_ms=runtime.busy_timeout_ms,
+            artifact_root=runtime.artifact_root,
+            publication=FactArtifactPublication(
+                user_id=binding.user_id,
+                fact_id=fact_id,
+                memory_run=binding,
+                draft=draft,
+                profile_brief=await build_profile_brief(
+                    "fact", render_artifact_documents(draft.documents)
+                ),
+                prompt_name=prompt_name,
+                prompt_version=prompt_version,
+                source_insight_ids=tuple(payload["short_insight_ids"]),
+                created_at=payload["enqueued_at"],
+            ),
+        )
+    else:
+        long_term_text = render_artifact_documents(
+            tuple(
+                document
+                for document in draft.documents
+                if document.source_path != TODO_DOCUMENT_PATH
+                and document.content.strip()
+            )
+        )
+        publish_long_term_insight_artifact(
+            db_path=runtime.db_path,
+            busy_timeout_ms=runtime.busy_timeout_ms,
+            artifact_root=runtime.artifact_root,
+            publication=LongTermInsightArtifactPublication(
+                user_id=binding.user_id,
+                memory_run=binding,
+                source_run_id=binding.job_id,
+                draft=draft,
+                profile_brief=(
+                    await build_profile_brief("long_term_insight", long_term_text)
+                    if long_term_text
+                    else "No durable long-term insights recorded."
+                ),
+                prompt_name=prompt_name,
+                prompt_version=prompt_version,
+            ),
+        )
 
 
 def _publish_agent_experience(
@@ -288,5 +315,6 @@ def _archive_applied_notes(
 __all__ = [
     "ProfileBriefBuilder",
     "complete_memory_update_run",
+    "publish_memory_draft",
     "publish_memory_update_run",
 ]

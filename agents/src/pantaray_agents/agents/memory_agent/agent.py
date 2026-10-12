@@ -22,7 +22,7 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     UNLINK_MEMORY_TOOL_NAME,
     WRITE_FILE_TOOL_NAME,
 )
-from pantaray_agents.conversation.loop import ConversationRequest
+from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
@@ -53,11 +53,31 @@ from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 # Writing an endeavor's big picture searches its history first, which doubles it.
 MEMORY_UPDATE_MAX_LLM_TURNS = 60
 MEMORY_UPDATE_MAX_TOOL_CALLS = 96
+# A consolidation writes its one file whole, then may rewrite it after a refused
+# ref or to shrink it further, and ends with `completed`. Replays of 24-145k
+# character files took 1-6 rewrites and up to 7 turns; widen these if real runs
+# stop at the limit with a rewrite still needed.
+MEMORY_CONSOLIDATION_MAX_LLM_TURNS = 10
+MEMORY_CONSOLIDATION_MAX_TOOL_CALLS = 8
+MEMORY_CONSOLIDATION_PROMPT_NAME = "memory_consolidation"
+MEMORY_CONSOLIDATION_PROMPT_VERSION = "1.0"
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
     applied_memory_request_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryConsolidationRequest:
+    """One oversized memory file, rewritten on its own."""
+
+    run_id: str
+    path: str
+    content: str
+    limit_chars: int
+    # The user's local date, which tells a passed deadline from a coming one.
+    today: str
 
 
 class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
@@ -128,18 +148,6 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         # needs at least one item of; the rest is the request's own message.
         head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
-
-        async def send(request: ConversationRequest) -> ActionTurnReply:
-            return await self._generate_llm_action_turn(
-                sink=sink,
-                prompt=request.prompt,
-                tools=request.tools,
-                max_parallel_tool_calls=request.max_parallel_tool_calls,
-                system_instruction=request.system_instruction,
-                conversation=request.conversation,
-                stage="memory_update",
-            )
-
         applied = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
@@ -148,7 +156,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
                 prompt=head,
                 task=task,
                 system_instruction=self._prompt_config.system_instruction or "",
-                send=send,
+                send=self._sender(sink, stage="memory_update"),
                 usage=lambda: sink.delta,
                 max_turns=MEMORY_UPDATE_MAX_LLM_TURNS,
                 max_tool_calls=MEMORY_UPDATE_MAX_TOOL_CALLS,
@@ -156,6 +164,54 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             )
         )
         return MemoryUpdateAgentResult(applied_memory_request_ids=applied)
+
+    async def consolidate(
+        self,
+        request: MemoryConsolidationRequest,
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        tool_result_directory_fd: int,
+    ) -> None:
+        """Rewrite one file through the given tools; the caller judges the result."""
+
+        config = prompt_loader.load_config(MEMORY_CONSOLIDATION_PROMPT_NAME)
+        initial_prompt = config.prompt.format(
+            today=request.today,
+            path=request.path,
+            characters=len(request.content),
+            limit_chars=request.limit_chars,
+            content=request.content,
+        )
+        head, _, task = initial_prompt.rstrip().rpartition("\n\n")
+        sink = CountingSink()
+        await run_memory_file_editor(
+            MemoryFileEditorRunInput(
+                run_id=request.run_id,
+                tool_result_directory_fd=tool_result_directory_fd,
+                tool_definitions=tool_definitions,
+                prompt=head,
+                task=task,
+                system_instruction=config.system_instruction or "",
+                send=self._sender(sink, stage="memory_consolidation"),
+                usage=lambda: sink.delta,
+                max_turns=MEMORY_CONSOLIDATION_MAX_LLM_TURNS,
+                max_tool_calls=MEMORY_CONSOLIDATION_MAX_TOOL_CALLS,
+            )
+        )
+
+    def _sender(self, sink: CountingSink, *, stage: str) -> SendTurn:
+        async def send(request: ConversationRequest) -> ActionTurnReply:
+            return await self._generate_llm_action_turn(
+                sink=sink,
+                prompt=request.prompt,
+                tools=request.tools,
+                max_parallel_tool_calls=request.max_parallel_tool_calls,
+                system_instruction=request.system_instruction,
+                conversation=request.conversation,
+                stage=stage,
+            )
+
+        return send
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str
@@ -190,8 +246,11 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
 
 
 __all__ = [
+    "MEMORY_CONSOLIDATION_PROMPT_NAME",
+    "MEMORY_CONSOLIDATION_PROMPT_VERSION",
     "MEMORY_UPDATE_MAX_LLM_TURNS",
     "MEMORY_UPDATE_MAX_TOOL_CALLS",
+    "MemoryConsolidationRequest",
     "MemoryUpdateAgent",
     "MemoryUpdateAgentResult",
 ]

@@ -6,6 +6,7 @@ from typing import Protocol
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.agents.memory_agent import (
+    MemoryConsolidationRequest,
     MemoryUpdateAgent,
     MemoryUpdateAgentResult,
 )
@@ -33,6 +34,10 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 )
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
 from pantaray_agents.tasks.internal_jobs.memory_update_job import run_memory_update_job
+from pantaray_agents.tasks.memory_consolidation import (
+    consolidate_memory_files,
+    consolidation_targets,
+)
 from pantaray_agents.tasks.memory_update_completion import (
     complete_memory_update_run,
     publish_memory_update_run,
@@ -53,6 +58,14 @@ class MemoryUpdateWorkerAgent(Protocol):
         tool_definitions: tuple[ReactToolDefinition, ...],
         tool_result_directory_fd: int,
     ) -> MemoryUpdateAgentResult: ...
+
+    async def consolidate(
+        self,
+        request: MemoryConsolidationRequest,
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        tool_result_directory_fd: int,
+    ) -> None: ...
 
     async def generate_profile_brief(
         self, source: MemorySource, memory_text: str
@@ -123,6 +136,16 @@ async def execute_memory_update_job(
                 build_profile_brief=agent.generate_profile_brief,
                 applied_memory_request_ids=applied_memory_request_ids,
             )
+        # After completion: a crash from here leaves the update complete, and
+        # the next update that changes an oversized file consolidates it.
+        await consolidate_memory_files(
+            runtime=runtime,
+            payload=payload,
+            fact_id=prepared.fact_id,
+            targets=consolidation_targets(prepared),
+            agent=agent,
+            build_profile_brief=agent.generate_profile_brief,
+        )
 
     await run_memory_update_job(
         runtime=runtime,

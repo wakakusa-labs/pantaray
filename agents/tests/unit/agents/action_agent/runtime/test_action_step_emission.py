@@ -120,7 +120,7 @@ async def test_supervisor_terminal_emits_only_after_durable_save() -> None:
 
     with (
         patch.object(tool_steps, "project_tool_step_for_persistence", MagicMock()),
-        patch.object(tool_steps, "save_action_step_with_retry", save),
+        patch.object(tool_steps, "persist_action_step", save),
     ):
         await record_tool_step(
             MagicMock(),

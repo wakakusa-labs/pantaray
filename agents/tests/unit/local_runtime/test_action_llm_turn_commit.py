@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
+import time
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -141,6 +145,39 @@ async def test_second_message_failure_rolls_back_output_and_all_messages(
         )
         connection.execute("DROP TRIGGER fail_second_message")
     assert (await _save(repo, _turn())).error is None
+
+
+@pytest.mark.asyncio
+async def test_turn_waits_for_a_concurrent_writer_instead_of_failing(
+    tmp_path: Path,
+) -> None:
+    # The turn reads before it writes; a deferred transaction would fail at
+    # once with "database is locked" while another connection holds the lock.
+    db_path, _ = _runtime(tmp_path, seed_think=False)
+    repo = LocalActionRepository(db_path=db_path, busy_timeout_ms=5000)
+    lock_held = threading.Event()
+
+    def hold_write_lock() -> None:
+        with closing(sqlite3.connect(db_path, isolation_level=None)) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE agent_actions SET updated_at = updated_at WHERE action_id = ?",
+                ("action-1",),
+            )
+            lock_held.set()
+            time.sleep(0.5)
+            connection.execute("COMMIT")
+
+    holder = threading.Thread(target=hold_write_lock)
+    holder.start()
+    try:
+        assert lock_held.wait(timeout=5)
+        result = await _save(repo, _turn())
+    finally:
+        holder.join()
+
+    assert result.error is None
+    assert result.data is not None and result.data["step_id"] == "think-1"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     collect_action_subagent_results_in_connection,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.repository.tool_invocation_links import (
     link_tool_invocations_to_action_step_in_connection,
 )
@@ -215,8 +216,10 @@ class LocalActionRepositoryStepsMixin:
         """
         with self._connect() as connection:
             try:
-                with connection:
-                    connection.execute("BEGIN")
+                # Take the write lock before the reads below: SQLite does not
+                # apply busy_timeout when a deferred transaction that has read
+                # upgrades to a write, so another writer fails it at once.
+                with immediate_transaction(connection):
                     if step_type == StepType.ASSISTANT_MESSAGE:
                         # Bind the utterance to the same adopted USER that owns
                         # this timeline position; checkpoint and message commit together.

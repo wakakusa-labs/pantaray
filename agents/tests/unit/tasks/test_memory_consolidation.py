@@ -21,6 +21,8 @@ from pantaray_agents.local_runtime.memory_catalog.agent_experience_content impor
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_delta import (
     applies_when_chars,
 )
+from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
+from pantaray_agents.local_runtime.memory_catalog.fragments import content_sha256
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     consolidated_experience_ids,
     derived_experience_ids,
@@ -36,6 +38,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks import memory_consolidation
 from pantaray_agents.tasks.experience_consolidation import (
     MERGE_EXPERIENCES_TOOL_NAME,
+    entry_written_dates,
 )
 from pantaray_agents.tasks.internal_jobs.memory_update import execute_memory_update_job
 from pantaray_agents.tasks.memory_consolidation import (
@@ -400,3 +403,77 @@ async def test_after_a_consolidation_the_next_waits_for_enough_new_lessons(
 
     assert not due(left + EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS - 1)
     assert due(left + EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS)
+
+
+def test_an_entry_is_dated_by_its_lesson_not_by_a_later_evidence_repair(
+    tmp_path: Path,
+) -> None:
+    """Old rule, then its correction, then the old rule losing its evidence."""
+    runtime = _bootstrap(tmp_path)
+    old_id, correction_id = "a" * 8 + "-old-rule", "b" * 8 + "-correction"
+    old_path = experience_entry_path(old_id)
+    correction_path = experience_entry_path(correction_id)
+    old_rule = _lesson(old_id, "Running tests via uv.")
+    evidence = '- Evidence: Action act-1 [[ref:ref_act_1 note:"source action"]]\n'
+    correction = _lesson(correction_id, "Running tests via uv.")
+    published = (
+        ("2026-10-01T00:00:00Z", {old_path: old_rule + evidence}),
+        (
+            "2026-10-02T00:00:00Z",
+            {old_path: old_rule + evidence, correction_path: correction},
+        ),
+        # A deleted conversation takes its Action's evidence line with it.
+        ("2026-10-03T00:00:00Z", {old_path: old_rule, correction_path: correction}),
+    )
+    with sqlite3.connect(runtime.db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO memory_nodes(
+                user_id, node_id, source_type, source_record_id, lifecycle,
+                integrity, current_revision_id, created_at, updated_at
+            ) VALUES (?, 'node-1', 'agent_experience', ?, 'preparing', 'healthy',
+                      NULL, ?, ?)
+            """,
+            ("user-1", "user-1", published[0][0], published[0][0]),
+        )
+        for number, (created_at, files) in enumerate(published, start=1):
+            connection.execute(
+                """
+                INSERT INTO memory_revisions(
+                    user_id, revision_id, node_id, body_kind, artifact_root_path,
+                    fragment_schema_version, content_sha256, created_at
+                ) VALUES ('user-1', ?, 'node-1', 'artifact_tree', ?, 1, 'x', ?)
+                """,
+                (f"rev-{number}", f"root-{number}", created_at),
+            )
+            connection.executemany(
+                """
+                INSERT INTO memory_fragments(
+                    user_id, fragment_id, revision_id, source_path, block_kind,
+                    block_index, content_text, content_sha256
+                ) VALUES ('user-1', ?, ?, ?, 'document_root', 0, ?, ?)
+                """,
+                [
+                    (
+                        f"frag-{number}-{path}",
+                        f"rev-{number}",
+                        path,
+                        text,
+                        content_sha256(text),
+                    )
+                    for path, text in files.items()
+                ],
+            )
+        connection.row_factory = sqlite3.Row
+        draft = create_memory_draft(
+            user_id="user-1",
+            owner_node_id="node-1",
+            base_revision_id=None,
+            documents=tuple(
+                MemoryDocument(path, text) for path, text in published[-1][1].items()
+            ),
+        )
+
+        written = entry_written_dates(connection=connection, draft=draft)
+
+    assert written[old_path] < written[correction_path]

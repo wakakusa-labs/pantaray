@@ -15,6 +15,7 @@ from pantaray_agents.local_runtime.memory_catalog.agent_experience_content impor
     AGENT_EXPERIENCE_INDEX_PATH,
     AgentExperienceContent,
     AgentExperienceOutcome,
+    agent_experience_evidence_text,
     experience_entry_path,
     experience_id_from_path,
     parse_agent_experience_markdown,
@@ -27,7 +28,6 @@ from pantaray_agents.local_runtime.memory_catalog.draft import replace_draft_doc
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryCatalogIntegrityError,
 )
-from pantaray_agents.local_runtime.memory_catalog.fragments import content_sha256
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     consolidated_experience_ids,
 )
@@ -272,32 +272,42 @@ def _apply_merge(
 def entry_written_dates(
     *, connection: sqlite3.Connection, draft: MemoryDraftCheckpoint
 ) -> dict[str, str]:
-    """When each entry's current text was first published, by path."""
+    """When each entry's current lesson was first published, by path.
 
-    published = {
-        (str(row["source_path"]), str(row["content_sha256"])): str(row["written_at"])
-        for row in connection.execute(
-            """
-            SELECT fragments.source_path, fragments.content_sha256,
-                   MIN(revisions.created_at) AS written_at
-            FROM memory_fragments AS fragments
-            JOIN memory_revisions AS revisions
-              ON revisions.user_id = fragments.user_id
-             AND revisions.revision_id = fragments.revision_id
-            WHERE revisions.user_id = ? AND revisions.node_id = ?
-              AND fragments.block_kind = 'document_root'
-            GROUP BY fragments.source_path, fragments.content_sha256
-            """,
-            (draft.user_id, draft.owner_node_id),
-        )
-    }
+    The host rewrites Evidence lines on its own, as when a deleted conversation
+    takes its Action's evidence with it, so only the lesson above them dates
+    the entry; otherwise an old rule would look newer than its correction.
+    """
+
+    first_published: dict[tuple[str, str], str] = {}
+    for row in connection.execute(
+        """
+        SELECT fragments.source_path, fragments.content_text,
+               MIN(revisions.created_at) AS written_at
+        FROM memory_fragments AS fragments
+        JOIN memory_revisions AS revisions
+          ON revisions.user_id = fragments.user_id
+         AND revisions.revision_id = fragments.revision_id
+        WHERE revisions.user_id = ? AND revisions.node_id = ?
+          AND fragments.block_kind = 'document_root'
+        GROUP BY fragments.source_path, fragments.content_sha256
+        """,
+        (draft.user_id, draft.owner_node_id),
+    ):
+        key = (str(row["source_path"]), _lesson_text(str(row["content_text"])))
+        written_at = str(row["written_at"])
+        first_published[key] = min(first_published.get(key, written_at), written_at)
     return {
-        document.source_path: published[
-            (document.source_path, content_sha256(document.content))
+        document.source_path: first_published[
+            (document.source_path, _lesson_text(document.content))
         ]
         for document in draft.documents
         if document.source_path != AGENT_EXPERIENCE_INDEX_PATH
     }
+
+
+def _lesson_text(markdown: str) -> str:
+    return markdown.removesuffix(agent_experience_evidence_text(markdown))
 
 
 def experience_entries_text(

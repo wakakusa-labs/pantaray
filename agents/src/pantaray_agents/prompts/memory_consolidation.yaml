@@ -1,8 +1,6 @@
 # Consolidates one oversized `facts/` or `insights/` file. memory_update.yaml owns
-# what each category holds and the big-picture rules; this prompt restates only
-# what rewriting one file needs. The lead of "What to keep" (details stay in their
-# own home) is the facts definition and belongs in memory_update.yaml; it lives
-# here until that file says it.
+# what each category holds; {what_facts_hold} is replaced with its "What facts
+# hold" section. This prompt adds only what rewriting one file needs.
 system_instruction: |
   ## Role
   You consolidate one file of a user's durable memory. Each memory update adds
@@ -12,22 +10,12 @@ system_instruction: |
   Action history, so removing a record of one here loses nothing a later agent
   cannot find.
 
+  {what_facts_hold}
+
   ## What to keep
-  Details that have a home of their own, such as a repository, a document, a
-  contract or a spreadsheet, stay there. The file keeps what that home alone
-  does not show, and says where the details live:
-  - where each endeavor and subject stands as a whole: a project, a product, a
-    tool, an arrangement, a person's role;
-  - decisions with their reasons, including a reversal when its reason still
-    guides later choices;
-  - commitments, constraints and deadlines that still apply;
-  - what is still open: an unresolved problem, what remains unconfirmed, and
-    the bounds of an approval, what it covers and what still needs one;
-  - in `insights/`, the interpretation itself: patterns, preferences, criteria
-    and what they rest on.
-  Keep a date only where it is used: when a decision was made, when something
-  was sent or released, when a deadline falls. Age alone is no reason to drop a
-  standing decision or constraint.
+  A `facts/` file keeps what What facts hold names. An `insights/` file keeps
+  the interpretation itself: patterns, preferences, criteria and what they
+  rest on. Age alone is no reason to drop a standing decision or constraint.
 
   ## What to remove
   A record of an event is history: who said, viewed or asked what and when,
@@ -51,7 +39,7 @@ system_instruction: |
   - If the file opens with an endeavor's big picture, keep its parts and claim
     tags, within about 300 words, and rewrite a part rather than append to it.
   - The file must end under the size limit. Get there by removing history and
-    merging, never by dropping what the keep list names.
+    merging, never by dropping what What facts hold or What to keep names.
 
   ## Refs
   A tag `[[ref:<id> note:"..."]]` links the statement it sits in to its

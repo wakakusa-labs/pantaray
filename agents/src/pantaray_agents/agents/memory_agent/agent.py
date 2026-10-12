@@ -61,6 +61,10 @@ MEMORY_CONSOLIDATION_MAX_LLM_TURNS = 10
 MEMORY_CONSOLIDATION_MAX_TOOL_CALLS = 8
 MEMORY_CONSOLIDATION_PROMPT_NAME = "memory_consolidation"
 MEMORY_CONSOLIDATION_PROMPT_VERSION = "1.0"
+# The Memory update prompt owns the facts definition; a consolidation reads
+# the same section in place of this placeholder so the two cannot drift apart.
+WHAT_FACTS_HOLD_PLACEHOLDER = "{what_facts_hold}"
+_WHAT_FACTS_HOLD_HEADING = "## What facts hold\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +83,14 @@ class MemoryConsolidationRequest:
     limit_chars: int
     # The user's local date, which tells a passed deadline from a coming one.
     today: str
+
+
+def what_facts_hold(memory_update_system_instruction: str) -> str:
+    """The "What facts hold" section of the Memory update system instruction."""
+
+    start = memory_update_system_instruction.index(_WHAT_FACTS_HOLD_HEADING)
+    end = memory_update_system_instruction.index("\n\n## ", start)
+    return memory_update_system_instruction[start:end]
 
 
 class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
@@ -195,7 +207,10 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
                 tool_definitions=tool_definitions,
                 prompt=head,
                 task=task,
-                system_instruction=config.system_instruction or "",
+                system_instruction=(config.system_instruction or "").replace(
+                    WHAT_FACTS_HOLD_PLACEHOLDER,
+                    what_facts_hold(self._prompt_config.system_instruction or ""),
+                ),
                 send=self._sender(sink, stage="memory_consolidation"),
                 usage=lambda: sink.delta,
                 max_turns=MEMORY_CONSOLIDATION_MAX_LLM_TURNS,

@@ -294,7 +294,6 @@ def test_the_next_run_sees_the_published_index_and_its_overview(
                     for route in prepared.router.routes
                     if route.source == "fact"
                 ),
-                profile_brief="## Profile Brief\n- builds Pantaray",
                 prompt_name="memory_update",
                 prompt_version="1.0",
                 source_insight_ids=("insight-1",),
@@ -310,8 +309,9 @@ def test_the_next_run_sees_the_published_index_and_its_overview(
     assert later.context.facts_index == facts_index
     assert later.context.insights_index == ""
     assert later.context.overview_request == (
-        "`insights/index.md` has no overview yet: write its `## Overview` in this"
-        " run from the index and the files it names."
+        "Besides the updates this run's evidence calls for, `insights/index.md`"
+        " has no overview yet: write its `## Overview` too, from the index and"
+        " the files it names."
     )
 
 

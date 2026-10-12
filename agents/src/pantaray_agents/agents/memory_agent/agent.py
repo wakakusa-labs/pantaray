@@ -23,7 +23,6 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     WRITE_FILE_TOOL_NAME,
 )
 from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
-from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
     LIST_ACTION_STEPS_TOOL_NAME,
@@ -37,11 +36,6 @@ from pantaray_agents.tools.contract import (
 from pantaray_agents.tools.memory.retrieval import (
     GET_MEMORY_REFERENCE_TOOL_NAME,
     MEMORY_SEARCH_TOOL_NAME,
-)
-from pantaray_agents.utils.profile_brief import (
-    build_facts_profile_brief_prompt,
-    build_insight_profile_brief_prompt,
-    generate_profile_brief_with_retry,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig, prompt_loader
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
@@ -231,29 +225,6 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             )
 
         return send
-
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        """The compact brief downstream agents read instead of the whole tree."""
-
-        prompt = (
-            build_facts_profile_brief_prompt(memory_text)
-            if source == "fact"
-            else build_insight_profile_brief_prompt(memory_text)
-        )
-        sink = CountingSink()
-
-        async def call_llm(profile_prompt: str) -> str:
-            response = await self._generate_llm_response(
-                prompt=profile_prompt,
-                sink=sink,
-                system_instruction=self._prompt_config.system_instruction,
-                stage="memory_profile_brief",
-            )
-            return response if isinstance(response, str) else str(response)
-
-        return await generate_profile_brief_with_retry(prompt=prompt, call_llm=call_llm)
 
     def _selected_tool_ids(
         self, tool_definitions: tuple[ReactToolDefinition, ...]

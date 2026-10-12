@@ -123,7 +123,7 @@ def test_fact_artifact_activation_updates_domain_and_catalog_atomically(
         row = connection.execute(
             """
             SELECT facts.status, facts.structured_fact_sha256,
-                   nodes.current_revision_id, revisions.profile_brief
+                   nodes.current_revision_id
             FROM agent_facts AS facts
             JOIN memory_nodes AS nodes
               ON nodes.user_id = facts.user_id
@@ -145,7 +145,6 @@ def test_fact_artifact_activation_updates_domain_and_catalog_atomically(
         "success",
         revision.content_sha256,
         revision.revision_id,
-        "brief",
     )
     # The retired per-Fact run ledger is history: publishing never writes it.
     assert retired_run_status == ("processing",)
@@ -383,8 +382,8 @@ def test_recovery_activates_exact_materialized_intent(tmp_path: Path) -> None:
         # A retired per-Fact run left this intent pending: recovery writes the
         # Fact projection and leaves that run's closed ledger alone.
         assert connection.execute(
-            "SELECT status, facts_profile_brief FROM agent_facts WHERE fact_id = 'fact-1'"
-        ).fetchone() == ("success", "brief")
+            "SELECT status FROM agent_facts WHERE fact_id = 'fact-1'"
+        ).fetchone() == ("success",)
         assert (
             connection.execute(
                 "SELECT status FROM agent_fact_structuring_runs WHERE fact_run_id = 'run-1'"
@@ -461,7 +460,7 @@ def test_recovery_activates_a_retired_insight_update_intent(tmp_path: Path) -> N
     with sqlite3.connect(db_path) as connection:
         state = connection.execute(
             """
-            SELECT source_insight_id, source_run_id, insight_profile_brief
+            SELECT source_insight_id, source_run_id
             FROM agent_long_term_insight_state WHERE user_id = 'user-1'
             """
         ).fetchone()
@@ -471,7 +470,7 @@ def test_recovery_activates_a_retired_insight_update_intent(tmp_path: Path) -> N
             WHERE insight_update_id = 'insight-update-1'
             """
         ).fetchone()
-    assert state == (None, "insight-update-1", "legacy brief")
+    assert state == (None, "insight-update-1")
     assert retired_run_status == ("processing",)
 
 
@@ -1143,7 +1142,6 @@ def _publication(draft: MemoryDraftCheckpoint) -> FactArtifactPublication:
         user_id="user-1",
         fact_id="fact-1",
         draft=draft,
-        profile_brief="brief",
         prompt_name="memory_update",
         prompt_version="1.0",
         source_insight_ids=(),

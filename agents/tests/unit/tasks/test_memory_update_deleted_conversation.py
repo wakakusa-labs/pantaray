@@ -191,9 +191,9 @@ async def test_refs_to_a_copy_deleted_mid_run_are_dropped_and_the_rest_published
         if kept_target == "tombstoned":
             # Only a missing target is dropped; any other invalid ref still fails.
             with pytest.raises(MemoryLinkValidationError):
-                await _publish(runtime, payload, prepared)
+                _publish(runtime, payload, prepared)
             return
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     assert _rows(
         runtime,

@@ -5,9 +5,6 @@ from typing import Literal, Protocol
 from pantaray_agents.repositories.action_runtime_resume_contract import (
     ActionRuntimeResumeContext,
 )
-from pantaray_agents.repositories.action_support.initial_memory_context_contract import (
-    InitialMemoryContext,
-)
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import (
     ActionAgentResponse,
@@ -183,10 +180,6 @@ class ActionRepositoryPort(Protocol):
         approval_session_id: str,
         tool_request_id: str,
     ) -> RepositoryResult[DBRow]: ...
-
-    async def get_initial_memory_context(
-        self, user_id: str
-    ) -> RepositoryResult[InitialMemoryContext]: ...
 
 
 class SuggestionRepositoryPort(Protocol):

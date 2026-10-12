@@ -19,7 +19,8 @@ from pantaray_agents.schema.workspace_context import (
 
 AGENT_EXPERIENCE_SOURCE_TYPE = "agent_experience"
 AGENT_EXPERIENCE_PROMPT_HINT = (
-    "useful past procedures may exist here; explore only when needed"
+    "lessons from past work, one file each; Memory Indexes lists the situations "
+    "they apply to"
 )
 
 

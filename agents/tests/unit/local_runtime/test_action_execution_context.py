@@ -718,8 +718,8 @@ def test_action_manifest_pins_current_agent_experience_revision_read_only(
         )
     ) == (1, 0, 0, 0)
     assert experience_line == (
-        f"- `{first_root}`: useful past procedures may exist here; "
-        "explore only when needed"
+        f"- `{first_root}`: lessons from past work, one file each; Memory Indexes "
+        "lists the situations they apply to"
     )
 
 

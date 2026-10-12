@@ -9,7 +9,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import pantaray_agents.local_runtime.memory_catalog.memory_indexes as memory_indexes_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
+from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
+    AgentExperienceContent,
+    AgentExperienceScope,
+    render_agent_experience_index,
+    render_agent_experience_markdown,
+)
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -202,15 +209,13 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
     assert snapshot.memory_revisions["fact"] == revision.revision_id
-    assert (
-        "### Structured Facts\nEntry: facts/index.md" in snapshot.stable_memory.prompt
+    # What is missing is said, not left out.
+    assert snapshot.stable_memory.prompt == (
+        "facts/index.md has no overview yet.\n"
+        '<file path="facts/index.md">\n# Facts\n- [Project](project.md)\n</file>'
+        "\n\ninsights/index.md: none yet."
+        "\n\nLessons from past work: none yet."
     )
-    assert "Profile brief:\nbrief" in snapshot.stable_memory.prompt
-    assert "Documents:\n- facts/index.md\n- facts/project.md" in (
-        snapshot.stable_memory.prompt
-    )
-    assert "[Project](project.md)" in snapshot.stable_memory.prompt
-    assert "Leaf-only detail" not in snapshot.stable_memory.prompt
 
 
 def test_published_insight_snapshot_seeds_index_and_reads_leaf(
@@ -227,30 +232,17 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
-    assert "### Long-term Insights\nEntry: insights/index.md" in (
-        snapshot.stable_memory.prompt
-    )
-    assert "Profile brief:\ninsight brief" in snapshot.stable_memory.prompt
-    assert "Documents:\n- insights/index.md\n- insights/topic.md" in (
-        snapshot.stable_memory.prompt
-    )
+    assert (
+        '<file path="insights/index.md">\n# Insights\n- [Topic](topic.md)\n</file>'
+    ) in snapshot.stable_memory.prompt
     assert "Insight leaf detail" not in snapshot.stable_memory.prompt
-    assert len(snapshot.stable_memory.prompt) <= 4_500
 
 
-def test_stable_memory_bounds_include_truncation_markers() -> None:
-    bounded = snapshot_module._bounded("x" * 1_000)  # noqa: SLF001
-    tree = snapshot_module._render_document_tree(  # noqa: SLF001
-        tuple(
-            MemoryDocument(f"facts/topic-{index:03d}.md", "leaf")
-            for index in range(100)
-        )
-    )
+def test_pending_work_bound_includes_truncation_marker() -> None:
+    bounded = snapshot_module._bounded("x" * 1_000, limit=650)  # noqa: SLF001
 
     assert len(bounded) <= 650
     assert bounded.endswith("[truncated; find the rest with memory_search]")
-    assert len(tree) <= 450
-    assert tree.endswith("[truncated]")
 
 
 def test_snapshot_search_remains_pinned_after_fact_head_update(
@@ -367,10 +359,10 @@ def test_snapshot_pins_nothing_for_a_preparing_node(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
     assert snapshot.memory_revisions["fact"] is None
-    assert "Structured Facts" not in snapshot.stable_memory.prompt
+    assert "facts/index.md: none yet." in snapshot.stable_memory.prompt
 
 
-def test_revision_integrity_rollback_restores_revision_owned_brief(
+def test_revision_integrity_rollback_restores_the_previous_revision(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -401,8 +393,7 @@ def test_revision_integrity_rollback_restores_revision_owned_brief(
     with sqlite3.connect(db_path) as connection:
         restored = connection.execute(
             """
-            SELECT nodes.current_revision_id, facts.structured_fact_sha256,
-                   facts.facts_profile_brief
+            SELECT nodes.current_revision_id, facts.structured_fact_sha256
             FROM memory_nodes AS nodes
             JOIN agent_facts AS facts
               ON facts.user_id = nodes.user_id
@@ -411,11 +402,7 @@ def test_revision_integrity_rollback_restores_revision_owned_brief(
             """
         ).fetchone()
     assert completed == 1
-    assert restored == (
-        first_revision.revision_id,
-        first_revision.content_sha256,
-        "brief",
-    )
+    assert restored == (first_revision.revision_id, first_revision.content_sha256)
 
 
 def test_snapshot_integrity_failure_enqueues_revision_repair(tmp_path: Path) -> None:
@@ -455,7 +442,7 @@ def test_snapshot_os_error_does_not_enqueue_integrity_repair(
         raise OSError("temporary artifact I/O failure")
 
     monkeypatch.setattr(
-        snapshot_module,
+        memory_indexes_module,
         "read_artifact_revision_documents",
         fail_artifact_read,
     )
@@ -498,14 +485,13 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
         "long_term_insight": insight_revision.revision_id,
         "agent_experience": experience_revision.revision_id,
     }
-    assert "### Agent Experience\nEntry: agent_experience/index.md" in (
-        snapshot.stable_memory.prompt
+    # A lesson is named by its situation alone; its rule is read when it fits.
+    assert snapshot.stable_memory.prompt.endswith(
+        "Lessons from past work, each named by the situation it applies to:\n"
+        "- Retrying a flaky parallel test run."
     )
-    assert "Documents:\n- agent_experience/entries/exp-1.md" in (
-        snapshot.stable_memory.prompt
-    )
+    assert "exp-00001" not in snapshot.stable_memory.prompt
     assert "Experience leaf detail" not in snapshot.stable_memory.prompt
-    assert len(snapshot.stable_memory.prompt) <= 4_500
 
 
 def test_snapshot_without_experience_head_excludes_later_experience_revision(
@@ -1216,11 +1202,21 @@ def _publish_insight_tree(
             user_id="user-1",
             source_run_id=_memory_run().job_id,
             draft=draft,
-            profile_brief="insight brief",
             prompt_name="memory_update",
             prompt_version="1.0",
         ),
     )
+
+
+_EXPERIENCE = AgentExperienceContent(
+    experience_id="exp-00001",
+    scope=AgentExperienceScope(kind="user", key=None),
+    applies_when="Retrying a flaky parallel test run.",
+    observed_approach="Reran the whole suite with retryparallelism.",
+    outcome="ineffective",
+    next_time_rule="Experience leaf detail",
+    observed_result="The same test failed again.",
+)
 
 
 def _publish_experience_tree(*, db_path: Path, artifact_root: Path) -> MemoryRevision:
@@ -1247,11 +1243,11 @@ def _publish_experience_tree(*, db_path: Path, artifact_root: Path) -> MemoryRev
                         documents=(
                             MemoryDocument(
                                 "agent_experience/index.md",
-                                "# Agent Experience Index\n- Retryparallelism\n",
+                                render_agent_experience_index((_EXPERIENCE,)),
                             ),
                             MemoryDocument(
-                                "agent_experience/entries/exp-1.md",
-                                "# Experience\nExperience leaf detail\n",
+                                "agent_experience/entries/exp-00001.md",
+                                render_agent_experience_markdown(_EXPERIENCE),
                             ),
                         ),
                     ),
@@ -1304,7 +1300,6 @@ def _publish_second_fact_revision(
             user_id="user-1",
             fact_id="fact-1",
             draft=draft,
-            profile_brief="new brief",
             prompt_name="memory_update",
             prompt_version="1.0",
             source_insight_ids=(),

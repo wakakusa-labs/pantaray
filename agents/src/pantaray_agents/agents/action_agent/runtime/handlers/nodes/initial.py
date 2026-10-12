@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     load_pantaray_agents_md,
@@ -28,8 +28,13 @@ from pantaray_agents.agents.action_agent.runtime.state.types import TargetContex
 from pantaray_agents.agents.action_agent.runtime.user_image_attachments import (
     build_user_image_attachments,
 )
-from pantaray_agents.agents.action_agent.support.repository_result import (
-    ensure_repository_result,
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    load_memory_heads,
+    render_memory_indexes,
+)
+from pantaray_agents.local_runtime.runtime.bootstrap import (
+    read_local_runtime_artifact_root,
+    read_local_runtime_db_config,
 )
 from pantaray_agents.schema.workspace_context import render_workspace_context_prompt
 from pantaray_agents.tasks.action_user_message import render_action_user_request_text
@@ -94,10 +99,10 @@ async def initialize_context(
             "prompt_version": runtime.state_config["prompt_version"],
         }
     )
-    if not is_continuation:
-        # Read once per Action: the head shows these briefs for the whole Action
-        # and the model looks up anything else with its memory tools.
-        context.update(await _load_profile_briefs(agent, runtime))
+    if "memory_indexes" not in context:
+        # Read once per Action: the head shows these indexes for the whole
+        # Action and the model reads anything else with its memory tools.
+        context["memory_indexes"] = _load_memory_indexes(str(request.user_id))
     context["additional_notes"] = []
     context["local_step_counters"] = (
         previous_local_step_counters if is_continuation else {}
@@ -168,31 +173,16 @@ async def initialize_context(
     )
 
 
-class _ProfileBriefs(TypedDict):
-    insight_data: str
-    structured_fact_data: str
-
-
-async def _load_profile_briefs(
-    agent: ActionAgent, runtime: ActionGraphRuntime
-) -> _ProfileBriefs:
-    """Read the insight and fact profile briefs the head shows."""
-
-    initial_memory = ensure_repository_result(
-        await agent.repository.get_initial_memory_context(runtime.request.user_id),
-        "Failed to fetch atomic initial memory context.",
+def _load_memory_indexes(user_id: str) -> str:
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    return render_memory_indexes(
+        load_memory_heads(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            artifact_root=read_local_runtime_artifact_root(),
+            user_id=user_id,
+        )
     )
-    insight = initial_memory.insight
-    return {
-        "insight_data": runtime.services.rendering.build_insight_text(
-            insight.insight_profile_brief if insight is not None else None
-        ),
-        "structured_fact_data": (
-            initial_memory.facts.facts_profile_brief
-            if initial_memory.facts is not None
-            else ""
-        ),
-    }
 
 
 def _reset_turn_plan(context: ActionAgentContext) -> None:

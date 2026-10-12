@@ -3,12 +3,14 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    load_memory_heads,
+    render_memory_indexes,
+)
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryDocument,
     MemoryIntentKind,
@@ -28,7 +30,6 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from .local_action_repository_support import (
     USER_ID,
     bootstrap_action_repository_db,
-    build_action_repository,
 )
 
 
@@ -40,8 +41,7 @@ def _publish_head(
     source: MemorySource,
     intent_kind: MemoryIntentKind,
     source_record_id: str,
-    entry_path: str,
-    profile_brief: str | None,
+    documents: tuple[MemoryDocument, ...],
 ) -> None:
     artifact_root.mkdir(exist_ok=True)
     with open_memory_catalog_connection(
@@ -63,7 +63,7 @@ def _publish_head(
                         user_id=user_id,
                         owner_node_id=node.node_id,
                         base_revision_id=None,
-                        documents=(MemoryDocument(entry_path, f"# {source}\n"),),
+                        documents=documents,
                     ),
                     body_kind="artifact_tree",
                     intent_kind=intent_kind,
@@ -75,24 +75,28 @@ def _publish_head(
         db_path=db_path, busy_timeout_ms=1_000
     ) as connection:
         with immediate_transaction(connection):
-            revision = activate_artifact_revision(
-                connection=connection, prepared=prepared
-            )
-            if profile_brief is not None:
-                # The unified Memory agent writes the brief onto the revision; the
-                # legacy run tables stay empty here on purpose.
-                connection.execute(
-                    """
-                    UPDATE memory_revisions SET profile_brief = ?
-                    WHERE user_id = ? AND revision_id = ?
-                    """,
-                    (profile_brief, user_id, revision.revision_id),
-                )
+            activate_artifact_revision(connection=connection, prepared=prepared)
 
 
-def _publish_all_heads(
+def _publish_indexes(
     *, db_path: Path, artifact_root: Path, user_id: str = USER_ID
 ) -> None:
+    _publish_head(
+        db_path=db_path,
+        artifact_root=artifact_root,
+        user_id=user_id,
+        source="fact",
+        intent_kind="fact",
+        source_record_id="fact-1",
+        documents=(
+            MemoryDocument(
+                "facts/index.md",
+                "# Facts\n\n## Overview\nBuilds Pantaray.\n\n"
+                "## Wakakusa\n- [Pantaray](pantaray.md)\n",
+            ),
+            MemoryDocument("facts/pantaray.md", "# Pantaray\nLeaf detail\n"),
+        ),
+    )
     _publish_head(
         db_path=db_path,
         artifact_root=artifact_root,
@@ -100,78 +104,37 @@ def _publish_all_heads(
         source="long_term_insight",
         intent_kind="long_term_insight",
         source_record_id=user_id,
-        entry_path="insights/index.md",
-        profile_brief="INSIGHT-BRIEF",
-    )
-    _publish_head(
-        db_path=db_path,
-        artifact_root=artifact_root,
-        user_id=user_id,
-        source="fact",
-        intent_kind="fact",
-        source_record_id="fact-1",
-        entry_path="facts/index.md",
-        profile_brief="FACTS-BRIEF",
+        documents=(MemoryDocument("insights/index.md", "# Insights\n- Topic\n"),),
     )
 
 
-def _assert_legacy_tables_empty(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as connection:
-        for table in (
-            "agent_insight_update_runs",
-            "agent_fact_structuring_runs",
-            "agent_facts",
-        ):
-            assert (
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
-            )
+def _render(db_path: Path, artifact_root: Path) -> str:
+    return render_memory_indexes(
+        load_memory_heads(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            artifact_root=artifact_root,
+            user_id=USER_ID,
+        )
+    )
 
 
-@pytest.mark.asyncio
-async def test_initial_memory_context_reads_the_profile_brief_heads(
+def test_memory_indexes_show_each_index_and_say_what_is_missing(
     tmp_path: Path,
 ) -> None:
     db_path = bootstrap_action_repository_db(tmp_path)
-    _publish_all_heads(db_path=db_path, artifact_root=tmp_path / "artifacts")
-    _assert_legacy_tables_empty(db_path)
+    _publish_indexes(db_path=db_path, artifact_root=tmp_path / "artifacts")
 
-    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
-
-    assert result.data is not None
-    assert result.data.insight is not None
-    assert result.data.insight.insight_id == USER_ID
-    assert result.data.insight.insight_profile_brief == "INSIGHT-BRIEF"
-    assert result.data.facts is not None
-    assert result.data.facts.fact_id == "fact-1"
-    assert result.data.facts.facts_profile_brief == "FACTS-BRIEF"
-
-
-@pytest.mark.asyncio
-async def test_initial_memory_context_skips_categories_without_a_head(
-    tmp_path: Path,
-) -> None:
-    db_path = bootstrap_action_repository_db(tmp_path)
-    _publish_head(
-        db_path=db_path,
-        artifact_root=tmp_path / "artifacts",
-        source="fact",
-        intent_kind="fact",
-        source_record_id="fact-1",
-        entry_path="facts/index.md",
-        profile_brief="FACTS-BRIEF",
+    assert _render(db_path, tmp_path / "artifacts") == (
+        '<file path="facts/index.md">\n# Facts\n\n## Overview\nBuilds Pantaray.\n\n'
+        "## Wakakusa\n- [Pantaray](pantaray.md)\n</file>\n\n"
+        "insights/index.md has no overview yet.\n"
+        '<file path="insights/index.md">\n# Insights\n- Topic\n</file>\n\n'
+        "Lessons from past work: none yet."
     )
 
-    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
 
-    assert result.data is not None
-    assert result.data.insight is None
-    assert result.data.facts is not None
-
-
-@pytest.mark.asyncio
-async def test_initial_memory_context_ignores_other_users_heads(
-    tmp_path: Path,
-) -> None:
+def test_memory_indexes_ignore_other_users_heads(tmp_path: Path) -> None:
     db_path = bootstrap_action_repository_db(tmp_path)
     with sqlite3.connect(db_path) as connection, connection:
         connection.execute(
@@ -180,12 +143,11 @@ async def test_initial_memory_context_ignores_other_users_heads(
             VALUES ('user-2', 'ja', '2026-03-24T00:00:00Z', '2026-03-24T00:00:00Z')
             """
         )
-    _publish_all_heads(
+    _publish_indexes(
         db_path=db_path, artifact_root=tmp_path / "artifacts", user_id="user-2"
     )
 
-    result = await build_action_repository(db_path).get_initial_memory_context(USER_ID)
-
-    assert result.data is not None
-    assert result.data.insight is None
-    assert result.data.facts is None
+    assert _render(db_path, tmp_path / "artifacts") == (
+        "facts/index.md: none yet.\n\ninsights/index.md: none yet.\n\n"
+        "Lessons from past work: none yet."
+    )

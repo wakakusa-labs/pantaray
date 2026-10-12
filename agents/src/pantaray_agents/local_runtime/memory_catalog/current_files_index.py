@@ -118,7 +118,6 @@ def _refresh_category(
             artifact_root_path=relative_root,
             fragment_schema_version=MEMORY_FRAGMENT_SCHEMA_VERSION,
             content_sha256=digest,
-            profile_brief=None,
             created_at=now,
         )
         insert_revision(connection=connection, revision=revision)

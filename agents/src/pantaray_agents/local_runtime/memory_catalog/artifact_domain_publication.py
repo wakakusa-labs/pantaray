@@ -36,7 +36,6 @@ class FactArtifactPublication:
     fact_id: str
     memory_run: MemoryRunBinding | None
     draft: MemoryDraftCheckpoint
-    profile_brief: str
     prompt_name: str
     prompt_version: str
     source_insight_ids: tuple[str, ...]
@@ -55,7 +54,6 @@ class LongTermInsightArtifactPublication:
     memory_run: MemoryRunBinding | None
     source_run_id: str
     draft: MemoryDraftCheckpoint
-    profile_brief: str
     prompt_name: str
     prompt_version: str
 
@@ -133,24 +131,18 @@ def write_fact_projection(
     publication: FactArtifactPublication,
 ) -> None:
     now = now_utc_iso()
-    _set_revision_profile_brief(
-        connection=connection,
-        revision=revision,
-        profile_brief=publication.profile_brief,
-    )
     final_path = _index_storage_path(revision, "facts/index.md")
     source_ids = json.dumps(publication.source_insight_ids, ensure_ascii=False)
     fact_cursor = connection.execute(
         """
         INSERT INTO agent_facts(
-            fact_id, user_id, status, facts_profile_brief, error, prompt_text,
+            fact_id, user_id, status, error, prompt_text,
             response_text, llm_output, prompt_name, prompt_version,
             source_insight_ids, structured_fact_storage_path,
             structured_fact_sha256, created_at, updated_at
-        ) VALUES (?, ?, 'success', ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, 'success', NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(fact_id) DO UPDATE SET
             status = 'success',
-            facts_profile_brief = excluded.facts_profile_brief,
             error = NULL,
             prompt_name = excluded.prompt_name,
             prompt_version = excluded.prompt_version,
@@ -163,7 +155,6 @@ def write_fact_projection(
         (
             publication.fact_id,
             publication.user_id,
-            publication.profile_brief,
             publication.prompt_name,
             publication.prompt_version,
             source_ids,
@@ -194,11 +185,6 @@ def write_long_term_projection(
     publication: LongTermInsightArtifactPublication,
 ) -> None:
     now = now_utc_iso()
-    _set_revision_profile_brief(
-        connection=connection,
-        revision=revision,
-        profile_brief=publication.profile_brief,
-    )
     final_path = _index_storage_path(revision, "insights/index.md")
     _upsert_long_term_state(
         connection=connection,
@@ -237,14 +223,13 @@ def _upsert_long_term_state(
         """
         INSERT INTO agent_long_term_insight_state(
             user_id, source_insight_id, source_run_id, storage_path, sha256,
-            insight_profile_brief, created_at, updated_at
-        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             source_insight_id = NULL,
             source_run_id = excluded.source_run_id,
             storage_path = excluded.storage_path,
             sha256 = excluded.sha256,
-            insight_profile_brief = excluded.insight_profile_brief,
             updated_at = excluded.updated_at
         """,
         (
@@ -252,7 +237,6 @@ def _upsert_long_term_state(
             publication.source_run_id,
             final_path,
             content_sha256,
-            publication.profile_brief,
             now,
             now,
         ),
@@ -276,35 +260,12 @@ def _index_storage_path(revision: MemoryRevision, relative_path: str) -> str:
     return f"{revision.artifact_root_path.rstrip('/')}/{relative_path}"
 
 
-def _set_revision_profile_brief(
-    *,
-    connection: sqlite3.Connection,
-    revision: MemoryRevision,
-    profile_brief: str,
-) -> None:
-    brief = profile_brief.strip()
-    if not brief:
-        raise MemoryCatalogIntegrityError("artifact profile brief must not be blank")
-    cursor = connection.execute(
-        """
-        UPDATE memory_revisions SET profile_brief = ?
-        WHERE user_id = ? AND revision_id = ? AND profile_brief IS NULL
-        """,
-        (brief, revision.user_id, revision.revision_id),
-    )
-    if cursor.rowcount != 1:
-        raise MemoryCatalogIntegrityError(
-            "artifact revision profile brief is not writable"
-        )
-
-
 def _fact_payload_json(publication: FactArtifactPublication) -> str:
     return json.dumps(
         {
             "user_id": publication.user_id,
             "fact_id": publication.fact_id,
             "memory_run": _memory_run_payload(publication.memory_run),
-            "profile_brief": publication.profile_brief,
             "prompt_name": publication.prompt_name,
             "prompt_version": publication.prompt_version,
             "source_insight_ids": list(publication.source_insight_ids),
@@ -321,7 +282,6 @@ def _long_term_payload_json(publication: LongTermInsightArtifactPublication) -> 
         {
             "user_id": publication.user_id,
             "memory_run": _memory_run_payload(publication.memory_run),
-            "profile_brief": publication.profile_brief,
             "prompt_name": publication.prompt_name,
             "prompt_version": publication.prompt_version,
         },
@@ -360,7 +320,6 @@ def fact_publication_from_intent(
         fact_id=_require_payload_string(payload, "fact_id"),
         memory_run=_memory_run_from_intent(payload),
         draft=draft,
-        profile_brief=_require_payload_string(payload, "profile_brief"),
         prompt_name=_require_payload_string(payload, "prompt_name"),
         prompt_version=_require_payload_string(payload, "prompt_version"),
         source_insight_ids=tuple(source_ids),
@@ -384,7 +343,6 @@ def long_term_publication_from_intent(
         memory_run=memory_run,
         source_run_id=source_run_id,
         draft=draft,
-        profile_brief=_require_payload_string(payload, "profile_brief"),
         prompt_name=_require_payload_string(payload, "prompt_name"),
         prompt_version=_require_payload_string(payload, "prompt_version"),
     )

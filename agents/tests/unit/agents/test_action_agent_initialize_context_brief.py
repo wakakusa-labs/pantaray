@@ -4,11 +4,12 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from tests.unit.agents.action_agent.fixtures import build_action_request
 from tests.unit.local_runtime.action_seed import insert_agent_action
+from tests.unit.local_runtime.test_memory_indexes import _publish_indexes
 
 from pantaray_agents.agents.action_agent import ActionAgent
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
@@ -59,59 +60,28 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 
 
 @pytest.mark.asyncio
-async def test_initialize_context_uses_profile_briefs_for_action_prompt(
+async def test_initialize_context_shows_the_memory_indexes_not_their_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ActionAgentの初期文脈は、長期insight/factsをbriefで渡すこと。
-
-    - long_term_insight_data / structured_data の全文を初期プロンプトに入れない
-    - 詳細は memory_search（Storage検索）で取得する前提
-    """
     repo = MockActionAgentRepository()
     agent = _build_agent(repo)
     await _save_suggestion(repo)
-
-    # long-term insight（brief + full）
-    await repo.save_insight(
-        {
-            "insight_id": "ins-1",
-            "user_id": "user-1",
-            "insight_profile_brief": "BRIEF-LT",
-            "long_term_insight_data": "FULL-LT",
-            "short_term_insight_data": "short-1",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
-        }
-    )
-
-    # structured facts（brief + full）
-    await repo.save_structured_fact(
-        {
-            "fact_id": "fact-1",
-            "user_id": "user-1",
-            "facts_profile_brief": "BRIEF-FACTS",
-            "structured_data": "FULL-FACTS",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
-        }
-    )
-
-    execution_context = _bootstrap_execution_context(
+    execution_context, db_path = _bootstrap_execution_context_with_db(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
     )
+    monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    _publish_indexes(db_path=db_path, artifact_root=tmp_path / "artifacts")
     state = _state_with_execution_context(execution_context)
 
     updated = await initialize_context(agent, state, _runtime(agent))  # type: ignore[arg-type]
     ctx = updated["context"]
 
-    assert "BRIEF-LT" in ctx["insight_data"]
-    assert "FULL-LT" not in ctx["insight_data"]
-    # Recent short-term insights are looked up with tools, not shown up front.
-    assert "short-1" not in ctx["insight_data"]
-    assert ctx["structured_fact_data"] == "BRIEF-FACTS"
-    assert "FULL-FACTS" not in ctx["structured_fact_data"]
+    assert "## Overview\nBuilds Pantaray." in ctx["memory_indexes"]
+    assert "insights/index.md has no overview yet." in ctx["memory_indexes"]
+    # A linked file is read with the memory tools when the task needs it.
+    assert "Leaf detail" not in ctx["memory_indexes"]
     assert ctx["request_summary"] == "SUM"
     assert ctx["target_context"] == {
         "organization_name": "Wakakusa",
@@ -251,9 +221,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
         occurred_at=prior_step.created_at,
         history_phase="init",
     )
-    memory_reader = AsyncMock(wraps=repo.get_initial_memory_context)
-    repo.get_initial_memory_context = memory_reader  # type: ignore[method-assign]
-    first["context"]["insight_data"] = "insight read when the Action started"
+    first["context"]["memory_indexes"] = "indexes read when the Action started"
     request = build_action_request(
         action_id="action-1",
         suggestion_id="sug-1",
@@ -284,10 +252,11 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
         "organization_name": "Prior org",
         "project_name": "Prior project",
     }
-    # The profile briefs are read once per Action; a follow-up keeps what the
+    # The memory indexes are read once per Action; a follow-up keeps what the
     # head shows.
-    memory_reader.assert_not_awaited()
-    assert updated["context"]["insight_data"] == "insight read when the Action started"
+    assert (
+        updated["context"]["memory_indexes"] == "indexes read when the Action started"
+    )
     assert repo.data.get("action_steps", []) == []
 
     replay = await initialize_context(  # type: ignore[arg-type]

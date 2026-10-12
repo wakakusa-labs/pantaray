@@ -7,11 +7,6 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 
 from pantaray_agents.repositories import action_runtime_resume_contract as resume
-from pantaray_agents.repositories.action_support.initial_memory_context_contract import (
-    InitialFactsBrief,
-    InitialInsightBrief,
-    InitialMemoryContext,
-)
 from pantaray_agents.schema.agent.action import ActionProviderTurnRecord
 from pantaray_agents.schema.repositories.repository import (
     DBRow,
@@ -265,60 +260,6 @@ class MockActionAgentQueryMixin:
             return RepositoryResult(error="No long term insight")
         items.sort(key=lambda x: x.get("created_at"), reverse=True)
         return RepositoryResult(data=items[0])
-
-    async def get_initial_memory_context(
-        self: MockActionAgentRepository,
-        user_id: str,
-    ) -> RepositoryResult[InitialMemoryContext]:
-        insights = [
-            row
-            for row in self.data.get("insights", [])
-            if row.get("user_id") == user_id
-        ]
-        insight_rows = [row for row in insights if row.get("insight_profile_brief")]
-        insight_rows.sort(
-            key=lambda row: row.get("updated_at") or row.get("created_at"),
-            reverse=True,
-        )
-        insight_row = insight_rows[0] if insight_rows else None
-        fact_rows = [
-            row
-            for row in self.data.get("facts", [])
-            if row.get("user_id") == user_id and row.get("facts_profile_brief")
-        ]
-        fact_rows.sort(
-            key=lambda row: row.get("updated_at") or row.get("created_at"),
-            reverse=True,
-        )
-        fact_row = fact_rows[0] if fact_rows else None
-        return RepositoryResult(
-            data=InitialMemoryContext(
-                insight=(
-                    InitialInsightBrief(
-                        insight_id=str(insight_row.get("insight_id") or ""),
-                        insight_profile_brief=str(
-                            insight_row.get("insight_profile_brief") or ""
-                        ),
-                        created_at=str(insight_row.get("created_at") or ""),
-                        updated_at=str(insight_row.get("updated_at") or ""),
-                    )
-                    if insight_row is not None
-                    else None
-                ),
-                facts=(
-                    InitialFactsBrief(
-                        fact_id=str(fact_row.get("fact_id") or ""),
-                        facts_profile_brief=str(
-                            fact_row.get("facts_profile_brief") or ""
-                        ),
-                        created_at=str(fact_row.get("created_at") or ""),
-                        updated_at=str(fact_row.get("updated_at") or ""),
-                    )
-                    if fact_row is not None
-                    else None
-                ),
-            )
-        )
 
     async def get_recent_short_term_insights(
         self: MockActionAgentRepository,

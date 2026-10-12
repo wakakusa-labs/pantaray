@@ -18,11 +18,17 @@ from pantaray_agents.local_runtime.memory_catalog.agent_experience_content impor
     parse_agent_experience_markdown,
     render_agent_experience_markdown,
 )
+from pantaray_agents.local_runtime.memory_catalog.agent_experience_delta import (
+    applies_when_chars,
+)
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     consolidated_experience_ids,
     derived_experience_ids,
 )
-from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.local_runtime.memory_catalog.models import (
+    MemoryDocument,
+    MemorySource,
+)
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     LocalMemoryFileEditorRuntime,
 )
@@ -33,8 +39,10 @@ from pantaray_agents.tasks.experience_consolidation import (
 )
 from pantaray_agents.tasks.internal_jobs.memory_update import execute_memory_update_job
 from pantaray_agents.tasks.memory_consolidation import (
+    EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS,
     EXPERIENCE_CONSOLIDATION_PROMPT_NAME,
     MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS,
+    experience_consolidation_is_due,
 )
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -213,7 +221,7 @@ def _lesson(experience_id: str, applies_when: str, *, key: str | None = None) ->
 
 
 _MERGED: dict[str, JSONValue] = {
-    "applies_when": "Running the Python test suite of a uv-managed repository.",
+    "applies_when": "Running tests with uv.",
     "observed_approach": "Ran the suite with the system interpreter, twice.",
     "outcome": "ineffective",
     "next_time_rule": "Run the suite through uv run.",
@@ -281,7 +289,7 @@ async def test_an_index_over_the_limit_merges_lessons_into_one_that_supersedes_t
     payload = _claimed_payload(runtime)
     first, second, third, _ = derived_experience_ids(payload["job_id"])
     monkeypatch.setattr(
-        memory_consolidation, "EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS", 300
+        memory_consolidation, "EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS", 50
     )
     agent = _MergingAgent(
         _three_lessons(payload["job_id"]),
@@ -336,7 +344,7 @@ async def test_an_experience_consolidation_that_merges_nothing_publishes_nothing
     runtime = _bootstrap(tmp_path)
     payload = _claimed_payload(runtime)
     monkeypatch.setattr(
-        memory_consolidation, "EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS", 300
+        memory_consolidation, "EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS", 50
     )
     agent = _MergingAgent(_three_lessons(payload["job_id"]), merges=merges)
 
@@ -360,3 +368,35 @@ async def test_an_index_under_the_limit_is_not_consolidated(tmp_path: Path) -> N
     )
 
     assert agent.requests == []
+
+
+@pytest.mark.asyncio
+async def test_after_a_consolidation_the_next_waits_for_enough_new_lessons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    payload = _claimed_payload(runtime)
+    first, second, _, _ = derived_experience_ids(payload["job_id"])
+    monkeypatch.setattr(
+        memory_consolidation, "EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS", 50
+    )
+    agent = _MergingAgent(
+        _three_lessons(payload["job_id"]),
+        merges=[{"supersedes": [first, second], **_MERGED}],
+    )
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+    files = _published_fact_files(runtime, "agent_experience")
+    left = applies_when_chars(
+        tuple(MemoryDocument(path, text) for path, text in files.items())
+    )
+    assert _fact_revision_count(runtime, "agent_experience") == 2
+
+    def due(chars: int) -> bool:
+        return experience_consolidation_is_due(
+            runtime=runtime, user_id=payload["user_id"], chars=chars
+        )
+
+    assert not due(left + EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS - 1)
+    assert due(left + EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS)

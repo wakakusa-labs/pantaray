@@ -1,9 +1,9 @@
 """Agent Experience consolidation: lessons that overlap become one.
 
-An entry is one lesson, and the host-written index lists each one's situation.
-Lessons only accumulate, so the index outgrows what a later agent can be handed
-whole. A consolidation merges the lessons that cover one situation into a new
-entry that supersedes them, the same way an update replaces a lesson.
+An entry is one lesson, and its `Applies when` names the situation it is for.
+Lessons only accumulate, so their situations outgrow what a later agent can be
+handed whole. A consolidation merges the lessons that cover one situation into
+a new entry that supersedes them, the same way an update replaces a lesson.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pantaray_agents.local_runtime.memory_catalog.agent_experience_content impor
     render_agent_experience_markdown,
 )
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_delta import (
-    rebuild_agent_experience_index,
+    applies_when_chars,
 )
 from pantaray_agents.local_runtime.memory_catalog.draft import replace_draft_documents
 from pantaray_agents.local_runtime.memory_catalog.errors import (
@@ -34,6 +34,10 @@ from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
 from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryDocument,
     MemoryDraftCheckpoint,
+)
+from pantaray_agents.local_runtime.runtime.memory_update_progress import (
+    MEMORY_CATEGORY_PUBLISHED_EVENT,
+    MEMORY_UPDATE_COMPLETED_EVENT,
 )
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     MemoryDraftToolSession,
@@ -105,7 +109,7 @@ def merge_experiences_tool(
             "status": "success",
             "merged": merged,
             "rejected": rejected,
-            "index_characters": len(experience_index(session.draft.documents)),
+            "applies_when_characters": applies_when_chars(session.draft.documents),
         }
         return success(call.tool_name, output)
 
@@ -173,7 +177,7 @@ def merge_experiences_tool(
             },
         },
         response_schema=response_schema(
-            required=("status", "merged", "rejected", "index_characters"),
+            required=("status", "merged", "rejected", "applies_when_characters"),
             properties={
                 "merged": {
                     "type": "array",
@@ -202,7 +206,7 @@ def merge_experiences_tool(
                         },
                     },
                 },
-                "index_characters": {"type": "integer"},
+                "applies_when_characters": {"type": "integer"},
             },
         ),
         execute=execute,
@@ -315,13 +319,48 @@ def experience_entries_text(
     )
 
 
-def experience_index(documents: tuple[MemoryDocument, ...]) -> str:
-    """The index publication will write for these entries."""
+def last_consolidated_applies_when_chars(
+    *, connection: sqlite3.Connection, user_id: str
+) -> int | None:
+    """`Applies when` characters the last consolidation left, if one ran.
 
-    return next(
-        document.content
-        for document in rebuild_agent_experience_index(documents)
-        if document.source_path == AGENT_EXPERIENCE_INDEX_PATH
+    A consolidation publishes inside the update's job after the update has
+    completed, so its revision is the Agent Experience one a Memory process
+    published after its completion event.
+    """
+
+    row = connection.execute(
+        """
+        SELECT json_extract(published.payload_json, '$.revision_id') AS revision_id
+        FROM process_events AS published
+        JOIN processes ON processes.process_id = published.process_id
+        WHERE processes.user_id = ? AND published.event_name = ?
+          AND json_extract(published.payload_json, '$.source') = 'agent_experience'
+          AND EXISTS (
+              SELECT 1 FROM process_events AS completed
+              WHERE completed.process_id = published.process_id
+                AND completed.event_name = ?
+                AND completed.event_seq < published.event_seq
+          )
+        ORDER BY published.process_event_rowid DESC
+        LIMIT 1
+        """,
+        (user_id, MEMORY_CATEGORY_PUBLISHED_EVENT, MEMORY_UPDATE_COMPLETED_EVENT),
+    ).fetchone()
+    if row is None:
+        return None
+    return applies_when_chars(
+        tuple(
+            MemoryDocument(str(item["source_path"]), str(item["content_text"]))
+            for item in connection.execute(
+                """
+                SELECT source_path, content_text FROM memory_fragments
+                WHERE user_id = ? AND revision_id = ?
+                  AND block_kind = 'document_root'
+                """,
+                (user_id, str(row["revision_id"])),
+            )
+        )
     )
 
 
@@ -329,6 +368,6 @@ __all__ = [
     "MERGE_EXPERIENCES_TOOL_NAME",
     "entry_written_dates",
     "experience_entries_text",
-    "experience_index",
+    "last_consolidated_applies_when_chars",
     "merge_experiences_tool",
 ]

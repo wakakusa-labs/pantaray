@@ -58,6 +58,12 @@ def rebuild_agent_experience_index(
     )
 
 
+def applies_when_chars(documents: tuple[MemoryDocument, ...]) -> int:
+    """Characters of every lesson's `Applies when`, the part Action is handed."""
+
+    return sum(len(entry.applies_when) for entry in _parse_entries(documents))
+
+
 def validate_agent_experience_tree_change(
     *,
     base_documents: tuple[MemoryDocument, ...],
@@ -170,6 +176,7 @@ def _validate_tree_paths(documents: dict[str, str]) -> None:
 
 __all__ = [
     "AgentExperienceTreeChange",
+    "applies_when_chars",
     "parse_agent_experience_tree",
     "rebuild_agent_experience_index",
     "validate_agent_experience_tree_change",

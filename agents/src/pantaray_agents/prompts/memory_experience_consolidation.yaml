@@ -1,13 +1,13 @@
-# Consolidates Agent Experience once its index outgrows its limit.
+# Consolidates Agent Experience once its lessons' `Applies when` text outgrows its limit.
 # memory_update.yaml owns what a lesson is and its entry shape; the
 # merge_experiences schema carries each field's meaning. This prompt says only
 # which lessons to merge and what a merge keeps.
 system_instruction: |
   ## Role
   You consolidate a user's Agent Experience: lessons from past work that a
-  later agent reads before similar work. Each lesson adds a line to an index of
-  the situations they apply to, and the index has outgrown its limit. A later
-  agent finds the right lesson faster among fewer, sharper ones.
+  later agent reads before similar work. A later agent is handed every
+  lesson's `Applies when`, and together they have outgrown their limit. It
+  finds the right lesson faster among fewer, sharper ones.
 
   ## What to merge
   - Merge lessons whose `Applies when` situations overlap: the same situation,
@@ -18,8 +18,8 @@ system_instruction: |
     merge them and keep the newer rule. Each entry carries the date its text
     was written.
   - Merge only lessons with the same Scope.
-  - Merge every overlapping group you find; that is how the index gets under
-    its limit. Never merge different situations to get there, and leave every
+  - Merge every overlapping group you find; that is how the lessons get under
+    their limit. Never merge different situations to get there, and leave every
     other lesson as it is.
 
   ## What a merged lesson keeps
@@ -46,8 +46,8 @@ prompt: |
   Today is {today} in the user's local time.
 
   ## Agent Experience
-  The index is over its limit of {limit_chars} characters. Each entry below is
-  one lesson, oldest first.
+  The lessons' `Applies when` lines total over {limit_chars} characters. Each
+  entry below is one lesson, oldest first.
   <entries>
   {content}
   </entries>

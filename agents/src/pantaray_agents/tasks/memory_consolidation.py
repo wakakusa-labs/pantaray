@@ -1,5 +1,5 @@
 """Consolidation of an oversized Fact or long-term Insight file, or of Agent
-Experience whose index has grown too long.
+Experience whose lessons' `Applies when` text has grown too long.
 
 A memory update changes only what its evidence touches, so a file that keeps
 receiving evidence grows into a log of events, and Agent Experience only ever
@@ -8,8 +8,8 @@ over the size limit is rewritten on its own, and Agent Experience it changed
 merges its overlapping lessons, still inside the update's job: the job's user
 lock and the one active update per user keep it from racing another update, and
 its publication is bound to the job's Memory run like the update's own. A
-consolidation that fails, or does not shrink its file or index, publishes
-nothing and leaves the update's revision current.
+consolidation that fails, or does not shrink its file or its lessons'
+`Applies when` text, publishes nothing and leaves the update's revision current.
 """
 
 from __future__ import annotations
@@ -27,6 +27,9 @@ from pantaray_agents.agents.memory_agent import (
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AGENT_EXPERIENCE_ENTRIES_ROOT,
     AGENT_EXPERIENCE_INDEX_PATH,
+)
+from pantaray_agents.local_runtime.memory_catalog.agent_experience_delta import (
+    applies_when_chars,
 )
 from pantaray_agents.local_runtime.memory_catalog.artifact_workspace import (
     prepare_artifact_draft,
@@ -70,7 +73,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.tool_support impor
 from pantaray_agents.tasks.experience_consolidation import (
     entry_written_dates,
     experience_entries_text,
-    experience_index,
+    last_consolidated_applies_when_chars,
     merge_experiences_tool,
 )
 from pantaray_agents.tasks.memory_update_completion import (
@@ -94,11 +97,14 @@ logger = logging.getLogger(__name__)
 # at 20,000; past that, every update that edits the file reads all of it and its
 # events pile up faster than any one update removes them.
 MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS: Final[int] = 20_000
-# Characters of the host-written `agent_experience/index.md`, one line per
-# lesson. Action is to receive the whole index when it starts, so it stays near
-# 2,500 tokens: about 45 lessons at the ~220 characters a line averaged when
-# 73 lessons had grown it to 16,000.
-EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS: Final[int] = 10_000
+# Characters of every lesson's `Applies when`, which Action is to receive
+# whole when it starts: about 80 lessons at the ~125 characters one averaged
+# when 73 lessons totalled 9,100.
+EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS: Final[int] = 10_000
+# Lessons on separate situations stay apart, so a consolidation can leave the
+# total over the threshold; the next one waits for about 16 new lessons
+# (~2,000 characters) instead of rerunning on each update's one or two.
+EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS: Final[int] = 2_000
 EXPERIENCE_CONSOLIDATION_PROMPT_NAME: Final[str] = "memory_experience_consolidation"
 REWRITE_FILE_TOOL_NAME: Final[str] = "rewrite_file"
 # The TODO list is pruned whole by every update.
@@ -129,7 +135,7 @@ class MemoryConsolidationTarget:
 
 
 def consolidation_targets(
-    prepared: PreparedMemoryUpdateRun,
+    prepared: PreparedMemoryUpdateRun, *, runtime: LocalMemoryFileEditorRuntime
 ) -> tuple[MemoryConsolidationTarget, ...]:
     """Files this run changed that are now over the limit.
 
@@ -142,10 +148,12 @@ def consolidation_targets(
     for route in prepared.router.routes:
         if route.source == "agent_experience":
             draft = route.session.draft
-            if (
-                draft.draft_revision != prepared.base_draft(route.source).draft_revision
-                and len(experience_index(draft.documents))
-                > EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS
+            if draft.draft_revision != prepared.base_draft(
+                route.source
+            ).draft_revision and experience_consolidation_is_due(
+                runtime=runtime,
+                user_id=draft.user_id,
+                chars=applies_when_chars(draft.documents),
             ):
                 targets.append(
                     MemoryConsolidationTarget(
@@ -167,6 +175,22 @@ def consolidation_targets(
             and before.get(document.source_path) != document.content
         )
     return tuple(targets)
+
+
+def experience_consolidation_is_due(
+    *, runtime: LocalMemoryFileEditorRuntime, user_id: str, chars: int
+) -> bool:
+    """Whether lessons whose `Applies when` total `chars` are due a merge."""
+
+    if chars <= EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS:
+        return False
+    with open_memory_catalog_connection(
+        db_path=runtime.db_path, busy_timeout_ms=runtime.busy_timeout_ms
+    ) as connection:
+        last = last_consolidated_applies_when_chars(
+            connection=connection, user_id=user_id
+        )
+    return last is None or chars - last >= EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS
 
 
 async def consolidate_memory_files(
@@ -259,13 +283,14 @@ async def _consolidate_file(
                 prompt_name=EXPERIENCE_CONSOLIDATION_PROMPT_NAME,
                 path=target.path,
                 content=experience_entries_text(base, written),
-                limit_chars=EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS,
+                limit_chars=EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS,
                 today=today,
             )
             tools = (merge_experiences_tool(session=session, run_id=run_id),)
-            before = experience_index(base.documents)
+            before_chars = applies_when_chars(base.documents)
         else:
             before = _content(base, target.path)
+            before_chars = len(before)
             request = MemoryConsolidationRequest(
                 run_id=run_id,
                 prompt_name=MEMORY_CONSOLIDATION_PROMPT_NAME,
@@ -280,15 +305,15 @@ async def _consolidate_file(
             tool_definitions=tools,
             tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
         )
-    after = (
-        experience_index(session.draft.documents)
+    after_chars = (
+        applies_when_chars(session.draft.documents)
         if experience
-        else _content(session.draft, target.path)
+        else len(_content(session.draft, target.path))
     )
     # `completed` after a refused or missing rewrite leaves the file as it was.
-    if len(after) >= len(before):
+    if after_chars >= before_chars:
         raise MemoryConsolidationRejectedError(
-            f"consolidation left {len(after)} of {len(before)} characters"
+            f"consolidation left {after_chars} of {before_chars} characters"
         )
     await require_current_route_identity()
     await publish_memory_draft(
@@ -311,8 +336,8 @@ async def _consolidate_file(
         job_id=run_id,
         source=target.source,
         path=target.path,
-        chars_before=len(before),
-        chars_after=len(after),
+        chars_before=before_chars,
+        chars_after=after_chars,
     )
 
 
@@ -390,8 +415,9 @@ def _content(draft: MemoryDraftCheckpoint, path: str) -> str:
 
 
 __all__ = [
+    "EXPERIENCE_CONSOLIDATION_MIN_GROWTH_CHARS",
     "EXPERIENCE_CONSOLIDATION_PROMPT_NAME",
-    "EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS",
+    "EXPERIENCE_CONSOLIDATION_THRESHOLD_CHARS",
     "MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS",
     "REWRITE_FILE_TOOL_NAME",
     "MemoryConsolidationAgent",
@@ -399,5 +425,6 @@ __all__ = [
     "MemoryConsolidationTarget",
     "consolidate_memory_files",
     "consolidation_targets",
+    "experience_consolidation_is_due",
     "rewrite_file_tool",
 ]

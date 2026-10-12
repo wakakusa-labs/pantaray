@@ -18,14 +18,18 @@ MEMORY_SEARCH_PURPOSE = (
     "found it."
 )
 MEMORY_SEARCH_WHEN = (
-    "keywords finds records holding the words you give; query finds records by "
-    "meaning, so it also finds records worded differently. Give at least one; most "
-    "searches should give both."
+    "Search before answering or acting when what is known about the user, a "
+    "project, recent activity, or past agent work may change the answer or the "
+    "work. keywords finds records holding the words you give; query finds records"
+    " by meaning, so it also finds records worded differently. Give at least one;"
+    " most searches should give both."
 )
 MEMORY_SEARCH_AVOID = (
-    "observed_at is the latest time in the result's record, not when a quote was "
-    "observed; read the quote's Observed: line for that. notes in the result name "
-    "any keyword that was not matched and say when the result list was full."
+    "Long-term insights and facts can be stale; when it matters, check them "
+    "against recent activity. observed_at is the latest time in the result's "
+    "record, not when a quote was observed; read the quote's Observed: line for "
+    "that. notes in the result name any keyword that was not matched and say when"
+    " the result list was full."
 )
 MEMORY_SEARCH_DESCRIPTION = " ".join(
     (MEMORY_SEARCH_PURPOSE, MEMORY_SEARCH_WHEN, MEMORY_SEARCH_AVOID)

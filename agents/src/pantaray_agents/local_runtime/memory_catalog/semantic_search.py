@@ -50,64 +50,98 @@ def search_semantic_fragments(
     *,
     user_id: str,
     visible_revision_ids: Sequence[str],
-    query_embedding: Sequence[float],
+    query_embeddings: Sequence[Sequence[float]],
     embedding_generation: EmbeddingGeneration,
     candidate_limit: int,
-) -> tuple[SemanticFragmentMatch, ...]:
+) -> tuple[tuple[SemanticFragmentMatch, ...], ...]:
+    """One ranked match list per query embedding, in the order given.
+
+    The index is verified once, which costs more than a nearest-neighbour pass,
+    and every embedding is then ranked against the verified entries.
+    """
     if candidate_limit <= 0:
         raise ValueError("semantic candidate_limit must be positive")
-    revision_ids = tuple(dict.fromkeys(visible_revision_ids))
-    if not revision_ids:
-        return ()
     if not embedding_generation.specification.normalized:
         raise MemoryEmbeddingIndexUnavailableError(
             "active memory embedding generation is not normalized"
         )
     try:
-        query_blob = encode_embedding(
-            query_embedding,
-            dimensions=embedding_generation.specification.dimensions,
+        query_blobs = tuple(
+            encode_embedding(
+                embedding,
+                dimensions=embedding_generation.specification.dimensions,
+            )
+            for embedding in query_embeddings
         )
     except MemoryEmbeddingValidationError as exc:
         raise MemoryEmbeddingIndexUnavailableError(
             "memory search query embedding is invalid"
         ) from exc
+    revision_ids = tuple(dict.fromkeys(visible_revision_ids))
+    if not revision_ids or not query_blobs:
+        return tuple(() for _ in query_blobs)
     entries = generation_entry_table(embedding_generation.generation_id)
     vectors = generation_vector_table(embedding_generation.generation_id)
-    best_by_fragment: dict[str, SemanticFragmentMatch] = {}
     try:
+        batches: list[tuple[_ProjectedEmbedding, ...]] = []
         for offset in range(0, len(revision_ids), _SQLITE_REVISION_ID_CHUNK_SIZE):
-            revision_chunk = revision_ids[
-                offset : offset + _SQLITE_REVISION_ID_CHUNK_SIZE
-            ]
             projected = _verify_projected_chunk(
                 connection,
                 entries=entries,
                 user_id=user_id,
                 generation_id=embedding_generation.generation_id,
-                revision_ids=revision_chunk,
+                revision_ids=revision_ids[
+                    offset : offset + _SQLITE_REVISION_ID_CHUNK_SIZE
+                ],
                 max_text_chars=embedding_generation.specification.max_text_chars,
             )
-            for start in range(0, len(projected), _SQLITE_VEC_MAX_K):
-                # Retrieve every distance before deduplication and limiting so
-                # later chunks and equal-distance fragments cannot be dropped.
-                matches = _search_embedding_batch(
-                    connection,
-                    vectors=vectors,
-                    user_id=user_id,
-                    projected=projected[start : start + _SQLITE_VEC_MAX_K],
-                    query_blob=query_blob,
-                )
-                for match in matches:
-                    current = best_by_fragment.get(match.fragment_id)
-                    if current is None or match.distance < current.distance:
-                        best_by_fragment[match.fragment_id] = match
+            batches.extend(
+                projected[start : start + _SQLITE_VEC_MAX_K]
+                for start in range(0, len(projected), _SQLITE_VEC_MAX_K)
+            )
+
+        return tuple(
+            _rank_matches(
+                connection,
+                vectors=vectors,
+                user_id=user_id,
+                batches=batches,
+                query_blob=query_blob,
+                candidate_limit=candidate_limit,
+            )
+            for query_blob in query_blobs
+        )
     except sqlite3.OperationalError as exc:
         if is_retryable_repository_exception(exc):
             raise
         raise MemoryEmbeddingIndexUnavailableError(
             "memory embedding index schema is unavailable"
         ) from exc
+
+
+def _rank_matches(
+    connection: sqlite3.Connection,
+    *,
+    vectors: str,
+    user_id: str,
+    batches: Sequence[Sequence[_ProjectedEmbedding]],
+    query_blob: bytes,
+    candidate_limit: int,
+) -> tuple[SemanticFragmentMatch, ...]:
+    best_by_fragment: dict[str, SemanticFragmentMatch] = {}
+    for batch in batches:
+        # Retrieve every distance before deduplication and limiting so later
+        # chunks and equal-distance fragments cannot be dropped.
+        for match in _search_embedding_batch(
+            connection,
+            vectors=vectors,
+            user_id=user_id,
+            projected=batch,
+            query_blob=query_blob,
+        ):
+            current = best_by_fragment.get(match.fragment_id)
+            if current is None or match.distance < current.distance:
+                best_by_fragment[match.fragment_id] = match
     ranked = sorted(
         best_by_fragment.values(),
         key=lambda match: (match.distance, match.fragment_id),

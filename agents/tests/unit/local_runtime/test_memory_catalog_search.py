@@ -92,7 +92,7 @@ def test_semantic_search_preserves_retryable_operational_error(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     TEST_EMBEDDING_SPECIFICATION,
@@ -123,7 +123,7 @@ def test_semantic_search_maps_missing_schema_to_index_unavailable(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     TEST_EMBEDDING_SPECIFICATION,
@@ -410,6 +410,11 @@ def test_catalog_semantic_search_uses_vec0_cosine_ordering(tmp_path: Path) -> No
             generation_id=_scoped_generation_id(connection),
             activated_at="2026-07-18T00:00:00Z",
         )
+        # Equal times keep the activity time prior from reordering by recency.
+        connection.execute(
+            "UPDATE memory_nodes SET updated_at = '2026-07-18T00:00:00Z' "
+            "WHERE user_id = 'user-1'"
+        )
         results, _ = search_memory_catalog(
             connection=connection,
             user_id="user-1",
@@ -429,6 +434,22 @@ def test_catalog_semantic_search_uses_vec0_cosine_ordering(tmp_path: Path) -> No
         "far-vector",
     ]
     assert results[0]["matched_by"] == "query"
+    # The keywords and the query are ranked in one pass over the verified
+    # index; each must rank by its own embedding.
+    both, _ = search_memory_catalog(
+        connection=connection,
+        user_id="user-1",
+        run_id="semantic-two-lanes",
+        keywords=("unmatched",),
+        semantic=SemanticSearchInput(
+            _active_generation(connection), _vector(0), _vector(1)
+        ),
+        focus="activity",
+        center_time=None,
+        radius_hours=None,
+        limit=2,
+    )
+    assert [result["record_id"] for result in both] == ["far-vector", "near-vector"]
 
 
 def test_semantic_chunks_return_unique_original_fragments(tmp_path: Path) -> None:
@@ -518,11 +539,11 @@ def test_semantic_search_filters_single_vector_before_knn_limit(tmp_path: Path) 
         )
         _index_pending_fragments(connection, vector=_vector(0))
 
-        actual = search_semantic_fragments(
+        (actual,) = search_semantic_fragments(
             connection,
             user_id="user-1",
             visible_revision_ids=(visible.revision_id,),
-            query_embedding=_vector(0),
+            query_embeddings=(_vector(0),),
             embedding_generation=_active_generation(connection),
             candidate_limit=8,
         )
@@ -622,14 +643,14 @@ def test_semantic_search_batches_all_vectors_before_deduplication_and_limit(
         assert len(expected) == 4_097
         assert long_fragment_id in {str(row[0]) for row in expected[:3]}
         for limit in (24, len(expected)):
-            actual = search_semantic_fragments(
+            (actual,) = search_semantic_fragments(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=(
                     revision.revision_id,
                     hidden_revisions[1].revision_id,
                 ),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=_active_generation(connection),
                 candidate_limit=limit,
             )
@@ -1206,11 +1227,11 @@ def test_semantic_search_accepts_an_unembeddable_chunk(tmp_path: Path) -> None:
 
         # A chunk the model cannot embed is left out of the index rather than
         # taking semantic search down with it.
-        results = search_semantic_fragments(
+        (results,) = search_semantic_fragments(
             connection,
             user_id="user-1",
             visible_revision_ids=(revision.revision_id,),
-            query_embedding=_vector(0),
+            query_embeddings=(_vector(0),),
             embedding_generation=_active_generation(connection),
             candidate_limit=8,
         )

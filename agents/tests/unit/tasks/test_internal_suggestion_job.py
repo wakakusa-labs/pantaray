@@ -677,10 +677,7 @@ async def test_run_suggestion_job_defers_transient_semantic_search_failure(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=(
-                    1.0,
-                    *([0.0] * (MEMORY_EMBEDDING_DIMENSIONS - 1)),
-                ),
+                query_embeddings=((1.0, *([0.0] * (MEMORY_EMBEDDING_DIMENSIONS - 1))),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     EmbeddingSpecification(

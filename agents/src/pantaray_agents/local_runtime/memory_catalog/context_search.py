@@ -40,7 +40,7 @@ from .search_policy import (
 from .semantic_index import (
     MemoryEmbeddingIndexUnavailableError,
 )
-from .semantic_search import search_semantic_fragments
+from .semantic_search import SemanticFragmentMatch, search_semantic_fragments
 
 LEXICAL_CANDIDATE_POOL_MULTIPLIER = 3
 
@@ -94,33 +94,18 @@ def search_memory_catalog(
     # A fragment ID names one fragment; it is not a word to match elsewhere.
     fragment_ids = {hit.fragment.fragment_id for hit in exact_hits}
     word_keywords = tuple(word for word in keywords if word not in fragment_ids)
-    visible_revision_ids = (
-        _load_visible_revision_ids(
-            connection=connection,
-            user_id=user_id,
-            sources=sources,
-            pinned_revisions=pinned_revisions,
-        )
-        if semantic is not None
-        else ()
+    keyword_semantic, query_semantic = _semantic_hits(
+        connection=connection,
+        user_id=user_id,
+        semantic=semantic,
+        embeddings=(
+            semantic.keywords_embedding if semantic and word_keywords else None,
+            semantic.query_embedding if semantic else None,
+        ),
+        sources=sources,
+        pinned_revisions=pinned_revisions,
+        candidate_limit=candidate_limit,
     )
-
-    def semantic_hits(
-        embedding: Sequence[float] | None,
-    ) -> tuple[MemoryCandidateHit, ...]:
-        if semantic is None or embedding is None:
-            return ()
-        return _semantic_hits(
-            connection=connection,
-            user_id=user_id,
-            visible_revision_ids=visible_revision_ids,
-            query_embedding=embedding,
-            embedding_generation=semantic.generation,
-            sources=sources,
-            pinned_revisions=pinned_revisions,
-            candidate_limit=candidate_limit,
-        )
-
     keyword_hits = rank_keyword_hits(
         exact=exact_hits,
         lexical=(
@@ -135,16 +120,12 @@ def search_memory_catalog(
             if word_keywords
             else ()
         ),
-        semantic=(
-            semantic_hits(semantic.keywords_embedding)
-            if word_keywords and semantic is not None
-            else ()
-        ),
+        semantic=keyword_semantic,
         center_time=parsed_center_time,
         radius_hours=radius_hours,
     )
     query_hits = rank_query_hits(
-        semantic=semantic_hits(semantic.query_embedding) if semantic else (),
+        semantic=query_semantic,
         center_time=parsed_center_time,
         radius_hours=radius_hours,
     )
@@ -279,21 +260,53 @@ def _semantic_hits(
     *,
     connection: sqlite3.Connection,
     user_id: str,
-    visible_revision_ids: tuple[str, ...],
-    query_embedding: Sequence[float],
-    embedding_generation: EmbeddingGeneration,
+    semantic: SemanticSearchInput | None,
+    embeddings: tuple[Sequence[float] | None, ...],
     sources: tuple[MemorySource, ...],
     pinned_revisions: Mapping[MemorySource, str | None] | None,
     candidate_limit: int,
-) -> tuple[MemoryCandidateHit, ...]:
-    matches = search_semantic_fragments(
-        connection,
-        user_id=user_id,
-        visible_revision_ids=visible_revision_ids,
-        query_embedding=query_embedding,
-        embedding_generation=embedding_generation,
-        candidate_limit=candidate_limit,
+) -> tuple[tuple[MemoryCandidateHit, ...], ...]:
+    """One hit list per embedding; an absent embedding gets an empty list."""
+    present = tuple(embedding for embedding in embeddings if embedding is not None)
+    if semantic is None or not present:
+        return tuple(() for _ in embeddings)
+    lanes = iter(
+        search_semantic_fragments(
+            connection,
+            user_id=user_id,
+            visible_revision_ids=_load_visible_revision_ids(
+                connection=connection,
+                user_id=user_id,
+                sources=sources,
+                pinned_revisions=pinned_revisions,
+            ),
+            query_embeddings=present,
+            embedding_generation=semantic.generation,
+            candidate_limit=candidate_limit,
+        )
     )
+    return tuple(
+        _visible_hits(
+            connection=connection,
+            user_id=user_id,
+            matches=next(lanes),
+            sources=sources,
+            pinned_revisions=pinned_revisions,
+        )
+        if embedding is not None
+        else ()
+        for embedding in embeddings
+    )
+
+
+def _visible_hits(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    matches: tuple[SemanticFragmentMatch, ...],
+    sources: tuple[MemorySource, ...],
+    pinned_revisions: Mapping[MemorySource, str | None] | None,
+) -> tuple[MemoryCandidateHit, ...]:
     rows = _load_visible_fragment_matches(
         connection=connection,
         user_id=user_id,

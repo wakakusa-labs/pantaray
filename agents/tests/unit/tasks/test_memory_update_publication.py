@@ -181,7 +181,7 @@ def _experience_entry(
             outcome="effective",
             next_time_rule="Trace every caller first.",
             observed_result="One root fix restored every caller.",
-            supersedes_experience_id=None,
+            supersedes_experience_ids=(),
         )
     )
 

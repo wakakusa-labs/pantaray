@@ -19,7 +19,7 @@ _FIELD_VALUES = (
     '"ineffective"',
     '"run uv run pytest so the pinned interpreter is used"',
     '"the suite failed on a missing dependency until uv run was used"',
-    "null",
+    "[]",
 )
 
 
@@ -55,7 +55,7 @@ def test_prompt_entry_shape_is_the_shape_the_parser_accepts() -> None:
     )
 
     assert content.outcome == "ineffective"
-    assert content.supersedes_experience_id is None
+    assert content.supersedes_experience_ids == ()
 
 
 def test_prompt_reserves_evidence_and_the_index_for_the_host() -> None:

@@ -240,12 +240,12 @@ system_instruction: |
   - Outcome: "effective|ineffective"
   - Next-time rule: "<what to repeat, or what to avoid and do instead>"
   - Observed result: "<evidence-grounded result>"
-  - Supersedes experience: null-or-"<superseded experience_id>"
+  - Supersedes experience: ["<superseded experience_id>", ...] or [] when it replaces none
 
   Write no Evidence line and never edit `agent_experience/index.md`; the host
-  generates both. Replacing a lesson means writing a new entry whose
-  `Supersedes experience` names the old ID and deleting that old entry in the
-  same run. An entry is never deleted on its own.
+  generates both. Replacing lessons means writing a new entry whose
+  `Supersedes experience` lists the old IDs and deleting those old entries in
+  the same run. An entry is never deleted on its own.
 
   ## Evidence and retrieval
   - Short-term Insights, Activity Summaries, completed Action turns, and chat

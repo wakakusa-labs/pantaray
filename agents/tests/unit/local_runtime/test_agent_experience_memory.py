@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.memory_catalog.models import MemoryDocument
 NEW_ID = "3f861ab4-7b3c-5d90-b520-3424da5bca75"
 SECOND_ID = "9a9b9c9d-1111-5222-8333-123456789abc"
 OLD_ID = "1a1b1c1d-1111-5222-8333-123456789abc"
+SECOND_OLD_ID = "2a2b2c2d-1111-5222-8333-123456789abc"
 ALLOWED_NEW_IDS = (NEW_ID, SECOND_ID)
 
 
@@ -33,7 +34,7 @@ def _content(
     experience_id: str,
     *,
     outcome: Literal["effective", "ineffective"] = "effective",
-    supersedes: str | None = None,
+    supersedes: tuple[str, ...] = (),
 ) -> AgentExperienceContent:
     observed_approach = "Changed the shared boundary after tracing every caller."
     observed_result = "One root fix restored every caller."
@@ -48,7 +49,7 @@ def _content(
         outcome=outcome,
         next_time_rule="Trace every caller before changing the shared boundary.",
         observed_result=observed_result,
-        supersedes_experience_id=supersedes,
+        supersedes_experience_ids=supersedes,
     )
 
 
@@ -84,7 +85,7 @@ def test_canonical_markdown_round_trips_both_outcomes(
         f'- Outcome: "{outcome}"\n'
         '- Next-time rule: "Trace every caller before changing the shared boundary."\n'
         f"- Observed result: {json.dumps(content.observed_result)}\n"
-        "- Supersedes experience: null\n"
+        "- Supersedes experience: []\n"
     )
     assert (
         parse_agent_experience_markdown(
@@ -156,7 +157,7 @@ def test_tree_change_rejects_an_entry_id_the_run_does_not_own() -> None:
 def test_tree_change_supersede_must_remove_the_entry_it_replaces() -> None:
     old = _entry(_content(OLD_ID), evidence=True)
     base = _tree(old)
-    replacement = _entry(_content(NEW_ID, supersedes=OLD_ID), evidence=False)
+    replacement = _entry(_content(NEW_ID, supersedes=(OLD_ID,)), evidence=False)
 
     change = validate_agent_experience_tree_change(
         base_documents=base,
@@ -171,6 +172,66 @@ def test_tree_change_supersede_must_remove_the_entry_it_replaces() -> None:
             published_documents=_tree(old, replacement),
             allowed_new_experience_ids=ALLOWED_NEW_IDS,
         )
+
+
+@pytest.mark.parametrize(
+    ("line", "superseded"),
+    (("null", ()), (f'"{OLD_ID}"', (OLD_ID,)), (f'["{OLD_ID}"]', (OLD_ID,))),
+    ids=("legacy_null", "legacy_one_id", "list"),
+)
+def test_an_entry_written_before_supersedes_became_a_list_still_parses(
+    line: str, superseded: tuple[str, ...]
+) -> None:
+    lines = render_agent_experience_markdown(_content(NEW_ID)).splitlines()
+    markdown = "\n".join((*lines[:-1], f"- Supersedes experience: {line}")) + "\n"
+
+    content = parse_agent_experience_markdown(markdown, expected_experience_id=NEW_ID)
+
+    assert content.supersedes_experience_ids == superseded
+
+
+def test_one_entry_may_replace_several_that_the_change_removes() -> None:
+    base = _tree(
+        _entry(_content(OLD_ID), evidence=False),
+        _entry(_content(SECOND_OLD_ID), evidence=False),
+    )
+    merged = _entry(
+        _content(NEW_ID, supersedes=(OLD_ID, SECOND_OLD_ID)), evidence=False
+    )
+
+    change = validate_agent_experience_tree_change(
+        base_documents=base,
+        published_documents=_tree(merged),
+        allowed_new_experience_ids=ALLOWED_NEW_IDS,
+    )
+
+    assert (change.added, change.removed) == ((NEW_ID,), (OLD_ID, SECOND_OLD_ID))
+
+
+def test_an_entry_cannot_claim_to_replace_an_id_that_was_not_in_the_tree() -> None:
+    base = _tree(_entry(_content(OLD_ID), evidence=False))
+    merged = _entry(
+        _content(NEW_ID, supersedes=(OLD_ID, SECOND_OLD_ID)), evidence=False
+    )
+
+    with pytest.raises(MemoryCatalogIntegrityError, match=SECOND_OLD_ID):
+        validate_agent_experience_tree_change(
+            base_documents=base,
+            published_documents=_tree(merged),
+            allowed_new_experience_ids=ALLOWED_NEW_IDS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("supersedes", "message"),
+    (((NEW_ID,), "cannot supersede itself"), ((OLD_ID, OLD_ID), "more than once")),
+    ids=("itself", "repeated"),
+)
+def test_supersedes_names_other_entries_once_each(
+    supersedes: tuple[str, ...], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _content(NEW_ID, supersedes=supersedes)
 
 
 def test_tree_change_rejects_deleting_an_entry_nothing_replaces() -> None:

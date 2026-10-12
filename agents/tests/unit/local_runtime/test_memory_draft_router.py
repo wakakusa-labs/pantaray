@@ -182,7 +182,7 @@ def _router_with_agent_experience() -> MemoryDraftRouter:
                 outcome="effective",
                 next_time_rule="Use the project interpreter",
                 observed_result="Tests passed",
-                supersedes_experience_id=None,
+                supersedes_experience_ids=(),
             )
         )
         + f"- Evidence: Action action-1 [[ref:{_EXPERIENCE_EVIDENCE_REF} "

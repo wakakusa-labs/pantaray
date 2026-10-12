@@ -269,7 +269,7 @@ def _experience_content(experience_id: str) -> AgentExperienceContent:
         outcome="effective",
         next_time_rule="Record every activation before the next category starts.",
         observed_result="A rerun skipped the category that already landed.",
-        supersedes_experience_id=None,
+        supersedes_experience_ids=(),
     )
 
 

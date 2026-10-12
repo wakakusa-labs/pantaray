@@ -1,12 +1,15 @@
-"""Consolidation of an oversized Fact or long-term Insight file.
+"""Consolidation of an oversized Fact or long-term Insight file, or of Agent
+Experience whose index has grown too long.
 
 A memory update changes only what its evidence touches, so a file that keeps
-receiving evidence grows into a log of events. Once an update has published,
-each file it changed that is now over the size limit is rewritten on its own,
-still inside the update's job: the job's user lock and the one active update per
-user keep it from racing another update, and its publication is bound to the
-job's Memory run like the update's own. A consolidation that fails, or does not
-shrink its file, publishes nothing and leaves the update's revision current.
+receiving evidence grows into a log of events, and Agent Experience only ever
+gains lessons. Once an update has published, each file it changed that is now
+over the size limit is rewritten on its own, and Agent Experience it changed
+merges its overlapping lessons, still inside the update's job: the job's user
+lock and the one active update per user keep it from racing another update, and
+its publication is bound to the job's Memory run like the update's own. A
+consolidation that fails, or does not shrink its file or index, publishes
+nothing and leaves the update's revision current.
 """
 
 from __future__ import annotations
@@ -20,6 +23,10 @@ from pantaray_agents.agents.memory_agent import (
     MEMORY_CONSOLIDATION_PROMPT_NAME,
     MEMORY_CONSOLIDATION_PROMPT_VERSION,
     MemoryConsolidationRequest,
+)
+from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
+    AGENT_EXPERIENCE_ENTRIES_ROOT,
+    AGENT_EXPERIENCE_INDEX_PATH,
 )
 from pantaray_agents.local_runtime.memory_catalog.artifact_workspace import (
     prepare_artifact_draft,
@@ -60,6 +67,12 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.tool_support impor
     success,
     tool,
 )
+from pantaray_agents.tasks.experience_consolidation import (
+    entry_written_dates,
+    experience_entries_text,
+    experience_index,
+    merge_experiences_tool,
+)
 from pantaray_agents.tasks.memory_update_completion import (
     ProfileBriefBuilder,
     publish_memory_draft,
@@ -81,9 +94,14 @@ logger = logging.getLogger(__name__)
 # at 20,000; past that, every update that edits the file reads all of it and its
 # events pile up faster than any one update removes them.
 MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS: Final[int] = 20_000
+# Characters of the host-written `agent_experience/index.md`, one line per
+# lesson. Action is to receive the whole index when it starts, so it stays near
+# 2,500 tokens: about 45 lessons at the ~220 characters a line averaged when
+# 73 lessons had grown it to 16,000.
+EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS: Final[int] = 10_000
+EXPERIENCE_CONSOLIDATION_PROMPT_NAME: Final[str] = "memory_experience_consolidation"
 REWRITE_FILE_TOOL_NAME: Final[str] = "rewrite_file"
-# Agent Experience has its own entry shape, and the TODO list is pruned whole
-# by every update.
+# The TODO list is pruned whole by every update.
 _CONSOLIDATED_SOURCES: Final[frozenset[MemorySource]] = frozenset(
     {"fact", "long_term_insight"}
 )
@@ -122,6 +140,19 @@ def consolidation_targets(
 
     targets: list[MemoryConsolidationTarget] = []
     for route in prepared.router.routes:
+        if route.source == "agent_experience":
+            draft = route.session.draft
+            if (
+                draft.draft_revision != prepared.base_draft(route.source).draft_revision
+                and len(experience_index(draft.documents))
+                > EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS
+            ):
+                targets.append(
+                    MemoryConsolidationTarget(
+                        source=route.source, path=AGENT_EXPERIENCE_INDEX_PATH
+                    )
+                )
+            continue
         if route.source not in _CONSOLIDATED_SOURCES:
             continue
         before = {
@@ -188,6 +219,7 @@ async def _consolidate_file(
 ) -> None:
     user_id = payload["user_id"]
     run_id = payload["job_id"]
+    experience = target.source == "agent_experience"
     with MemoryRunWorkspaceScope() as workspace_scope:
         workspace_scope.create(
             artifact_root=runtime.artifact_root, user_id=user_id, run_id=run_id
@@ -206,24 +238,53 @@ async def _consolidate_file(
                     source_record_id=fact_id if target.source == "fact" else user_id,
                     initial_documents=(),
                 )
+                written = (
+                    entry_written_dates(connection=connection, draft=base)
+                    if experience
+                    else {}
+                )
         session = MemoryDraftToolSession(
-            editable_policy=EditablePathPolicy((target.path,)),
+            editable_policy=EditablePathPolicy(
+                (f"{AGENT_EXPERIENCE_ENTRIES_ROOT}/*.md",)
+                if experience
+                else (target.path,)
+            ),
             draft=base,
             memory_context=MemoryContextSession(user_id=user_id, run_id=run_id),
         )
-        before = _content(base, target.path)
-        await agent.consolidate(
-            MemoryConsolidationRequest(
+        today = datetime.now().astimezone().date().isoformat()
+        if experience:
+            request = MemoryConsolidationRequest(
                 run_id=run_id,
+                prompt_name=EXPERIENCE_CONSOLIDATION_PROMPT_NAME,
+                path=target.path,
+                content=experience_entries_text(base, written),
+                limit_chars=EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS,
+                today=today,
+            )
+            tools = (merge_experiences_tool(session=session, run_id=run_id),)
+            before = experience_index(base.documents)
+        else:
+            before = _content(base, target.path)
+            request = MemoryConsolidationRequest(
+                run_id=run_id,
+                prompt_name=MEMORY_CONSOLIDATION_PROMPT_NAME,
                 path=target.path,
                 content=before,
                 limit_chars=MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS,
-                today=datetime.now().astimezone().date().isoformat(),
-            ),
-            tool_definitions=(rewrite_file_tool(session=session, path=target.path),),
+                today=today,
+            )
+            tools = (rewrite_file_tool(session=session, path=target.path),)
+        await agent.consolidate(
+            request,
+            tool_definitions=tools,
             tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
         )
-    after = _content(session.draft, target.path)
+    after = (
+        experience_index(session.draft.documents)
+        if experience
+        else _content(session.draft, target.path)
+    )
     # `completed` after a refused or missing rewrite leaves the file as it was.
     if len(after) >= len(before):
         raise MemoryConsolidationRejectedError(
@@ -329,6 +390,8 @@ def _content(draft: MemoryDraftCheckpoint, path: str) -> str:
 
 
 __all__ = [
+    "EXPERIENCE_CONSOLIDATION_PROMPT_NAME",
+    "EXPERIENCE_INDEX_CONSOLIDATION_THRESHOLD_CHARS",
     "MEMORY_FILE_CONSOLIDATION_THRESHOLD_CHARS",
     "REWRITE_FILE_TOOL_NAME",
     "MemoryConsolidationAgent",

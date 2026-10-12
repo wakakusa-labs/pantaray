@@ -38,6 +38,9 @@ from .models import MemoryRevision, MemorySource
 # One run may record several independent lessons; more than this is a sign the
 # agent is batching unrelated observations rather than selecting.
 MEMORY_RUN_MAX_NEW_EXPERIENCES: Final[int] = 4
+# Each consolidated entry replaces at least two, so this covers a tree of twice
+# as many entries; the 73-entry tree that prompted consolidation needs at most 36.
+MEMORY_CONSOLIDATION_MAX_NEW_EXPERIENCES: Final[int] = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,14 +130,33 @@ def memory_run_binding_from_payload(
 def derived_experience_ids(job_id: str) -> tuple[str, ...]:
     """Deterministic IDs so a rerun of the job writes the same entry paths."""
 
+    return _experience_ids(
+        job_id, kind="agent-experience", count=MEMORY_RUN_MAX_NEW_EXPERIENCES
+    )
+
+
+def consolidated_experience_ids(job_id: str) -> tuple[str, ...]:
+    """IDs of the entries a consolidation in this job writes.
+
+    A namespace of their own keeps them apart from the update's IDs, which the
+    same job may already have published.
+    """
+
+    return _experience_ids(
+        job_id,
+        kind="agent-experience-consolidation",
+        count=MEMORY_CONSOLIDATION_MAX_NEW_EXPERIENCES,
+    )
+
+
+def _experience_ids(job_id: str, *, kind: str, count: int) -> tuple[str, ...]:
     return tuple(
         str(
             uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"pantaray://memory-runs/{job_id}/agent-experience/{index}",
+                uuid.NAMESPACE_URL, f"pantaray://memory-runs/{job_id}/{kind}/{index}"
             )
         )
-        for index in range(1, MEMORY_RUN_MAX_NEW_EXPERIENCES + 1)
+        for index in range(1, count + 1)
     )
 
 
@@ -303,9 +325,11 @@ def _require_bound_row(
 
 
 __all__ = [
+    "MEMORY_CONSOLIDATION_MAX_NEW_EXPERIENCES",
     "MEMORY_RUN_MAX_NEW_EXPERIENCES",
     "MemoryRunActionEvidence",
     "MemoryRunBinding",
+    "consolidated_experience_ids",
     "derived_experience_ids",
     "memory_run_binding_from_intent",
     "memory_run_binding_from_payload",

@@ -63,7 +63,9 @@ from pantaray_llm.contracts.conversation import (
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_LLM_TOOL_CALL_INVALID,
+    PROXY_UPSTREAM_FORBIDDEN,
     PROXY_UPSTREAM_UNAVAILABLE,
     LlmProxyExecutionError,
 )
@@ -560,6 +562,33 @@ async def test_a_transport_retry_never_goes_out_on_a_changed_route(
 
     assert len(attempts) == 1
     assert plan_chat_turn(user_id=USER, retry_of=None) is not None
+
+
+@pytest.mark.parametrize(
+    ("response_status", "reason"),
+    [
+        (MODEL_REFUSAL_RESPONSE_STATUS, "llm_refused"),
+        # An HTTP 403 is an access denial: still told as a connection failure.
+        (None, "llm_connection"),
+    ],
+)
+async def test_a_refusal_to_answer_is_not_told_as_a_connection_failure(
+    response_status: str | None, reason: str
+) -> None:
+    _say("m-1", "Hi")
+    forbidden = LlmProxyExecutionError(
+        error_code=PROXY_UPSTREAM_FORBIDDEN,
+        error_message="The model provider refused the request.",
+        retryable=False,
+        response_status=response_status,
+    )
+
+    await _run(_Model([forbidden]))
+
+    assert _items()[-1].content.model_dump() == {
+        "kind": "turn_failure",
+        "reason": reason,
+    }
 
 
 async def test_a_send_that_fails_after_the_route_changed_leaves_no_failure(

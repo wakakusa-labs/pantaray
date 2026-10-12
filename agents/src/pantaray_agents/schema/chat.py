@@ -62,8 +62,9 @@ type ChatActionEventKind = Literal[
     "completed", "failed", "canceled", "approval_pending"
 ]
 # ``internal`` is a failure of Pantaray's own, which the user can still retry.
+# ``llm_refused`` is the model declining to answer.
 type ChatTurnFailureReason = Literal[
-    "llm_connection", "llm_request", "step_limit", "internal"
+    "llm_connection", "llm_refused", "llm_request", "step_limit", "internal"
 ]
 
 

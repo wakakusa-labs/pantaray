@@ -107,7 +107,7 @@ const ChatItemContentSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('turn_failure'),
-      reason: z.enum(['llm_connection', 'llm_request', 'step_limit', 'internal']),
+      reason: z.enum(['llm_connection', 'llm_refused', 'llm_request', 'step_limit', 'internal']),
     })
     .strict(),
 ]);

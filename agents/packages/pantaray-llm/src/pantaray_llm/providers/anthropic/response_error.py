@@ -7,6 +7,7 @@ import httpx
 from pantaray_llm.contracts.json_value import JSONValue
 from pantaray_llm.contracts.request import LlmRequest
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_AUTHENTICATION_FAILED,
     PROXY_INSUFFICIENT_BALANCE,
     PROXY_INVALID_INPUT,
@@ -108,7 +109,7 @@ def anthropic_stop_reason_error(
             status_code=403,
             code=PROXY_UPSTREAM_FORBIDDEN,
             message="The model provider refused the request.",
-            details={**details, "response_status": "refusal"},
+            details={**details, "response_status": MODEL_REFUSAL_RESPONSE_STATUS},
         )
     if stop_reason in _TRUNCATED_STOP_REASONS:
         return ProviderError(

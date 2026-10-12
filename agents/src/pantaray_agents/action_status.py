@@ -51,6 +51,7 @@ ACTION_FAILURE_CODE_CONNECTION_NOT_CONFIGURED: Final[str] = (
 )
 ACTION_FAILURE_CODE_CONNECTION_REJECTED: Final[str] = "ACTION_CONNECTION_REJECTED"
 ACTION_FAILURE_CODE_SIGN_IN_EXPIRED: Final[str] = "ACTION_SIGN_IN_EXPIRED"
+ACTION_FAILURE_CODE_LLM_REFUSED: Final[str] = "ACTION_LLM_REFUSED"
 # `build_llm_proxy_agent_error` folds PROXY_INSUFFICIENT_BALANCE into this code by
 # prefixing the agent's own code prefix, so the public message keys on it directly.
 ACTION_FAILURE_CODE_INSUFFICIENT_BALANCE: Final[str] = "ACTION_INSUFFICIENT_BALANCE"
@@ -122,6 +123,10 @@ _ACTION_PUBLIC_FAILURE_MESSAGES: Final[dict[str, dict[str, str]]] = {
     ACTION_FAILURE_CODE_SIGN_IN_EXPIRED: {
         "en": "Your sign-in expired. Log in again, then try again.",
         "ja": "ログインの有効期限が切れました。ログインし直してください。",
+    },
+    ACTION_FAILURE_CODE_LLM_REFUSED: {
+        "en": "The AI declined to answer. Change the model or start a new task.",
+        "ja": "AI が回答を断りました。モデルを変えるか、新しい作業で頼み直してください。",
     },
     # The same sentence has to hold for a user's own provider account and for a
     # Pantaray account, so it names neither an amount nor a way to pay.
@@ -605,6 +610,7 @@ __all__ = [
     "ACTION_FAILURE_CODE_CONNECTION_NOT_CONFIGURED",
     "ACTION_FAILURE_CODE_CONNECTION_REJECTED",
     "ACTION_FAILURE_CODE_SIGN_IN_EXPIRED",
+    "ACTION_FAILURE_CODE_LLM_REFUSED",
     "action_failure_message_public",
     "ACTION_FAILURE_CODE_CANCELED",
     "ACTION_FAILURE_CODE_PROCESSING_ERROR",

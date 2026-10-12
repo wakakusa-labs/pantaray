@@ -100,6 +100,7 @@ from pantaray_llm.contracts.conversation import (
 )
 from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_AUTHENTICATION_FAILED,
     PROXY_CONNECTION_NOT_CONFIGURED,
     PROXY_INSUFFICIENT_BALANCE,
@@ -521,6 +522,11 @@ def _failure_reason(exc: Exception) -> ChatTurnFailureReason:
     if isinstance(exc, ConversationTurnsExhausted):
         return "step_limit"
     if isinstance(exc, LlmProxyExecutionError):
+        if (
+            exc.error_code == PROXY_UPSTREAM_FORBIDDEN
+            and exc.response_status == MODEL_REFUSAL_RESPONSE_STATUS
+        ):
+            return "llm_refused"
         if exc.retryable or exc.error_code in _CONNECTION_ERROR_CODES:
             return "llm_connection"
         return "llm_request"

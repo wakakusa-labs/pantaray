@@ -137,6 +137,9 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             dismissed_suggestions=context.dismissed_suggestions or "- none",
             local_time_note=context.local_time_note,
             memory_file_manifest=context.memory_file_manifest,
+            facts_index=context.facts_index or "- none",
+            insights_index=context.insights_index or "- none",
+            overview_request=context.overview_request,
             workspace_context_prompt=context.workspace_context_prompt or "- none",
             new_experience_ids="\n".join(
                 f"- {item}" for item in context.new_experience_ids

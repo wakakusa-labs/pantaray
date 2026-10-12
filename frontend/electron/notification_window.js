@@ -400,6 +400,23 @@ function showNotification(id) {
   }
 }
 
+// Closing the key panel while another app is frontmost lets AppKit hand key status to another
+// visible panel without the WindowServer keyboard focus a click would have taken. That panel then
+// looks focused, but keys go to the frontmost app, and clicking it changes nothing because AppKit
+// already counts it as key. So the other panels cannot become key while one closes; making a window
+// focusable again neither makes it key nor brings it forward.
+function closeWithoutHandingOffKey(win, close) {
+  const others =
+    process.platform === 'darwin'
+      ? [...overlayWindows.values()].filter(
+          (other) => other !== win && !other.isDestroyed() && other.isVisible()
+        )
+      : [];
+  for (const other of others) other.setFocusable(false);
+  close();
+  for (const other of others) other.setFocusable(true);
+}
+
 function hideNotification(id) {
   const win = overlayWindows.get(id);
   if (win && !win.isDestroyed()) {
@@ -407,14 +424,18 @@ function hideNotification(id) {
     // a renderer alive for the rest of the session; destroying it also releases
     // the Action association through onClosed.
     if (conversationOverlayIds.has(id)) {
-      try {
-        win.destroy();
-      } catch {}
+      closeWithoutHandingOffKey(win, () => {
+        try {
+          win.destroy();
+        } catch {}
+      });
       return;
     }
-    try {
-      win.hide();
-    } catch {}
+    closeWithoutHandingOffKey(win, () => {
+      try {
+        win.hide();
+      } catch {}
+    });
   }
 }
 

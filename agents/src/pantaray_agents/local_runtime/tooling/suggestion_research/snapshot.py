@@ -10,6 +10,9 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
 from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
     TODO_DOCUMENT_PATH,
 )
+from pantaray_agents.local_runtime.memory_catalog.errors import (
+    MemoryCatalogIntegrityError,
+)
 from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
     load_memory_heads,
     render_memory_indexes,
@@ -47,14 +50,20 @@ def build_suggestion_research_snapshot(
     user_id: str,
     workspace_settings: WorkspaceSettings,
 ) -> SuggestionResearchSnapshot:
-    heads = load_memory_heads(
+    memory = load_memory_heads(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         artifact_root=artifact_root,
         user_id=user_id,
     )
+    if memory.unreadable:
+        # The repair is queued; a Suggestion does not start from memory it cannot trust.
+        raise MemoryCatalogIntegrityError(
+            f"unreadable memory heads: {', '.join(memory.unreadable)}"
+        )
+    heads = memory.heads
     stable_memory = SuggestionStableMemoryContext(
-        prompt=render_memory_indexes(heads),
+        prompt=render_memory_indexes(memory),
         has_facts=any(
             head.source == "fact" and any(doc.content.strip() for doc in head.documents)
             for head in heads

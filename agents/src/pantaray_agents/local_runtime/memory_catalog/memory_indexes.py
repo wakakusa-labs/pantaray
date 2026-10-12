@@ -22,6 +22,7 @@ from .errors import MemoryCatalogIntegrityError
 from .models import MemoryDocument, MemorySource
 from .repository import load_latest_active_node_by_source, load_revision
 from .resolver import enqueue_memory_repair
+from .revision_inspection import REVISION_INTEGRITY_ERRORS
 
 FACTS_INDEX_PATH: Final[str] = "facts/index.md"
 INSIGHTS_INDEX_PATH: Final[str] = "insights/index.md"
@@ -41,11 +42,19 @@ class MemoryHead:
     documents: tuple[MemoryDocument, ...]
 
 
-class _HeadIntegrityFailure(MemoryCatalogIntegrityError):
-    def __init__(self, *, node_id: str, revision_id: str, message: str) -> None:
-        super().__init__(message)
-        self.node_id = node_id
-        self.revision_id = revision_id
+@dataclass(frozen=True, slots=True)
+class MemoryHeads:
+    heads: tuple[MemoryHead, ...]
+    # Published heads whose files no longer match their revision; each has been
+    # queued for repair.
+    unreadable: tuple[MemorySource, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _HeadIntegrityFailure:
+    source: MemorySource
+    node_id: str
+    revision_id: str
 
 
 def opens_with_overview(index_text: str) -> bool:
@@ -59,48 +68,57 @@ def load_memory_heads(
     busy_timeout_ms: int,
     artifact_root: Path,
     user_id: str,
-) -> tuple[MemoryHead, ...]:
+) -> MemoryHeads:
     """The published facts, insights and Agent Experience trees, read together.
 
     A tree whose files no longer match its revision is queued for repair and
-    the read fails, so a run never starts from memory it cannot trust.
+    reported as unreadable, so the other trees still reach the run.
     """
 
-    try:
-        return _load_heads(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            artifact_root=artifact_root,
-            user_id=user_id,
-        )
-    except _HeadIntegrityFailure as exc:
+    heads, failures = _load_heads(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        artifact_root=artifact_root,
+        user_id=user_id,
+    )
+    if failures:
         with open_memory_catalog_connection(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms
         ) as connection:
             with immediate_transaction(connection):
-                enqueue_memory_repair(
-                    connection=connection,
-                    user_id=user_id,
-                    node_id=exc.node_id,
-                    detected_revision_id=exc.revision_id,
-                    reason="revision_integrity",
-                )
-        raise MemoryCatalogIntegrityError(str(exc)) from exc
-
-
-def render_memory_indexes(heads: tuple[MemoryHead, ...]) -> str:
-    documents = {head.source: head.documents for head in heads}
-    sections = [
-        _render_index(documents.get("fact", ()), FACTS_INDEX_PATH),
-        _render_index(documents.get("long_term_insight", ()), INSIGHTS_INDEX_PATH),
-    ]
-    situations = lesson_situations(documents.get("agent_experience", ()))
-    sections.append(
-        "Lessons from past work, each named by the situation it applies to:\n"
-        + "\n".join(f"- {situation}" for situation in situations)
-        if situations
-        else "Lessons from past work: none yet."
+                for failure in failures:
+                    enqueue_memory_repair(
+                        connection=connection,
+                        user_id=user_id,
+                        node_id=failure.node_id,
+                        detected_revision_id=failure.revision_id,
+                        reason="revision_integrity",
+                    )
+    return MemoryHeads(
+        heads=heads, unreadable=tuple(failure.source for failure in failures)
     )
+
+
+def render_memory_indexes(memory: MemoryHeads) -> str:
+    documents = {head.source: head.documents for head in memory.heads}
+
+    def index(source: MemorySource) -> str:
+        path = _ENTRY_PATHS[source]
+        if source in memory.unreadable:
+            return f"{path}: could not be read."
+        return _render_index(documents.get(source, ()), path)
+
+    sections = [index("fact"), index("long_term_insight")]
+    situations = lesson_situations(documents.get("agent_experience", ()))
+    if "agent_experience" in memory.unreadable:
+        sections.append("Lessons from past work: could not be read.")
+    elif situations:
+        sections.append(
+            "Lessons from past work, each named by the situation it applies to:\n"
+            + "\n".join(f"- {situation}" for situation in situations)
+        )
+    else:
+        sections.append("Lessons from past work: none yet.")
     return "\n\n".join(sections)
 
 
@@ -120,32 +138,32 @@ def _load_heads(
     busy_timeout_ms: int,
     artifact_root: Path,
     user_id: str,
-) -> tuple[MemoryHead, ...]:
+) -> tuple[tuple[MemoryHead, ...], tuple[_HeadIntegrityFailure, ...]]:
     # Design limit: eager document copies avoid a cross-run revision lease. Introduce
     # lease-backed reads if a load's p95 exceeds 1 s or copied content exceeds 32 MiB.
+    heads: list[MemoryHead] = []
+    failures: list[_HeadIntegrityFailure] = []
     with open_memory_catalog_connection(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms
     ) as connection:
         connection.execute("BEGIN")
         try:
-            heads = tuple(
-                head
-                for head in (
-                    _load_head(
-                        connection=connection,
-                        artifact_root=artifact_root,
-                        user_id=user_id,
-                        source=source,
-                    )
-                    for source in _ENTRY_PATHS
+            for source in _ENTRY_PATHS:
+                loaded = _load_head(
+                    connection=connection,
+                    artifact_root=artifact_root,
+                    user_id=user_id,
+                    source=source,
                 )
-                if head is not None
-            )
+                if isinstance(loaded, MemoryHead):
+                    heads.append(loaded)
+                elif loaded is not None:
+                    failures.append(loaded)
         except Exception:
             connection.rollback()
             raise
         connection.commit()
-    return heads
+    return tuple(heads), tuple(failures)
 
 
 def _load_head(
@@ -154,7 +172,7 @@ def _load_head(
     artifact_root: Path,
     user_id: str,
     source: MemorySource,
-) -> MemoryHead | None:
+) -> MemoryHead | _HeadIntegrityFailure | None:
     node = load_latest_active_node_by_source(
         connection=connection, user_id=user_id, source=source
     )
@@ -167,6 +185,9 @@ def _load_head(
         raise MemoryCatalogIntegrityError(
             f"{source} memory head has no current revision"
         )
+    failure = _HeadIntegrityFailure(
+        source=source, node_id=node.node_id, revision_id=revision.revision_id
+    )
     try:
         documents = read_artifact_revision_documents(
             connection=connection,
@@ -174,16 +195,10 @@ def _load_head(
             user_id=user_id,
             revision_id=revision.revision_id,
         )
-    except (MemoryCatalogIntegrityError, UnicodeError) as exc:
-        raise _HeadIntegrityFailure(
-            node_id=node.node_id, revision_id=revision.revision_id, message=str(exc)
-        ) from exc
+    except REVISION_INTEGRITY_ERRORS:
+        return failure
     if not any(item.source_path == _ENTRY_PATHS[source] for item in documents):
-        raise _HeadIntegrityFailure(
-            node_id=node.node_id,
-            revision_id=revision.revision_id,
-            message=f"{source} memory entry document is absent",
-        )
+        return failure
     return MemoryHead(
         source=source, revision_id=revision.revision_id, documents=documents
     )
@@ -194,6 +209,7 @@ __all__ = [
     "INDEX_OVERVIEW_HEADING",
     "INSIGHTS_INDEX_PATH",
     "MemoryHead",
+    "MemoryHeads",
     "load_memory_heads",
     "opens_with_overview",
     "render_memory_indexes",

@@ -151,3 +151,31 @@ def test_memory_indexes_ignore_other_users_heads(tmp_path: Path) -> None:
         "facts/index.md: none yet.\n\ninsights/index.md: none yet.\n\n"
         "Lessons from past work: none yet."
     )
+
+
+def test_a_missing_memory_file_is_reported_and_queued_for_repair(
+    tmp_path: Path,
+) -> None:
+    db_path = bootstrap_action_repository_db(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    _publish_indexes(db_path=db_path, artifact_root=artifact_root)
+    (leaf,) = artifact_root.rglob("facts/pantaray.md")
+    leaf.unlink()
+
+    memory = load_memory_heads(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        artifact_root=artifact_root,
+        user_id=USER_ID,
+    )
+
+    # The other indexes still reach the run, and the gap is said.
+    assert memory.unreadable == ("fact",)
+    rendered = render_memory_indexes(memory)
+    assert rendered.startswith("facts/index.md: could not be read.\n\n")
+    assert '<file path="insights/index.md">' in rendered
+    with sqlite3.connect(db_path) as connection:
+        queued = connection.execute(
+            "SELECT reason FROM memory_repair_queue WHERE user_id = ?", (USER_ID,)
+        ).fetchall()
+    assert queued == [("revision_integrity",)]

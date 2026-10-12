@@ -22,6 +22,9 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     ActionAgentState,
 )
 from pantaray_agents.agents.action_agent.runtime.state.context import (
+    ensure_context,
+)
+from pantaray_agents.agents.action_agent.runtime.state.context import (
     get_context_view as _context_view,
 )
 from pantaray_agents.agents.action_agent.runtime.state.types import TargetContextState
@@ -99,10 +102,6 @@ async def initialize_context(
             "prompt_version": runtime.state_config["prompt_version"],
         }
     )
-    if "memory_indexes" not in context:
-        # Read once per Action: the head shows these indexes for the whole
-        # Action and the model reads anything else with its memory tools.
-        context["memory_indexes"] = _load_memory_indexes(str(request.user_id))
     context["additional_notes"] = []
     context["local_step_counters"] = (
         previous_local_step_counters if is_continuation else {}
@@ -173,9 +172,19 @@ async def initialize_context(
     )
 
 
-def _load_memory_indexes(user_id: str) -> str:
+def ensure_memory_indexes(state: ActionAgentState, *, user_id: str) -> None:
+    """Read the memory indexes the head shows, once per Action.
+
+    Runs before any route, so a run restored from a checkpoint written before
+    the head showed them gets them too, including a head it already froze:
+    its later turns and the subagents it spawns render that frozen head.
+    """
+
+    context = ensure_context(state)
+    if "memory_indexes" in context:
+        return
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    return render_memory_indexes(
+    indexes = render_memory_indexes(
         load_memory_heads(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -183,6 +192,10 @@ def _load_memory_indexes(user_id: str) -> str:
             user_id=user_id,
         )
     )
+    context["memory_indexes"] = indexes
+    frozen = context.get("executing_head_fields")
+    if frozen is not None:
+        context["executing_head_fields"] = {**frozen, "memory_indexes": indexes}
 
 
 def _reset_turn_plan(context: ActionAgentContext) -> None:
@@ -198,4 +211,4 @@ def _require_execution_context(state: ActionAgentState) -> ExecutionContextModel
     )
 
 
-__all__ = ["initialize_context"]
+__all__ = ["ensure_memory_indexes", "initialize_context"]

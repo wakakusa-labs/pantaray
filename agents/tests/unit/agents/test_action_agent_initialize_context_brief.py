@@ -3,10 +3,12 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from string import Formatter
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import yaml
 from tests.unit.agents.action_agent.fixtures import build_action_request
 from tests.unit.local_runtime.action_seed import insert_agent_action
 from tests.unit.local_runtime.test_memory_indexes import _publish_indexes
@@ -16,8 +18,12 @@ from pantaray_agents.agents.action_agent.runtime.agents_md import (
     PANTARAY_DEFAULT_AGENTS_MD,
     load_pantaray_agents_md,
 )
+from pantaray_agents.agents.action_agent.runtime.graph import ActionGraphRuntime
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.initial import (
     initialize_context,
+)
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input import (
+    frozen_executing_head,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
     project_persisted_user_request_step,
@@ -60,13 +66,12 @@ from pantaray_agents.utils.prompt_loader import PromptConfig
 
 
 @pytest.mark.asyncio
-async def test_initialize_context_shows_the_memory_indexes_not_their_files(
+async def test_a_new_run_shows_the_memory_indexes_not_their_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = MockActionAgentRepository()
     agent = _build_agent(repo)
-    await _save_suggestion(repo)
     execution_context, db_path = _bootstrap_execution_context_with_db(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
@@ -75,18 +80,57 @@ async def test_initialize_context_shows_the_memory_indexes_not_their_files(
     _publish_indexes(db_path=db_path, artifact_root=tmp_path / "artifacts")
     state = _state_with_execution_context(execution_context)
 
-    updated = await initialize_context(agent, state, _runtime(agent))  # type: ignore[arg-type]
-    ctx = updated["context"]
+    updated = await ActionGraphRuntime.resume_gate(_runtime(agent), state)  # type: ignore[arg-type]
+    indexes = updated["context"]["memory_indexes"]
 
-    assert "## Overview\nBuilds Pantaray." in ctx["memory_indexes"]
-    assert "insights/index.md has no overview yet." in ctx["memory_indexes"]
+    assert "## Overview\nBuilds Pantaray." in indexes
+    assert "insights/index.md has no overview yet." in indexes
     # A linked file is read with the memory tools when the task needs it.
-    assert "Leaf detail" not in ctx["memory_indexes"]
-    assert ctx["request_summary"] == "SUM"
-    assert ctx["target_context"] == {
-        "organization_name": "Wakakusa",
-        "project_name": "Pantaray",
-    }
+    assert "Leaf detail" not in indexes
+
+
+@pytest.mark.asyncio
+async def test_a_run_restored_from_a_checkpoint_before_the_indexes_shows_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restored mid-Action, the run goes straight to THINK or to a pending
+    subagent spawn or message; both render the head the checkpoint froze."""
+
+    agent = _build_agent(MockActionAgentRepository())
+    execution_context, db_path = _bootstrap_execution_context_with_db(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    _publish_indexes(db_path=db_path, artifact_root=tmp_path / "artifacts")
+    template = _real_executing_prompt()
+    state = _state_with_execution_context(execution_context)
+    state["context"]["insight_data"] = "[Long-term (brief)]\nold brief"
+    state["context"]["executing_head_fields"] = {
+        name: name
+        for _, name, _, _ in Formatter().parse(template)
+        if name is not None and name != "memory_indexes"
+    } | {"insight_data": "[Long-term (brief)]\nold brief"}
+
+    restored = await ActionGraphRuntime.resume_gate(_runtime(agent), state)  # type: ignore[arg-type]
+    head = frozen_executing_head(
+        SimpleNamespace(executing_prompt=template),  # type: ignore[arg-type]
+        restored,
+    )
+
+    assert "## Memory Indexes" in head
+    assert "## Overview\nBuilds Pantaray." in head
+
+
+def _real_executing_prompt() -> str:
+    config = yaml.safe_load(
+        (
+            Path(__file__).parents[3]
+            / "src/pantaray_agents/prompts/action/executing.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    return str(config["prompt"]).partition("{action_history}")[0]
 
 
 @pytest.mark.asyncio

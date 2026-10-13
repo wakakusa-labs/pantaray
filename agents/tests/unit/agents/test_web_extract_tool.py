@@ -126,3 +126,33 @@ async def test_web_extract_names_a_requested_url_the_provider_left_out(
         {"url": "https://e.com/b", "error": "No content was returned for this URL."}
     ]
     assert result.output["meta"]["outcome"] == "partial_results"
+
+
+@pytest.mark.asyncio
+async def test_web_extract_does_not_list_a_page_returned_under_another_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _FETCH,
+        AsyncMock(
+            return_value={
+                "result": {
+                    "results": [
+                        {"url": "https://E.com:443/article/#top", "raw_content": "a"}
+                    ],
+                    "failed_results": [],
+                }
+            }
+        ),
+    )
+
+    result = await _run_tool(
+        {"urls": ["https://e.com/article", "https://e.com/articles"]}
+    )
+
+    assert result.output["failed_results"] == [
+        {
+            "url": "https://e.com/articles",
+            "error": "No content was returned for this URL.",
+        }
+    ]

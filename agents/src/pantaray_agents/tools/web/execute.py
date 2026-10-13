@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import cast
+from urllib.parse import urlsplit, urlunsplit
 
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentExecutionError,
@@ -160,11 +161,11 @@ async def run_web_extract(
     # A requested URL the provider answered for in neither list is named as a
     # failure rather than vanishing. A URL it returned that was not asked for
     # is kept: providers return a page under a normalized spelling of its URL.
-    answered = {row["url"] for row in (*pages, *failures)}
+    answered = {_page_key(row["url"]) for row in (*pages, *failures)}
     failures.extend(
         {"url": url, "error": _NOTHING_RETURNED}
         for url in dict.fromkeys(str(url) for url in urls)
-        if url not in answered
+        if _page_key(url) not in answered
     )
     outcome: ProxyResultOutcome = (
         PROXY_OUTCOME_PARTIAL_RESULTS
@@ -189,6 +190,26 @@ async def run_web_extract(
             on_nothing=PROXY_SUGGESTED_ACTION_CHANGE_URL,
         ),
     }
+
+
+def _page_key(url: str) -> str:
+    """The URL as compared for a missing page, with only spelling differences removed.
+
+    Case of the scheme and host, a fragment, one trailing slash and a default
+    port; nothing that could name another page.
+    """
+
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return url
+    scheme = parts.scheme.lower()
+    default_port = {"http": 80, "https": 443}.get(scheme)
+    netloc = host if port in (None, default_port) else f"{host}:{port}"
+    path = parts.path[:-1] if parts.path.endswith("/") else parts.path
+    return urlunsplit((scheme, netloc, path, parts.query, ""))
 
 
 def _meta(

@@ -113,7 +113,7 @@ def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence()
     assert "latest user instructions and verified evidence take precedence" in section
     assert "Update stale session memory" in section
     assert "evidence candidates, not truth" in section
-    assert "instead of accepting them blindly" in section
+    assert "instead of accepting it blindly" in section
     assert "call `history_fetch`" in section
     # Checking a change is not tied to the role, so subagents get it too.
     shared = _shared_system_instruction()

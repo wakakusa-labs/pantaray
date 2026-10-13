@@ -112,9 +112,15 @@ SPAWN_SUBAGENT_TOOL = ToolDefinition.from_spec(
         guide=ToolGuideSpec(
             what="Delegate one bounded task to an independently executing subagent.",
             when=(
-                "Use for an independent part of the work. Do not read or redo the "
-                "part you delegated yourself: while the subagent runs, work on "
-                "another part, and wait for its report when nothing else is left."
+                "Delegate only independent, sizable work: a part that takes many "
+                "calls, reading many files when only the conclusion is needed, or "
+                "an independent review that materially lowers the risk of a wrong "
+                "result. Do it yourself when a few calls finish it, when you know "
+                "where to look, or when your next step waits on its result, and do "
+                "not split small work across subagents. A subagent rebuilds its "
+                "context from scratch, its report drops detail, and it adds "
+                "tokens, so when unsure, do not spawn. While it runs, work on a "
+                "part it does not cover; do not reread or redo what you delegated."
             ),
             pitfalls=(
                 "Claim every resource the child may write. Replaying the same decision "

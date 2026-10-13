@@ -86,7 +86,8 @@ async def test_missing_read_is_failed_in_history_and_checkpoint(
     ("query_size", "storage_kind", "expected_code"),
     [
         (10, "inline_json", "PROXY_INVALID_UPSTREAM_RESPONSE"),
-        (21_000, "action_file", "ACTION_TOOL_WEB_SEARCH_FAILED"),
+        # Only the long query moves to a file; the error's code stays in the result.
+        (21_000, "action_file", "PROXY_INVALID_UPSTREAM_RESPONSE"),
     ],
     ids=["inline", "spilled"],
 )

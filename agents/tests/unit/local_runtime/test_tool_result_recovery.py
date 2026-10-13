@@ -13,6 +13,11 @@ from pantaray_agents.local_runtime.tooling.tool_result_recovery import (
     ToolResultRecoveryError,
     reconcile_tool_results_for_startup,
 )
+from pantaray_agents.local_runtime.tooling.tool_result_spill import spilled_texts
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
+)
 
 _JSON_FILE_NAME = f"output-{'1' * 32}.json"
 _BINARY_FILE_NAME = f"output-{'2' * 32}.bin"
@@ -441,6 +446,83 @@ def test_recovery_accepts_exact_linked_invocation_owned_formal_output(
     assert result.preserved_file_count == 1
 
 
+def test_recovery_keeps_every_moved_text_and_removes_unreferenced_ones(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    _create_reference_db(db_path)
+    root = _tool_results_root(db_path)
+    root.mkdir(parents=True)
+    long_text = "line\n" * 5_000
+    terminal = store_tool_result(
+        action_tool_results_path=root,
+        invocation_id="invocation-linked",
+        output={"status": "success", "stdout": long_text, "stderr": long_text + "!"},
+    )
+    summary = store_tool_result(
+        action_tool_results_path=root,
+        invocation_id="request-preflight",
+        output={"command": long_text, "cwd": "."},
+    )
+    for stored in (terminal, summary):
+        release_stored_tool_result(stored)
+    moved_paths = [
+        Path(str(text["path"]))
+        for stored in (terminal, summary)
+        for text in spilled_texts(stored.output_json)
+    ]
+    assert len(moved_paths) == 3
+    orphan = _write_result(
+        root, owner="invocation-linked", file_name=f"output-{'6' * 32}.txt"
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO tool_invocations VALUES (?, ?, ?, ?)",
+            ("invocation-linked", "user-1", "action-1", "step-1"),
+        )
+        connection.execute(
+            "INSERT INTO tool_outputs VALUES (?, ?, ?, 'action_file')",
+            ("output-linked", "invocation-linked", json.dumps(terminal.output_json)),
+        )
+        connection.executemany(
+            "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
+            (
+                (
+                    "step-1",
+                    "user-1",
+                    "action-1",
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "success",
+                            "output": terminal.output_json,
+                            "output_storage_kind": "action_file",
+                            "output_owner_kind": "tool_invocation",
+                        }
+                    ),
+                ),
+                (
+                    "step-2",
+                    "user-1",
+                    "action-1",
+                    json.dumps(
+                        _preflight_tool_output(
+                            summary.output_json,  # type: ignore[arg-type]
+                            tool_request_id="request-preflight",
+                        )
+                    ),
+                ),
+            ),
+        )
+
+    result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert all(path.is_file() for path in moved_paths)
+    assert not orphan.exists()
+    assert result.preserved_file_count == 3
+    assert result.removed_file_count == 1
+
+
 def test_recovery_fails_closed_for_action_file_kind_with_inline_payload(
     tmp_path: Path,
 ) -> None:
@@ -464,7 +546,7 @@ def test_recovery_fails_closed_for_action_file_kind_with_inline_payload(
             ),
         )
 
-    with pytest.raises(ToolResultRecoveryError, match="storage marker"):
+    with pytest.raises(ToolResultRecoveryError, match="references no stored file"):
         reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
 
     assert orphan.is_file()

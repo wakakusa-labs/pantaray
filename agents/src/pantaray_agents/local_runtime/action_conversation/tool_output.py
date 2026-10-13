@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
-from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+from pantaray_agents.local_runtime.tooling.tool_result_reading import (
     ToolResultLoadError,
     ToolResultTextOffsetError,
     read_tool_result_text_prefix,

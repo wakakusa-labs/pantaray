@@ -22,7 +22,7 @@ from .tool_result_storage import (
     ACTION_TOOL_RESULTS_DIRNAME,
 )
 
-_FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json)$")
+_FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json|txt)$")
 _TEMP_RESULT_FILE_PATTERN = re.compile(r"^\.output-[0-9a-f]{32}\.tmp$")
 
 logger = logging.getLogger(__name__)

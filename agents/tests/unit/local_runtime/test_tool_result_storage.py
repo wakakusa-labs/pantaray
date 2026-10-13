@@ -1,32 +1,39 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from pantaray_agents.local_runtime.tooling import tool_result_storage
-from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+from pantaray_agents.local_runtime.tooling.tool_result_reading import (
     ToolResultLoadError,
     ToolResultReadLimitError,
-    ToolResultStorageError,
     ToolResultTextOffsetError,
-    load_action_file_json_result,
+    load_action_file_result,
     read_tool_result_text_prefix,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+    ToolResultStorageError,
     release_stored_tool_result,
     store_tool_result,
 )
+from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
 
 
 def _display_text(output: object) -> str:
     return json.dumps(output, ensure_ascii=False, indent=2)
 
 
-def _output_with_exact_display_size(character_count: int) -> dict[str, str]:
-    empty_output = {"text": ""}
-    payload_size = character_count - len(_display_text(empty_output))
-    output = {"text": "x" * payload_size}
+def _output_with_exact_display_size(character_count: int) -> dict[str, object]:
+    """Many short values and no long one, so a large result moves whole as JSON."""
+    output: dict[str, object] = {
+        "items": ["x" * 100] * ((character_count - 1_000) // 108)
+    }
+    output["pad"] = ""
+    output["pad"] = "x" * (character_count - len(_display_text(output)))
     assert len(_display_text(output)) == character_count
     return output
 
@@ -109,11 +116,10 @@ def test_result_above_inline_character_limit_is_stored(tmp_path: Path) -> None:
     release_stored_tool_result(result)
 
 
-def test_large_unicode_result_is_stored_with_exact_metadata(tmp_path: Path) -> None:
-    output = {
-        "title": "日本語の結果",
-        "content": ("一行目\n二行目🌊" * 2_500),
-    }
+def test_large_result_without_long_texts_is_stored_whole_with_exact_metadata(
+    tmp_path: Path,
+) -> None:
+    output = {"title": "日本語の結果", "lines": ["一行目二行目🌊" * 20] * 300}
     history_text = _display_text(output)
     assert len(history_text) > ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
 
@@ -136,7 +142,13 @@ def test_large_unicode_result_is_stored_with_exact_metadata(tmp_path: Path) -> N
     assert result.output_json["byte_size"] == len(history_text.encode("utf-8"))
     assert result.output_json["character_count"] == len(history_text)
     assert result.output_json["line_count"] == history_text.count("\n") + 1
-    assert result.output_json["preview"] == history_text[:1_000]
+    preview = result.output_json["preview"]
+    assert len(preview) <= 2_000
+    assert history_text.startswith(preview + "\n")
+    assert (
+        f"in {history_text.count(chr(10)) + 1:,} lines"
+        in result.output_json["retry_hint"]
+    )
     assert f"path={relative_path.as_posix()}" in result.output_json["retry_hint"]
     assert "offset=" in result.output_json["retry_hint"]
     assert "sha256" not in result.output_json
@@ -152,13 +164,207 @@ def test_large_unicode_result_is_stored_with_exact_metadata(tmp_path: Path) -> N
         if key not in {"preview", "retry_hint"}
     }
     for metadata in (result.output_json, without_preview):
-        loaded = load_action_file_json_result(
+        loaded = load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="large-result",
-            metadata=metadata,
+            output=metadata,
             max_bytes=result.output_json["byte_size"],
         )
         assert loaded == output
+
+
+def _page(words: int) -> str:
+    return "\n".join(f"line {number}: " + "word " * words for number in range(1, 4_000))
+
+
+def test_long_texts_move_to_text_files_and_the_rest_stays_in_place(
+    tmp_path: Path,
+) -> None:
+    pages = [_page(12), _page(6)]
+    output = {
+        "status": "success",
+        "results": [
+            {"url": "https://example.com/a", "raw_content": pages[0]},
+            {"url": "https://example.com/b", "raw_content": pages[1]},
+            {"url": "https://example.com/c", "raw_content": "short"},
+        ],
+        "truncated": False,
+    }
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="web-extract",
+        output=output,
+    )
+    release_stored_tool_result(result)
+
+    projected = result.output_json
+    assert result.storage_kind == "action_file"
+    assert isinstance(projected, dict)
+    assert len(_display_text(projected)) <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    assert projected["status"] == "success"
+    assert projected["truncated"] is False
+    results = projected["results"]
+    assert [item["url"] for item in results] == [  # type: ignore[union-attr]
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/c",
+    ]
+    assert results[2]["raw_content"] == "short"  # type: ignore[index]
+    for item, page in zip(results[:2], pages, strict=True):  # type: ignore[index]
+        moved = item["raw_content"]  # type: ignore[index]
+        stored_path = Path(moved["path"])
+        assert stored_path.suffix == ".txt"
+        assert stored_path.parent == tmp_path / "web-extract"
+        assert stored_path.read_text(encoding="utf-8") == page
+        assert moved["media_type"] == "text/plain"
+        assert moved["byte_size"] == len(page.encode("utf-8"))
+        assert moved["character_count"] == len(page)
+        assert moved["line_count"] == page.count("\n") + 1
+        assert len(moved["preview"]) <= 2_000
+        assert page.startswith(moved["preview"] + "\n")
+        assert f"in {page.count(chr(10)) + 1:,} lines" in moved["retry_hint"]
+        assert f"read path={stored_path}" in moved["retry_hint"]
+
+    assert (
+        load_action_file_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="web-extract",
+            output=projected,
+            max_bytes=1_000_000,
+        )
+        == output
+    )
+    with pytest.raises(ToolResultReadLimitError, match="read limit"):
+        load_action_file_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="web-extract",
+            output=projected,
+            max_bytes=len(pages[0].encode("utf-8")),
+        )
+
+
+def test_read_continues_a_moved_text_where_its_preview_stops(tmp_path: Path) -> None:
+    page = _page(30)
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="bash",
+        output={"status": "success", "exit_code": 0, "stdout": page, "stderr": ""},
+    )
+    release_stored_tool_result(result)
+    moved = result.output_json["stdout"]  # type: ignore[index,call-overload]
+    offset = int(moved["retry_hint"].split("offset=")[1].split(",")[0])
+    assert result.output_json["exit_code"] == 0  # type: ignore[index,call-overload]
+
+    read_back = [moved["preview"], "\n"]
+    column = 1
+    descriptor = os.open(moved["path"], os.O_RDONLY)
+    try:
+        while offset is not None:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            page_read = read_text_descriptor_lines(
+                descriptor=descriptor, offset=offset, column=column, limit=100_000
+            )
+            assert len(page_read.content.encode("utf-8")) <= 50 * 1024
+            read_back.append(page_read.content)
+            offset, column = page_read.next_offset, page_read.next_column or 1
+    finally:
+        os.close(descriptor)
+
+    assert len(read_back) > 3
+    assert "".join(read_back) == page
+
+
+def test_text_moved_out_pages_whole_in_the_output_view(tmp_path: Path) -> None:
+    output = {"status": "success", "stdout": "日本語\n" * 10_000}
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="output-view",
+        output=output,
+    )
+    release_stored_tool_result(result)
+    expected = _display_text(output).encode("utf-8")
+
+    pages: list[str] = []
+    start = 0
+    while True:
+        prefix = read_tool_result_text_prefix(
+            action_tool_results_path=tmp_path,
+            output_owner_id="output-view",
+            output=result.output_json,
+            storage_kind="action_file",
+            start_byte=start,
+            page_bytes=16_384,
+            max_read_bytes=1_048_576,
+        )
+        pages.append(prefix.content)
+        if prefix.next_byte_offset is None:
+            break
+        start = prefix.next_byte_offset
+
+    assert prefix.total_bytes == len(expected)
+    assert "".join(pages) == expected.decode("utf-8")
+
+
+def test_result_holding_a_reference_shape_moves_whole_as_json(tmp_path: Path) -> None:
+    # A reader could not tell this value from a reference storage put in.
+    output = {
+        "embedded": {"storage": "action_file", "media_type": "text/plain"},
+        "body": "x" * (ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT + 1),
+    }
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="reference-shaped",
+        output=output,
+    )
+    release_stored_tool_result(result)
+
+    assert result.output_json["media_type"] == "application/json"  # type: ignore[index,call-overload]
+    assert (
+        load_action_file_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="reference-shaped",
+            output=result.output_json,
+            max_bytes=1_000_000,
+        )
+        == output
+    )
+
+
+def test_failure_on_a_later_text_file_removes_the_earlier_ones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = {
+        "stdout": "o" * (ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT + 1),
+        "stderr": "e" * (ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT + 1),
+    }
+    original_rename = tool_result_storage.os.rename
+    renamed = 0
+
+    def fail_second_rename(
+        source: str, destination: str, *, src_dir_fd: int, dst_dir_fd: int
+    ) -> None:
+        nonlocal renamed
+        renamed += 1
+        if renamed == 2:
+            raise OSError("rename failed")
+        original_rename(
+            source, destination, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd
+        )
+
+    monkeypatch.setattr(tool_result_storage.os, "rename", fail_second_rename)
+
+    with pytest.raises(ToolResultStorageError, match="failed to atomically store"):
+        store_tool_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="two-texts",
+            output=output,
+        )
+
+    assert renamed == 2
+    assert list((tmp_path / "two-texts").iterdir()) == []
 
 
 def test_action_file_json_load_is_bounded(tmp_path: Path) -> None:
@@ -173,10 +379,10 @@ def test_action_file_json_load_is_bounded(tmp_path: Path) -> None:
     release_stored_tool_result(result)
 
     with pytest.raises(ToolResultReadLimitError, match="read limit"):
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="bounded-result",
-            metadata=result.output_json,
+            output=result.output_json,
             max_bytes=1,
         )
 
@@ -198,10 +404,10 @@ def test_action_file_json_load_rejects_invalid_path_before_read_limit(
     metadata["path"] = str((tmp_path / "outside.json").absolute())
 
     with pytest.raises(ToolResultLoadError, match="outside its owner") as error:
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="invalid-path",
-            metadata=metadata,
+            output=metadata,
             max_bytes=1,
         )
 
@@ -226,10 +432,10 @@ def test_action_file_json_load_rejects_symlink_replacement(tmp_path: Path) -> No
     stored_path.symlink_to(outside)
 
     with pytest.raises(ToolResultLoadError, match="safely open"):
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="symlinked-result",
-            metadata=result.output_json,
+            output=result.output_json,
             max_bytes=int(result.output_json["byte_size"]),
         )
 
@@ -249,10 +455,10 @@ def test_action_file_json_load_rejects_byte_size_mismatch(tmp_path: Path) -> Non
     metadata["byte_size"] = int(metadata["byte_size"]) + 1
 
     with pytest.raises(ToolResultLoadError, match="size or type"):
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="size-mismatch",
-            metadata=metadata,
+            output=metadata,
             max_bytes=int(metadata["byte_size"]),
         )
 
@@ -286,10 +492,10 @@ def test_action_file_json_load_rechecks_size_after_read(
 
     monkeypatch.setattr(tool_result_storage.os, "read", grow_after_read)
     with pytest.raises(ToolResultLoadError, match="size changed"):
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="growing-result",
-            metadata=result.output_json,
+            output=result.output_json,
             max_bytes=int(result.output_json["byte_size"]),
         )
 
@@ -310,10 +516,10 @@ def test_action_file_json_load_rejects_infinite_exponent(tmp_path: Path) -> None
     }
 
     with pytest.raises(ToolResultLoadError, match="valid UTF-8 JSON"):
-        load_action_file_json_result(
+        load_action_file_result(
             action_tool_results_path=tmp_path,
             invocation_id="infinite-number",
-            metadata=metadata,
+            output=metadata,
             max_bytes=1_000,
         )
 
@@ -471,7 +677,7 @@ def test_atomic_rename_failure_preserves_previous_result(
         invocation_id="atomic-result",
         output=previous_output,
     )
-    stored_path = tmp_path / str(previous_result.output_json["path"])
+    stored_path = tmp_path / str(previous_result.output_json["content"]["path"])
     previous_text = stored_path.read_text(encoding="utf-8")
 
     def fail_rename(

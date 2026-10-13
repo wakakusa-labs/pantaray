@@ -87,6 +87,21 @@ from pantaray_agents.schema.agent.base import JSONValue
             },
             "bash: ok, spilled to /x/out.json, 40,000 chars",
         ),
+        # A long text moved to a file still counts at its full length.
+        (
+            "bash",
+            {
+                "exit_code": 0,
+                "stdout": {
+                    "storage": "action_file",
+                    "media_type": "text/plain",
+                    "path": "/x/output.txt",
+                    "character_count": 40_000,
+                },
+                "stderr": "de",
+            },
+            "bash: ok, exit 0, 40,002 chars",
+        ),
     ],
 )
 def test_success_outcome_lines(tool_id: str, output: JSONValue, expected: str) -> None:

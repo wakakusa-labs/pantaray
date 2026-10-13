@@ -89,8 +89,9 @@ _MEMORY_FOLDERS_NOTE = (
     "Read activity with memory_search and get_memory_reference."
 )
 _SPILL_NOTE = (
-    "A result too large to show inline is saved to a file instead; the result "
-    "then gives its path, a preview and how to read the rest with read or grep."
+    "When a result is too large to show inline, its longest texts are saved to "
+    "files instead; each then gives its path, a preview and how to read the rest "
+    "with read or grep."
 )
 _PATH: dict[str, JSONValue] = {"type": "string", "minLength": 1, "pattern": r"\S"}
 _POSITIVE: dict[str, JSONValue] = {"type": "integer", "minimum": 1}

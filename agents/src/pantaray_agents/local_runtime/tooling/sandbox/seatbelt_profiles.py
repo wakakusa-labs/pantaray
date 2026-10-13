@@ -119,16 +119,19 @@ def render_ripgrep_seatbelt_profile(
     *,
     read_roots: Sequence[str],
     read_files: Sequence[str],
+    runtime_roots: Sequence[str],
     private_storage_roots: Sequence[str],
     readable_private_roots: Sequence[str],
 ) -> str:
-    """Let the discovery search read ``read_roots`` and ``read_files`` and run,
+    """Let a discovery backend read ``read_roots`` and ``read_files`` and run,
     and do nothing else.
 
-    ripgrep walks and reopens directories by name itself, so a check Pantaray
-    makes beforehand cannot bind what it reads: a directory swapped for a link
-    mid-search would lead it anywhere. The kernel checks every path it really
-    opens instead, with the private-storage denies of commands.
+    ripgrep, and the list worker's ignore library, walk and reopen directories
+    by name themselves, so a check Pantaray makes beforehand cannot bind what
+    they read: a directory swapped for a link mid-search would lead them
+    anywhere. The kernel checks every path they really open instead, with the
+    private-storage denies of commands. ``runtime_roots`` are what an
+    interpreter-run backend needs to start, wherever they are.
     """
 
     read_allow = _render_clause_block(
@@ -139,6 +142,7 @@ def render_ripgrep_seatbelt_profile(
                     *MACOS_SYSTEM_RUNTIME_READ_ROOTS,
                     *toolchain_read_roots(),
                     *read_roots,
+                    *runtime_roots,
                 )
             ),
             *(
@@ -146,6 +150,14 @@ def render_ripgrep_seatbelt_profile(
                 for path in read_files
             ),
         )
+    )
+    # An interpreter resolves the names above its own files as it starts, and
+    # the list worker's ignore library above the folder it is asked about.
+    runtime_ancestors = _render_clause_block(
+        f'    (path-ancestors "{_escape_seatbelt_string(path)}")'
+        for path in (*runtime_roots, *read_roots)
+        # sandbox-exec rejects the profile when "/" has no ancestors to list.
+        if path != "/"
     )
     return "\n".join(
         (
@@ -155,8 +167,15 @@ def render_ripgrep_seatbelt_profile(
             "(allow file-map-executable)",
             "(deny file-read*)",
             f"(allow file-read*\n{read_allow}\n)",
+            *(
+                (f"(allow file-read-metadata\n{runtime_ancestors}\n)",)
+                if runtime_roots
+                else ()
+            ),
             _render_private_storage_deny(
-                "file-read*", private_storage_roots, readable_private_roots
+                "file-read*",
+                private_storage_roots,
+                (*readable_private_roots, *runtime_roots),
             ),
             "(deny file-write*)",
             "(deny network*)",

@@ -313,6 +313,7 @@ def test_ripgrep_profile_without_own_roots_denies_all_private_storage() -> None:
     profile = render_ripgrep_seatbelt_profile(
         read_roots=("/",),
         read_files=(),
+        runtime_roots=(),
         private_storage_roots=("/app-data",),
         readable_private_roots=(),
     )

@@ -53,7 +53,8 @@ dependencies = [
     # in the short-lived sandboxed worker, never in the helper itself.
     "pypdfium2>=5.13.0",
     # list leaves out what glob and grep leave out; ripgrep prints no
-    # directories, so list asks the ignore library ripgrep is built on.
+    # directories, so list's sandboxed worker asks the ignore library ripgrep
+    # is built on.
     "rignore>=0.7.6",
 ]
 

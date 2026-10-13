@@ -50,8 +50,7 @@ RIPGREP_GLOB_ERROR_MARKERS = (
 )
 # Discovery leaves out what .gitignore, .ignore and .rgignore files exclude, as
 # ripgrep does by default, keeps hidden files such as .github and .env.example,
-# and always leaves out .git. list applies the same rules through rignore,
-# which wraps the ignore library ripgrep is built on but reads no .rgignore.
+# and always leaves out .git. list applies the same rules in list_ignore_worker.
 ALWAYS_EXCLUDED_NAME = ".git"
 # Files ripgrep reads above a registered folder to apply the rules inside it:
 # a parent's ignore files, and the .git that makes its .gitignore apply.
@@ -401,7 +400,7 @@ def _run_ripgrep_lines(
     handle_line: LineHandler,
 ) -> RipgrepRunResult:
     process = subprocess.Popen(
-        _sandboxed_argv(argv, sandbox_profile),
+        sandboxed_argv(argv, sandbox_profile),
         cwd=cwd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -469,7 +468,7 @@ def _run_ripgrep_lines(
     )
 
 
-def _sandboxed_argv(argv: tuple[str, ...], sandbox_profile: str) -> tuple[str, ...]:
+def sandboxed_argv(argv: tuple[str, ...], sandbox_profile: str) -> tuple[str, ...]:
     """``argv`` under the seatbelt profile that bounds what ripgrep may read.
 
     Only macOS has sandbox-exec, and it is the only platform the app ships on.

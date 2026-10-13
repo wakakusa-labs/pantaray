@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files import discovery_paths, ripgrep
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
+    _bootstrap_runtime_db,
     _bootstrap_runtime_db_with_registered_folder,
 )
 from .discovery_output_support import glob_paths, grep_matches
@@ -58,7 +62,10 @@ def _registered_repo(tmp_path: Path) -> tuple[Path, _Run]:
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path
     )
+    return repo, _runner(db_path, context)
 
+
+def _runner(db_path: Path, context: Any) -> _Run:
     async def run(tool_id: str, args: dict[str, JSONValue]) -> dict[str, JSONValue]:
         outcome = await execute_broker_tool(
             db_path=db_path,
@@ -73,7 +80,7 @@ def _registered_repo(tmp_path: Path) -> tuple[Path, _Run]:
         assert outcome.status == "success", outcome.output
         return outcome.output
 
-    return repo, run
+    return run
 
 
 def _listed(output: dict[str, JSONValue], root: Path) -> set[str]:
@@ -177,3 +184,59 @@ async def test_discovery_applies_ignore_files_above_the_registered_folder(
     assert listed == {"src", "src/app.py"}
     assert globbed == {"src/app.py"}
     assert grepped == [str(repo / "src" / "app.py")]
+
+
+def _swap_for_link_once_pinned(
+    monkeypatch: pytest.MonkeyPatch, directory: Path, target: Path
+) -> None:
+    """Swap directory for a link to target after the scan has opened it."""
+
+    ask = discovery_paths._ShownEntries._ask
+
+    def swap_then_ask(entries: Any, asked: Path) -> frozenset[str]:
+        if asked == directory and not directory.is_symlink():
+            directory.rename(directory.with_name("pinned"))
+            directory.symlink_to(target, target_is_directory=True)
+        return ask(entries, asked)
+
+    monkeypatch.setattr(discovery_paths._ShownEntries, "_ask", swap_then_ask)
+
+
+_SANDBOXED = pytest.mark.skipif(
+    sys.platform != "darwin", reason="the discovery sandbox is macOS seatbelt"
+)
+
+
+@_SANDBOXED
+@pytest.mark.asyncio
+async def test_list_refuses_instead_of_naming_entries_outside_the_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, run = _registered_repo(tmp_path)
+    _write(repo, "docs/kept.txt")
+    _write(repo, "docs/outside-sentinel.txt")
+    _write(tmp_path, "outside/outside-sentinel.txt")
+    _swap_for_link_once_pinned(monkeypatch, repo / "docs", tmp_path / "outside")
+
+    with pytest.raises(BrokerPolicyError) as caught:
+        await run("list", {"path": str(repo), "max_depth": 2})
+
+    assert "could not apply ignore rules" in str(caught.value)
+
+
+@_SANDBOXED
+@pytest.mark.asyncio
+async def test_list_refuses_instead_of_naming_entries_in_app_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path, read_access_scope="full_access")
+    run = _runner(db_path, context)
+    folder = tmp_path / "folder"
+    _write(folder, "docs/kept.txt")
+    _write(folder, "docs/runtime.db")
+    _swap_for_link_once_pinned(monkeypatch, folder / "docs", db_path.parent)
+
+    with pytest.raises(BrokerPolicyError) as caught:
+        await run("list", {"path": str(folder), "max_depth": 2})
+
+    assert "could not apply ignore rules" in str(caught.value)

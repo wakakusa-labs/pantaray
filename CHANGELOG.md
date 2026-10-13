@@ -3,6 +3,49 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.5.1
+
+- Activity recording now also reads windows whose text could not be read before. It needs the
+  Screen Recording permission; grant it when Pantaray asks.
+- When the AI declines to answer, Pantaray now says so instead of failing without a reason.
+- With Claude models, the notes written between steps now show as a task's progress.
+- Pantaray's memory keeps where things stand rather than a log of what happened, and condenses a
+  memory file once it grows long.
+- Tasks and suggestions now start from a short overview of you and your work, and can open your
+  memory files whole when they need more.
+- Memory search finds things by meaning as well as by words, and answers about twice as fast.
+- Suggestions no longer offer again what you passed on unless something has changed.
+- In the chat, Pantaray finds the suggestion you mention and starts it when you ask.
+- Without a Pantaray sign-in or a web search key, tasks and suggestions can still read web pages,
+  fetched from your Mac.
+- Web search can look up several things in one go.
+- Tasks read long command output and long web pages all the way through, not just the beginning.
+- A new ChatGPT or OpenAI connection starts on GPT-6.1 Sol, and an Anthropic connection on Claude
+  Sonnet 5.5.
+- Fixed a task stalling after it rewrote a file it had read.
+- Fixed keystrokes in a small window going to another app while another small window closed.
+- Fixed the live work label running past the conversation column.
+- Fixed a memory update that could lose a change when it rewrote a line with a link.
+
+---
+
+- 記録で、これまで文字を読み取れなかったウィンドウも読めるようになりました。画面収録の許可が必要です。Pantaray に求められたら許可してください。
+- AI が回答を断ったときは、理由がないまま失敗するのではなく、そう伝えるようになりました。
+- Claude のモデルでは、手順の合間に書かれるメモが作業の進み具合として表示されるようになりました。
+- Pantaray の記憶は、出来事の記録ではなく「いまどうなっているか」を残すようになり、長くなった記憶のファイルはまとめ直すようになりました。
+- 作業と提案は、あなたとあなたの仕事の短い概要から始め、必要なときは記憶のファイルを丸ごと読めるようになりました。
+- 記憶の検索が、言葉だけでなく意味でも探せるようになり、約 2 倍速くなりました。
+- 提案は、見送ったものを、状況が変わらない限りもう一度出さないようになりました。
+- チャットで提案に触れると、Pantaray がその提案を探し、頼めば始めるようになりました。
+- Pantaray へのログインや Web 検索のキーがなくても、作業と提案が Web ページを読めるようになりました。ページはこの Mac から取りに行きます。
+- Web 検索で、いくつかのことを一度に調べられるようになりました。
+- 作業が、長いコマンドの出力や長い Web ページを、最初だけでなく最後まで読めるようになりました。
+- 新しく ChatGPT や OpenAI に接続すると GPT-6.1 Sol、Anthropic に接続すると Claude Sonnet 5.5 から始まるようになりました。
+- 読み込んだファイルを作業が書き換えると、その作業が止まってしまう問題を直しました。
+- 小さい画面を閉じている間、別の小さい画面に打った文字がほかのアプリに入ってしまう問題を直しました。
+- 作業中の表示が、会話の幅からはみ出す問題を直しました。
+- 記憶の更新で、リンクを含む行を書き直したときに変更が失われることがある問題を直しました。
+
 ## 0.5.0
 
 - History is now Home: a sidebar lists the chat, your projects and your tasks, and the one you

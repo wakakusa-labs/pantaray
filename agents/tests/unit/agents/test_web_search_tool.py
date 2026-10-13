@@ -15,7 +15,11 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tools import (
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools.web_search_tool import WEB_SEARCH_TOOL
 from pantaray_agents.agents.core import CountingSink
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+)
 from pantaray_agents.local_runtime.web_tools.client import WebContentExecutionError
+from pantaray_agents.schema.tool_result import serialize_json_tool_output
 
 _FETCH = "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper"
 
@@ -119,6 +123,38 @@ async def test_web_search_runs_each_query_side_by_side_and_reports_each(
         "error": "Web search is unavailable right now, so nothing was looked up.",
     }
     assert first["meta"]["request_id"] != second["meta"]["request_id"]
+    # Results that fit inline keep their excerpts whole.
+    assert first["results"][0]["content"] == "C" * 3_000
+    assert result.output["retry_hint"] is None
+
+
+@pytest.mark.asyncio
+async def test_web_search_cuts_excerpts_so_every_result_stays_inline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def invoke(**kwargs: Any) -> dict[str, Any]:
+        query = kwargs["args"]["query"]
+        rows = [_row(f"https://e.com/{query}/{number}") for number in range(10)]
+        return _provider_result(query, rows)
+
+    monkeypatch.setattr(_FETCH, invoke)
+    queries = [f"q{index}" for index in range(5)]
+
+    result = await _run_tool({"queries": queries})
+
+    output = result.output
+    assert len(serialize_json_tool_output(output)) <= (
+        ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
+    rows = [row for search in output["searches"] for row in search["results"]]
+    assert [row["url"] for row in rows] == [
+        f"https://e.com/{query}/{number}" for query in queries for number in range(10)
+    ]
+    # Every excerpt is cut to the same length, and the result says how to read more.
+    assert {row["content"] for row in rows} == {rows[0]["content"]}
+    assert rows[0]["content"].endswith("…")
+    assert len(rows[0]["content"]) > 100
+    assert "web_extract" in output["retry_hint"]
 
 
 @pytest.mark.asyncio

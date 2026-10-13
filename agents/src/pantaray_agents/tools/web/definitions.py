@@ -2,8 +2,9 @@
 
 The Action builds its catalog entries from these words and schemas, and
 Suggestion and the chat build theirs in ``session``; all three run them through
-``execute``. A long result is not paged here: the host stores it like any other
-tool result too large to keep inline, and the model reads the rest from there.
+``execute``. web_search cuts its excerpts to keep every result inline. A long
+web_extract result is not paged here: the host stores it like any other tool
+result too large to keep inline, and the model reads the rest from there.
 """
 
 from __future__ import annotations
@@ -179,13 +180,14 @@ _SEARCH_FAILED: Final[dict[str, JSONValue]] = {
 WEB_SEARCH_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["status", "searches"],
+    "required": ["status", "searches", "retry_hint"],
     "properties": {
         "status": {"const": "success"},
         "searches": {
             "type": "array",
             "items": {"oneOf": [_SEARCH_FOUND, _SEARCH_FAILED]},
         },
+        "retry_hint": _NULLABLE_STRING,
     },
 }
 

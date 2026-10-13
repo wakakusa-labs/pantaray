@@ -1,6 +1,7 @@
 """Canonical tool-output contracts shared by runtime projectors."""
 
 import json
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -35,6 +36,28 @@ def serialize_json_tool_output(output: JSONValue) -> str:
     )
 
 
+def largest_fitting_size(
+    build: Callable[[int], JSONValue], *, high: int, limit: int
+) -> int:
+    """The largest n in 0..high whose ``build(n)`` serializes within ``limit``
+    characters, or 0 when none does.
+
+    The search halves, taking the output to grow with n; where it does not, the
+    n found still fits but may not be the largest. The output is measured
+    serialized because escaping lengthens text by an amount only its content
+    decides.
+    """
+
+    low = 0
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(serialize_json_tool_output(build(middle))) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
 def build_runtime_tool_error_output(
     *,
     error_type: str,
@@ -59,5 +82,6 @@ __all__ = [
     "ToolOutputStorageKind",
     "UnprojectedToolOutput",
     "build_runtime_tool_error_output",
+    "largest_fitting_size",
     "serialize_json_tool_output",
 ]

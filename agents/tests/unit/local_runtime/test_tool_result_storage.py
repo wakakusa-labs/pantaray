@@ -28,6 +28,14 @@ def _display_text(output: object) -> str:
     return json.dumps(output, ensure_ascii=False, indent=2)
 
 
+_LEFT_OUT = re.compile(r"\n\[… lines ([\d,]+)–([\d,]+) left out …\]\n")
+
+
+def _head_left_out_and_tail(preview: str) -> tuple[str, int, int, str]:
+    head, first, last, tail = _LEFT_OUT.split(preview)
+    return head, int(first.replace(",", "")), int(last.replace(",", "")), tail
+
+
 def _output_with_exact_display_size(character_count: int) -> dict[str, object]:
     """Many short values and no long one, so a large result moves whole as JSON."""
     output: dict[str, object] = {
@@ -144,9 +152,14 @@ def test_large_result_without_long_texts_is_stored_whole_with_exact_metadata(
     assert result.output_json["character_count"] == len(history_text)
     assert result.output_json["line_count"] == history_text.count("\n") + 1
     preview = result.output_json["preview"]
-    assert len(preview) <= 2_000
     assert preview.startswith('title="日本語の結果"\nlines[0]: "一行目')
     assert preview.endswith(" more of 301 lines")
+    # The outline fills the room the reference leaves: one more line would not fit.
+    shown = _display_text(result.output_json)
+    assert len(shown) <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    assert len(shown) + len(json.dumps(output["lines"][0], ensure_ascii=False)) > (
+        ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
     assert (
         f"in {history_text.count(chr(10)) + 1:,} lines"
         in result.output_json["retry_hint"]
@@ -182,10 +195,10 @@ def test_outline_of_a_result_stored_whole_names_every_short_value(
         {
             "title": f"Result {index}",
             "url": f"https://example.com/{index}",
-            "content": f"{index} " + "body " * 400,
+            "content": f"{index} " + "body " * 300,
             "score": 0.5,
         }
-        for index in range(12)
+        for index in range(50)
     ]
     output = {"status": "success", "searches": [{"query": "q", "results": results}]}
 
@@ -203,7 +216,11 @@ def test_outline_of_a_result_stored_whole_names_every_short_value(
         'searches[0].results[0]: title="Result 0" url="https://example.com/0" '
         "score=0.5",
     ]
-    assert 'title="Result 11"' in preview
+    assert all(
+        f'title="Result {index}" url="https://example.com/{index}"' in preview
+        for index in range(50)
+    )
+    assert "more of" not in preview
     assert "body" not in preview
     release_stored_tool_result(result)
 
@@ -218,10 +235,13 @@ def test_outline_says_how_many_lines_it_leaves_out(tmp_path: Path) -> None:
     )
 
     preview = result.output_json["preview"]
-    assert len(preview) <= 2_000
+    assert len(_display_text(result.output_json)) <= (
+        ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
     assert preview.startswith('matches[0]: "folder/file-0000.md"\n')
     shown = preview.count("\n")
     assert preview.endswith(f"… {2_000 - shown:,} more of 2,000 lines")
+    assert f'matches[{shown - 1}]: "folder/file-{shown - 1:04}.md"' in preview
     release_stored_tool_result(result)
 
 
@@ -273,8 +293,13 @@ def test_long_texts_move_to_text_files_and_the_rest_stays_in_place(
         assert moved["byte_size"] == len(page.encode("utf-8"))
         assert moved["character_count"] == len(page)
         assert moved["line_count"] == page.count("\n") + 1
-        assert len(moved["preview"]) <= 2_000
-        assert page.startswith(moved["preview"] + "\n")
+        head, first, last, tail = _head_left_out_and_tail(moved["preview"])
+        assert page.startswith(head + "\n")
+        assert page.endswith("\n" + tail)
+        assert first == head.count("\n") + 2
+        assert last == page.count("\n") - tail.count("\n")
+        # The two previews share the room under the limit about equally.
+        assert len(moved["preview"]) > 8_000
         assert f"in {page.count(chr(10)) + 1:,} lines" in moved["retry_hint"]
         assert f"read path={stored_path}" in moved["retry_hint"]
 
@@ -296,6 +321,37 @@ def test_long_texts_move_to_text_files_and_the_rest_stays_in_place(
         )
 
 
+def test_long_texts_share_the_room_alike(tmp_path: Path) -> None:
+    # Pages read at once: a mid-sized one left in place would take the room the
+    # previews of the others need.
+    middle = "\n".join(f"line {number}: word" for number in range(1, 1_300))
+    assert 15_000 < len(middle) < ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    pages = [_page(40), middle, _page(15)]
+    output = {
+        "status": "success",
+        "results": [
+            {"url": f"https://example.com/{index}", "raw_content": page}
+            for index, page in enumerate(pages)
+        ],
+    }
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="pages",
+        output=output,
+    )
+    release_stored_tool_result(result)
+
+    assert len(_display_text(result.output_json)) <= (
+        ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
+    previews = [
+        item["raw_content"]["preview"]  # type: ignore[index]
+        for item in result.output_json["results"]  # type: ignore[index,call-overload]
+    ]
+    assert all(len(preview) > 4_000 for preview in previews)
+
+
 def test_read_continues_a_moved_text_where_its_preview_stops(tmp_path: Path) -> None:
     page = _page(30)
     result = store_tool_result(
@@ -308,7 +364,8 @@ def test_read_continues_a_moved_text_where_its_preview_stops(tmp_path: Path) -> 
     offset = int(moved["retry_hint"].split("offset=")[1].split(",")[0])
     assert result.output_json["exit_code"] == 0  # type: ignore[index,call-overload]
 
-    read_back = [moved["preview"], "\n"]
+    head, _first, _last, _tail = _head_left_out_and_tail(moved["preview"])
+    read_back = [head, "\n"]
     column = 1
     descriptor = os.open(moved["path"], os.O_RDONLY)
     try:
@@ -342,20 +399,66 @@ def test_moved_text_counts_lines_the_way_read_does(tmp_path: Path) -> None:
     release_stored_tool_result(result)
     moved = result.output_json["stdout"]  # type: ignore[index,call-overload]
     offset = int(moved["retry_hint"].split("offset=")[1].split(",")[0])
-    preview_lines = re.split(r"\r\n|\r|\n", moved["preview"])
+    head, first, last, tail = _head_left_out_and_tail(moved["preview"])
+    preview_lines = re.split(r"\r\n|\r|\n", head)
     assert Path(moved["path"]).read_bytes() == stdout.encode("utf-8")
 
     descriptor = os.open(moved["path"], os.O_RDONLY)
     try:
         page = read_text_descriptor_lines(descriptor=descriptor, offset=offset, limit=1)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        tail_page = read_text_descriptor_lines(
+            descriptor=descriptor, offset=last + 1, limit=1
+        )
     finally:
         os.close(descriptor)
 
-    assert offset == len(preview_lines) + 1
+    assert offset == first == len(preview_lines) + 1
     assert preview_lines[-1] == f"progress {offset - 2:05d} of the download"
     assert page.content == f"progress {offset - 1:05d} of the download\n"
+    # The tail starts on the line after the last one left out, as read counts them.
+    assert tail.startswith(f"progress {last:05d} of the download")
+    assert tail_page.content == f"progress {last:05d} of the download\n"
     assert moved["line_count"] == page.total_lines == 3_000
     assert f"in {3_000:,} lines" in moved["retry_hint"]
+
+
+def test_preview_shows_how_command_output_ends(tmp_path: Path) -> None:
+    stdout = "".join(f"PASSED test_{number:05d}\n" for number in range(5_000))
+    stdout += "FAILED test_05000 - AssertionError: expected 3, got 4\n1 failed\n"
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="test-run",
+        output={"status": "success", "exit_code": 1, "stdout": stdout, "stderr": ""},
+    )
+    release_stored_tool_result(result)
+
+    shown = _display_text(result.output_json)
+    assert len(shown) <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    moved = result.output_json["stdout"]  # type: ignore[index,call-overload]
+    head, first, last, tail = _head_left_out_and_tail(moved["preview"])
+    assert head.startswith("PASSED test_00000\n")
+    assert tail.endswith(
+        "FAILED test_05000 - AssertionError: expected 3, got 4\n1 failed\n"
+    )
+    assert f"lines {first:,} to {last:,} left out" in moved["retry_hint"]
+    # Head and tail fill the room the rest of the result leaves.
+    assert len(shown) > ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT - 100
+
+
+def test_a_line_too_long_to_split_shows_only_its_head(tmp_path: Path) -> None:
+    stdout = "x" * 50_000
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="one-line",
+        output={"status": "success", "stdout": stdout},
+    )
+    release_stored_tool_result(result)
+
+    moved = result.output_json["stdout"]  # type: ignore[index,call-overload]
+    assert stdout.startswith(moved["preview"])
+    assert len(moved["preview"]) > 19_000
+    assert f"read path={moved['path']} offset=1," in moved["retry_hint"]
 
 
 def test_text_moved_out_pages_whole_in_the_output_view(tmp_path: Path) -> None:

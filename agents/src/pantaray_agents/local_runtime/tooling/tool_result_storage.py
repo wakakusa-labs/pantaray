@@ -11,12 +11,13 @@ from urllib.parse import quote
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import (
     UnprojectedToolOutput,
+    largest_fitting_size,
     serialize_json_tool_output,
 )
 from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
-from .tool_result_spill import outline_preview, spill_long_texts
+from .tool_result_spill import outline_previewer, spill_long_texts
 
 TOOL_RESULT_JSON_MEDIA_TYPE: Literal["application/json"] = "application/json"
 TOOL_RESULT_BINARY_MEDIA_TYPE: Literal["application/octet-stream"] = (
@@ -119,28 +120,42 @@ def store_tool_result(
 
     file_name = _result_file_name(TOOL_RESULT_JSON_SUFFIX)
     payload = history_text.encode("utf-8")
-    preview, retry_hint = outline_preview(
+    previewer = outline_previewer(
         output=output, text=history_text, path=str(owner_path / file_name)
     )
-    metadata: ActionFileToolResultMetadata = {
+    reference: ActionFileToolResultMetadata = {
         "storage": "action_file",
         "path": str(owner_path / file_name),
         "media_type": TOOL_RESULT_JSON_MEDIA_TYPE,
         "byte_size": len(payload),
         "character_count": len(history_text),
         "line_count": count_text_lines(history_text),
-        "preview": preview,
-        "retry_hint": retry_hint,
     }
     # A result's status says how the call ended, not what it returned. Keeping it beside
     # the reference lets a reader tell, say, a patch that applied nothing from one that
     # did without opening the file.
     if isinstance(output, dict) and isinstance(status := output.get("status"), str):
-        metadata["status"] = status
+        reference["status"] = status
+
+    def with_preview(window: int) -> JSONValue:
+        preview, retry_hint = previewer(window)
+        metadata: ActionFileToolResultMetadata = {
+            **reference,
+            "preview": preview,
+            "retry_hint": retry_hint,
+        }
+        return cast(dict[str, JSONValue], metadata)
+
     return _stored_result(
         action_tool_results_path=action_tool_results_path,
         invocation_id=invocation_id,
-        output_json=cast(dict[str, JSONValue], metadata),
+        output_json=with_preview(
+            largest_fitting_size(
+                with_preview,
+                high=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+                limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+            )
+        ),
         payloads=((file_name, payload),),
     )
 

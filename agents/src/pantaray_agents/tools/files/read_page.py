@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal
 
@@ -10,7 +9,10 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.schema.tool_result import (
+    largest_fitting_size,
+    serialize_json_tool_output,
+)
 from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .text_lines import (
@@ -93,10 +95,18 @@ def bound_text_page(
         return page((prefix,), first.number, first.column + length)
 
     # JSON escaping and cursor metadata count toward the same storage limit.
-    count = _largest_fitting(len(result.lines) - 1, whole_lines)
+    count = largest_fitting_size(
+        whole_lines,
+        high=len(result.lines) - 1,
+        limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+    )
     if count:
         return whole_lines(count)
-    length = _largest_fitting(len(result.lines[0].text), first_line_prefix)
+    length = largest_fitting_size(
+        first_line_prefix,
+        high=len(result.lines[0].text),
+        limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+    )
     if length == 0:
         raise BrokerPolicyError("read metadata exceeds the inline output budget")
     return first_line_prefix(length)
@@ -107,18 +117,6 @@ def _fits_inline(output: JSONValue) -> bool:
         len(serialize_json_tool_output(output))
         <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
     )
-
-
-def _largest_fitting(high: int, build: Callable[[int], dict[str, JSONValue]]) -> int:
-    """The largest n in 0..high whose ``build(n)`` fits inline (0 when none)."""
-    low = 0
-    while low < high:
-        midpoint = (low + high + 1) // 2
-        if _fits_inline(build(midpoint)):
-            low = midpoint
-        else:
-            high = midpoint - 1
-    return low
 
 
 __all__ = [

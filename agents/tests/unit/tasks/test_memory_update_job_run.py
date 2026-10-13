@@ -100,9 +100,10 @@ class _ScriptedMemoryAgent:
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
-        del tool_result_directory_fd
+        del tool_results_path, db_path
         self.contexts.append(context)
         write = next(item for item in tool_definitions if item.name == "write_file")
         draft_revision = context.draft_revision
@@ -281,9 +282,10 @@ class _AgentThatReplacesTheRoute:
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
-        del context, tool_definitions, tool_result_directory_fd
+        del context, tool_definitions, tool_results_path, db_path
         # A second sign-in of the same account is a new cloud identity.
         import_desktop_session(
             db_path=self._db_path,
@@ -355,7 +357,8 @@ class _AgentThatMustNotRun(_ScriptedMemoryAgent):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         raise AssertionError("a run with every input deleted has nothing to read")
 
@@ -641,7 +644,8 @@ class _AgentThatFails(_ScriptedMemoryAgent):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         raise RuntimeError("Memory update ReAct loop failed")
 

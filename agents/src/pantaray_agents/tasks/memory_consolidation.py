@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Final, Protocol
 
 from pantaray_agents.agents.memory_agent import (
@@ -121,7 +122,8 @@ class MemoryConsolidationAgent(Protocol):
         request: MemoryConsolidationRequest,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> None: ...
 
 
@@ -297,7 +299,8 @@ async def _consolidate_file(
         await agent.consolidate(
             request,
             tool_definitions=tools,
-            tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
+            tool_results_path=workspace_scope.require_tool_results_path(),
+            db_path=runtime.db_path,
         )
     after_chars = (
         applies_when_chars(session.draft.documents)

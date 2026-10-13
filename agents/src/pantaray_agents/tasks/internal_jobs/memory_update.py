@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Protocol
 
 import pantaray_agents.dependencies as deps
@@ -56,7 +57,8 @@ class MemoryUpdateWorkerAgent(Protocol):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult: ...
 
     async def consolidate(
@@ -64,7 +66,8 @@ class MemoryUpdateWorkerAgent(Protocol):
         request: MemoryConsolidationRequest,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> None: ...
 
 
@@ -116,7 +119,8 @@ async def execute_memory_update_job(
                 result = await agent.update(
                     prepared.context,
                     tool_definitions=prepared.tool_definitions,
-                    tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
+                    tool_results_path=workspace_scope.require_tool_results_path(),
+                    db_path=runtime.db_path,
                 )
                 applied_memory_request_ids = result.applied_memory_request_ids
             # Everything above stayed in the run-only workspace; this is where

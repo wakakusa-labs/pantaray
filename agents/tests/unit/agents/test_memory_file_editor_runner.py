@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import itertools
-import os
-import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
-from pantaray_agents.agents.memory_file_editor import runner as memory_runner
+from pantaray_agents.agents.memory_agent.agent import saved_results_for_run
 from pantaray_agents.agents.memory_file_editor.runner import (
     MemoryFileEditorRunInput,
     run_memory_file_editor,
 )
-from pantaray_agents.agents.memory_file_editor.tool_result_store import (
-    TOOL_RESULT_FETCH_TOOL_NAME,
-)
 from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
-from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
-    MemoryRunWorkspaceScope,
-)
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import serialize_json_tool_output
 from pantaray_agents.tools.contract import ReactToolDefinition, ReactToolResult
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse, LlmCommentary
 from pantaray_llm.contracts.conversation import (
@@ -36,25 +26,7 @@ from pantaray_llm.contracts.conversation import (
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall
 
-_OPEN_TEST_DIRECTORY_FDS: list[int] = []
 _CALL_IDS = itertools.count()
-
-
-@pytest.fixture(autouse=True)
-def _close_test_directory_fds() -> Iterator[None]:
-    try:
-        yield
-    finally:
-        while _OPEN_TEST_DIRECTORY_FDS:
-            os.close(_OPEN_TEST_DIRECTORY_FDS.pop())
-
-
-def _tool_result_directory(tmp_path: Path) -> int:
-    path = tmp_path / "tool-results"
-    path.mkdir(mode=0o700)
-    directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    _OPEN_TEST_DIRECTORY_FDS.append(directory_fd)
-    return directory_fd
 
 
 def _reply(*calls: tuple[str, dict[str, JSONValue]], text: str = "") -> ActionTurnReply:
@@ -100,13 +72,16 @@ def _run_input(
     *,
     tools: tuple[ReactToolDefinition, ...] = (),
     memory_request_ids: tuple[str, ...] = (),
-    directory_fd: int | None = None,
 ) -> MemoryFileEditorRunInput:
+    tool_results_path = tmp_path / "tool-results"
+    tool_results_path.mkdir(mode=0o700, exist_ok=True)
+    save_result, read_saved_results = saved_results_for_run(
+        tool_results_path=tool_results_path, db_path=tmp_path / "runtime.sqlite3"
+    )
     return MemoryFileEditorRunInput(
         run_id="run-1",
-        tool_result_directory_fd=(
-            _tool_result_directory(tmp_path) if directory_fd is None else directory_fd
-        ),
+        save_result=save_result,
+        read_saved_results=read_saved_results,
         tool_definitions=tools,
         prompt="memory context",
         task="Update the draft.",
@@ -140,31 +115,34 @@ def _last_result(request: ConversationRequest) -> LlmTurnToolResultItem:
 
 
 @pytest.mark.asyncio
-async def test_a_large_result_is_spilled_and_read_back_in_bounded_pages(
-    tmp_path: Path,
-) -> None:
-    large_text = "raw-tool-result-日本語🌊\n" * 1_200
-    fetched: list[str] = []
+async def test_a_large_text_is_saved_and_read_on_from_its_hint(tmp_path: Path) -> None:
+    large_text = "".join(
+        f"line {number:05d} raw-tool-result-日本語🌊\n" for number in range(1_200)
+    )
+    read_back: list[str] = []
 
-    def fetch_next(request: ConversationRequest) -> ActionTurnReply:
+    def read_next(request: ConversationRequest) -> ActionTurnReply:
         result = _last_result(request).output
         assert isinstance(result, dict)
-        if result.get("storage") == "run_tool_result_file":
-            offset: JSONValue = 0
+        if result.get("kind") == "file":
+            read_back.append(str(result["content"]))
+            offset, column = result["next_offset"], result["next_column"]
+            path = result["path"]
         else:
-            fetched.append(str(result["content"]))
-            offset = result["next_offset"]
-        if not isinstance(offset, int):
+            # The saved text keeps its place in the result, which says how to go on.
+            assert result["status"] == "success"
+            moved = result["text"]
+            assert isinstance(moved, dict)
+            read_back.append(str(moved["preview"]) + "\n")
+            hint = str(moved["retry_hint"])
+            path = hint.split("path=")[1].split(" ")[0]
+            offset, column = int(hint.split("offset=")[1].split(",")[0]), 1
+        if offset is None:
             return _reply(("completed", {}))
-        return _reply(
-            (
-                TOOL_RESULT_FETCH_TOOL_NAME,
-                {"result_ref": result["result_ref"], "offset": offset},
-            )
-        )
+        return _reply(("read", {"path": path, "offset": offset, "column": column}))
 
     send, requests = _scripted(
-        _reply(("read_memory", {"path": "facts.md"})), *([fetch_next] * 7)
+        _reply(("read_memory", {"path": "facts.md"})), *([read_next] * 8)
     )
 
     applied = await run_memory_file_editor(
@@ -172,11 +150,26 @@ async def test_a_large_result_is_spilled_and_read_back_in_bounded_pages(
     )
 
     assert applied == ()
-    assert "".join(fetched) == serialize_json_tool_output(
-        {"output": {"status": "success", "text": large_text}, "error_message": None}
-    )
+    assert "".join(read_back) == large_text
     assert all(large_text not in str(request.conversation) for request in requests)
-    assert TOOL_RESULT_FETCH_TOOL_NAME in {tool.name for tool in requests[0].tools}
+    tool_names = {tool.name for tool in requests[0].tools}
+    assert "read" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_read_reaches_only_the_saved_results(tmp_path: Path) -> None:
+    outside = tmp_path / "facts.md"
+    outside.write_text("private", encoding="utf-8")
+    send, requests = _scripted(
+        _reply(("read", {"path": str(outside)})), _reply(("completed", {}))
+    )
+
+    await run_memory_file_editor(_run_input(tmp_path, send))
+
+    refused = _last_result(requests[1]).output
+    assert isinstance(refused, dict)
+    assert refused["status"] == "error"
+    assert "private" not in str(refused)
 
 
 @pytest.mark.asyncio
@@ -204,107 +197,3 @@ async def test_completed_reports_the_requests_applied_after_a_rejected_report(
     rejected = _last_result(requests[2]).output
     assert isinstance(rejected, dict)
     assert rejected["error_code"] == "COMPLETION_PRECONDITION_FAILED"
-
-
-@pytest.mark.asyncio
-async def test_closing_the_store_never_deletes_through_a_replaced_workspace(
-    tmp_path: Path,
-) -> None:
-    outside_user = tmp_path / "outside-user"
-    with MemoryRunWorkspaceScope() as workspace_scope:
-        workspace = workspace_scope.create(
-            artifact_root=tmp_path / "artifacts", user_id="user-1", run_id="run-1"
-        )
-        original_user = workspace.root_path.parents[1]
-        renamed_user = original_user.with_name("user-1-original")
-        original_user.rename(renamed_user)
-        original_user.symlink_to(outside_user, target_is_directory=True)
-        victim = (
-            outside_user
-            / "workspaces"
-            / workspace.root_path.name
-            / "tool-results"
-            / "victim"
-        )
-        victim.mkdir(parents=True)
-        send, _ = _scripted(_reply(("completed", {})))
-
-        await run_memory_file_editor(
-            _run_input(
-                tmp_path,
-                send,
-                directory_fd=workspace_scope.require_tool_results_fd(),
-            )
-        )
-
-        assert victim.is_dir()
-
-    assert victim.is_dir()
-    assert tuple((renamed_user / "workspaces").iterdir()) == ()
-
-
-@pytest.mark.asyncio
-async def test_a_stopped_run_closes_the_store_only_after_its_projection(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    projection_started = threading.Event()
-    release_projection = threading.Event()
-    projection_finished = threading.Event()
-    close_finished = threading.Event()
-    original_close = memory_runner.RunToolResultStore.close
-
-    def blocking_projection(
-        *, result: ReactToolResult, store: memory_runner.RunToolResultStore
-    ) -> ReactToolResult:
-        del store
-        projection_started.set()
-        assert release_projection.wait(timeout=5)
-        projection_finished.set()
-        return result
-
-    def tracked_close(store: memory_runner.RunToolResultStore) -> None:
-        assert projection_finished.is_set()
-        original_close(store)
-        close_finished.set()
-
-    monkeypatch.setattr(memory_runner, "project_tool_result", blocking_projection)
-    monkeypatch.setattr(memory_runner.RunToolResultStore, "close", tracked_close)
-    send, _ = _scripted(_reply(("read_memory", {"path": "facts.md"})))
-
-    run = asyncio.create_task(
-        run_memory_file_editor(_run_input(tmp_path, send, tools=(_read_tool(),)))
-    )
-    assert await asyncio.to_thread(projection_started.wait, 5)
-    run.cancel()
-    await asyncio.sleep(0)
-    assert not run.done()
-    release_projection.set()
-
-    with pytest.raises(asyncio.CancelledError):
-        await run
-    assert close_finished.is_set()
-
-
-@pytest.mark.asyncio
-async def test_a_run_error_keeps_its_type_when_closing_the_store_also_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    class RunFailure(RuntimeError):
-        pass
-
-    def fail_close(_store: memory_runner.RunToolResultStore) -> None:
-        raise RuntimeError("close failed")
-
-    monkeypatch.setattr(memory_runner.RunToolResultStore, "close", fail_close)
-
-    async def send(_request: ConversationRequest) -> ActionTurnReply:
-        raise RunFailure("run failed")
-
-    with pytest.raises(RunFailure) as exc_info:
-        await run_memory_file_editor(_run_input(tmp_path, send))
-
-    assert exc_info.value.__notes__ == [
-        "run tool-result store close failed: RuntimeError: close failed"
-    ]

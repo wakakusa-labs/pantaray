@@ -85,7 +85,7 @@ def test_prompt_names_the_zone_of_its_local_times() -> None:
 
 
 async def _consolidation_system_instruction(
-    monkeypatch: pytest.MonkeyPatch, loader: PromptLoader
+    monkeypatch: pytest.MonkeyPatch, loader: PromptLoader, tool_results_path: Path
 ) -> str:
     sent: list[str] = []
 
@@ -105,16 +105,17 @@ async def _consolidation_system_instruction(
             today="2026-10-12",
         ),
         tool_definitions=(),
-        tool_result_directory_fd=0,
+        tool_results_path=tool_results_path,
+        db_path=tool_results_path / "runtime.sqlite3",
     )
     return sent[0]
 
 
 async def test_consolidation_uses_the_memory_update_facts_definition(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     section = memory_agent_module.what_facts_hold(_system_instruction())
-    sent = await _consolidation_system_instruction(monkeypatch, prompt_loader)
+    sent = await _consolidation_system_instruction(monkeypatch, prompt_loader, tmp_path)
 
     assert section.startswith("## What facts hold\n")
     assert "Details that have a home of their own" in section
@@ -135,6 +136,8 @@ async def test_editing_the_facts_definition_changes_the_consolidation_too(
         "utf-8",
     )
 
-    sent = await _consolidation_system_instruction(monkeypatch, PromptLoader(tmp_path))
+    sent = await _consolidation_system_instruction(
+        monkeypatch, PromptLoader(tmp_path), tmp_path
+    )
 
     assert "## What facts hold\nEdited definition.\n" in sent

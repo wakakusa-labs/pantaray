@@ -32,6 +32,7 @@ from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
+    READ_ACCESS_SCOPE_WORKSPACE,
     ReadAccessScope,
 )
 from pantaray_agents.tools.contract import (
@@ -157,6 +158,33 @@ def build_read_only_file_tools(
     return _ReadOnlyFileTools(
         db_path=db_path, scope=scope, spill_root=spill_path, memory_note=memory_note
     ).definitions()
+
+
+def build_saved_result_read_tool(
+    *, db_path: Path, spill_root: Path
+) -> ReactToolDefinition:
+    """read alone, over nothing but ``spill_root``.
+
+    For a run whose own file tools cannot reach the folder where its large
+    results are saved, so it can follow a saved result's hint to read the rest.
+    """
+
+    spill_path = spill_root.resolve(strict=True)
+    tools = _ReadOnlyFileTools(
+        db_path=db_path,
+        scope=ReadScope(
+            manifest_roots=(_read_only_root("tool_results", spill_path),),
+            cwd_path=None,
+            read_access_scope=READ_ACCESS_SCOPE_WORKSPACE,
+            scratch_root_path=None,
+            private_storage=PrivateAppStorage(
+                storage_roots=(), readable_roots=(spill_path,)
+            ),
+        ),
+        spill_root=spill_path,
+        memory_note="Its only folder is this run's saved tool results.",
+    )
+    return next(tool for tool in tools.definitions() if tool.name == "read")
 
 
 def _read_only_root(root_id: str, path: Path) -> ManifestRoot:
@@ -527,4 +555,8 @@ def _definition(
     )
 
 
-__all__ = ["RENDER_PDF_PAGE_TOOL_NAME", "build_read_only_file_tools"]
+__all__ = [
+    "RENDER_PDF_PAGE_TOOL_NAME",
+    "build_read_only_file_tools",
+    "build_saved_result_read_tool",
+]

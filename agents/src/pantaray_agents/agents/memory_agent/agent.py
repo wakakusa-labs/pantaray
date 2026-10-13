@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
@@ -28,11 +31,17 @@ from pantaray_agents.local_runtime.tooling.agent_experience import (
     LIST_ACTION_STEPS_TOOL_NAME,
     SEARCH_ACTION_STEPS_TOOL_NAME,
 )
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
+)
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
 from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     resolve_react_tool_definitions,
 )
+from pantaray_agents.tools.files.read_only_tools import build_saved_result_read_tool
 from pantaray_agents.tools.memory.retrieval import (
     GET_MEMORY_REFERENCE_TOOL_NAME,
     MEMORY_SEARCH_TOOL_NAME,
@@ -128,7 +137,8 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         selected_tools = resolve_react_tool_definitions(
             definitions=tool_definitions,
@@ -158,10 +168,14 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         # needs at least one item of; the rest is the request's own message.
         head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
+        save_result, read_saved_results = saved_results_for_run(
+            tool_results_path=tool_results_path, db_path=db_path
+        )
         applied = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
-                tool_result_directory_fd=tool_result_directory_fd,
+                save_result=save_result,
+                read_saved_results=read_saved_results,
                 tool_definitions=selected_tools,
                 prompt=head,
                 task=task,
@@ -180,7 +194,8 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         request: MemoryConsolidationRequest,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> None:
         """Rewrite one file through the given tools; the caller judges the result."""
 
@@ -194,10 +209,14 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         )
         head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
+        save_result, read_saved_results = saved_results_for_run(
+            tool_results_path=tool_results_path, db_path=db_path
+        )
         await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=request.run_id,
-                tool_result_directory_fd=tool_result_directory_fd,
+                save_result=save_result,
+                read_saved_results=read_saved_results,
                 tool_definitions=tool_definitions,
                 prompt=head,
                 task=task,
@@ -235,6 +254,28 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         return tuple(item for item in self.TOOL_IDS if item in available)
 
 
+def saved_results_for_run(
+    *, tool_results_path: Path, db_path: Path
+) -> tuple[Callable[[JSONValue], JSONValue], ReactToolDefinition]:
+    """Save oversized results in the run's folder, which goes with its workspace,
+    the way an Action saves its own, and read them back the same way."""
+
+    # Saved results are named by the same path read checks them against.
+    root = tool_results_path.resolve(strict=True)
+
+    def save_result(output: JSONValue) -> JSONValue:
+        stored = store_tool_result(
+            action_tool_results_path=root, invocation_id=uuid.uuid4().hex, output=output
+        )
+        release_error = release_stored_tool_result(stored)
+        if release_error is not None:
+            raise release_error
+        return stored.output_json
+
+    # read's db_path locates the Office converter, which no saved result needs.
+    return save_result, build_saved_result_read_tool(db_path=db_path, spill_root=root)
+
+
 __all__ = [
     "MEMORY_CONSOLIDATION_PROMPT_NAME",
     "MEMORY_CONSOLIDATION_PROMPT_VERSION",
@@ -243,4 +284,5 @@ __all__ = [
     "MemoryConsolidationRequest",
     "MemoryUpdateAgent",
     "MemoryUpdateAgentResult",
+    "saved_results_for_run",
 ]

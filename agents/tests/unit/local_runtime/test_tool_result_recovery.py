@@ -535,7 +535,7 @@ def _pending_approval_named_only_inside_json(db_path: Path) -> tuple[Path, Path]
     summary = store_tool_result(
         action_tool_results_path=root,
         invocation_id="request-1",
-        output={"command": "c" * 25_000, "justification": "j" * 17_007},
+        output={"command": "c" * 25_000, "justification": "j" * 100},
     )
     envelope = store_tool_result(
         action_tool_results_path=root,

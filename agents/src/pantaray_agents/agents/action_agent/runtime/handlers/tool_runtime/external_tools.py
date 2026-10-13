@@ -26,7 +26,10 @@ from pantaray_agents.local_runtime.web_tools.client import (
 from pantaray_agents.schema.agent.action_history import HistoryFetchStep
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.repositories.repository import DBRow
-from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.schema.tool_result import (
+    largest_fitting_size,
+    serialize_json_tool_output,
+)
 from pantaray_agents.tools.web.execute import run_web_extract, run_web_search
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 
@@ -218,16 +221,11 @@ def _history_fetch_page(
             "next_cursor": f"{digest}:{end}" if end < len(content) else None,
         }
 
-    low, high = 0, min(len(content) - offset, ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT)
-    while low < high:
-        midpoint = (low + high + 1) // 2
-        if (
-            len(serialize_json_tool_output(cast(JSONValue, page(midpoint))))
-            <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
-        ):
-            low = midpoint
-        else:
-            high = midpoint - 1
+    low = largest_fitting_size(
+        lambda length: cast(JSONValue, page(length)),
+        high=min(len(content) - offset, ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT),
+        limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+    )
     if low == 0:
         raise ToolValidationError("history_fetch: refs exceed the inline page budget")
     return page(low)

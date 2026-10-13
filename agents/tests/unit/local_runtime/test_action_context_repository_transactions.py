@@ -87,7 +87,6 @@ def _write_context_records(connection: sqlite3.Connection, tmp_path: Path) -> No
         manifest_id="manifest:action-1",
         scratch_real_path=str(tmp_path / "scratch"),
         tool_results_real_path=str(tmp_path / "tool-results"),
-        memory_folders=(),
         created_at=started_at,
     )
 

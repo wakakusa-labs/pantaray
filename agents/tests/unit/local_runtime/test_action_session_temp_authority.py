@@ -101,7 +101,6 @@ def _seed_evidence(tmp_path: Path, *, status: str = "completed") -> tuple[Path, 
                 manifest_id="manifest:action-1",
                 scratch_real_path=str(paths.workspace),
                 tool_results_real_path=str(paths.tool_results),
-                memory_folders=(),
                 created_at=STARTED_AT,
             )
     if status != "running":

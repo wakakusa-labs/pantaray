@@ -11,7 +11,6 @@ from pantaray_agents.schema.read_access import ReadAccessScope
 
 from ..app_runtime_verification import load_and_verify_app_runtime_python_from_env
 from ..descriptor_access import DescriptorPathError, open_directory_descriptor
-from ..runtime.runtime_env import read_local_runtime_artifact_root
 from ..storage.migrations import MigrationError
 from ..storage.transactions import immediate_transaction
 from .action_session_temp_paths import (
@@ -51,7 +50,6 @@ from .repository import (
 )
 from .repository.executions import create_execution_session_in_connection
 from .repository.manifests import (
-    _prepare_memory_folders,
     ensure_action_workspace_manifest_in_connection,
 )
 from .resources.resource_db_support import configure_connection
@@ -342,12 +340,6 @@ def _persist_action_execution_context(
 ) -> str:
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
-        memory_folders = _prepare_memory_folders(
-            connection=connection,
-            user_id=user_id,
-            action_id=action_id,
-            artifact_root=read_local_runtime_artifact_root(),
-        )
         with immediate_transaction(connection):
             create_execution_session_in_connection(
                 connection=connection,
@@ -396,7 +388,6 @@ def _persist_action_execution_context(
                 manifest_id=f"manifest:{action_id}",
                 scratch_real_path=str(workspace_path),
                 tool_results_real_path=str(tool_results_path),
-                memory_folders=memory_folders,
                 created_at=started_at,
             )
 

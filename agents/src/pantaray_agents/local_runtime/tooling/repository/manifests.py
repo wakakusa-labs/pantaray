@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
     load_memory_folders,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.workspace_context import (
     workspace_context_catalog_to_snapshot,
 )
@@ -34,7 +35,6 @@ def ensure_action_workspace_manifest(
     execution_session_id: str,
     workspace_path: Path,
     tool_results_path: Path,
-    artifact_root: Path,
     created_at: str,
 ) -> str:
     manifest_id = f"manifest:{action_id}"
@@ -45,12 +45,6 @@ def ensure_action_workspace_manifest(
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
-            memory_folders = _prepare_memory_folders(
-                connection=connection,
-                user_id=user_id,
-                action_id=action_id,
-                artifact_root=artifact_root,
-            )
             return ensure_action_workspace_manifest_in_connection(
                 connection=connection,
                 user_id=user_id,
@@ -60,7 +54,6 @@ def ensure_action_workspace_manifest(
                 manifest_id=manifest_id,
                 scratch_real_path=scratch_real_path,
                 tool_results_real_path=tool_results_real_path,
-                memory_folders=memory_folders,
                 created_at=created_at,
             )
 
@@ -75,7 +68,6 @@ def ensure_action_workspace_manifest_in_connection(
     manifest_id: str,
     scratch_real_path: str,
     tool_results_real_path: str,
-    memory_folders: tuple[MemoryFolder, ...],
     created_at: str,
 ) -> str:
     existing_manifest = connection.execute(
@@ -166,33 +158,60 @@ def ensure_action_workspace_manifest_in_connection(
         manifest_id=manifest_id,
         created_at=created_at,
     )
-    _insert_memory_roots(
-        connection=connection,
-        manifest_id=manifest_id,
-        folders=memory_folders,
-        created_at=created_at,
-    )
     return manifest_id
 
 
-def _prepare_memory_folders(
+def pin_action_memory_roots(
     *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    action_id: str,
+    db_path: Path,
+    busy_timeout_ms: int,
     artifact_root: Path,
-) -> tuple[MemoryFolder, ...]:
-    # An Action reads the memory revisions current when it was created, on
-    # every later run too, as it keeps the memory indexes it started from.
-    existing = connection.execute(
-        "SELECT 1 FROM workspace_manifests WHERE action_id = ?",
-        (action_id,),
-    ).fetchone()
-    if existing is not None:
-        return ()
-    return load_memory_folders(
-        connection=connection, artifact_root=artifact_root, user_id=user_id
-    )
+    user_id: str,
+    manifest_id: str,
+) -> dict[MemorySource, str]:
+    """The memory revisions an Action reads, pinned as read-only manifest roots.
+
+    A tree the manifest has no root for yet, on an Action's first run or on an
+    Action created before the tree had one, is pinned at its current revision;
+    a pinned tree keeps its revision for the Action's life. The Action's memory
+    indexes are read from the revisions returned here, so they always match
+    the folders it can read.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            manifest = connection.execute(
+                """
+                SELECT 1 FROM workspace_manifests
+                WHERE manifest_id = ? AND user_id = ? AND status = 'ready'
+                """,
+                (manifest_id, user_id),
+            ).fetchone()
+            if manifest is None:
+                raise MigrationError(f"workspace manifest not found: {manifest_id}")
+            _insert_memory_roots(
+                connection=connection,
+                manifest_id=manifest_id,
+                folders=load_memory_folders(
+                    connection=connection, artifact_root=artifact_root, user_id=user_id
+                ),
+                created_at=now_utc_iso(),
+            )
+            rows = connection.execute(
+                f"""
+                SELECT source_type, source_id FROM workspace_manifest_roots
+                WHERE manifest_id = ?
+                  AND source_type IN ({", ".join("?" for _ in _MEMORY_ROOT_NAMES)})
+                """,
+                (manifest_id, *_MEMORY_ROOT_NAMES),
+            ).fetchall()
+    return {
+        source: str(row["source_id"])
+        for row in rows
+        for source in _MEMORY_ROOT_NAMES
+        if row["source_type"] == source
+    }
 
 
 def _upsert_tool_results_root(
@@ -451,6 +470,7 @@ def _insert_memory_roots(
             can_process_write,
             created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?)
+        ON CONFLICT(root_id) DO NOTHING
         """,
         [
             (
@@ -472,4 +492,5 @@ __all__ = [
     "ensure_action_workspace_manifest",
     "insert_approved_folder_root_in_connection",
     "load_action_manifest_id",
+    "pin_action_memory_roots",
 ]

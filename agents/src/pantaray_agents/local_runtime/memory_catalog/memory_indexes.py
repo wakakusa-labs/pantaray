@@ -9,6 +9,7 @@ from the same revisions' folders, which it may read but not change.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -81,11 +82,14 @@ def load_memory_heads(
     busy_timeout_ms: int,
     artifact_root: Path,
     user_id: str,
+    revisions: Mapping[MemorySource, str] | None = None,
 ) -> MemoryHeads:
-    """The published facts, insights and Agent Experience trees, read together.
+    """The facts, insights and Agent Experience trees, read together.
 
-    A tree whose files no longer match its revision is queued for repair and
-    reported as unreadable, so the other trees still reach the run.
+    ``revisions`` names the revision of each tree to read, a tree it leaves out
+    having none; without it the current revisions are read. A tree whose files
+    no longer match its revision is queued for repair and reported as
+    unreadable, so the other trees still reach the run.
     """
 
     heads, failures = _load_heads(
@@ -93,6 +97,7 @@ def load_memory_heads(
         busy_timeout_ms=busy_timeout_ms,
         artifact_root=artifact_root,
         user_id=user_id,
+        revisions=revisions,
     )
     if failures:
         with open_memory_catalog_connection(
@@ -126,20 +131,14 @@ def load_memory_folders(
 
     folders: list[MemoryFolder] = []
     for source in _ENTRY_PATHS:
-        node = load_latest_active_node_by_source(
+        revision_id = _current_revision_id(
             connection=connection, user_id=user_id, source=source
         )
-        if node is None or node.current_revision_id is None:
+        if revision_id is None:
             continue
-        revision = load_revision(
-            connection=connection,
-            user_id=user_id,
-            revision_id=node.current_revision_id,
+        revision = _require_revision(
+            connection=connection, user_id=user_id, revision_id=revision_id
         )
-        if revision is None:
-            raise MemoryCatalogIntegrityError(
-                f"{source} memory head has no current revision"
-            )
         path = _revision_folder(
             artifact_root=artifact_root, revision=revision, source=source
         )
@@ -148,6 +147,26 @@ def load_memory_folders(
                 MemoryFolder(source=source, revision_id=revision.revision_id, path=path)
             )
     return tuple(folders)
+
+
+def _current_revision_id(
+    *, connection: sqlite3.Connection, user_id: str, source: MemorySource
+) -> str | None:
+    node = load_latest_active_node_by_source(
+        connection=connection, user_id=user_id, source=source
+    )
+    return None if node is None else node.current_revision_id
+
+
+def _require_revision(
+    *, connection: sqlite3.Connection, user_id: str, revision_id: str
+) -> MemoryRevision:
+    revision = load_revision(
+        connection=connection, user_id=user_id, revision_id=revision_id
+    )
+    if revision is None:
+        raise MemoryCatalogIntegrityError(f"memory revision {revision_id} is missing")
+    return revision
 
 
 def _revision_folder(
@@ -203,6 +222,7 @@ def _load_heads(
     busy_timeout_ms: int,
     artifact_root: Path,
     user_id: str,
+    revisions: Mapping[MemorySource, str] | None,
 ) -> tuple[tuple[MemoryHead, ...], tuple[_HeadIntegrityFailure, ...]]:
     # Design limit: eager document copies avoid a cross-run revision lease. Introduce
     # lease-backed reads if a load's p95 exceeds 1 s or copied content exceeds 32 MiB.
@@ -214,15 +234,25 @@ def _load_heads(
         connection.execute("BEGIN")
         try:
             for source in _ENTRY_PATHS:
+                revision_id = (
+                    _current_revision_id(
+                        connection=connection, user_id=user_id, source=source
+                    )
+                    if revisions is None
+                    else revisions.get(source)
+                )
+                if revision_id is None:
+                    continue
                 loaded = _load_head(
                     connection=connection,
                     artifact_root=artifact_root,
                     user_id=user_id,
                     source=source,
+                    revision_id=revision_id,
                 )
                 if isinstance(loaded, MemoryHead):
                     heads.append(loaded)
-                elif loaded is not None:
+                else:
                     failures.append(loaded)
         except Exception:
             connection.rollback()
@@ -237,21 +267,13 @@ def _load_head(
     artifact_root: Path,
     user_id: str,
     source: MemorySource,
-) -> MemoryHead | _HeadIntegrityFailure | None:
-    node = load_latest_active_node_by_source(
-        connection=connection, user_id=user_id, source=source
+    revision_id: str,
+) -> MemoryHead | _HeadIntegrityFailure:
+    revision = _require_revision(
+        connection=connection, user_id=user_id, revision_id=revision_id
     )
-    if node is None or node.current_revision_id is None:
-        return None
-    revision = load_revision(
-        connection=connection, user_id=user_id, revision_id=node.current_revision_id
-    )
-    if revision is None:
-        raise MemoryCatalogIntegrityError(
-            f"{source} memory head has no current revision"
-        )
     failure = _HeadIntegrityFailure(
-        source=source, node_id=node.node_id, revision_id=revision.revision_id
+        source=source, node_id=revision.node_id, revision_id=revision.revision_id
     )
     try:
         documents = read_artifact_revision_documents(

@@ -28,6 +28,9 @@ from pantaray_agents.local_runtime.tooling.repository import (
     delete_workspace_folder,
     load_execution_session,
 )
+from pantaray_agents.local_runtime.tooling.repository.manifests import (
+    pin_action_memory_roots,
+)
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     READ_ACCESS_SCOPE_WORKSPACE,
@@ -669,6 +672,7 @@ def test_action_manifest_pins_current_agent_experience_revision_read_only(
         started_at="2026-03-23T00:00:00Z",
         allowed_tool_ids=("read", "apply_patch", "bash", "run_python"),
     )
+    _pin(db_path, artifact_root, context.manifest_id)
     _activate_agent_experience_revision(
         db_path=db_path,
         artifact_root=artifact_root,
@@ -684,6 +688,7 @@ def test_action_manifest_pins_current_agent_experience_revision_read_only(
         started_at="2026-03-24T00:00:00Z",
         allowed_tool_ids=("read", "apply_patch", "bash", "run_python"),
     )
+    _pin(db_path, artifact_root, resumed_context.manifest_id)
 
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
@@ -774,15 +779,16 @@ def test_action_manifest_rejects_healthy_legacy_inline_agent_experience(
                 """
             )
 
+    context = ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        action_id="action-1",
+        started_at="2026-03-23T00:00:00Z",
+        allowed_tool_ids=("read",),
+    )
     with pytest.raises(MemoryCatalogIntegrityError, match="not a file tree"):
-        ensure_action_scratch_execution_context(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id="action-1",
-            started_at="2026-03-23T00:00:00Z",
-            allowed_tool_ids=("read",),
-        )
+        _pin(db_path, tmp_path / "artifacts", context.manifest_id)
 
 
 def test_processing_action_manifest_leases_agent_experience_revision_from_gc(
@@ -806,7 +812,7 @@ def test_processing_action_manifest_leases_agent_experience_revision_from_gc(
         artifact_root_path="memory/experience-revision-leased",
         create_node=True,
     )
-    ensure_action_scratch_execution_context(
+    context = ensure_action_scratch_execution_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id="user-1",
@@ -814,6 +820,7 @@ def test_processing_action_manifest_leases_agent_experience_revision_from_gc(
         started_at="2026-03-23T00:00:00Z",
         allowed_tool_ids=("read",),
     )
+    _pin(db_path, artifact_root, context.manifest_id)
     _activate_agent_experience_revision(
         db_path=db_path,
         artifact_root=artifact_root,
@@ -843,6 +850,16 @@ def test_processing_action_manifest_leases_agent_experience_revision_from_gc(
             )
 
     assert deletion_id is not None
+
+
+def _pin(db_path: Path, artifact_root: Path, manifest_id: str) -> None:
+    pin_action_memory_roots(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        artifact_root=artifact_root,
+        user_id="user-1",
+        manifest_id=manifest_id,
+    )
 
 
 def _activate_agent_experience_revision(

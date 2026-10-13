@@ -238,6 +238,19 @@ async def _read_body(response: httpx2.Response) -> _Download:
         raise _PageFailure(
             f"The site answered HTTP {response.status_code} {response.reason_phrase}."
         )
+    encodings = [
+        encoding
+        for encoding in response.headers.get_list("content-encoding", split_commas=True)
+        if encoding.strip().lower() not in {"", "identity"}
+    ]
+    if len(encodings) > 1:
+        # Each layer is decoded whole before the size limit sees its output,
+        # synchronously, so stacked layers can expand far past the limit while
+        # holding the event loop that every other page is fetched on.
+        raise _PageFailure(
+            "The page uses more than one content encoding, which this tool "
+            "does not read."
+        )
     content_type = response.headers.get("content-type", "")
     kind = _page_kind(content_type)
     limit = MAX_DOCUMENT_BYTES if kind == "pdf" else MAX_PAGE_BYTES

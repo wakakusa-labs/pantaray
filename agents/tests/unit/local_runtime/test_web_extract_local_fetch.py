@@ -7,6 +7,7 @@ goes through the real check.
 
 from __future__ import annotations
 
+import gzip
 import threading
 import time
 from collections.abc import Iterator
@@ -102,6 +103,11 @@ class _Site(BaseHTTPRequestHandler):
                 b'<meta charset="Shift_JIS"><p>' + JAPANESE.encode("cp932"),
             ),
             "/far-port": (302, {"Location": "http://site.test:65536/"}, b""),
+            "/gzip-twice": (
+                200,
+                {"Content-Type": "text/plain", "Content-Encoding": "gzip, gzip"},
+                gzip.compress(gzip.compress(b"plain")),
+            ),
             "/utf-16": (200, {"Content-Type": "text/plain"}, UTF16_WITH_BOM),
             "/gbk": (200, {"Content-Type": "text/plain; charset=gbk"}, FOUR_BYTE_GBK),
             "/deep": (200, {"Content-Type": "text/html"}, b"<div>" * 3_000),
@@ -248,7 +254,13 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
         ]
     )
     more = await _extract(
-        [f"{base}/article", f"{base}/far-port", f"{base}/utf-16", f"{base}/gbk"]
+        [
+            f"{base}/article",
+            f"{base}/far-port",
+            f"{base}/utf-16",
+            f"{base}/gbk",
+            f"{base}/gzip-twice",
+        ]
     )
 
     read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
@@ -271,7 +283,11 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
         "日本語",
         "\U00020000",
     ]
-    assert _failures(more) == {f"{base}/far-port": "The page could not be fetched."}
+    assert _failures(more) == {
+        f"{base}/far-port": "The page could not be fetched.",
+        f"{base}/gzip-twice": "The page uses more than one content encoding, "
+        "which this tool does not read.",
+    }
 
 
 @pytest.mark.asyncio

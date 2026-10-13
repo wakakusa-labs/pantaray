@@ -924,10 +924,12 @@ async def test_run_tool_spills_large_non_broker_output_before_returning(
         actor="supervisor",
     )
 
-    assert isinstance(result.finalized_output.output, dict)
-    assert result.finalized_output.output["storage"] == "action_file"
-    stored_path = Path(str(result.finalized_output.output["path"]))
-    assert json.loads(stored_path.read_text(encoding="utf-8")) == raw_output
+    output = result.finalized_output.output
+    assert isinstance(output, dict)
+    assert output["row_count"] == 1
+    moved = output["rows"][0]["c"]  # type: ignore[index,call-overload]
+    assert moved["storage"] == "action_file"
+    assert Path(moved["path"]).read_text(encoding="utf-8") == "x" * 21_000
 
 
 @pytest.mark.asyncio

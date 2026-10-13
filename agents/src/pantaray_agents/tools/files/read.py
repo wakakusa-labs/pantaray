@@ -22,6 +22,7 @@ from .read_contract import ReadToolArgs, ReadToolResult
 from .read_document import document_format, read_document, reject_legacy_document
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
 from .read_scope import ReadScope
+from .read_sniffing import SAMPLE_BYTES, image_mime_type, looks_binary
 from .read_target import ReadTarget, action_reference_paths, resolve_read_target
 from .text_encoding import (
     ByteOrderMark,
@@ -37,7 +38,6 @@ from .text_lines import (
 )
 from .workspace_descriptor_access import open_workspace_entry_descriptor
 
-SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
@@ -422,14 +422,8 @@ def _sniff_image_mime(*, filepath: Path, sample: bytes) -> str | None:
     one file whose bytes have to reach the model to be understood at all.
     """
 
-    if sample.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if sample.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if sample.startswith(b"GIF87a") or sample.startswith(b"GIF89a"):
-        return "image/gif"
-    if sample.startswith(b"RIFF") and sample[8:12] == b"WEBP":
-        return "image/webp"
+    if (announced := image_mime_type(sample)) is not None:
+        return announced
     guessed, _encoding = mimetypes.guess_type(filepath.name)
     return guessed if guessed in IMAGE_MIME_TYPES else None
 
@@ -450,21 +444,10 @@ def _read_attachment_payload(*, target: ReadTarget, descriptor: int) -> bytes:
 
 
 def _is_binary_file(*, filepath: Path, sample: bytes) -> bool:
-    if filepath.suffix.lower() in _BINARY_EXTENSIONS:
-        return True
-    if not sample:
-        return False
-    non_printable = 0
-    for byte in sample:
-        if byte == 0:
-            return True
-        if byte < 9 or (byte > 13 and byte < 32):
-            non_printable += 1
-    return non_printable / len(sample) > 0.3
+    return filepath.suffix.lower() in _BINARY_EXTENSIONS or looks_binary(sample)
 
 
 __all__ = [
-    "SAMPLE_BYTES",
     "open_read_target",
     "read_leading_bytes",
     "run_read",

@@ -605,8 +605,8 @@ def test_action_artifact_owner_types_use_their_canonical_directory(
 
     assert isinstance(action_step.output, dict)
     assert isinstance(approval.output, dict)
-    assert Path(str(action_step.output["path"])).parent.name == "step-1"
-    assert Path(str(approval.output["path"])).parent.name == "request-1"
+    assert Path(str(action_step.output["content"]["path"])).parent.name == "step-1"  # type: ignore[index,call-overload]
+    assert Path(str(approval.output["command"]["path"])).parent.name == "request-1"  # type: ignore[index,call-overload]
 
 
 def test_binary_completion_stores_metadata_only_with_exact_payload(
@@ -677,7 +677,7 @@ def test_binary_completion_conflict_removes_uncommitted_spill(
     assert list(context.tool_results_path.rglob("output-*.bin")) == []
 
 
-def test_large_error_completion_is_stored_as_action_file_metadata(
+def test_large_error_completion_moves_its_message_to_an_action_file(
     tmp_path: Path,
 ) -> None:
     db_path, context = bootstrap_runtime_db(tmp_path)
@@ -703,9 +703,10 @@ def test_large_error_completion_is_stored_as_action_file_metadata(
     )
 
     assert isinstance(result.output, dict)
-    assert result.output["storage"] == "action_file"
-    stored_path = Path(str(result.output["path"]))
-    assert "x" * 21_000 in stored_path.read_text(encoding="utf-8")
+    assert result.output["status"] == "error"
+    moved = result.output["error"]["message"]  # type: ignore[index,call-overload]
+    assert moved["storage"] == "action_file"
+    assert Path(moved["path"]).read_text(encoding="utf-8") == "x" * 21_000
     with sqlite3.connect(db_path) as connection:
         output_row = connection.execute(
             "SELECT output_json FROM tool_outputs WHERE invocation_id = ?",

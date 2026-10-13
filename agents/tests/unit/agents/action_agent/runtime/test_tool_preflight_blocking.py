@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -398,8 +397,9 @@ async def test_broker_wrapper_projects_only_the_approval_command_summary(
         assert projected_summary == {"command": command}
         return
     assert isinstance(projected_summary, dict)
-    stored_path = Path(str(projected_summary["path"]))
-    assert json.loads(stored_path.read_text(encoding="utf-8")) == {"command": command}
+    moved = projected_summary["command"]
+    assert isinstance(moved, dict)
+    assert Path(str(moved["path"])).read_text(encoding="utf-8") == command
 
 
 @pytest.mark.asyncio
@@ -477,10 +477,9 @@ async def test_approval_envelope_is_finalized_after_inline_summary_projection(
 
     assert finalized.storage_kind == "action_file"
     assert isinstance(finalized.output, dict)
-    stored_path = Path(str(finalized.output["path"]))
-    stored_envelope = json.loads(stored_path.read_text(encoding="utf-8"))
-    assert stored_envelope["kind"] == "approval_required"
-    assert stored_envelope["command_summary"] == {"command": command}
+    assert finalized.output["kind"] == "approval_required"
+    moved = finalized.output["command_summary"]["command"]  # type: ignore[index,call-overload]
+    assert Path(str(moved["path"])).read_text(encoding="utf-8") == command
 
 
 @pytest.mark.asyncio

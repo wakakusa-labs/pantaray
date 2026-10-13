@@ -35,8 +35,8 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     ToolResultFinalizationRequest,
     finalize_local_tool_result,
 )
-from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    load_action_file_json_result,
+from pantaray_agents.local_runtime.tooling.tool_result_reading import (
+    load_action_file_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.files import (
@@ -680,13 +680,14 @@ async def test_apply_patch_retry_reads_large_needs_read_action_file(
             """
         ).fetchone()
 
-    assert first.output["storage"] == "action_file"
+    assert first.output["status"] == "needs_read"
+    assert first.output["text"]["storage"] == "action_file"
     assert stored_kind == ("action_file",)
     assert retry_status == ("completed",)
-    loaded_second = load_action_file_json_result(
+    loaded_second = load_action_file_result(
         action_tool_results_path=context.tool_results_path,
         invocation_id="invocation-large-retry",
-        metadata=second.output,
+        output=second.output,
         max_bytes=100_000,
     )
     assert isinstance(loaded_second, dict)
@@ -726,7 +727,8 @@ async def test_apply_patch_reads_action_file_from_manifest_root(
         tool_request_id="request-manifest-root-read",
         args=args,
     )
-    assert first.output["storage"] == "action_file"
+    assert first.output["status"] == "needs_read"
+    assert first.output["text"]["storage"] == "action_file"
     alias_parent = context.workspace_path / "aliases"
     alias_parent.mkdir()
     cwd_alias = alias_parent / "cwd"
@@ -754,10 +756,10 @@ async def test_apply_patch_reads_action_file_from_manifest_root(
         args=retry_args,
     )
 
-    loaded_second = load_action_file_json_result(
+    loaded_second = load_action_file_result(
         action_tool_results_path=context.tool_results_path,
         invocation_id="invocation-manifest-root-retry",
-        metadata=second.output,
+        output=second.output,
         max_bytes=100_000,
     )
     assert isinstance(loaded_second, dict)

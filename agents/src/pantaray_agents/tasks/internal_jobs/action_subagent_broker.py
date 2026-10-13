@@ -19,6 +19,9 @@ from pantaray_agents.agents.action_agent.tools.discovery_tools import (
 )
 from pantaray_agents.agents.action_agent.tools.read_tool import READ_TOOL
 from pantaray_agents.agents.action_agent.tools.run_python_tool import RUN_PYTHON_TOOL
+from pantaray_agents.agents.action_agent.tools.schema_types import (
+    schema_to_plain_json,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_broker_authority import (
     ActionSubagentBrokerAuthority,
 )
@@ -40,6 +43,10 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
 )
 from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    SPILLED_TEXT_KEYS,
+    SPILLED_TEXT_MEDIA_TYPE,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
@@ -93,6 +100,21 @@ _ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
         "preview": {"type": "string"},
         "retry_hint": {"type": "string"},
         "status": {"type": "string"},
+    },
+}
+_SPILLED_TEXT_SCHEMA: JsonSchema = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [*sorted(SPILLED_TEXT_KEYS)],
+    "properties": {
+        "storage": {"type": "string", "enum": ["action_file"]},
+        "path": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "enum": [SPILLED_TEXT_MEDIA_TYPE]},
+        "byte_size": {"type": "integer", "minimum": 0},
+        "character_count": {"type": "integer", "minimum": 0},
+        "line_count": {"type": "integer", "minimum": 1},
+        "preview": {"type": "string"},
+        "retry_hint": {"type": "string"},
     },
 }
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {
@@ -344,15 +366,59 @@ def _build_tool(
         name=definition.tool_id,
         description=definition.prompt_contract.description or definition.description,
         request_schema=definition.build_validation_input_schema(),
-        response_schema=react_tool_response_schema(
-            success_schema={
-                "oneOf": [
-                    dict(definition.output_schema),
-                    dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
-                    dict(_APPROVAL_DENIED_RESULT_SCHEMA),
-                ]
-            }
-        ),
+        response_schema=_child_response_schema(definition),
         execute=execute,
         concurrency=definition.concurrency,
     )
+
+
+def _child_response_schema(definition: ToolDefinition) -> JsonSchema:
+    output_schema = cast(
+        dict[str, JSONValue],
+        _accepting_spilled_texts(schema_to_plain_json(definition.output_schema)),
+    )
+    # The output schema's $refs point at its own root ("#/$defs/..."); nested in
+    # oneOf they resolve against the response schema's root, so its $defs go there.
+    definitions = output_schema.pop("$defs", None)
+    response_schema = react_tool_response_schema(
+        success_schema={
+            "oneOf": [
+                output_schema,
+                dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
+                dict(_APPROVAL_DENIED_RESULT_SCHEMA),
+            ]
+        }
+    )
+    if definitions is None:
+        return response_schema
+    return {**response_schema, "$defs": definitions}
+
+
+def _accepting_spilled_texts(schema: JSONValue) -> JSONValue:
+    """``schema`` with each text value also allowed to be a moved-text reference,
+    which storage puts in place of a long text when the result is too large."""
+
+    if not isinstance(schema, dict):
+        return schema
+    adjusted: dict[str, JSONValue] = {}
+    for key, value in schema.items():
+        if key in ("properties", "patternProperties", "$defs") and isinstance(
+            value, dict
+        ):
+            adjusted[key] = {
+                name: _accepting_spilled_texts(child) for name, child in value.items()
+            }
+        elif key in ("items", "additionalProperties", "anyOf", "oneOf", "allOf"):
+            adjusted[key] = (
+                [_accepting_spilled_texts(child) for child in value]
+                if isinstance(value, list)
+                else _accepting_spilled_texts(value)
+            )
+        else:
+            adjusted[key] = value
+    schema_type = schema.get("type")
+    if schema_type == "string" or (
+        isinstance(schema_type, list) and "string" in schema_type
+    ):
+        return {"anyOf": [adjusted, dict(_SPILLED_TEXT_SCHEMA)]}
+    return adjusted

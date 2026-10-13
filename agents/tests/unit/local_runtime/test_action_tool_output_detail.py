@@ -168,7 +168,7 @@ def test_tool_output_route_pages_owned_text_and_classifies_unavailable(
     )
     assert "private thinking" not in "".join(pages)
     assert '"secret":"input"' not in "".join(pages)
-    text_path = next(raw_context.tool_results_path.rglob("*.json"))
+    text_path = next(raw_context.tool_results_path.rglob("*.txt"))
     with text_path.open("r+b") as handle:
         handle.write(b"\x80")
     assert client.get(output_url).status_code == 500

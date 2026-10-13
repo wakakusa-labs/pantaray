@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -13,6 +14,10 @@ from pantaray_agents.local_runtime.runtime.office_runtime import (
     OfficeRuntimeReady,
 )
 from pantaray_agents.local_runtime.tooling.documents import RenderedPage
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
+)
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import (
@@ -349,3 +354,38 @@ def test_drawn_pages_run_one_call_at_a_time_and_reads_together(
     # One render sends up to eight images; several at once would send dozens.
     assert placements.pop(RENDER_PDF_PAGE_TOOL_NAME) == "sequential"
     assert set(placements.values()) == {"parallel"}
+
+
+@pytest.mark.asyncio
+async def test_a_stored_command_output_reads_on_from_its_hint(tmp_path: Path) -> None:
+    """Output read would not page as text in a file of its own -- NUL-separated
+    (find -print0), or starting like a PDF or an image -- stays in the JSON."""
+
+    registry, _folder, _storage, spill_root = _tools(tmp_path)
+    lines = "\n".join(f"line {number:05d}" for number in range(3_000))
+    for stdout, moved in (
+        ("\0".join(f"./src/module_{number:05d}.py" for number in range(3_000)), False),
+        ("%PDF-1.7\n" + lines, False),
+        ("GIF89a\n" + lines, False),
+        (lines, True),
+    ):
+        stored = store_tool_result(
+            action_tool_results_path=spill_root.resolve(),
+            invocation_id=uuid.uuid4().hex,
+            output={"status": "success", "exit_code": 0, "stdout": stdout},
+        )
+        assert release_stored_tool_result(stored) is None
+        output = cast(dict[str, object], stored.output_json)
+        reference = cast(dict[str, object], output["stdout"] if moved else output)
+        assert reference["media_type"] == (
+            "text/plain" if moved else "application/json"
+        )
+        hint = str(reference["retry_hint"])
+        path = hint.split("path=")[1].split(" ")[0]
+        offset = int(hint.split("offset=")[1].split(",")[0])
+
+        result = await _call(registry, "read", {"path": path, "offset": offset})
+
+        assert result.status == "success", result.output
+        assert result.output["kind"] == "file"
+        assert result.output["content"]

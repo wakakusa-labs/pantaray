@@ -32,6 +32,7 @@ _MULTIMODAL_CAPABILITIES: Mapping[LlmCapability, bool] = {
 # independently of the public API.
 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
 # https://developers.openai.com/api/docs/models/gpt-6-luna
+# https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-10-13)
 # https://platform.claude.com/docs/en/about-claude/models/overview
 # https://platform.claude.com/docs/en/build-with-claude/effort
 # https://platform.claude.com/docs/en/build-with-claude/structured-outputs
@@ -44,7 +45,13 @@ MODEL_CATALOG = {
             ModelCatalogEntry(
                 "openai", model, _MULTIMODAL_CAPABILITIES, "effort", 128000
             )
-            for model in ("gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6")
+            for model in (
+                "gpt-6.1-sol",
+                "gpt-6-luna",
+                "gpt-5.6-terra",
+                "gpt-5.6-sol",
+                "gpt-5.6",
+            )
         ),
         *(
             ModelCatalogEntry(

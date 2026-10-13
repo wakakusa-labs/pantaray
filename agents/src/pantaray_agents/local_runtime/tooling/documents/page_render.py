@@ -30,7 +30,7 @@ from .document_model import (
     DocumentTooLargeError,
     EncryptedDocumentError,
 )
-from .page_render_sandbox import sandboxed_argv
+from .sandboxed_worker import sandboxed_worker
 
 WORKER_SCRIPT: Final = Path(__file__).with_name("pdf_render_worker.py")
 RENDERED_PAGE_MEDIA_TYPE: Final = "image/webp"
@@ -122,34 +122,19 @@ async def render_pdf_pages(
             "long_edge_px": RENDERED_PAGE_LONG_EDGE_PX,
         }
     ).encode("utf-8")
-    process = await asyncio.create_subprocess_exec(
-        *sandboxed_argv(
-            # -I so the worker takes nothing from the environment or the
-            # directory it happens to sit in, -B so it never tries to write a
-            # .pyc into a runtime the sandbox has made read-only.
-            (str(python_executable), "-I", "-B", str(WORKER_SCRIPT)),
-            read_files=(WORKER_SCRIPT, pdf_path),
-            python_executable=python_executable,
-        ),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        # The worker says everything it has to say on stdout. Its stderr would
-        # only carry a traceback from a process holding an untrusted file, and
-        # a pipe nobody drains is a way to wedge it.
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    try:
-        return await asyncio.wait_for(
-            _exchange(process, request=request, pages=pages), timeout_seconds
-        )
-    except TimeoutError as error:
-        raise PageRenderTimeoutError(
-            f"rendering did not finish within {timeout_seconds:g} seconds"
-        ) from error
-    finally:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
+    async with sandboxed_worker(
+        script=WORKER_SCRIPT,
+        read_files=(pdf_path,),
+        python_executable=python_executable,
+    ) as process:
+        try:
+            return await asyncio.wait_for(
+                _exchange(process, request=request, pages=pages), timeout_seconds
+            )
+        except TimeoutError as error:
+            raise PageRenderTimeoutError(
+                f"rendering did not finish within {timeout_seconds:g} seconds"
+            ) from error
 
 
 async def _exchange(

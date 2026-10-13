@@ -25,8 +25,8 @@ from typing import Final
 
 from pydantic import ValidationError
 
-from pantaray_agents.local_runtime.tooling.documents.page_render_sandbox import (
-    sandboxed_argv,
+from pantaray_agents.local_runtime.tooling.documents.sandboxed_worker import (
+    sandboxed_worker,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_llm.errors import PROXY_INVALID_INPUT, ProxyProvider
@@ -112,30 +112,18 @@ async def extract_pages_locally(
 
 
 async def _read_page(url: str) -> str | _PageFailure:
-    process = await asyncio.create_subprocess_exec(
-        *sandboxed_argv(
-            # -I so the worker takes nothing from the environment or the
-            # directory it sits in, -B so it never writes a .pyc into a runtime
-            # the sandbox has made read-only.
-            (sys.executable, "-I", "-B", str(WORKER_SCRIPT)),
-            read_files=(WORKER_SCRIPT, *SIBLING_MODULE_FILES),
-            python_executable=Path(sys.executable),
-            allow_network=True,
-        ),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        # A traceback from the process that held the page says nothing the
-        # model can use, and an undrained pipe could wedge the worker.
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    try:
-        reply = await asyncio.wait_for(_exchange(process, url), PAGE_WALL_CLOCK_SECONDS)
-    except TimeoutError:
-        reply = None
-    finally:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
+    async with sandboxed_worker(
+        script=WORKER_SCRIPT,
+        read_files=SIBLING_MODULE_FILES,
+        python_executable=Path(sys.executable),
+        allow_network=True,
+    ) as process:
+        try:
+            reply = await asyncio.wait_for(
+                _exchange(process, url), PAGE_WALL_CLOCK_SECONDS
+            )
+        except TimeoutError:
+            reply = None
     return _outcome(reply, returncode=process.returncode)
 
 

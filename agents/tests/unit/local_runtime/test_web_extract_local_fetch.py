@@ -11,6 +11,7 @@ that page, and must never take the well-formed one down with it.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import gzip
 import threading
@@ -102,7 +103,13 @@ def _pdf(*contents: bytes) -> bytes:
 
 
 _WRAPPER = """
-import importlib.util, sys
+import importlib.util, io, json, sys
+request = sys.stdin.readline()
+if json.loads(request)["url"].endswith("/flood"):
+    # A reply still being written when the time limit falls.
+    while True:
+        sys.stdout.buffer.write(b"x" * (1024 * 1024))
+sys.stdin = io.StringIO(request)
 spec = importlib.util.spec_from_file_location("page_worker", {worker!r})
 worker = importlib.util.module_from_spec(spec)
 sys.modules["page_worker"] = worker
@@ -298,6 +305,23 @@ async def test_a_pdf_says_which_pages_have_no_text_and_a_scan_fails(
     assert read["/mixed.pdf"].endswith(
         "[Pages without a text layer (scans or figures): 2]"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_worker_cut_off_mid_reply_is_collected_within_the_limit(
+    site: tuple[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, _requests = site
+    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 1.0)
+    monkeypatch.setattr(local_fetch, "MAX_WORKER_REPLY_BYTES", 1024**3)
+
+    # Left unread in the pipe, the reply kept the killed worker from ever
+    # being collected, and the whole call from returning.
+    read, failed = await asyncio.wait_for(_beside_article(base, ["/flood"]), 10)
+
+    assert read == {}
+    assert failed == {"/flood": "The page could not be read."}
 
 
 @pytest.mark.asyncio

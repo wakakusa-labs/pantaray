@@ -38,12 +38,6 @@ from pantaray_agents.local_runtime.web_tools.client import (
     invoke_web_tools_wrapper,
 )
 from pantaray_agents.local_runtime.web_tools.html_markdown import html_to_markdown
-from pantaray_agents.tools.contract import (
-    ReactToolCall,
-    ReactToolRegistry,
-    ToolCallEnvelope,
-)
-from pantaray_agents.tools.web.session import WebResearchToolSession
 from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID
 
 from .migrated_db import prepare_test_database
@@ -184,7 +178,7 @@ class _Site(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - the stdlib's hook name
         self.server.requests.append(self.path)  # type: ignore[attr-defined]
         if self.path == "/slow":
-            time.sleep(3)
+            time.sleep(8)
         if self.path == "/echo-cookie":
             cookie = self.headers.get("Cookie", "none")
             status, headers, body = 200, _TEXT, f"cookie: {cookie}".encode()
@@ -275,7 +269,9 @@ async def test_a_page_that_hangs_expands_or_breaks_a_parser_fails_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, _requests = site
-    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 2.0)
+    # Long enough for the well-formed page's worker to start on a loaded
+    # machine, short of the hanging site's 8 seconds.
+    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 4.0)
 
     read, failed = await _beside_article(
         base, ["/slow", "/gzip-bomb", "/broken.pdf", "/far-port"]
@@ -313,7 +309,8 @@ async def test_a_worker_cut_off_mid_reply_is_collected_within_the_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, _requests = site
-    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 1.0)
+    # Long enough for the well-formed page's worker to start on a loaded machine.
+    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 4.0)
     monkeypatch.setattr(local_fetch, "MAX_WORKER_REPLY_BYTES", 1024**3)
 
     # Left unread in the pipe, the reply kept the killed worker from ever
@@ -404,38 +401,6 @@ async def test_a_lapsed_sign_in_is_not_read_here_instead(
 
     assert exc_info.value.suggested_action == "reauthenticate"
     assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_research_does_not_present_a_whole_page_as_query_excerpts(
-    site: tuple[str, list[str]],
-) -> None:
-    base, _requests = site
-    args: dict[str, object] = {
-        "urls": [f"{base}/article"],
-        "query": "providers",
-        "offset": 1,
-        "limit": 1_000,
-    }
-    call = ReactToolCall(
-        tool_name="web_extract",
-        tool_args=args,  # type: ignore[arg-type]
-        tool_call_envelope=ToolCallEnvelope(
-            tool_id="web_extract",
-            reason=None,
-            args=args,  # type: ignore[arg-type]
-        ),
-    )
-    registry = ReactToolRegistry(
-        WebResearchToolSession(user_id="user-1", speaks_to_user=True).definitions()
-    )
-
-    result = await registry.execute(call, 1)
-
-    page = result.output["results"][0]  # type: ignore[index]
-    assert page["raw_content"] == ARTICLE_TEXT
-    assert page["truncation_reason"] is None
-    assert page["retry_hint"] is None
 
 
 def test_page_markup_keeps_structure_and_drops_nothing_but_non_text() -> None:

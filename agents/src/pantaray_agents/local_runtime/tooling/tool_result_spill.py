@@ -203,3 +203,51 @@ def replace_spilled_texts(
     if isinstance(output, list):
         return [replace_spilled_texts(value, text_of) for value in output]
     return output
+
+
+# What storage puts in place of a long text value: its head and how to read the rest.
+SPILLED_TEXT_SCHEMA: dict[str, JSONValue] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [*sorted(SPILLED_TEXT_KEYS)],
+    "properties": {
+        "storage": {"type": "string", "enum": ["action_file"]},
+        "path": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "enum": [SPILLED_TEXT_MEDIA_TYPE]},
+        "byte_size": {"type": "integer", "minimum": 0},
+        "character_count": {"type": "integer", "minimum": 0},
+        "line_count": {"type": "integer", "minimum": 1},
+        "preview": {"type": "string"},
+        "retry_hint": {"type": "string"},
+    },
+}
+
+
+def accepting_spilled_texts(schema: JSONValue) -> JSONValue:
+    """``schema`` with each text value also allowed to be a moved-text reference,
+    which storage puts in place of a long text when the result is too large."""
+
+    if not isinstance(schema, dict):
+        return schema
+    adjusted: dict[str, JSONValue] = {}
+    for key, value in schema.items():
+        if key in ("properties", "patternProperties", "$defs") and isinstance(
+            value, dict
+        ):
+            adjusted[key] = {
+                name: accepting_spilled_texts(child) for name, child in value.items()
+            }
+        elif key in ("items", "additionalProperties", "anyOf", "oneOf", "allOf"):
+            adjusted[key] = (
+                [accepting_spilled_texts(child) for child in value]
+                if isinstance(value, list)
+                else accepting_spilled_texts(value)
+            )
+        else:
+            adjusted[key] = value
+    schema_type = schema.get("type")
+    if schema_type == "string" or (
+        isinstance(schema_type, list) and "string" in schema_type
+    ):
+        return {"anyOf": [adjusted, dict(SPILLED_TEXT_SCHEMA)]}
+    return adjusted

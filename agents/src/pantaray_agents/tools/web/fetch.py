@@ -29,17 +29,9 @@ class WebSearchResult:
 
 
 @dataclass(frozen=True, slots=True)
-class WebSearchImage:
-    url: str
-    description: str
-
-
-@dataclass(frozen=True, slots=True)
 class WebSearchResponse:
-    status: str
     query: str
     results: tuple[WebSearchResult, ...]
-    images: tuple[WebSearchImage, ...]
     upstream_request_id: str | None
 
 
@@ -97,7 +89,6 @@ async def fetch_web_search(
         raise WebContentInvalidResponseError("meta")
     has_upstream_request_id = meta.get("upstream_request_id") is not None
     return WebSearchResponse(
-        status=_text(result, "status"),
         query=query,
         results=tuple(
             WebSearchResult(
@@ -107,10 +98,6 @@ async def fetch_web_search(
                 content=_text(row, "content"),
             )
             for row in _rows(result.get("results"), field="results")
-        ),
-        images=tuple(
-            WebSearchImage(url=_text(row, "url"), description=_text(row, "description"))
-            for row in _rows(result.get("images"), field="images")
         ),
         upstream_request_id=(
             _text(meta, "upstream_request_id") if has_upstream_request_id else None

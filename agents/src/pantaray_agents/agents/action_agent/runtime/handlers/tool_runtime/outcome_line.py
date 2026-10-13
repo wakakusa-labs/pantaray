@@ -199,9 +199,10 @@ def _failure_code(output: JSONValue) -> str | None:
     if not isinstance(output, Mapping):
         return None
     error = output.get("error")
-    if not isinstance(error, Mapping):
-        return None
-    codes = [code for key in ("code", "error_code") for code in _text(error, key)]
+    # Tools shared with Suggestion and the chat report the shared tool error
+    # shape, whose code sits beside the status rather than under ``error``.
+    body = error if isinstance(error, Mapping) else output
+    codes = [code for key in ("code", "error_code") for code in _text(body, key)]
     return codes[0] if codes else None
 
 

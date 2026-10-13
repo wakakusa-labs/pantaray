@@ -17,6 +17,7 @@ from tests.unit.agents.test_action_agent_tool_batch_execution import (
 )
 
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
+from pantaray_agents.local_runtime.web_tools.client import WebContentExecutionError
 from pantaray_agents.tools.web import fetch as web_fetch
 from pantaray_agents.utils.trace_context import TraceContextManager
 
@@ -82,21 +83,9 @@ async def test_missing_read_is_failed_in_history_and_checkpoint(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("query_size", "storage_kind", "expected_code"),
-    [
-        (10, "inline_json", "PROXY_INVALID_UPSTREAM_RESPONSE"),
-        # Only the long query moves to a file; the error's code stays in the result.
-        (21_000, "action_file", "PROXY_INVALID_UPSTREAM_RESPONSE"),
-    ],
-    ids=["inline", "spilled"],
-)
 async def test_non_broker_failure_history_uses_finalized_status(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    query_size: int,
-    storage_kind: str,
-    expected_code: str,
 ) -> None:
     agent, runtime, state, request = await _build_fixture(
         monkeypatch,
@@ -105,21 +94,27 @@ async def test_non_broker_failure_history_uses_finalized_status(
         allowed_tool_ids=("web_search",),
     )
     agent._generate_llm_action_turn = AsyncMock(
-        return_value=_turn(("web_search", {"query": "x" * query_size}))
+        return_value=_turn(("web_search", {"query": "pantaray"}))
     )
     state = await _think(agent, runtime, state)
-    # Simulate a transport failure at the network boundary. Error mapping,
-    # audit, spill projection, ACT and history all use their real implementations.
+    # Simulate a transport failure at the network boundary. Failure shaping,
+    # audit, ACT and history all use their real implementations.
     monkeypatch.setattr(
         web_fetch,
         "invoke_web_tools_wrapper",
-        AsyncMock(side_effect=RuntimeError("upstream unavailable")),
+        AsyncMock(
+            side_effect=WebContentExecutionError(
+                error_code="PROXY_REQUEST_FAILED",
+                error_message="upstream unavailable",
+                retryable=True,
+            )
+        ),
     )
     state = await _act(agent, runtime, state)
 
     saved = _persisted_tool_steps(agent, request.action_id)[0]
     assert saved["status"] == "error"
-    assert saved["tool_output"]["output_storage_kind"] == storage_kind
+    assert saved["tool_output"]["output_storage_kind"] == "inline_json"
     assert (
-        _tool_history(state)[0]["result_line"] == f"web_search: failed {expected_code}"
+        _tool_history(state)[0]["result_line"] == "web_search: failed WEB_TOOL_FAILED"
     )

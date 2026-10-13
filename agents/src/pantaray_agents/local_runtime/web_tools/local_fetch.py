@@ -13,7 +13,6 @@ resolve to a public address for the check and a private one for the request.
 from __future__ import annotations
 
 import asyncio
-import codecs
 import ipaddress
 import logging
 import re
@@ -42,6 +41,7 @@ from .contract import (
     WebToolsWrapperResponse,
 )
 from .html_markdown import html_to_markdown
+from .page_encodings import page_codec
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +72,6 @@ _META_CHARSET: Final = re.compile(
     rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.I
 )
 _SNIFF_BYTES: Final = 4096
-# The WHATWG Encoding Standard's encodings that Python can decode, by Python's
-# canonical name. A page may declare any codec Python knows, and some of those
-# are not text encodings (rot_13), have no replace handler (idna) or decode in
-# quadratic time (punycode); a page declaring anything else is read as UTF-8.
-_PAGE_ENCODINGS: Final = frozenset(
-    codecs.lookup(name).name
-    for name in (
-        "utf-8 utf-16 utf-16-le utf-16-be cp866 cp874 cp1250 cp1251 cp1252 cp1253 "
-        "cp1254 cp1255 cp1256 cp1257 cp1258 iso8859-1 iso8859-2 iso8859-3 "
-        "iso8859-4 iso8859-5 iso8859-6 iso8859-7 iso8859-8 iso8859-10 iso8859-13 "
-        "iso8859-14 iso8859-15 iso8859-16 koi8-r koi8-u mac-roman mac-cyrillic "
-        "shift_jis cp932 euc_jp iso2022_jp gb2312 gbk gb18030 big5 euc_kr"
-    ).split()
-)
 _INVALID_URL: Final = "The URL, or a redirect's target, is not a valid URL."
 
 
@@ -163,6 +149,15 @@ async def _read_page(url: str) -> str | _PageFailure:
         )
     except httpx2.HTTPError as exc:
         return _PageFailure(f"The connection failed ({type(exc).__name__}).")
+    except Exception as exc:
+        # Every input past the URL -- redirect targets, headers, the address a
+        # name resolves to -- is the site's, and the network stack raises more
+        # than the errors above on some of them (an out-of-range port in a
+        # redirect surfaces as an ExceptionGroup of OverflowError). Results are
+        # per URL, so whatever fetching one page raises fails that page alone.
+        # Cancellation is a BaseException and still stops the call.
+        logger.warning("web_extract could not fetch a page: %s", type(exc).__name__)
+        return _PageFailure("The page could not be fetched.")
     try:
         return await asyncio.to_thread(_page_text, download)
     except _PageFailure as failure:
@@ -326,23 +321,14 @@ def _charset(download: _Download) -> str:
     declared = re.search(
         r"charset\s*=\s*[\"']?([^;\"'\s]+)", download.content_type, re.I
     )
+    if declared is not None:
+        return page_codec(declared.group(1))
     sniffed = (
         _META_CHARSET.search(download.body[:_SNIFF_BYTES])
-        if declared is None and download.kind == "html"
+        if download.kind == "html"
         else None
     )
-    name = (
-        declared.group(1)
-        if declared
-        else sniffed.group(1).decode("ascii")
-        if sniffed
-        else "utf-8"
-    )
-    try:
-        codec = codecs.lookup(name).name
-    except LookupError:
-        return "utf-8"
-    return codec if codec in _PAGE_ENCODINGS else "utf-8"
+    return page_codec(sniffed.group(1).decode("ascii") if sniffed else None)
 
 
 __all__ = ["LOCAL_PROVIDER", "extract_pages_locally"]

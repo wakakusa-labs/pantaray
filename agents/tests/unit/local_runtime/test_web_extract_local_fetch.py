@@ -48,6 +48,9 @@ ARTICLE = b"""<!doctype html><html><head><title>t</title>
 <main><h1>Providers</h1><p>Use <a href="/docs/zen">Zen</a> or <code>/connect</code>.</p>
 <ul><li>First</li><li>Second</li></ul></main>
 <footer>Copyright</footer></body></html>"""
+# Shift_JIS as browsers read it is code page 932, which has these two; Python's
+# own shift_jis codec does not.
+JAPANESE = "日本語髙①"
 BAD_LINK = b'<p>See <a href="https://[broken">this</a>.</p>'
 
 
@@ -85,11 +88,17 @@ class _Site(BaseHTTPRequestHandler):
                 {"Content-Type": "text/plain; charset=punycode"},
                 b"plain\xff",
             ),
-            "/sjis": (
+            "/windows-31j": (
                 200,
-                {"Content-Type": "text/plain; charset=Shift_JIS"},
-                "日本語".encode("shift_jis"),
+                {"Content-Type": "text/plain; charset=windows-31j"},
+                JAPANESE.encode("cp932"),
             ),
+            "/meta-shift-jis": (
+                200,
+                {"Content-Type": "text/html"},
+                b'<meta charset="Shift_JIS"><p>' + JAPANESE.encode("cp932"),
+            ),
+            "/far-port": (302, {"Location": "http://site.test:65536/"}, b""),
         }.get(self.path, (404, {}, b""))
         self.send_response(status)
         for name, value in {**headers, "Content-Length": str(len(body))}.items():
@@ -224,8 +233,15 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
 
     result = await _extract([*(base + page for page in pages), bad_port])
     charsets = await _extract(
-        [f"{base}/article", f"{base}/idna", f"{base}/punycode", f"{base}/sjis"]
+        [
+            f"{base}/article",
+            f"{base}/idna",
+            f"{base}/punycode",
+            f"{base}/windows-31j",
+            f"{base}/meta-shift-jis",
+        ]
     )
+    far_port = await _extract([f"{base}/article", f"{base}/far-port"])
 
     read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
     assert read[f"{base}/article"].startswith("# Providers")
@@ -234,12 +250,16 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
     failures = _failures(result)
     assert set(failures) == {f"{base}/bad-redirect", bad_port}
     assert "not a valid URL" in str(failures[bad_port])
-    # A codec that is not a page encoding is ignored; a real one is still used.
+    # A label outside the WHATWG table reads as UTF-8; a Shift_JIS label reads
+    # as code page 932, whether the header or the page declares it.
     assert [row["raw_content"] for row in charsets["results"]][1:] == [  # type: ignore[index,union-attr]
         "plain",
         "plain\ufffd",
-        "日本語",
+        JAPANESE,
+        JAPANESE,
     ]
+    assert [row["url"] for row in far_port["results"]] == [f"{base}/article"]  # type: ignore[index,union-attr]
+    assert _failures(far_port) == {f"{base}/far-port": "The page could not be fetched."}
 
 
 @pytest.mark.asyncio

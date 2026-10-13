@@ -7,7 +7,6 @@ tools' results do, and the model reads the rest from there.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +15,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_spill import (
     accepting_spilled_texts,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    release_stored_tool_result,
-    store_tool_result,
+    store_run_tool_result,
 )
 from pantaray_agents.local_runtime.web_tools.client import (
     WebToolsWrapperContext,
@@ -53,7 +51,6 @@ from .execute import run_web_extract, run_web_search
 
 # One provider attempt per call: research moves on rather than waiting.
 _MAX_RETRIES = 1
-_SPILL_ROOT_MODE = 0o700
 _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 
 type _Run = Callable[..., Awaitable[dict[str, JSONValue]]]
@@ -137,17 +134,10 @@ class WebResearchToolSession:
                 output=output,
                 error_message=message if isinstance(message, str) else None,
             )
-        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
-        stored = store_tool_result(
-            action_tool_results_path=self.spill_root,
-            invocation_id=uuid.uuid4().hex,
-            output=output,
-        )
-        release_error = release_stored_tool_result(stored)
-        if release_error is not None:
-            raise release_error
         return ReactToolResult(
-            tool_name=tool_name, status="success", output=stored.output_json
+            tool_name=tool_name,
+            status="success",
+            output=store_run_tool_result(spill_root=self.spill_root, output=output),
         )
 
     def _context(self) -> WebToolsWrapperContext:

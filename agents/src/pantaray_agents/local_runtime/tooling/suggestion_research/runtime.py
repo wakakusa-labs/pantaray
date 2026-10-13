@@ -71,6 +71,7 @@ class LocalSuggestionResearchTools:
         run_id: str,
     ) -> tuple[ReactToolDefinition, ...]:
         memory_context = MemoryContextSession(user_id=user_id, run_id=run_id)
+        spill_root = suggestion_tool_results_root(db_path=self.db_path, run_id=run_id)
         memory_tools = MemoryRetrievalSession(
             db_path=self.db_path,
             busy_timeout_ms=self.busy_timeout_ms,
@@ -104,17 +105,13 @@ class LocalSuggestionResearchTools:
                 folders=self.snapshot.folders,
                 read_access_scope=self.snapshot.read_access_scope,
                 app_storage_roots=app_owned_roots(self.db_path),
-                spill_root=suggestion_tool_results_root(
-                    db_path=self.db_path, run_id=run_id
-                ),
+                spill_root=spill_root,
                 memory_folders=self.snapshot.memory_folders,
             ),
             *WebResearchToolSession(
                 user_id=user_id,
                 speaks_to_user=False,
-                spill_root=suggestion_tool_results_root(
-                    db_path=self.db_path, run_id=run_id
-                ),
+                spill_root=spill_root,
             ).definitions(),
             *SuggestionZaneiSession(
                 reader=SourceReader(context_source_control.gate),
@@ -127,6 +124,7 @@ class LocalSuggestionResearchTools:
                     user_id=user_id,
                     workspace_roots=self.snapshot.folders,
                     read_access_scope=self.snapshot.read_access_scope,
+                    spill_root=spill_root,
                 ).definitions()
                 if self.snapshot.commands_allowed
                 else ()

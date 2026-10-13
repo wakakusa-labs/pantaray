@@ -8,7 +8,7 @@ limits, but with no writable folder at all.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_COMMAND_TOOL_ID
@@ -44,14 +44,15 @@ from ..sandbox.command_sandbox_protocol import BrokerToSandboxCommandRequest
 from ..sandbox.command_sandbox_request import compose_sandbox_request
 from ..sandbox.runtime_policy import resolve_runtime_budget
 from ..sandbox.unrecorded_command import run_unrecorded_sandbox_command
-from ..tool_result_storage import ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+from ..tool_result_spill import accepting_spilled_texts
+from ..tool_result_storage import store_run_tool_result
 
 BASH_EXECUTABLE = Path("/bin/bash")
-# An Action keeps a result this long inline in its transcript. A Suggestion has
-# no spill file to page through, so it keeps that much and says what it cut.
-STDERR_MAX_CHARS = ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT // 4
+# The error message stays a short string; stdout and stderr carry the output.
 # The same bound submit_suggestion puts on rejection feedback.
 ERROR_MESSAGE_MAX_CHARS = 1_200
+# What storage stores whole when it cannot move stdout or stderr out alone.
+_WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 
 
 def commands_run_without_asking(
@@ -84,35 +85,14 @@ def commands_run_without_asking(
     return all(capability in grants for capability in required)
 
 
-def _bounded_streams(output: BashToolOutput) -> dict[str, JSONValue]:
-    # A command prints its error last, so stderr keeps its end.
-    stderr = output.stderr[max(0, len(output.stderr) - STDERR_MAX_CHARS) :]
-    stdout = output.stdout[: ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT - len(stderr)]
-    notes: list[JSONValue] = []
-    if len(stdout) < len(output.stdout):
-        notes.append(
-            f"stdout was cut: showing the first {len(stdout):,} of "
-            f"{len(output.stdout):,} characters. Narrow it with grep, head, tail "
-            "or sed -n to read the rest."
-        )
-    if len(stderr) < len(output.stderr):
-        notes.append(
-            f"stderr was cut: showing the last {len(stderr):,} of "
-            f"{len(output.stderr):,} characters."
-        )
-    return {
-        "exit_code": output.exit_code,
-        "stdout": stdout,
-        "stderr": stderr,
-        "truncated": bool(notes),
-        "notes": notes,
-    }
-
-
 def _react_result(
     *, tool_name: str, terminal_outcome: TerminalOutcome, output: BashToolOutput
 ) -> ReactToolResult:
-    streams = _bounded_streams(output)
+    streams: dict[str, JSONValue] = {
+        "exit_code": output.exit_code,
+        "stdout": output.stdout,
+        "stderr": output.stderr,
+    }
     if terminal_outcome == "exited":
         # A nonzero exit status is an answer (no match, a failed check), not a
         # failed tool call.
@@ -137,6 +117,8 @@ class SuggestionCommandSession:
     user_id: str
     workspace_roots: tuple[Path, ...]
     read_access_scope: ReadAccessScope
+    # The run's folder for output too long to show inline.
+    spill_root: Path
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
         return (
@@ -147,12 +129,10 @@ class SuggestionCommandSession:
                     "for example `git log` or `gh pr view`. No file can be written; "
                     "the network follows the user's command network setting. Never "
                     "run a command that changes something elsewhere, such as "
-                    "merging, pushing, sending or deleting. Output is limited to "
-                    f"{ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT:,} characters: "
-                    "stdout keeps its beginning and stderr its last "
-                    f"{STDERR_MAX_CHARS:,} characters. When either is cut, "
-                    "truncated is true and notes say how much; narrow the output "
-                    "with grep, head, tail or sed -n."
+                    "merging, pushing, sending or deleting. When stdout or stderr "
+                    "is too long to show inline, it is saved to a file instead and "
+                    "gives its path, a preview of its start and end, and how to "
+                    "read the rest with read or grep."
                 ),
                 request_schema={
                     "type": "object",
@@ -179,24 +159,27 @@ class SuggestionCommandSession:
                 },
                 response_schema=react_tool_response_schema(
                     success_schema={
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [
-                            "status",
-                            "exit_code",
-                            "stdout",
-                            "stderr",
-                            "truncated",
-                            "notes",
-                        ],
-                        "properties": {
-                            "status": {"const": "success"},
-                            "exit_code": {"type": "integer"},
-                            "stdout": {"type": "string"},
-                            "stderr": {"type": "string"},
-                            "truncated": {"type": "boolean"},
-                            "notes": {"type": "array", "items": {"type": "string"}},
-                        },
+                        "anyOf": [
+                            accepting_spilled_texts(
+                                {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": [
+                                        "status",
+                                        "exit_code",
+                                        "stdout",
+                                        "stderr",
+                                    ],
+                                    "properties": {
+                                        "status": {"const": "success"},
+                                        "exit_code": {"type": "integer"},
+                                        "stdout": {"type": "string"},
+                                        "stderr": {"type": "string"},
+                                    },
+                                }
+                            ),
+                            _WHOLE_RESULT_STORED,
+                        ]
                     }
                 ),
                 execute=self.run,
@@ -290,8 +273,14 @@ class SuggestionCommandSession:
         terminal_outcome, output = await run_unrecorded_sandbox_command(
             db_path=self.db_path, build_request=build_request
         )
-        return _react_result(
+        result = _react_result(
             tool_name=call.tool_name, terminal_outcome=terminal_outcome, output=output
+        )
+        return replace(
+            result,
+            output=store_run_tool_result(
+                spill_root=self.spill_root, output=result.output
+            ),
         )
 
 

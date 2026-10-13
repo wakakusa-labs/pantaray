@@ -12,6 +12,9 @@ from pantaray_agents.local_runtime.tooling.repository.command_network_settings i
 from pantaray_agents.local_runtime.tooling.suggestion_research.commands import (
     SuggestionCommandSession,
 )
+from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
+    suggestion_tool_results_root,
+)
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 
@@ -52,6 +55,9 @@ def _session(
         user_id="user-1",
         workspace_roots=(workspace,),
         read_access_scope=scope,
+        spill_root=suggestion_tool_results_root(
+            db_path=testbed.db_path, run_id="run-1"
+        ),
     )
 
 

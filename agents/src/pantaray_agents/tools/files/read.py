@@ -24,10 +24,12 @@ from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
 from .read_scope import ReadScope
 from .read_target import ReadTarget, action_reference_paths, resolve_read_target
 from .text_encoding import (
+    SAMPLE_BYTES,
     ByteOrderMark,
     TextEncoding,
     byte_order_mark,
     decided_encoding,
+    looks_binary,
     text_encoding_unsupported,
 )
 from .text_lines import (
@@ -37,7 +39,6 @@ from .text_lines import (
 )
 from .workspace_descriptor_access import open_workspace_entry_descriptor
 
-SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
@@ -450,21 +451,10 @@ def _read_attachment_payload(*, target: ReadTarget, descriptor: int) -> bytes:
 
 
 def _is_binary_file(*, filepath: Path, sample: bytes) -> bool:
-    if filepath.suffix.lower() in _BINARY_EXTENSIONS:
-        return True
-    if not sample:
-        return False
-    non_printable = 0
-    for byte in sample:
-        if byte == 0:
-            return True
-        if byte < 9 or (byte > 13 and byte < 32):
-            non_printable += 1
-    return non_printable / len(sample) > 0.3
+    return filepath.suffix.lower() in _BINARY_EXTENSIONS or looks_binary(sample)
 
 
 __all__ = [
-    "SAMPLE_BYTES",
     "open_read_target",
     "read_leading_bytes",
     "run_read",

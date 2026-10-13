@@ -366,20 +366,32 @@ def _build_tool(
         name=definition.tool_id,
         description=definition.prompt_contract.description or definition.description,
         request_schema=definition.build_validation_input_schema(),
-        response_schema=react_tool_response_schema(
-            success_schema={
-                "oneOf": [
-                    _accepting_spilled_texts(
-                        schema_to_plain_json(definition.output_schema)
-                    ),
-                    dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
-                    dict(_APPROVAL_DENIED_RESULT_SCHEMA),
-                ]
-            }
-        ),
+        response_schema=_child_response_schema(definition),
         execute=execute,
         concurrency=definition.concurrency,
     )
+
+
+def _child_response_schema(definition: ToolDefinition) -> JsonSchema:
+    output_schema = cast(
+        dict[str, JSONValue],
+        _accepting_spilled_texts(schema_to_plain_json(definition.output_schema)),
+    )
+    # The output schema's $refs point at its own root ("#/$defs/..."); nested in
+    # oneOf they resolve against the response schema's root, so its $defs go there.
+    definitions = output_schema.pop("$defs", None)
+    response_schema = react_tool_response_schema(
+        success_schema={
+            "oneOf": [
+                output_schema,
+                dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
+                dict(_APPROVAL_DENIED_RESULT_SCHEMA),
+            ]
+        }
+    )
+    if definitions is None:
+        return response_schema
+    return {**response_schema, "$defs": definitions}
 
 
 def _accepting_spilled_texts(schema: JSONValue) -> JSONValue:

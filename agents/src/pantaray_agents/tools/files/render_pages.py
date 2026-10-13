@@ -51,7 +51,7 @@ from pantaray_agents.local_runtime.tooling.documents.office_convert import (
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .read import SAMPLE_BYTES, open_read_target, read_leading_bytes
+from .read import open_read_target, read_leading_bytes
 from .read_document import (
     READ_DOCUMENT_TOO_LARGE,
     READ_DOCUMENT_TOO_LARGE_FIX_HINT,
@@ -60,6 +60,7 @@ from .read_document import (
 )
 from .read_scope import ReadScope
 from .read_target import ReadTarget, resolve_read_target
+from .text_encoding import SAMPLE_BYTES
 
 RENDER_CONVERTER_UNAVAILABLE = "RENDER_CONVERTER_UNAVAILABLE"
 RENDER_DOCUMENT_ENCRYPTED = "RENDER_DOCUMENT_ENCRYPTED"

@@ -15,7 +15,7 @@ from typing import Literal, TypeGuard
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
-from pantaray_agents.tools.files.text_encoding import SAMPLE_BYTES, looks_binary
+from pantaray_agents.tools.files.read_sniffing import SAMPLE_BYTES, reads_as_text
 from pantaray_agents.tools.files.text_lines import LINE_BREAK, count_text_lines
 
 ACTION_FILE_STORAGE: Literal["action_file"] = "action_file"
@@ -65,7 +65,7 @@ def spill_long_texts(
     """Move the longest text values out until the result fits ``limit`` characters.
 
     Returns the result with references in place of the moved values, and each moved
-    value's path and text. A text read would refuse as binary is not moved. Returns
+    value's path and text. A text read would not page as text is not moved. Returns
     None when the bulk is not in long text values that read can page,
     or when the result already holds something shaped like a reference, which a
     reader could not tell from the ones this puts in.
@@ -100,10 +100,11 @@ def spill_long_texts(
 
 
 def _readable_as_text(text: str) -> bool:
-    """Whether read would page a file holding ``text`` instead of refusing it as
-    binary (NUL-separated output such as find -print0 would be refused)."""
+    """Whether read would page a file holding ``text`` as text: not one it takes
+    for a PDF or an image by its first bytes, nor refuses as binary (as it does
+    NUL-separated output such as find -print0)."""
 
-    return not looks_binary(text[:SAMPLE_BYTES].encode("utf-8")[:SAMPLE_BYTES])
+    return reads_as_text(text[:SAMPLE_BYTES].encode("utf-8")[:SAMPLE_BYTES])
 
 
 def spill_preview(*, text: str, path: str) -> tuple[str, str]:

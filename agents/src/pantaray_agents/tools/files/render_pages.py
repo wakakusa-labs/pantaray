@@ -59,8 +59,8 @@ from .read_document import (
     document_format,
 )
 from .read_scope import ReadScope
+from .read_sniffing import SAMPLE_BYTES
 from .read_target import ReadTarget, resolve_read_target
-from .text_encoding import SAMPLE_BYTES
 
 RENDER_CONVERTER_UNAVAILABLE = "RENDER_CONVERTER_UNAVAILABLE"
 RENDER_DOCUMENT_ENCRYPTED = "RENDER_DOCUMENT_ENCRYPTED"

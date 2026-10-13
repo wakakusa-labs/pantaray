@@ -22,14 +22,13 @@ from .read_contract import ReadToolArgs, ReadToolResult
 from .read_document import document_format, read_document, reject_legacy_document
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
 from .read_scope import ReadScope
+from .read_sniffing import SAMPLE_BYTES, image_mime_type, looks_binary
 from .read_target import ReadTarget, action_reference_paths, resolve_read_target
 from .text_encoding import (
-    SAMPLE_BYTES,
     ByteOrderMark,
     TextEncoding,
     byte_order_mark,
     decided_encoding,
-    looks_binary,
     text_encoding_unsupported,
 )
 from .text_lines import (
@@ -423,14 +422,8 @@ def _sniff_image_mime(*, filepath: Path, sample: bytes) -> str | None:
     one file whose bytes have to reach the model to be understood at all.
     """
 
-    if sample.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if sample.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if sample.startswith(b"GIF87a") or sample.startswith(b"GIF89a"):
-        return "image/gif"
-    if sample.startswith(b"RIFF") and sample[8:12] == b"WEBP":
-        return "image/webp"
+    if (announced := image_mime_type(sample)) is not None:
+        return announced
     guessed, _encoding = mimetypes.guess_type(filepath.name)
     return guessed if guessed in IMAGE_MIME_TYPES else None
 

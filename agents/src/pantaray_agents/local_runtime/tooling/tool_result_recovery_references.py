@@ -20,6 +20,11 @@ from pantaray_agents.schema.tool_result import FormalToolStepOutput
 
 from ..storage.migrations import MigrationError
 from .repository.common import BUSY_TIMEOUT_PRAGMA_TEMPLATE
+from .tool_result_reading import (
+    ToolResultLoadError,
+    ToolResultReadLimitError,
+    load_action_file_result,
+)
 from .tool_result_spill import (
     SPILLED_TEXT_KEYS,
     SPILLED_TEXT_MEDIA_TYPE,
@@ -34,6 +39,9 @@ from .tool_result_storage import (
 
 _FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json|txt)$")
 _BINARY_METADATA_KEYS = frozenset({"storage", "path", "media_type", "byte_size"})
+# An approval output is its envelope around a summary that is itself bounded by
+# the inline limit, so it stays far below this.
+_APPROVAL_OUTPUT_MAX_BYTES = 1024 * 1024
 
 
 class ToolResultRecoveryError(MigrationError):
@@ -219,12 +227,23 @@ def _step_references_from_json_column(
                     "invocation-owned formal output disagrees with linked tool_outputs"
                 )
             return references
-        return _action_file_references(
+        references = _action_file_references(
             value=output,
             action_root=action_root,
             owner_name=_storage_owner_name(step_id),
             column_name="agent_action_steps.tool_output",
         )
+        if payload.status == "processing":
+            # A pending approval that grew past the inline limit around a summary
+            # already stored as files is kept whole as JSON, so the summary's
+            # files are named only inside that JSON.
+            references |= _approval_summary_reference(
+                output=_load_whole_step_output(
+                    action_root=action_root, step_id=step_id, output=output
+                ),
+                action_root=action_root,
+            )
+        return references
     if output_storage_kind != "inline_json":
         raise ToolResultRecoveryError(
             "formal tool output has an invalid storage contract"
@@ -235,6 +254,31 @@ def _step_references_from_json_column(
             action_root=action_root,
         )
     return set()
+
+
+def _load_whole_step_output(
+    *, action_root: Path, step_id: str, output: JSONValue
+) -> JSONValue:
+    if not (
+        isinstance(output, dict)
+        and output.get("media_type") == TOOL_RESULT_JSON_MEDIA_TYPE
+    ):
+        return None
+    try:
+        return load_action_file_result(
+            action_tool_results_path=action_root,
+            invocation_id=step_id,
+            output=output,
+            max_bytes=_APPROVAL_OUTPUT_MAX_BYTES,
+        )
+    except ToolResultReadLimitError as exc:
+        raise ToolResultRecoveryError(
+            "a pending approval's stored output is too large to check"
+        ) from exc
+    except ToolResultLoadError:
+        # Gone or unreadable, it names nothing a reader could still reach; its own
+        # reference is counted as missing.
+        return None
 
 
 def _parse_formal_step_output(*, raw_json: object) -> FormalToolStepOutput:

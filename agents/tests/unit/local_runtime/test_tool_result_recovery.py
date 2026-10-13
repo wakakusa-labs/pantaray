@@ -523,6 +523,64 @@ def test_recovery_keeps_every_moved_text_and_removes_unreferenced_ones(
     assert result.removed_file_count == 1
 
 
+def test_recovery_keeps_summary_texts_named_only_inside_a_whole_approval_output(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    _create_reference_db(db_path)
+    root = _tool_results_root(db_path)
+    root.mkdir(parents=True)
+    summary = store_tool_result(
+        action_tool_results_path=root,
+        invocation_id="request-1",
+        output={"command": "c" * 25_000, "justification": "j" * 17_007},
+    )
+    envelope = store_tool_result(
+        action_tool_results_path=root,
+        invocation_id="step-1",
+        output={
+            "kind": "approval_required",
+            "approval_status": "pending",
+            "approval_session_id": "approval-1",
+            "tool_request_id": "request-1",
+            "intent_class": "process_exec_local",
+            "command_summary": summary.output_json,
+            "command_summary_storage_kind": "action_file",
+        },
+    )
+    for stored in (summary, envelope):
+        release_stored_tool_result(stored)
+    # The summary already holds a reference, so the envelope is kept whole.
+    assert envelope.output_json["media_type"] == "application/json"  # type: ignore[index,call-overload]
+    kept = [Path(str(text["path"])) for text in spilled_texts(summary.output_json)] + [
+        Path(str(envelope.output_json["path"]))
+    ]  # type: ignore[index,call-overload]
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
+            (
+                "step-1",
+                "user-1",
+                "action-1",
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "processing",
+                        "output": envelope.output_json,
+                        "output_storage_kind": "action_file",
+                        "output_owner_kind": "action_step",
+                    }
+                ),
+            ),
+        )
+
+    result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert all(path.is_file() for path in kept)
+    assert result.removed_file_count == 0
+    assert result.preserved_file_count == 2
+
+
 def test_recovery_fails_closed_for_action_file_kind_with_inline_payload(
     tmp_path: Path,
 ) -> None:

@@ -31,8 +31,6 @@ UNMARKED_TEXT_ENCODINGS: tuple[UnmarkedTextEncoding, ...] = ("utf-8", "cp932")
 # It covers MAX_TOTAL_LINE_COUNT_BYTES, so a file whose lines a page counts to
 # its end is decided on all of its bytes.
 ENCODING_DECISION_BYTES = 4 * 1024 * 1024
-# How much of a file's start read looks at to tell text from binary.
-SAMPLE_BYTES = 4_096
 _UTF32_LE_BOM = b"\xff\xfe\x00\x00"
 
 
@@ -104,20 +102,6 @@ def text_encoding_unsupported(
     )
 
 
-def looks_binary(sample: bytes) -> bool:
-    """Whether read refuses a file whose first SAMPLE_BYTES are ``sample`` as binary."""
-
-    if not sample:
-        return False
-    non_printable = 0
-    for byte in sample:
-        if byte == 0:
-            return True
-        if byte < 9 or (byte > 13 and byte < 32):
-            non_printable += 1
-    return non_printable / len(sample) > 0.3
-
-
 def _read_prefix(descriptor: int, limit: int) -> bytes:
     chunks: list[bytes] = []
     size = 0
@@ -130,12 +114,10 @@ def _read_prefix(descriptor: int, limit: int) -> bytes:
 __all__ = [
     "ENCODING_DECISION_BYTES",
     "READ_TEXT_ENCODING_UNSUPPORTED",
-    "SAMPLE_BYTES",
     "ByteOrderMark",
     "TextEncoding",
     "UnmarkedTextEncoding",
     "byte_order_mark",
     "decided_encoding",
-    "looks_binary",
     "text_encoding_unsupported",
 ]

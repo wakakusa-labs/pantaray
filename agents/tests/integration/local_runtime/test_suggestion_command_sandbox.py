@@ -49,7 +49,7 @@ def _session(
     workspace: Path,
     scope: ReadAccessScope = "workspace",
 ) -> SuggestionCommandSession:
-    return SuggestionCommandSession(
+    session = SuggestionCommandSession(
         db_path=testbed.db_path,
         busy_timeout_ms=ONE_SECOND_MS,
         user_id="user-1",
@@ -59,6 +59,9 @@ def _session(
             db_path=testbed.db_path, run_id="run-1"
         ),
     )
+    # Building the tools, as a run does when it starts, creates its folder.
+    session.definitions()
+    return session
 
 
 @pytest.fixture

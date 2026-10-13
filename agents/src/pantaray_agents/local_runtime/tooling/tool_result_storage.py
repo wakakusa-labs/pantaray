@@ -29,7 +29,6 @@ TOOL_RESULT_FILENAME_PREFIX = "output-"
 TOOL_RESULT_JSON_SUFFIX = ".json"
 TOOL_RESULT_BINARY_SUFFIX = ".bin"
 TOOL_RESULT_TEXT_SUFFIX = ".txt"
-_RUN_SPILL_ROOT_MODE = 0o700
 
 
 class ActionFileToolResultMetadata(TypedDict):
@@ -164,11 +163,17 @@ def store_tool_result(
 def store_run_tool_result(*, spill_root: Path, output: JSONValue) -> JSONValue:
     """What the model reads of one result of a run with no Action: the result
     itself, or, when too large, what storage leaves in its place, the rest saved
-    under ``spill_root`` (the run's own folder, created here) for read to page."""
+    under ``spill_root`` (the run's own folder) for read to page.
 
-    spill_root.mkdir(mode=_RUN_SPILL_ROOT_MODE, parents=True, exist_ok=True)
+    The run creates ``spill_root`` when it starts and removes it when it ends;
+    this never creates it. A tool still working in a thread after its run was
+    canceled and its folder removed would otherwise make it again, with nothing
+    left to remove it, so that result fails here instead of being saved.
+    """
+
     stored = store_tool_result(
-        # Named by the path read checks them against.
+        # Raises when the folder is gone; saved results are named by the same
+        # path read checks them against.
         action_tool_results_path=spill_root.resolve(strict=True),
         invocation_id=uuid.uuid4().hex,
         output=output,

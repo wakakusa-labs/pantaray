@@ -110,7 +110,7 @@ def _command(command: str, *, cwd: str | None = None, login: bool = False):
 
 
 def _session(db_path: Path, root: Path, *, scope: str = "workspace"):
-    return SuggestionCommandSession(
+    session = SuggestionCommandSession(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id="user-1",
@@ -118,6 +118,9 @@ def _session(db_path: Path, root: Path, *, scope: str = "workspace"):
         read_access_scope=scope,  # type: ignore[arg-type]
         spill_root=suggestion_tool_results_root(db_path=db_path, run_id="run-1"),
     )
+    # Building the tools, as a run does when it starts, creates its folder.
+    session.definitions()
+    return session
 
 
 @pytest.fixture

@@ -51,6 +51,7 @@ from .execute import run_web_extract, run_web_search
 
 # One provider attempt per call: research moves on rather than waiting.
 _MAX_RETRIES = 1
+_SPILL_ROOT_MODE = 0o700
 _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 
 type _Run = Callable[..., Awaitable[dict[str, JSONValue]]]
@@ -62,7 +63,8 @@ class WebResearchToolSession:
 
     ``speaks_to_user`` is set where the model answers the user directly (the
     chat): only there does a failure the user can fix ask the model to tell
-    them how. ``spill_root`` is the run's folder for large results.
+    them how. ``spill_root`` is the run's folder for large results, created
+    when the tools are built at the start of the run.
     """
 
     user_id: str
@@ -74,6 +76,7 @@ class WebResearchToolSession:
             raise ValueError("web research session user_id must not be empty")
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
+        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
         return (
             self._definition(
                 name=WEB_SEARCH_TOOL_NAME,

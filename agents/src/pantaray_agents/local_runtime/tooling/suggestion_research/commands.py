@@ -51,6 +51,7 @@ BASH_EXECUTABLE = Path("/bin/bash")
 # The error message stays a short string; stdout and stderr carry the output.
 # The same bound submit_suggestion puts on rejection feedback.
 ERROR_MESSAGE_MAX_CHARS = 1_200
+_SPILL_ROOT_MODE = 0o700
 # What storage stores whole when it cannot move stdout or stderr out alone.
 _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 
@@ -117,10 +118,12 @@ class SuggestionCommandSession:
     user_id: str
     workspace_roots: tuple[Path, ...]
     read_access_scope: ReadAccessScope
-    # The run's folder for output too long to show inline.
+    # The run's folder for output too long to show inline, created when the
+    # tools are built at the start of the run.
     spill_root: Path
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
+        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
         return (
             ReactToolDefinition(
                 name=SUGGESTION_COMMAND_TOOL_ID,

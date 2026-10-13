@@ -16,8 +16,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Local refs answer in milliseconds; a repository that takes longer is skipped.
-_GIT_TIMEOUT_SECONDS = 5
+# Local refs answer in milliseconds; a repository that takes longer is skipped,
+# so a hung git delays an Action's start by at most this per call.
+_GIT_TIMEOUT_SECONDS = 2
 
 
 def render_checkouts_behind(folder_paths: Sequence[str]) -> str:
@@ -29,14 +30,22 @@ def render_checkouts_behind(folder_paths: Sequence[str]) -> str:
     lines = [line for path in in_repositories if (line := _behind_line(path))]
     if not lines:
         return ""
-    return "Git checkouts behind their remote, as of the last fetch:\n" + "\n".join(
-        lines
+    heading = (
+        "Git checkouts behind their remote, as of the last fetch "
+        "(merge commits not counted):"
     )
+    return "\n".join((heading, *lines))
 
 
 def _inside_git_work_tree(path: str) -> bool:
     folder = Path(path)
-    return any((parent / ".git").exists() for parent in (folder, *folder.parents))
+    try:
+        return any((parent / ".git").exists() for parent in (folder, *folder.parents))
+    except OSError:
+        # A folder the runtime may no longer read, such as one whose permission
+        # was revoked, has no line: the count is an aside and must not stop
+        # the Action from starting.
+        return False
 
 
 def _git_runs_without_prompt() -> bool:
@@ -85,7 +94,8 @@ def _run(command: list[str]) -> str | None:
             timeout=_GIT_TIMEOUT_SECONDS,
             check=False,
         )
-    except FileNotFoundError:
+    except OSError:
+        # git missing, or a folder it cannot enter: that checkout has no line.
         return None
     except subprocess.TimeoutExpired:
         logger.warning(

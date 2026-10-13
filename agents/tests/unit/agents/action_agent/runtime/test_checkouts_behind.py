@@ -9,7 +9,10 @@ from pantaray_agents.agents.action_agent.runtime.checkouts_behind import (
     render_checkouts_behind,
 )
 
-_HEADING = "Git checkouts behind their remote, as of the last fetch:\n"
+_HEADING = (
+    "Git checkouts behind their remote, as of the last fetch "
+    "(merge commits not counted):\n"
+)
 
 
 def _git(cwd: Path, *args: str) -> None:

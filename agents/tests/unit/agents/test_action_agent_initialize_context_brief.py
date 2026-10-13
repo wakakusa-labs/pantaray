@@ -418,6 +418,36 @@ async def test_initialize_context_uses_manifest_roots_not_current_settings(
 
 
 @pytest.mark.asyncio
+async def test_a_folder_the_runtime_can_no_longer_read_does_not_stop_the_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Revoked access to a registered folder only drops its behind count."""
+
+    locked = tmp_path / "locked"
+    repo = locked / "repo"
+    repo.mkdir(parents=True)
+    execution_context, _db_path = _bootstrap_execution_context_with_db(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        workspace_folders=((repo, "Repo"),),
+    )
+    agent_repo = MockActionAgentRepository()
+    agent = _build_agent(agent_repo)
+    await _save_suggestion(agent_repo)
+    state = _state_with_execution_context(execution_context)
+    locked.chmod(0)
+    try:
+        updated = await initialize_context(agent, state, _runtime(agent))  # type: ignore[arg-type]
+    finally:
+        locked.chmod(0o755)
+
+    prompt = updated["context"]["workspace_context_prompt"]
+    assert "- Repo: " in prompt
+    assert "Git checkouts behind" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_initialize_context_uses_manifest_root_context_names(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

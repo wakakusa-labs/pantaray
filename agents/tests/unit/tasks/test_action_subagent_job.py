@@ -100,7 +100,7 @@ from pantaray_llm.errors import (
     PROXY_LLM_TOOL_CALL_INVALID,
     LlmProxyExecutionError,
 )
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 TIMESTAMP = "2026-09-01T00:00:00Z"
 THINKING_MARKER = "PRIVATE_THINKING_MUST_NOT_PERSIST"
@@ -202,23 +202,25 @@ def _running_child(
     profile_id: str,
     claim_workspace: bool = False,
     task: str = "Inspect the assigned boundary",
+    model: str | None = None,
 ) -> tuple[Path, ActionSubagentJobPayload]:
     db_path = tmp_path / "runtime.db"
     apply_migrations(db_path, 1_000, load_default_migrations())
-    payload = build_action_subagent_job_payload(
-        {
-            "job_id": "child-job",
-            "process_id": "child-process",
-            "user_id": "user-1",
-            "action_id": "action-1",
-            "parent_process_id": "parent-process",
-            "inference_profile_id": profile_id,
-            "action_context": "# Workspace Paths\nparent context",
-            "task": task,
-            "context_refs": ["conversation:step-1"],
-            "resource_claim_ids": ["child-claim"] if claim_workspace else [],
-        }
-    )
+    params: ActionSubagentJobPayload = {
+        "job_id": "child-job",
+        "process_id": "child-process",
+        "user_id": "user-1",
+        "action_id": "action-1",
+        "parent_process_id": "parent-process",
+        "inference_profile_id": profile_id,
+        "action_context": "# Workspace Paths\nparent context",
+        "task": task,
+        "context_refs": ["conversation:step-1"],
+        "resource_claim_ids": ["child-claim"] if claim_workspace else [],
+    }
+    if model is not None:
+        params["model"] = model
+    payload = build_action_subagent_job_payload(params)
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, 1_000)
         with connection:
@@ -339,19 +341,16 @@ def _assert_canceled(db_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("profile_id", "proxy_failures", "terminal_failures"),
-    (
-        (SUBAGENT_MODEL_SETTINGS[0].profile_id, 1, 1),
-        (SUBAGENT_MODEL_SETTINGS[1].profile_id, 0, 0),
-    ),
+    ("proxy_failures", "terminal_failures"),
+    ((1, 1), (0, 0)),
 )
-def test_configured_profiles_retry_exactly_and_persist_only_private_terminal(
+def test_child_retries_exactly_and_persists_only_private_terminal(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    profile_id: str,
     proxy_failures: int,
     terminal_failures: int,
 ) -> None:
+    profile_id = ACTION_EXECUTING_PROFILE_ID
     db_path, payload = _running_child(tmp_path, profile_id=profile_id)
     client = _Client(failures=proxy_failures)
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
@@ -411,24 +410,28 @@ def test_configured_profiles_retry_exactly_and_persist_only_private_terminal(
     assert (public_count, step_count, action) == (0, 0, ("processing", ""))
 
 
-def test_unknown_profile_fails_before_proxy_and_closes_private_child(
+def test_a_model_the_connection_does_not_offer_fails_the_child_before_any_send(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(tmp_path, profile_id="removed.profile")
+    """A named model the connection cannot serve fails the child, never another model."""
 
-    def build_proxy() -> object:
-        raise AssertionError("proxy must not be built")
-
-    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", build_proxy)
+    db_path, payload = _running_child(
+        tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID, model="gpt-6-luna"
+    )
+    client = _Client(failures=0)
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    # Pantaray Cloud picks the model per profile, so no model can be named there.
+    monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
     ):
         with pytest.raises(
             subagent_job.ActionSubagentJobFailed,
-            match="ACTION_SUBAGENT_PROFILE_UNAVAILABLE",
+            match="ACTION_SUBAGENT_MODEL_UNAVAILABLE",
         ):
             subagent_job.run_action_subagent_job(payload)
 
+    assert client.profiles == []
     with sqlite3.connect(db_path) as connection:
         event = connection.execute(
             "SELECT payload_json FROM process_events WHERE process_id='child-process'"
@@ -441,7 +444,7 @@ def test_unknown_profile_fails_before_proxy_and_closes_private_child(
     assert event is not None
     assert json.loads(event[0]) == {
         "outcome": "failure",
-        "error_code": "ACTION_SUBAGENT_PROFILE_UNAVAILABLE",
+        "error_code": "ACTION_SUBAGENT_MODEL_UNAVAILABLE",
     }
     assert statuses == ("failed", "failed", "failed")
 
@@ -449,9 +452,7 @@ def test_unknown_profile_fails_before_proxy_and_closes_private_child(
 def test_cancel_before_proxy_closes_without_building_client(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     _request_cancel(db_path, payload)
 
     def build_proxy() -> object:
@@ -469,9 +470,7 @@ def test_cancel_before_proxy_closes_without_building_client(
 def test_cancel_after_llm_response_discards_late_report(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
 
     def cancel_on_response(call_number: int) -> None:
         if call_number == 1:
@@ -498,9 +497,7 @@ def test_cancel_during_proxy_failure_stops_and_replays_canceled_winner(
     tmp_path: Path,
     retryable: bool,
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     client = _Client(
         failures=1,
         retryable=retryable,
@@ -519,9 +516,7 @@ def test_cancel_during_proxy_failure_stops_and_replays_canceled_winner(
 def test_cancel_after_tool_return_preserves_tool_then_closes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     real_append = subagent_history.append_action_subagent_event
 
     def append_then_cancel(**kwargs: object) -> None:
@@ -555,9 +550,7 @@ def test_cancel_after_tool_return_preserves_tool_then_closes(
 def test_cancel_between_tool_and_next_proxy_stops_second_request(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     real_deliver = subagent_history.deliver_action_subagent_messages
     prompt_builds = 0
 
@@ -608,9 +601,7 @@ class _HangingModels:
 def test_stop_cancels_the_llm_request_in_flight(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     models = _HangingModels(lambda: _request_cancel(db_path, payload))
     client = SimpleNamespace(aio=SimpleNamespace(models=models))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
@@ -626,9 +617,7 @@ def test_stop_cancels_the_llm_request_in_flight(
 def test_stop_cancels_the_tool_in_flight(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     cancelled = False
 
     async def in_flight(**_kwargs: object) -> object:
@@ -657,9 +646,7 @@ def test_stop_cancels_the_tool_in_flight(
 def test_message_between_turns_rebuilds_the_durable_prompt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
 
     def accept_message(call_number: int) -> None:
         if call_number == 1:
@@ -704,9 +691,7 @@ def test_message_between_turns_rebuilds_the_durable_prompt(
 def test_invalid_report_repairs_stop_after_three_llm_calls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     client = _Client(reports=(1, 2, 3, "must not be requested"))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
 
@@ -744,9 +729,7 @@ def test_broker_read_is_durable_in_the_next_fresh_prompt(
     content: str,
     prompt_fragment: str,
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     (_workspace(db_path) / "evidence.txt").write_text(content, encoding="utf-8")
     client = _Client(
         calls=(
@@ -787,9 +770,7 @@ def test_broker_read_is_durable_in_the_next_fresh_prompt(
 def test_broker_attachment_read_fails_instead_of_reporting_unusable_success(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     (_workspace(db_path) / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(32))
     client = _Client(
         calls=(
@@ -829,9 +810,7 @@ def test_report_bound_is_utf8_bytes_and_terminal_failure_rolls_back(
     with pytest.raises(ActionSubagentReportError, match="UTF-8 bytes"):
         build_action_subagent_success_result(report + "a")
 
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "CREATE TRIGGER fail_child_terminal BEFORE UPDATE OF status ON jobs "
@@ -884,7 +863,7 @@ def _pause_gated_child(
 ) -> tuple[Path, ActionSubagentJobPayload, str, str]:
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     client = _Client(calls=(_APPLY_PATCH_CALL,))
@@ -1042,7 +1021,7 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
 ) -> None:
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     real_pause = subagent_job.pause_action_subagent_for_approval
@@ -1140,7 +1119,7 @@ def test_failed_command_output_stays_bounded_in_the_child_transcript(
 ) -> None:
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _allow_workspace_commands(db_path)
@@ -1194,7 +1173,7 @@ def test_a_likely_denied_write_does_not_tell_the_child_to_request_folders(
     # broker adds for the parent Action would only send it into that refusal.
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _allow_workspace_commands(db_path)
@@ -1240,7 +1219,7 @@ def _enqueue_sibling_child(db_path: Path) -> None:
             "user_id": "user-1",
             "action_id": "action-1",
             "parent_process_id": "parent-process",
-            "inference_profile_id": SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            "inference_profile_id": ACTION_EXECUTING_PROFILE_ID,
             "action_context": "# Workspace Paths\nparent context",
             "task": "Inspect the sibling boundary",
             "context_refs": [],
@@ -1329,9 +1308,7 @@ def _results(client: _Client, index: int) -> list[tuple[str, object]]:
 def test_the_transcript_is_sent_as_appended_conversation_items(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     (_workspace(db_path) / "evidence.txt").write_text("broker evidence", "utf-8")
 
     def message_after_first_turn(call_number: int) -> None:
@@ -1424,9 +1401,7 @@ def test_the_transcript_is_sent_as_appended_conversation_items(
 def test_the_repair_notice_is_appended_without_touching_what_was_sent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     (_workspace(db_path) / "evidence.txt").write_text("broker evidence", "utf-8")
 
     def reject_second_turn(call_number: int) -> None:
@@ -1493,7 +1468,7 @@ def test_children_of_one_parent_send_its_context_and_differ_only_in_the_task(
     for task in ("Fix module a", "Fix module b"):
         db_path, payload = _running_child(
             tmp_path / task.replace(" ", "-"),
-            profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            profile_id=ACTION_EXECUTING_PROFILE_ID,
             task=task,
         )
         client = _Client()
@@ -1521,9 +1496,7 @@ def test_read_only_calls_of_one_turn_all_run_and_keep_their_own_results(
 ) -> None:
     """読み取りは 1 ターンでまとめて走り、結果は宣言順にそれぞれの呼び出しへ対応する。"""
 
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     workspace = _workspace(db_path)
     (workspace / "a.txt").write_text("alpha contents", "utf-8")
     (workspace / "b.txt").write_text("bravo contents", "utf-8")
@@ -1595,7 +1568,7 @@ def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
 
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _allow_workspace_commands(db_path)
@@ -1679,7 +1652,7 @@ def test_a_pause_inside_a_turn_answers_every_call_and_runs_none_twice(
 
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     workspace = _workspace(db_path)
@@ -1761,7 +1734,7 @@ def test_a_report_mixed_with_other_calls_waits_for_a_turn_of_its_own(
 
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _allow_workspace_commands(db_path)
@@ -1816,9 +1789,7 @@ def test_two_reports_in_one_turn_end_nothing_until_one_comes_alone(
 ) -> None:
     """報告を 2 件出したターンでは終わらず、単独で出し直した報告で終わる。"""
 
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     first = LlmToolCall(
         call_id="r1", name="submit_subagent_report", arguments={"report": "Draft"}
     )
@@ -1859,7 +1830,7 @@ def test_a_resumed_child_sends_the_same_prefix_and_hands_its_turns_back(
     monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     (_workspace(db_path) / "notes.txt").write_text("read before the edit", "utf-8")
@@ -1905,7 +1876,7 @@ def test_a_call_a_crash_left_unanswered_is_answered_as_not_run_on_resume(
 
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _allow_workspace_commands(db_path)
@@ -1977,9 +1948,7 @@ def test_the_childs_session_memory_stays_in_its_own_conversation(
 ) -> None:
     """子の write_session_memory は子の会話にだけ残り、親や記憶更新からは見えない。"""
 
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     note = "CHILD_SESSION_NOTE: module a uses tabs"
     client = _Client(
         calls=(
@@ -2041,7 +2010,7 @@ def test_repository_agents_md_reaches_the_child_once_across_a_resume(
 
     db_path, payload = _running_child(
         tmp_path,
-        profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
     _agents_md_workspace(db_path)
@@ -2079,9 +2048,7 @@ def test_a_child_that_may_not_read_files_gets_no_agents_md(
 ) -> None:
     """ファイルを読めない子には AGENTS.md を添えない。"""
 
-    db_path, payload = _running_child(
-        tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id
-    )
+    db_path, payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
     _agents_md_workspace(db_path)
     with sqlite3.connect(db_path) as connection:
         connection.execute(

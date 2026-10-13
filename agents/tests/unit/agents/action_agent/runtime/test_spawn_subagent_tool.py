@@ -29,6 +29,7 @@ from pantaray_agents.agents.action_agent.tools import (
     TOOL_REGISTRY,
     WAIT_SUBAGENTS_TOOL,
 )
+from pantaray_agents.conversation import provider_turns
 from pantaray_agents.local_runtime.runtime.action_subagent_spawn import (
     ActionSubagentSpawnRequest,
     ActionSubagentSpawnResult,
@@ -38,15 +39,15 @@ from pantaray_agents.local_runtime.runtime.action_subagent_spawn import (
 from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     ActionSubagentWaitSnapshot,
 )
+from pantaray_agents.local_runtime.runtime.connection_store import ApiKeyConnection
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.utils.trace_context import TraceContextManager
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 
-def _args(model: str = "gpt-6-luna") -> dict[str, JSONValue]:
+def _args(model: str | None = None) -> dict[str, JSONValue]:
     return {
-        "model": model,
+        **({} if model is None else {"model": model}),
         "task": "Inspect the assigned boundary",
         "context_refs": ["conversation:step-1"],
         "resource_claims": [
@@ -78,8 +79,6 @@ def _state() -> ActionAgentState:
 
 def test_spawn_tool_registry_is_config_derived_and_production_activated() -> None:
     schema = SPAWN_SUBAGENT_TOOL.build_validation_input_schema()
-    model_schema = schema["properties"]["model"]
-    selectors = [setting.selector for setting in SUBAGENT_MODEL_SETTINGS]
 
     assert TOOL_REGISTRY[SPAWN_SUBAGENT_TOOL_ID] is SPAWN_SUBAGENT_TOOL
     assert SEND_MESSAGE_TO_SUBAGENT_TOOL_ID in TOOL_REGISTRY
@@ -93,11 +92,9 @@ def test_spawn_tool_registry_is_config_derived_and_production_activated() -> Non
         "context_refs",
         "resource_claims",
     }
-    assert model_schema["enum"] == selectors
-    assert all(
-        setting.recommendation in SPAWN_SUBAGENT_TOOL.prompt_contract.description
-        for setting in SUBAGENT_MODEL_SETTINGS
-    )
+    # The model is the user's unless their instructions name one.
+    assert "model" not in schema["required"]
+    assert "enum" not in schema["properties"]["model"]
     child_tool_ids = {
         SPAWN_SUBAGENT_TOOL_ID,
         SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
@@ -108,17 +105,14 @@ def test_spawn_tool_registry_is_config_derived_and_production_activated() -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "selector",
-    tuple(setting.selector for setting in SUBAGENT_MODEL_SETTINGS),
-)
-async def test_spawn_tool_binds_durable_think_trace_and_configured_selector(
+@pytest.mark.parametrize("model", (None, "gpt-5.6-sol"))
+async def test_spawn_tool_binds_durable_think_trace_and_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    selector: str,
+    model: str | None,
 ) -> None:
-    args = _args(selector)
-    if selector == "gpt-5.6-sol":
+    args = _args(model)
+    if model is not None:
         args["resource_claims"] = [{"kind": "workspace_path", "path": "src"}]
     captured: list[ActionSubagentSpawnRequest] = []
 
@@ -172,18 +166,45 @@ async def test_spawn_tool_binds_durable_think_trace_and_configured_selector(
     request = captured[0]
     assert request.origin == origin
     assert request.logical_request_id != result.step_id
-    assert request.model_selector == selector
+    assert request.model == model
     # The child starts from the head the parent froze, not from a fresh read.
     assert request.action_context == "Context at T0\n"
     assert result.output == {"child_process_id": "child-1"}
     claim = request.resource_claims[0]
-    if selector == "gpt-5.6-sol":
+    if model is not None:
         assert claim == WorkspaceSpawnResourceClaim(
             "src",
             tmp_path / "local_runtime_workspaces/scratch/user-1/action-1/scratch",
         )
     else:
         assert claim == ExternalSpawnResourceClaim("workspace", "repository:src")
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_refuses_a_model_the_connection_does_not_offer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn = MagicMock()
+    monkeypatch.setattr(subagent_spawn, "spawn_action_subagent", spawn)
+    monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "direct")
+    monkeypatch.setattr(
+        provider_turns,
+        "peek_llm_connection",
+        lambda: ApiKeyConnection(
+            provider="anthropic", model="claude-opus-5-5", api_key="sk-not-real"
+        ),
+    )
+    with pytest.raises(ToolValidationError, match="not offered by the user's"):
+        await subagent_spawn.run_spawn_subagent_tool(
+            cast(Any, _AGENT),
+            step_id="execution-step",
+            tool_def=SPAWN_SUBAGENT_TOOL,
+            args=_args("gpt-6-luna"),
+            state=_state(),
+            actor="supervisor",
+            origin=ActionToolCallOrigin(llm_step_id="think", call_id="spawn-call"),
+        )
+    spawn.assert_not_called()
 
 
 @pytest.mark.asyncio

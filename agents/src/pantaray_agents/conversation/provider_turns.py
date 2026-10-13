@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from pantaray_agents.local_runtime.runtime.connection_store import (
+    ChatGptConnection,
     LlmConnection,
     peek_llm_connection,
     read_llm_route,
@@ -32,16 +33,26 @@ from pantaray_llm.contracts.conversation import (
     LlmTurnAssistantItem,
 )
 from pantaray_llm.errors import PROXY_INVALID_INPUT, LlmProxyExecutionError
+from pantaray_llm.profiles.models import MODEL_CATALOG
 
 logger = logging.getLogger(__name__)
 
 
+class ModelNotAvailable(ValueError):
+    """A run named a model its connection does not offer."""
+
+
 def read_provider_turn_target(
-    *, inference_profile: str
+    *, inference_profile: str, model: str | None = None
 ) -> tuple[str | None, LlmConnection | None]:
     """Identity and direct connection for one prepared turn.
 
     ``None`` on the unconfigured route, which reaches no provider at all.
+
+    ``model`` replaces the connection's own model for this turn. It must be one
+    the connection offers: the connection's model or one the catalog lists for
+    its provider. The cloud route offers none, since the Cloud picks the model
+    for each profile.
 
     On the cloud route the account is the operator's and the desktop never sees
     it, so there is nothing of it to name. What the desktop does name is the
@@ -57,10 +68,17 @@ def read_provider_turn_target(
     """
     route = read_llm_route()
     if route == "cloud":
+        if model is not None:
+            raise ModelNotAvailable(
+                f"Model {model!r} cannot be chosen on Pantaray Cloud, which picks "
+                "the model itself. Omit the model to use the user's model."
+            )
         return f"cloud:{inference_profile}", None
     connection = peek_llm_connection()
     if route != "direct" or connection is None:
         return None, None
+    if model is not None:
+        connection = _with_model(connection, model)
     identity = connection_identity(connection)
     return (
         ":".join(
@@ -68,6 +86,24 @@ def read_provider_turn_target(
         ),
         connection,
     )
+
+
+def _with_model(connection: LlmConnection, model: str) -> LlmConnection:
+    provider = (
+        "openai_codex"
+        if isinstance(connection, ChatGptConnection)
+        else connection.provider
+    )
+    offered = {connection.model} | {
+        entry.model for entry in MODEL_CATALOG.values() if entry.provider == provider
+    }
+    if model not in offered:
+        raise ModelNotAvailable(
+            f"Model {model!r} is not offered by the user's connection. Choose one "
+            f"of {', '.join(sorted(offered))}, or omit the model to use the "
+            "user's model."
+        )
+    return replace(connection, model=model)
 
 
 @dataclass(slots=True)
@@ -154,6 +190,7 @@ async def send_dropping_refused_turns[W: SentWindow, R](
 
 
 __all__ = [
+    "ModelNotAvailable",
     "ProviderTurnStore",
     "SentWindow",
     "read_provider_turn_target",

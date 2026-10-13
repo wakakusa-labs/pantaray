@@ -56,6 +56,9 @@ class ActionSubagentJobPayload(TypedDict):
     action_id: str
     parent_process_id: str
     inference_profile_id: str
+    # A model the Supervisor named for the child; absent, the child runs on the
+    # user's model.
+    model: NotRequired[str]
     # The parent's frozen Executing head: the context message the child starts from.
     action_context: str
     task: str

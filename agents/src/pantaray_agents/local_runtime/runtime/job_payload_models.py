@@ -63,6 +63,7 @@ def parse_action_subagent_job_payload_json(
             "action_id",
             "parent_process_id",
             "inference_profile_id",
+            "model",
             "action_context",
             "task",
             "context_refs",
@@ -82,6 +83,8 @@ def parse_action_subagent_job_payload_json(
         "context_refs": _require_opaque_refs(payload, "context_refs"),
         "resource_claim_ids": _require_opaque_refs(payload, "resource_claim_ids"),
     }
+    if "model" in payload:
+        parsed["model"] = _require_string(payload, "model")
     canonical_json = _canonical_action_subagent_payload_json(parsed)
     byte_size = len(canonical_json.encode("utf-8"))
     if byte_size > ACTION_SUBAGENT_PAYLOAD_MAX_BYTES:

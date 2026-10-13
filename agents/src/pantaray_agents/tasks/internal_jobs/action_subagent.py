@@ -91,7 +91,6 @@ from pantaray_agents.tools.contract import (
 from pantaray_agents.utils.prompt_loader import load_config
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 from pantaray_llm.errors import LlmProxyExecutionError
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 from .action_subagent_broker import (
     build_action_subagent_broker_tools,
@@ -103,12 +102,9 @@ from .action_subagent_history import (
     load_subagent_history,
 )
 
-ACTION_SUBAGENT_PROFILE_UNAVAILABLE = "ACTION_SUBAGENT_PROFILE_UNAVAILABLE"
+ACTION_SUBAGENT_MODEL_UNAVAILABLE = "ACTION_SUBAGENT_MODEL_UNAVAILABLE"
 ACTION_SUBAGENT_EXECUTION_FAILED = "ACTION_SUBAGENT_EXECUTION_FAILED"
 
-_CONFIGURED_PROFILE_IDS = frozenset(
-    settings.profile_id for settings in SUBAGENT_MODEL_SETTINGS
-)
 _ACTION_SUBAGENT_MAX_REPORT_REPAIRS = 2
 # The bounds the child ran under on the generic ReAct loop.
 _MAX_TURNS = 100
@@ -232,7 +228,7 @@ async def _execute_action_subagent_job(
         agents_md.restore(history)
     entries = await writer.answer_unanswered(history)
     identity, _ = provider_turns.read_provider_turn_target(
-        inference_profile=payload["inference_profile_id"]
+        inference_profile=payload["inference_profile_id"], model=payload.get("model")
     )
     store = provider_turns.ProviderTurnStore(
         identity=identity,
@@ -308,6 +304,7 @@ async def _execute_action_subagent_job(
             on_result=writer.on_result,
             on_notice=writer.on_notice,
             decide=decide,
+            model=payload.get("model"),
         )
     )
 
@@ -325,7 +322,6 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
             busy_timeout_ms=db_context.busy_timeout_ms,
             payload=payload,
         )
-        _require_configured_profile(payload["inference_profile_id"])
         broker_authority = load_action_subagent_broker_authority(
             db_path=db_context.db_path,
             busy_timeout_ms=db_context.busy_timeout_ms,
@@ -383,11 +379,6 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
     )
 
 
-def _require_configured_profile(profile_id: str) -> None:
-    if profile_id not in _CONFIGURED_PROFILE_IDS:
-        raise ActionSubagentJobFailed(ACTION_SUBAGENT_PROFILE_UNAVAILABLE)
-
-
 def _raise_if_cancellation_requested(
     *, db_path: Path, busy_timeout_ms: int, payload: ActionSubagentJobPayload
 ) -> None:
@@ -402,6 +393,8 @@ def _raise_if_cancellation_requested(
 def _execution_error_code(exc: Exception) -> str:
     if isinstance(exc, ActionSubagentJobFailed):
         return exc.error_code
+    if isinstance(exc, provider_turns.ModelNotAvailable):
+        return ACTION_SUBAGENT_MODEL_UNAVAILABLE
     if isinstance(exc, LlmProxyExecutionError):
         return exc.error_code
     return ACTION_SUBAGENT_EXECUTION_FAILED

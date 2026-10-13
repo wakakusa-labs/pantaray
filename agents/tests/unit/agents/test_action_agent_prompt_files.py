@@ -13,7 +13,6 @@ from pantaray_agents.agents.action_agent.tools import (
     TOOL_CONCURRENCY,
     WRITE_SESSION_MEMORY_TOOL_ID,
 )
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 
 def _read_text(path: Path) -> str:
@@ -126,16 +125,8 @@ def test_executing_prompt_reconciles_plan_and_reports_against_current_evidence()
     assert "deliverable" not in shared
 
 
-def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> None:
+def test_executing_prompt_briefs_subagents() -> None:
     section = _supervisor_rules()
-    prompt_text = _read_text(
-        Path(__file__).parents[3]
-        / "src"
-        / "pantaray_agents"
-        / "prompts"
-        / "action"
-        / "executing.yaml"
-    )
 
     assert "Request all their `spawn_subagent` calls in the same turn" in section
     assert "Brief each subagent in detail so it does not redo your work" in section
@@ -144,10 +135,6 @@ def test_executing_prompt_delegates_model_guidance_to_spawn_tool_metadata() -> N
     assert "a colleague who just walked in" in section
     assert "exactly what to return" in section
     assert "Parallel subagents must not write the same files" in section
-    assert "choose an explicit model from the tool definition" in section
-    for setting in SUBAGENT_MODEL_SETTINGS:
-        assert setting.selector not in prompt_text
-        assert setting.recommendation not in prompt_text
 
 
 def test_executing_prompt_states_the_tool_batch_rules() -> None:
@@ -163,13 +150,13 @@ def test_executing_prompt_states_the_tool_batch_rules() -> None:
     )
 
     assert "exactly one provided tool" not in text
-    assert "One turn may request several read-only calls at once" in text
+    assert "One turn runs at most {max_parallel_tool_calls} tool calls" in text
     for tool_id, declared in TOOL_CONCURRENCY.items():
         if declared.placement != "sequential":
             assert f"`{tool_id}`" in text
     assert "must be the only call of their turn" in text
     assert "Do not request two changing tools" in text
-    assert "The runtime may defer or drop requested calls" in text
+    assert "says which ones it did not run and why" in text
     assert "Every call needs its own internal `step_note`" in text
 
 

@@ -34,6 +34,8 @@ def build_action_subagent_job_payload(
         "context_refs": list(params["context_refs"]),
         "resource_claim_ids": list(params["resource_claim_ids"]),
     }
+    if "model" in params:
+        payload["model"] = params["model"]
     return parse_action_subagent_job_payload_json(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )

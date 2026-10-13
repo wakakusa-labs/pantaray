@@ -108,7 +108,7 @@ def _seed_child(
             "user_id": "user-1",
             "action_id": turn.action_id,
             "parent_process_id": turn.process_id,
-            "inference_profile_id": "action.subagent.luna",
+            "inference_profile_id": "action.executing",
             "action_context": "# Workspace Paths\nparent context",
             "task": "inspect the boundary",
             "context_refs": [],

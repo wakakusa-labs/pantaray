@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     load_pantaray_agents_md,
+)
+from pantaray_agents.agents.action_agent.runtime.checkouts_behind import (
+    render_checkouts_behind,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
     has_persisted_user_request_step,
@@ -120,8 +124,14 @@ async def initialize_context(
         read_access_scope=execution_context.read_access_scope,
     )
     context["workspace_root_catalog"] = workspace_manifest_catalog.root_catalog
-    context["workspace_context_prompt"] = render_workspace_context_prompt(
-        workspace_manifest_catalog.workspace_context
+    workspace_context = workspace_manifest_catalog.workspace_context
+    behind = await asyncio.to_thread(
+        render_checkouts_behind, [folder.path for folder in workspace_context.folders]
+    )
+    context["workspace_context_prompt"] = "\n\n".join(
+        section
+        for section in (render_workspace_context_prompt(workspace_context), behind)
+        if section
     )
     context["agents_md_instructions"] = load_pantaray_agents_md()
 

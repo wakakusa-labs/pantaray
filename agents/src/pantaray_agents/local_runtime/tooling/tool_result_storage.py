@@ -16,7 +16,7 @@ from pantaray_agents.schema.tool_result import (
 from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
-from .tool_result_spill import spill_long_texts, spill_preview
+from .tool_result_spill import outline_preview, spill_long_texts
 
 TOOL_RESULT_JSON_MEDIA_TYPE: Literal["application/json"] = "application/json"
 TOOL_RESULT_BINARY_MEDIA_TYPE: Literal["application/octet-stream"] = (
@@ -119,8 +119,8 @@ def store_tool_result(
 
     file_name = _result_file_name(TOOL_RESULT_JSON_SUFFIX)
     payload = history_text.encode("utf-8")
-    preview, retry_hint = spill_preview(
-        text=history_text, path=str(owner_path / file_name)
+    preview, retry_hint = outline_preview(
+        output=output, text=history_text, path=str(owner_path / file_name)
     )
     metadata: ActionFileToolResultMetadata = {
         "storage": "action_file",

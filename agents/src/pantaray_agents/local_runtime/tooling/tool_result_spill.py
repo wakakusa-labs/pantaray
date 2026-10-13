@@ -9,6 +9,7 @@ rest. Small fields such as a status or an exit code stay where they were.
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Callable, Iterator, Set
 from functools import partial
 from typing import Literal, TypeGuard
@@ -36,6 +37,9 @@ TOOL_RESULT_PREVIEW_KEYS = frozenset({"preview", "retry_hint"})
 TOOL_RESULT_STATUS_KEY = "status"
 SPILLED_TEXT_KEYS = TOOL_RESULT_JSON_METADATA_KEYS | TOOL_RESULT_PREVIEW_KEYS
 TOOL_RESULT_PREVIEW_CHARS = 2_000
+# What the outline of a result stored whole counts as a short value, such as a
+# title, a URL, a path or a status; longer texts are only in the file.
+OUTLINE_VALUE_CHARS = 200
 
 
 def is_json_spill_shape(keys: Set[str]) -> bool:
@@ -138,6 +142,77 @@ def spill_preview(*, text: str, path: str) -> tuple[str, str]:
         f"{len(preview):,}. Read the rest with read path={path} offset={next_line}, "
         "continuing with next_offset, or search it with grep."
     )
+
+
+def outline_preview(*, output: JSONValue, text: str, path: str) -> tuple[str, str]:
+    """An outline of a result stored whole as JSON, and how to read all of it.
+
+    Such a result holds many values, none long enough to move out alone, so its
+    head would show only the first few. The outline lists the short values of
+    every object instead, one object per line under its place in the result,
+    so what the result holds and where can be seen without opening the file.
+    """
+
+    lines = list(_outline_lines(output, place=""))
+    if len(lines) <= 1:
+        # A result this large with at most one line of short values holds its
+        # bulk in the texts the outline leaves out, so their head says more.
+        return spill_preview(text=text, path=path)
+
+    def more(shown: int) -> list[str]:
+        hidden = len(lines) - shown
+        return [f"… {hidden:,} more of {len(lines):,} lines"] if hidden else []
+
+    shown = 0
+    while shown < len(lines) and (
+        len("\n".join([*lines[: shown + 1], *more(shown + 1)]))
+        <= TOOL_RESULT_PREVIEW_CHARS
+    ):
+        shown += 1
+    head = lines[:shown] or [lines[0][: TOOL_RESULT_PREVIEW_CHARS // 2] + "…"]
+    preview = "\n".join([*head, *more(len(head))])
+    return preview, (
+        f"This result is {len(text):,} characters in {count_text_lines(text):,} "
+        "lines of JSON, too large to show inline; preview outlines it with its "
+        f"values of up to {OUTLINE_VALUE_CHARS} characters, without the longer "
+        f"texts. Read all of it with read path={path} offset=1, continuing "
+        "with next_offset, or search it with grep."
+    )
+
+
+def _outline_lines(value: JSONValue, *, place: str) -> Iterator[str]:
+    prefix = f"{place}: " if place else ""
+    if isinstance(value, dict):
+        fields = " ".join(
+            f"{key}={_outline_value(child)}"
+            for key, child in value.items()
+            if _is_short(child)
+        )
+        if fields:
+            yield prefix + fields
+        for key, child in value.items():
+            if isinstance(child, dict | list):
+                yield from _outline_lines(
+                    child, place=f"{place}.{key}" if place else key
+                )
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            if isinstance(child, dict | list):
+                yield from _outline_lines(child, place=f"{place}[{index}]")
+            elif _is_short(child):
+                yield f"{place}[{index}]: {_outline_value(child)}"
+    elif _is_short(value):
+        yield _outline_value(value)
+
+
+def _is_short(value: JSONValue) -> bool:
+    if isinstance(value, str):
+        return len(value) <= OUTLINE_VALUE_CHARS and LINE_BREAK.search(value) is None
+    return not isinstance(value, dict | list)
+
+
+def _outline_value(value: JSONValue) -> str:
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _spilled_text(*, text: str, path: str) -> dict[str, JSONValue]:

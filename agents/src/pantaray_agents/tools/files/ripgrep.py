@@ -48,14 +48,36 @@ RIPGREP_GLOB_ERROR_MARKERS = (
     "glob parse error",
     "error parsing glob",
 )
+# Discovery leaves out what .gitignore, .ignore and .rgignore files exclude, as
+# ripgrep does by default, keeps hidden files such as .github and .env.example,
+# and always leaves out .git. list applies the same rules through rignore,
+# which wraps the ignore library ripgrep is built on but reads no .rgignore.
+ALWAYS_EXCLUDED_NAME = ".git"
+# Files ripgrep reads above a registered folder to apply the rules inside it:
+# a parent's ignore files, and the .git that makes its .gitignore apply.
+ANCESTOR_RULE_FILE_NAMES = (
+    ".gitignore",
+    ".ignore",
+    ".rgignore",
+    ALWAYS_EXCLUDED_NAME,
+    f"{ALWAYS_EXCLUDED_NAME}/info/exclude",
+)
 RIPGREP_COMMON_ARGS = (
     # A config file named by the inherited RIPGREP_CONFIG_PATH would change what
     # a search returns, and its --pre would run a program nobody approved.
     "--no-config",
     "--hidden",
-    "--no-ignore",
+    # The global gitignore is a git preference outside the folder, which the
+    # sandbox does not let ripgrep read for a registered folder.
+    "--no-ignore-global",
     "--color",
     "never",
+)
+# Last, so a caller's glob such as **/* cannot include it again.
+RIPGREP_EXCLUSION_ARGS = ("--glob", f"!{ALWAYS_EXCLUDED_NAME}")
+DISCOVERY_IGNORE_NOTE = (
+    "Leaves out .git and what .gitignore or .ignore files exclude; to look "
+    "inside an excluded directory, pass that directory itself as the path."
 )
 GLOB_PATTERN_FIX_HINT = (
     "Use a base_path-relative ripgrep glob such as **/*.py. Do not pass malformed "
@@ -162,6 +184,7 @@ def run_ripgrep_files(
             "--glob",
             glob_pattern,
             *_pruning_args(pruned_relative_paths),
+            *RIPGREP_EXCLUSION_ARGS,
             "--",
             ".",
             *extra_search_paths,
@@ -273,6 +296,7 @@ def run_ripgrep_grep(
     if include_glob is not None:
         argv.extend(("--glob", include_glob))
     argv.extend(_pruning_args(pruned_relative_paths))
+    argv.extend(RIPGREP_EXCLUSION_ARGS)
     argv.extend(("--", pattern, ".", *extra_search_paths))
     result = _run_ripgrep_lines(
         argv=tuple(argv),
@@ -314,6 +338,16 @@ def run_ripgrep_grep(
         skipped_files=result.stderr_lines,
         first_skip_error=_first_skip_error(result.stderr),
         binary_match_paths=tuple(binary_match_paths),
+    )
+
+
+def ancestor_rule_files(root: Path) -> tuple[str, ...]:
+    """The rule files above root that decide what is ignored inside it."""
+
+    return tuple(
+        str(parent / name)
+        for parent in root.parents
+        for name in ANCESTOR_RULE_FILE_NAMES
     )
 
 

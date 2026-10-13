@@ -40,6 +40,7 @@ from .read_target import resolve_read_target
 from .ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
+    ancestor_rule_files,
     run_ripgrep_files,
     run_ripgrep_grep,
 )
@@ -170,8 +171,10 @@ def _ripgrep_sandbox_profile(*, scope: ReadScope, base: ResolvedManifestPath) ->
     # it really opens holds; the backend's paths are reported as they come.
     full_access = scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     storage = scope.private_storage
+    folder = base.root.canonical_real_path
     return render_ripgrep_seatbelt_profile(
-        read_roots=("/",) if full_access else (str(base.root.canonical_real_path),),
+        read_roots=("/",) if full_access else (str(folder),),
+        read_files=() if full_access else ancestor_rule_files(folder),
         private_storage_roots=tuple(str(root) for root in storage.storage_roots),
         readable_private_roots=tuple(str(root) for root in storage.readable_roots),
     )

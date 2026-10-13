@@ -118,10 +118,12 @@ def _render_private_storage_deny(
 def render_ripgrep_seatbelt_profile(
     *,
     read_roots: Sequence[str],
+    read_files: Sequence[str],
     private_storage_roots: Sequence[str],
     readable_private_roots: Sequence[str],
 ) -> str:
-    """Let the discovery search read ``read_roots`` and run, and do nothing else.
+    """Let the discovery search read ``read_roots`` and ``read_files`` and run,
+    and do nothing else.
 
     ripgrep walks and reopens directories by name itself, so a check Pantaray
     makes beforehand cannot bind what it reads: a directory swapped for a link
@@ -129,8 +131,21 @@ def render_ripgrep_seatbelt_profile(
     opens instead, with the private-storage denies of commands.
     """
 
-    read_allow = _render_subpath_block(
-        (*MACOS_SYSTEM_RUNTIME_READ_ROOTS, *toolchain_read_roots(), *read_roots)
+    read_allow = _render_clause_block(
+        (
+            *(
+                _render_subpath_clause(path)
+                for path in (
+                    *MACOS_SYSTEM_RUNTIME_READ_ROOTS,
+                    *toolchain_read_roots(),
+                    *read_roots,
+                )
+            ),
+            *(
+                f'    (literal "{_escape_seatbelt_string(path)}")'
+                for path in read_files
+            ),
+        )
     )
     return "\n".join(
         (

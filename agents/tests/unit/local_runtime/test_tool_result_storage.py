@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_reading import (
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
     ToolResultStorageError,
+    discard_run_tool_results,
     release_stored_tool_result,
+    store_run_tool_result,
     store_tool_result,
 )
 from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
@@ -948,3 +952,111 @@ def test_parent_directory_fsync_failure_stops_before_writing_result(
         )
 
     assert list(tmp_path.rglob("output-*")) == []
+
+
+_LONG_OUTPUT = {"status": "success", "stdout": "private line\n" * 3_000}
+
+
+def _files_under(path: Path) -> list[str]:
+    return [name for _root, _dirs, names in os.walk(path) for name in names]
+
+
+def test_a_save_arriving_while_its_run_is_removed_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spill_root = tmp_path / "runs" / "run-1"
+    spill_root.mkdir(parents=True)
+    assert store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+    remove_tree = shutil.rmtree
+
+    def late_save_mid_removal(path: Path, **kwargs: object) -> None:
+        # A canceled run's tool finishes once the folder is moved away.
+        with pytest.raises(FileNotFoundError):
+            store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+        remove_tree(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(tool_result_storage.shutil, "rmtree", late_save_mid_removal)
+
+    discard_run_tool_results(spill_root)
+
+    assert list((tmp_path / "runs").iterdir()) == []
+
+
+def test_a_save_whose_folder_is_moved_away_mid_write_removes_its_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The removal may have scanned the folder before these files landed; the
+    save finds its folder gone afterwards and removes them itself."""
+
+    spill_root = tmp_path / "runs" / "run-1"
+    spill_root.mkdir(parents=True)
+    moved = tmp_path / "runs" / ".discarding-run-1"
+    write = tool_result_storage._write_bytes_atomically
+
+    def write_then_move_away(**kwargs: object) -> None:
+        write(**kwargs)  # type: ignore[arg-type]
+        if spill_root.exists():
+            spill_root.rename(moved)
+
+    monkeypatch.setattr(
+        tool_result_storage, "_write_bytes_atomically", write_then_move_away
+    )
+
+    with pytest.raises(FileNotFoundError):
+        store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+
+    assert _files_under(moved) == []
+
+
+def _unlink_once_with(
+    monkeypatch: pytest.MonkeyPatch, before: Callable[[str, int | None], None]
+) -> None:
+    """Run ``before`` just ahead of the removal's first unlink of a file."""
+
+    unlink = os.unlink
+    pending = [before]
+
+    def unlink_after(path: str, *, dir_fd: int | None = None) -> None:
+        if pending:
+            pending.pop()(path, dir_fd)
+        unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", unlink_after)
+
+
+def test_a_late_save_removing_its_own_files_does_not_stop_the_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = tmp_path / "runs"
+    spill_root = runs / "run-1"
+    spill_root.mkdir(parents=True)
+    for _call in range(4):
+        store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+    assert len(_files_under(spill_root)) == 4
+
+    def removed_by_its_save(path: str, dir_fd: int | None) -> None:
+        # The save's own removal reaches a file the removal listed first.
+        os.unlink(path, dir_fd=dir_fd)
+
+    _unlink_once_with(monkeypatch, removed_by_its_save)
+
+    discard_run_tool_results(spill_root)
+
+    assert list(runs.iterdir()) == []
+
+
+def test_a_failed_removal_is_logged_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    spill_root = tmp_path / "run-1"
+    spill_root.mkdir()
+    store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+
+    def fail(path: str, _dir_fd: int | None) -> None:
+        raise PermissionError(f"cannot remove {path}")
+
+    _unlink_once_with(monkeypatch, fail)
+
+    discard_run_tool_results(spill_root)
+
+    assert "failed to remove" in caplog.text

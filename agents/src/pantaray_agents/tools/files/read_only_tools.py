@@ -12,7 +12,6 @@ import asyncio
 import hashlib
 import os
 import tempfile
-import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,8 +24,7 @@ from pantaray_agents.local_runtime.tooling.documents import (
     RENDERED_PAGE_MEDIA_TYPE,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    release_stored_tool_result,
-    store_tool_result,
+    store_run_tool_result,
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
@@ -511,18 +509,10 @@ class _ReadOnlyFileTools:
                     }
                 ],
             }
-        stored = store_tool_result(
-            action_tool_results_path=self.spill_root,
-            invocation_id=uuid.uuid4().hex,
-            output=output,
-        )
-        release_error = release_stored_tool_result(stored)
-        if release_error is not None:
-            raise release_error
         return ReactToolResult(
             tool_name=call.tool_name,
             status="success",
-            output=stored.output_json,
+            output=store_run_tool_result(spill_root=self.spill_root, output=output),
             images=images,
         )
 

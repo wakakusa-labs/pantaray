@@ -10,7 +10,6 @@ work that changes things is a task the chat starts.
 from __future__ import annotations
 
 import asyncio
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Final, cast
@@ -36,6 +35,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 from pantaray_agents.local_runtime.tooling.suggestion_research.zanei import (
     InsightActivityStart,
     SuggestionZaneiSession,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    discard_run_tool_results,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import (
@@ -74,9 +76,7 @@ def chat_tool_results_root(*, db_path: Path, run_id: str) -> Path:
 
 
 def discard_chat_tool_results(*, db_path: Path, run_id: str) -> None:
-    # Design limit: a turn the app quits in leaves its folder behind; sweep this
-    # root at startup if leftovers are seen to grow.
-    shutil.rmtree(chat_tool_results_root(db_path=db_path, run_id=run_id), True)
+    discard_run_tool_results(chat_tool_results_root(db_path=db_path, run_id=run_id))
 
 
 async def chat_research_tools(

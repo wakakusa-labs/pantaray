@@ -23,6 +23,12 @@ WEB_SEARCH_TOOL_NAME: Final = "web_search"
 WEB_EXTRACT_TOOL_NAME: Final = "web_extract"
 WEB_EXTRACT_MAX_URLS: Final = 5
 WEB_URL_MAX_CHARS: Final = 2_048
+# The Action allows one web tool call this long when it shares a turn with other
+# calls, and cancels it, with every result, past that.
+WEB_TOOL_TIMEOUT_SECONDS: Final = 60
+# One query's own limit, short enough that a query still retrying gives up as
+# its own failure while the call still has time to return the others.
+WEB_SEARCH_QUERY_SECONDS: Final = WEB_TOOL_TIMEOUT_SECONDS * 3 / 4
 
 # What, when and what to avoid: the Action shows them as its tool guide, and
 # Suggestion and the chat show the same three as one description.
@@ -241,10 +247,12 @@ __all__ = [
     "WEB_EXTRACT_WHEN",
     "WEB_SEARCH_FIELDS",
     "WEB_SEARCH_PITFALLS",
+    "WEB_SEARCH_QUERY_SECONDS",
     "WEB_SEARCH_REQUIRED",
     "WEB_SEARCH_RESULT_SCHEMA",
     "WEB_SEARCH_TOOL_NAME",
     "WEB_SEARCH_WHAT",
     "WEB_SEARCH_WHEN",
+    "WEB_TOOL_TIMEOUT_SECONDS",
     "request_schema",
 ]

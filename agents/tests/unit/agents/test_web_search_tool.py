@@ -157,3 +157,31 @@ async def test_web_search_fails_as_a_whole_only_when_every_query_failed(
         "error_code": "WEB_TOOL_FAILED",
         "message": "Web search is unavailable right now, so nothing was looked up.",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_query_past_its_own_deadline_leaves_the_others_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.tools.web import execute
+
+    monkeypatch.setattr(execute, "WEB_SEARCH_QUERY_SECONDS", 0.2)
+
+    async def invoke(**kwargs: Any) -> dict[str, Any]:
+        query = kwargs["args"]["query"]
+        if query == "slow":
+            # A provider still retrying when the call's own limit would fall.
+            await asyncio.sleep(30)
+        return _provider_result(query, [_row(f"https://e.com/{query}")])
+
+    monkeypatch.setattr(_FETCH, invoke)
+
+    result = await asyncio.wait_for(_run_tool({"queries": ["fast", "slow"]}), 5)
+
+    found, late = result.output["searches"]
+    assert [row["url"] for row in found["results"]] == ["https://e.com/fast"]
+    assert late == {
+        "query": "slow",
+        "error": "The search did not finish within 0.2 seconds, so nothing was "
+        "looked up.",
+    }

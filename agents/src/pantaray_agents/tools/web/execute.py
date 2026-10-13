@@ -44,6 +44,7 @@ from pantaray_llm.profiles import (
     WEB_SEARCH_PROFILE_ID,
 )
 
+from .definitions import WEB_SEARCH_QUERY_SECONDS
 from .fetch import WebSearchResponse, fetch_web_extract, fetch_web_search
 from .validation import (
     ArgumentProblem,
@@ -112,15 +113,24 @@ async def run_web_search(
             "request_id": str(uuid.uuid4()),
         }
         try:
-            response = await fetch_web_search(
-                context=own_context,
-                query=query,
-                max_retries=max_retries,
-                topic=topic,
-                country=country,
-            )
+            async with asyncio.timeout(WEB_SEARCH_QUERY_SECONDS):
+                response = await fetch_web_search(
+                    context=own_context,
+                    query=query,
+                    max_retries=max_retries,
+                    topic=topic,
+                    country=country,
+                )
         except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
             return _failure(exc, surface_id="web_search", speaks_to_user=speaks_to_user)
+        except TimeoutError:
+            return tool_error_output(
+                error_code="WEB_TOOL_FAILED",
+                message=(
+                    f"The search did not finish within {WEB_SEARCH_QUERY_SECONDS:g} "
+                    "seconds, so nothing was looked up."
+                ),
+            )
         return _Found(context=own_context, response=response)
 
     outcomes = await asyncio.gather(*(search(str(query)) for query in queries))

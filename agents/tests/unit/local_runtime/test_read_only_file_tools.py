@@ -170,7 +170,19 @@ async def test_a_large_result_is_spilled_to_a_file_the_tools_can_read(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["list", "grep"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "list",
+        pytest.param(
+            "grep",
+            marks=pytest.mark.skipif(
+                sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+                reason="grep runs ripgrep under sandbox-exec",
+            ),
+        ),
+    ],
+)
 async def test_a_result_finishing_after_its_run_was_cleaned_up_leaves_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:

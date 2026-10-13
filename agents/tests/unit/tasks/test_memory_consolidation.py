@@ -81,9 +81,10 @@ class _ConsolidatingAgent(_ScriptedMemoryAgent):
         request: MemoryConsolidationRequest,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> None:
-        del tool_result_directory_fd
+        del tool_results_path, db_path
         self.requests.append(request)
         if isinstance(self._rewrite, Exception):
             raise self._rewrite
@@ -250,9 +251,10 @@ class _MergingAgent(_ScriptedMemoryAgent):
         request: MemoryConsolidationRequest,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> None:
-        del tool_result_directory_fd
+        del tool_results_path, db_path
         self.requests.append(request)
         if isinstance(self._merges, Exception):
             raise self._merges

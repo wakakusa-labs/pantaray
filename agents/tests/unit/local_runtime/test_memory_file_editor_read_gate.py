@@ -6,6 +6,7 @@ import pytest
 
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
+from pantaray_agents.agents.memory_agent.agent import saved_results_for_run
 from pantaray_agents.agents.memory_file_editor.runner import (
     MemoryFileEditorRunInput,
     run_memory_file_editor,
@@ -87,10 +88,15 @@ async def test_patch_reference_rejection_reaches_next_turn_and_can_be_corrected(
 
     with MemoryRunWorkspaceScope() as workspace:
         workspace.create(artifact_root=tmp_path, user_id="user-1", run_id="run-1")
+        save_result, read_saved_results = saved_results_for_run(
+            tool_results_path=workspace.require_tool_results_path(),
+            db_path=tmp_path / "runtime.sqlite3",
+        )
         await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id="run-1",
-                tool_result_directory_fd=workspace.require_tool_results_fd(),
+                save_result=save_result,
+                read_saved_results=read_saved_results,
                 tool_definitions=tools,
                 prompt="Update memory",
                 task="Edit the draft.",

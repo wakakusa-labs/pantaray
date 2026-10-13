@@ -11,6 +11,7 @@ from pantaray_agents.tools.web.definitions import (
     WEB_EXTRACT_TOOL_NAME,
     WEB_EXTRACT_WHAT,
     WEB_EXTRACT_WHEN,
+    WEB_TOOL_TIMEOUT_SECONDS,
 )
 
 from .base import (
@@ -33,7 +34,7 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
         concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="network_access",
-            default_timeout_ms=60_000,
+            default_timeout_ms=WEB_TOOL_TIMEOUT_SECONDS * 1000,
         ),
         input_spec=InputSpec(
             fields=shared_fields(WEB_EXTRACT_FIELDS, WEB_EXTRACT_REQUIRED)

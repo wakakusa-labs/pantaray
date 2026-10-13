@@ -793,7 +793,7 @@ async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
     the chat, which answers the user, is asked to pass a fix on."""
 
     arrange(monkeypatch, tmp_path)
-    args: dict[str, object] = {"query": "Pantaray"}
+    args: dict[str, object] = {"queries": ["Pantaray"]}
     call = ReactToolCall(
         tool_name="web_search",
         tool_args=args,  # type: ignore[arg-type]

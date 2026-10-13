@@ -97,7 +97,14 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
             return _command_detail(body)
         case "apply_patch":
             return _apply_patch_detail(body)
-        case "web_search" | "memory_search":
+        case "web_search":
+            searches = [s for s in _items(body, "searches") if isinstance(s, Mapping)]
+            found = sum(len(_items(search, "results")) for search in searches)
+            return [
+                f"{len(searches):,} {'query' if len(searches) == 1 else 'queries'}",
+                f"{found:,} {'result' if found == 1 else 'results'}",
+            ]
+        case "memory_search":
             return [_count(body, "results", "result", "results")]
         case "web_extract":
             return _web_extract_detail(body)

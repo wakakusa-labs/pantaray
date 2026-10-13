@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -58,32 +59,66 @@ def _provider_result(query: str, results: list[dict[str, object]]) -> dict[str, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "args",
-    [{"query": "   "}, {"query": "chips", "topic": "news", "country": "japan"}],
-    ids=["blank-query", "country-outside-general"],
+    [
+        {"queries": ["   "]},
+        {"queries": [f"q{index}" for index in range(6)]},
+        {"queries": ["chips"], "topic": "news", "country": "japan"},
+    ],
+    ids=["blank-query", "six-queries", "country-outside-general"],
 )
-async def test_web_search_refuses_a_request_the_provider_cannot_serve(
+async def test_web_search_refuses_a_request_it_cannot_serve(
     args: dict[str, Any],
 ) -> None:
     with pytest.raises(ToolValidationError):
         await _run_tool(args)
 
 
+def _row(url: str) -> dict[str, object]:
+    return {"title": "T", "url": url, "content": "C" * 3_000, "score": 0.9}
+
+
 @pytest.mark.asyncio
-async def test_web_search_returns_each_result_whole_with_its_route(
+async def test_web_search_runs_each_query_side_by_side_and_reports_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    row = {"title": "T", "url": "https://e.com/a", "content": "C" * 3_000, "score": 0.9}
-    invoke = AsyncMock(return_value=_provider_result("q", [row]))
+    both_started = asyncio.Event()
+    started: list[str] = []
+
+    async def invoke(**kwargs: Any) -> dict[str, Any]:
+        query = kwargs["args"]["query"]
+        started.append(query)
+        if len(started) == 3:
+            both_started.set()
+        # Every search waits for the others: run one at a time, this never ends.
+        await asyncio.wait_for(both_started.wait(), 5)
+        if query == "down":
+            raise WebContentExecutionError(
+                error_code="PROXY_UPSTREAM_UNAVAILABLE",
+                error_message="unavailable",
+                retryable=False,
+            )
+        shared = _row("https://e.com/shared")
+        own = _row(f"https://e.com/{query}")
+        return _provider_result(query, [shared, own] if query == "b" else [own, shared])
+
     monkeypatch.setattr(_FETCH, invoke)
 
-    result = await _run_tool({"query": "q", "topic": "news"})
+    result = await _run_tool({"queries": ["a", "down", "b"], "topic": "news"})
 
     assert result.status == "success"
-    assert result.output["results"] == [row]
-    assert result.output["meta"]["upstream_provider"] == "tavily"
-    assert result.output["meta"]["upstream_request_id"] == "provider-1"
-    assert invoke.await_args.kwargs["args"] == {"query": "q", "topic": "news"}
-    assert invoke.await_args.kwargs["max_retries"] == 3
+    first, failed, second = result.output["searches"]
+    assert [row["url"] for row in first["results"]] == [
+        "https://e.com/a",
+        "https://e.com/shared",
+    ]
+    # Found again by a later query, a URL stays only under the first.
+    assert [row["url"] for row in second["results"]] == ["https://e.com/b"]
+    assert second["meta"]["outcome"] == "complete"
+    assert failed == {
+        "query": "down",
+        "error": "Web search is unavailable right now, so nothing was looked up.",
+    }
+    assert first["meta"]["request_id"] != second["meta"]["request_id"]
 
 
 @pytest.mark.asyncio
@@ -92,22 +127,19 @@ async def test_web_search_with_no_results_suggests_refining_the_query(
 ) -> None:
     monkeypatch.setattr(_FETCH, AsyncMock(return_value=_provider_result("q", [])))
 
-    result = await _run_tool({"query": "q"})
+    result = await _run_tool({"queries": ["q"]})
 
-    assert result.status == "success"
-    assert result.output["meta"]["outcome"] == "no_results"
-    assert result.output["meta"]["suggested_action"] == "refine_query"
+    meta = result.output["searches"][0]["meta"]
+    assert meta["outcome"] == "no_results"
+    assert meta["suggested_action"] == "refine_query"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure",
-    [
-        AsyncMock(
-            return_value=_provider_result(
-                "q", [{"title": "T", "content": "C", "score": 0.9}]
-            )
-        ),
+async def test_web_search_fails_as_a_whole_only_when_every_query_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _FETCH,
         AsyncMock(
             side_effect=WebContentExecutionError(
                 error_code="PROXY_REQUEST_FAILED",
@@ -115,19 +147,41 @@ async def test_web_search_with_no_results_suggests_refining_the_query(
                 retryable=True,
             )
         ),
-    ],
-    ids=["invalid-row", "transport"],
-)
-async def test_web_search_failure_names_no_provider_detail(
-    monkeypatch: pytest.MonkeyPatch, failure: AsyncMock
-) -> None:
-    monkeypatch.setattr(_FETCH, failure)
+    )
 
-    result = await _run_tool({"query": "q"})
+    result = await _run_tool({"queries": ["q1", "q2"]})
 
     assert result.status == "error"
     assert result.output == {
         "status": "error",
         "error_code": "WEB_TOOL_FAILED",
         "message": "Web search is unavailable right now, so nothing was looked up.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_query_past_its_own_deadline_leaves_the_others_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.tools.web import execute
+
+    monkeypatch.setattr(execute, "WEB_SEARCH_QUERY_SECONDS", 0.2)
+
+    async def invoke(**kwargs: Any) -> dict[str, Any]:
+        query = kwargs["args"]["query"]
+        if query == "slow":
+            # A provider still retrying when the call's own limit would fall.
+            await asyncio.sleep(30)
+        return _provider_result(query, [_row(f"https://e.com/{query}")])
+
+    monkeypatch.setattr(_FETCH, invoke)
+
+    result = await asyncio.wait_for(_run_tool({"queries": ["fast", "slow"]}), 5)
+
+    found, late = result.output["searches"]
+    assert [row["url"] for row in found["results"]] == ["https://e.com/fast"]
+    assert late == {
+        "query": "slow",
+        "error": "The search did not finish within 0.2 seconds, so nothing was "
+        "looked up.",
     }

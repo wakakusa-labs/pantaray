@@ -928,12 +928,13 @@ async def test_suggestion_web_search_returns_shared_client_response(
     registry, _db_path = _research_registry(tmp_path)
 
     result = await registry.execute(
-        _tool_call("web_search", {"query": "current evidence"}), 1
+        _tool_call("web_search", {"queries": ["current evidence"]}), 1
     )
 
     assert result.status == "success"
-    assert result.output["results"] == [row]
-    assert result.output["meta"]["upstream_provider"] == "tavily"
+    search = result.output["searches"][0]
+    assert search["results"] == [row]
+    assert search["meta"]["upstream_provider"] == "tavily"
     assert captured["tool_id"] == "web_search"
     assert captured["max_retries"] == 1
 
@@ -1001,7 +1002,7 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
 @pytest.mark.parametrize(
     ("tool_name", "args"),
     [
-        ("web_search", {"query": "chips", "topic": "news", "country": "japan"}),
+        ("web_search", {"queries": ["chips"], "topic": "news", "country": "japan"}),
         ("web_extract", {"urls": ["http://localhost:8000/"]}),
         ("web_extract", {"urls": ["https://[invalid]/"]}),
     ],
@@ -1036,7 +1037,9 @@ async def test_suggestion_web_search_rejects_a_result_for_another_query(
     )
     registry, _db_path = _research_registry(tmp_path)
 
-    result = await registry.execute(_tool_call("web_search", {"query": "evidence"}), 1)
+    result = await registry.execute(
+        _tool_call("web_search", {"queries": ["evidence"]}), 1
+    )
 
     assert result.output["error_code"] == "WEB_TOOL_FAILED"
 

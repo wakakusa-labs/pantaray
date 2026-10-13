@@ -69,7 +69,7 @@ async def test_action_step_does_not_execute_without_write_authority(
     state["next_action"] = build_next_action(
         tool=build_tool_call(
             tool_id=MEMORY_SEARCH_TOOL.tool_id,
-            args={"query": "must not execute"},
+            args={"queries": ["must not execute"]},
         ),
         decided_at="2026-03-26T10:00:00Z",
     )
@@ -204,7 +204,7 @@ async def test_action_step_web_search_tool_end_to_end(
     state["next_action"] = build_next_action(
         tool=build_tool_call(
             tool_id=WEB_SEARCH_TOOL.tool_id,
-            args={"query": "q"},
+            args={"queries": ["q"]},
         ),
         decided_at="2026-03-26T10:00:00Z",
     )
@@ -223,9 +223,10 @@ async def test_action_step_web_search_tool_end_to_end(
     assert history_entry["tool_id"] == WEB_SEARCH_TOOL.tool_id
     payload = history_entry["output"]
     assert isinstance(payload, dict)
-    assert payload["query"] == "q"
-    assert payload["results"][0]["title"] == "T1"
-    assert payload["meta"]["upstream_provider"] == "tavily"
+    search = payload["searches"][0]
+    assert search["query"] == "q"
+    assert search["results"][0]["title"] == "T1"
+    assert search["meta"]["upstream_provider"] == "tavily"
 
     # action_step が保存される
     repo_steps = action_agent.repository.data.get("action_steps", [])
@@ -537,7 +538,7 @@ async def test_action_step_does_not_retry_or_commit_failed_tool_state(
     state["next_action"] = build_next_action(
         tool=build_tool_call(
             tool_id=THINKING_TOOL.tool_id,
-            args={"query": "ツール失敗テスト"},
+            args={"queries": ["ツール失敗テスト"]},
         ),
         decided_at="2026-03-26T10:00:00Z",
     )
@@ -614,7 +615,7 @@ async def test_action_step_does_not_retry_completed_tool_when_audit_persistence_
     state["next_action"] = build_next_action(
         tool=build_tool_call(
             tool_id=THINKING_TOOL.tool_id,
-            args={"query": "audit failure"},
+            args={"queries": ["audit failure"]},
         ),
         decided_at="2026-03-26T10:00:00Z",
     )

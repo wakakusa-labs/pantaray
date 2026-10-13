@@ -10,7 +10,10 @@ model gets no code or provider detail to relay.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
@@ -41,7 +44,8 @@ from pantaray_llm.profiles import (
     WEB_SEARCH_PROFILE_ID,
 )
 
-from .fetch import fetch_web_extract, fetch_web_search
+from .definitions import WEB_SEARCH_QUERY_SECONDS
+from .fetch import WebSearchResponse, fetch_web_extract, fetch_web_search
 from .validation import (
     ArgumentProblem,
     extract_argument_problem,
@@ -89,44 +93,90 @@ async def run_web_search(
     max_retries: int,
     speaks_to_user: bool,
 ) -> dict[str, JSONValue]:
+    """Run every query as its own search, side by side, and report each one.
+
+    One query failing leaves the others' results; only when every query
+    failed is the call itself a failure, told with the first query's reason.
+    """
+
     problem = search_argument_problem(args)
     if problem is not None:
         return _invalid_arguments(problem)
-    query = _text(args, "query")
-    assert query is not None  # the request schema requires it
-    try:
-        response = await fetch_web_search(
-            context=context,
-            query=query,
-            max_retries=max_retries,
-            topic=_text(args, "topic"),
-            country=_text(args, "country"),
-        )
-    except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-        return _failure(exc, surface_id="web_search", speaks_to_user=speaks_to_user)
-    return {
-        "status": "success",
-        "query": query,
-        "results": [
+    queries = args.get("queries")
+    assert isinstance(queries, list)  # the request schema requires it
+    topic, country = _text(args, "topic"), _text(args, "country")
+
+    async def search(query: str) -> _Found | dict[str, JSONValue]:
+        # Each search is its own request, so each has its own request id.
+        own_context: WebToolsWrapperContext = {
+            **context,
+            "request_id": str(uuid.uuid4()),
+        }
+        try:
+            async with asyncio.timeout(WEB_SEARCH_QUERY_SECONDS):
+                response = await fetch_web_search(
+                    context=own_context,
+                    query=query,
+                    max_retries=max_retries,
+                    topic=topic,
+                    country=country,
+                )
+        except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
+            return _failure(exc, surface_id="web_search", speaks_to_user=speaks_to_user)
+        except TimeoutError:
+            return tool_error_output(
+                error_code="WEB_TOOL_FAILED",
+                message=(
+                    f"The search did not finish within {WEB_SEARCH_QUERY_SECONDS:g} "
+                    "seconds, so nothing was looked up."
+                ),
+            )
+        return _Found(context=own_context, response=response)
+
+    outcomes = await asyncio.gather(*(search(str(query)) for query in queries))
+    if not any(isinstance(outcome, _Found) for outcome in outcomes):
+        return outcomes[0]  # type: ignore[return-value]
+    seen: set[str] = set()
+    searches: list[JSONValue] = []
+    for query, outcome in zip(queries, outcomes, strict=True):
+        if not isinstance(outcome, _Found):
+            searches.append({"query": query, "error": outcome["message"]})
+            continue
+        # A URL stays under the first query that found it.
+        rows = [row for row in outcome.response.results if row.url not in seen]
+        seen.update(row.url for row in rows)
+        searches.append(
             {
-                "title": row.title,
-                "url": row.url,
-                "content": row.content,
-                "score": row.score,
+                "query": query,
+                "results": [
+                    {
+                        "title": row.title,
+                        "url": row.url,
+                        "content": row.content,
+                        "score": row.score,
+                    }
+                    for row in rows
+                ],
+                # Judged on what the query found, before repeats were dropped.
+                "meta": _meta(
+                    context=outcome.context,
+                    profile_id=WEB_SEARCH_PROFILE_ID,
+                    provider="tavily",
+                    outcome=PROXY_OUTCOME_COMPLETE
+                    if outcome.response.results
+                    else PROXY_OUTCOME_NO_RESULTS,
+                    upstream_request_id=outcome.response.upstream_request_id,
+                    on_nothing=PROXY_SUGGESTED_ACTION_REFINE_QUERY,
+                ),
             }
-            for row in response.results
-        ],
-        "meta": _meta(
-            context=context,
-            profile_id=WEB_SEARCH_PROFILE_ID,
-            provider="tavily",
-            outcome=PROXY_OUTCOME_COMPLETE
-            if response.results
-            else PROXY_OUTCOME_NO_RESULTS,
-            upstream_request_id=response.upstream_request_id,
-            on_nothing=PROXY_SUGGESTED_ACTION_REFINE_QUERY,
-        ),
-    }
+        )
+    return {"status": "success", "searches": searches}
+
+
+@dataclass(frozen=True, slots=True)
+class _Found:
+    context: WebToolsWrapperContext
+    response: WebSearchResponse
 
 
 async def run_web_extract(

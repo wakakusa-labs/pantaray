@@ -40,7 +40,9 @@ WRITE_PATH_DENIED = "WRITE_PATH_DENIED"
 EXEC_CWD_NOT_FOUND = "EXEC_CWD_NOT_FOUND"
 EXEC_CWD_DENIED = "EXEC_CWD_DENIED"
 # The app's own storage roots that an Action's manifest may grant back to it.
-_APP_MANAGED_ROOT_SOURCE_TYPES = frozenset({"scratch", "agent_experience"})
+_APP_MANAGED_ROOT_SOURCE_TYPES = frozenset(
+    {"scratch", "fact", "long_term_insight", "agent_experience"}
+)
 
 
 @dataclass(frozen=True, slots=True)

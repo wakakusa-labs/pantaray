@@ -194,6 +194,7 @@ async def test_suggestion_memory_search_returns_only_the_users_evidence(
         snapshot=SuggestionResearchSnapshot(
             folders=(),
             memory_revisions={},
+            memory_folders=(),
             stable_memory=SuggestionStableMemoryContext("", False, False),
             commands_allowed=False,
             read_access_scope="workspace",

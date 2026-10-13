@@ -36,6 +36,8 @@ class SuggestionResearchSnapshot:
     folders: tuple[Path, ...]
     # The memory revisions the run's memory_search stays on.
     memory_revisions: Mapping[MemorySource, str | None]
+    # Those revisions' folders, which the file tools may read.
+    memory_folders: tuple[Path, ...]
     stable_memory: SuggestionStableMemoryContext
     # Whether the run offers commands at all; each command checks again.
     commands_allowed: bool
@@ -103,6 +105,7 @@ def build_suggestion_research_snapshot(
             Path(folder.canonical_real_path) for folder in workspace_settings.folders
         ),
         memory_revisions=memory_revisions,
+        memory_folders=tuple(head.folder for head in heads),
         stable_memory=stable_memory,
         commands_allowed=commands_run_without_asking(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id

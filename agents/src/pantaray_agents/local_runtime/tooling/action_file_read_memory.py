@@ -40,7 +40,7 @@ def register_action_file_read_memory(
 ) -> MemoryRevision | None:
     if redaction_applied or read_memory is None:
         return None
-    if _is_agent_experience_read(
+    if _is_memory_folder_read(
         connection=connection,
         invocation_id=invocation_id,
         user_id=user_id,
@@ -117,14 +117,15 @@ def _extraction_window(read: ReadTextPageOutput) -> str:
     return f"#{read.unit_kind}{read.start_unit}"
 
 
-def _is_agent_experience_read(
+def _is_memory_folder_read(
     *,
     connection: sqlite3.Connection,
     invocation_id: str,
     user_id: str,
     path: str,
 ) -> bool:
-    row = connection.execute(
+    # A read of the memory's own files is already memory.
+    rows = connection.execute(
         """
         SELECT roots.canonical_real_path
         FROM tool_invocations AS invocations
@@ -135,16 +136,16 @@ def _is_agent_experience_read(
         WHERE invocations.invocation_id = ?
           AND invocations.user_id = ?
           AND manifests.user_id = ?
-          AND roots.source_type = 'agent_experience'
+          AND roots.source_type IN ('fact', 'long_term_insight', 'agent_experience')
           AND roots.can_read = 1
         """,
         (invocation_id, user_id, user_id),
-    ).fetchone()
-    if row is None:
-        return False
+    ).fetchall()
     read_path = Path(path).resolve()
-    experience_root = Path(str(row["canonical_real_path"])).resolve()
-    return read_path == experience_root or read_path.is_relative_to(experience_root)
+    return any(
+        read_path.is_relative_to(Path(str(row["canonical_real_path"])).resolve())
+        for row in rows
+    )
 
 
 def _render_search_document(read: ReadTextPageOutput) -> str:

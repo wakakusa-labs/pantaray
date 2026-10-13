@@ -82,6 +82,7 @@ from pantaray_agents.tasks.types import SuggestionJobPayload
 _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
     folders=(),
     memory_revisions={},
+    memory_folders=(),
     stable_memory=SuggestionStableMemoryContext(
         prompt="No stable memory roots are available.",
         has_facts=False,

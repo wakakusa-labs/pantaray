@@ -15,6 +15,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request imp
 )
 from pantaray_agents.agents.action_agent.runtime.models.execution_context import (
     ExecutionContextModel,
+    execution_context_from_state,
     require_execution_context_from_state,
 )
 from pantaray_agents.agents.action_agent.runtime.state import (
@@ -38,6 +39,9 @@ from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
 from pantaray_agents.local_runtime.runtime.bootstrap import (
     read_local_runtime_artifact_root,
     read_local_runtime_db_config,
+)
+from pantaray_agents.local_runtime.tooling.repository.manifests import (
+    pin_action_memory_roots,
 )
 from pantaray_agents.schema.workspace_context import render_workspace_context_prompt
 from pantaray_agents.tasks.action_user_message import render_action_user_request_text
@@ -173,25 +177,43 @@ async def initialize_context(
 
 
 def ensure_memory_indexes(state: ActionAgentState, *, user_id: str) -> None:
-    """Read the memory indexes the head shows, once per Action.
+    """Read the memory indexes the head shows from the revisions the Action reads.
 
-    Runs before any route, so a run restored from a checkpoint written before
-    the head showed them gets them too, including a head it already froze:
-    its later turns and the subagents it spawns render that frozen head.
+    The revisions are the ones pinned in the Action's manifest as read-only
+    folders, so an index's links resolve in the folders the Action is given.
+    Runs before any route, so a run restored from a checkpoint gets them too,
+    including a head it already froze: its later turns and the subagents it
+    spawns render that frozen head. The indexes change only when a tree is
+    pinned for the first time, such as on an Action created before its tree
+    had a folder.
     """
 
-    context = ensure_context(state)
-    if "memory_indexes" in context:
+    execution_context = execution_context_from_state(state)
+    if execution_context is None:
+        # A run whose resume failed carries no execution context and only
+        # finalizes; every run that works gets one before the graph starts.
         return
+    context = ensure_context(state)
     db_path, busy_timeout_ms = read_local_runtime_db_config()
+    artifact_root = read_local_runtime_artifact_root()
+    revisions = pin_action_memory_roots(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        artifact_root=artifact_root,
+        user_id=user_id,
+        manifest_id=execution_context.manifest_id,
+    )
     indexes = render_memory_indexes(
         load_memory_heads(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            artifact_root=read_local_runtime_artifact_root(),
+            artifact_root=artifact_root,
             user_id=user_id,
+            revisions=revisions,
         )
     )
+    if context.get("memory_indexes") == indexes:
+        return
     context["memory_indexes"] = indexes
     frozen = context.get("executing_head_fields")
     if frozen is not None:

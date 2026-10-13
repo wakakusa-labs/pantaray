@@ -126,6 +126,7 @@ def _prepare_job(
             SuggestionResearchSnapshot(
                 folders=(),
                 memory_revisions={},
+                memory_folders=(),
                 stable_memory=_STABLE_MEMORY,
                 commands_allowed=False,
                 read_access_scope="workspace",

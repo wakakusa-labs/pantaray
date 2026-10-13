@@ -42,6 +42,7 @@ def _publish_head(
     intent_kind: MemoryIntentKind,
     source_record_id: str,
     documents: tuple[MemoryDocument, ...],
+    base_revision_id: str | None = None,
 ) -> None:
     artifact_root.mkdir(exist_ok=True)
     with open_memory_catalog_connection(
@@ -62,7 +63,7 @@ def _publish_head(
                     draft=create_memory_draft(
                         user_id=user_id,
                         owner_node_id=node.node_id,
-                        base_revision_id=None,
+                        base_revision_id=base_revision_id,
                         documents=documents,
                     ),
                     body_kind="artifact_tree",

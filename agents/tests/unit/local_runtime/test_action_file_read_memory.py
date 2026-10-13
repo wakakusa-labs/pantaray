@@ -324,8 +324,9 @@ def test_redacted_file_read_is_not_registered_as_memory(tmp_path: Path) -> None:
     assert output_count == 1
 
 
-def test_agent_experience_read_keeps_audit_without_registering_memory(
-    tmp_path: Path,
+@pytest.mark.parametrize("source_type", ["agent_experience", "fact"])
+def test_memory_folder_read_keeps_audit_without_registering_memory(
+    tmp_path: Path, source_type: str
 ) -> None:
     db_path, context = _runtime_with_action(tmp_path)
     experience_root = tmp_path / "experience-revision" / "agent_experience"
@@ -341,13 +342,14 @@ def test_agent_experience_read_keeps_audit_without_registering_memory(
                     canonical_real_path, real_path, can_read, can_apply_patch,
                     can_process_read, can_process_write, created_at
                 ) VALUES (
-                    'root:experience', ?, 'agent_experience', 'experience-revision-1',
+                    'root:experience', ?, ?, 'experience-revision-1',
                     'Agent Experience', ?, ?, 1, 0, 0, 0,
                     '2026-08-01T09:01:00Z'
                 )
                 """,
                 (
                     context.manifest_id,
+                    source_type,
                     str(experience_root.resolve()),
                     str(experience_root.resolve()),
                 ),

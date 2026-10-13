@@ -178,7 +178,7 @@ class _Site(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - the stdlib's hook name
         self.server.requests.append(self.path)  # type: ignore[attr-defined]
         if self.path == "/slow":
-            time.sleep(3)
+            time.sleep(8)
         if self.path == "/echo-cookie":
             cookie = self.headers.get("Cookie", "none")
             status, headers, body = 200, _TEXT, f"cookie: {cookie}".encode()
@@ -269,7 +269,9 @@ async def test_a_page_that_hangs_expands_or_breaks_a_parser_fails_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, _requests = site
-    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 2.0)
+    # Long enough for the well-formed page's worker to start on a loaded
+    # machine, short of the hanging site's 8 seconds.
+    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 4.0)
 
     read, failed = await _beside_article(
         base, ["/slow", "/gzip-bomb", "/broken.pdf", "/far-port"]
@@ -307,7 +309,8 @@ async def test_a_worker_cut_off_mid_reply_is_collected_within_the_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, _requests = site
-    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 1.0)
+    # Long enough for the well-formed page's worker to start on a loaded machine.
+    monkeypatch.setattr(local_fetch, "PAGE_WALL_CLOCK_SECONDS", 4.0)
     monkeypatch.setattr(local_fetch, "MAX_WORKER_REPLY_BYTES", 1024**3)
 
     # Left unread in the pipe, the reply kept the killed worker from ever

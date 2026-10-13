@@ -15,6 +15,7 @@ from typing import Literal, TypeGuard
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.files.text_lines import LINE_BREAK, count_text_lines
 
 ACTION_FILE_STORAGE: Literal["action_file"] = "action_file"
 SPILLED_TEXT_MEDIA_TYPE: Literal["text/plain"] = "text/plain"
@@ -97,16 +98,32 @@ def spill_long_texts(
 
 
 def spill_preview(*, text: str, path: str) -> tuple[str, str]:
-    """The head of a spilled text, cut at a line end, and how to read all of it."""
+    """The head of a spilled text, cut at a line end, and how to read all of it.
 
-    preview = text[:TOOL_RESULT_PREVIEW_CHARS]
-    if len(preview) < len(text) and (line_end := preview.rfind("\n")) > 0:
-        preview = preview[:line_end]
-    # The line after the preview, or the one it stops in when it ends mid-line.
-    next_line = text.count("\n", 0, len(preview) + 1) + 1
-    line_count = text.count("\n") + 1
+    Lines end where read ends them (also at a lone carriage return, as progress
+    output writes), so the offset given here is the line read starts after it.
+    """
+
+    window = TOOL_RESULT_PREVIEW_CHARS
+    # One character past the window keeps a CRLF that straddles its end whole.
+    breaks = [
+        line_end
+        for line_end in LINE_BREAK.finditer(text, 0, window + 1)
+        if line_end.start() < window
+    ]
+    cut = next(
+        (index for index in reversed(range(len(breaks))) if breaks[index].start()),
+        None,
+    )
+    if len(text) > window and cut is not None:
+        preview = text[: breaks[cut].start()]
+        next_line = cut + 2
+    else:
+        # No line end to cut at: the preview stops inside the line read starts on.
+        preview = text[:window]
+        next_line = 1 + sum(1 for line_end in breaks if line_end.end() <= window)
     return preview, (
-        f"This result is {len(text):,} characters in {line_count:,} "
+        f"This result is {len(text):,} characters in {count_text_lines(text):,} "
         f"lines, too large to show inline; preview holds only its first "
         f"{len(preview):,}. Read the rest with read path={path} offset={next_line}, "
         "continuing with next_offset, or search it with grep."
@@ -121,7 +138,7 @@ def _spilled_text(*, text: str, path: str) -> dict[str, JSONValue]:
         "media_type": SPILLED_TEXT_MEDIA_TYPE,
         "byte_size": len(text.encode("utf-8")),
         "character_count": len(text),
-        "line_count": text.count("\n") + 1,
+        "line_count": count_text_lines(text),
         "preview": preview,
         "retry_hint": retry_hint,
     }

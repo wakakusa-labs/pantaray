@@ -13,6 +13,7 @@ from pantaray_agents.schema.tool_result import (
     UnprojectedToolOutput,
     serialize_json_tool_output,
 )
+from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
 from .tool_result_spill import spill_long_texts, spill_preview
@@ -127,7 +128,7 @@ def store_tool_result(
         "media_type": TOOL_RESULT_JSON_MEDIA_TYPE,
         "byte_size": len(payload),
         "character_count": len(history_text),
-        "line_count": history_text.count("\n") + 1,
+        "line_count": count_text_lines(history_text),
         "preview": preview,
         "retry_hint": retry_hint,
     }

@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
 from .tool_result_spill import (
@@ -190,7 +191,7 @@ def _check_counts(
 ) -> None:
     if (
         len(text) != metadata["character_count"]
-        or text.count("\n") + 1 != metadata["line_count"]
+        or count_text_lines(text) != metadata["line_count"]
     ):
         raise ToolResultLoadError("action-file result metadata does not match content")
 

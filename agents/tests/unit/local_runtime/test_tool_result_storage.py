@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -273,6 +274,37 @@ def test_read_continues_a_moved_text_where_its_preview_stops(tmp_path: Path) -> 
 
     assert len(read_back) > 3
     assert "".join(read_back) == page
+
+
+def test_moved_text_counts_lines_the_way_read_does(tmp_path: Path) -> None:
+    # Progress output ends lines with a lone \r, and some tools with \r\n.
+    endings = ("\r", "\r\n", "\n")
+    stdout = "".join(
+        f"progress {number:05d} of the download{endings[number % 3]}"
+        for number in range(3_000)
+    )
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="progress",
+        output={"status": "success", "exit_code": 0, "stdout": stdout, "stderr": ""},
+    )
+    release_stored_tool_result(result)
+    moved = result.output_json["stdout"]  # type: ignore[index,call-overload]
+    offset = int(moved["retry_hint"].split("offset=")[1].split(",")[0])
+    preview_lines = re.split(r"\r\n|\r|\n", moved["preview"])
+    assert Path(moved["path"]).read_bytes() == stdout.encode("utf-8")
+
+    descriptor = os.open(moved["path"], os.O_RDONLY)
+    try:
+        page = read_text_descriptor_lines(descriptor=descriptor, offset=offset, limit=1)
+    finally:
+        os.close(descriptor)
+
+    assert offset == len(preview_lines) + 1
+    assert preview_lines[-1] == f"progress {offset - 2:05d} of the download"
+    assert page.content == f"progress {offset - 1:05d} of the download\n"
+    assert moved["line_count"] == page.total_lines == 3_000
+    assert f"in {3_000:,} lines" in moved["retry_hint"]
 
 
 def test_text_moved_out_pages_whole_in_the_output_view(tmp_path: Path) -> None:

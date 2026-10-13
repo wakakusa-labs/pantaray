@@ -22,6 +22,7 @@ from pantaray_llm.errors import (
     PROXY_OUTCOME_PARTIAL_RESULTS,
     PROXY_SUGGESTED_ACTION_CHANGE_URL,
     ProxyAgentErrorPayload,
+    ProxyProvider,
     ProxyToolResultMeta,
     build_proxy_tool_result_meta,
 )
@@ -87,11 +88,12 @@ def _build_extract_meta(
     payload: WebExtractPayload,
     request_id: str,
     upstream_request_id: str | None,
+    provider: ProxyProvider,
 ) -> ProxyToolResultMeta:
     if payload["results"] and payload["failed_results"]:
         return build_proxy_tool_result_meta(
             request_id=request_id,
-            upstream_provider="tavily",
+            upstream_provider=provider,
             profile_id=WEB_EXTRACT_PROFILE_ID,
             outcome=PROXY_OUTCOME_PARTIAL_RESULTS,
             upstream_request_id=upstream_request_id,
@@ -99,14 +101,14 @@ def _build_extract_meta(
     if payload["results"] or payload["failed_results"]:
         return build_proxy_tool_result_meta(
             request_id=request_id,
-            upstream_provider="tavily",
+            upstream_provider=provider,
             profile_id=WEB_EXTRACT_PROFILE_ID,
             outcome=PROXY_OUTCOME_COMPLETE,
             upstream_request_id=upstream_request_id,
         )
     return build_proxy_tool_result_meta(
         request_id=request_id,
-        upstream_provider="tavily",
+        upstream_provider=provider,
         profile_id=WEB_EXTRACT_PROFILE_ID,
         outcome=PROXY_OUTCOME_NO_RESULTS,
         upstream_request_id=upstream_request_id,
@@ -159,7 +161,11 @@ async def run_web_extract_tool(
             max_retries=max_retries,
         )
         payload = _extract_payload(response)
-        payload["truncated"] = query is not None and bool(payload["results"])
+        payload["truncated"] = (
+            query is not None
+            and response.provider == "tavily"
+            and bool(payload["results"])
+        )
         payload["retry_hint"] = (
             QUERY_EXCERPTS_RETRY_HINT if payload["truncated"] else None
         )
@@ -167,6 +173,7 @@ async def run_web_extract_tool(
             payload=payload,
             request_id=request_context["request_id"],
             upstream_request_id=response.upstream_request_id,
+            provider=response.provider,
         )
         status = _aggregate_web_extract_status(payload)
     except (RuntimeError, WebContentInvalidResponseError, ValueError) as exc:

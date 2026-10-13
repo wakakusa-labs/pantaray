@@ -29,7 +29,7 @@ _DISALLOWED_HOST_SUFFIXES = (
 _PUBLIC_URL_ERROR_MESSAGE = (
     "Use an http/https URL that is not obviously local or internal. "
     "This app rejects localhost, private literal IPs, link-local literals, "
-    "and internal-only hostnames. Final destination access policy is enforced by Tavily."
+    "and internal-only hostnames."
 )
 
 

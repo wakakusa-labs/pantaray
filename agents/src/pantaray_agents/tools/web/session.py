@@ -150,6 +150,9 @@ class WebResearchToolSession:
     speaks_to_user: bool
     search_snapshots: dict[str, WebSearchResponse] = field(default_factory=dict)
     extract_snapshots: dict[tuple[str, str | None], str] = field(default_factory=dict)
+    # Snapshots read whole although a query was given: the local route has no
+    # excerpting, so these must not be presented as excerpts.
+    whole_page_snapshots: set[tuple[str, str | None]] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if not self.user_id.strip():
@@ -225,6 +228,8 @@ class WebResearchToolSession:
                 )
             for url, content in contents.items():
                 self.extract_snapshots[(url, query)] = content
+                if response.provider == "local":
+                    self.whole_page_snapshots.add((url, query))
         return _success(
             call.tool_name,
             web_extract_pages(
@@ -233,6 +238,7 @@ class WebResearchToolSession:
                 offset=_integer_arg(args, "offset"),
                 limit=_integer_arg(args, "limit"),
                 snapshots=self.extract_snapshots,
+                whole_pages=self.whole_page_snapshots,
                 failures=failures,
             ),
         )

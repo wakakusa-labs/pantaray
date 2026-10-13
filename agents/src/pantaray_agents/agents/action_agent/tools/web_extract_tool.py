@@ -23,7 +23,11 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
             "Extract the main body content from specific web pages that you already "
             "know. Accepts up to 5 exact URLs and returns each page's full text. "
             f"With query, each page returns only its top {WEB_EXCERPTS_PER_PAGE} "
-            "excerpts (up to 500 characters each) relevant to the query."
+            "excerpts (up to 500 characters each) relevant to the query. "
+            'When meta.upstream_provider is "local" (no Pantaray sign-in or '
+            "Tavily key), pages were fetched from this computer: query is "
+            "ignored and each page comes back whole, and a page that builds its "
+            "content with JavaScript may come back without text."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -63,9 +67,8 @@ WEB_EXTRACT_TOOL = ToolDefinition.from_spec(
                     },
                     required=True,
                     description=(
-                        "Page URLs to extract via the cloud search wrapper (max 5). "
-                        "This app blocks obvious local/internal forms, "
-                        "and the cloud wrapper enforces the final fetch policy."
+                        "Page URLs to extract (max 5). Addresses on this computer "
+                        "or a private network are refused."
                     ),
                 ),
                 field_spec(

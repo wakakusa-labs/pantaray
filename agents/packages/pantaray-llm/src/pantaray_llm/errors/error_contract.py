@@ -11,7 +11,8 @@ type LlmProvider = Literal[
 ]
 # Runtime membership check for values decoded from the wire.
 LLM_PROVIDERS: frozenset[str] = frozenset(get_args(LlmProvider.__value__))
-type ProxyProvider = Literal["tavily", "openai"]
+# "local" is web_extract reading pages from this computer, with no provider.
+type ProxyProvider = Literal["tavily", "openai", "local"]
 type ProxyErrorCode = Literal[
     "PROXY_CONNECTION_NOT_CONFIGURED",
     "PROXY_CONTINUATION_PROVIDER_MISMATCH",
@@ -369,6 +370,13 @@ def _resolve_error_message(
     surface_id: ProxySurfaceId,
     error_code: ProxyErrorCode,
 ) -> str:
+    if error_code == PROXY_CONNECTION_NOT_CONFIGURED and surface_id != "llm":
+        return (
+            "Web search is not set up, so nothing was looked up. It works once the "
+            "user signs in to Pantaray or saves a Tavily API key in Settings > AI "
+            "connection > Web search (in Japanese: 設定 > AI 接続 > Web 検索). "
+            "web_extract still reads pages whose URL is known."
+        )
     if error_code == PROXY_CONNECTION_NOT_CONFIGURED:
         return "No connection is configured. Configure a connection before retrying."
     if error_code == PROXY_CONTINUATION_PROVIDER_MISMATCH:

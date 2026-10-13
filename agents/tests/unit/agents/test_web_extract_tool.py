@@ -177,6 +177,40 @@ async def test_web_extract_without_query_reports_full_pages(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_web_extract_read_locally_is_whole_pages_whatever_the_query(
+    monkeypatch,
+) -> None:
+    page = {"url": "https://example.com/a", "raw_content": "body"}
+    result = {
+        "results": [page],
+        "failed_results": [],
+        "meta": {"upstream_provider": "local"},
+    }
+
+    async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
+        return {
+            "tool_id": "web_extract",
+            "status": "success",
+            "request_id": "r",
+            "result": result,
+        }
+
+    monkeypatch.setattr(
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
+        _fake_invoke,
+    )
+
+    result = await _run_tool(
+        args={"urls": ["https://example.com/a"], "query": "pricing"},
+        state=_base_state(),
+    )
+
+    assert result.output["truncated"] is False
+    assert result.output["retry_hint"] is None
+    assert result.output["meta"]["upstream_provider"] == "local"
+
+
+@pytest.mark.asyncio
 async def test_web_extract_invalid_response_maps_to_error(monkeypatch) -> None:
     async def _fake_invoke(**_kwargs: object) -> dict[str, object]:
         return {

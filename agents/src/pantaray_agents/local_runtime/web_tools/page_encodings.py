@@ -2,7 +2,7 @@
 
 A label is what a web page declares, not a Python codec name: browsers read it
 through the WHATWG Encoding Standard (https://encoding.spec.whatwg.org/), which
-sends Shift_JIS to the Windows code page 932, ISO-8859-1 and US-ASCII to
+sends Shift_JIS to the Windows code page 932, GBK to GB18030, ISO-8859-1 and US-ASCII to
 windows-1252, and EUC-KR to the Windows code page 949. Following the same table
 reads a page the way the person's browser shows it. A label outside the table,
 or one of WHATWG's encodings Python has no codec for (x-user-defined,
@@ -58,9 +58,9 @@ _LABELS_BY_CODEC: Final = {
     "cp1256": "cp1256 windows-1256 x-cp1256",
     "cp1257": "cp1257 windows-1257 x-cp1257",
     "cp1258": "cp1258 windows-1258 x-cp1258",
-    "gbk": "chinese csgb2312 csiso58gb231280 gb2312 gb_2312 gb_2312-80 gbk "
-    "iso-ir-58 x-gbk",
-    "gb18030": "gb18030",
+    # WHATWG decodes GBK with the gb18030 decoder, four-byte sequences included.
+    "gb18030": "chinese csgb2312 csiso58gb231280 gb2312 gb_2312 gb_2312-80 gbk "
+    "iso-ir-58 x-gbk gb18030",
     # WHATWG's Big5 includes the Hong Kong extensions.
     "big5hkscs": "big5 big5-hkscs cn-big5 csbig5 x-x-big5",
     "euc_jp": "cseucpkdfmtjapanese euc-jp x-euc-jp",

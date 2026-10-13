@@ -42,7 +42,13 @@ def html_to_markdown(page: str) -> str:
     """The page's readable text, or ``""`` when it has none (a script-built page)."""
 
     try:
-        document = lxml_html.document_fromstring(_XML_DECLARATION.sub("", page))
+        document = lxml_html.document_fromstring(
+            _XML_DECLARATION.sub("", page),
+            # Past libxml2's default depth limit the parser silently returns
+            # the tree so far, dropping the rest of the page as if it were not
+            # there. A tree deeper than rendering can recurse fails the page.
+            parser=lxml_html.HTMLParser(huge_tree=True),
+        )
     except ParserError:
         return ""
     root = document.find(".//main")

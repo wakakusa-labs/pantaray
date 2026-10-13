@@ -51,6 +51,9 @@ ARTICLE = b"""<!doctype html><html><head><title>t</title>
 # Shift_JIS as browsers read it is code page 932, which has these two; Python's
 # own shift_jis codec does not.
 JAPANESE = "日本語髙①"
+UTF16_WITH_BOM = "\ufeff日本語".encode("utf-16-le")
+# WHATWG decodes a gbk label with gb18030, which has four-byte sequences.
+FOUR_BYTE_GBK = "\U00020000".encode("gb18030")
 BAD_LINK = b'<p>See <a href="https://[broken">this</a>.</p>'
 
 
@@ -99,6 +102,9 @@ class _Site(BaseHTTPRequestHandler):
                 b'<meta charset="Shift_JIS"><p>' + JAPANESE.encode("cp932"),
             ),
             "/far-port": (302, {"Location": "http://site.test:65536/"}, b""),
+            "/utf-16": (200, {"Content-Type": "text/plain"}, UTF16_WITH_BOM),
+            "/gbk": (200, {"Content-Type": "text/plain; charset=gbk"}, FOUR_BYTE_GBK),
+            "/deep": (200, {"Content-Type": "text/html"}, b"<div>" * 3_000),
         }.get(self.path, (404, {}, b""))
         self.send_response(status)
         for name, value in {**headers, "Content-Length": str(len(body))}.items():
@@ -241,7 +247,9 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
             f"{base}/meta-shift-jis",
         ]
     )
-    far_port = await _extract([f"{base}/article", f"{base}/far-port"])
+    more = await _extract(
+        [f"{base}/article", f"{base}/far-port", f"{base}/utf-16", f"{base}/gbk"]
+    )
 
     read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
     assert read[f"{base}/article"].startswith("# Providers")
@@ -258,8 +266,12 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
         JAPANESE,
         JAPANESE,
     ]
-    assert [row["url"] for row in far_port["results"]] == [f"{base}/article"]  # type: ignore[index,union-attr]
-    assert _failures(far_port) == {f"{base}/far-port": "The page could not be fetched."}
+    # A byte order mark outranks the missing charset.
+    assert [row["raw_content"] for row in more["results"]][1:] == [  # type: ignore[index,union-attr]
+        "日本語",
+        "\U00020000",
+    ]
+    assert _failures(more) == {f"{base}/far-port": "The page could not be fetched."}
 
 
 @pytest.mark.asyncio
@@ -276,11 +288,13 @@ async def test_a_converter_failing_on_one_page_leaves_the_others(
 
     monkeypatch.setattr(local_fetch, "extract_document", broken_pdf)
 
-    result = await _extract([f"{base}/article", f"{base}/broken.pdf"])
+    result = await _extract([f"{base}/article", f"{base}/broken.pdf", f"{base}/deep"])
 
     assert [row["url"] for row in result["results"]] == [f"{base}/article"]  # type: ignore[union-attr,index]
+    # A tree deeper than rendering recurses fails its own page the same way.
     assert _failures(result) == {
-        f"{base}/broken.pdf": "The page could not be converted to text."
+        f"{base}/broken.pdf": "The page could not be converted to text.",
+        f"{base}/deep": "The page could not be converted to text.",
     }
 
 
@@ -305,6 +319,12 @@ def test_skipped_elements_repeated_up_to_the_size_limit_render_quickly() -> None
 
     assert time.perf_counter() - started < 5
     assert text == "a" * 250_000
+
+
+def test_a_page_deeper_than_the_parser_default_keeps_its_end() -> None:
+    page = "<body>" + "<div>" * 260 + "x" + "</div>" * 260 + "<p>end</p></body>"
+
+    assert html_to_markdown(page).endswith("end")
 
 
 def test_the_text_grows_no_faster_than_the_markup() -> None:

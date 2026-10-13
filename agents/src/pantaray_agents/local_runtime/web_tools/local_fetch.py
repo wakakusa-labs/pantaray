@@ -72,6 +72,12 @@ _META_CHARSET: Final = re.compile(
     rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.I
 )
 _SNIFF_BYTES: Final = 4096
+# A byte order mark outranks any declared charset (WHATWG "decode").
+_BYTE_ORDER_MARKS: Final = (
+    (b"\xef\xbb\xbf", "utf-8"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
+)
 _INVALID_URL: Final = "The URL, or a redirect's target, is not a valid URL."
 
 
@@ -291,7 +297,7 @@ def _page_kind(content_type: str) -> _PageKind:
 def _page_text(download: _Download) -> str:
     if download.kind == "pdf":
         return _pdf_text(download.body)
-    text = download.body.decode(_charset(download), errors="replace")
+    text = _decode(download)
     if download.kind == "html":
         text = html_to_markdown(text)
     if not text.strip():
@@ -315,6 +321,15 @@ def _pdf_text(body: bytes) -> str:
         f"{document.text}\n\n[Only pages 1-{document.next_start_unit - 1} of "
         f"{document.total_units} fit; the rest of this PDF was not read.]"
     )
+
+
+def _decode(download: _Download) -> str:
+    """Decode by the byte order mark when there is one, as WHATWG does."""
+
+    for bom, codec in _BYTE_ORDER_MARKS:
+        if download.body.startswith(bom):
+            return download.body[len(bom) :].decode(codec, errors="replace")
+    return download.body.decode(_charset(download), errors="replace")
 
 
 def _charset(download: _Download) -> str:

@@ -16,6 +16,7 @@ from .broker_test_support import (
     _bootstrap_runtime_db,
     _bootstrap_runtime_db_with_registered_folder,
 )
+from .discovery_output_support import glob_paths, grep_matches
 
 
 @pytest.mark.asyncio
@@ -52,14 +53,41 @@ async def test_execute_broker_tool_greps_workspace_files(
     assert outcome.output["truncation_reason"] is None
     assert outcome.output["retry_hint"] is None
     assert outcome.output["warning"] is None
-    matches = outcome.output["matches"]
-    assert isinstance(matches, list)
-    assert [
-        (match["path"], match["line_number"], match["line"]) for match in matches
-    ] == [
-        (str(context.workspace_path / "src" / "app.py"), 1, "needle"),
-        (str(context.workspace_path / "src" / "util.py"), 2, "needle again"),
+    assert outcome.output["base_path"] == str(context.workspace_path)
+    assert outcome.output["files"] == [
+        {"path": "src/app.py", "matches": ["1:needle"]},
+        {"path": "src/util.py", "matches": ["2:needle again"]},
     ]
+
+
+@pytest.mark.asyncio
+async def test_grep_names_each_file_once_relative_to_base_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_ripgrep_backend(monkeypatch)
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    deep = context.workspace_path / "results" / ("long-directory-name-" * 5)
+    deep.mkdir(parents=True)
+    (deep / "output.txt").write_text(
+        "".join(f"needle {index}\n" for index in range(65)), encoding="utf-8"
+    )
+
+    outcome = await execute_broker_tool(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_id="grep",
+        user_id="user-1",
+        actor_process_id=BROKER_ACTOR_PROCESS_ID,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session_id,
+        args={"base_path": ".", "pattern": "needle", "max_matches": 100},
+    )
+
+    (only,) = outcome.output["files"]
+    assert only["path"] == f"results/{'long-directory-name-' * 5}/output.txt"
+    assert len(only["matches"]) == 65
+    assert json.dumps(outcome.output).count("long-directory-name-" * 5) == 1
 
 
 @pytest.mark.asyncio
@@ -94,7 +122,9 @@ async def test_grep_full_access_allows_absolute_base_path_outside_workspace(
     )
 
     assert outcome.status == "success"
-    assert [(match["path"], match["line"]) for match in outcome.output["matches"]] == [
+    assert [
+        (match["path"], match["line"]) for match in grep_matches(outcome.output)
+    ] == [
         (str(outside_file), "needle outside"),
     ]
 
@@ -128,7 +158,9 @@ async def test_grep_dot_searches_current_execution_workspace(
     )
 
     assert outcome.status == "success"
-    assert [(match["path"], match["line"]) for match in outcome.output["matches"]] == [
+    assert [
+        (match["path"], match["line"]) for match in grep_matches(outcome.output)
+    ] == [
         (str(context.workspace_path / "scratch.txt"), "needle scratch"),
     ]
 
@@ -228,8 +260,7 @@ async def test_grep_truncates_long_matching_lines(
     assert outcome.output["truncation_reason"] == "line_length"
     assert "offset=line_number" in str(outcome.output["retry_hint"])
     assert "excerpt around their first match" in str(outcome.output["warning"])
-    matches = outcome.output["matches"]
-    assert isinstance(matches, list)
+    matches = grep_matches(outcome.output)
     assert len(matches) == 1
     line = matches[0]["line"]
     assert line.startswith("…x") and line.endswith("y…")
@@ -260,7 +291,7 @@ async def test_grep_match_limit_names_the_limit_and_keeps_line_note(
     )
 
     assert outcome.status == "success"
-    assert len(outcome.output["matches"]) == 2
+    assert len(grep_matches(outcome.output)) == 2
     assert outcome.output["truncated"] is True
     assert outcome.output["truncation_reason"] == "limit"
     warning = str(outcome.output["warning"])
@@ -279,7 +310,7 @@ async def test_grep_caps_total_output_bytes(
     install_fake_ripgrep_backend(monkeypatch)
     db_path, context = _bootstrap_runtime_db(tmp_path)
     (context.workspace_path / "many.txt").write_text(
-        "".join(f"needle {'x' * 1800} {index}\n" for index in range(100)),
+        "".join(f"needle {'x' * 1800} {index}\n" for index in range(200)),
         encoding="utf-8",
     )
 
@@ -295,7 +326,7 @@ async def test_grep_caps_total_output_bytes(
             "base_path": ".",
             "pattern": "needle",
             "include_glob": "*.txt",
-            "max_matches": 100,
+            "max_matches": 200,
         },
     )
 
@@ -310,10 +341,9 @@ async def test_grep_caps_total_output_bytes(
     assert stored_output["truncation_reason"] == "output_bytes"
     assert "Narrow base_path" in str(stored_output["retry_hint"])
     assert "50 KB output limit" in str(stored_output["warning"])
-    matches = stored_output["matches"]
-    assert isinstance(matches, list)
+    matches = grep_matches(stored_output)
     assert len(str(stored_output).encode("utf-8")) <= 70_000
-    assert len(matches) < 100
+    assert len(matches) < 200
 
 
 @pytest.mark.asyncio
@@ -464,10 +494,7 @@ async def test_discovery_tools_accept_workspace_absolute_paths(
     )
 
     assert outcome.status == "success"
-    assert {
-        (match["path"], match["kind"], match["name"])
-        for match in outcome.output["matches"]
-    } >= {(str(context.workspace_path / "a.txt"), "file", "a.txt")}
+    assert str(context.workspace_path / "a.txt") in glob_paths(outcome.output)
 
 
 @pytest.mark.asyncio

@@ -145,13 +145,13 @@ def test_large_result_without_long_texts_is_stored_whole_with_exact_metadata(
     assert result.output_json["line_count"] == history_text.count("\n") + 1
     preview = result.output_json["preview"]
     assert len(preview) <= 2_000
-    assert history_text.startswith(preview + "\n")
+    assert preview.startswith('title="日本語の結果"\nlines[0]: "一行目')
+    assert preview.endswith(" more of 301 lines")
     assert (
         f"in {history_text.count(chr(10)) + 1:,} lines"
         in result.output_json["retry_hint"]
     )
     assert f"path={relative_path.as_posix()}" in result.output_json["retry_hint"]
-    assert "offset=" in result.output_json["retry_hint"]
     assert "sha256" not in result.output_json
     assert result.search_text is None
     assert result.stdout_text is None
@@ -172,6 +172,57 @@ def test_large_result_without_long_texts_is_stored_whole_with_exact_metadata(
             max_bytes=result.output_json["byte_size"],
         )
         assert loaded == output
+
+
+def test_outline_of_a_result_stored_whole_names_every_short_value(
+    tmp_path: Path,
+) -> None:
+    # Search results: no text long enough to move out alone, and many of them.
+    results = [
+        {
+            "title": f"Result {index}",
+            "url": f"https://example.com/{index}",
+            "content": f"{index} " + "body " * 400,
+            "score": 0.5,
+        }
+        for index in range(12)
+    ]
+    output = {"status": "success", "searches": [{"query": "q", "results": results}]}
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="search-result",
+        output=output,
+    )
+
+    preview = result.output_json["preview"]
+    assert result.output_json["media_type"] == "application/json"
+    assert preview.splitlines()[:3] == [
+        'status="success"',
+        'searches[0]: query="q"',
+        'searches[0].results[0]: title="Result 0" url="https://example.com/0" '
+        "score=0.5",
+    ]
+    assert 'title="Result 11"' in preview
+    assert "body" not in preview
+    release_stored_tool_result(result)
+
+
+def test_outline_says_how_many_lines_it_leaves_out(tmp_path: Path) -> None:
+    output = {"matches": [f"folder/file-{index:04}.md" for index in range(2_000)]}
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path,
+        invocation_id="glob-result",
+        output=output,
+    )
+
+    preview = result.output_json["preview"]
+    assert len(preview) <= 2_000
+    assert preview.startswith('matches[0]: "folder/file-0000.md"\n')
+    shown = preview.count("\n")
+    assert preview.endswith(f"… {2_000 - shown:,} more of 2,000 lines")
+    release_stored_tool_result(result)
 
 
 def _page(words: int) -> str:

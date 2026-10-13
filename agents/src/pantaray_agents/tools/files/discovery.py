@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -14,7 +13,6 @@ from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .discovery_paths import (
-    DiscoveryPath,
     entry_for_discovery_path,
     list_discovery_paths,
 )
@@ -81,10 +79,6 @@ def _reject_unsafe_glob_pattern(pattern: str, *, field_name: str) -> None:
         raise BrokerPolicyError(f"{field_name} must not contain parent directory parts")
 
 
-def _sort_discovery_paths(paths: Iterable[DiscoveryPath]) -> list[DiscoveryPath]:
-    return sorted(paths, key=lambda path: str(path.path))
-
-
 def run_list(*, scope: ReadScope, request: ListToolArgs) -> ReadToolResult:
     base = _resolve_directory(scope=scope, raw_path=request.path)
     bounded = list_discovery_paths(
@@ -139,15 +133,13 @@ def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
         extra_search_paths=search_scope.own_roots,
         include_path=lambda path: not scope.hides(path),
     )
-    selected = [
-        DiscoveryPath(path=_backend_path(base, relative_path), kind="file")
-        for relative_path in backend_result.relative_paths
-    ]
-    matches = [
-        entry_for_discovery_path(path) for path in _sort_discovery_paths(selected)
-    ]
-    match_values: list[JSONValue] = [_discovery_entry_json(match) for match in matches]
-    search_text = "\n".join(str(match["path"]) for match in matches)
+    relative_paths = sorted(
+        _relative_path(relative_path) for relative_path in backend_result.relative_paths
+    )
+    absolute_paths = tuple(
+        str(_backend_path(base, relative_path)) for relative_path in relative_paths
+    )
+    match_values: list[JSONValue] = list(relative_paths)
     warnings, hints = _glob_notes(
         reason=backend_result.truncation_reason,
         limit=request.limit,
@@ -157,6 +149,7 @@ def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
     return ReadToolResult(
         output={
             "status": "success",
+            "base_path": str(base.path),
             "matches": match_values,
             "truncated": backend_result.truncated,
             "truncation_reason": backend_result.truncation_reason,
@@ -164,12 +157,10 @@ def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
             "warning": " ".join(warnings) or None,
             "skipped_files": backend_result.skipped_files,
         },
-        search_text=search_text,
-        file_paths=tuple(str(match["path"]) for match in matches),
+        search_text="\n".join(absolute_paths),
+        file_paths=absolute_paths,
         file_reference_paths=(
-            tuple(str(match["path"]) for match in matches)
-            if base.root in scope.manifest_roots
-            else ()
+            absolute_paths if base.root in scope.manifest_roots else ()
         ),
     )
 
@@ -190,6 +181,11 @@ def _backend_path(base: ResolvedManifestPath, relative_path: str) -> Path:
     return base.path / PurePosixPath(relative_path)
 
 
+def _relative_path(backend_path: str) -> str:
+    """A path the search backend printed, relative to base_path, without ./."""
+    return PurePosixPath(backend_path).as_posix()
+
+
 def _discovery_entry_json(entry: dict[str, object]) -> dict[str, JSONValue]:
     return {
         "path": str(entry["path"]),
@@ -200,27 +196,22 @@ def _discovery_entry_json(entry: dict[str, object]) -> dict[str, JSONValue]:
 
 def _append_grep_match(
     *,
-    matches: list[dict[str, JSONValue]],
+    files: dict[str, list[tuple[int, str]]],
     output_bytes: int,
-    base: ResolvedManifestPath,
     match: RipgrepGrepMatch,
 ) -> GrepAppendResult:
-    path = str(_backend_path(base, match.relative_path))
+    path = _relative_path(match.relative_path)
+    # A file's path is shown once, above its matching lines.
     byte_size = len(
-        f"{path}:{match.line_number}:{match.line}\n".encode("utf-8", errors="replace")
+        ("" if path in files else f"{path}\n").encode("utf-8", errors="replace")
+        + f"{match.line_number}:{match.line}\n".encode("utf-8", errors="replace")
     )
     if output_bytes + byte_size > GREP_MAX_OUTPUT_BYTES:
         return GrepAppendResult(
             output_bytes=output_bytes,
             truncation_reason="output_bytes",
         )
-    matches.append(
-        {
-            "path": path,
-            "line_number": match.line_number,
-            "line": match.line,
-        }
-    )
+    files.setdefault(path, []).append((match.line_number, match.line))
     return GrepAppendResult(
         output_bytes=output_bytes + byte_size,
         truncation_reason="line_length" if match.line_truncated else None,
@@ -229,7 +220,7 @@ def _append_grep_match(
 
 def _build_grep_outcome(
     *,
-    matches: list[dict[str, JSONValue]],
+    files: dict[str, list[tuple[int, str]]],
     base: ResolvedManifestPath,
     backend_result: RipgrepGrepResult,
     max_matches: int,
@@ -237,14 +228,19 @@ def _build_grep_outcome(
     truncation_reason: DiscoveryTruncationReason | None,
     include_file_references: bool,
 ) -> ReadToolResult:
-    sorted_matches = sorted(matches, key=_grep_match_sort_key)
-    search_text = "\n".join(
-        f"{match['path']}:{match['line_number']}:{match['line']}"
-        for match in sorted_matches
-    )
-    match_values: list[JSONValue] = []
-    for match in sorted_matches:
-        match_values.append(dict(match))
+    file_values: list[JSONValue] = []
+    search_lines: list[str] = []
+    for path in sorted(files):
+        lines = sorted(files[path])
+        # "line_number:line", as ripgrep prints it, which the byte budget counts.
+        file_values.append(
+            {"path": path, "matches": [f"{number}:{line}" for number, line in lines]}
+        )
+        absolute_path = _backend_path(base, path)
+        search_lines.extend(
+            f"{absolute_path}:{number}:{line}" for number, line in lines
+        )
+    absolute_paths = tuple(str(_backend_path(base, path)) for path in sorted(files))
     warnings, retry_hints = _grep_notes(
         reason=truncation_reason,
         max_matches=max_matches,
@@ -259,30 +255,17 @@ def _build_grep_outcome(
     return ReadToolResult(
         output={
             "status": "success",
-            "matches": match_values,
+            "base_path": str(base.path),
+            "files": file_values,
             "truncated": truncation_reason is not None,
             "truncation_reason": truncation_reason,
             "retry_hint": " ".join(retry_hints) or None,
             "warning": " ".join(warnings) or None,
             "skipped_files": backend_result.skipped_files,
         },
-        search_text=search_text,
-        file_paths=tuple(str(match["path"]) for match in sorted_matches),
-        file_reference_paths=(
-            tuple(str(match["path"]) for match in sorted_matches)
-            if include_file_references
-            else ()
-        ),
-    )
-
-
-def _grep_match_sort_key(match: dict[str, JSONValue]) -> tuple[str, int]:
-    line_number = match["line_number"]
-    return (
-        str(match["path"]),
-        line_number
-        if isinstance(line_number, int) and not isinstance(line_number, bool)
-        else 0,
+        search_text="\n".join(search_lines),
+        file_paths=absolute_paths,
+        file_reference_paths=absolute_paths if include_file_references else (),
     )
 
 
@@ -307,7 +290,7 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
         ),
         include_path=lambda path: not scope.hides(path),
     )
-    matches: list[dict[str, JSONValue]] = []
+    files: dict[str, list[tuple[int, str]]] = {}
     truncation_reason: DiscoveryTruncationReason | None = (
         backend_result.truncation_reason
     )
@@ -315,9 +298,8 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
     lines_excerpted = False
     for backend_match in backend_result.matches:
         append_result = _append_grep_match(
-            matches=matches,
+            files=files,
             output_bytes=output_bytes,
-            base=base,
             match=backend_match,
         )
         output_bytes = append_result.output_bytes
@@ -329,7 +311,7 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
             break
         lines_excerpted = lines_excerpted or backend_match.line_truncated
     return _build_grep_outcome(
-        matches=matches,
+        files=files,
         base=base,
         backend_result=backend_result,
         max_matches=request.max_matches,
@@ -430,7 +412,9 @@ def _grep_notes(
             f"that match is over {RIPGREP_MAX_COLUMNS // 1024} KB into the line; "
             f"{GREP_OMITTED_TEXT_MARKER} marks omitted text."
         )
-        hints.append("To see more of such a line, read the file at offset=line_number.")
+        hints.append(
+            "To see more of such a line, read base_path/path at offset=line_number."
+        )
     if skipped_files > 0:
         warnings.append(
             f"{skipped_files} path(s) could not be read and were not searched, so "

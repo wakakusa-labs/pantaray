@@ -108,8 +108,10 @@ async def test_read_caps_output_bytes(tmp_path: Path) -> None:
     assert output["truncated"] is True
     assert output["truncation_reason"] == "page_limit"
     assert output["retry_hint"] is not None
-    assert output["next_offset"] == output["end_line"]
-    assert output["next_column"] == output["end_column"] + 1
+    # The page ends after its last whole line.
+    assert output["content"].endswith("x\n")
+    assert output["next_offset"] == output["end_line"] + 1
+    assert output["next_column"] == 1
     ReadToolOutput.model_validate(output)
 
 
@@ -183,7 +185,7 @@ async def test_read_returns_total_lines_when_limit_stops_before_eof(
 async def test_read_pages_long_lines_without_losing_content(tmp_path: Path) -> None:
     db_path, context = bootstrap_read_runtime_db(tmp_path)
     (context.workspace_path / "long-line.txt").write_text(
-        "a" * 2_100 + "\n",
+        "a" * 2_100 + "\nnext\n",
         encoding="utf-8",
     )
 
@@ -194,19 +196,77 @@ async def test_read_pages_long_lines_without_losing_content(tmp_path: Path) -> N
     )
 
     assert outcome.status == "success"
-    assert outcome.output["content"] == "a" * 2_000
-    assert outcome.output["next_offset"] == 1
-    assert outcome.output["next_column"] == 2_001
+    assert outcome.output["content"] == (
+        "a" * 2_000 + " … [line cut; read offset=1 column=2001 for the rest]\nnext\n"
+    )
+    assert outcome.output["next_offset"] is None
+    assert outcome.output["truncated"] is True
+    assert outcome.output["truncation_reason"] == "line_length"
+    ReadToolOutput.model_validate(outcome.output)
 
     continuation = await execute_read_tool(
         db_path=db_path,
         context=context,
-        args={"path": "long-line.txt", "offset": 1, "column": 2_001},
+        args={"path": "long-line.txt", "offset": 1, "column": 2_001, "limit": 1},
     )
 
     assert continuation.output["content"] == "a" * 100 + "\n"
-    assert continuation.output["next_offset"] is None
-    assert continuation.output["next_column"] is None
+    assert continuation.output["next_offset"] == 2
+    assert continuation.output["next_column"] == 1
+
+
+@pytest.mark.asyncio
+async def test_read_keeps_whole_cut_lines_inline_with_their_markers(
+    tmp_path: Path,
+) -> None:
+    # The shape of a saved search result: every value on one long line.
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    (context.workspace_path / "results.json").write_text(
+        "".join(f"{index}" + "b" * 3_000 + "\n" for index in range(30)),
+        encoding="utf-8",
+    )
+
+    outcome = await execute_read_tool(
+        db_path=db_path,
+        context=context,
+        args={"path": "results.json"},
+    )
+
+    output = outcome.output
+    assert (
+        len(serialize_json_tool_output(output))
+        <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
+    lines = output["content"].splitlines()
+    assert len(lines) > 1
+    assert lines[-1].endswith(
+        f"[line cut; read offset={output['end_line']} column=2001 for the rest]"
+    )
+    assert output["next_offset"] == output["end_line"] + 1
+    assert output["next_column"] == 1
+    ReadToolOutput.model_validate(output)
+
+
+@pytest.mark.asyncio
+async def test_read_splits_a_first_line_too_large_to_keep_inline_in_its_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "pantaray_agents.tools.files.read_page.ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT",
+        2_400,
+    )
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    (context.workspace_path / "long.txt").write_text("a" * 3_000 + "\n")
+
+    outcome = await execute_read_tool(
+        db_path=db_path, context=context, args={"path": "long.txt"}
+    )
+
+    content = outcome.output["content"]
+    assert content == "a" * len(content)
+    assert outcome.output["next_offset"] == 1
+    assert outcome.output["next_column"] == len(content) + 1
+    assert outcome.output["end_column"] == len(content)
 
 
 @pytest.mark.asyncio

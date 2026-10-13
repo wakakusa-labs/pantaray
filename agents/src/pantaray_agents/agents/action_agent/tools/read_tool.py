@@ -112,8 +112,9 @@ READ_TOOL = ToolDefinition.from_spec(
                 f"{ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT:,}-character inline "
                 "result with its metadata; follow the returned cursor for the "
                 "rest. Every line of a text file of any size is reachable by "
-                f"offset, and a line longer than {MAX_LINE_LENGTH} characters "
-                "continues with next_column. A text file in CP932 (Shift_JIS) "
+                f"offset; a line longer than {MAX_LINE_LENGTH:,} characters is cut "
+                "and ends with the offset and column that read the rest of it. "
+                "A text file in CP932 (Shift_JIS) "
                 "or with a UTF-16 byte order mark is decoded too, and encoding "
                 "says which encoding was used. A directory read pages through "
                 "every entry in the directory's own order, and offset counts the "
@@ -216,10 +217,13 @@ READ_TOOL = ToolDefinition.from_spec(
                         "page_limit",
                         "line_count_budget",
                         "document_budget",
+                        "line_length",
                         None,
                     ],
                     "description": (
                         "page_limit means more entries or lines are available. "
+                        "line_length means the page reached the end, but some "
+                        "lines in it were cut. "
                         "line_count_budget means a text file was "
                         "too large to count total_lines safely. "
                         "document_budget means document extraction stopped before "

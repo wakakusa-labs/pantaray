@@ -16,8 +16,13 @@ from pantaray_agents.schema.agent.base import JSONValue
     [
         ("read", {"kind": "file", "content": "x" * 12_340}, "read: ok, 12,340 chars"),
         ("read", {"kind": "directory", "entries": [{}]}, "read: ok, 1 entry"),
-        ("glob", {"matches": [{}, {}, {}]}, "glob: ok, 3 matches"),
-        ("grep", {"matches": []}, "grep: ok, 0 matches"),
+        ("glob", {"matches": ["a", "b", "c"]}, "glob: ok, 3 matches"),
+        ("grep", {"files": []}, "grep: ok, 0 matches, 0 files"),
+        (
+            "grep",
+            {"files": [{"matches": ["1:a", "2:b"]}, {"matches": ["3:c"]}]},
+            "grep: ok, 3 matches, 2 files",
+        ),
         (
             "bash",
             {"exit_code": 2, "stdout": "abc", "stderr": "de"},

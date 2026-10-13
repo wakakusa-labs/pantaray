@@ -44,6 +44,7 @@ from pantaray_agents.tools.files.read_paths import (
 )
 
 from .broker_test_support import BROKER_ACTOR_PROCESS_ID
+from .discovery_output_support import glob_paths, grep_matches
 from .path_access_policy_support import (
     bootstrap_path_policy_runtime_db,
     build_manifest_root,
@@ -465,11 +466,9 @@ async def test_full_access_read_scope_allows_read_list_glob_and_grep_outside_wor
     assert [entry["path"] for entry in list_outcome.output["entries"]] == [
         str(outside_file)
     ]
-    assert [match["path"] for match in glob_outcome.output["matches"]] == [
-        str(outside_file)
-    ]
+    assert glob_paths(glob_outcome.output) == [str(outside_file)]
     assert [
-        (match["path"], match["line"]) for match in grep_outcome.output["matches"]
+        (match["path"], match["line"]) for match in grep_matches(grep_outcome.output)
     ] == [(str(outside_file), "needle")]
 
 

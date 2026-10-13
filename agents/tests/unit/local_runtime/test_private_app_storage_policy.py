@@ -35,6 +35,7 @@ from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _grant_workspace_full_access,
 )
+from .discovery_output_support import glob_paths, grep_matches
 from .path_access_policy_support import (
     ACTION_ID,
     USER_ID,
@@ -182,8 +183,7 @@ async def test_own_workspace_and_results_stay_readable_inside_app_storage(
             tool_id=tool_id,
             args=_search_args(tool_id, above_storage),
         )
-        items = outcome.output["entries" if tool_id == "list" else "matches"]
-        paths = [Path(str(item["path"])) for item in items]
+        paths = _paths(outcome, tool_id)
         # list stops at max_depth 6, which reaches the workspace folder itself.
         visible = context.workspace_path if tool_id == "list" else workspace_file
         assert any(path.samefile(visible) for path in paths), tool_id
@@ -328,8 +328,11 @@ def _seed_registered_parent(tmp_path: Path) -> tuple[Path, object, Path, Path]:
     return db_path, context, public, own
 
 
-def _paths(outcome: object, key: str) -> list[Path]:
-    items = outcome.output[key]  # type: ignore[attr-defined]
+def _paths(outcome: object, tool_id: str) -> list[Path]:
+    output = outcome.output  # type: ignore[attr-defined]
+    if tool_id == "glob":
+        return [Path(path) for path in glob_paths(output)]
+    items = output["entries"] if tool_id == "list" else grep_matches(output)
     return [Path(str(item["path"])) for item in items]
 
 
@@ -352,7 +355,7 @@ async def test_list_from_a_parent_does_not_walk_private_app_storage(
 
     assert outcome.output["truncation_reason"] is None
     assert "symlink" not in str(outcome.output["warning"])
-    paths = _paths(outcome, "entries")
+    paths = _paths(outcome, "list")
     assert public in paths
     # max_depth 6 reaches the Action's workspace folder inside app storage.
     assert context.workspace_path in paths  # type: ignore[attr-defined]
@@ -392,7 +395,7 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
     )
 
     assert grep.output["truncation_reason"] is None
-    assert sorted(_paths(grep, "matches")) == sorted([public, own, result_file])
+    assert sorted(_paths(grep, "grep")) == sorted([public, own, result_file])
 
     # File names spend the output budget too; lower it so a few hundred do.
     monkeypatch.setattr(ripgrep, "RIPGREP_MAX_STDOUT_BYTES", 4_096)
@@ -407,7 +410,7 @@ async def test_search_from_a_parent_does_not_read_private_app_storage(
     )
 
     assert glob.output["truncation_reason"] is None
-    assert sorted(_paths(glob, "matches")) == sorted([public, own, result_file])
+    assert sorted(_paths(glob, "glob")) == sorted([public, own, result_file])
 
 
 @pytest.mark.skipif(
@@ -442,6 +445,6 @@ async def test_grep_does_not_follow_a_swapped_link_to_decide_an_encoding(
         args={"base_path": str(public.parent), "pattern": "needle"},
     )
 
-    assert [match["line"] for match in grep.output["matches"]] == [
+    assert [match["line"] for match in grep_matches(grep.output)] == [
         line.decode("utf-8", errors="replace").removesuffix("\n")
     ]

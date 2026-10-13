@@ -231,7 +231,9 @@ class GlobToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     status: str
-    matches: list[DiscoveryEntry]
+    base_path: str
+    # Each relative to base_path.
+    matches: list[str]
     truncated: bool
     truncation_reason: DiscoveryTruncationReason | None = None
     retry_hint: str | None = None
@@ -239,19 +241,21 @@ class GlobToolOutput(BaseModel):
     skipped_files: int = Field(ge=0)
 
 
-class GrepMatch(BaseModel):
+class GrepFile(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    # Relative to base_path.
     path: str
-    line_number: int
-    line: str
+    # Each "line_number:line".
+    matches: list[str]
 
 
 class GrepToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     status: str
-    matches: list[GrepMatch]
+    base_path: str
+    files: list[GrepFile]
     truncated: bool
     truncation_reason: DiscoveryTruncationReason | None = None
     retry_hint: str | None = None

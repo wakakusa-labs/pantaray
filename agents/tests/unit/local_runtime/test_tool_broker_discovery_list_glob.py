@@ -15,6 +15,7 @@ from .broker_test_support import (
     _bootstrap_runtime_db,
     _bootstrap_runtime_db_with_registered_folder,
 )
+from .discovery_output_support import glob_paths, grep_matches
 
 
 @pytest.mark.asyncio
@@ -225,10 +226,10 @@ async def test_discovery_relative_paths_resolve_from_execution_cwd(
 
     assert glob_outcome.status == "success"
     assert grep_outcome.status == "success"
-    assert [match["path"] for match in glob_outcome.output["matches"]] == [
+    assert glob_paths(glob_outcome.output) == [
         str(context.workspace_path / "src" / "app.py")
     ]
-    assert [match["path"] for match in grep_outcome.output["matches"]] == [
+    assert [match["path"] for match in grep_matches(grep_outcome.output)] == [
         str(context.workspace_path / "src" / "app.py")
     ]
 
@@ -262,9 +263,7 @@ async def test_execute_broker_tool_globs_workspace_files(
     assert outcome.output["truncation_reason"] is None
     assert outcome.output["retry_hint"] is None
     assert outcome.output["warning"] is None
-    matches = outcome.output["matches"]
-    assert isinstance(matches, list)
-    assert [match["path"] for match in matches] == [
+    assert glob_paths(outcome.output) == [
         str(context.workspace_path / "src" / "app.py"),
         str(context.workspace_path / "src" / "util.py"),
     ]
@@ -297,7 +296,7 @@ async def test_glob_full_access_allows_absolute_base_path_outside_workspace(
     )
 
     assert outcome.status == "success"
-    assert [match["path"] for match in outcome.output["matches"]] == [str(outside_file)]
+    assert glob_paths(outcome.output) == [str(outside_file)]
 
 
 @pytest.mark.asyncio
@@ -324,7 +323,7 @@ async def test_glob_dot_searches_current_execution_workspace(
     )
 
     assert outcome.status == "success"
-    assert [match["path"] for match in outcome.output["matches"]] == [
+    assert glob_paths(outcome.output) == [
         str(context.workspace_path / "scratch_app.py"),
     ]
 
@@ -363,14 +362,10 @@ async def test_glob_single_star_does_not_cross_directory_separator(
         args={"base_path": ".", "pattern": "src/**/*.py", "limit": 10},
     )
 
-    direct_matches = direct_outcome.output["matches"]
-    recursive_matches = recursive_outcome.output["matches"]
-    assert isinstance(direct_matches, list)
-    assert isinstance(recursive_matches, list)
-    assert [match["path"] for match in direct_matches] == [
+    assert glob_paths(direct_outcome.output) == [
         str(context.workspace_path / "src" / "app.py")
     ]
-    assert [match["path"] for match in recursive_matches] == [
+    assert glob_paths(recursive_outcome.output) == [
         str(context.workspace_path / "src" / "app.py"),
         str(context.workspace_path / "src" / "nested" / "app.py"),
     ]

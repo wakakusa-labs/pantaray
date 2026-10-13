@@ -32,6 +32,7 @@ from pantaray_agents.tools.files.read_only_tools import (
     build_read_only_file_tools,
 )
 
+from .discovery_output_support import grep_matches
 from .test_pdf_page_render import write_pdf
 from .test_read_document_broker import (
     PIXEL_PNG,
@@ -261,7 +262,7 @@ async def test_grep_does_not_follow_a_swapped_link_out_of_scope_for_an_encoding(
         registry, "grep", {"base_path": str(folder), "pattern": "needle"}
     )
 
-    assert [match["line"] for match in result.output["matches"]] == [
+    assert [match["line"] for match in grep_matches(result.output)] == [
         line.decode("utf-8", errors="replace").removesuffix("\n")
     ]
 
@@ -287,8 +288,8 @@ async def test_grep_skips_app_storage_but_searches_a_spilled_result(
         registry, "grep", {"base_path": spill_dir, "pattern": "name-0399"}
     )
 
-    assert in_folder.output["matches"] == []
-    assert len(in_spill.output["matches"]) == 2
+    assert in_folder.output["files"] == []
+    assert len(grep_matches(in_spill.output)) == 2
 
 
 @pytest.mark.asyncio

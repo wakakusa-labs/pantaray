@@ -307,10 +307,10 @@ def _charset(download: _Download) -> str:
     )
     try:
         codec = codecs.lookup(name).name
-        # rot_13 and the like are codecs but not text encodings, which str and
-        # bytes refuse whatever the content.
-        "".encode(codec)
-    except LookupError:
+        # The body is decoded with errors="replace", which rot_13 (not a text
+        # encoding) and idna (no replace handler) refuse whatever the content.
+        b"x".decode(codec, errors="replace")
+    except (LookupError, UnicodeError):
         return "utf-8"
     return codec
 

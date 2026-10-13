@@ -66,6 +66,7 @@ class _Site(BaseHTTPRequestHandler):
             "/bad-redirect": (302, {"Location": "http://[::1/"}, b""),
             "/bad-link": (200, {"Content-Type": "text/html"}, BAD_LINK),
             "/rot13": (200, {"Content-Type": "text/plain; charset=rot_13"}, b"plain"),
+            "/idna": (200, {"Content-Type": "text/plain; charset=idna"}, b"plain"),
         }.get(self.path, (404, {}, b""))
         self.send_response(status)
         for name, value in {**headers, "Content-Length": str(len(body))}.items():
@@ -199,6 +200,7 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
     pages = ("/article", "/bad-link", "/rot13", "/bad-redirect")
 
     result = await _extract([*(base + page for page in pages), bad_port])
+    idna = await _extract([f"{base}/article", f"{base}/idna"])
 
     read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
     assert read[f"{base}/article"].startswith("# Providers")
@@ -207,6 +209,18 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
     failures = _failures(result)
     assert set(failures) == {f"{base}/bad-redirect", bad_port}
     assert "not a valid URL" in str(failures[bad_port])
+    assert [row["raw_content"] for row in idna["results"]][1] == "plain"  # type: ignore[index,union-attr]
+
+
+def test_skipped_elements_repeated_up_to_the_size_limit_render_quickly() -> None:
+    page = "<body>" + "<script></script>a" * 250_000 + "</body>"
+    assert len(page.encode()) < local_fetch.MAX_PAGE_BYTES
+
+    started = time.perf_counter()
+    text = html_to_markdown(page)
+
+    assert time.perf_counter() - started < 5
+    assert text == "a" * 250_000
 
 
 def test_the_text_grows_no_faster_than_the_markup() -> None:

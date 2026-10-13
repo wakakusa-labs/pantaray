@@ -16,6 +16,10 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - Memory search finds things by meaning as well as by words, and answers about twice as fast.
 - Suggestions no longer offer again what you passed on unless something has changed.
 - In the chat, Pantaray finds the suggestion you mention and starts it when you ask.
+- Without a Pantaray sign-in or a web search key, tasks and suggestions can still read web pages,
+  fetched from your Mac.
+- Web search can look up several things in one go.
+- Tasks read long command output and long web pages all the way through, not just the beginning.
 - Fixed a task stalling after it rewrote a file it had read.
 - Fixed keystrokes in a small window going to another app while another small window closed.
 - Fixed the live work label running past the conversation column.
@@ -31,6 +35,9 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - 記憶の検索が、言葉だけでなく意味でも探せるようになり、約 2 倍速くなりました。
 - 提案は、見送ったものを、状況が変わらない限りもう一度出さないようになりました。
 - チャットで提案に触れると、Pantaray がその提案を探し、頼めば始めるようになりました。
+- Pantaray へのログインや Web 検索のキーがなくても、作業と提案が Web ページを読めるようになりました。ページはこの Mac から取りに行きます。
+- Web 検索で、いくつかのことを一度に調べられるようになりました。
+- 作業が、長いコマンドの出力や長い Web ページを、最初だけでなく最後まで読めるようになりました。
 - 読み込んだファイルを作業が書き換えると、その作業が止まってしまう問題を直しました。
 - 小さい画面を閉じている間、別の小さい画面に打った文字がほかのアプリに入ってしまう問題を直しました。
 - 作業中の表示が、会話の幅からはみ出す問題を直しました。

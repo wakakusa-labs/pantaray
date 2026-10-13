@@ -409,7 +409,9 @@ test('packaged main window opens the app root on initial load and recovery', (t)
     getAppPath: () => appPath,
   });
   const win = createMainWindow({ initialUiLanguage: 'ja' });
-  withMutedConsole(() => win.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath));
+  withMutedConsole(() =>
+    win.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath, true)
+  );
   assert.deepEqual(loads, [
     { file: indexPath, options: { hash: '/' } },
     { file: indexPath, options: { hash: '/' } },
@@ -441,13 +443,93 @@ test('packaged main window created on a task retries its first load there, and l
   const task = '/history?item=action:act-1';
   const failFirst = createMainWindow({ initialUiLanguage: 'ja', hashRoute: task });
   withMutedConsole(() =>
-    failFirst.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath)
+    failFirst.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath, true)
   );
   const failLater = createMainWindow({ initialUiLanguage: 'ja', hashRoute: task });
   failLater.webContents.emit('did-finish-load');
   withMutedConsole(() =>
-    failLater.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath)
+    failLater.webContents.emit('did-fail-load', null, -2, 'Failed', indexPath, true)
   );
 
   assert.deepEqual(loads, [task, task, task, '/']);
+});
+
+function withEnv(t, name, value) {
+  const original = process.env[name];
+  process.env[name] = value;
+  t.after(() => {
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
+  });
+}
+
+function captureHeadersListener(appOverrides) {
+  let listener = null;
+  const win = {
+    on: () => {},
+    webContents: {
+      session: { webRequest: { onHeadersReceived: (fn) => (listener = fn) } },
+    },
+  };
+  const { setupWindowEventListeners } = loadWindowLifecycleWithBrowserWindow(
+    function BrowserWindow() {},
+    appOverrides
+  );
+  setupWindowEventListeners(win);
+  return (url) => {
+    let result;
+    listener({ url, responseHeaders: { 'Content-Type': ['text/html'] } }, (r) => (result = r));
+    return result.responseHeaders?.['Content-Security-Policy'] ?? null;
+  };
+}
+
+// Chromium's PDF viewer loads inside a previewed PDF's frame; the app's frame-ancestors 'none'
+// on it blocked the viewer, which left the preview empty.
+const PDF_VIEWER_URL = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html';
+const PDF_FRAME_URL = 'pantaray-action-file://local/?action=act-1&path=%2Fwork%2Fa.pdf';
+
+test("the CSP listener stamps the policy on the app's own responses only", (t) => {
+  withEnv(t, 'FRONTEND_PORT', '5173');
+  const devPolicy = captureHeadersListener({ isPackaged: false });
+  assert.match(String(devPolicy('http://localhost:5173/index.html')), /frame-ancestors 'none'/);
+  assert.match(String(devPolicy('http://localhost:5173/src/worker.ts?worker')), /worker-src/);
+  assert.equal(devPolicy(PDF_VIEWER_URL), null);
+  assert.equal(devPolicy(PDF_FRAME_URL), null);
+
+  withEnv(t, 'NODE_ENV', 'production');
+  const packagedPolicy = captureHeadersListener({ isPackaged: true });
+  assert.equal(packagedPolicy(PDF_VIEWER_URL), null);
+  assert.equal(packagedPolicy(PDF_FRAME_URL), null);
+});
+
+test('packaged main window stays on its page when a frame inside it fails to load', (t) => {
+  const appPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-entry-'));
+  t.after(() => fs.rmSync(appPath, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(appPath, 'dist'));
+  const indexPath = path.join(appPath, 'dist', 'index.html');
+  fs.writeFileSync(indexPath, '<!doctype html>');
+  withEnv(t, 'NODE_ENV', 'production');
+  const loads = [];
+  function BrowserWindow() {
+    const win = createEntryWindow();
+    win.loadFile = (_file, options) => loads.push(options.hash);
+    return win;
+  }
+  const { createMainWindow } = loadWindowLifecycleWithBrowserWindow(BrowserWindow, {
+    isPackaged: true,
+    getAppPath: () => appPath,
+  });
+  const task = '/history?item=action:act-1';
+  const win = createMainWindow({ initialUiLanguage: 'ja', hashRoute: task });
+  win.webContents.emit('did-finish-load');
+  win.webContents.emit(
+    'did-fail-load',
+    null,
+    -27,
+    'ERR_BLOCKED_BY_RESPONSE',
+    PDF_VIEWER_URL,
+    false
+  );
+
+  assert.deepEqual(loads, [task]);
 });

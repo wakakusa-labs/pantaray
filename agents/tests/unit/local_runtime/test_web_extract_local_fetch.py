@@ -48,6 +48,7 @@ ARTICLE = b"""<!doctype html><html><head><title>t</title>
 <main><h1>Providers</h1><p>Use <a href="/docs/zen">Zen</a> or <code>/connect</code>.</p>
 <ul><li>First</li><li>Second</li></ul></main>
 <footer>Copyright</footer></body></html>"""
+BAD_LINK = b'<p>See <a href="https://[broken">this</a>.</p>'
 
 
 class _Site(BaseHTTPRequestHandler):
@@ -62,6 +63,9 @@ class _Site(BaseHTTPRequestHandler):
             "/large": (200, {"Content-Type": "text/plain"}, b"x" * 4096),
             "/script-only": (200, {"Content-Type": "text/html"}, b"<div id=app>"),
             "/to-private": (302, {"Location": private}, b""),
+            "/bad-redirect": (302, {"Location": "http://[::1/"}, b""),
+            "/bad-link": (200, {"Content-Type": "text/html"}, BAD_LINK),
+            "/rot13": (200, {"Content-Type": "text/plain; charset=rot_13"}, b"plain"),
         }.get(self.path, (404, {}, b""))
         self.send_response(status)
         for name, value in {**headers, "Content-Length": str(len(body))}.items():
@@ -125,7 +129,7 @@ async def test_with_no_provider_a_page_is_read_here_and_says_so(
         {
             "url": f"{base}/article",
             "raw_content": "# Providers\n\n"
-            f"Use [Zen]({base}/docs/zen) or `/connect`.\n\n- First\n- Second",
+            "Use [Zen](/docs/zen) or `/connect`.\n\n- First\n- Second",
         }
     ]
     assert result["meta"]["upstream_provider"] == "local"  # type: ignore[index]
@@ -183,6 +187,39 @@ async def test_each_page_fails_on_its_own_with_the_reason(
     assert failures[f"{base}/slow"] == "No complete response within 0.5 seconds."
     assert "larger than" in str(failures[f"{base}/large"])
     assert "JavaScript" in str(failures[f"{base}/script-only"])
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_page_never_takes_the_other_pages_down(
+    site: tuple[str, list[str]],
+) -> None:
+    base, _requests = site
+    mark_configured()
+    bad_port = "http://site.test:abc/"
+    pages = ("/article", "/bad-link", "/rot13", "/bad-redirect")
+
+    result = await _extract([*(base + page for page in pages), bad_port])
+
+    read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
+    assert read[f"{base}/article"].startswith("# Providers")
+    assert read[f"{base}/bad-link"] == "See [this](https://[broken)."
+    assert read[f"{base}/rot13"] == "plain"
+    failures = _failures(result)
+    assert set(failures) == {f"{base}/bad-redirect", bad_port}
+    assert "not a valid URL" in str(failures[bad_port])
+
+
+def test_the_text_grows_no_faster_than_the_markup() -> None:
+    lines = "line<br>" * 2_000
+    pages = (
+        "<body>" + '<a href="a">x</a> ' * 2_000 + "</body>",
+        "<body>" + "<blockquote>" * 60 + lines + "</blockquote>" * 60 + "</body>",
+        "<body>" + "<ul><li>" * 60 + lines + "</li></ul>" * 60 + "</body>",
+        "<body>" + "<table><tr><td>" * 30 + "x" * 2_000 + "</td></tr></table>" * 30,
+    )
+
+    for page in pages:
+        assert 0 < len(html_to_markdown(page)) < 3 * len(page)
 
 
 @pytest.mark.asyncio
@@ -260,7 +297,7 @@ def test_page_markup_keeps_structure_and_drops_site_chrome() -> None:
     <tr><td>zen</td><td>models</td></tr></table></div>
     <footer>Copyright</footer></body></html>"""
 
-    assert html_to_markdown(page, base_url="https://example.com/") == (
+    assert html_to_markdown(page) == (
         "## Install\n\n"
         "1. Run\n   ```\n   a\n   b\n   ```\n2. Done\n\n"
         "| Name | Use |\n| --- | --- |\n| zen | models |"

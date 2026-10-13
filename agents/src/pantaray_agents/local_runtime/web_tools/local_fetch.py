@@ -69,6 +69,7 @@ _META_CHARSET: Final = re.compile(
     rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.I
 )
 _SNIFF_BYTES: Final = 4096
+_INVALID_URL: Final = "The URL, or a redirect's target, is not a valid URL."
 
 
 class _PageFailure(Exception):
@@ -77,7 +78,6 @@ class _PageFailure(Exception):
 
 @dataclass(frozen=True, slots=True)
 class _Download:
-    url: str
     kind: _PageKind
     content_type: str
     body: bytes
@@ -157,7 +157,7 @@ async def _download(url: str) -> _Download:
         trust_env=False,
     ) as client:
         for _hop in range(MAX_REDIRECTS + 1):
-            target = httpx2.URL(current)
+            target = _parse_url(current)
             if target.scheme not in {"http", "https"} or not target.host:
                 raise _PageFailure("Only http and https URLs can be read.")
             address = await _public_address(target.host, target.port, target.scheme)
@@ -181,15 +181,25 @@ async def _download(url: str) -> _Download:
                         raise _PageFailure(
                             f"HTTP {response.status_code} redirect without a target."
                         )
-                    current = urljoin(str(target), location)
+                    try:
+                        current = urljoin(str(target), location)
+                    except ValueError as exc:
+                        raise _PageFailure(_INVALID_URL) from exc
                     continue
-                return await _read_body(response, url=str(target))
+                return await _read_body(response)
             finally:
                 await response.aclose()
     raise _PageFailure(f"More than {MAX_REDIRECTS} redirects.")
 
 
-async def _read_body(response: httpx2.Response, *, url: str) -> _Download:
+def _parse_url(url: str) -> httpx2.URL:
+    try:
+        return httpx2.URL(url)
+    except httpx2.InvalidURL as exc:
+        raise _PageFailure(_INVALID_URL) from exc
+
+
+async def _read_body(response: httpx2.Response) -> _Download:
     if not response.is_success:
         raise _PageFailure(
             f"The site answered HTTP {response.status_code} {response.reason_phrase}."
@@ -205,7 +215,7 @@ async def _read_body(response: httpx2.Response, *, url: str) -> _Download:
                 f"The page is larger than {limit // (1024 * 1024)} MB, "
                 "the most this tool reads."
             )
-    return _Download(url=url, kind=kind, content_type=content_type, body=bytes(body))
+    return _Download(kind=kind, content_type=content_type, body=bytes(body))
 
 
 async def _public_address(host: str, port: int | None, scheme: str) -> str:
@@ -218,7 +228,8 @@ async def _public_address(host: str, port: int | None, scheme: str) -> str:
                 port or (443 if scheme == "https" else 80),
                 type=socket.SOCK_STREAM,
             )
-        except socket.gaierror as exc:
+        # An over-long label fails IDNA encoding before any lookup is made.
+        except (socket.gaierror, UnicodeError) as exc:
             raise _PageFailure("The host name could not be resolved.") from exc
         addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
     if not addresses or not all(_is_public(address) for address in addresses):
@@ -254,7 +265,7 @@ def _page_text(download: _Download) -> str:
         return _pdf_text(download.body)
     text = download.body.decode(_charset(download), errors="replace")
     if download.kind == "html":
-        text = html_to_markdown(text, base_url=download.url)
+        text = html_to_markdown(text)
     if not text.strip():
         raise _PageFailure(
             "The page has no readable text; it may build its content with "
@@ -295,9 +306,13 @@ def _charset(download: _Download) -> str:
         else "utf-8"
     )
     try:
-        return codecs.lookup(name).name
+        codec = codecs.lookup(name).name
+        # rot_13 and the like are codecs but not text encodings, which str and
+        # bytes refuse whatever the content.
+        "".encode(codec)
     except LookupError:
         return "utf-8"
+    return codec
 
 
 __all__ = ["LOCAL_PROVIDER", "extract_pages_locally"]

@@ -30,6 +30,9 @@ dependencies = [
     "onnxruntime==1.29.0",
     "tokenizers==0.23.2",
     "python-docx>=1.2.0",
+    # web_extract turns fetched HTML into text with lxml.html; python-docx and
+    # python-pptx also depend on it.
+    "lxml>=6.1.3",
     "openpyxl>=3.1.5",
     "python-pptx>=1.0.2",
     # [crypto] pulls in cryptography, which pypdf needs to open an AES-encrypted
@@ -155,7 +158,7 @@ ignore_missing_imports = true
 module = ["onnxruntime.*"]
 ignore_missing_imports = true
 
-# lxml ships no py.typed marker; python-docx pulls it in.
+# lxml ships no py.typed marker.
 [[tool.mypy.overrides]]
 module = ["lxml.*"]
 ignore_missing_imports = true

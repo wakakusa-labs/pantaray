@@ -20,6 +20,8 @@ in English and Japanese: one short sentence per change, saying what changed for 
   fetched from your Mac.
 - Web search can look up several things in one go.
 - Tasks read long command output and long web pages all the way through, not just the beginning.
+- A new ChatGPT or OpenAI connection starts on GPT-6.1 Sol, and an Anthropic connection on Claude
+  Sonnet 5.5.
 - Fixed a task stalling after it rewrote a file it had read.
 - Fixed keystrokes in a small window going to another app while another small window closed.
 - Fixed the live work label running past the conversation column.
@@ -38,6 +40,7 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - Pantaray へのログインや Web 検索のキーがなくても、作業と提案が Web ページを読めるようになりました。ページはこの Mac から取りに行きます。
 - Web 検索で、いくつかのことを一度に調べられるようになりました。
 - 作業が、長いコマンドの出力や長い Web ページを、最初だけでなく最後まで読めるようになりました。
+- 新しく ChatGPT や OpenAI に接続すると GPT-6.1 Sol、Anthropic に接続すると Claude Sonnet 5.5 から始まるようになりました。
 - 読み込んだファイルを作業が書き換えると、その作業が止まってしまう問題を直しました。
 - 小さい画面を閉じている間、別の小さい画面に打った文字がほかのアプリに入ってしまう問題を直しました。
 - 作業中の表示が、会話の幅からはみ出す問題を直しました。

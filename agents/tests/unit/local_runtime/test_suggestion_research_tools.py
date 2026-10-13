@@ -1003,8 +1003,9 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
     [
         ("web_search", {"query": "chips", "topic": "news", "country": "japan"}),
         ("web_extract", {"urls": ["http://localhost:8000/"]}),
+        ("web_extract", {"urls": ["https://[invalid]/"]}),
     ],
-    ids=["country-outside-general", "local-url"],
+    ids=["country-outside-general", "local-url", "malformed-url"],
 )
 async def test_suggestion_web_tools_refuse_what_the_action_refuses(
     tmp_path: Path,

@@ -81,12 +81,17 @@ def is_public_like_http_url(value: object) -> bool:
 
     if not isinstance(value, str) or not value.strip():
         return False
-    parsed = urlsplit(value.strip())
+    try:
+        parsed = urlsplit(value.strip())
+        hostname = parsed.hostname
+    except ValueError:
+        # A malformed bracketed host, such as https://[invalid]/, is no URL.
+        return False
     if parsed.scheme not in {"http", "https"}:
         return False
     if not parsed.netloc or parsed.username or parsed.password:
         return False
-    host = (parsed.hostname or "").strip().lower()
+    host = (hostname or "").strip().lower()
     if not host or host == "localhost" or "." not in host:
         return False
     if any(host.endswith(suffix) for suffix in _DISALLOWED_HOST_SUFFIXES):

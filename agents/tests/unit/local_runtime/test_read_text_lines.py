@@ -193,7 +193,32 @@ def test_read_text_lines_counts_total_after_long_line_exceeds_byte_budget(
     assert stream.position == len("fit\n" + ("a" * 10_000) + "\nnext\n")
 
 
-def test_read_text_lines_stops_after_long_line_clamp(
+def test_read_text_lines_cuts_a_long_line_and_goes_on_to_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One search result per line: a long line must not end the page.
+    stream = _CountingLineStream(("a" * 10_000) + "\nnext\n")
+    _patch_path_stream(monkeypatch, stream=stream)
+    monkeypatch.setattr(text_lines, "MAX_LINE_LENGTH", 8)
+    monkeypatch.setattr(text_lines, "_LINE_READ_AHEAD_CHARS", 9)
+
+    result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=2)
+
+    assert result.content == (
+        "a" * 8 + " … [line cut; read offset=1 column=9 for the rest]\nnext\n"
+    )
+    assert result.end_line == 2
+    assert result.end_column == 4
+    assert result.total_lines == 2
+    assert result.next_offset is None
+    assert result.next_column is None
+    assert result.truncated is True
+    assert result.truncation_reason == "line_length"
+    assert result.retry_hint == text_lines.READ_FILE_LINE_LENGTH_RETRY_HINT
+    assert stream.position == len(("a" * 10_000) + "\nnext\n")
+
+
+def test_read_text_lines_cut_line_at_limit_continues_on_the_next_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stream = _CountingLineStream(("a" * 10_000) + "\nnext\n")
@@ -203,15 +228,15 @@ def test_read_text_lines_stops_after_long_line_clamp(
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, limit=1)
 
-    assert result.content == "a" * 8
     assert result.end_line == 1
     assert result.end_column == 8
-    assert result.total_lines == 2
-    assert result.next_offset == 1
-    assert result.next_column == 9
-    assert result.truncated is True
+    assert result.next_offset == 2
+    assert result.next_column == 1
     assert result.truncation_reason == "page_limit"
-    assert stream.position == len(("a" * 10_000) + "\nnext\n")
+    assert result.retry_hint == (
+        f"{text_lines.READ_FILE_PAGE_LIMIT_RETRY_HINT} "
+        f"{text_lines.READ_FILE_LINE_LENGTH_RETRY_HINT}"
+    )
 
 
 def test_read_text_lines_consumes_skipped_long_lines_to_reach_offset(
@@ -241,12 +266,20 @@ def test_read_text_lines_continues_long_line_from_column(
 
     result = read_text_lines(filepath=Path("unused.txt"), offset=1, column=9, limit=1)
 
-    assert result.content == "ijabcdef"
+    assert result.content == (
+        "ijabcdef … [line cut; read offset=1 column=17 for the rest]\n"
+    )
     assert result.end_line == 1
     assert result.end_column == 16
-    assert result.next_offset == 1
-    assert result.next_column == 17
+    assert result.next_offset == 2
+    assert result.next_column == 1
     assert result.total_lines == 2
+
+    _patch_path_stream(
+        monkeypatch, stream=_CountingLineStream(("abcdefghij" * 2) + "\nnext\n")
+    )
+    rest = read_text_lines(filepath=Path("unused.txt"), offset=1, column=17, limit=1)
+    assert rest.content == "ghij\n"
 
 
 def test_read_text_lines_pages_multibyte_line_without_stalling(

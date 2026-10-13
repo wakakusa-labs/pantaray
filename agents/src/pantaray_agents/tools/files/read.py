@@ -186,9 +186,7 @@ def _read_file(
             ),
             "encoding": encoding,
         },
-        content=result.content,
-        offset=offset,
-        column=column,
+        result=result,
     )
     return ReadToolResult(
         output=output,

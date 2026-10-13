@@ -170,12 +170,6 @@ async def test_action_step_web_search_tool_end_to_end(
                             "score": 0.9,
                         }
                     ],
-                    "images": [
-                        {
-                            "url": "https://img.example.com/1.png",
-                            "description": "Image 1",
-                        }
-                    ],
                 },
             }
         ),
@@ -231,7 +225,7 @@ async def test_action_step_web_search_tool_end_to_end(
     assert isinstance(payload, dict)
     assert payload["query"] == "q"
     assert payload["results"][0]["title"] == "T1"
-    assert payload["images"][0]["description"] == "Image 1"
+    assert payload["meta"]["upstream_provider"] == "tavily"
 
     # action_step が保存される
     repo_steps = action_agent.repository.data.get("action_steps", [])

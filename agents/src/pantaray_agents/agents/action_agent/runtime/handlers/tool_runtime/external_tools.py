@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
@@ -13,22 +14,20 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
 from pantaray_agents.agents.action_agent.runtime.handlers.web_crawl_runtime import (
     run_web_crawl_tool,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.web_extract_runtime import (
-    run_web_extract_tool,
-)
-from pantaray_agents.agents.action_agent.runtime.handlers.web_search_runtime import (
-    run_web_search_tool,
-)
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
 )
+from pantaray_agents.local_runtime.web_tools.client import (
+    build_web_tools_wrapper_context,
+)
 from pantaray_agents.schema.agent.action_history import HistoryFetchStep
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.repositories.repository import DBRow
 from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.tools.web.execute import run_web_extract, run_web_search
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 
 from .shared import (
@@ -48,22 +47,8 @@ async def run_web_search_wrapper(
     args: ToolArgs,
     state,
 ) -> UnprojectedToolExecutionResult:
-    outcome = await run_web_search_tool(
-        agent=agent,
-        step_id=step_id,
-        tool_def=tool_def,
-        args=dict(args),
-        state=state,
-    )
-    return UnprojectedToolExecutionResult(
-        step_id=step_id,
-        tool_id=tool_def.tool_id,
-        status=outcome.status,
-        started_at=now_utc_iso(),
-        completed_at=now_utc_iso(),
-        output=cast(JSONValue, outcome.payload),
-        prompt_tokens=outcome.prompt_tokens,
-        completion_tokens=outcome.completion_tokens,
+    return await _run_shared_web_tool(
+        run_web_search, step_id=step_id, tool_def=tool_def, args=args, state=state
     )
 
 
@@ -74,22 +59,40 @@ async def run_web_extract_wrapper(
     args: ToolArgs,
     state,
 ) -> UnprojectedToolExecutionResult:
-    outcome = await run_web_extract_tool(
-        agent=agent,
-        step_id=step_id,
-        tool_def=tool_def,
+    return await _run_shared_web_tool(
+        run_web_extract, step_id=step_id, tool_def=tool_def, args=args, state=state
+    )
+
+
+async def _run_shared_web_tool(
+    run: Callable[..., Awaitable[dict[str, JSONValue]]],
+    *,
+    step_id: str,
+    tool_def: ToolDefinition,
+    args: ToolArgs,
+    state,
+) -> UnprojectedToolExecutionResult:
+    """web_search and web_extract run the same way as for Suggestion and the chat."""
+
+    started_at = now_utc_iso()
+    output = await run(
+        context=build_web_tools_wrapper_context(
+            user_id=state.get("user_id"), action_id=state.get("action_id")
+        ),
         args=dict(args),
-        state=state,
+        max_retries=int((tool_def.runtime_config or {}).get("max_retries", 3) or 3),
+        # The Action answers the user, so a fix only they can make is passed on.
+        speaks_to_user=True,
     )
     return UnprojectedToolExecutionResult(
         step_id=step_id,
         tool_id=tool_def.tool_id,
-        status=outcome.status,
-        started_at=now_utc_iso(),
+        status="success" if output["status"] == "success" else "error",
+        started_at=started_at,
         completed_at=now_utc_iso(),
-        output=cast(JSONValue, outcome.payload),
-        prompt_tokens=outcome.prompt_tokens,
-        completion_tokens=outcome.completion_tokens,
+        output=output,
+        prompt_tokens=0,
+        completion_tokens=0,
     )
 
 

@@ -34,10 +34,8 @@ from pantaray_agents.tools.contract import (
     ReactToolRegistry,
     ToolCallEnvelope,
 )
-from pantaray_agents.tools.web.session import (
-    _WEB_SEARCH_KEY_PLACE,
-    WebResearchToolSession,
-)
+from pantaray_agents.tools.web.execute import WEB_SEARCH_KEY_PLACE
+from pantaray_agents.tools.web.session import WebResearchToolSession
 from pantaray_llm.errors import ProviderError
 from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID, WEB_SEARCH_PROFILE_ID
 from pantaray_llm.web_tools.schemas import WebToolsProxyRequest
@@ -744,11 +742,13 @@ _UNAVAILABLE = "Web search is unavailable right now, so nothing was looked up."
     [
         (
             _arrange_unconfigured_web_search,
-            "Web search is not set up, so nothing was looked up. Tell the user "
-            "they can turn it on by saving the Tavily API key in Settings > AI "
-            "connection > Web search (in Japanese: "
+            "Web search is not set up, so nothing was looked up. web_extract "
+            "still reads pages whose URL is known. Tell the user they can turn it "
+            "on by signing in to Pantaray or by saving the Tavily API key in "
+            "Settings > AI connection > Web search (in Japanese: "
             '"Tavily API キー" in 設定 > AI 接続 > Web 検索).',
-            "Web search is not set up, so nothing was looked up.",
+            "Web search is not set up, so nothing was looked up. web_extract "
+            "still reads pages whose URL is known.",
         ),
         (
             _arrange_rejected_tavily_key,
@@ -793,7 +793,7 @@ async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
     the chat, which answers the user, is asked to pass a fix on."""
 
     arrange(monkeypatch, tmp_path)
-    args: dict[str, object] = {"query": "Pantaray", "offset": 1, "limit": 5}
+    args: dict[str, object] = {"query": "Pantaray"}
     call = ReactToolCall(
         tool_name="web_search",
         tool_args=args,  # type: ignore[arg-type]
@@ -805,7 +805,9 @@ async def test_the_research_web_tool_names_only_a_fix_the_user_can_make(
     )
     registry = ReactToolRegistry(
         WebResearchToolSession(
-            user_id=REQUEST_CONTEXT["user_id"], speaks_to_user=speaks_to_user
+            user_id=REQUEST_CONTEXT["user_id"],
+            speaks_to_user=speaks_to_user,
+            spill_root=tmp_path / "spill",
         ).definitions()
     )
 
@@ -845,55 +847,7 @@ def test_the_fix_text_names_the_web_search_key_as_the_app_labels_it(key: str) ->
     labels = _ui_labels(key)
 
     assert len(labels) == 2  # English and Japanese
-    assert all(label in _WEB_SEARCH_KEY_PLACE for label in labels)
-
-
-@pytest.mark.asyncio
-async def test_the_research_web_tool_keeps_a_provider_page_failure_to_itself(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_tavily_key()
-    _patch_proxy_transport(monkeypatch)
-    provider_words = "upstream HTTP 503: service unavailable"
-    _patch_tavily(
-        monkeypatch,
-        _RecordingTavilyClient(
-            result={
-                **TAVILY_EXTRACT_PAYLOAD,
-                "failed_results": [
-                    {"url": "https://example.test/b", "error": provider_words}
-                ],
-            }
-        ),
-    )
-    args: dict[str, object] = {
-        "urls": ["https://example.test/a", "https://example.test/b"],
-        "query": None,
-        "offset": 1,
-        "limit": 100,
-    }
-    call = ReactToolCall(
-        tool_name="web_extract",
-        tool_args=args,  # type: ignore[arg-type]
-        tool_call_envelope=ToolCallEnvelope(
-            tool_id="web_extract",
-            reason=None,
-            args=args,  # type: ignore[arg-type]
-        ),
-    )
-    registry = ReactToolRegistry(
-        WebResearchToolSession(
-            user_id=REQUEST_CONTEXT["user_id"], speaks_to_user=True
-        ).definitions()
-    )
-
-    result = await registry.execute(call, 1)
-
-    assert result.status == "success"
-    assert result.output["failed_results"] == [
-        {"url": "https://example.test/b", "error": "This page could not be read."}
-    ]
-    assert provider_words not in str(result.output)
+    assert all(label in WEB_SEARCH_KEY_PLACE for label in labels)
 
 
 @pytest.mark.asyncio

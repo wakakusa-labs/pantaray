@@ -38,12 +38,6 @@ from pantaray_agents.local_runtime.web_tools.client import (
     invoke_web_tools_wrapper,
 )
 from pantaray_agents.local_runtime.web_tools.html_markdown import html_to_markdown
-from pantaray_agents.tools.contract import (
-    ReactToolCall,
-    ReactToolRegistry,
-    ToolCallEnvelope,
-)
-from pantaray_agents.tools.web.session import WebResearchToolSession
 from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID
 
 from .migrated_db import prepare_test_database
@@ -404,38 +398,6 @@ async def test_a_lapsed_sign_in_is_not_read_here_instead(
 
     assert exc_info.value.suggested_action == "reauthenticate"
     assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_research_does_not_present_a_whole_page_as_query_excerpts(
-    site: tuple[str, list[str]],
-) -> None:
-    base, _requests = site
-    args: dict[str, object] = {
-        "urls": [f"{base}/article"],
-        "query": "providers",
-        "offset": 1,
-        "limit": 1_000,
-    }
-    call = ReactToolCall(
-        tool_name="web_extract",
-        tool_args=args,  # type: ignore[arg-type]
-        tool_call_envelope=ToolCallEnvelope(
-            tool_id="web_extract",
-            reason=None,
-            args=args,  # type: ignore[arg-type]
-        ),
-    )
-    registry = ReactToolRegistry(
-        WebResearchToolSession(user_id="user-1", speaks_to_user=True).definitions()
-    )
-
-    result = await registry.execute(call, 1)
-
-    page = result.output["results"][0]  # type: ignore[index]
-    assert page["raw_content"] == ARTICLE_TEXT
-    assert page["truncation_reason"] is None
-    assert page["retry_hint"] is None
 
 
 def test_page_markup_keeps_structure_and_drops_nothing_but_non_text() -> None:

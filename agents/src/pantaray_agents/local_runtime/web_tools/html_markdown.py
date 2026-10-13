@@ -1,6 +1,7 @@
 """Turn a fetched HTML page into Markdown-like text: headings, lists, links, code.
 
-The page's own ``<main>`` (else ``<article>``, else ``<body>``) is the content.
+The page's own ``<main>`` (else its ``role="main"`` region, else its only
+``<article>``, else ``<body>``) is the content.
 Only under ``<body>`` is site chrome -- header, footer, navigation, sidebars --
 dropped, because inside ``<main>`` those elements carry the article's own title
 and callouts.
@@ -51,11 +52,7 @@ def html_to_markdown(page: str) -> str:
         )
     except ParserError:
         return ""
-    root = document.find(".//main")
-    if root is None:
-        root = document.find(".//article")
-    if root is None:
-        root = document.find("body")
+    root = _content_root(document)
     if root is None:
         return ""
     # Skipped while rendering rather than removed from the tree: removing an
@@ -65,6 +62,19 @@ def html_to_markdown(page: str) -> str:
         skipped=_NEVER_TEXT | (_SITE_CHROME if root.tag == "body" else frozenset())
     )
     return "\n\n".join(renderer.blocks(root, depth=0))
+
+
+def _content_root(document: lxml_html.HtmlElement) -> lxml_html.HtmlElement | None:
+    """The page's main region; a list of several articles is read whole."""
+
+    for path in (".//main", ".//*[@role='main']"):
+        region = document.find(path)
+        if region is not None:
+            return region
+    articles = document.findall(".//article")
+    if len(articles) == 1:
+        return articles[0]
+    return document.find("body")
 
 
 @dataclass(frozen=True, slots=True)

@@ -327,6 +327,17 @@ def test_a_page_deeper_than_the_parser_default_keeps_its_end() -> None:
     assert html_to_markdown(page).endswith("end")
 
 
+def test_every_article_of_a_listing_page_is_read() -> None:
+    page = """<body><header>Blog</header><div id="primary"><div role="main">
+    <article><h1>First post</h1><p>First body.</p></article>
+    <article><h1>Second post</h1><p>Second body.</p></article>
+    </div></div><footer>Footer</footer></body>"""
+
+    assert html_to_markdown(page) == (
+        "# First post\n\nFirst body.\n\n# Second post\n\nSecond body."
+    )
+
+
 def test_the_text_grows_no_faster_than_the_markup() -> None:
     lines = "line<br>" * 2_000
     pages = (

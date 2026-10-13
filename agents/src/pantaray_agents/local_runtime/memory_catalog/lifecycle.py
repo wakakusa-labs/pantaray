@@ -91,7 +91,9 @@ def plan_revision_garbage_collection(
               JOIN agent_actions AS actions
                 ON actions.user_id = manifests.user_id
                AND actions.action_id = manifests.action_id
-              WHERE roots.source_type = 'agent_experience'
+              WHERE roots.source_type IN (
+                        'fact', 'long_term_insight', 'agent_experience'
+                    )
                 AND roots.source_id = revisions.revision_id
                 AND manifests.user_id = revisions.user_id
                 AND actions.status = 'processing'

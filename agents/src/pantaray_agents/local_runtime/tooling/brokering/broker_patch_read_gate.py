@@ -27,10 +27,10 @@ from pantaray_agents.local_runtime.tooling.read_windows import (
     build_bounded_read_windows,
 )
 from pantaray_agents.local_runtime.tooling.repository import _configure_connection
-from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+from pantaray_agents.local_runtime.tooling.tool_result_reading import (
     ToolResultLoadError,
     ToolResultReadLimitError,
-    load_action_file_json_result,
+    load_action_file_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.files.manifest_paths import (
@@ -248,13 +248,13 @@ def _latest_mutating_tool_output(
         if action_id is None:
             raise MigrationError("execution session is not bound to an action")
         try:
-            parsed = load_action_file_json_result(
+            parsed = load_action_file_result(
                 action_tool_results_path=resolve_tool_results_root(
                     roots=context.manifest_roots,
                     action_id=action_id,
                 ),
                 invocation_id=str(row["invocation_id"]),
-                metadata=cast(JSONValue, projected),
+                output=cast(JSONValue, projected),
                 max_bytes=PATCH_READ_SNAPSHOT_MAX_JSON_BYTES,
             )
         except ToolResultReadLimitError:

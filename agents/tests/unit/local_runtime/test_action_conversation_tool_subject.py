@@ -60,10 +60,18 @@ def _args(tool_id: str, **args: JSONValue) -> str:
         ),
         pytest.param(
             "web_search",
+            _args("web_search", queries=["OpenCode providers", "Hermes providers"]),
+            "OpenCode providers, Hermes providers",
+            id="web_search",
+        ),
+        # Recorded before web_search took several queries.
+        pytest.param(
+            "web_search",
             _args(
                 "web_search", query="Japanese information retrieval", topic="general"
             ),
             "Japanese information retrieval",
+            id="web_search-single-query",
         ),
         pytest.param(
             "web_extract",
@@ -76,6 +84,12 @@ def _args(tool_id: str, **args: JSONValue) -> str:
             "https://a.example",
         ),
         pytest.param("memory_search", _args("memory_search", query="議事録"), "議事録"),
+        pytest.param(
+            "memory_search",
+            _args("memory_search", keywords=["見積", "#12"], query="見積の経緯"),
+            "見積, #12",
+            id="memory-search-names-its-keywords-first",
+        ),
         pytest.param(
             "memory_sql",
             _args("memory_sql", sql="SELECT id\nFROM nodes"),

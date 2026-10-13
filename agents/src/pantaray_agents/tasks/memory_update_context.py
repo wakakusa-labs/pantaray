@@ -11,7 +11,6 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from typing import Final
 
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AGENT_EXPERIENCE_ENTRIES_ROOT,
@@ -25,6 +24,12 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
 )
 from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
     render_artifact_manifest,
+)
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    FACTS_INDEX_PATH,
+    INDEX_OVERVIEW_HEADING,
+    INSIGHTS_INDEX_PATH,
+    opens_with_overview,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
@@ -86,9 +91,6 @@ from pantaray_agents.utils.local_time import (
     local_time_note,
     local_zone_name,
 )
-
-FACTS_INDEX_PATH: Final[str] = "facts/index.md"
-INSIGHTS_INDEX_PATH: Final[str] = "insights/index.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +294,9 @@ def prepare_memory_update_run(
         dismissed_suggestions=dismissed_suggestions,
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
+        facts_index=_index_text(router.draft.documents, FACTS_INDEX_PATH),
+        insights_index=_index_text(router.draft.documents, INSIGHTS_INDEX_PATH),
+        overview_request=_overview_request(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
             db_path=runtime.db_path,
             busy_timeout_ms=runtime.busy_timeout_ms,
@@ -337,6 +342,37 @@ def _resolve_fact_id(
     if identity is None:
         return derived_first_fact_id(payload["job_id"])
     return identity[0]
+
+
+def _index_text(documents: tuple[MemoryDocument, ...], path: str) -> str:
+    """An index's current text, or "" when its category is not in this run."""
+
+    return next((item.content for item in documents if item.source_path == path), "")
+
+
+def _overview_request(documents: tuple[MemoryDocument, ...]) -> str:
+    """Ask for the overview of each index in this run that does not open with one.
+
+    Shown the index text alone, the model leaves a missing overview unwritten,
+    so the host names the gap in the task.
+    """
+
+    requests = []
+    for path in (FACTS_INDEX_PATH, INSIGHTS_INDEX_PATH):
+        if not any(item.source_path == path for item in documents):
+            continue
+        if not opens_with_overview(_index_text(documents, path)):
+            requests.append(
+                f"`{path}` has no overview yet: write its `{INDEX_OVERVIEW_HEADING}`"
+                " too, from the index and the files it names."
+            )
+    # Worded as an addition: asked alone, the model wrote the overview and
+    # called `completed` without the updates the evidence called for.
+    return (
+        "Besides the updates this run's evidence calls for, " + " ".join(requests)
+        if requests
+        else ""
+    )
 
 
 def _category_plan(

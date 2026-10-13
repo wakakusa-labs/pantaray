@@ -62,12 +62,6 @@ def require_string_list_arg(args: ToolArgs, key: str) -> list[str]:
     return value
 
 
-def optional_keywords_arg(args: ToolArgs, key: str = "keywords") -> list[str] | None:
-    """memory_search.keywords を文字列配列として取得する。"""
-
-    return optional_string_list_arg(args, key)
-
-
 def optional_int_value(value: object) -> int | None:
     return value if is_strict_int(value) else None
 

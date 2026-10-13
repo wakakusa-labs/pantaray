@@ -11,7 +11,8 @@ type LlmProvider = Literal[
 ]
 # Runtime membership check for values decoded from the wire.
 LLM_PROVIDERS: frozenset[str] = frozenset(get_args(LlmProvider.__value__))
-type ProxyProvider = Literal["tavily", "openai"]
+# "local" is web_extract reading pages from this computer, with no provider.
+type ProxyProvider = Literal["tavily", "openai", "local"]
 type ProxyErrorCode = Literal[
     "PROXY_CONNECTION_NOT_CONFIGURED",
     "PROXY_CONTINUATION_PROVIDER_MISMATCH",
@@ -101,6 +102,11 @@ PROXY_OUTCOME_PARTIAL_RESULTS: ProxyResultOutcome = "partial_results"
 PROXY_OUTCOME_MODEL_OUTPUT_REJECTED: ProxyResultOutcome = "model_output_rejected"
 
 PROXY_ERROR_SEVERITY = "error"
+
+# The model declined to answer: PROXY_UPSTREAM_FORBIDDEN with this
+# `response_status`. A FORBIDDEN without it is an access denial (an HTTP 403),
+# which the user cannot fix by changing the model or starting over.
+MODEL_REFUSAL_RESPONSE_STATUS = "refusal"
 
 _VALID_ERROR_CODES: frozenset[str] = frozenset(get_args(ProxyErrorCode.__value__))
 _VALID_SUGGESTED_ACTIONS: frozenset[str] = frozenset(
@@ -364,6 +370,13 @@ def _resolve_error_message(
     surface_id: ProxySurfaceId,
     error_code: ProxyErrorCode,
 ) -> str:
+    if error_code == PROXY_CONNECTION_NOT_CONFIGURED and surface_id != "llm":
+        return (
+            "Web search is not set up, so nothing was looked up. It works once the "
+            "user signs in to Pantaray or saves a Tavily API key in Settings > AI "
+            "connection > Web search (in Japanese: 設定 > AI 接続 > Web 検索). "
+            "web_extract still reads pages whose URL is known."
+        )
     if error_code == PROXY_CONNECTION_NOT_CONFIGURED:
         return "No connection is configured. Configure a connection before retrying."
     if error_code == PROXY_CONTINUATION_PROVIDER_MISMATCH:
@@ -462,6 +475,7 @@ def _invalid_input_message(surface_id: ProxySurfaceId) -> str:
 
 
 __all__ = [
+    "MODEL_REFUSAL_RESPONSE_STATUS",
     "PROXY_CONNECTION_NOT_CONFIGURED",
     "PROXY_CONTINUATION_PROVIDER_MISMATCH",
     "PROXY_MODEL_CAPABILITY_UNSUPPORTED",

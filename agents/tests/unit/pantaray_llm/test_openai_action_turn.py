@@ -265,7 +265,7 @@ async def test_action_turn_keeps_existing_batch_limit(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("status", "reason", "output", "expected_code"),
+    ("status", "reason", "output", "expected_code", "expected_response_status"),
     [
         (
             "completed",
@@ -281,23 +281,26 @@ async def test_action_turn_keeps_existing_batch_limit(monkeypatch) -> None:
                 _call(),
             ],
             "PROXY_UPSTREAM_FORBIDDEN",
+            "refusal",
         ),
         (
             "incomplete",
             "content_filter",
             [_message(), _call()],
             "PROXY_UPSTREAM_FORBIDDEN",
+            "refusal",
         ),
         (
             "failed",
             "server_error",
             [_message(), _call()],
             "PROXY_UPSTREAM_INTERNAL_ERROR",
+            "failed",
         ),
     ],
 )
 async def test_action_turn_preserves_provider_failure_classification(
-    monkeypatch, status, reason, output, expected_code
+    monkeypatch, status, reason, output, expected_code, expected_response_status
 ) -> None:
     responses = _FakeResponses(
         output_text="途中説明",
@@ -315,6 +318,8 @@ async def test_action_turn_preserves_provider_failure_classification(
             uploaded_blobs={},
         )
     assert caught.value.code == expected_code
+    # The Action terminal tells a refusal from an access denial by this status.
+    assert caught.value.details["response_status"] == expected_response_status
     assert caught.value.details["total_tokens"] == 132
 
 

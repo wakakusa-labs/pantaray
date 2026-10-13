@@ -6,6 +6,7 @@ export const DEV_USER_DATA_DIR_ENV = 'PANTARAY_USER_DATA_DIR';
 type UserDataPathApp = {
   isPackaged: boolean;
   setPath: (name: 'userData', value: string) => void;
+  setAppLogsPath: (value: string) => void;
 };
 
 export function applyDevUserDataDirOverride(params: {
@@ -25,5 +26,8 @@ export function applyDevUserDataDirOverride(params: {
   }
   fs.mkdirSync(rawDir, { recursive: true, mode: 0o700 });
   params.app.setPath('userData', rawDir);
+  // The logs directory is keyed by the app name, not userData, so without this a
+  // development profile writes into the installed app's log files.
+  params.app.setAppLogsPath(path.join(rawDir, 'logs'));
   return rawDir;
 }

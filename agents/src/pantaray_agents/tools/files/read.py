@@ -17,11 +17,12 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPES
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .attachment_reference import build_workspace_file_attachment
+from .attachment_reference import build_read_image
 from .read_contract import ReadToolArgs, ReadToolResult
 from .read_document import document_format, read_document, reject_legacy_document
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
 from .read_scope import ReadScope
+from .read_sniffing import SAMPLE_BYTES, image_mime_type, looks_binary
 from .read_target import ReadTarget, action_reference_paths, resolve_read_target
 from .text_encoding import (
     ByteOrderMark,
@@ -37,7 +38,6 @@ from .text_lines import (
 )
 from .workspace_descriptor_access import open_workspace_entry_descriptor
 
-SAMPLE_BYTES = 4_096
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 READ_BINARY_FILE_UNSUPPORTED = "READ_BINARY_FILE_UNSUPPORTED"
 READ_NOT_A_REGULAR_FILE = "READ_NOT_A_REGULAR_FILE"
@@ -130,50 +130,20 @@ def _read_file(
                 ),
                 code=READ_ATTACHMENT_TOO_LARGE,
             )
-        payload = _read_attachment_payload(target=target, descriptor=descriptor)
-        workspace_attachment = build_workspace_file_attachment(
-            canonical_root_path=target.canonical_root_path,
-            root_relative_path=target.root_relative_path,
-            display_path=target.display_path,
-            mime_type=mime_type,
-            payload=payload,
-        )
         return ReadToolResult(
             output={
                 "kind": "attachment",
                 "path": target.display_path,
                 "mime_type": mime_type,
                 "message": "Image read successfully",
-                "attachments": [
-                    {
-                        "type": "file",
-                        "mime_type": mime_type,
-                        "path": target.display_path,
-                        "ref": workspace_attachment.ref,
-                        "byte_size": workspace_attachment.byte_size,
-                    }
-                ],
             },
             search_text=None,
             file_paths=(target.display_path,),
             file_reference_paths=action_reference_paths(target),
-            attachments=(
-                {
-                    "type": "file",
-                    "source_kind": "workspace_file",
-                    "ref": workspace_attachment.ref,
-                    "blob_ref": workspace_attachment.blob_ref,
-                    "display_path": target.display_path,
-                    "workspace_root_path": str(
-                        workspace_attachment.canonical_root_path
-                    ),
-                    "workspace_relative_path": (
-                        workspace_attachment.root_relative_path
-                    ),
-                    "mime_type": mime_type,
-                    "byte_size": workspace_attachment.byte_size,
-                    "sha256": workspace_attachment.sha256,
-                },
+            image=build_read_image(
+                display_path=target.display_path,
+                mime_type=mime_type,
+                payload=_read_attachment_payload(target=target, descriptor=descriptor),
             ),
         )
     reject_legacy_document(target)
@@ -452,14 +422,8 @@ def _sniff_image_mime(*, filepath: Path, sample: bytes) -> str | None:
     one file whose bytes have to reach the model to be understood at all.
     """
 
-    if sample.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if sample.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if sample.startswith(b"GIF87a") or sample.startswith(b"GIF89a"):
-        return "image/gif"
-    if sample.startswith(b"RIFF") and sample[8:12] == b"WEBP":
-        return "image/webp"
+    if (announced := image_mime_type(sample)) is not None:
+        return announced
     guessed, _encoding = mimetypes.guess_type(filepath.name)
     return guessed if guessed in IMAGE_MIME_TYPES else None
 
@@ -480,21 +444,10 @@ def _read_attachment_payload(*, target: ReadTarget, descriptor: int) -> bytes:
 
 
 def _is_binary_file(*, filepath: Path, sample: bytes) -> bool:
-    if filepath.suffix.lower() in _BINARY_EXTENSIONS:
-        return True
-    if not sample:
-        return False
-    non_printable = 0
-    for byte in sample:
-        if byte == 0:
-            return True
-        if byte < 9 or (byte > 13 and byte < 32):
-            non_printable += 1
-    return non_printable / len(sample) > 0.3
+    return filepath.suffix.lower() in _BINARY_EXTENSIONS or looks_binary(sample)
 
 
 __all__ = [
-    "SAMPLE_BYTES",
     "open_read_target",
     "read_leading_bytes",
     "run_read",

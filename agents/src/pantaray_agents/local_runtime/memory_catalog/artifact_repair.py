@@ -325,37 +325,17 @@ def write_artifact_repair_projection(
     if source == "agent_experience":
         # Agent Experience is Catalog-native; its artifact head is the projection.
         return
-    profile_brief = (revision.profile_brief or "").strip()
-    if not profile_brief:
-        profile_brief = _repair_profile_brief(
-            connection=connection,
-            user_id=revision.user_id,
-            source=source,
-            source_record_id=source_record_id,
-        )
-        revision_cursor = connection.execute(
-            """
-            UPDATE memory_revisions SET profile_brief = ?
-            WHERE user_id = ? AND revision_id = ? AND profile_brief IS NULL
-            """,
-            (profile_brief, revision.user_id, revision.revision_id),
-        )
-        if revision_cursor.rowcount != 1:
-            raise MemoryCatalogIntegrityError(
-                "repair revision profile brief is not writable"
-            )
     if source == "fact":
         cursor = connection.execute(
             """
             UPDATE agent_facts
             SET structured_fact_storage_path = ?, structured_fact_sha256 = ?,
-                facts_profile_brief = ?, updated_at = ?
+                updated_at = ?
             WHERE user_id = ? AND fact_id = ? AND status = 'success'
             """,
             (
                 f"{revision.artifact_root_path}/facts/index.md",
                 revision.content_sha256,
-                profile_brief,
                 revision.created_at,
                 revision.user_id,
                 source_record_id,
@@ -365,13 +345,12 @@ def write_artifact_repair_projection(
         cursor = connection.execute(
             """
             UPDATE agent_long_term_insight_state
-            SET storage_path = ?, sha256 = ?, insight_profile_brief = ?, updated_at = ?
+            SET storage_path = ?, sha256 = ?, updated_at = ?
             WHERE user_id = ?
             """,
             (
                 f"{revision.artifact_root_path}/insights/index.md",
                 revision.content_sha256,
-                profile_brief,
                 revision.created_at,
                 revision.user_id,
             ),
@@ -380,36 +359,6 @@ def write_artifact_repair_projection(
         raise MemoryCatalogIntegrityError("unsupported artifact repair source")
     if cursor.rowcount != 1:
         raise MemoryCatalogIntegrityError("artifact repair domain projection is absent")
-
-
-def _repair_profile_brief(
-    *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    source: MemorySource,
-    source_record_id: str,
-) -> str:
-    if source == "fact":
-        row = connection.execute(
-            """
-            SELECT facts_profile_brief AS profile_brief FROM agent_facts
-            WHERE user_id = ? AND fact_id = ? AND status = 'success'
-            """,
-            (user_id, source_record_id),
-        ).fetchone()
-    elif source == "long_term_insight":
-        row = connection.execute(
-            """
-            SELECT insight_profile_brief AS profile_brief
-            FROM agent_long_term_insight_state WHERE user_id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-    else:
-        raise MemoryCatalogIntegrityError("unsupported artifact repair source")
-    if row is None or not str(row["profile_brief"] or "").strip():
-        raise MemoryCatalogIntegrityError("artifact repair profile brief is absent")
-    return str(row["profile_brief"]).strip()
 
 
 def build_repair_payload(*, user_id: str, source_record_id: str) -> str:

@@ -17,6 +17,7 @@ from pantaray_agents.schema.agent.suggestion import SuggestionExtraction
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
+from .nudges import PastSuggestions
 from .output import parse_suggestion_output
 from .react import (
     SuggestionStepRecorder,
@@ -119,9 +120,11 @@ async def decide_with_lenses(
     system_instruction: str,
     current_time: str,
     recent_suggestions: str,
+    past: PastSuggestions,
     lenses: Sequence[str],
     lens_config: PromptConfig,
     selector_config: PromptConfig,
+    nudge_config: PromptConfig,
     research_tools: SuggestionResearchTools,
     send_turn: SuggestionTurnSender,
     generate_tool_call: SuggestionToolCallGenerator,
@@ -146,9 +149,11 @@ async def decide_with_lenses(
             lens=_lens_section(lens_config, lens),
             system_instruction=system_instruction,
             research_tools=research_tools,
+            nudge_config=nudge_config,
             send_turn=send_turn,
             parse_output=parse_suggestion_output,
             record_step=record,
+            past=past,
         )
 
     tasks = [
@@ -203,6 +208,8 @@ async def decide_with_lenses(
         raise ValueError(
             f"The Suggestion selector chose an unknown candidate: {choice}"
         )
+    chosen = None if choice is None else candidates[choice - 1]
+    selected_lens = None if chosen is None else chosen.lens
     await record_step(
         ReactLoopStep(
             run_id=suggestion_id,
@@ -211,13 +218,14 @@ async def decide_with_lenses(
             status="success",
             prompt_text=prompt,
             response_text=f"choice={choice}; {reason}",
+            # The recent-Suggestion history reads the shown Suggestion's lens here.
+            tool_output={"selected_lens": selected_lens},
         )
     )
-    if choice is None:
+    if chosen is None:
         declined = _declined(candidates[0].extraction)
         return LensDecision(declined, candidates, None)
-    chosen = candidates[choice - 1]
-    return LensDecision(chosen.extraction, candidates, chosen.lens)
+    return LensDecision(chosen.extraction, candidates, selected_lens)
 
 
 def _declined(extraction: SuggestionExtraction) -> SuggestionExtraction:

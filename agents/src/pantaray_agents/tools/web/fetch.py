@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentInvalidResponseError,
@@ -28,17 +29,9 @@ class WebSearchResult:
 
 
 @dataclass(frozen=True, slots=True)
-class WebSearchImage:
-    url: str
-    description: str
-
-
-@dataclass(frozen=True, slots=True)
 class WebSearchResponse:
-    status: str
     query: str
     results: tuple[WebSearchResult, ...]
-    images: tuple[WebSearchImage, ...]
     upstream_request_id: str | None
 
 
@@ -60,6 +53,8 @@ class WebExtractResponse:
     failed_results: tuple[WebExtractFailure, ...]
     response_time: float | None
     upstream_request_id: str | None
+    # "local" pages were read from this computer: whole, whatever the query.
+    provider: Literal["tavily", "local"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +89,6 @@ async def fetch_web_search(
         raise WebContentInvalidResponseError("meta")
     has_upstream_request_id = meta.get("upstream_request_id") is not None
     return WebSearchResponse(
-        status=_text(result, "status"),
         query=query,
         results=tuple(
             WebSearchResult(
@@ -104,10 +98,6 @@ async def fetch_web_search(
                 content=_text(row, "content"),
             )
             for row in _rows(result.get("results"), field="results")
-        ),
-        images=tuple(
-            WebSearchImage(url=_text(row, "url"), description=_text(row, "description"))
-            for row in _rows(result.get("images"), field="images")
         ),
         upstream_request_id=(
             _text(meta, "upstream_request_id") if has_upstream_request_id else None
@@ -137,6 +127,7 @@ async def fetch_web_extract(
         ),
         response_time=_response_time(result),
         upstream_request_id=_upstream_request_id(result),
+        provider=_extract_provider(result),
     )
 
 
@@ -214,6 +205,15 @@ def _response_time(result: dict[str, JSONValue]) -> float | None:
     if not isinstance(value, int | float):
         raise WebContentInvalidResponseError("response_time")
     return float(value)
+
+
+def _extract_provider(result: dict[str, JSONValue]) -> Literal["tavily", "local"]:
+    """Only the local route marks its result; both provider routes are Tavily."""
+
+    meta = result.get("meta")
+    if isinstance(meta, dict) and meta.get("upstream_provider") == "local":
+        return "local"
+    return "tavily"
 
 
 def _upstream_request_id(result: dict[str, JSONValue]) -> str | None:

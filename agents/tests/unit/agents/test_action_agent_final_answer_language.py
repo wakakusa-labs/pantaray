@@ -78,7 +78,7 @@ async def test_execution_think_injects_final_answer_language_ja() -> None:
     # minimal prompt/instruction
     agent.executing_prompt = (
         "{request_summary}{target_context}"
-        "{insight_data}{structured_fact_data}{current_time}{action_history}"
+        "{memory_indexes}{current_time}{action_history}"
     )
     agent.executing_system_instruction = (
         "BASE\n"
@@ -121,7 +121,7 @@ async def test_execution_think_injects_final_answer_language_en() -> None:
 
     agent.executing_prompt = (
         "{request_summary}{target_context}"
-        "{insight_data}{structured_fact_data}{current_time}{action_history}"
+        "{memory_indexes}{current_time}{action_history}"
     )
     agent.executing_system_instruction = (
         "BASE\n"

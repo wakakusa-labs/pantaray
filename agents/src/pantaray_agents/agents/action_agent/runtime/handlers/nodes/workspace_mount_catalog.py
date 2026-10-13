@@ -17,10 +17,17 @@ from pantaray_agents.schema.workspace_context import (
     workspace_context_catalog_from_snapshot,
 )
 
-AGENT_EXPERIENCE_SOURCE_TYPE = "agent_experience"
-AGENT_EXPERIENCE_PROMPT_HINT = (
-    "useful past procedures may exist here; explore only when needed"
-)
+# The memory's current revision folders, which the Action reads but cannot change.
+_MEMORY_ROOT_HINTS = {
+    "fact": "the user's facts, read-only; `facts/` in Memory Indexes is this folder",
+    "long_term_insight": (
+        "the user's insights, read-only; `insights/` in Memory Indexes is this folder"
+    ),
+    "agent_experience": (
+        "lessons from past work, one file each, read-only; Memory Indexes lists "
+        "the situations they apply to"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,8 +165,9 @@ def _format_root_catalog(
 
 
 def _format_mount_catalog_row(row: ManifestRootCatalogRow) -> str:
-    if row.source_type == AGENT_EXPERIENCE_SOURCE_TYPE:
-        return f"- `{row.real_path}`: {AGENT_EXPERIENCE_PROMPT_HINT}"
+    hint = _MEMORY_ROOT_HINTS.get(row.source_type)
+    if hint is not None:
+        return f"- `{row.real_path}`: {hint}"
     return (
         f"- `{row.real_path}`: {row.display_name} "
         f"({row.source_type}; capabilities={', '.join(_capabilities(row))})"

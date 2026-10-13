@@ -34,6 +34,8 @@ from pantaray_agents.agents.suggestion_agent.context_fetch import (
     fetch_summary_rows_by_type,
 )
 from pantaray_agents.agents.suggestion_agent.context_formatters import (
+    RECENT_SUGGESTIONS_SHOWN,
+    SUGGESTION_HISTORY_DAYS,
     format_activity_descriptions,
     format_activity_summary,
     format_recent_suggestions,
@@ -53,12 +55,22 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     decide_with_lenses,
     sample_lenses,
 )
+from pantaray_agents.agents.suggestion_agent.nudges import (
+    SUGGESTION_NUDGES_PROMPT_NAME,
+    Embed,
+    PastSuggestions,
+    load_past_suggestions,
+)
 from pantaray_agents.agents.suggestion_agent.research import SuggestionResearchTools
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
     write_suggestion_answer,
 )
 from pantaray_agents.conversation.loop import ConversationRequest
+from pantaray_agents.local_runtime.embedding_local import (
+    LocalEmbeddingUnavailableError,
+    load_local_embedding_model,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.repositories.runtime_ports import (
     SuggestionRepositoryPort,
@@ -94,6 +106,20 @@ type SuggestionLlmPayload = dict[str, JSONValue]
 # todos.md exceeds about 20 KB after Memory has run on it, revisit the Memory rules
 # rather than raising these limits.
 SUGGESTION_INITIAL_PROMPT_MAX_CHARS = 124_000
+# Design limit: the 123 Suggestions shown in four weeks of production use, with
+# their Actions, took 0.7 s to read; revisit when the history's read nears 2 s.
+SUGGESTION_HISTORY_MAX_ROWS = 1_000
+
+
+def _bundled_embedding() -> Embed | None:
+    """The bundled embedding model, or None when it is not installed.
+
+    The loader logs the reason once; semantic memory search is off then too.
+    """
+    try:
+        return load_local_embedding_model().embed_documents
+    except LocalEmbeddingUnavailableError:
+        return None
 
 
 class SuggestionPersistencePayload(TypedDict):
@@ -147,6 +173,9 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._selector_prompt_config = self._load_prompt_config(
             SUGGESTION_SELECTOR_PROMPT_NAME
         )
+        self._nudge_prompt_config = self._load_prompt_config(
+            SUGGESTION_NUDGES_PROMPT_NAME
+        )
         self._lens_rng = random.Random()
         self._last_step_number = 0  # the run's latest recorded step
         self._action_agent_capabilities_prompt_text = ACTION_AGENT_CAPABILITY_ENVELOPE
@@ -155,6 +184,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._last_prompt_text = ""
         self._last_response_text = ""
         self._recent_suggestions_text = ""
+        self._past_suggestions = PastSuggestions((), datetime.now(UTC))
 
     @property
     def task_suggestion_prompt(self) -> str:
@@ -232,11 +262,13 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             raise TypeError("Request must be of type SuggestionAgentRequest")
         suggestion_request = request
 
-        # 直近のanswer（最新12件）を取得（thinkingは含めない）
-        # 期間は広め（30日）に設定し、limitで20件に絞る
+        # The shown Suggestions of the history's period, newest first; the
+        # prompt lists the latest of them and the nudges check against all.
         recent_suggestion_rows = repository_data_or_raise(
             await self.repository.get_recent_suggestions(
-                suggestion_request.user_id, days=30, limit=20
+                suggestion_request.user_id,
+                days=SUGGESTION_HISTORY_DAYS,
+                limit=SUGGESTION_HISTORY_MAX_ROWS,
             ),
             safe_message="failed to fetch recent suggestions",
         )
@@ -245,7 +277,13 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             normalized = normalize_recent_suggestion_entry(row)
             if normalized is not None:
                 recent_entries.append(normalized)
-        recent_suggestions_text = format_recent_suggestions(recent_entries)
+        reference_time = self._get_reference_time()
+        recent_suggestions_text = format_recent_suggestions(
+            recent_entries[:RECENT_SUGGESTIONS_SHOWN], reference_time
+        )
+        self._past_suggestions = await load_past_suggestions(
+            recent_entries, reference_time, _bundled_embedding()
+        )
 
         # 直近のActivity Descriptionを3件取得し、実際の対象期間を表示する。
         recent_activity_description_rows = repository_data_or_raise(
@@ -271,7 +309,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         summary_1h_row = summary_1h_rows[0] if summary_1h_rows else None
 
         # 追加: Activity Summary（24h/1w/1m）を取得し、ended_ago 付きで整形する
-        reference_time = self._get_reference_time()
         rows_by_type = await fetch_summary_rows_by_type(
             repository=self.repository,
             user_id=suggestion_request.user_id,
@@ -373,9 +410,11 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 self._get_reference_time(), local_zone_name()
             ),
             recent_suggestions=self._recent_suggestions_text,
+            past=self._past_suggestions,
             lenses=sample_lenses(self._lens_rng),
             lens_config=self._lens_prompt_config,
             selector_config=self._selector_prompt_config,
+            nudge_config=self._nudge_prompt_config,
             research_tools=self.research_tools,
             send_turn=self._send_research_turn,
             generate_tool_call=generate_tool_call,

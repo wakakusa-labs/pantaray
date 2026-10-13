@@ -5,7 +5,7 @@ the whole conversation behind it: the first call after each new message read
 only the fixed prefix from the prompt cache. Every run re-reads the workspace
 and the Pantaray-wide AGENTS.md, and every turn re-reads the time, so the head
 instead shows them as they were on the Action's first turn and is never
-rewritten. (The profile briefs are read once per Action and are not sections
+rewritten. (The memory indexes are read once per Action and are not sections
 here.) A turn that reads a different version appends it to its turn context,
 saying it replaces the earlier one, and a turn that reads the same version
 appends nothing -- the world-state pattern Codex uses for its own instructions

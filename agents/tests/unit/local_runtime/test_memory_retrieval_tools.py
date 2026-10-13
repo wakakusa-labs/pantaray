@@ -35,6 +35,7 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     MemoryDraftToolSession,
 )
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
@@ -82,7 +83,7 @@ async def test_memory_search_commits_epoch_only_after_result_presentation(
             "source_path": "facts/index.md",
             "heading_path": None,
             "observed_at": "2026-07-31T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
         }
         return MemorySearchResponse(
             results=(malformed,),  # type: ignore[arg-type]
@@ -187,7 +188,7 @@ async def test_memory_search_reuses_handle_and_promotes_direct_provenance(
             "source_path": "facts/index.md",
             "heading_path": None,
             "observed_at": "2026-09-26T21:50:00.000000Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": "ctx_duplicate",
         }
     ]
@@ -234,6 +235,22 @@ async def test_memory_search_reuses_handle_and_promotes_direct_provenance(
         == "ctx_existing"
     )
     assert memory_session.memory_context.require_epoch().items[0].reference_depth == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    ({}, {"keywords": [" "], "query": " "}, {"keywords": "needle"}),
+)
+async def test_memory_search_needs_keywords_or_query(
+    tmp_path: Path, arguments: dict[str, JSONValue]
+) -> None:
+    tools = _retrieval_tools(tmp_path, _memory_session())
+
+    result = await tools.search(_tool_call("memory_search", arguments), 1)
+
+    assert result.status == "error"
+    assert result.output["error_code"] == "MEMORY_SEARCH_INVALID"
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,11 @@ from pantaray_agents.local_runtime.embedding_local import (
 from pantaray_agents.schema.memory_embeddings import MemorySearchSemanticStatus
 
 from .connection import open_memory_catalog_connection
-from .context_search import merge_memory_search_context, search_memory_catalog
+from .context_search import (
+    SemanticSearchInput,
+    merge_memory_search_context,
+    search_memory_catalog,
+)
 from .embedding_generations import (
     EmbeddingGeneration,
     current_embedding_specification,
@@ -36,9 +40,12 @@ MEMORY_EMBEDDING_INDEX_BLOCKED = "MEMORY_EMBEDDING_INDEX_BLOCKED"
 
 @dataclass(frozen=True, slots=True)
 class MemorySearchRequest:
+    """At least one of keywords and query; keywords are stripped and distinct."""
+
     user_id: str
     run_id: str
-    query: str
+    keywords: tuple[str, ...]
+    query: str | None
     focus: MemorySearchFocus
     limit: int
     center_time: str | None = None
@@ -100,7 +107,7 @@ def _search(
     )
     semantic_status: MemorySearchSemanticStatus = "not_ready"
     semantic_error_code: str | None = None
-    query_vector: tuple[float, ...] | None = None
+    vectors: tuple[tuple[float, ...] | None, tuple[float, ...] | None] | None = None
     try:
         model = load_local_embedding_model()
     except LocalEmbeddingUnavailableError:
@@ -114,7 +121,12 @@ def _search(
             current_embedding_specification(model.manifest)
         ):
             try:
-                query_vector = model.embed_query(request.query)
+                vectors = (
+                    model.embed_query(" ".join(request.keywords))
+                    if request.keywords
+                    else None,
+                    model.embed_query(request.query) if request.query else None,
+                )
             # The model is installed but could not embed this query. Reporting
             # it keeps the lexical and exact lanes answering instead of failing
             # the whole search.
@@ -132,29 +144,28 @@ def _search(
                 connection,
                 user_id=request.user_id,
             )
-            if query_vector is None:
-                search_generation = None
-                query_embedding = None
+            semantic: SemanticSearchInput | None = None
+            if vectors is None:
                 if semantic_status == "not_ready":
                     semantic_error_code = _not_ready_reason(
                         connection, user_id=request.user_id
                     )
-            elif generation != selected_generation:
-                search_generation = None
-                query_embedding = None
+            elif generation != selected_generation or generation is None:
                 semantic_status = "generation_changed"
                 semantic_error_code = None
             else:
-                search_generation = generation
-                query_embedding = query_vector
+                semantic = SemanticSearchInput(
+                    generation=generation,
+                    keywords_embedding=vectors[0],
+                    query_embedding=vectors[1],
+                )
                 semantic_status = "available"
             results, search_epoch = search_memory_catalog(
                 connection=connection,
                 user_id=request.user_id,
                 run_id=request.run_id,
-                query=request.query,
-                query_embedding=query_embedding,
-                embedding_generation=search_generation,
+                keywords=request.keywords,
+                semantic=semantic,
                 focus=request.focus,
                 center_time=request.center_time,
                 radius_hours=request.radius_hours,
@@ -171,8 +182,21 @@ def _search(
         epoch=epoch,
         semantic_status=semantic_status,
         semantic_error_code=semantic_error_code,
-        notes=lexical_query_notes(request.query),
+        notes=_search_notes(request, semantic_status),
     )
+
+
+def _search_notes(
+    request: MemorySearchRequest, semantic_status: MemorySearchSemanticStatus
+) -> tuple[str, ...]:
+    notes = lexical_query_notes(" ".join(request.keywords))
+    if request.query and semantic_status != "available":
+        # query is matched by meaning only, so it found nothing this time.
+        notes += (
+            f"query was not searched (semantic_status={semantic_status}); put "
+            "the names and words to match in keywords.",
+        )
+    return notes
 
 
 def _not_ready_reason(connection: sqlite3.Connection, *, user_id: str) -> str | None:

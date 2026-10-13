@@ -100,6 +100,7 @@ from pantaray_llm.contracts.conversation import (
 )
 from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_AUTHENTICATION_FAILED,
     PROXY_CONNECTION_NOT_CONFIGURED,
     PROXY_INSUFFICIENT_BALANCE,
@@ -125,7 +126,14 @@ CHAT_SYSTEM_INSTRUCTION: Final[str] = (
     "bubble exactly as typed, so Markdown never renders there; what would be a "
     "list or a heading reads as ordinary sentences. "
     "The tasks in your work list are the user's tasks that you are working on "
-    "yourself, and the suggestions there are yours.\n"
+    "yourself. Your suggestions, the offers you made them outside this chat, "
+    "are in agent_suggestions. Whenever they mention a suggestion or proposal "
+    "-- that suggestion, do the X proposal, your recent ones -- look it up "
+    "there with memory_sql before anything else, those with user_reaction IS "
+    "NULL first; only when none matches is it a new request. Asked to do one, "
+    "take it up with accept_suggestion: start_action would make it a new task "
+    "apart from your suggestion. In reply, add a suggestion card for each "
+    "suggestion you mention.\n"
     "Your tasks move only through your tools: a task starts or hears from you "
     'when a call says it did, and a result that begins with "Not done" '
     "means nothing happened, which is what you then tell the user.\n"
@@ -514,6 +522,11 @@ def _failure_reason(exc: Exception) -> ChatTurnFailureReason:
     if isinstance(exc, ConversationTurnsExhausted):
         return "step_limit"
     if isinstance(exc, LlmProxyExecutionError):
+        if (
+            exc.error_code == PROXY_UPSTREAM_FORBIDDEN
+            and exc.response_status == MODEL_REFUSAL_RESPONSE_STATUS
+        ):
+            return "llm_refused"
         if exc.retryable or exc.error_code in _CONNECTION_ERROR_CODES:
             return "llm_connection"
         return "llm_request"

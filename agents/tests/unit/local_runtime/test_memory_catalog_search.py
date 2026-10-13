@@ -8,6 +8,7 @@ import pytest
 
 from pantaray_agents.local_runtime.memory_catalog.context_search import (
     LEXICAL_CANDIDATE_POOL_MULTIPLIER,
+    SemanticSearchInput,
     merge_memory_search_context,
     search_memory_catalog,
 )
@@ -61,39 +62,6 @@ BUSY_TIMEOUT_MS = 1_000
 EMBEDDING_DIMENSIONS = 512
 
 
-@pytest.mark.parametrize(
-    ("query_embedding", "embedding_generation"),
-    (
-        (
-            None,
-            EmbeddingGeneration(
-                1,
-                TEST_EMBEDDING_SPECIFICATION,
-            ),
-        ),
-        ((1.0, *([0.0] * (EMBEDDING_DIMENSIONS - 1))), None),
-    ),
-)
-def test_catalog_search_requires_semantic_inputs_together(
-    query_embedding: tuple[float, ...] | None,
-    embedding_generation: EmbeddingGeneration | None,
-) -> None:
-    with sqlite3.connect(":memory:") as connection:
-        with pytest.raises(ValueError, match="must be provided together"):
-            search_memory_catalog(
-                connection=connection,
-                user_id="user-1",
-                run_id="invalid-semantic-input",
-                query="query",
-                query_embedding=query_embedding,
-                embedding_generation=embedding_generation,
-                focus="all",
-                center_time=None,
-                radius_hours=None,
-                limit=8,
-            )
-
-
 def _vector(index: int) -> tuple[float, ...]:
     values = [0.0] * EMBEDDING_DIMENSIONS
     values[index] = 1.0
@@ -114,7 +82,7 @@ def test_semantic_search_preserves_retryable_operational_error(
 ) -> None:
     locked = sqlite3.OperationalError("database is locked")
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_operational_error(locked),
     )
 
@@ -124,7 +92,7 @@ def test_semantic_search_preserves_retryable_operational_error(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     TEST_EMBEDDING_SPECIFICATION,
@@ -140,7 +108,7 @@ def test_semantic_search_maps_missing_schema_to_index_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_operational_error(
             sqlite3.OperationalError("no such table: memory_embedding_entries_g1")
         ),
@@ -155,7 +123,7 @@ def test_semantic_search_maps_missing_schema_to_index_unavailable(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     TEST_EMBEDDING_SPECIFICATION,
@@ -294,9 +262,10 @@ def test_catalog_search_returns_only_active_current_fragments(tmp_path: Path) ->
             connection=connection,
             user_id="user-1",
             run_id="search-1",
-            query="current boundary",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("current boundary",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="activity",
             center_time=None,
             radius_hours=None,
@@ -306,9 +275,10 @@ def test_catalog_search_returns_only_active_current_fragments(tmp_path: Path) ->
             connection=connection,
             user_id="user-1",
             run_id="search-2",
-            query="obsolete",
-            query_embedding=_vector(1),
-            embedding_generation=_active_generation(connection),
+            keywords=("obsolete",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(1), None
+            ),
             focus="all",
             center_time=None,
             radius_hours=None,
@@ -318,7 +288,6 @@ def test_catalog_search_returns_only_active_current_fragments(tmp_path: Path) ->
     assert [row["content"] for row in results] == ["current boundary wording"]
     assert results[0]["context_handle"] == epoch.items[0].item.context_handle
     assert [row["content"] for row in old_results] == ["current boundary wording"]
-    assert old_results[0]["match_kind"] == "semantic"
 
 
 def test_catalog_search_time_hint_ranks_without_filtering(tmp_path: Path) -> None:
@@ -357,9 +326,10 @@ def test_catalog_search_time_hint_ranks_without_filtering(tmp_path: Path) -> Non
             connection=connection,
             user_id="user-1",
             run_id="search-inside",
-            query="temporal context",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("temporal context",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="activity",
             center_time="2026-07-18T13:00:00Z",
             radius_hours=2,
@@ -369,9 +339,10 @@ def test_catalog_search_time_hint_ranks_without_filtering(tmp_path: Path) -> Non
             connection=connection,
             user_id="user-1",
             run_id="search-outside",
-            query="temporal context",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("temporal context",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="activity",
             center_time="2026-07-19T00:00:00Z",
             radius_hours=2,
@@ -439,13 +410,19 @@ def test_catalog_semantic_search_uses_vec0_cosine_ordering(tmp_path: Path) -> No
             generation_id=_scoped_generation_id(connection),
             activated_at="2026-07-18T00:00:00Z",
         )
+        # Equal times keep the activity time prior from reordering by recency.
+        connection.execute(
+            "UPDATE memory_nodes SET updated_at = '2026-07-18T00:00:00Z' "
+            "WHERE user_id = 'user-1'"
+        )
         results, _ = search_memory_catalog(
             connection=connection,
             user_id="user-1",
             run_id="semantic-order",
-            query="no lexical overlap",
-            query_embedding=_vector(1),
-            embedding_generation=_active_generation(connection),
+            keywords=(),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), None, _vector(1)
+            ),
             focus="activity",
             center_time=None,
             radius_hours=None,
@@ -456,7 +433,23 @@ def test_catalog_semantic_search_uses_vec0_cosine_ordering(tmp_path: Path) -> No
         "near-vector",
         "far-vector",
     ]
-    assert results[0]["match_kind"] == "semantic"
+    assert results[0]["matched_by"] == "query"
+    # The keywords and the query are ranked in one pass over the verified
+    # index; each must rank by its own embedding.
+    both, _ = search_memory_catalog(
+        connection=connection,
+        user_id="user-1",
+        run_id="semantic-two-lanes",
+        keywords=("unmatched",),
+        semantic=SemanticSearchInput(
+            _active_generation(connection), _vector(0), _vector(1)
+        ),
+        focus="activity",
+        center_time=None,
+        radius_hours=None,
+        limit=2,
+    )
+    assert [result["record_id"] for result in both] == ["far-vector", "near-vector"]
 
 
 def test_semantic_chunks_return_unique_original_fragments(tmp_path: Path) -> None:
@@ -499,9 +492,10 @@ def test_semantic_chunks_return_unique_original_fragments(tmp_path: Path) -> Non
             connection=connection,
             user_id="user-1",
             run_id="chunk-dedup",
-            query="意味検索だけで見つける問い合わせ",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=(),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), None, _vector(0)
+            ),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -545,11 +539,11 @@ def test_semantic_search_filters_single_vector_before_knn_limit(tmp_path: Path) 
         )
         _index_pending_fragments(connection, vector=_vector(0))
 
-        actual = search_semantic_fragments(
+        (actual,) = search_semantic_fragments(
             connection,
             user_id="user-1",
             visible_revision_ids=(visible.revision_id,),
-            query_embedding=_vector(0),
+            query_embeddings=(_vector(0),),
             embedding_generation=_active_generation(connection),
             candidate_limit=8,
         )
@@ -649,14 +643,14 @@ def test_semantic_search_batches_all_vectors_before_deduplication_and_limit(
         assert len(expected) == 4_097
         assert long_fragment_id in {str(row[0]) for row in expected[:3]}
         for limit in (24, len(expected)):
-            actual = search_semantic_fragments(
+            (actual,) = search_semantic_fragments(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=(
                     revision.revision_id,
                     hidden_revisions[1].revision_id,
                 ),
-                query_embedding=_vector(0),
+                query_embeddings=(_vector(0),),
                 embedding_generation=_active_generation(connection),
                 candidate_limit=limit,
             )
@@ -685,9 +679,10 @@ def test_catalog_search_uses_semantic_backfill_for_japanese_paraphrase(
             connection=connection,
             user_id="user-1",
             run_id="search-semantic-ja",
-            query="ログインできない",
-            query_embedding=_vector(7),
-            embedding_generation=_active_generation(connection),
+            keywords=(),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), None, _vector(7)
+            ),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -695,7 +690,7 @@ def test_catalog_search_uses_semantic_backfill_for_japanese_paraphrase(
         )
 
     assert [row["record_id"] for row in results] == ["fact-authentication"]
-    assert results[0]["match_kind"] == "semantic"
+    assert results[0]["matched_by"] == "query"
 
 
 def _ranked_lexical_record_ids(
@@ -705,15 +700,13 @@ def _ranked_lexical_record_ids(
         connection=connection,
         user_id="user-1",
         run_id=f"lexical-{query}",
-        query=query,
-        query_embedding=None,
-        embedding_generation=None,
+        keywords=(query,),
+        semantic=None,
         focus="stable_knowledge",
         center_time=None,
         radius_hours=None,
         limit=8,
     )
-    assert [row["match_kind"] for row in results] == ["lexical"] * len(results)
     return [str(row["record_id"]) for row in results]
 
 
@@ -808,9 +801,8 @@ def test_lexical_lane_keeps_short_terms_when_indexed_terms_fill_the_pool(
             connection=connection,
             user_id="user-1",
             run_id="lexical-short-term",
-            query="エンタープライズサーチ 見積",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("エンタープライズサーチ 見積",),
+            semantic=None,
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -957,9 +949,10 @@ def test_catalog_search_keeps_structured_exact_match_first(tmp_path: Path) -> No
             connection=connection,
             user_id="user-1",
             run_id="search-exact",
-            query="REQ-123",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("REQ-123",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -967,7 +960,6 @@ def test_catalog_search_keeps_structured_exact_match_first(tmp_path: Path) -> No
         )
 
     assert [row["record_id"] for row in results] == ["REQ-123", "fact-lexical"]
-    assert [row["match_kind"] for row in results] == ["exact", "corroborated"]
 
 
 def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
@@ -996,9 +988,8 @@ def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
             connection=connection,
             user_id="user-1",
             run_id="pending-exact",
-            query="fact-auth-runbook",
-            query_embedding=_vector(7),
-            embedding_generation=generation,
+            keywords=("fact-auth-runbook",),
+            semantic=SemanticSearchInput(generation, _vector(7), None),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1008,9 +999,8 @@ def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
             connection=connection,
             user_id="user-1",
             run_id="pending-lexical",
-            query="recovery procedure",
-            query_embedding=_vector(7),
-            embedding_generation=generation,
+            keywords=("recovery procedure",),
+            semantic=SemanticSearchInput(generation, _vector(7), None),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1020,9 +1010,8 @@ def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
             connection=connection,
             user_id="user-1",
             run_id="pending-semantic",
-            query="ログイン障害の復旧",
-            query_embedding=_vector(7),
-            embedding_generation=generation,
+            keywords=(),
+            semantic=SemanticSearchInput(generation, None, _vector(7)),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1034,9 +1023,8 @@ def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
             connection=connection,
             user_id="user-1",
             run_id="projected-semantic",
-            query="ログイン障害の復旧",
-            query_embedding=_vector(7),
-            embedding_generation=generation,
+            keywords=(),
+            semantic=SemanticSearchInput(generation, None, _vector(7)),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1046,16 +1034,14 @@ def test_pending_current_revision_keeps_exact_and_lexical_then_gains_semantic(
     assert [row["content"] for row in exact] == [
         "verified authentication recovery procedure"
     ]
-    assert exact[0]["match_kind"] == "exact"
     assert [row["content"] for row in lexical] == [
         "verified authentication recovery procedure"
     ]
-    assert lexical[0]["match_kind"] == "lexical"
     assert semantic_before == []
     assert [row["content"] for row in semantic_after] == [
         "verified authentication recovery procedure"
     ]
-    assert semantic_after[0]["match_kind"] == "semantic"
+    assert semantic_after[0]["matched_by"] == "query"
 
 
 def test_exact_fragment_id_is_single_and_record_results_use_source_order(
@@ -1082,9 +1068,8 @@ def test_exact_fragment_id_is_single_and_record_results_use_source_order(
             connection=connection,
             user_id="user-1",
             run_id="ordered-record-search",
-            query="ordered-record",
-            query_embedding=_vector(0),
-            embedding_generation=generation,
+            keywords=("ordered-record",),
+            semantic=SemanticSearchInput(generation, _vector(0), None),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1094,9 +1079,8 @@ def test_exact_fragment_id_is_single_and_record_results_use_source_order(
             connection=connection,
             user_id="user-1",
             run_id="single-fragment-search",
-            query=paragraph.fragment_id,
-            query_embedding=_vector(0),
-            embedding_generation=generation,
+            keywords=(paragraph.fragment_id,),
+            semantic=SemanticSearchInput(generation, _vector(0), None),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -1111,7 +1095,9 @@ def test_exact_fragment_id_is_single_and_record_results_use_source_order(
     assert [row["content"] for row in fragment_results] == ["First paragraph."]
 
 
-def test_semantic_search_rejects_stale_projected_content_hash(tmp_path: Path) -> None:
+def test_semantic_search_rejects_a_candidate_projected_from_other_content(
+    tmp_path: Path,
+) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):
         register_inline_domain_memory(
@@ -1131,51 +1117,18 @@ def test_semantic_search_rejects_stale_projected_content_hash(tmp_path: Path) ->
             ("f" * 64,),
         )
 
+        # Search trusts the writer for the index as a whole but still matches
+        # every candidate it returns against the fragment's current hash.
         with pytest.raises(
             MemoryEmbeddingIndexUnavailableError,
-            match="stale",
+            match="no longer visible",
         ):
             search_memory_catalog(
                 connection=connection,
                 user_id="user-1",
                 run_id="corrupt-search",
-                query="unrelated",
-                query_embedding=_vector(0),
-                embedding_generation=generation,
-                focus="stable_knowledge",
-                center_time=None,
-                radius_hours=None,
-                limit=8,
-            )
-
-
-def test_semantic_search_rejects_missing_completed_projection(tmp_path: Path) -> None:
-    connection = _connection(tmp_path)
-    with immediate_transaction(connection):
-        register_inline_domain_memory(
-            connection=connection,
-            user_id="user-1",
-            source="fact",
-            source_record_id="missing-projection",
-            content="projected fact",
-        )
-        _index_pending_fragments(connection)
-        generation = _active_generation(connection)
-        connection.execute(
-            f"DELETE FROM memory_embedding_entries_g{generation.generation_id}"
-        )
-
-        with pytest.raises(
-            MemoryEmbeddingIndexUnavailableError,
-            match="missing or duplicate",
-        ):
-            search_memory_catalog(
-                connection=connection,
-                user_id="user-1",
-                run_id="missing-projection-search",
-                query="unrelated",
-                query_embedding=_vector(0),
-                embedding_generation=generation,
+                keywords=("unrelated",),
+                semantic=SemanticSearchInput(generation, _vector(0), None),
                 focus="stable_knowledge",
                 center_time=None,
                 radius_hours=None,
@@ -1209,53 +1162,13 @@ def test_semantic_search_rejects_a_projected_entry_without_its_vector(
                 connection=connection,
                 user_id="user-1",
                 run_id="vectorless-search",
-                query="unrelated",
-                query_embedding=_vector(0),
-                embedding_generation=generation,
+                keywords=("unrelated",),
+                semantic=SemanticSearchInput(generation, _vector(0), None),
                 focus="stable_knowledge",
                 center_time=None,
                 radius_hours=None,
                 limit=8,
             )
-
-
-def test_semantic_search_accepts_an_unembeddable_chunk(tmp_path: Path) -> None:
-    connection = _connection(tmp_path)
-    with immediate_transaction(connection):
-        activate_embedding_generation_in_transaction(
-            connection,
-            user_id="user-1",
-            generation_id=_scoped_generation_id(connection),
-            activated_at="2026-07-18T00:00:00Z",
-        )
-        revision = register_inline_domain_memory(
-            connection=connection,
-            user_id="user-1",
-            source="fact",
-            source_record_id="failed-projection",
-            content="unavailable semantic fact",
-        )
-        connection.execute(
-            """
-            UPDATE memory_embedding_work
-            SET state = 'failed', last_error_code = ?
-            WHERE user_id = 'user-1'
-            """,
-            ("MEMORY_EMBEDDING_CONTENT_EMPTY",),
-        )
-
-        # A chunk the model cannot embed is left out of the index rather than
-        # taking semantic search down with it.
-        results = search_semantic_fragments(
-            connection,
-            user_id="user-1",
-            visible_revision_ids=(revision.revision_id,),
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
-            candidate_limit=8,
-        )
-
-    assert results == ()
 
 
 def test_catalog_search_supports_all_declared_focus_values(tmp_path: Path) -> None:
@@ -1280,9 +1193,10 @@ def test_catalog_search_supports_all_declared_focus_values(tmp_path: Path) -> No
             connection=connection,
             user_id="user-1",
             run_id="search-user-context",
-            query="focus marker",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("focus marker",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="user_context",
             center_time=None,
             radius_hours=None,
@@ -1292,9 +1206,10 @@ def test_catalog_search_supports_all_declared_focus_values(tmp_path: Path) -> No
             connection=connection,
             user_id="user-1",
             run_id="search-agent-work",
-            query="focus marker",
-            query_embedding=_vector(0),
-            embedding_generation=_active_generation(connection),
+            keywords=("focus marker",),
+            semantic=SemanticSearchInput(
+                _active_generation(connection), _vector(0), None
+            ),
             focus="agent_work",
             center_time=None,
             radius_hours=None,

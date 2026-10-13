@@ -558,6 +558,9 @@ async def test_recent_suggestions_include_the_actual_user_reply_and_reaction(
     assert recent.error is None
     assert recent.data is not None and len(recent.data) == 1
     entry = recent.data[0]
+    assert entry["interaction_contract"] == (
+        "action_offer" if action_offer else "message_only"
+    )
     assert entry["user_reaction"] == ("accepted" if action_offer else None)
     # An approval's content repeats the Suggestion; only the supplement is the reply.
     assert entry["user_reply"] == ("Prepare a draft only." if action_offer else content)
@@ -664,6 +667,52 @@ async def test_recent_suggestions_keep_dismissal_distinct_from_no_reply(
     assert recent.data[0]["user_reaction"] == "rejected"
     assert recent.data[0]["dismiss_reason"] is None
     assert recent.data[0]["user_reply"] is None
+
+
+@pytest.mark.asyncio
+async def test_recent_suggestions_carry_the_lens_the_selector_recorded(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    db_path = _bootstrap_db(tmp_path)
+    repo = _repo(db_path)
+    now = datetime.now(UTC)
+    for offset, suggestion_id in enumerate(("sug-old", "sug-lens")):
+        await repo.create_processing_suggestion_row(
+            user_id=USER_ID,
+            suggestion_id=suggestion_id,
+            created_at=(now + timedelta(seconds=offset)).isoformat(),
+        )
+        saved = await repo.save_suggestion(
+            _success_response(answer=suggestion_id).model_copy(
+                update={"suggestion_id": suggestion_id}
+            ),
+            prompt_name="suggestion",
+            prompt_version="react_v3",
+        )
+        assert saved.error is None
+    # The selector's record, then the writer's step after it.
+    for step_number, tool_output in (
+        (30_001, {"selected_lens": "take_over"}),
+        (30_002, None),
+    ):
+        step = await repo.save_suggestion_run_step(
+            suggestion_id="sug-lens",
+            step_number=step_number,
+            step_kind="llm",
+            status="success",
+            tool_output=tool_output,
+        )
+        assert step.error is None
+
+    recent = await repo.get_recent_suggestions(USER_ID)
+
+    assert recent.data is not None
+    assert [(row["answer"], row["lens"]) for row in recent.data] == [
+        ("sug-lens", "take_over"),
+        ("sug-old", None),
+    ]
 
 
 @pytest.mark.asyncio

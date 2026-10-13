@@ -175,6 +175,9 @@ class SuggestionHistoryEntry(BaseModel):
     """提案本文と、取得できたユーザー反応・返信・対応する Action の状態と結果。"""
 
     answer: str = Field(description="提案内容（LLMが返した最終提案テキスト）")
+    interaction_contract: SuggestionInteractionContract = Field(
+        description="反応を求める offer か、反応を求めない message_only か"
+    )
     created_at: str = Field(description="提案作成時刻（ISO 8601形式）")
     thinking: str | None = Field(
         default=None,
@@ -201,6 +204,10 @@ class SuggestionHistoryEntry(BaseModel):
     action_followups: list[str] = Field(
         default_factory=list,
         description="Action の途中でユーザーが送った指示（古い順、最初の依頼を除く）",
+    )
+    lens: str | None = Field(
+        default=None,
+        description="提案を選んだレンズ。selector の記録が無い提案は null",
     )
 
 

@@ -13,7 +13,7 @@ import hashlib
 import os
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -32,6 +32,7 @@ from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
+    READ_ACCESS_SCOPE_WORKSPACE,
     ReadAccessScope,
 )
 from pantaray_agents.tools.contract import (
@@ -51,6 +52,7 @@ from .attachment_reference import (
     ATTACHMENT_BLOB_REF_PREFIX,
     ATTACHMENT_ID_HEX_LENGTH,
     TOOL_ATTACHMENT_REF_PREFIX,
+    ReadImage,
 )
 from .discovery import GREP_MAX_OUTPUT_BYTES, run_glob, run_grep, run_list
 from .grep_lines import GREP_MAX_LINE_CHARS
@@ -82,9 +84,15 @@ _MEMORY_NOTE = (
     "activity) is not a file here: read it with memory_search and "
     "get_memory_reference."
 )
+_MEMORY_FOLDERS_NOTE = (
+    "Pantaray's memory folders are readable too: {folders}. A facts/ or "
+    "insights/ path in the memory indexes is under the folder of that name. "
+    "Read activity with memory_search and get_memory_reference."
+)
 _SPILL_NOTE = (
-    "A result too large to show inline is saved to a file instead; the result "
-    "then gives its path, a preview and how to read the rest with read or grep."
+    "When a result is too large to show inline, its longest texts are saved to "
+    "files instead; each then gives its path, a preview and how to read the rest "
+    "with read or grep."
 )
 _PATH: dict[str, JSONValue] = {"type": "string", "minLength": 1, "pattern": r"\S"}
 _POSITIVE: dict[str, JSONValue] = {"type": "integer", "minimum": 1}
@@ -95,6 +103,7 @@ type _RunCall = Callable[[ReactToolCall, BaseModel], Awaitable[ReactToolResult]]
 RENDER_PDF_PAGE_TOOL_NAME = "render_pdf_page"
 # Inside the run's own folder, so both go with it when the run ends.
 _PAGES_DIRNAME = "rendered_pages"
+_READ_IMAGES_DIRNAME = "read_images"
 _CONVERTED_DIRNAME = "converted_documents"
 
 
@@ -105,13 +114,15 @@ def build_read_only_file_tools(
     read_access_scope: ReadAccessScope,
     app_storage_roots: tuple[Path, ...],
     spill_root: Path,
+    memory_folders: tuple[Path, ...] = (),
 ) -> tuple[ReactToolDefinition, ...]:
-    """The tools over ``folders``, which they only read.
+    """The tools over ``folders`` and ``memory_folders``, which they only read.
 
     Paths are absolute: there is no current directory and no scratch workspace.
-    ``app_storage_roots`` stay hidden except ``spill_root``, created here: the
-    run's own folder, where a large result is written and read back from and
-    drawn pages and converted documents are kept, all removed with it.
+    ``app_storage_roots`` stay hidden except ``memory_folders`` and
+    ``spill_root``, created here: the run's own folder, where a large result is
+    written and read back from and drawn pages and converted documents are
+    kept, all removed with it.
     """
 
     spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
@@ -121,6 +132,10 @@ def build_read_only_file_tools(
         manifest_roots=(
             _read_only_root("tool_results", spill_path),
             *(
+                _read_only_root(f"memory:{index}", folder)
+                for index, folder in enumerate(memory_folders)
+            ),
+            *(
                 _read_only_root(f"folder:{index}", folder)
                 for index, folder in enumerate(folders)
             ),
@@ -129,12 +144,47 @@ def build_read_only_file_tools(
         read_access_scope=read_access_scope,
         scratch_root_path=None,
         private_storage=PrivateAppStorage(
-            storage_roots=app_storage_roots, readable_roots=(spill_path,)
+            storage_roots=app_storage_roots,
+            readable_roots=(spill_path, *memory_folders),
         ),
     )
+    memory_note = (
+        _MEMORY_FOLDERS_NOTE.format(
+            folders=", ".join(f"`{folder}`" for folder in memory_folders)
+        )
+        if memory_folders
+        else _MEMORY_NOTE
+    )
     return _ReadOnlyFileTools(
-        db_path=db_path, scope=scope, spill_root=spill_path
+        db_path=db_path, scope=scope, spill_root=spill_path, memory_note=memory_note
     ).definitions()
+
+
+def build_saved_result_read_tool(
+    *, db_path: Path, spill_root: Path
+) -> ReactToolDefinition:
+    """read alone, over nothing but ``spill_root``.
+
+    For a run whose own file tools cannot reach the folder where its large
+    results are saved, so it can follow a saved result's hint to read the rest.
+    """
+
+    spill_path = spill_root.resolve(strict=True)
+    tools = _ReadOnlyFileTools(
+        db_path=db_path,
+        scope=ReadScope(
+            manifest_roots=(_read_only_root("tool_results", spill_path),),
+            cwd_path=None,
+            read_access_scope=READ_ACCESS_SCOPE_WORKSPACE,
+            scratch_root_path=None,
+            private_storage=PrivateAppStorage(
+                storage_roots=(), readable_roots=(spill_path,)
+            ),
+        ),
+        spill_root=spill_path,
+        memory_note="Its only folder is this run's saved tool results.",
+    )
+    return next(tool for tool in tools.definitions() if tool.name == "read")
 
 
 def _read_only_root(root_id: str, path: Path) -> ManifestRoot:
@@ -157,6 +207,7 @@ class _ReadOnlyFileTools:
     db_path: Path  # where the Office converter is installed from
     scope: ReadScope
     spill_root: Path
+    memory_note: str
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
         where = (
@@ -164,7 +215,7 @@ class _ReadOnlyFileTools:
             if self.scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
             else "Readable paths are inside the registered folders"
         ) + "; Pantaray's own storage is hidden."
-        notes = f"{where} {_MEMORY_NOTE} {_SPILL_NOTE}"
+        notes = f"{where} {self.memory_note} {_SPILL_NOTE}"
         return (
             _definition(
                 name="read",
@@ -302,8 +353,8 @@ class _ReadOnlyFileTools:
                 details: dict[str, JSONValue] = {}
                 if exc.code == PATH_NOT_ABSOLUTE:
                     # A relative path here is often a memory path such as
-                    # insights/todos.md, which these tools cannot open.
-                    details["fix_hint"] = f"{exc.fix_hint} {_MEMORY_NOTE}"
+                    # insights/todos.md.
+                    details["fix_hint"] = f"{exc.fix_hint} {self.memory_note}"
                 elif exc.fix_hint:
                     details["fix_hint"] = exc.fix_hint
                 if exc.examples:
@@ -373,21 +424,13 @@ class _ReadOnlyFileTools:
         )
 
     def _keep_pages(self, drawn: DrawnDocument) -> tuple[ToolImage, ...]:
-        """Write each page into the run's folder, the file its image is sent from."""
+        """Keep each page in the run's folder, the file its image is sent from."""
 
-        pages_dir = self.spill_root / _PAGES_DIRNAME
-        pages_dir.mkdir(mode=_SPILL_ROOT_MODE, exist_ok=True)
         images = []
         for page in drawn.pages:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
             name = f"page-{page.number}-{attachment_id}.png"
-            # Lens runs of one Suggestion share this folder and may draw the
-            # same page at once; the file is sent from, so never half-written.
-            handle, temp_path = tempfile.mkstemp(prefix=".page-", dir=pages_dir)
-            with os.fdopen(handle, "wb") as temp_file:
-                temp_file.write(page.payload)
-            os.replace(temp_path, pages_dir / name)
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
@@ -397,19 +440,73 @@ class _ReadOnlyFileTools:
                     byte_size=len(page.payload),
                     sha256=sha256,
                     workspace_root_path=str(self.spill_root),
-                    workspace_relative_path=f"{_PAGES_DIRNAME}/{name}",
+                    workspace_relative_path=self._keep(
+                        _PAGES_DIRNAME, name, page.payload
+                    ),
                 )
             )
         return tuple(images)
+
+    def _keep_read_image(self, image: ReadImage) -> ToolImage:
+        """Keep the bytes ``read`` returned, which every later request sends.
+
+        Pointing at the file that was read would send whatever it holds by the
+        next request, or fail the run once something rewrote or removed it.
+        """
+
+        return ToolImage(
+            ref=image.ref,
+            blob_ref=image.blob_ref,
+            display_path=image.display_path,
+            mime_type=image.mime_type,
+            byte_size=image.byte_size,
+            sha256=image.sha256,
+            workspace_root_path=str(self.spill_root),
+            # The name is the bytes' own, so keeping the same read twice
+            # rewrites the same file with the same bytes.
+            workspace_relative_path=self._keep(
+                _READ_IMAGES_DIRNAME, image.blob_ref, image.payload
+            ),
+        )
+
+    def _keep(self, dirname: str, name: str, payload: bytes) -> str:
+        """Write one image into the run's folder; its path relative to the folder."""
+
+        directory = self.spill_root / dirname
+        directory.mkdir(mode=_SPILL_ROOT_MODE, exist_ok=True)
+        # Lens runs of one Suggestion share this folder and may keep the same
+        # image at once; the file is sent from, so never half-written.
+        handle, temp_path = tempfile.mkstemp(prefix=".image-", dir=directory)
+        with os.fdopen(handle, "wb") as temp_file:
+            temp_file.write(payload)
+        os.replace(temp_path, directory / name)
+        return f"{dirname}/{name}"
 
     def _run(
         self, call: ReactToolCall, body: _Body, request: BaseModel
     ) -> ReactToolResult:
         result = body(scope=self.scope, request=request)
+        output = result.output
+        images: tuple[ToolImage, ...] = ()
+        if result.image is not None:
+            kept = self._keep_read_image(result.image)
+            images = (kept,)
+            output = {
+                **output,
+                "attachments": [
+                    {
+                        "type": "file",
+                        "mime_type": kept.mime_type,
+                        "path": kept.display_path,
+                        "ref": kept.ref,
+                        "byte_size": kept.byte_size,
+                    }
+                ],
+            }
         stored = store_tool_result(
             action_tool_results_path=self.spill_root,
             invocation_id=uuid.uuid4().hex,
-            output=result.output,
+            output=output,
         )
         release_error = release_stored_tool_result(stored)
         if release_error is not None:
@@ -418,7 +515,7 @@ class _ReadOnlyFileTools:
             tool_name=call.tool_name,
             status="success",
             output=stored.output_json,
-            images=tuple(_image(attachment) for attachment in result.attachments),
+            images=images,
         )
 
 
@@ -458,19 +555,8 @@ def _definition(
     )
 
 
-def _image(attachment: Mapping[str, JSONValue]) -> ToolImage:
-    """An image ``read`` attached, as the workspace file it read."""
-
-    return ToolImage(
-        ref=str(attachment["ref"]),
-        blob_ref=str(attachment["blob_ref"]),
-        display_path=str(attachment["display_path"]),
-        mime_type=str(attachment["mime_type"]),
-        byte_size=cast(int, attachment["byte_size"]),
-        sha256=str(attachment["sha256"]),
-        workspace_root_path=str(attachment["workspace_root_path"]),
-        workspace_relative_path=str(attachment["workspace_relative_path"]),
-    )
-
-
-__all__ = ["RENDER_PDF_PAGE_TOOL_NAME", "build_read_only_file_tools"]
+__all__ = [
+    "RENDER_PDF_PAGE_TOOL_NAME",
+    "build_read_only_file_tools",
+    "build_saved_result_read_tool",
+]

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Protocol
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.agents.memory_agent import (
+    MemoryConsolidationRequest,
     MemoryUpdateAgent,
     MemoryUpdateAgentResult,
 )
@@ -33,6 +35,10 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 )
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
 from pantaray_agents.tasks.internal_jobs.memory_update_job import run_memory_update_job
+from pantaray_agents.tasks.memory_consolidation import (
+    consolidate_memory_files,
+    consolidation_targets,
+)
 from pantaray_agents.tasks.memory_update_completion import (
     complete_memory_update_run,
     publish_memory_update_run,
@@ -51,12 +57,18 @@ class MemoryUpdateWorkerAgent(Protocol):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult: ...
 
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str: ...
+    async def consolidate(
+        self,
+        request: MemoryConsolidationRequest,
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        tool_results_path: Path,
+        db_path: Path,
+    ) -> None: ...
 
 
 type MemoryUpdateAgentBuilder = Callable[[], Awaitable[MemoryUpdateWorkerAgent]]
@@ -107,22 +119,31 @@ async def execute_memory_update_job(
                 result = await agent.update(
                     prepared.context,
                     tool_definitions=prepared.tool_definitions,
-                    tool_result_directory_fd=workspace_scope.require_tool_results_fd(),
+                    tool_results_path=workspace_scope.require_tool_results_path(),
+                    db_path=runtime.db_path,
                 )
                 applied_memory_request_ids = result.applied_memory_request_ids
             # Everything above stayed in the run-only workspace; this is where
             # the edits become the owner's memory, so the route they were made
             # on has to still be current.
             await require_current_route_identity()
-            await publish_memory_update_run(
+            publish_memory_update_run(
                 runtime=runtime,
                 payload=payload,
                 prepared=prepared,
                 prompt_name=MemoryUpdateAgent.PROMPT_NAME,
                 prompt_version=MemoryUpdateAgent.PROMPT_VERSION,
-                build_profile_brief=agent.generate_profile_brief,
                 applied_memory_request_ids=applied_memory_request_ids,
             )
+        # After completion: a crash from here leaves the update complete, and
+        # the next update that changes an oversized file consolidates it.
+        await consolidate_memory_files(
+            runtime=runtime,
+            payload=payload,
+            fact_id=prepared.fact_id,
+            targets=consolidation_targets(prepared, runtime=runtime),
+            agent=agent,
+        )
 
     await run_memory_update_job(
         runtime=runtime,

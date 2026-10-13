@@ -169,7 +169,7 @@ declare global {
         getGateState: () => Promise<ElectronCaptureGateState>;
         /** 記録画面を「あとで」で閉じる。main は表示されていた owner の答えだけを受ける */
         dismissIntro: (ownerId: string) => Promise<ElectronCaptureGateState>;
-        /** システム設定のプライバシーとセキュリティ→アクセシビリティを開く */
+        /** システム設定のプライバシーとセキュリティで、まだ足りない権限（アクセシビリティか画面収録）を開く */
         openPermissionSettings: () => Promise<void>;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;

@@ -55,7 +55,6 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryDocument,
     MemoryDraftCheckpoint,
     MemoryRevision,
-    MemorySource,
 )
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
@@ -164,10 +163,6 @@ def _claim(
     assert claimed is not None
 
 
-async def _brief(source: MemorySource, memory_text: str) -> str:
-    return f"## Profile Brief for {source}\n- {memory_text[:20]}"
-
-
 def _experience_entry(
     experience_id: str,
     scope: AgentExperienceScope = AgentExperienceScope(kind="user", key=None),
@@ -181,23 +176,22 @@ def _experience_entry(
             outcome="effective",
             next_time_rule="Trace every caller first.",
             observed_result="One root fix restored every caller.",
-            supersedes_experience_id=None,
+            supersedes_experience_ids=(),
         )
     )
 
 
-async def _publish(
+def _publish(
     runtime: LocalMemoryFileEditorRuntime,
     payload: MemoryUpdateJobPayload,
     prepared: PreparedMemoryUpdateRun,
 ) -> None:
-    await publish_memory_update_run(
+    publish_memory_update_run(
         runtime=runtime,
         payload=payload,
         prepared=prepared,
         prompt_name=PROMPT_NAME,
         prompt_version=PROMPT_VERSION,
-        build_profile_brief=_brief,
         applied_memory_request_ids=(),
     )
 
@@ -232,7 +226,7 @@ async def test_a_run_that_changes_nothing_publishes_nothing(tmp_path: Path) -> N
         prepared = prepare_memory_update_run(
             runtime=runtime, payload=payload, workspace_scope=scope
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     assert _rows(runtime, "SELECT revision_id FROM memory_revisions") == []
     assert _rows(runtime, "SELECT revision_id FROM memory_revision_intents") == []
@@ -286,7 +280,7 @@ async def test_each_changed_category_publishes_its_own_head(tmp_path: Path) -> N
             path=experience_entry_path(experience_id),
             content=_experience_entry(experience_id),
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     assert sorted(_published_events(runtime)) == [
         "agent_experience",
@@ -306,11 +300,8 @@ async def test_each_changed_category_publishes_its_own_head(tmp_path: Path) -> N
     ]
     # The unified run owns no legacy run row, but the domain heads a downstream
     # agent reads still have to be current.
-    facts = _rows(
-        runtime,
-        "SELECT status, facts_profile_brief IS NOT NULL FROM agent_facts",
-    )
-    assert facts == [("success", 1)]
+    facts = _rows(runtime, "SELECT status FROM agent_facts")
+    assert facts == [("success",)]
     state = _rows(
         runtime,
         """
@@ -348,7 +339,7 @@ async def test_an_experience_scope_key_need_not_be_a_registered_folder(
                 AgentExperienceScope(kind=kind, key="/Users/me/src/unregistered"),
             ),
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     assert _published_events(runtime) == ["agent_experience"]
 
@@ -389,7 +380,6 @@ async def test_a_rerun_does_not_republish_a_category_that_already_activated(
                 fact_id=prepared.fact_id,
                 memory_run=memory_run_binding_from_payload(payload),
                 draft=fact_route.session.draft,
-                profile_brief="## Profile Brief\n- interrupted run",
                 prompt_name=PROMPT_NAME,
                 prompt_version=PROMPT_VERSION,
                 source_insight_ids=("insight-1",),
@@ -416,7 +406,7 @@ async def test_a_rerun_does_not_republish_a_category_that_already_activated(
             ),
             content="# Insights\n\n- Values fast tooling.\n",
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     assert _published_events(runtime) == ["fact", "long_term_insight"]
     assert len(_rows(runtime, "SELECT revision_id FROM memory_revisions")) == 2
@@ -455,7 +445,7 @@ async def test_a_fact_head_a_memory_run_published_can_still_be_repaired(
             ),
             content="# Facts\n\n- Prefers uv over pip.\n",
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
 
     revision_row = _rows(
         runtime,
@@ -477,7 +467,6 @@ async def test_a_fact_head_a_memory_run_published_can_still_be_repaired(
         artifact_root_path=str(revision_row[3]),
         fragment_schema_version=1,
         content_sha256=str(revision_row[4]),
-        profile_brief="## Profile Brief\n- repaired",
         created_at=str(revision_row[5]),
     )
 
@@ -494,9 +483,9 @@ async def test_a_fact_head_a_memory_run_published_can_still_be_repaired(
                 source_record_id=prepared.fact_id,
             )
 
-    assert _rows(
-        runtime, "SELECT structured_fact_sha256, facts_profile_brief FROM agent_facts"
-    ) == [(revision.content_sha256, "## Profile Brief\n- repaired")]
+    assert _rows(runtime, "SELECT structured_fact_sha256 FROM agent_facts") == [
+        (revision.content_sha256,)
+    ]
 
 
 def _set_run_runtime_state(
@@ -553,7 +542,7 @@ async def test_startup_recovery_leaves_a_deferred_runs_fact_intent_for_its_job(
                 fail_materialization,
             )
             with pytest.raises(OSError):
-                await _publish(runtime, payload, prepared)
+                _publish(runtime, payload, prepared)
 
     assert len(_rows(runtime, "SELECT revision_id FROM memory_revision_intents")) == 1
 
@@ -779,10 +768,7 @@ def test_a_fact_intent_written_before_the_memory_run_still_parses() -> None:
     # A retired run's ledger is closed, so recovery publishes the projection
     # under no Memory run at all.
     assert publication.memory_run is None
-    assert (publication.fact_id, publication.profile_brief) == (
-        "fact-1",
-        "## Profile Brief\n- legacy",
-    )
+    assert publication.fact_id == "fact-1"
 
 
 @pytest.mark.asyncio
@@ -795,12 +781,6 @@ async def test_plain_todos_persist_without_becoming_the_long_term_profile(
     _bootstrap(runtime)
     payload = _payload()
     _claim(runtime, payload)
-    brief_inputs: list[tuple[MemorySource, str]] = []
-
-    async def build_brief(source: MemorySource, memory_text: str) -> str:
-        brief_inputs.append((source, memory_text))
-        return await _brief(source, memory_text)
-
     todo = "# TODOs\n- Observed: revise the estimate requested on Friday.\n"
     with MemoryRunWorkspaceScope() as scope:
         prepared = prepare_memory_update_run(
@@ -822,25 +802,7 @@ async def test_plain_todos_persist_without_becoming_the_long_term_profile(
             content=todo,
             expected_revision=prepared.router.draft.draft_revision,
         )
-        await publish_memory_update_run(
-            runtime=runtime,
-            payload=payload,
-            prepared=prepared,
-            prompt_name=PROMPT_NAME,
-            prompt_version=PROMPT_VERSION,
-            build_profile_brief=build_brief,
-            applied_memory_request_ids=(),
-        )
-    if has_direction:
-        assert len(brief_inputs) == 1
-        assert brief_inputs[0][0] == "long_term_insight"
-        assert "Build a sustainable business." in brief_inputs[0][1]
-        assert "revise the estimate" not in brief_inputs[0][1]
-    else:
-        assert brief_inputs == []
-        assert _rows(runtime, "SELECT profile_brief FROM memory_revisions") == [
-            ("No durable long-term insights recorded.",)
-        ]
+        _publish(runtime, payload, prepared)
 
     with MemoryRunWorkspaceScope() as scope:
         reopened = prepare_memory_update_run(
@@ -903,7 +865,7 @@ async def test_memory_completion_queues_latest_insight_atomically_and_once(
                 completion, "enqueue_suggestion_for_insight", interrupted_enqueue
             )
             with pytest.raises(OSError, match="commit interrupted"):
-                await _publish(runtime, payload, prepared)
+                _publish(runtime, payload, prepared)
     # The category is durable, but neither completion nor its Suggestion escaped
     # the failed completion transaction. Restart can finish from this point.
     assert _published_events(runtime) == ["long_term_insight"]
@@ -968,7 +930,7 @@ async def test_recording_disabled_before_memory_completion_suppresses_suggestion
         prepared = prepare_memory_update_run(
             runtime=runtime, payload=payload, workspace_scope=scope
         )
-        await _publish(runtime, payload, prepared)
+        _publish(runtime, payload, prepared)
     assert (
         len(
             _rows(

@@ -803,7 +803,6 @@ async def test_cancel_cleanup_stays_on_committed_session_when_next_session_start
         execution_session_id=descendant_session_id,
         workspace_path=context.workspace_path,
         tool_results_path=context.tool_results_path,
-        artifact_root=tmp_path / "artifacts",
         created_at="2026-08-16T00:00:21Z",
     )
     with sqlite3.connect(db_path) as connection:

@@ -107,9 +107,14 @@ class LocalSuggestionResearchTools:
                 spill_root=suggestion_tool_results_root(
                     db_path=self.db_path, run_id=run_id
                 ),
+                memory_folders=self.snapshot.memory_folders,
             ),
             *WebResearchToolSession(
-                user_id=user_id, speaks_to_user=False
+                user_id=user_id,
+                speaks_to_user=False,
+                spill_root=suggestion_tool_results_root(
+                    db_path=self.db_path, run_id=run_id
+                ),
             ).definitions(),
             *SuggestionZaneiSession(
                 reader=SourceReader(context_source_control.gate),

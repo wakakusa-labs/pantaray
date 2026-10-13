@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
-from pantaray_agents.local_runtime.artifacts.paths import resolve_artifact_path
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    MemoryFolder,
+    load_memory_folders,
+)
+from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.workspace_context import (
     workspace_context_catalog_to_snapshot,
 )
@@ -14,14 +19,11 @@ from .common import _configure_connection, _serialize_json
 from .workspace_context import build_workspace_context_catalog
 from .workspace_settings import load_workspace_settings_in_connection
 
-AGENT_EXPERIENCE_DIRNAME = "agent_experience"
-AGENT_EXPERIENCE_INDEX_FILENAME = "index.md"
-
-
-@dataclass(frozen=True, slots=True)
-class AgentExperienceRoot:
-    revision_id: str
-    path: Path
+_MEMORY_ROOT_NAMES: Final[dict[MemorySource, str]] = {
+    "fact": "Facts",
+    "long_term_insight": "Insights",
+    "agent_experience": "Agent Experience",
+}
 
 
 def ensure_action_workspace_manifest(
@@ -33,7 +35,6 @@ def ensure_action_workspace_manifest(
     execution_session_id: str,
     workspace_path: Path,
     tool_results_path: Path,
-    artifact_root: Path,
     created_at: str,
 ) -> str:
     manifest_id = f"manifest:{action_id}"
@@ -44,12 +45,6 @@ def ensure_action_workspace_manifest(
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
-            agent_experience_root = _prepare_agent_experience_root(
-                connection=connection,
-                user_id=user_id,
-                action_id=action_id,
-                artifact_root=artifact_root,
-            )
             return ensure_action_workspace_manifest_in_connection(
                 connection=connection,
                 user_id=user_id,
@@ -59,7 +54,6 @@ def ensure_action_workspace_manifest(
                 manifest_id=manifest_id,
                 scratch_real_path=scratch_real_path,
                 tool_results_real_path=tool_results_real_path,
-                agent_experience_root=agent_experience_root,
                 created_at=created_at,
             )
 
@@ -74,7 +68,6 @@ def ensure_action_workspace_manifest_in_connection(
     manifest_id: str,
     scratch_real_path: str,
     tool_results_real_path: str,
-    agent_experience_root: AgentExperienceRoot | None,
     created_at: str,
 ) -> str:
     existing_manifest = connection.execute(
@@ -165,34 +158,60 @@ def ensure_action_workspace_manifest_in_connection(
         manifest_id=manifest_id,
         created_at=created_at,
     )
-    if agent_experience_root is not None:
-        _insert_agent_experience_root(
-            connection=connection,
-            manifest_id=manifest_id,
-            root=agent_experience_root,
-            created_at=created_at,
-        )
     return manifest_id
 
 
-def _prepare_agent_experience_root(
+def pin_action_memory_roots(
     *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    action_id: str,
+    db_path: Path,
+    busy_timeout_ms: int,
     artifact_root: Path,
-) -> AgentExperienceRoot | None:
-    existing = connection.execute(
-        "SELECT 1 FROM workspace_manifests WHERE action_id = ?",
-        (action_id,),
-    ).fetchone()
-    if existing is not None:
-        return None
-    return _resolve_agent_experience_root(
-        connection=connection,
-        user_id=user_id,
-        artifact_root=artifact_root,
-    )
+    user_id: str,
+    manifest_id: str,
+) -> dict[MemorySource, str]:
+    """The memory revisions an Action reads, pinned as read-only manifest roots.
+
+    A tree the manifest has no root for yet, on an Action's first run or on an
+    Action created before the tree had one, is pinned at its current revision;
+    a pinned tree keeps its revision for the Action's life. The Action's memory
+    indexes are read from the revisions returned here, so they always match
+    the folders it can read.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            manifest = connection.execute(
+                """
+                SELECT 1 FROM workspace_manifests
+                WHERE manifest_id = ? AND user_id = ? AND status = 'ready'
+                """,
+                (manifest_id, user_id),
+            ).fetchone()
+            if manifest is None:
+                raise MigrationError(f"workspace manifest not found: {manifest_id}")
+            _insert_memory_roots(
+                connection=connection,
+                manifest_id=manifest_id,
+                folders=load_memory_folders(
+                    connection=connection, artifact_root=artifact_root, user_id=user_id
+                ),
+                created_at=now_utc_iso(),
+            )
+            rows = connection.execute(
+                f"""
+                SELECT source_type, source_id FROM workspace_manifest_roots
+                WHERE manifest_id = ?
+                  AND source_type IN ({", ".join("?" for _ in _MEMORY_ROOT_NAMES)})
+                """,
+                (manifest_id, *_MEMORY_ROOT_NAMES),
+            ).fetchall()
+    return {
+        source: str(row["source_id"])
+        for row in rows
+        for source in _MEMORY_ROOT_NAMES
+        if row["source_type"] == source
+    }
 
 
 def _upsert_tool_results_root(
@@ -428,72 +447,14 @@ def insert_approved_folder_root_in_connection(
     )
 
 
-def _resolve_agent_experience_root(
-    *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    artifact_root: Path,
-) -> AgentExperienceRoot | None:
-    row = connection.execute(
-        """
-        SELECT revisions.revision_id, revisions.body_kind,
-               revisions.artifact_root_path
-        FROM memory_nodes AS nodes
-        JOIN memory_revisions AS revisions
-          ON revisions.user_id = nodes.user_id
-         AND revisions.node_id = nodes.node_id
-         AND revisions.revision_id = nodes.current_revision_id
-        WHERE nodes.user_id = ?
-          AND nodes.source_type = 'agent_experience'
-          AND nodes.source_record_id = ?
-          AND nodes.lifecycle = 'active'
-          AND nodes.integrity = 'healthy'
-        """,
-        (user_id, user_id),
-    ).fetchone()
-    if row is None:
-        return None
-    if row["body_kind"] != "artifact_tree" or row["artifact_root_path"] is None:
-        raise MigrationError(
-            "healthy agent experience revision is not an artifact tree"
-        )
-    revision_root = resolve_artifact_path(
-        root_path=artifact_root,
-        relative_path=str(row["artifact_root_path"]),
-    )
-    experience_root = (revision_root / AGENT_EXPERIENCE_DIRNAME).resolve()
-    try:
-        experience_root.relative_to(revision_root)
-    except ValueError as exc:
-        raise MigrationError(
-            "agent experience root escapes its current revision"
-        ) from exc
-    if not experience_root.is_dir():
-        raise MigrationError(
-            "healthy agent experience revision has no artifact directory"
-        )
-    index_path = (experience_root / AGENT_EXPERIENCE_INDEX_FILENAME).resolve()
-    try:
-        index_path.relative_to(experience_root)
-    except ValueError as exc:
-        raise MigrationError("agent experience index escapes its artifact") from exc
-    if not index_path.is_file():
-        raise MigrationError("healthy agent experience revision has no index.md")
-    return AgentExperienceRoot(
-        revision_id=str(row["revision_id"]),
-        path=experience_root,
-    )
-
-
-def _insert_agent_experience_root(
+def _insert_memory_roots(
     *,
     connection: sqlite3.Connection,
     manifest_id: str,
-    root: AgentExperienceRoot,
+    folders: tuple[MemoryFolder, ...],
     created_at: str,
 ) -> None:
-    root_path = str(root.path)
-    connection.execute(
+    connection.executemany(
         """
         INSERT INTO workspace_manifest_roots(
             root_id,
@@ -508,16 +469,22 @@ def _insert_agent_experience_root(
             can_process_read,
             can_process_write,
             created_at
-        ) VALUES (?, ?, 'agent_experience', ?, 'Agent Experience', ?, ?, 1, 0, 0, 0, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?)
+        ON CONFLICT(root_id) DO NOTHING
         """,
-        (
-            f"root:{manifest_id}:agent-experience",
-            manifest_id,
-            root.revision_id,
-            root_path,
-            root_path,
-            created_at,
-        ),
+        [
+            (
+                f"root:{manifest_id}:{folder.source.replace('_', '-')}",
+                manifest_id,
+                folder.source,
+                folder.revision_id,
+                _MEMORY_ROOT_NAMES[folder.source],
+                str(folder.path),
+                str(folder.path),
+                created_at,
+            )
+            for folder in folders
+        ],
     )
 
 
@@ -525,4 +492,5 @@ __all__ = [
     "ensure_action_workspace_manifest",
     "insert_approved_folder_root_in_connection",
     "load_action_manifest_id",
+    "pin_action_memory_roots",
 ]

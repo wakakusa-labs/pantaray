@@ -16,6 +16,9 @@ from pantaray_agents.local_runtime.memory_catalog import search_service
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
+from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    SemanticSearchInput,
+)
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_domain_memory,
 )
@@ -205,7 +208,8 @@ async def test_initial_building_search_serves_exact_and_lexical_without_embeddin
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="initial-exact",
-            query="fact-initial-building",
+            keywords=("fact-initial-building",),
+            query=None,
             focus="stable_knowledge",
             limit=8,
         ),
@@ -216,7 +220,8 @@ async def test_initial_building_search_serves_exact_and_lexical_without_embeddin
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="initial-lexical",
-            query="recovery procedure",
+            keywords=("recovery procedure",),
+            query=None,
             focus="stable_knowledge",
             limit=8,
         ),
@@ -227,7 +232,9 @@ async def test_initial_building_search_serves_exact_and_lexical_without_embeddin
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="initial-semantic",
-            query="ログイン障害の復旧",
+            keywords=(),
+            # Words the record holds: a query is still never matched by words.
+            query="recovery procedure",
             focus="stable_knowledge",
             limit=8,
         ),
@@ -238,13 +245,13 @@ async def test_initial_building_search_serves_exact_and_lexical_without_embeddin
     assert [item["content"] for item in exact.results] == [
         "verified authentication recovery procedure"
     ]
-    assert exact.results[0]["match_kind"] == "exact"
     assert [item["content"] for item in lexical.results] == [
         "verified authentication recovery procedure"
     ]
-    assert lexical.results[0]["match_kind"] == "lexical"
     assert semantic_only.results == ()
     assert semantic_only.semantic_status == "not_ready"
+    # A query is matched by meaning only; an empty answer must say why.
+    assert semantic_only.notes[-1].startswith("query was not searched")
 
 
 @pytest.mark.asyncio
@@ -262,7 +269,8 @@ async def test_missing_model_keeps_exact_and_lexical_results(
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="missing-model-exact",
-            query="fact-initial-building",
+            keywords=("fact-initial-building",),
+            query=None,
             focus="stable_knowledge",
             limit=8,
         ),
@@ -273,14 +281,14 @@ async def test_missing_model_keeps_exact_and_lexical_results(
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="missing-model-lexical",
-            query="recovery procedure",
+            keywords=("recovery procedure",),
+            query=None,
             focus="stable_knowledge",
             limit=8,
         ),
     )
 
-    assert exact.results[0]["match_kind"] == "exact"
-    assert lexical.results[0]["match_kind"] == "lexical"
+    assert exact.results and lexical.results
     assert exact.semantic_status == lexical.semantic_status == "provider_unavailable"
     assert exact.semantic_error_code == MEMORY_EMBEDDING_MODEL_UNAVAILABLE
 
@@ -311,7 +319,7 @@ async def test_execute_memory_search_uses_one_generation_in_one_read_transaction
         "source_path": "facts/index.md",
         "heading_path": None,
         "observed_at": "2026-08-09T00:00:00Z",
-        "match_kind": "semantic",
+        "matched_by": "query",
         "context_handle": searched_handle,
     }
     model = _install_model(monkeypatch, StubEmbeddingModel())
@@ -329,9 +337,10 @@ async def test_execute_memory_search_uses_one_generation_in_one_read_transaction
     def search(connection, **kwargs):
         events.append("search")
         assert connection.in_transaction
-        assert kwargs["embedding_generation"] is generation
+        assert kwargs["semantic"] == SemanticSearchInput(
+            generation, keywords_embedding=unit_vector(), query_embedding=unit_vector()
+        )
         assert kwargs["pinned_revisions"] is pinned_revisions
-        assert kwargs["query_embedding"] == unit_vector()
         return [result], search_epoch
 
     monkeypatch.setattr(
@@ -347,7 +356,8 @@ async def test_execute_memory_search_uses_one_generation_in_one_read_transaction
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="run-1",
-            query="shared",
+            keywords=("shared", "fact"),
+            query="the fact both share",
             focus="stable_knowledge",
             limit=8,
             pinned_revisions=pinned_revisions,
@@ -356,7 +366,7 @@ async def test_execute_memory_search_uses_one_generation_in_one_read_transaction
     )
 
     assert generation_loads == 2
-    assert model.queries == ["shared"]
+    assert model.queries == ["shared fact", "the fact both share"]
     assert events == ["load:False", "load:True", "search"]
     assert response.semantic_status == "available"
     assert response.results[0]["context_handle"] == canonical_handle
@@ -397,15 +407,15 @@ async def test_index_built_by_another_artifact_is_not_searched(
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="run-1",
-            query="query",
+            keywords=("query",),
+            query=None,
             focus="all",
             limit=8,
         ),
     )
 
     assert model.queries == []
-    assert search_kwargs["query_embedding"] is None
-    assert search_kwargs["embedding_generation"] is None
+    assert search_kwargs["semantic"] is None
     assert response.semantic_status == "not_ready"
     assert response.semantic_error_code is None
 
@@ -441,14 +451,14 @@ async def test_execute_memory_search_reports_active_switch_and_runs_local_lanes(
         request=MemorySearchRequest(
             user_id="user-1",
             run_id="run-1",
-            query="query",
+            keywords=("query",),
+            query=None,
             focus="all",
             limit=8,
         ),
     )
 
-    assert search_kwargs["query_embedding"] is None
-    assert search_kwargs["embedding_generation"] is None
+    assert search_kwargs["semantic"] is None
     assert response.semantic_status == "generation_changed"
     assert response.semantic_error_code is None
 
@@ -478,7 +488,8 @@ async def test_a_search_leaves_the_event_loop_free_while_it_reads(
             request=MemorySearchRequest(
                 user_id="user-1",
                 run_id="off-loop",
-                query="fact-initial-building",
+                keywords=("fact-initial-building",),
+                query=None,
                 focus="stable_knowledge",
                 limit=8,
             ),

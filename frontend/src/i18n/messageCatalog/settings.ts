@@ -210,7 +210,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'recordingIntro.settingsNote': 'You can exclude apps and sites in Settings.',
     'recordingIntro.startFailed': 'Recording could not be started. Please try again.',
     'recordingIntro.permissionPending':
-      'Accessibility and related permissions are required. Allow them in System Settings, then press "Start recording" again.',
+      'Accessibility, Screen Recording, and related permissions are required. Allow them in System Settings, then press "Start recording" again. After allowing Screen Recording, quit and reopen Pantaray.',
     'settings.recordingFilter.title': 'Recorded apps and websites',
     'settings.recordingFilter.description':
       'Choose which apps and websites are recorded. Everything else on this device is recorded as usual.',
@@ -477,7 +477,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'recordingIntro.settingsNote': '除外するアプリやサイトは設定で変えられます',
     'recordingIntro.startFailed': '記録を開始できませんでした。もう一度お試しください。',
     'recordingIntro.permissionPending':
-      'アクセシビリティなどの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。',
+      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。',
     'settings.recordingFilter.title': '記録するアプリとウェブサイト',
     'settings.recordingFilter.description':
       '記録するアプリとウェブサイトを選びます。ここで指定しないものは通常どおり記録されます。',

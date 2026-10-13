@@ -1,1 +1,1 @@
-"""Shared memory-file editing harness (runner, tool contracts, result store)."""
+"""Shared memory-file editing harness (runner and tool contracts)."""

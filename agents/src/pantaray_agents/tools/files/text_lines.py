@@ -26,7 +26,9 @@ READ_FILE_PAGE_LIMIT_RETRY_HINT = (
 
 _LINE_READ_AHEAD_CHARS = MAX_LINE_LENGTH + 1
 _SKIP_CHUNK_BYTES = 1024 * 1024
-_LINE_BREAK = re.compile(rb"\r\n|\r|\n")
+# What read counts as the end of one line, matched in text and in bytes alike.
+LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_LINE_BREAK = re.compile(LINE_BREAK.pattern.encode())
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,6 +434,13 @@ def _encoded_len(text: str) -> int:
     return len(text.encode("utf-8", errors="replace"))
 
 
+def count_text_lines(text: str) -> int:
+    """How many lines read finds in ``text``; a final line end starts no new line."""
+
+    breaks = sum(1 for _ in LINE_BREAK.finditer(text))
+    return breaks + (0 if not text or text.endswith(("\n", "\r")) else 1)
+
+
 def _split_line_newline(line: str) -> tuple[str, str]:
     if line.endswith("\n"):
         return line[:-1], "\n"
@@ -439,8 +448,10 @@ def _split_line_newline(line: str) -> tuple[str, str]:
 
 
 __all__ = [
+    "LINE_BREAK",
     "READ_FILE_PAGE_LIMIT_RETRY_HINT",
     "ReadLinesResult",
+    "count_text_lines",
     "read_text_descriptor_lines",
     "read_text_value_lines",
 ]

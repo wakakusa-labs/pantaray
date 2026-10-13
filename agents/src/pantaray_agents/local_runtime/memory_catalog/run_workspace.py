@@ -38,8 +38,8 @@ class MemoryRunWorkspaceScope:
         self._entered = False
         self._closed = False
         self._workspaces_fd: int | None = None
-        self._tool_results_fd: int | None = None
         self._workspace_name: str | None = None
+        self._workspace: MemoryRunWorkspace | None = None
 
     def __enter__(self) -> MemoryRunWorkspaceScope:
         if self._entered:
@@ -92,38 +92,21 @@ class MemoryRunWorkspaceScope:
             workspace_name=workspace_name,
         )
         workspace = MemoryRunWorkspace.from_root_path(root_path)
+        self._workspace = workspace
         return workspace
 
-    def require_tool_results_fd(self) -> int:
-        if self._closed or self._workspace_name is None:
+    def require_tool_results_path(self) -> Path:
+        if self._closed or self._workspace is None:
             raise RuntimeError("memory run workspace has not been created")
-        if self._tool_results_fd is None:
-            workspaces_fd = self._workspaces_fd
-            if workspaces_fd is None:
-                raise RuntimeError("memory run workspace authority is unavailable")
-            workspace_fd = _open_required_directory(
-                parent_fd=workspaces_fd,
-                name=self._workspace_name,
-            )
-            try:
-                self._tool_results_fd = _open_required_directory(
-                    parent_fd=workspace_fd,
-                    name=MEMORY_RUN_TOOL_RESULTS_DIRNAME,
-                )
-            finally:
-                os.close(workspace_fd)
-        return self._tool_results_fd
+        return self._workspace.tool_results_path
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
         workspaces_fd = self._workspaces_fd
-        tool_results_fd = self._tool_results_fd
         workspace_name = self._workspace_name
         try:
-            if tool_results_fd is not None:
-                os.close(tool_results_fd)
             if workspaces_fd is not None and workspace_name is not None:
                 _remove_workspace_tree_with_retry(
                     workspaces_fd=workspaces_fd,

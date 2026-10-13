@@ -82,6 +82,7 @@ from pantaray_agents.tasks.types import SuggestionJobPayload
 _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
     folders=(),
     memory_revisions={},
+    memory_folders=(),
     stable_memory=SuggestionStableMemoryContext(
         prompt="No stable memory roots are available.",
         has_facts=False,
@@ -667,7 +668,7 @@ async def test_run_suggestion_job_defers_transient_semantic_search_failure(
         raise locked
 
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.semantic_search._verify_projected_chunk",
+        "pantaray_agents.local_runtime.memory_catalog.semantic_search._projected_entries",
         _raise_locked,
     )
 
@@ -677,10 +678,7 @@ async def test_run_suggestion_job_defers_transient_semantic_search_failure(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=("revision-1",),
-                query_embedding=(
-                    1.0,
-                    *([0.0] * (MEMORY_EMBEDDING_DIMENSIONS - 1)),
-                ),
+                query_embeddings=((1.0, *([0.0] * (MEMORY_EMBEDDING_DIMENSIONS - 1))),),
                 embedding_generation=EmbeddingGeneration(
                     1,
                     EmbeddingSpecification(

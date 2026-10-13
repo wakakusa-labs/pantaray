@@ -119,7 +119,11 @@ async def chat_research_tools(
             app_storage_roots=app_owned_roots(db_path),
             spill_root=chat_tool_results_root(db_path=db_path, run_id=run_id),
         ),
-        *WebResearchToolSession(user_id=user_id, speaks_to_user=True).definitions(),
+        *WebResearchToolSession(
+            user_id=user_id,
+            speaks_to_user=True,
+            spill_root=chat_tool_results_root(db_path=db_path, run_id=run_id),
+        ).definitions(),
         *(
             _recording_may_stop(tool)
             for tool in SuggestionZaneiSession(

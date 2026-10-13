@@ -10,24 +10,38 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import quote
 
 from pydantic import ValidationError
 
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import FormalToolStepOutput
 
 from ..storage.migrations import MigrationError
 from .repository.common import BUSY_TIMEOUT_PRAGMA_TEMPLATE
-from .tool_result_spill import is_json_spill_shape
+from .tool_result_reading import (
+    ToolResultLoadError,
+    ToolResultReadLimitError,
+    load_action_file_result,
+)
+from .tool_result_spill import (
+    SPILLED_TEXT_KEYS,
+    SPILLED_TEXT_MEDIA_TYPE,
+    is_json_spill_shape,
+    spilled_texts,
+)
 from .tool_result_storage import (
     ACTION_TOOL_RESULTS_DIRNAME,
     TOOL_RESULT_BINARY_MEDIA_TYPE,
     TOOL_RESULT_JSON_MEDIA_TYPE,
 )
 
-_FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json)$")
+_FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json|txt)$")
 _BINARY_METADATA_KEYS = frozenset({"storage", "path", "media_type", "byte_size"})
+# An approval output is its envelope around a summary that is itself bounded by
+# the inline limit, so it stays far below this.
+_APPROVAL_OUTPUT_MAX_BYTES = 1024 * 1024
 
 
 class ToolResultRecoveryError(MigrationError):
@@ -91,32 +105,30 @@ def load_stored_tool_result_references(
                 """
             ):
                 invocation_id = str(row["invocation_id"])
-                reference = _terminal_reference_from_json_column(
+                for reference in _terminal_references_from_json_column(
                     raw_json=row["output_json"],
                     storage_kind=row["output_storage_kind"],
                     workspace_root=workspace_root,
                     user_id=str(row["user_id"]),
                     action_id=str(row["action_id"]),
                     invocation_id=invocation_id,
-                )
-                if reference is None:
-                    continue
-                existing = terminal_references.get(reference.path)
-                if existing is not None and existing != reference:
-                    raise ToolResultRecoveryError(
-                        "tool_outputs contains conflicting action-file metadata"
+                ):
+                    existing = terminal_references.get(reference.path)
+                    if existing is not None and existing != reference:
+                        raise ToolResultRecoveryError(
+                            "tool_outputs contains conflicting action-file metadata"
+                        )
+                    terminal_references[reference.path] = reference
+                    references.add(
+                        StoredToolResultReference(
+                            path=reference.path,
+                            source_kind="tool_invocation",
+                            source_id=invocation_id,
+                        )
                     )
-                terminal_references[reference.path] = reference
-                references.add(
-                    StoredToolResultReference(
-                        path=reference.path,
-                        source_kind="tool_invocation",
-                        source_id=invocation_id,
-                    )
-                )
-                step_id = row["step_id"]
-                if isinstance(step_id, str) and step_id:
-                    invocation_references_by_step[step_id].add(reference)
+                    step_id = row["step_id"]
+                    if isinstance(step_id, str) and step_id:
+                        invocation_references_by_step[step_id].add(reference)
             for row in connection.execute(
                 """
                 SELECT step_id, user_id, action_id, tool_output
@@ -150,7 +162,7 @@ def load_stored_tool_result_references(
     return frozenset(references)
 
 
-def _terminal_reference_from_json_column(
+def _terminal_references_from_json_column(
     *,
     raw_json: object,
     storage_kind: object,
@@ -158,11 +170,11 @@ def _terminal_reference_from_json_column(
     user_id: str,
     action_id: str,
     invocation_id: str,
-) -> _ActionFileReference | None:
+) -> set[_ActionFileReference]:
     if storage_kind is None and raw_json is None:
-        return None
+        return set()
     if storage_kind == "inline_json" and raw_json is not None:
-        return None
+        return set()
     if storage_kind != "action_file" or raw_json is None:
         raise ToolResultRecoveryError(
             "tool_outputs has an invalid output storage contract"
@@ -171,16 +183,12 @@ def _terminal_reference_from_json_column(
         raw_json=raw_json,
         column_name="tool_outputs.output_json",
     )
-    if not isinstance(payload, dict):
-        raise ToolResultRecoveryError(
-            "action-file tool output metadata must be a JSON object"
-        )
     action_root = _action_tool_results_root(
         workspace_root=workspace_root,
         user_id=user_id,
         action_id=action_id,
     )
-    return _validate_action_file_metadata(
+    return _action_file_references(
         value=payload,
         action_root=action_root,
         owner_name=_storage_owner_name(invocation_id),
@@ -208,33 +216,34 @@ def _step_references_from_json_column(
     )
     if output_storage_kind == "action_file":
         if output_owner_kind == "tool_invocation":
-            if not isinstance(output, dict):
-                raise ToolResultRecoveryError(
-                    "invocation-owned action-file output must contain metadata"
-                )
-            reference = _validate_action_file_metadata(
+            references = _action_file_references(
                 value=output,
                 action_root=action_root,
                 owner_name=None,
                 column_name="agent_action_steps.tool_output",
             )
-            if reference not in linked_invocation_references:
+            if not references <= linked_invocation_references:
                 raise ToolResultRecoveryError(
                     "invocation-owned formal output disagrees with linked tool_outputs"
                 )
-            return {reference}
-        if not isinstance(output, dict):
-            raise ToolResultRecoveryError(
-                "action-file formal output must contain metadata"
-            )
-        return {
-            _validate_action_file_metadata(
-                value=output,
+            return references
+        references = _action_file_references(
+            value=output,
+            action_root=action_root,
+            owner_name=_storage_owner_name(step_id),
+            column_name="agent_action_steps.tool_output",
+        )
+        if payload.status == "processing":
+            # A pending approval that grew past the inline limit around a summary
+            # already stored as files is kept whole as JSON, so the summary's
+            # files are named only inside that JSON.
+            references |= _approval_summary_reference(
+                output=_load_whole_step_output(
+                    action_root=action_root, step_id=step_id, output=output
+                ),
                 action_root=action_root,
-                owner_name=_storage_owner_name(step_id),
-                column_name="agent_action_steps.tool_output",
             )
-        }
+        return references
     if output_storage_kind != "inline_json":
         raise ToolResultRecoveryError(
             "formal tool output has an invalid storage contract"
@@ -245,6 +254,36 @@ def _step_references_from_json_column(
             action_root=action_root,
         )
     return set()
+
+
+def _load_whole_step_output(
+    *, action_root: Path, step_id: str, output: JSONValue
+) -> JSONValue:
+    if not (
+        isinstance(output, dict)
+        and output.get("media_type") == TOOL_RESULT_JSON_MEDIA_TYPE
+    ):
+        return None
+    try:
+        return load_action_file_result(
+            action_tool_results_path=action_root,
+            invocation_id=step_id,
+            output=output,
+            max_bytes=_APPROVAL_OUTPUT_MAX_BYTES,
+        )
+    except ToolResultReadLimitError as exc:
+        raise ToolResultRecoveryError(
+            "a pending approval's stored output is too large to check"
+        ) from exc
+    except ToolResultLoadError as exc:
+        # Only a file that is gone names nothing: its own reference is counted as
+        # missing. A read that failed or found it damaged proves nothing about the
+        # summary files it names, so recovery stops before deleting any of them.
+        if isinstance(exc.__cause__, FileNotFoundError):
+            return None
+        raise ToolResultRecoveryError(
+            "a pending approval's stored output could not be read"
+        ) from exc
 
 
 def _parse_formal_step_output(*, raw_json: object) -> FormalToolStepOutput:
@@ -278,14 +317,12 @@ def _approval_summary_reference(
         raise ToolResultRecoveryError(
             "action-file approval command summary must include owner and metadata"
         )
-    return {
-        _validate_action_file_metadata(
-            value=command_summary,
-            action_root=action_root,
-            owner_name=_storage_owner_name(tool_request_id),
-            column_name="agent_action_steps.tool_output",
-        )
-    }
+    return _action_file_references(
+        value=command_summary,
+        action_root=action_root,
+        owner_name=_storage_owner_name(tool_request_id),
+        column_name="agent_action_steps.tool_output",
+    )
 
 
 def _parse_json_column(*, raw_json: object, column_name: str) -> object:
@@ -301,6 +338,39 @@ def _storage_owner_name(owner_id: str) -> str:
     if not _is_path_component(owner_id):
         raise ToolResultRecoveryError("tool-result reference has an invalid owner id")
     return quote(owner_id, safe="-_")
+
+
+def _action_file_references(
+    *,
+    value: object,
+    action_root: Path,
+    owner_name: str | None,
+    column_name: str,
+) -> set[_ActionFileReference]:
+    """The files an action-file output references: the one standing in for the whole
+    result, or each one a moved text value points to."""
+
+    if (
+        isinstance(value, dict)
+        and value.get("storage") == "action_file"
+        and value.get("media_type") != SPILLED_TEXT_MEDIA_TYPE
+    ):
+        texts: list[dict[str, JSONValue]] = [value]
+    else:
+        texts = spilled_texts(cast(JSONValue, value))
+    if not texts:
+        raise ToolResultRecoveryError(
+            f"action-file output references no stored file in {column_name}"
+        )
+    return {
+        _validate_action_file_metadata(
+            value=text,
+            action_root=action_root,
+            owner_name=owner_name,
+            column_name=column_name,
+        )
+        for text in texts
+    }
 
 
 def _validate_action_file_metadata(
@@ -323,6 +393,10 @@ def _validate_action_file_metadata(
             "character_count",
             "line_count",
         )
+    elif media_type == SPILLED_TEXT_MEDIA_TYPE:
+        shape_is_valid = set(value) == SPILLED_TEXT_KEYS
+        expected_suffix = ".txt"
+        size_fields = ("byte_size", "character_count", "line_count")
     elif media_type == TOOL_RESULT_BINARY_MEDIA_TYPE:
         shape_is_valid = set(value) == _BINARY_METADATA_KEYS
         expected_suffix = ".bin"

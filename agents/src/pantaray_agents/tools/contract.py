@@ -67,11 +67,12 @@ class ReactToolCall:
 
 @dataclass(frozen=True)
 class ToolImage:
-    """An image a tool hands the model, as the file it was read from.
+    """An image a tool hands the model, as the file the run kept it in.
 
     The request reads the bytes from that file again when it is sent and checks
-    them against ``byte_size`` and ``sha256``; ``ref`` names the image in the
-    conversation, which the request matches it to.
+    them against ``byte_size`` and ``sha256``, so the file is the run's own copy
+    and never one the run's tools or anything else may rewrite; ``ref`` names
+    the image in the conversation, which the request matches it to.
     """
 
     ref: str

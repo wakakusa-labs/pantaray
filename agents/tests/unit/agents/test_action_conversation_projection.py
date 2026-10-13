@@ -818,7 +818,7 @@ def test_the_recorded_context_is_the_one_the_next_turn_replays() -> None:
 # --- 新しい依頼をまたぐ追記のみ -------------------------------------------------
 
 _RUN_1 = {
-    "insight_data": "I-1",
+    "memory_indexes": "I-1",
     "agents_md_instructions": "# AGENTS.md instructions for ~/.pantaray\nA-1",
     "workspace_context_prompt": "W-1",
 }
@@ -940,7 +940,7 @@ def _updates(prepared: Any) -> list[str]:
     [
         ({}, []),
         # Memory is read once per Action, so a later run shows no new version.
-        ({"insight_data": "I-2"}, []),
+        ({"memory_indexes": "I-2"}, []),
         (
             {"agents_md_instructions": "# AGENTS.md instructions\nA-2"},
             ["## AGENTS.md Update"],

@@ -230,10 +230,15 @@
   box-shadow: var(--focus-ring);
 }
 
-/* A live label can be a long command; it shortens instead of wrapping, and the count stays. */
+/*
+ * A live label can be a long command; it shortens instead of wrapping, and the count stays.
+ * Start-aligned, the button sizes to its content, and the label's unwrapped width still counts
+ * toward that size, so only a cap at the column's width lets the label shorten.
+ */
 .action-conversation__work > .action-conversation__disclosure {
   display: flex;
   align-items: baseline;
+  max-width: 100%;
 }
 
 .action-conversation__work > .action-conversation__disclosure::before,

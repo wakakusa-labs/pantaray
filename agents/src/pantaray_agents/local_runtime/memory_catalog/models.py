@@ -30,7 +30,7 @@ MemoryIntentKind = Literal[
     "agent_experience_repair",
 ]
 MemoryReferenceDepth = Literal[0, 1]
-MemorySearchMatchKind = Literal["exact", "corroborated", "lexical", "semantic"]
+MemorySearchMatchedBy = Literal["keywords", "query", "both"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +67,6 @@ class MemoryRevision:
     artifact_root_path: str | None
     fragment_schema_version: int
     content_sha256: str
-    profile_brief: str | None
     created_at: str
 
 
@@ -145,7 +144,7 @@ class MemorySearchResult(TypedDict):
     source_path: str
     heading_path: str | None
     observed_at: str
-    match_kind: MemorySearchMatchKind
+    matched_by: MemorySearchMatchedBy
     context_handle: NotRequired[str]
 
 

@@ -14,6 +14,7 @@ from typing import Literal, cast
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     count_patch_diff_lines,
 )
+from pantaray_agents.local_runtime.tooling.tool_result_spill import is_spilled_text
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -65,12 +66,7 @@ def _captured_detail(output: JSONValue) -> str:
 
     if not isinstance(output, Mapping):
         return ""
-    captured = "".join(
-        value
-        for key in ("stdout", "stderr")
-        for value in (output.get(key),)
-        if isinstance(value, str)
-    )
+    captured = sum(_length(output.get(key)) for key in ("stdout", "stderr"))
     return f", {_chars(captured)} captured" if captured else ""
 
 
@@ -101,7 +97,14 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
             return _command_detail(body)
         case "apply_patch":
             return _apply_patch_detail(body)
-        case "web_search" | "memory_search":
+        case "web_search":
+            searches = [s for s in _items(body, "searches") if isinstance(s, Mapping)]
+            found = sum(len(_items(search, "results")) for search in searches)
+            return [
+                f"{len(searches):,} {'query' if len(searches) == 1 else 'queries'}",
+                f"{found:,} {'result' if found == 1 else 'results'}",
+            ]
+        case "memory_search":
             return [_count(body, "results", "result", "results")]
         case "web_extract":
             return _web_extract_detail(body)
@@ -110,7 +113,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
         case "history_fetch":
             return [
                 _count(body, "refs", "ref", "refs"),
-                _chars(cast(str, body["content"])),
+                _chars(len(cast(str, body["content"]))),
                 *(["more available"] if body["next_cursor"] is not None else []),
             ]
         case "wait_subagents":
@@ -131,8 +134,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
 def _read_detail(body: Mapping[str, JSONValue]) -> list[str]:
     match body.get("kind"):
         case "file" | "document":
-            content = body.get("content")
-            return [_chars(content if isinstance(content, str) else "")]
+            return [_chars(_length(body.get("content")))]
         case "directory":
             return [_count(body, "entries", "entry", "entries")]
         case "attachment":
@@ -142,12 +144,7 @@ def _read_detail(body: Mapping[str, JSONValue]) -> list[str]:
 
 
 def _command_detail(body: Mapping[str, JSONValue]) -> list[str]:
-    streams = "".join(
-        value
-        for key in ("stdout", "stderr")
-        for value in (body.get(key),)
-        if isinstance(value, str)
-    )
+    streams = sum(_length(body.get(key)) for key in ("stdout", "stderr"))
     exit_code = body.get("exit_code")
     prefix = (
         [f"exit {exit_code}"]
@@ -168,12 +165,7 @@ def _apply_patch_detail(body: Mapping[str, JSONValue]) -> list[str]:
 
 def _web_extract_detail(body: Mapping[str, JSONValue]) -> list[str]:
     results = [item for item in _items(body, "results") if isinstance(item, Mapping)]
-    extracted = "".join(
-        content
-        for result in results
-        for content in (result.get("raw_content"),)
-        if isinstance(content, str)
-    )
+    extracted = sum(_length(result.get("raw_content")) for result in results)
     urls = [url for result in results for url in _text(result, "url")]
     return [_chars(extracted), *urls[:1]]
 
@@ -214,9 +206,10 @@ def _failure_code(output: JSONValue) -> str | None:
     if not isinstance(output, Mapping):
         return None
     error = output.get("error")
-    if not isinstance(error, Mapping):
-        return None
-    codes = [code for key in ("code", "error_code") for code in _text(error, key)]
+    # Tools shared with Suggestion and the chat report the shared tool error
+    # shape, whose code sits beside the status rather than under ``error``.
+    body = error if isinstance(error, Mapping) else output
+    codes = [code for key in ("code", "error_code") for code in _text(body, key)]
     return codes[0] if codes else None
 
 
@@ -235,8 +228,18 @@ def _count(body: Mapping[str, JSONValue], key: str, one: str, many: str) -> str:
     return f"{total:,} {one if total == 1 else many}"
 
 
-def _chars(text: str) -> str:
-    return f"{len(text):,} char{'' if len(text) == 1 else 's'}"
+def _length(value: JSONValue | None) -> int:
+    """A text's length, also when storage moved the text to a file of its own."""
+
+    if isinstance(value, str):
+        return len(value)
+    if is_spilled_text(value):
+        return cast(int, value["character_count"])
+    return 0
+
+
+def _chars(count: int) -> str:
+    return f"{count:,} char{'' if count == 1 else 's'}"
 
 
 __all__ = ["OutcomeStatus", "build_outcome_line"]

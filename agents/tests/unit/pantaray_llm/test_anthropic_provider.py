@@ -116,9 +116,13 @@ def _install(
     calls: list[dict[str, object]] = []
 
     async def send(
-        *, api_key: str, body: dict[str, object], client: httpx.AsyncClient | None
+        *,
+        api_key: str,
+        body: dict[str, object],
+        betas: tuple[str, ...],
+        client: httpx.AsyncClient | None,
     ) -> httpx.Response:
-        calls.append({"api_key": api_key, "body": body})
+        calls.append({"api_key": api_key, "body": body, "betas": betas})
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -498,9 +502,13 @@ def _install_sequence(
     calls: list[dict[str, object]] = []
 
     async def send(
-        *, api_key: str, body: dict[str, object], client: httpx.AsyncClient | None
+        *,
+        api_key: str,
+        body: dict[str, object],
+        betas: tuple[str, ...],
+        client: httpx.AsyncClient | None,
     ) -> httpx.Response:
-        calls.append({"api_key": api_key, "body": body})
+        calls.append({"api_key": api_key, "body": body, "betas": betas})
         return responses[len(calls) - 1]
 
     monkeypatch.setattr(anthropic_provider, "send_anthropic_message", send)
@@ -793,3 +801,128 @@ async def test_a_continuation_from_another_provider_is_rejected_before_sending(
 
     assert exc_info.value.code == "PROXY_CONTINUATION_PROVIDER_MISMATCH"
     assert calls == []
+
+
+_PROGRESS_UPDATES = AnthropicAdaptiveThinking(effort="high", progress_updates=True)
+
+
+@pytest.mark.parametrize(
+    ("thinking", "tool_use", "expected_thinking", "expected_betas"),
+    [
+        (
+            _PROGRESS_UPDATES,
+            {"mode": "action_turn", "tools": [_TOOL]},
+            {"type": "adaptive", "display": "updates"},
+            ("thinking-display-updates-2026-08-18",),
+        ),
+        # A model without them rejects the display value.
+        (
+            AnthropicAdaptiveThinking(effort="high"),
+            {"mode": "action_turn", "tools": [_TOOL]},
+            {"type": "adaptive"},
+            (),
+        ),
+        # Only an Action turn reads them back.
+        (
+            _PROGRESS_UPDATES,
+            {"tools": [_TOOL], "continuation_mode": "disabled"},
+            {"type": "adaptive"},
+            (),
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_progress_updates_are_asked_for_only_where_they_are_read(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking: AnthropicAdaptiveThinking,
+    tool_use: dict[str, object],
+    expected_thinking: dict[str, object],
+    expected_betas: tuple[str, ...],
+) -> None:
+    calls = _install(
+        monkeypatch, _ok(_message(content=[_tool_block()], stop_reason="tool_use"))
+    )
+
+    await _execute(_request(tool_use=tool_use), profile=_profile(thinking=thinking))
+
+    assert calls[0]["body"]["thinking"] == expected_thinking
+    assert calls[0]["betas"] == expected_betas
+
+
+@pytest.mark.asyncio
+async def test_progress_updates_become_action_commentary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = [
+        {"type": "thinking", "thinking": "", "signature": "sig-reasoning"},
+        {
+            "type": "thinking",
+            "thinking": "Found the config; editing it next.",
+            "signature": "sig-update",
+        },
+        _tool_block(),
+        {
+            "type": "thinking",
+            "thinking": "This part of the response was interrupted before it finished.",
+            "signature": "sig-interrupted",
+        },
+    ]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="tool_use")))
+
+    response = await _execute(
+        _request(tool_use={"mode": "action_turn", "tools": [_TOOL]}),
+        profile=_profile(thinking=_PROGRESS_UPDATES),
+    )
+
+    turn = response.tool_use
+    # The empty reasoning block and the interrupted-work stand-in say nothing.
+    assert [message.text for message in turn.messages] == [
+        "Found the config; editing it next."
+    ]
+    assert [call.call_id for call in turn.calls] == ["toolu_1"]
+    assert response.output == []
+
+
+@pytest.mark.asyncio
+async def test_thinking_text_stays_private_without_progress_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = [
+        {"type": "thinking", "thinking": "a reasoning summary", "signature": "sig"},
+        _tool_block(),
+    ]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="tool_use")))
+
+    response = await _execute(
+        _request(tool_use={"mode": "action_turn", "tools": [_TOOL]}),
+        profile=_profile(thinking=AnthropicAdaptiveThinking(effort="high")),
+    )
+
+    assert response.tool_use.messages == []
+
+
+@pytest.mark.asyncio
+async def test_transport_sends_the_beta_header_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+    real_client = httpx.AsyncClient
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return _ok(_message(content=[_tool_block()], stop_reason="tool_use"))
+
+    def client(*, timeout: float) -> httpx.AsyncClient:
+        return real_client(transport=httpx.MockTransport(respond), timeout=timeout)
+
+    monkeypatch.setattr(anthropic_transport.httpx, "AsyncClient", client)
+    action_turn = _request(tool_use={"mode": "action_turn", "tools": [_TOOL]})
+    await _execute(action_turn, profile=_profile(thinking=_PROGRESS_UPDATES))
+    await _execute(
+        action_turn, profile=_profile(thinking=AnthropicAdaptiveThinking(effort="high"))
+    )
+
+    assert requests[0].headers["anthropic-beta"] == (
+        "thinking-display-updates-2026-08-18"
+    )
+    assert "anthropic-beta" not in requests[1].headers

@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pantaray_agents.schema.agent.base import JSONValue
 
+from .attachment_reference import ReadImage
+
 DiscoveryTruncationReason = Literal[
     "limit",
     "timeout",
@@ -65,13 +67,16 @@ class ReadToolResult:
 
     ``file_reference_paths`` are the returned files that lie in a registered
     folder, which a caller may remember as files this call looked at.
+
+    An image comes back as ``image``: the caller keeps its bytes and adds the
+    output's ``attachments`` entry naming where it kept them.
     """
 
     output: dict[str, JSONValue]
     search_text: str | None
     file_paths: tuple[str, ...]
     file_reference_paths: tuple[str, ...]
-    attachments: tuple[dict[str, JSONValue], ...] = ()
+    image: ReadImage | None = None
 
 
 __all__ = [

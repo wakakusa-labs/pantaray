@@ -12,6 +12,7 @@ from openai.types.responses.response_output_refusal import ResponseOutputRefusal
 from pantaray_llm.contracts.json_value import JSONValue
 from pantaray_llm.contracts.request import LlmRequest
 from pantaray_llm.errors import (
+    MODEL_REFUSAL_RESPONSE_STATUS,
     PROXY_AUTHENTICATION_FAILED,
     PROXY_INSUFFICIENT_BALANCE,
     PROXY_INVALID_INPUT,
@@ -49,7 +50,8 @@ def build_openai_response_error(
     incomplete_reason = getattr(incomplete_details, "reason", None)
     if response_status == "incomplete" and incomplete_reason == "content_filter":
         error_details = dict(details)
-        error_details["response_status"] = "incomplete:content_filter"
+        error_details["response_status"] = MODEL_REFUSAL_RESPONSE_STATUS
+        error_details["upstream_code"] = incomplete_reason
         return ProviderError(
             403,
             PROXY_UPSTREAM_FORBIDDEN,
@@ -68,7 +70,7 @@ def build_openai_response_error(
     )
     if has_refusal:
         error_details = dict(details)
-        error_details["response_status"] = "completed"
+        error_details["response_status"] = MODEL_REFUSAL_RESPONSE_STATUS
         return ProviderError(
             403,
             PROXY_UPSTREAM_FORBIDDEN,
@@ -119,6 +121,7 @@ def build_openai_failed_response_error(
             502, PROXY_UPSTREAM_UNAVAILABLE, "OpenAI timed out.", error_details
         )
     if upstream_code in {"bio_policy", "image_content_policy_violation"}:
+        error_details["response_status"] = MODEL_REFUSAL_RESPONSE_STATUS
         return ProviderError(
             403, PROXY_UPSTREAM_FORBIDDEN, "OpenAI refused the request.", error_details
         )

@@ -48,6 +48,16 @@ from pantaray_agents.tools.contract import (
 )
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 
+from .search_contract import (
+    KEYWORDS_DESCRIPTION,
+    MEMORY_SEARCH_DESCRIPTION,
+    QUERY_DESCRIPTION,
+    focus_description,
+    keywords_schema,
+    parse_memory_search_input,
+    query_schema,
+)
+
 MEMORY_SEARCH_TOOL_NAME = "memory_search"
 GET_MEMORY_REFERENCE_TOOL_NAME = "get_memory_reference"
 # A search sets the run's context epoch, which a reference reads.
@@ -139,14 +149,7 @@ class MemoryRetrievalSession:
     calls_used: int = 0
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
-        search_description = (
-            "Search persisted memory and return matching content with stable "
-            "context handles. Words are matched from three characters; below "
-            "that, single characters are not matched, and two-letter ASCII words "
-            "only whole and when written in capitals (PR, UI) or with a digit "
-            "(#7, v2). notes in the result name any query term that was not "
-            "matched and say when the result list was full."
-        )
+        search_description = MEMORY_SEARCH_DESCRIPTION
         if self.policy.search_content_max_chars is not None:
             search_description += (
                 " A truncated preview cannot be expanded in this run; it is "
@@ -193,7 +196,7 @@ class MemoryRetrievalSession:
         try:
             focus = self._focus(args)
             limit = self._limit(args)
-            query = _required_string(args, "query")
+            search_input = parse_memory_search_input(args)
         except ValueError as exc:
             return tool_error_response(
                 tool_name=call.tool_name,
@@ -206,7 +209,8 @@ class MemoryRetrievalSession:
             request=MemorySearchRequest(
                 user_id=self.context.user_id,
                 run_id=self.context.run_id,
-                query=query,
+                keywords=search_input.keywords,
+                query=search_input.query,
                 focus=focus,
                 limit=limit,
                 pinned_revisions=self.policy.pinned_revisions,
@@ -284,7 +288,7 @@ class MemoryRetrievalSession:
         )
 
     def _search_request_schema(self) -> dict[str, JSONValue]:
-        required: list[JSONValue] = ["query"]
+        required: list[JSONValue] = []
         if self.policy.default_focus is None:
             required.append("focus")
         if self.policy.default_limit is None:
@@ -294,10 +298,17 @@ class MemoryRetrievalSession:
             "additionalProperties": False,
             "required": required,
             "properties": {
-                "query": {"type": "string", "minLength": 1, "pattern": r"\S"},
+                "keywords": {
+                    **keywords_schema(),
+                    "description": KEYWORDS_DESCRIPTION,
+                },
+                "query": {**query_schema(), "description": QUERY_DESCRIPTION},
                 "focus": {
                     "type": "string",
                     "enum": list(self.policy.allowed_focuses),
+                    "description": focus_description(
+                        self.policy.allowed_focuses, self.policy.default_focus
+                    ),
                 },
                 "limit": {
                     "type": "integer",
@@ -353,7 +364,7 @@ class MemoryRetrievalSession:
             "source_path": str(row.get("source_path") or ""),
             "heading_path": _optional_string(row.get("heading_path")),
             "observed_at": describe_utc_timestamp(row["observed_at"]),
-            "match_kind": row["match_kind"],
+            "matched_by": row["matched_by"],
             "context_handle": context_handle,
         }
 
@@ -460,7 +471,7 @@ def _search_success_schema() -> dict[str, JSONValue]:
                         "source_path",
                         "heading_path",
                         "observed_at",
-                        "match_kind",
+                        "matched_by",
                         "context_handle",
                     ],
                     "properties": {
@@ -472,14 +483,9 @@ def _search_success_schema() -> dict[str, JSONValue]:
                         "source_path": {"type": "string"},
                         "heading_path": nullable_string,
                         "observed_at": {"type": "string"},
-                        "match_kind": {
+                        "matched_by": {
                             "type": "string",
-                            "enum": [
-                                "exact",
-                                "corroborated",
-                                "lexical",
-                                "semantic",
-                            ],
+                            "enum": ["keywords", "query", "both"],
                         },
                         "context_handle": {"type": "string", "minLength": 1},
                     },

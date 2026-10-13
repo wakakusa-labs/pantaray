@@ -13,6 +13,8 @@ WEB_CRAWL_MAX_DEPTH = 5
 # The counts below are the Tavily API defaults (docs.tavily.com, 2026-10), passed
 # explicitly so the limits the tool descriptions state stay true on every route.
 WEB_SEARCH_RESULT_LIMIT = 10
+# Queries one web_search call runs side by side, each its own provider search.
+WEB_SEARCH_MAX_QUERIES = 5
 WEB_CRAWL_MAX_BREADTH = 20
 WEB_CRAWL_PAGE_LIMIT = 50
 # Excerpts (at most 500 characters each) returned per page when web_extract has
@@ -82,6 +84,7 @@ __all__ = [
     "WEB_SEARCH_COUNTRY_SOUTH_KOREA",
     "WEB_SEARCH_COUNTRY_UNITED_KINGDOM",
     "WEB_SEARCH_COUNTRY_UNITED_STATES",
+    "WEB_SEARCH_MAX_QUERIES",
     "WEB_SEARCH_PROFILE_ID",
     "WEB_SEARCH_RESULT_LIMIT",
     "WEB_SEARCH_TOPICS",

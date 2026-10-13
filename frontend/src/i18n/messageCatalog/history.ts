@@ -104,11 +104,15 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.typing': 'Typing',
     'history.chat.announce': '{name}: {text}',
     'history.chat.failure.llm_connection': 'Couldn’t connect to the AI, so there’s no reply.',
+    'history.chat.failure.llm_refused':
+      'The AI declined to answer. Change the model or rephrase your message.',
     'history.chat.failure.llm_request': 'The request to the AI failed, so there’s no reply.',
     'history.chat.failure.step_limit': 'Stopped at the step limit before replying.',
     'history.chat.failure.internal': 'Something went wrong, so there’s no reply.',
     'history.chat.retry.llm_connection':
       'Couldn’t connect to the AI, so there’s no reply. Send again',
+    'history.chat.retry.llm_refused':
+      'The AI declined to answer. Change the model or rephrase your message. Send again',
     'history.chat.retry.llm_request':
       'The request to the AI failed, so there’s no reply. Send again',
     'history.chat.retry.step_limit': 'Stopped at the step limit before replying. Send again',
@@ -234,10 +238,14 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.chat.typing': '入力中',
     'history.chat.announce': '{name}：{text}',
     'history.chat.failure.llm_connection': 'AI に接続できず、返信できませんでした。',
+    'history.chat.failure.llm_refused':
+      'AI が回答を断りました。モデルを変えるか、言い方を変えてください。',
     'history.chat.failure.llm_request': 'AI への依頼が失敗し、返信できませんでした。',
     'history.chat.failure.step_limit': '手順の上限に達し、返信できませんでした。',
     'history.chat.failure.internal': '問題が起きて返信できませんでした。',
     'history.chat.retry.llm_connection': 'AI に接続できず、返信できませんでした。もう一度送る',
+    'history.chat.retry.llm_refused':
+      'AI が回答を断りました。モデルを変えるか、言い方を変えてください。もう一度送る',
     'history.chat.retry.llm_request': 'AI への依頼が失敗し、返信できませんでした。もう一度送る',
     'history.chat.retry.step_limit': '手順の上限に達し、返信できませんでした。もう一度送る',
     'history.chat.retry.internal': '返信できませんでした。もう一度送る',

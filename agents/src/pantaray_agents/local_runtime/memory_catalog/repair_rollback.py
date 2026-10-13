@@ -76,13 +76,6 @@ def rollback_or_quarantine(
         valid_revision = load_revision(
             connection=connection, user_id=node.user_id, revision_id=candidate_id
         )
-        if (
-            valid_revision is not None
-            and node.source in {"fact", "long_term_insight"}
-            and not (valid_revision.profile_brief or "").strip()
-        ):
-            valid_revision = None
-            continue
         break
     with immediate_transaction(connection):
         if valid_revision is None:

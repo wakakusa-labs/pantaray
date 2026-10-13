@@ -442,7 +442,7 @@ def test_search_copies_go_and_learned_memory_stays_valid(tmp_path: Path) -> None
         '{"experience_id":"lesson-0001","scope":{"kind":"user","key":null},'
         '"applies_when":"Testing","observed_approach":"Used uv","outcome":"effective",'
         '"next_time_rule":"Use uv","observed_result":"Passed",'
-        '"supersedes_experience_id":null}'
+        '"supersedes_experience_ids":[]}'
     )
     entry = experience.experience_entry_path("lesson-0001")
     lesson_text = experience.render_agent_experience_markdown(lesson)

@@ -28,10 +28,10 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .read_contract import ReadToolArgs, ReadToolResult
 from .read_page import DEFAULT_READ_LIMIT, bound_text_page, text_page_output
+from .read_sniffing import starts_like_pdf
 from .read_target import ReadTarget, action_reference_paths
 from .text_lines import read_text_value_lines
 
-_PDF_MAGIC = b"%PDF-"
 READ_DOCUMENT_ENCRYPTED = "READ_DOCUMENT_ENCRYPTED"
 READ_DOCUMENT_TOO_LARGE = "READ_DOCUMENT_TOO_LARGE"
 READ_DOCUMENT_UNREADABLE = "READ_DOCUMENT_UNREADABLE"
@@ -71,7 +71,7 @@ def document_format(*, filepath: Path, sample: bytes) -> DocumentFormat | None:
     document it is rather than refused as a binary file.
     """
 
-    if sample.startswith(_PDF_MAGIC):
+    if starts_like_pdf(sample):
         return "pdf"
     return DOCUMENT_FORMAT_BY_EXTENSION.get(filepath.suffix.lower())
 

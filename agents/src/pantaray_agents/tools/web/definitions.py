@@ -1,212 +1,258 @@
+"""web_search and web_extract as the model sees them, once for every agent.
+
+The Action builds its catalog entries from these words and schemas, and
+Suggestion and the chat build theirs in ``session``; all three run them through
+``execute``. A long result is not paged here: the host stores it like any other
+tool result too large to keep inline, and the model reads the rest from there.
+"""
+
 from __future__ import annotations
 
+from typing import Final
+
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.tools.contract import (
-    ReactToolDefinition,
-    ReactToolExecutor,
-    ToolConcurrency,
-    react_tool_response_schema,
+from pantaray_llm.profiles import (
+    WEB_EXCERPTS_PER_PAGE,
+    WEB_SEARCH_COUNTRIES,
+    WEB_SEARCH_MAX_QUERIES,
+    WEB_SEARCH_RESULT_LIMIT,
+    WEB_SEARCH_TOPICS,
 )
-from pantaray_llm.profiles import WEB_EXCERPTS_PER_PAGE, WEB_SEARCH_RESULT_LIMIT
 
-WEB_EXTRACT_MAX_URLS = 3
-WEB_URL_MAX_CHARS = 2_048
-WEB_SEARCH_MAX_RESULTS = 8
-WEB_SEARCH_RESULT_CONTENT_MAX_CHARS = 600
-WEB_EXTRACT_PAGE_MAX_CHARS = 1_400
+WEB_SEARCH_TOOL_NAME: Final = "web_search"
+WEB_EXTRACT_TOOL_NAME: Final = "web_extract"
+WEB_EXTRACT_MAX_URLS: Final = 5
+WEB_URL_MAX_CHARS: Final = 2_048
+# The Action allows one web tool call this long when it shares a turn with other
+# calls, and cancels it, with every result, past that.
+WEB_TOOL_TIMEOUT_SECONDS: Final = 60
+# One query's own limit, short enough that a query still retrying gives up as
+# its own failure while the call still has time to return the others.
+WEB_SEARCH_QUERY_SECONDS: Final = WEB_TOOL_TIMEOUT_SECONDS * 3 / 4
 
-_NULLABLE_STRING: dict[str, JSONValue] = {"type": ["string", "null"]}
-_PAGE_PROPERTIES: dict[str, JSONValue] = {
-    "next_offset": {"type": ["integer", "null"], "minimum": 1},
-    "truncated": {"type": "boolean"},
-    "truncation_reason": _NULLABLE_STRING,
+# What, when and what to avoid: the Action shows them as its tool guide, and
+# Suggestion and the chat show the same three as one description.
+WEB_SEARCH_WHAT: Final = (
+    f"Search the web for up to {WEB_SEARCH_MAX_QUERIES} queries at once. Each "
+    f"query is its own search and returns up to {WEB_SEARCH_RESULT_LIMIT} results, "
+    "each with an excerpt of its page, under that query; a URL another query "
+    "already found is listed only under the first. Use web_extract to read a "
+    "whole page."
+)
+WEB_SEARCH_WHEN: Final = (
+    "Use when the answer depends on public facts that memory and the current "
+    "context do not have: products, documentation, news, prices, or people and "
+    "organisations outside the user's own records."
+)
+WEB_SEARCH_PITFALLS: Final = (
+    "Give each product, source or angle a query of its own rather than one query "
+    "that covers them all, and send them together. Set topic only when it "
+    "changes what should "
+    "be found (news for recent reporting, finance for markets and companies), "
+    "and country only with the general topic when regional results matter."
+)
+
+WEB_EXTRACT_WHAT: Final = (
+    f"Read up to {WEB_EXTRACT_MAX_URLS} known web pages and return each page's "
+    "main text; a page that could not be read is listed with the reason. With "
+    f"query, each page returns only its top {WEB_EXCERPTS_PER_PAGE} excerpts (up "
+    "to 500 characters each) relevant to it. When meta.upstream_provider is "
+    '"local" (no Pantaray sign-in or Tavily key), the pages were fetched from '
+    "this computer: query is ignored and each page comes back whole, and a page "
+    "that builds its content with JavaScript may come back without text."
+)
+WEB_EXTRACT_WHEN: Final = (
+    "Use after web_search, or when the user or a source gave concrete page URLs "
+    "whose content is needed."
+)
+WEB_EXTRACT_PITFALLS: Final = (
+    "Pass the page itself, not a homepage unless the homepage is the target. Set "
+    "query only when excerpts are enough; omit it to read the whole page."
+)
+
+WEB_SEARCH_FIELDS: Final[dict[str, JSONValue]] = {
+    "queries": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": WEB_SEARCH_MAX_QUERIES,
+        "uniqueItems": True,
+        "items": {"type": "string", "minLength": 1, "pattern": r"\S"},
+        "description": (
+            f"1 to {WEB_SEARCH_MAX_QUERIES} search queries, each focused on one "
+            "subject; they run side by side."
+        ),
+    },
+    "topic": {
+        "type": "string",
+        "enum": list(WEB_SEARCH_TOPICS),
+        "description": (
+            "Optional. general for broad web search, news for recent reporting, "
+            "finance for markets and companies."
+        ),
+    },
+    "country": {
+        "type": "string",
+        "enum": list(WEB_SEARCH_COUNTRIES),
+        "description": (
+            "Optional. Prefer results from this country; only with the general topic."
+        ),
+    },
+}
+WEB_SEARCH_REQUIRED: Final = ("queries",)
+
+WEB_EXTRACT_FIELDS: Final[dict[str, JSONValue]] = {
+    "urls": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": WEB_EXTRACT_MAX_URLS,
+        "uniqueItems": True,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": WEB_URL_MAX_CHARS,
+            "pattern": r"^https?://\S+$",
+        },
+        "description": (
+            f"Page URLs to read (at most {WEB_EXTRACT_MAX_URLS}). Addresses on this "
+            "computer or a private network are refused."
+        ),
+    },
+    "query": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": r"\S",
+        "description": (
+            f"Optional. Return only each page's top {WEB_EXCERPTS_PER_PAGE} excerpts "
+            "relevant to this text instead of the whole page."
+        ),
+    },
+}
+WEB_EXTRACT_REQUIRED: Final = ("urls",)
+
+_META: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["request_id", "upstream_provider", "profile_id", "outcome"],
+    "properties": {
+        "request_id": {"type": "string"},
+        "upstream_provider": {"type": "string"},
+        "profile_id": {"type": "string"},
+        "outcome": {
+            "type": "string",
+            "enum": ["complete", "no_results", "partial_results"],
+        },
+        "upstream_request_id": {"type": "string"},
+        "suggested_action": {"type": "string"},
+    },
+}
+_NULLABLE_STRING: Final[dict[str, JSONValue]] = {"type": ["string", "null"]}
+
+_SEARCH_FOUND: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["query", "results", "meta"],
+    "properties": {
+        "query": {"type": "string"},
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "url", "content", "score"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string"},
+                    "content": {"type": "string"},
+                    "score": {"type": "number"},
+                },
+            },
+        },
+        "meta": _META,
+    },
+}
+_SEARCH_FAILED: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["query", "error"],
+    "properties": {"query": {"type": "string"}, "error": {"type": "string"}},
+}
+WEB_SEARCH_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "searches"],
+    "properties": {
+        "status": {"const": "success"},
+        "searches": {
+            "type": "array",
+            "items": {"oneOf": [_SEARCH_FOUND, _SEARCH_FAILED]},
+        },
+    },
+}
+
+WEB_EXTRACT_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "results", "failed_results", "retry_hint", "meta"],
+    "properties": {
+        "status": {"const": "success"},
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["url", "raw_content"],
+                "properties": {
+                    "url": {"type": "string"},
+                    "raw_content": {"type": "string"},
+                },
+            },
+        },
+        "failed_results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["url", "error"],
+                "properties": {
+                    "url": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+            },
+        },
+        "retry_hint": _NULLABLE_STRING,
+        "meta": _META,
+    },
 }
 
 
-def _success_schema(
-    *, properties: dict[str, JSONValue], required: tuple[str, ...]
+def request_schema(
+    fields: dict[str, JSONValue], required: tuple[str, ...]
 ) -> dict[str, JSONValue]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["status", *required],
-        "properties": {"status": {"const": "success"}, **properties},
+        "properties": fields,
+        "required": list(required),
     }
-
-
-def _definition(
-    *,
-    name: str,
-    description: str,
-    properties: dict[str, JSONValue],
-    required: tuple[str, ...],
-    success_schema: dict[str, JSONValue],
-    execute: ReactToolExecutor,
-) -> ReactToolDefinition:
-    return ReactToolDefinition(
-        name=name,
-        description=description,
-        request_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": properties,
-            "required": list(required),
-        },
-        response_schema=react_tool_response_schema(success_schema=success_schema),
-        execute=execute,
-        # The session fetches a query or page once and pages over that snapshot.
-        concurrency=ToolConcurrency("parallel", shared_state="web_snapshots"),
-    )
-
-
-def build_web_research_definitions(
-    *,
-    web_search: ReactToolExecutor,
-    web_extract: ReactToolExecutor,
-) -> tuple[ReactToolDefinition, ...]:
-    offset: dict[str, JSONValue] = {"type": "integer", "minimum": 1}
-    return (
-        _definition(
-            name="web_search",
-            description=(
-                "Search the web for current evidence. Returns up to "
-                f"{WEB_SEARCH_RESULT_LIMIT} results per query, each with a short "
-                "excerpt. Continue result pages with next_offset; use web_extract "
-                "for full page content."
-            ),
-            properties={
-                "query": {"type": "string", "minLength": 1, "pattern": r"\S"},
-                "offset": offset,
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": WEB_SEARCH_MAX_RESULTS,
-                },
-            },
-            required=("query", "offset", "limit"),
-            success_schema=_web_search_schema(),
-            execute=web_search,
-        ),
-        _definition(
-            name="web_extract",
-            description=(
-                "Extract bounded content from specific web pages. Continue each "
-                "URL with its next_offset. With a query, each page holds only its "
-                f"top {WEB_EXCERPTS_PER_PAGE} excerpts relevant to the query; set "
-                "query to null to read the full page."
-            ),
-            properties={
-                "urls": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": WEB_EXTRACT_MAX_URLS,
-                    "uniqueItems": True,
-                    "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": WEB_URL_MAX_CHARS,
-                    },
-                },
-                "query": {
-                    "type": ["string", "null"],
-                    "minLength": 1,
-                    "pattern": r"\S",
-                },
-                "offset": offset,
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": WEB_EXTRACT_PAGE_MAX_CHARS,
-                },
-            },
-            required=("urls", "query", "offset", "limit"),
-            success_schema=_web_extract_schema(),
-            execute=web_extract,
-        ),
-    )
-
-
-def _web_search_schema() -> dict[str, JSONValue]:
-    return _success_schema(
-        properties={
-            "query": {"type": "string"},
-            "results": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "title",
-                        "url",
-                        "content",
-                        "content_truncated",
-                        "score",
-                    ],
-                    "properties": {
-                        "title": {"type": "string"},
-                        "url": {"type": "string"},
-                        "content": {"type": "string"},
-                        "content_truncated": {"type": "boolean"},
-                        "score": {"type": "number"},
-                    },
-                },
-            },
-            **_PAGE_PROPERTIES,
-            "retry_hint": _NULLABLE_STRING,
-        },
-        required=(
-            "query",
-            "results",
-            "next_offset",
-            "truncated",
-            "truncation_reason",
-            "retry_hint",
-        ),
-    )
-
-
-def _web_extract_schema() -> dict[str, JSONValue]:
-    page_properties: dict[str, JSONValue] = {
-        "url": {"type": "string"},
-        "raw_content": {"type": "string"},
-        "offset": {"type": "integer", "minimum": 1},
-        "end_offset": {"type": "integer", "minimum": 0},
-        "total_chars": {"type": "integer", "minimum": 0},
-        **_PAGE_PROPERTIES,
-        "retry_hint": _NULLABLE_STRING,
-    }
-    return _success_schema(
-        properties={
-            "results": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": list(page_properties),
-                    "properties": page_properties,
-                },
-            },
-            "failed_results": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["url", "error"],
-                    "properties": {
-                        "url": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-        },
-        required=("results", "failed_results"),
-    )
 
 
 __all__ = [
+    "WEB_EXTRACT_FIELDS",
     "WEB_EXTRACT_MAX_URLS",
-    "WEB_EXTRACT_PAGE_MAX_CHARS",
-    "WEB_SEARCH_MAX_RESULTS",
-    "WEB_SEARCH_RESULT_CONTENT_MAX_CHARS",
-    "build_web_research_definitions",
+    "WEB_EXTRACT_PITFALLS",
+    "WEB_EXTRACT_REQUIRED",
+    "WEB_EXTRACT_RESULT_SCHEMA",
+    "WEB_EXTRACT_TOOL_NAME",
+    "WEB_EXTRACT_WHAT",
+    "WEB_EXTRACT_WHEN",
+    "WEB_SEARCH_FIELDS",
+    "WEB_SEARCH_PITFALLS",
+    "WEB_SEARCH_QUERY_SECONDS",
+    "WEB_SEARCH_REQUIRED",
+    "WEB_SEARCH_RESULT_SCHEMA",
+    "WEB_SEARCH_TOOL_NAME",
+    "WEB_SEARCH_WHAT",
+    "WEB_SEARCH_WHEN",
+    "WEB_TOOL_TIMEOUT_SECONDS",
+    "request_schema",
 ]

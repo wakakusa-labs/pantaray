@@ -38,6 +38,7 @@ export function createScreenshotSyncManager(params: {
   capturePrivacy: CapturePrivacyManager;
   getManifestPath: () => string;
   requestPermissions: (missing: CapturePermission[]) => Promise<void>;
+  holdsScreenRecording: () => boolean;
   readSource: (userId: string) => Promise<SourceState>;
   transitionSource: (
     userId: string,
@@ -99,6 +100,7 @@ export function createScreenshotSyncManager(params: {
    * The preference file exists only once recording actually ran for this user: a
    * start still waiting for macOS permissions, and a stop before anything ever ran,
    * leave none, so turning recording off writes nothing for a user who never had it on.
+   * Except a start waiting on Screen Recording, which can only finish after a reopen.
    */
   type StoredPreference = { enabled: boolean; recorder_paused?: boolean };
   const storedPreference = (): StoredPreference | null =>
@@ -266,6 +268,7 @@ export function createScreenshotSyncManager(params: {
       manifest: readZaneiManifest(params.getManifestPath()),
       userId: startedFor.id,
       requestPermissions: params.requestPermissions,
+      holdsScreenRecording: params.holdsScreenRecording,
       onExit: () => {
         void enqueue(async () => {
           await suspend('shutdown');
@@ -299,6 +302,10 @@ export function createScreenshotSyncManager(params: {
       }
       permissionRequired = true;
       failure = null;
+      // macOS applies a Screen Recording grant only once the app reopens, so this start
+      // can finish only after that reopen. Storing the user's "on" is what lets the
+      // reopened app resume it instead of coming back with recording off.
+      if (manual && !params.holdsScreenRecording()) markEnabled();
       notify();
       return 'permission_pending';
     } catch (error) {

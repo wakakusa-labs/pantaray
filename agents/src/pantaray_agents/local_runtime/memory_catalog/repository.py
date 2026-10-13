@@ -147,7 +147,7 @@ def load_revision(
         """
         SELECT user_id, revision_id, node_id, body_kind, inline_body,
                artifact_root_path, fragment_schema_version, content_sha256,
-               profile_brief, created_at
+               created_at
         FROM memory_revisions WHERE user_id = ? AND revision_id = ?
         """,
         (user_id, revision_id),
@@ -167,9 +167,6 @@ def load_revision(
         ),
         fragment_schema_version=int(row["fragment_schema_version"]),
         content_sha256=str(row["content_sha256"]),
-        profile_brief=(
-            str(row["profile_brief"]) if row["profile_brief"] is not None else None
-        ),
         created_at=str(row["created_at"]),
     )
 

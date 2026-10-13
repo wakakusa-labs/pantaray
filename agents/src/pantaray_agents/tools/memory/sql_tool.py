@@ -36,12 +36,15 @@ MEMORY_SQL_TOOL_NAME: Final[str] = "memory_sql"
 _TABLE_GUIDE = "\n".join(
     [
         "Readable memory tables:",
-        "- agent_suggestions: suggestion records; key columns suggestion_id, user_id, answer, status, created_at, updated_at, "
+        "- agent_suggestions: suggestion records; key columns suggestion_id, user_id, answer (what the user was shown), "
+        "suggestion_summary (the brief for whoever does the work), status, created_at, updated_at, interaction_contract "
+        "(action_offer for work that can be taken up, message_only for information; NULL on the many rows of runs that made no "
+        "suggestion, so keep interaction_contract IS NOT NULL to list suggestions), "
         "user_reaction (accepted, rejected for a dismissed suggestion, or NULL when the user has not answered), accepted_at, "
         "rejected_at, dismiss_reason (the user's own words when dismissing, or NULL).",
         "- agent_actions: executed action results; key columns action_id, suggestion_id, user_id, final_output, status, created_at, updated_at.",
         "- agent_insights: short-term insight rows; key columns insight_id, source_activity_summary_id, short_term_insight_data, status, created_at, updated_at.",
-        "- agent_facts: structured fact generation rows; key columns fact_id, user_id, facts_profile_brief, structured_fact_sha256, status, created_at, updated_at.",
+        "- agent_facts: structured fact generation rows; key columns fact_id, user_id, structured_fact_sha256, status, created_at, updated_at.",
         "- activity_logs: time-series activity descriptions; key columns log_id, user_id, period_start, period_end, description, status. "
         "period_start/period_end label the 15-minute job window that wrote the row, not the time the activity was observed; the activity "
         "is usually observed before period_start, and further before when recording stopped or the job was delayed. When a question "

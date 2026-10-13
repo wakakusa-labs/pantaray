@@ -1,9 +1,9 @@
 """One memory update as a model conversation on the shared loop.
 
-The harness adds what every memory edit run needs around the editing tools: a
-run-local store that keeps an oversized tool result out of the conversation and
-the `tool_result_fetch` tool that pages it back, and the `completed` ending
-tool that reports which memory requests the run applied. A run is never
+The harness adds what every memory edit run needs around the editing tools: an
+oversized tool result is saved out of the conversation by the caller's
+`save_result`, the caller's `read` pages through what was saved, and the
+`completed` ending tool reports which memory requests the run applied. A run is never
 resumed -- a stopped job prepares a fresh workspace and starts over -- so the
 history stays in memory.
 """
@@ -11,7 +11,6 @@ history stays in memory.
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -41,9 +40,6 @@ from pantaray_llm.contracts.input_block import LlmInputTextBlock
 from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 
-from .tool_result_projection import project_tool_result
-from .tool_result_store import TOOL_RESULT_FETCH_TOOL_NAME, RunToolResultStore
-
 APPLIED_MEMORY_REQUESTS_ARG = "applied_memory_requests"
 _COMPLETE_REQUIRED = (
     "Respond with tool calls. When the memory update is correct and complete, "
@@ -54,8 +50,10 @@ _COMPLETE_REQUIRED = (
 @dataclass(frozen=True, slots=True)
 class MemoryFileEditorRunInput:
     run_id: str
-    # The runner borrows this descriptor and owns only its internal duplicate.
-    tool_result_directory_fd: int
+    # What the model reads in place of a tool's output: an oversized one with its
+    # long texts saved to files, and `read_saved_results` to read those back.
+    save_result: Callable[[JSONValue], JSONValue]
+    read_saved_results: ReactToolDefinition
     tool_definitions: tuple[ReactToolDefinition, ...]
     # The request's own message every turn is sent behind, and the run's task,
     # which leads the history.
@@ -102,17 +100,6 @@ async def run_memory_file_editor(
 ) -> tuple[str, ...]:
     """Run the update to its accepted `completed`; return the applied requests."""
 
-    if any(
-        definition.name == TOOL_RESULT_FETCH_TOOL_NAME
-        for definition in run_input.tool_definitions
-    ):
-        raise ValueError(
-            f"{TOOL_RESULT_FETCH_TOOL_NAME} is reserved by the memory harness"
-        )
-    result_store = RunToolResultStore(
-        directory_fd=os.dup(run_input.tool_result_directory_fd)
-    )
-
     def decide(turn: IdleTurn) -> Finish[tuple[str, ...]] | Continue:
         if turn.ending_call is None:
             return Continue(_COMPLETE_REQUIRED)
@@ -128,16 +115,11 @@ async def run_memory_file_editor(
     async def on_result(
         call: LlmToolCall, result: ReactToolResult
     ) -> LlmTurnToolResultItem:
-        # The loop awaits this to its end through a stop, so the store is
-        # never closed under a projection still writing to it.
-        projected = await asyncio.to_thread(
-            project_tool_result, result=result, store=result_store
-        )
         return LlmTurnToolResultItem(
             type="tool_result",
             call_id=call.call_id,
             name=call.name,
-            output=projected.output,
+            output=await asyncio.to_thread(run_input.save_result, result.output),
         )
 
     # Memory update runs on the models an Action does, under the same input cap.
@@ -145,47 +127,35 @@ async def run_memory_file_editor(
     identity, _ = provider_turns.read_provider_turn_target(
         inference_profile=MEMORY_UPDATE_PROFILE_ID
     )
-    try:
-        applied = await run_conversation(
-            ConversationRun(
-                prompt=run_input.prompt,
-                system_instruction=run_input.system_instruction,
-                tools=(*run_input.tool_definitions, result_store.fetch_definition()),
-                ending_tools=(_completed_tool(run_input.memory_request_ids),),
-                history=(ConversationEntry(_user_text(run_input.task)),),
-                provider_turns=provider_turns.ProviderTurnStore(identity),
-                inference_profile=MEMORY_UPDATE_PROFILE_ID,
-                max_turns=run_input.max_turns,
-                max_tool_calls=run_input.max_tool_calls,
-                max_parallel_tool_calls=tunables.max_parallel_tool_calls,
-                window=WindowState(
-                    budget=ContextBudget(
-                        window_tokens=tunables.context_window_tokens,
-                        baseline=None,
-                        reset_pending=False,
-                    ),
-                    omit_before=0,
+    return await run_conversation(
+        ConversationRun(
+            prompt=run_input.prompt,
+            system_instruction=run_input.system_instruction,
+            tools=(*run_input.tool_definitions, run_input.read_saved_results),
+            ending_tools=(_completed_tool(run_input.memory_request_ids),),
+            history=(ConversationEntry(_user_text(run_input.task)),),
+            provider_turns=provider_turns.ProviderTurnStore(identity),
+            inference_profile=MEMORY_UPDATE_PROFILE_ID,
+            max_turns=run_input.max_turns,
+            max_tool_calls=run_input.max_tool_calls,
+            max_parallel_tool_calls=tunables.max_parallel_tool_calls,
+            window=WindowState(
+                budget=ContextBudget(
+                    window_tokens=tunables.context_window_tokens,
+                    baseline=None,
+                    reset_pending=False,
                 ),
-                usage=run_input.usage,
-                send=run_input.send,
-                before_send=_nothing_arrives,
-                on_turn=_keep_nothing,
-                on_result=on_result,
-                on_notice=_keep_nothing,
-                decide=decide,
-            )
+                omit_before=0,
+            ),
+            usage=run_input.usage,
+            send=run_input.send,
+            before_send=_nothing_arrives,
+            on_turn=_keep_nothing,
+            on_result=on_result,
+            on_notice=_keep_nothing,
+            decide=decide,
         )
-    except BaseException as run_error:
-        try:
-            result_store.close()
-        except BaseException as close_error:
-            run_error.add_note(
-                "run tool-result store close failed: "
-                f"{type(close_error).__name__}: {close_error}"
-            )
-        raise
-    result_store.close()
-    return applied
+    )
 
 
 async def _nothing_arrives() -> Sequence[LlmTurnItem]:

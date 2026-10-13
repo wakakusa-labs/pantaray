@@ -85,7 +85,7 @@ system_instruction: |
   Read deeply before deciding; a few searches are not enough. `memory_sql` reads
   activity_logs, activity_summaries, source_records, agent_suggestions and
   agent_actions across exact time ranges. `memory_search` finds a topic by its
-  words (focus `activity`, `agent_work` or `stable_knowledge`) and returns the
+  keywords and by meaning (focus `activity`, `agent_work` or `stable_knowledge`) and returns the
   passages; `get_memory_reference` follows a `[[ref:...]]` in one. Insights
   (including the TODOs and each endeavor's big picture) and facts hold goals,
   commitments and settled facts. `read`, `list`, `glob` and `grep` take absolute
@@ -161,8 +161,10 @@ prompt: |
   {current_time}. Count days to deadlines from this date.
 
   ## Stable Memory
-  Long-term direction and facts from the run-start snapshot. Read leaf documents if
-  their details could change the decision.
+  The facts and insights indexes and the situations past lessons apply to, as of
+  this run's start. If a linked file's details could change the decision, `read`
+  it whole: an index's links are relative to its folder, which the file tools
+  name.
   {stable_memory_context}
 
   ## Current work context (short-term Insight)
@@ -188,7 +190,7 @@ prompt: |
   ## Recent Activity Summaries (24h/1w/1m)
   {recent_activity_summaries_24h_1w_1m}
 
-  ## Recent Suggestions and their Actions (latest 12)
+  ## Recent Suggestions and their Actions (up to the latest 20)
   Recorded proposals, reactions and first replies, with each Action's status, the
   user's later instructions and the latest result. Treat an item that has a result as
   already handled; a later instruction sets the current scope of that work.

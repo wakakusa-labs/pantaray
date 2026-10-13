@@ -30,7 +30,7 @@ _FIELD_PREFIXES = {
     "outcome": "- Outcome: ",
     "next_time_rule": "- Next-time rule: ",
     "observed_result": "- Observed result: ",
-    "supersedes_experience_id": "- Supersedes experience: ",
+    "supersedes_experience_ids": "- Supersedes experience: ",
 }
 _EVIDENCE_PREFIX = "- Evidence: Action "
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -69,7 +69,8 @@ class AgentExperienceContent(BaseModel):
     outcome: AgentExperienceOutcome
     next_time_rule: str = Field(min_length=1, max_length=4_000)
     observed_result: str = Field(min_length=1, max_length=2_000)
-    supersedes_experience_id: str | None = Field(default=None, max_length=128)
+    # The entries this one replaces; each left the tree when this one was written.
+    supersedes_experience_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_content(self) -> AgentExperienceContent:
@@ -83,10 +84,14 @@ class AgentExperienceContent(BaseModel):
             _require_nonblank(getattr(self, field_name), field=field_name)
         if self.applies_when.splitlines() != [self.applies_when]:
             raise ValueError("applies_when must be exactly one line")
-        if self.supersedes_experience_id is not None:
-            _require_experience_id(self.supersedes_experience_id)
-            if self.supersedes_experience_id == self.experience_id:
-                raise ValueError("an experience cannot supersede itself")
+        for superseded in self.supersedes_experience_ids:
+            _require_experience_id(superseded)
+        if self.experience_id in self.supersedes_experience_ids:
+            raise ValueError("an experience cannot supersede itself")
+        if len(set(self.supersedes_experience_ids)) != len(
+            self.supersedes_experience_ids
+        ):
+            raise ValueError("an experience names a superseded ID more than once")
         return self
 
 
@@ -145,6 +150,18 @@ def parse_agent_experience_markdown(
         values[field_name] = _parse_json_value(
             line.removeprefix(prefix), field_name=field_name
         )
+    supersedes = values["supersedes_experience_ids"]
+    legacy_line: str | None = None
+    if supersedes is None or isinstance(supersedes, str):
+        # Entries written before the field became a list hold `null` or one ID,
+        # and a published revision is never rewritten.
+        legacy_line = _FIELD_PREFIXES["supersedes_experience_ids"] + _json_value(
+            supersedes
+        )
+        supersedes = [] if supersedes is None else [supersedes]
+    if isinstance(supersedes, list):
+        # A strict model takes a tuple field only from a tuple.
+        values["supersedes_experience_ids"] = tuple(supersedes)
     try:
         content = AgentExperienceContent.model_validate(values)
     except ValidationError as exc:
@@ -164,6 +181,8 @@ def parse_agent_experience_markdown(
     for field_name, line, canonical in zip(
         _FIELD_PREFIXES, lines[1 : field_count + 1], canonical_prefix[1:], strict=True
     ):
+        if field_name == "supersedes_experience_ids" and legacy_line is not None:
+            canonical = legacy_line
         if line != canonical:
             raise MemoryCatalogIntegrityError(
                 "Agent Experience field must be compact JSON in the documented "

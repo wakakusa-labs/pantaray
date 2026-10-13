@@ -58,6 +58,16 @@ def rebuild_agent_experience_index(
     )
 
 
+def lesson_situations(documents: tuple[MemoryDocument, ...]) -> tuple[str, ...]:
+    """Every lesson's `Applies when`, the part Action and Suggestion are handed."""
+
+    return tuple(entry.applies_when for entry in _parse_entries(documents))
+
+
+def applies_when_chars(documents: tuple[MemoryDocument, ...]) -> int:
+    return sum(len(situation) for situation in lesson_situations(documents))
+
+
 def validate_agent_experience_tree_change(
     *,
     base_documents: tuple[MemoryDocument, ...],
@@ -66,7 +76,10 @@ def validate_agent_experience_tree_change(
 ) -> AgentExperienceTreeChange:
     """Compare two well-formed trees and check what the run was allowed to write."""
 
-    parse_agent_experience_tree(base_documents)
+    base_entries = {
+        entry.experience_id: entry
+        for entry in parse_agent_experience_tree(base_documents)
+    }
     entries = parse_agent_experience_tree(published_documents)
     before = _entry_documents_by_path(base_documents)
     after = _entry_documents_by_path(published_documents)
@@ -88,11 +101,10 @@ def validate_agent_experience_tree_change(
         raise MemoryCatalogIntegrityError(
             "Agent Experience entry uses an ID this run does not own"
         )
-    surviving = {entry.experience_id for entry in entries}
     superseded = {
-        entry.supersedes_experience_id
+        superseded_id
         for entry in entries
-        if entry.supersedes_experience_id is not None
+        for superseded_id in entry.supersedes_experience_ids
     }
     # A lesson leaves the tree only when a surviving entry replaces it, so a
     # plain delete cannot silently drop durable memory.
@@ -100,11 +112,29 @@ def validate_agent_experience_tree_change(
         raise MemoryCatalogIntegrityError(
             "Agent Experience entry was removed without a superseding entry"
         )
-    if superseded & surviving:
+    if superseded & {entry.experience_id for entry in entries}:
         raise MemoryCatalogIntegrityError(
             "Agent Experience supersedes an entry that is still active"
         )
+    # What an entry newly claims to replace must be an entry this change
+    # removed; older claims name entries that left in earlier revisions.
+    claimed = {
+        superseded_id
+        for entry in entries
+        for superseded_id in entry.supersedes_experience_ids
+        if superseded_id
+        not in _superseded_before(base_entries.get(entry.experience_id))
+    }
+    if claimed - set(removed):
+        raise MemoryCatalogIntegrityError(
+            "Agent Experience supersedes an ID that was not in the tree: "
+            + ", ".join(sorted(claimed - set(removed)))
+        )
     return AgentExperienceTreeChange(added=added, modified=modified, removed=removed)
+
+
+def _superseded_before(entry: AgentExperienceContent | None) -> tuple[str, ...]:
+    return () if entry is None else entry.supersedes_experience_ids
 
 
 def _parse_entries(
@@ -150,6 +180,8 @@ def _validate_tree_paths(documents: dict[str, str]) -> None:
 
 __all__ = [
     "AgentExperienceTreeChange",
+    "applies_when_chars",
+    "lesson_situations",
     "parse_agent_experience_tree",
     "rebuild_agent_experience_index",
     "validate_agent_experience_tree_change",

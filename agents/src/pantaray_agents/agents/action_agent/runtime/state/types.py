@@ -167,8 +167,8 @@ class ActionAgentContext(TypedDict, total=False):
 
     request_summary: str | None
     target_context: TargetContextState
-    insight_data: str
-    structured_fact_data: str
+    # The memory indexes the head shows, read when the Action started.
+    memory_indexes: str
     analysis_summary: dict[str, JSONValue]
     prompt_name: str
     prompt_version: str

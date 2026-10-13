@@ -31,7 +31,6 @@ from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     derived_experience_ids,
 )
-from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.memory_catalog.search_policy import (
     parse_memory_search_focus,
 )
@@ -95,16 +94,16 @@ class _ScriptedMemoryAgent:
         self._edits = edits
         self.applied_memory_request_ids = applied_memory_request_ids
         self.contexts: list[MemoryUpdateContext] = []
-        self.briefs: list[MemorySource] = []
 
     async def update(
         self,
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
-        del tool_result_directory_fd
+        del tool_results_path, db_path
         self.contexts.append(context)
         write = next(item for item in tool_definitions if item.name == "write_file")
         draft_revision = context.draft_revision
@@ -130,12 +129,6 @@ class _ScriptedMemoryAgent:
         return MemoryUpdateAgentResult(
             applied_memory_request_ids=self.applied_memory_request_ids,
         )
-
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        self.briefs.append(source)
-        return f"## Profile Brief\n- {source}: {memory_text[:20]}"
 
 
 def _bootstrap(tmp_path: Path) -> LocalMemoryFileEditorRuntime:
@@ -232,8 +225,7 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
     with sqlite3.connect(runtime.db_path) as connection:
         heads = connection.execute(
             """
-            SELECT nodes.source_type, nodes.lifecycle,
-                   revisions.profile_brief IS NOT NULL
+            SELECT nodes.source_type, nodes.lifecycle
             FROM memory_nodes AS nodes
             JOIN memory_revisions AS revisions
               ON revisions.revision_id = nodes.current_revision_id
@@ -249,11 +241,10 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
         ).fetchall()
 
     assert heads == [
-        ("agent_experience", "active", 0),
-        ("fact", "active", 1),
-        ("long_term_insight", "active", 1),
+        ("agent_experience", "active"),
+        ("fact", "active"),
+        ("long_term_insight", "active"),
     ]
-    assert agent.briefs == ["fact", "long_term_insight"]
     assert len(completed) == 1
     assert json.loads(str(completed[0][0])) == {
         "published_sources": ["agent_experience", "fact", "long_term_insight"]
@@ -269,7 +260,7 @@ def _experience_content(experience_id: str) -> AgentExperienceContent:
         outcome="effective",
         next_time_rule="Record every activation before the next category starts.",
         observed_result="A rerun skipped the category that already landed.",
-        supersedes_experience_id=None,
+        supersedes_experience_ids=(),
     )
 
 
@@ -291,9 +282,10 @@ class _AgentThatReplacesTheRoute:
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
-        del context, tool_definitions, tool_result_directory_fd
+        del context, tool_definitions, tool_results_path, db_path
         # A second sign-in of the same account is a new cloud identity.
         import_desktop_session(
             db_path=self._db_path,
@@ -304,12 +296,6 @@ class _AgentThatReplacesTheRoute:
             session_version="2",
         )
         return MemoryUpdateAgentResult(applied_memory_request_ids=())
-
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        del source, memory_text
-        raise AssertionError("a replaced route must not reach publication")
 
 
 @pytest.mark.asyncio
@@ -371,7 +357,8 @@ class _AgentThatMustNotRun(_ScriptedMemoryAgent):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         raise AssertionError("a run with every input deleted has nothing to read")
 
@@ -492,9 +479,8 @@ def _searchable_notes(runtime: LocalMemoryFileEditorRuntime) -> list[str]:
             connection=connection,
             user_id=USER_ID,
             run_id="action-2",
-            query="passphrase",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("passphrase",),
+            semantic=None,
             focus=parse_memory_search_focus("all"),
             center_time=None,
             radius_hours=None,
@@ -658,7 +644,8 @@ class _AgentThatFails(_ScriptedMemoryAgent):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         raise RuntimeError("Memory update ReAct loop failed")
 

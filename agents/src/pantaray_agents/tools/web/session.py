@@ -1,10 +1,25 @@
+"""web_search and web_extract as tools of Suggestion research and the chat.
+
+The words, schemas and execution are the shared ones the Action uses too. A
+result too large to keep inline goes to the run's own folder the way the file
+tools' results do, and the model reads the rest from there.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
-from pantaray_agents.local_runtime.web_tools import (
-    WebContentExecutionError,
-    WebContentInvalidResponseError,
+from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    accepting_spilled_texts,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
+)
+from pantaray_agents.local_runtime.web_tools.client import (
     WebToolsWrapperContext,
     build_web_tools_wrapper_context,
 )
@@ -13,254 +28,130 @@ from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
-    tool_error_response,
-)
-from pantaray_llm.errors import (
-    PROXY_AUTHENTICATION_FAILED,
-    PROXY_CONNECTION_NOT_CONFIGURED,
-    ProxySurfaceId,
-    build_proxy_agent_error,
+    ToolConcurrency,
+    react_tool_response_schema,
 )
 
-from .definitions import build_web_research_definitions
-from .fetch import (
-    WebExtractFailure,
-    WebExtractResponse,
-    WebSearchResponse,
-    fetch_web_extract,
-    fetch_web_search,
+from .definitions import (
+    WEB_EXTRACT_FIELDS,
+    WEB_EXTRACT_PITFALLS,
+    WEB_EXTRACT_REQUIRED,
+    WEB_EXTRACT_RESULT_SCHEMA,
+    WEB_EXTRACT_TOOL_NAME,
+    WEB_EXTRACT_WHAT,
+    WEB_EXTRACT_WHEN,
+    WEB_SEARCH_FIELDS,
+    WEB_SEARCH_PITFALLS,
+    WEB_SEARCH_REQUIRED,
+    WEB_SEARCH_RESULT_SCHEMA,
+    WEB_SEARCH_TOOL_NAME,
+    WEB_SEARCH_WHAT,
+    WEB_SEARCH_WHEN,
+    request_schema,
 )
-from .paging import web_extract_pages, web_search_page
+from .execute import run_web_extract, run_web_search
+
+# One provider attempt per call: research moves on rather than waiting.
+_MAX_RETRIES = 1
+_SPILL_ROOT_MODE = 0o700
+_WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
+
+type _Run = Callable[..., Awaitable[dict[str, JSONValue]]]
 
 
-def _arguments(call: ReactToolCall) -> dict[str, JSONValue]:
-    if not isinstance(call.tool_args, dict):
-        raise AssertionError("validated tool arguments must be an object")
-    return call.tool_args
-
-
-def _string_arg(args: dict[str, JSONValue], name: str) -> str:
-    value = args.get(name)
-    if not isinstance(value, str) or not value.strip():
-        raise AssertionError(f"validated {name} must be a non-empty string")
-    return value
-
-
-def _integer_arg(args: dict[str, JSONValue], name: str) -> int:
-    value = args.get(name)
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise AssertionError(f"validated {name} must be an integer")
-    return value
-
-
-def _optional_string_arg(args: dict[str, JSONValue], name: str) -> str | None:
-    value = args.get(name)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise AssertionError(f"validated {name} must be a non-empty string")
-    return value
-
-
-def _string_array_arg(args: dict[str, JSONValue], name: str) -> tuple[str, ...]:
-    value = args.get(name)
-    if (
-        not isinstance(value, list)
-        or not value
-        or not all(isinstance(item, str) and item.strip() for item in value)
-    ):
-        raise AssertionError(f"validated {name} must be a non-empty string array")
-    return tuple(item for item in value if isinstance(item, str))
-
-
-def _success(tool_name: str, output: dict[str, JSONValue]) -> ReactToolResult:
-    return ReactToolResult(tool_name=tool_name, status="success", output=output)
-
-
-# A failure only the user can fix states its reason and the fix in the user's
-# terms, keyed like the Action's connection terminals: one code has a different
-# fix per connection and the raiser's suggested action says which. Every other
-# failure is the system's, so the model gets no code or provider detail to pass
-# on.
-# Where the web search key is set, as the app labels it: the UI's i18n keys
-# nav.settings > settings.aiConnection.title > settings.aiConnection.webSearch.title
-# and settings.aiConnection.webSearch.keyLabel (frontend/src/i18n/messageCatalog).
-# The UI language lives in the desktop app, not here, so both are given and the
-# chat uses the one it replies in.
-_WEB_SEARCH_KEY_PLACE = (
-    "the Tavily API key in Settings > AI connection > Web search (in Japanese: "
-    '"Tavily API キー" in 設定 > AI 接続 > Web 検索)'
-)
-_USER_FIX_BY_FAILURE: dict[tuple[str, str], tuple[str, str]] = {
-    (PROXY_CONNECTION_NOT_CONFIGURED, "configure_connection"): (
-        "Web search is not set up",
-        f"they can turn it on by saving {_WEB_SEARCH_KEY_PLACE}",
-    ),
-    (PROXY_AUTHENTICATION_FAILED, "configure_connection"): (
-        "The Tavily API key saved for web search was rejected",
-        f"they can save a working key as {_WEB_SEARCH_KEY_PLACE}",
-    ),
-    (PROXY_AUTHENTICATION_FAILED, "reauthenticate"): (
-        "The user's Pantaray sign-in has expired",
-        "web search works again once they sign in",
-    ),
-}
-
-
-def _web_tool_error(
-    *,
-    tool_name: str,
-    surface_id: ProxySurfaceId,
-    error: Exception,
-    speaks_to_user: bool,
-) -> ReactToolResult:
-    user_fix = None
-    if isinstance(error, WebContentExecutionError):
-        suggested_action = build_proxy_agent_error(
-            surface_id=surface_id,
-            error_code=error.error_code,
-            suggested_action=error.suggested_action,
-        )["error_details"]["suggested_action"]
-        user_fix = _USER_FIX_BY_FAILURE.get((error.error_code, suggested_action))
-    if user_fix is None:
-        return tool_error_response(
-            tool_name=tool_name,
-            error_code="WEB_TOOL_FAILED",
-            message="Web search is unavailable right now, so nothing was looked up.",
-        )
-    reason, fix = user_fix
-    return tool_error_response(
-        tool_name=tool_name,
-        error_code="WEB_TOOL_NEEDS_USER",
-        message=f"{reason}, so nothing was looked up."
-        + (f" Tell the user {fix}." if speaks_to_user else ""),
-    )
-
-
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class WebResearchToolSession:
     """Web research tools for one run.
 
     ``speaks_to_user`` is set where the model answers the user directly (the
     chat): only there does a failure the user can fix ask the model to tell
-    them how. Suggestion research would otherwise turn it into a nag.
+    them how. ``spill_root`` is the run's folder for large results.
     """
 
     user_id: str
     speaks_to_user: bool
-    search_snapshots: dict[str, WebSearchResponse] = field(default_factory=dict)
-    extract_snapshots: dict[tuple[str, str | None], str] = field(default_factory=dict)
+    spill_root: Path
 
     def __post_init__(self) -> None:
         if not self.user_id.strip():
             raise ValueError("web research session user_id must not be empty")
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
-        return build_web_research_definitions(
-            web_search=self.web_search,
-            web_extract=self.web_extract,
-        )
-
-    async def web_search(
-        self, call: ReactToolCall, _step_number: int
-    ) -> ReactToolResult:
-        args = _arguments(call)
-        query = _string_arg(args, "query")
-        snapshot = self.search_snapshots.get(query)
-        if snapshot is None:
-            try:
-                snapshot = await fetch_web_search(
-                    context=self._context(),
-                    query=query,
-                    max_retries=1,
-                )
-            except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-                return _web_tool_error(
-                    tool_name=call.tool_name,
-                    surface_id="web_search",
-                    error=exc,
-                    speaks_to_user=self.speaks_to_user,
-                )
-            self.search_snapshots[query] = snapshot
-        return _success(
-            call.tool_name,
-            web_search_page(
-                snapshot=snapshot,
-                offset=_integer_arg(args, "offset"),
-                limit=_integer_arg(args, "limit"),
+        return (
+            self._definition(
+                name=WEB_SEARCH_TOOL_NAME,
+                parts=(WEB_SEARCH_WHAT, WEB_SEARCH_WHEN, WEB_SEARCH_PITFALLS),
+                request=request_schema(WEB_SEARCH_FIELDS, WEB_SEARCH_REQUIRED),
+                result=WEB_SEARCH_RESULT_SCHEMA,
+                run=run_web_search,
+            ),
+            self._definition(
+                name=WEB_EXTRACT_TOOL_NAME,
+                parts=(WEB_EXTRACT_WHAT, WEB_EXTRACT_WHEN, WEB_EXTRACT_PITFALLS),
+                request=request_schema(WEB_EXTRACT_FIELDS, WEB_EXTRACT_REQUIRED),
+                result=WEB_EXTRACT_RESULT_SCHEMA,
+                run=run_web_extract,
             ),
         )
 
-    async def web_extract(
-        self, call: ReactToolCall, _step_number: int
-    ) -> ReactToolResult:
-        args = _arguments(call)
-        requested_urls = _string_array_arg(args, "urls")
-        query = _optional_string_arg(args, "query")
-        missing_urls = tuple(
-            url for url in requested_urls if (url, query) not in self.extract_snapshots
-        )
-        failures: tuple[WebExtractFailure, ...] = ()
-        if missing_urls:
-            try:
-                response = await fetch_web_extract(
-                    context=self._context(),
-                    urls=missing_urls,
-                    query=query,
-                    max_retries=1,
-                )
-                contents = _contents_by_url(response)
-                failures = response.failed_results
-                _validate_web_extract_coverage(
-                    requested_urls=missing_urls,
-                    contents=contents,
-                    failures=failures,
-                )
-            except (WebContentExecutionError, WebContentInvalidResponseError) as exc:
-                return _web_tool_error(
-                    tool_name=call.tool_name,
-                    surface_id="web_extract",
-                    error=exc,
-                    speaks_to_user=self.speaks_to_user,
-                )
-            for url, content in contents.items():
-                self.extract_snapshots[(url, query)] = content
-        return _success(
-            call.tool_name,
-            web_extract_pages(
-                urls=requested_urls,
-                query=query,
-                offset=_integer_arg(args, "offset"),
-                limit=_integer_arg(args, "limit"),
-                snapshots=self.extract_snapshots,
-                failures=failures,
+    def _definition(
+        self,
+        *,
+        name: str,
+        parts: tuple[str, ...],
+        request: dict[str, JSONValue],
+        result: dict[str, JSONValue],
+        run: _Run,
+    ) -> ReactToolDefinition:
+        async def execute(call: ReactToolCall, _step: int) -> ReactToolResult:
+            assert isinstance(call.tool_args, Mapping)  # the registry checked it
+            output = await run(
+                context=self._context(),
+                args=call.tool_args,
+                max_retries=_MAX_RETRIES,
+                speaks_to_user=self.speaks_to_user,
+            )
+            return self._result(call.tool_name, output)
+
+        return ReactToolDefinition(
+            name=name,
+            description="\n\n".join(parts),
+            request_schema=request,
+            response_schema=react_tool_response_schema(
+                # Storage moves long texts out, or, failing that, the whole result.
+                success_schema={
+                    "anyOf": [accepting_spilled_texts(result), _WHOLE_RESULT_STORED]
+                }
             ),
+            execute=execute,
+            # Each call is its own request, and a spill goes to a file of its own.
+            concurrency=ToolConcurrency("parallel"),
+        )
+
+    def _result(self, tool_name: str, output: dict[str, JSONValue]) -> ReactToolResult:
+        if output["status"] != "success":
+            message = output["message"]
+            return ReactToolResult(
+                tool_name=tool_name,
+                status="error",
+                output=output,
+                error_message=message if isinstance(message, str) else None,
+            )
+        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
+        stored = store_tool_result(
+            action_tool_results_path=self.spill_root,
+            invocation_id=uuid.uuid4().hex,
+            output=output,
+        )
+        release_error = release_stored_tool_result(stored)
+        if release_error is not None:
+            raise release_error
+        return ReactToolResult(
+            tool_name=tool_name, status="success", output=stored.output_json
         )
 
     def _context(self) -> WebToolsWrapperContext:
         return build_web_tools_wrapper_context(user_id=self.user_id, action_id=None)
-
-
-def _contents_by_url(response: WebExtractResponse) -> dict[str, str]:
-    contents: dict[str, str] = {}
-    for page in response.results:
-        if page.url in contents:
-            raise WebContentInvalidResponseError("duplicate result URL")
-        contents[page.url] = page.raw_content
-    return contents
-
-
-def _validate_web_extract_coverage(
-    *,
-    requested_urls: tuple[str, ...],
-    contents: dict[str, str],
-    failures: tuple[WebExtractFailure, ...],
-) -> None:
-    returned_urls = [*contents, *(failure.url for failure in failures)]
-    if len(returned_urls) != len(set(returned_urls)):
-        raise WebContentInvalidResponseError("duplicate web_extract URL")
-    if set(returned_urls) != set(requested_urls):
-        raise WebContentInvalidResponseError("web_extract URL coverage")
 
 
 __all__ = ["WebResearchToolSession"]

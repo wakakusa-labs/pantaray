@@ -104,10 +104,11 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "run_python": _text("code"),
     "apply_patch": _changed_paths,
     "capture_screen": _text("app_name"),
-    "web_search": _text("query"),
+    # A web_search recorded before it took several queries named one query.
+    "web_search": lambda args: _joined("queries")(args) or _text("query")(args),
     "web_extract": _joined("urls"),
     "web_crawl": _text("url"),
-    "memory_search": _text("query"),
+    "memory_search": lambda args: _joined("keywords")(args) or _text("query")(args),
     "memory_sql": _text("sql"),
     "get_memory_reference": _text("source_handle", "local_ref_id"),
     "link_memory": _text("target_handle"),

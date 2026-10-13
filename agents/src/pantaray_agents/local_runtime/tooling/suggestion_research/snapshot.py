@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,31 +7,17 @@ from pathlib import Path
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
-from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
-    AGENT_EXPERIENCE_INDEX_PATH,
-)
-from pantaray_agents.local_runtime.memory_catalog.artifact_workspace import (
-    read_artifact_revision_documents,
-)
-from pantaray_agents.local_runtime.memory_catalog.connection import (
-    open_memory_catalog_connection,
-)
 from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
     TODO_DOCUMENT_PATH,
 )
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryCatalogIntegrityError,
 )
-from pantaray_agents.local_runtime.memory_catalog.models import (
-    MemoryDocument,
-    MemorySource,
+from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
+    load_memory_heads,
+    render_memory_indexes,
 )
-from pantaray_agents.local_runtime.memory_catalog.repository import (
-    load_latest_active_node_by_source,
-    load_revision,
-)
-from pantaray_agents.local_runtime.memory_catalog.resolver import enqueue_memory_repair
-from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
 )
@@ -43,10 +28,6 @@ from .commands import commands_run_without_asking
 # The prompt carries insights/todos.md up to this size (production peaked at 41k
 # characters); a larger file is cut with a marker pointing to memory_search.
 PENDING_WORK_MAX_CHARS = 60_000
-STABLE_MEMORY_CONTEXT_MAX_CHARS = 4_500
-STABLE_MEMORY_ITEM_MAX_CHARS = 650
-STABLE_MEMORY_TREE_MAX_CHARS = 450
-STABLE_MEMORY_TREE_MAX_PATHS = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,27 +36,12 @@ class SuggestionResearchSnapshot:
     folders: tuple[Path, ...]
     # The memory revisions the run's memory_search stays on.
     memory_revisions: Mapping[MemorySource, str | None]
+    # Those revisions' folders, which the file tools may read.
+    memory_folders: tuple[Path, ...]
     stable_memory: SuggestionStableMemoryContext
     # Whether the run offers commands at all; each command checks again.
     commands_allowed: bool
     read_access_scope: ReadAccessScope
-
-
-@dataclass(frozen=True, slots=True)
-class _LoadedMemory:
-    source: MemorySource
-    display_name: str
-    revision_id: str
-    entry_path: str
-    documents: tuple[MemoryDocument, ...]
-    profile_brief: str
-
-
-class _SnapshotIntegrityFailure(MemoryCatalogIntegrityError):
-    def __init__(self, *, node_id: str, revision_id: str, message: str) -> None:
-        super().__init__(message)
-        self.node_id = node_id
-        self.revision_id = revision_id
 
 
 def build_suggestion_research_snapshot(
@@ -86,43 +52,39 @@ def build_suggestion_research_snapshot(
     user_id: str,
     workspace_settings: WorkspaceSettings,
 ) -> SuggestionResearchSnapshot:
-    try:
-        loaded_memory = _load_memory_roots(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            artifact_root=artifact_root,
-            user_id=user_id,
+    memory = load_memory_heads(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        artifact_root=artifact_root,
+        user_id=user_id,
+    )
+    if memory.unreadable:
+        # The repair is queued; a Suggestion does not start from memory it cannot trust.
+        raise MemoryCatalogIntegrityError(
+            f"unreadable memory heads: {', '.join(memory.unreadable)}"
         )
-    except _SnapshotIntegrityFailure as exc:
-        _enqueue_snapshot_repair(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=user_id,
-            failure=exc,
-        )
-        raise MemoryCatalogIntegrityError(str(exc)) from exc
-
+    heads = memory.heads
     stable_memory = SuggestionStableMemoryContext(
-        prompt=_render_stable_memory_prompt(loaded_memory),
+        prompt=render_memory_indexes(memory),
         has_facts=any(
-            item.source == "fact" and any(doc.content.strip() for doc in item.documents)
-            for item in loaded_memory
+            head.source == "fact" and any(doc.content.strip() for doc in head.documents)
+            for head in heads
         ),
         has_insights=any(
-            item.source == "long_term_insight"
+            head.source == "long_term_insight"
             and any(
                 doc.source_path != TODO_DOCUMENT_PATH and doc.content.strip()
-                for doc in item.documents
+                for doc in head.documents
             )
-            for item in loaded_memory
+            for head in heads
         ),
         pending_work=_bounded(
             next(
                 (
                     doc.content
-                    for item in loaded_memory
-                    if item.source == "long_term_insight"
-                    for doc in item.documents
+                    for head in heads
+                    if head.source == "long_term_insight"
+                    for doc in head.documents
                     if doc.source_path == TODO_DOCUMENT_PATH
                 ),
                 "",
@@ -137,12 +99,13 @@ def build_suggestion_research_snapshot(
         "long_term_insight": None,
         "agent_experience": None,
     }
-    memory_revisions.update((item.source, item.revision_id) for item in loaded_memory)
+    memory_revisions.update((head.source, head.revision_id) for head in heads)
     return SuggestionResearchSnapshot(
         folders=tuple(
             Path(folder.canonical_real_path) for folder in workspace_settings.folders
         ),
         memory_revisions=memory_revisions,
+        memory_folders=tuple(head.folder for head in heads),
         stable_memory=stable_memory,
         commands_allowed=commands_run_without_asking(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
@@ -151,188 +114,12 @@ def build_suggestion_research_snapshot(
     )
 
 
-def _load_memory_roots(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    artifact_root: Path,
-    user_id: str,
-) -> tuple[_LoadedMemory, ...]:
-    # Design limit: eager document copies avoid a cross-run revision lease. Introduce
-    # lease-backed reads if snapshot p95 exceeds 1 s or copied content exceeds 32 MiB/run.
-    with open_memory_catalog_connection(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-    ) as connection:
-        connection.execute("BEGIN")
-        try:
-            loaded = tuple(
-                item
-                for item in (
-                    _load_memory_root(
-                        connection=connection,
-                        artifact_root=artifact_root,
-                        user_id=user_id,
-                        source="fact",
-                        display_name="Structured Facts",
-                        entry_path="facts/index.md",
-                    ),
-                    _load_memory_root(
-                        connection=connection,
-                        artifact_root=artifact_root,
-                        user_id=user_id,
-                        source="long_term_insight",
-                        display_name="Long-term Insights",
-                        entry_path="insights/index.md",
-                    ),
-                    _load_memory_root(
-                        connection=connection,
-                        artifact_root=artifact_root,
-                        user_id=user_id,
-                        source="agent_experience",
-                        display_name="Agent Experience",
-                        entry_path=AGENT_EXPERIENCE_INDEX_PATH,
-                    ),
-                )
-                if item is not None
-            )
-        except Exception:
-            connection.rollback()
-            raise
-        connection.commit()
-    return loaded
-
-
-def _load_memory_root(
-    *,
-    connection: sqlite3.Connection,
-    artifact_root: Path,
-    user_id: str,
-    source: MemorySource,
-    display_name: str,
-    entry_path: str,
-) -> _LoadedMemory | None:
-    node = load_latest_active_node_by_source(
-        connection=connection,
-        user_id=user_id,
-        source=source,
-    )
-    if node is None or node.current_revision_id is None:
-        return None
-    revision = load_revision(
-        connection=connection,
-        user_id=user_id,
-        revision_id=node.current_revision_id,
-    )
-    if revision is None:
-        raise MemoryCatalogIntegrityError(
-            f"{source} memory head has no current revision"
-        )
-    try:
-        documents = read_artifact_revision_documents(
-            connection=connection,
-            artifact_root=artifact_root,
-            user_id=user_id,
-            revision_id=revision.revision_id,
-        )
-    except (MemoryCatalogIntegrityError, UnicodeError) as exc:
-        raise _SnapshotIntegrityFailure(
-            node_id=node.node_id,
-            revision_id=revision.revision_id,
-            message=str(exc),
-        ) from exc
-    if not any(document.source_path == entry_path for document in documents):
-        raise _SnapshotIntegrityFailure(
-            node_id=node.node_id,
-            revision_id=revision.revision_id,
-            message=f"{source} memory entry document is absent",
-        )
-    return _LoadedMemory(
-        source=source,
-        display_name=display_name,
-        revision_id=revision.revision_id,
-        entry_path=entry_path,
-        documents=documents,
-        profile_brief=(revision.profile_brief or "").strip(),
-    )
-
-
-def _enqueue_snapshot_repair(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    failure: _SnapshotIntegrityFailure,
-) -> None:
-    with open_memory_catalog_connection(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-    ) as connection:
-        with immediate_transaction(connection):
-            enqueue_memory_repair(
-                connection=connection,
-                user_id=user_id,
-                node_id=failure.node_id,
-                detected_revision_id=failure.revision_id,
-                reason="revision_integrity",
-            )
-
-
-def _render_stable_memory_prompt(loaded_memory: tuple[_LoadedMemory, ...]) -> str:
-    sections = [
-        "Stable memory is a run-start snapshot. Read more of it with "
-        "memory_search and get_memory_reference.",
-    ]
-    for item in loaded_memory:
-        index = _document_content(item.documents, item.entry_path)
-        sections.extend(
-            (
-                f"\n### {item.display_name}",
-                f"Entry: {item.entry_path}",
-                "Documents:\n" + _render_document_tree(item.documents),
-            )
-        )
-        if item.profile_brief:
-            sections.append("Profile brief:\n" + _bounded(item.profile_brief))
-        sections.append("Index preview:\n" + _bounded(index))
-    return _bounded("\n".join(sections), limit=STABLE_MEMORY_CONTEXT_MAX_CHARS)
-
-
-def _document_content(documents: tuple[MemoryDocument, ...], path: str) -> str:
-    return next(
-        document.content for document in documents if document.source_path == path
-    )
-
-
-def _render_document_tree(documents: tuple[MemoryDocument, ...]) -> str:
-    marker = "- [truncated]"
-    ordered = sorted(documents, key=lambda item: item.source_path)
-    selected = [
-        f"- {document.source_path}"
-        for document in ordered[:STABLE_MEMORY_TREE_MAX_PATHS]
-    ]
-    truncated = len(selected) < len(ordered)
-    while selected and len("\n".join(selected)) > STABLE_MEMORY_TREE_MAX_CHARS:
-        selected.pop()
-        truncated = True
-    if truncated:
-        while selected and len("\n".join((*selected, marker))) > (
-            STABLE_MEMORY_TREE_MAX_CHARS
-        ):
-            selected.pop()
-        selected.append(marker)
-    return "\n".join(selected)
-
-
-def _bounded(value: str, *, limit: int = STABLE_MEMORY_ITEM_MAX_CHARS) -> str:
+def _bounded(value: str, *, limit: int) -> str:
     stripped = value.strip()
     if len(stripped) <= limit:
         return stripped
     marker = "\n[truncated; find the rest with memory_search]"
-    if limit <= len(marker):
-        return marker[:limit]
-    content_limit = limit - len(marker)
-    return stripped[:content_limit].rstrip() + marker
+    return stripped[: limit - len(marker)].rstrip() + marker
 
 
 __all__ = [

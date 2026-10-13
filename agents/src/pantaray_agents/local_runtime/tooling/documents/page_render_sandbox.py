@@ -26,10 +26,21 @@ _SANDBOX_EXEC: Final = "/usr/bin/sandbox-exec"
 _FONT_READ_ROOTS: Final = ("/Library/Fonts",)
 # macOS refuses to resolve a path through more links than this (MAXSYMLINKS).
 _MAX_SYMLINK_HOPS: Final = 32
+# Outbound connections and the resolver, as the command sandbox grants them
+# when command networking is on.
+_NETWORK_RULES: Final = (
+    "(system-network)",
+    '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',
+    '(allow network-outbound (remote tcp "*:*") (remote udp "*:*"))',
+)
 
 
 def sandboxed_argv(
-    argv: Sequence[str], *, read_files: Sequence[Path], python_executable: Path
+    argv: Sequence[str],
+    *,
+    read_files: Sequence[Path],
+    python_executable: Path,
+    allow_network: bool = False,
 ) -> tuple[str, ...]:
     """``argv``, wrapped in whatever confinement this platform offers.
 
@@ -44,16 +55,26 @@ def sandboxed_argv(
     if not on_macos:
         return tuple(argv)
     profile = seatbelt_profile(
-        read_files=read_files, python_executable=python_executable
+        read_files=read_files,
+        python_executable=python_executable,
+        allow_network=allow_network,
     )
     return (_SANDBOX_EXEC, "-p", profile, *argv)
 
 
-def seatbelt_profile(*, read_files: Sequence[Path], python_executable: Path) -> str:
+def seatbelt_profile(
+    *,
+    read_files: Sequence[Path],
+    python_executable: Path,
+    allow_network: bool = False,
+) -> str:
     """Read the interpreter's installation and ``read_files``; nothing else, ever.
 
     ``read_files`` is every file named by the command itself -- the script that
     is run and the PDF it draws -- rather than a directory it may search.
+    ``allow_network`` opens outbound connections and name resolution for the
+    web page worker, which fetches the page itself; it still writes nothing and
+    reads nothing of the user's.
     """
 
     read_roots = (
@@ -92,6 +113,7 @@ def seatbelt_profile(*, read_files: Sequence[Path], python_executable: Path) -> 
             ),
             "(deny file-write*)",
             "(deny network*)",
+            *(_NETWORK_RULES if allow_network else ()),
             "",
         )
     )

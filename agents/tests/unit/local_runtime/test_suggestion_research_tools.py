@@ -3,13 +3,19 @@ from __future__ import annotations
 import dataclasses
 import sqlite3
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
+import pantaray_agents.local_runtime.memory_catalog.memory_indexes as memory_indexes_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
+from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
+    AgentExperienceContent,
+    AgentExperienceScope,
+    render_agent_experience_index,
+    render_agent_experience_markdown,
+)
 from pantaray_agents.local_runtime.memory_catalog.artifact_domain_publication import (
     FactArtifactPublication,
     LongTermInsightArtifactPublication,
@@ -20,6 +26,7 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.memory_catalog.context_search import (
+    SemanticSearchInput,
     merge_memory_search_context,
     search_memory_catalog,
 )
@@ -75,12 +82,15 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     LocalSuggestionResearchTools,
     build_suggestion_research_snapshot,
 )
+from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
+    suggestion_tool_results_root,
+)
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
     ToolCallEnvelope,
 )
-from pantaray_agents.tools.web.session import WebResearchToolSession
+from pantaray_agents.tools.web.execute import QUERY_EXCERPTS_RETRY_HINT
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION
 from .test_memory_artifact_publication import (
@@ -135,7 +145,7 @@ def _search_result(
             "source_path": f"facts/{fragment_id}.md",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": item.item.context_handle,
         }
     ], epoch
@@ -201,15 +211,56 @@ def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
     assert snapshot.memory_revisions["fact"] == revision.revision_id
-    assert (
-        "### Structured Facts\nEntry: facts/index.md" in snapshot.stable_memory.prompt
+    # What is missing is said, not left out.
+    assert snapshot.stable_memory.prompt == (
+        "facts/index.md has no overview yet.\n"
+        '<file path="facts/index.md">\n# Facts\n- [Project](project.md)\n</file>'
+        "\n\ninsights/index.md: none yet."
+        "\n\nLessons from past work: none yet."
     )
-    assert "Profile brief:\nbrief" in snapshot.stable_memory.prompt
-    assert "Documents:\n- facts/index.md\n- facts/project.md" in (
-        snapshot.stable_memory.prompt
+
+
+@pytest.mark.asyncio
+async def test_suggestion_reads_a_linked_fact_file_whole_from_the_snapshot_revision(
+    tmp_path: Path,
+) -> None:
+    db_path, artifact_root = _runtime(tmp_path)
+    leaf = "# Project\n\n" + "\n\n".join(f"- Detail {n}" for n in range(40))
+    draft = replace_draft_documents(
+        draft=_fact_draft(db_path),
+        documents=(
+            MemoryDocument("facts/index.md", "# Facts\n- [Project](project.md)\n"),
+            MemoryDocument("facts/project.md", leaf),
+        ),
     )
-    assert "[Project](project.md)" in snapshot.stable_memory.prompt
-    assert "Leaf-only detail" not in snapshot.stable_memory.prompt
+    publish_fact_artifact(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        artifact_root=artifact_root,
+        publication=_publication(draft),
+    )
+    snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
+    (facts,) = snapshot.memory_folders
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=snapshot,
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+
+    read = await registry.execute(
+        _tool_call("read", {"path": str(facts / "project.md")}), 1
+    )
+    # The revision's other files stay in the hidden app storage.
+    outside = await registry.execute(
+        _tool_call("read", {"path": str(facts.parent / "manifest.json")}), 2
+    )
+
+    assert facts.name == "facts"
+    assert read.output["content"].rstrip("\n").endswith("- Detail 39")
+    assert outside.output["error_code"] == "READ_PATH_DENIED"
 
 
 def test_published_insight_snapshot_seeds_index_and_reads_leaf(
@@ -226,30 +277,17 @@ def test_published_insight_snapshot_seeds_index_and_reads_leaf(
 
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
-    assert "### Long-term Insights\nEntry: insights/index.md" in (
-        snapshot.stable_memory.prompt
-    )
-    assert "Profile brief:\ninsight brief" in snapshot.stable_memory.prompt
-    assert "Documents:\n- insights/index.md\n- insights/topic.md" in (
-        snapshot.stable_memory.prompt
-    )
+    assert (
+        '<file path="insights/index.md">\n# Insights\n- [Topic](topic.md)\n</file>'
+    ) in snapshot.stable_memory.prompt
     assert "Insight leaf detail" not in snapshot.stable_memory.prompt
-    assert len(snapshot.stable_memory.prompt) <= 4_500
 
 
-def test_stable_memory_bounds_include_truncation_markers() -> None:
-    bounded = snapshot_module._bounded("x" * 1_000)  # noqa: SLF001
-    tree = snapshot_module._render_document_tree(  # noqa: SLF001
-        tuple(
-            MemoryDocument(f"facts/topic-{index:03d}.md", "leaf")
-            for index in range(100)
-        )
-    )
+def test_pending_work_bound_includes_truncation_marker() -> None:
+    bounded = snapshot_module._bounded("x" * 1_000, limit=650)  # noqa: SLF001
 
     assert len(bounded) <= 650
     assert bounded.endswith("[truncated; find the rest with memory_search]")
-    assert len(tree) <= 450
-    assert tree.endswith("[truncated]")
 
 
 def test_snapshot_search_remains_pinned_after_fact_head_update(
@@ -330,9 +368,8 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
             connection=connection,
             user_id="user-1",
             run_id="suggestion-1",
-            query="durableobsolete",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("durableobsolete",),
+            semantic=SemanticSearchInput(embedding_generation, None, QUERY_EMBEDDING),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -343,9 +380,8 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
             connection=connection,
             user_id="user-1",
             run_id="current-search",
-            query="durableobsolete",
-            query_embedding=QUERY_EMBEDDING,
-            embedding_generation=embedding_generation,
+            keywords=("durableobsolete",),
+            semantic=SemanticSearchInput(embedding_generation, None, QUERY_EMBEDDING),
             focus="stable_knowledge",
             center_time=None,
             radius_hours=None,
@@ -356,7 +392,7 @@ def test_snapshot_search_remains_pinned_after_fact_head_update(
     assert "Durableobsolete marker" in [row["content"] for row in pinned]
     assert {item.revision_id for item in epoch.items} == {first_revision.revision_id}
     assert current
-    assert all(row["match_kind"] == "semantic" for row in current)
+    assert all(row["matched_by"] == "query" for row in current)
 
 
 def test_snapshot_pins_nothing_for_a_preparing_node(
@@ -368,10 +404,10 @@ def test_snapshot_pins_nothing_for_a_preparing_node(
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
 
     assert snapshot.memory_revisions["fact"] is None
-    assert "Structured Facts" not in snapshot.stable_memory.prompt
+    assert "facts/index.md: none yet." in snapshot.stable_memory.prompt
 
 
-def test_revision_integrity_rollback_restores_revision_owned_brief(
+def test_revision_integrity_rollback_restores_the_previous_revision(
     tmp_path: Path,
 ) -> None:
     db_path, artifact_root = _runtime(tmp_path)
@@ -402,8 +438,7 @@ def test_revision_integrity_rollback_restores_revision_owned_brief(
     with sqlite3.connect(db_path) as connection:
         restored = connection.execute(
             """
-            SELECT nodes.current_revision_id, facts.structured_fact_sha256,
-                   facts.facts_profile_brief
+            SELECT nodes.current_revision_id, facts.structured_fact_sha256
             FROM memory_nodes AS nodes
             JOIN agent_facts AS facts
               ON facts.user_id = nodes.user_id
@@ -412,11 +447,7 @@ def test_revision_integrity_rollback_restores_revision_owned_brief(
             """
         ).fetchone()
     assert completed == 1
-    assert restored == (
-        first_revision.revision_id,
-        first_revision.content_sha256,
-        "brief",
-    )
+    assert restored == (first_revision.revision_id, first_revision.content_sha256)
 
 
 def test_snapshot_integrity_failure_enqueues_revision_repair(tmp_path: Path) -> None:
@@ -456,7 +487,7 @@ def test_snapshot_os_error_does_not_enqueue_integrity_repair(
         raise OSError("temporary artifact I/O failure")
 
     monkeypatch.setattr(
-        snapshot_module,
+        memory_indexes_module,
         "read_artifact_revision_documents",
         fail_artifact_read,
     )
@@ -499,14 +530,13 @@ def test_snapshot_pins_catalog_heads_without_legacy_projection_rows(
         "long_term_insight": insight_revision.revision_id,
         "agent_experience": experience_revision.revision_id,
     }
-    assert "### Agent Experience\nEntry: agent_experience/index.md" in (
-        snapshot.stable_memory.prompt
+    # A lesson is named by its situation alone; its rule is read when it fits.
+    assert snapshot.stable_memory.prompt.endswith(
+        "Lessons from past work, each named by the situation it applies to:\n"
+        "- Retrying a flaky parallel test run."
     )
-    assert "Documents:\n- agent_experience/entries/exp-1.md" in (
-        snapshot.stable_memory.prompt
-    )
+    assert "exp-00001" not in snapshot.stable_memory.prompt
     assert "Experience leaf detail" not in snapshot.stable_memory.prompt
-    assert len(snapshot.stable_memory.prompt) <= 4_500
 
 
 def test_snapshot_without_experience_head_excludes_later_experience_revision(
@@ -531,9 +561,8 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             connection=connection,
             user_id="user-1",
             run_id="suggestion-1",
-            query="retryparallelism",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("retryparallelism",),
+            semantic=None,
             focus="agent_work",
             center_time=None,
             radius_hours=None,
@@ -544,9 +573,8 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
             connection=connection,
             user_id="user-1",
             run_id="current-search",
-            query="retryparallelism",
-            query_embedding=None,
-            embedding_generation=None,
+            keywords=("retryparallelism",),
+            semantic=None,
             focus="agent_work",
             center_time=None,
             radius_hours=None,
@@ -818,7 +846,7 @@ async def test_suggestion_reads_memory_through_memory_search_not_read(
             "source_path": "activity/entry",
             "heading_path": None,
             "observed_at": "2026-08-09T00:00:00Z",
-            "match_kind": "lexical",
+            "matched_by": "keywords",
             "context_handle": item.item.context_handle,
         },
     )
@@ -868,226 +896,79 @@ async def test_suggestion_reads_memory_through_memory_search_not_read(
         assert "memory_search" in refused.output["details"]["fix_hint"]
 
 
+def _research_registry(tmp_path: Path) -> tuple[ReactToolRegistry, Path]:
+    db_path = _bootstrap_db(tmp_path)
+    registry = ReactToolRegistry(
+        LocalSuggestionResearchTools(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            snapshot=_snapshot(db_path=db_path),
+            activity_start=None,
+        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+    )
+    return registry, db_path
+
+
 @pytest.mark.asyncio
 async def test_suggestion_web_search_returns_shared_client_response(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = _bootstrap_db(tmp_path)
     captured: dict[str, object] = {}
+    row = {"title": "T", "url": "https://e.com/a", "content": "C", "score": 0.5}
 
     async def invoke_web_tools_wrapper(**kwargs):
         captured.update(kwargs)
-        return {
-            "status": "success",
-            "result": {
-                "status": "success",
-                "query": "current evidence",
-                "results": [],
-                "images": [],
-            },
-        }
+        return {"result": {"query": "current evidence", "results": [row]}}
 
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    definitions = LocalSuggestionResearchTools(
-        db_path=db_path,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        snapshot=_snapshot(db_path=db_path),
-        activity_start=None,
-    ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
-    tools = {definition.name: definition for definition in definitions}
+    registry, _db_path = _research_registry(tmp_path)
 
-    result = await tools["web_search"].execute(
-        _tool_call(
-            "web_search",
-            {
-                "query": "current evidence",
-                "offset": 1,
-                "limit": 8,
-            },
-        ),
-        1,
+    result = await registry.execute(
+        _tool_call("web_search", {"queries": ["current evidence"]}), 1
     )
 
     assert result.status == "success"
-    assert result.output == {
-        "status": "success",
-        "query": "current evidence",
-        "results": [],
-        "next_offset": None,
-        "truncated": False,
-        "truncation_reason": None,
-        "retry_hint": None,
-    }
+    search = result.output["searches"][0]
+    assert search["results"] == [row]
+    assert search["meta"]["upstream_provider"] == "tavily"
     assert captured["tool_id"] == "web_search"
     assert captured["max_retries"] == 1
 
 
 @pytest.mark.asyncio
-async def test_suggestion_web_search_pages_structured_results_from_one_snapshot(
+async def test_suggestion_web_extract_stores_a_long_page_in_the_run_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    calls = 0
+    page = "line\n" * 10_000
 
     async def invoke_web_tools_wrapper(**_kwargs):
-        nonlocal calls
-        calls += 1
         return {
-            "status": "success",
             "result": {
-                "status": "success",
-                "query": "current evidence",
-                "results": [
-                    {
-                        "title": f"Title {index}",
-                        "url": f"https://example.com/{index}",
-                        "content": "x" * (700 if index == 1 else 20),
-                        "score": 1.0 / index,
-                    }
-                    for index in range(1, 4)
-                ],
-                "images": [],
-            },
-        }
-
-    monkeypatch.setattr(
-        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
-        invoke_web_tools_wrapper,
-    )
-    registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
-            db_path=db_path,
-            busy_timeout_ms=BUSY_TIMEOUT_MS,
-            snapshot=_snapshot(db_path=db_path),
-            activity_start=None,
-        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
-    )
-
-    first = await registry.execute(
-        _tool_call(
-            "web_search",
-            {
-                "query": "current evidence",
-                "offset": 1,
-                "limit": 2,
-            },
-        ),
-        1,
-    )
-    second = await registry.execute(
-        _tool_call(
-            "web_search",
-            {
-                "query": "current evidence",
-                "offset": first.output["next_offset"],
-                "limit": 2,
-            },
-        ),
-        2,
-    )
-
-    assert calls == 1
-    assert [row["title"] for row in first.output["results"]] == [
-        "Title 1",
-        "Title 2",
-    ]
-    assert first.output["results"][0]["content_truncated"] is True
-    assert first.output["next_offset"] == 3
-    assert [row["title"] for row in second.output["results"]] == ["Title 3"]
-    assert second.output["next_offset"] is None
-
-
-@pytest.mark.asyncio
-async def test_suggestion_web_extract_pages_content_from_one_snapshot(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    calls = 0
-
-    async def invoke_web_tools_wrapper(**_kwargs):
-        nonlocal calls
-        calls += 1
-        return {
-            "status": "success",
-            "result": {
-                "results": [
-                    {
-                        "url": "https://example.com/page",
-                        "raw_content": "abcdefghij",
-                    }
-                ],
+                "results": [{"url": "https://e.com/a", "raw_content": page}],
                 "failed_results": [],
-            },
+            }
         }
 
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
-            db_path=db_path,
-            busy_timeout_ms=BUSY_TIMEOUT_MS,
-            snapshot=_snapshot(db_path=db_path),
-            activity_start=None,
-        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
-    )
-    common_args = {
-        "urls": ["https://example.com/page"],
-        "query": None,
-        "limit": 4,
-    }
+    registry, db_path = _research_registry(tmp_path)
 
-    first = await registry.execute(
-        _tool_call("web_extract", {**common_args, "offset": 1}),
-        1,
-    )
-    second = await registry.execute(
-        _tool_call(
-            "web_extract",
-            {**common_args, "offset": first.output["results"][0]["next_offset"]},
-        ),
-        2,
-    )
-    third = await registry.execute(
-        _tool_call(
-            "web_extract",
-            {**common_args, "offset": second.output["results"][0]["next_offset"]},
-        ),
-        3,
+    result = await registry.execute(
+        _tool_call("web_extract", {"urls": ["https://e.com/a"]}), 1
     )
 
-    assert calls == 1
-    assert first.output["results"] == [
-        {
-            "url": "https://example.com/page",
-            "raw_content": "abcd",
-            "offset": 1,
-            "end_offset": 4,
-            "total_chars": 10,
-            "next_offset": 5,
-            "truncated": True,
-            "truncation_reason": "page_limit",
-            "retry_hint": "Continue this URL with offset=next_offset.",
-        }
-    ]
-    assert second.output["results"][0]["raw_content"] == "efgh"
-    assert second.output["results"][0]["next_offset"] == 9
-    assert third.output["results"][0]["raw_content"] == "ij"
-    assert third.output["results"][0]["next_offset"] is None
-    assert (
-        "".join(
-            result.output["results"][0]["raw_content"]
-            for result in (first, second, third)
-        )
-        == "abcdefghij"
-    )
+    assert result.status == "success"
+    stored = result.output["results"][0]["raw_content"]
+    run_folder = suggestion_tool_results_root(db_path=db_path, run_id="suggestion-1")
+    assert Path(stored["path"]).is_relative_to(run_folder)
+    assert Path(stored["path"]).read_text(encoding="utf-8") == page
 
 
 @pytest.mark.asyncio
@@ -1095,91 +976,72 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    excerpts = "pricing table [...] plan limits"
-
     async def invoke_web_tools_wrapper(**_kwargs):
         return {
-            "status": "success",
             "result": {
-                "results": [
-                    {"url": "https://example.com/page", "raw_content": excerpts}
-                ],
+                "results": [{"url": "https://e.com/a", "raw_content": "a [...] b"}],
                 "failed_results": [],
-            },
+            }
         }
 
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
-            db_path=db_path,
-            busy_timeout_ms=BUSY_TIMEOUT_MS,
-            snapshot=_snapshot(db_path=db_path),
-            activity_start=None,
-        ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
-    )
+    registry, _db_path = _research_registry(tmp_path)
 
     result = await registry.execute(
-        _tool_call(
-            "web_extract",
-            {
-                "urls": ["https://example.com/page"],
-                "query": "pricing",
-                "offset": 1,
-                "limit": 1_000,
-            },
-        ),
+        _tool_call("web_extract", {"urls": ["https://e.com/a"], "query": "pricing"}),
         1,
     )
 
-    row = result.output["results"][0]
-    assert row["raw_content"] == excerpts
-    assert row["next_offset"] is None
-    assert row["truncated"] is True
-    assert row["truncation_reason"] == "query_excerpts"
-    assert "query=null" in row["retry_hint"]
+    assert result.output["retry_hint"] == QUERY_EXCERPTS_RETRY_HINT
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("tool_name", "args", "result"),
+    ("tool_name", "args"),
     [
-        (
-            "web_search",
-            {"query": "evidence", "offset": 1, "limit": 8},
-            {"status": "success", "query": "other", "results": [], "images": []},
-        ),
-        (
-            "web_extract",
-            {"urls": ["https://example.com/a"], "query": None, "offset": 1, "limit": 9},
-            {
-                "results": [{"url": "https://e.com/b", "raw_content": "body"}],
-                "failed_results": [],
-            },
-        ),
+        ("web_search", {"queries": ["chips"], "topic": "news", "country": "japan"}),
+        ("web_extract", {"urls": ["http://localhost:8000/"]}),
+        ("web_extract", {"urls": ["https://[invalid]/"]}),
     ],
+    ids=["country-outside-general", "local-url", "malformed-url"],
 )
-async def test_suggestion_web_tools_reject_a_result_for_another_request(
+async def test_suggestion_web_tools_refuse_what_the_action_refuses(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
     args: dict[str, object],
-    result: dict[str, object],
 ) -> None:
-    invoke = AsyncMock(return_value={"result": result})
+    invoke = AsyncMock()
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
     )
-    registry = ReactToolRegistry(
-        WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
+    registry, _db_path = _research_registry(tmp_path)
+
+    result = await registry.execute(_tool_call(tool_name, args), 1)
+
+    assert result.output["error_code"] == "INVALID_ARGUMENTS"
+    invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_suggestion_web_search_rejects_a_result_for_another_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invoke = AsyncMock(return_value={"result": {"query": "other", "results": []}})
+    monkeypatch.setattr(
+        "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
+    )
+    registry, _db_path = _research_registry(tmp_path)
+
+    result = await registry.execute(
+        _tool_call("web_search", {"queries": ["evidence"]}), 1
     )
 
-    results = [await registry.execute(_tool_call(tool_name, args), n) for n in (1, 2)]
-
-    assert [r.output["error_code"] for r in results] == ["WEB_TOOL_FAILED"] * 2
-    assert invoke.await_count == 2
+    assert result.output["error_code"] == "WEB_TOOL_FAILED"
 
 
 def _publish_insight_tree(
@@ -1219,11 +1081,21 @@ def _publish_insight_tree(
             user_id="user-1",
             source_run_id=_memory_run().job_id,
             draft=draft,
-            profile_brief="insight brief",
             prompt_name="memory_update",
             prompt_version="1.0",
         ),
     )
+
+
+_EXPERIENCE = AgentExperienceContent(
+    experience_id="exp-00001",
+    scope=AgentExperienceScope(kind="user", key=None),
+    applies_when="Retrying a flaky parallel test run.",
+    observed_approach="Reran the whole suite with retryparallelism.",
+    outcome="ineffective",
+    next_time_rule="Experience leaf detail",
+    observed_result="The same test failed again.",
+)
 
 
 def _publish_experience_tree(*, db_path: Path, artifact_root: Path) -> MemoryRevision:
@@ -1250,11 +1122,11 @@ def _publish_experience_tree(*, db_path: Path, artifact_root: Path) -> MemoryRev
                         documents=(
                             MemoryDocument(
                                 "agent_experience/index.md",
-                                "# Agent Experience Index\n- Retryparallelism\n",
+                                render_agent_experience_index((_EXPERIENCE,)),
                             ),
                             MemoryDocument(
-                                "agent_experience/entries/exp-1.md",
-                                "# Experience\nExperience leaf detail\n",
+                                "agent_experience/entries/exp-00001.md",
+                                render_agent_experience_markdown(_EXPERIENCE),
                             ),
                         ),
                     ),
@@ -1307,7 +1179,6 @@ def _publish_second_fact_revision(
             user_id="user-1",
             fact_id="fact-1",
             draft=draft,
-            profile_brief="new brief",
             prompt_name="memory_update",
             prompt_version="1.0",
             source_insight_ids=(),
@@ -1413,8 +1284,14 @@ _NO_SUGGESTION = {
 async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
     tmp_path: Path,
 ) -> None:
+    from datetime import UTC, datetime
+
     from pantaray_agents.agents.artifact_react import ReactLoopStep
     from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
+    from pantaray_agents.agents.suggestion_agent.nudges import (
+        SUGGESTION_NUDGES_PROMPT_NAME,
+        PastSuggestions,
+    )
     from pantaray_agents.agents.suggestion_agent.output import (
         parse_suggestion_output,
     )
@@ -1422,6 +1299,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         SUBMIT_SUGGESTION_TOOL_NAME,
         run_suggestion_react,
     )
+    from pantaray_agents.utils.prompt_loader import PromptLoader
     from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
     from pantaray_llm.contracts.tool_use import LlmToolCall
 
@@ -1466,9 +1344,11 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
             snapshot=_snapshot(db_path=db_path),
             activity_start=None,
         ),
+        nudge_config=PromptLoader().load_config(SUGGESTION_NUDGES_PROMPT_NAME),
         send_turn=send_turn,
         parse_output=parse_suggestion_output,
         record_step=record_step,
+        past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
     )
 
     assert result["has_suggestion"] is False
@@ -1503,18 +1383,3 @@ async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
     # Its sender passes the image as a file, so the run keeps it.
     assert image.status == "success"
     assert [item.display_path for item in image.images] == [str(folder / "chart.png")]
-
-
-def test_web_calls_of_one_turn_run_in_order_over_one_snapshot() -> None:
-    from pantaray_agents.conversation.tool_batch import plan_tool_batch
-
-    tools = WebResearchToolSession(user_id="user-1", speaks_to_user=False).definitions()
-    # Run at once, two pages of one query would each fetch and store a snapshot.
-    plan = plan_tool_batch(
-        [SimpleNamespace(tool_id="web_search")] * 2,
-        concurrency={tool.name: tool.concurrency for tool in tools},
-        max_parallel=3,
-        remaining_tool_steps=3,
-    )
-
-    assert plan.mode == "sequential"

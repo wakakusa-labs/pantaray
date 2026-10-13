@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     ActionTurnReply,
@@ -22,26 +25,26 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     UNLINK_MEMORY_TOOL_NAME,
     WRITE_FILE_TOOL_NAME,
 )
-from pantaray_agents.conversation.loop import ConversationRequest
-from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
     LIST_ACTION_STEPS_TOOL_NAME,
     SEARCH_ACTION_STEPS_TOOL_NAME,
 )
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
+)
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
 from pantaray_agents.tools.contract import (
     ReactToolDefinition,
     resolve_react_tool_definitions,
 )
+from pantaray_agents.tools.files.read_only_tools import build_saved_result_read_tool
 from pantaray_agents.tools.memory.retrieval import (
     GET_MEMORY_REFERENCE_TOOL_NAME,
     MEMORY_SEARCH_TOOL_NAME,
-)
-from pantaray_agents.utils.profile_brief import (
-    build_facts_profile_brief_prompt,
-    build_insight_profile_brief_prompt,
-    generate_profile_brief_with_retry,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig, prompt_loader
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
@@ -53,11 +56,44 @@ from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 # Writing an endeavor's big picture searches its history first, which doubles it.
 MEMORY_UPDATE_MAX_LLM_TURNS = 60
 MEMORY_UPDATE_MAX_TOOL_CALLS = 96
+# A consolidation writes its one file whole, then may rewrite it after a refused
+# ref or to shrink it further, and ends with `completed`. Replays of 24-145k
+# character files took 1-6 rewrites and up to 7 turns; widen these if real runs
+# stop at the limit with a rewrite still needed.
+MEMORY_CONSOLIDATION_MAX_LLM_TURNS = 10
+MEMORY_CONSOLIDATION_MAX_TOOL_CALLS = 8
+MEMORY_CONSOLIDATION_PROMPT_NAME = "memory_consolidation"
+MEMORY_CONSOLIDATION_PROMPT_VERSION = "1.0"
+# The Memory update prompt owns the facts definition; a consolidation reads
+# the same section in place of this placeholder so the two cannot drift apart.
+WHAT_FACTS_HOLD_PLACEHOLDER = "{what_facts_hold}"
+_WHAT_FACTS_HOLD_HEADING = "## What facts hold\n"
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
     applied_memory_request_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryConsolidationRequest:
+    """One oversized memory file, or Agent Experience, consolidated on its own."""
+
+    run_id: str
+    prompt_name: str
+    path: str
+    content: str
+    limit_chars: int
+    # The user's local date, which tells a passed deadline from a coming one.
+    today: str
+
+
+def what_facts_hold(memory_update_system_instruction: str) -> str:
+    """The "What facts hold" section of the Memory update system instruction."""
+
+    start = memory_update_system_instruction.index(_WHAT_FACTS_HOLD_HEADING)
+    end = memory_update_system_instruction.index("\n\n## ", start)
+    return memory_update_system_instruction[start:end]
 
 
 class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
@@ -101,7 +137,8 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         context: MemoryUpdateContext,
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
-        tool_result_directory_fd: int,
+        tool_results_path: Path,
+        db_path: Path,
     ) -> MemoryUpdateAgentResult:
         selected_tools = resolve_react_tool_definitions(
             definitions=tool_definitions,
@@ -117,6 +154,9 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             dismissed_suggestions=context.dismissed_suggestions or "- none",
             local_time_note=context.local_time_note,
             memory_file_manifest=context.memory_file_manifest,
+            facts_index=context.facts_index or "- none",
+            insights_index=context.insights_index or "- none",
+            overview_request=context.overview_request,
             workspace_context_prompt=context.workspace_context_prompt or "- none",
             new_experience_ids="\n".join(
                 f"- {item}" for item in context.new_experience_ids
@@ -128,27 +168,19 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         # needs at least one item of; the rest is the request's own message.
         head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
-
-        async def send(request: ConversationRequest) -> ActionTurnReply:
-            return await self._generate_llm_action_turn(
-                sink=sink,
-                prompt=request.prompt,
-                tools=request.tools,
-                max_parallel_tool_calls=request.max_parallel_tool_calls,
-                system_instruction=request.system_instruction,
-                conversation=request.conversation,
-                stage="memory_update",
-            )
-
+        save_result, read_saved_results = saved_results_for_run(
+            tool_results_path=tool_results_path, db_path=db_path
+        )
         applied = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
-                tool_result_directory_fd=tool_result_directory_fd,
+                save_result=save_result,
+                read_saved_results=read_saved_results,
                 tool_definitions=selected_tools,
                 prompt=head,
                 task=task,
                 system_instruction=self._prompt_config.system_instruction or "",
-                send=send,
+                send=self._sender(sink, stage="memory_update"),
                 usage=lambda: sink.delta,
                 max_turns=MEMORY_UPDATE_MAX_LLM_TURNS,
                 max_tool_calls=MEMORY_UPDATE_MAX_TOOL_CALLS,
@@ -157,28 +189,61 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         )
         return MemoryUpdateAgentResult(applied_memory_request_ids=applied)
 
-    async def generate_profile_brief(
-        self, source: MemorySource, memory_text: str
-    ) -> str:
-        """The compact brief downstream agents read instead of the whole tree."""
+    async def consolidate(
+        self,
+        request: MemoryConsolidationRequest,
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        tool_results_path: Path,
+        db_path: Path,
+    ) -> None:
+        """Rewrite one file through the given tools; the caller judges the result."""
 
-        prompt = (
-            build_facts_profile_brief_prompt(memory_text)
-            if source == "fact"
-            else build_insight_profile_brief_prompt(memory_text)
+        config = prompt_loader.load_config(request.prompt_name)
+        initial_prompt = config.prompt.format(
+            today=request.today,
+            path=request.path,
+            characters=len(request.content),
+            limit_chars=request.limit_chars,
+            content=request.content,
         )
+        head, _, task = initial_prompt.rstrip().rpartition("\n\n")
         sink = CountingSink()
-
-        async def call_llm(profile_prompt: str) -> str:
-            response = await self._generate_llm_response(
-                prompt=profile_prompt,
-                sink=sink,
-                system_instruction=self._prompt_config.system_instruction,
-                stage="memory_profile_brief",
+        save_result, read_saved_results = saved_results_for_run(
+            tool_results_path=tool_results_path, db_path=db_path
+        )
+        await run_memory_file_editor(
+            MemoryFileEditorRunInput(
+                run_id=request.run_id,
+                save_result=save_result,
+                read_saved_results=read_saved_results,
+                tool_definitions=tool_definitions,
+                prompt=head,
+                task=task,
+                system_instruction=(config.system_instruction or "").replace(
+                    WHAT_FACTS_HOLD_PLACEHOLDER,
+                    what_facts_hold(self._prompt_config.system_instruction or ""),
+                ),
+                send=self._sender(sink, stage="memory_consolidation"),
+                usage=lambda: sink.delta,
+                max_turns=MEMORY_CONSOLIDATION_MAX_LLM_TURNS,
+                max_tool_calls=MEMORY_CONSOLIDATION_MAX_TOOL_CALLS,
             )
-            return response if isinstance(response, str) else str(response)
+        )
 
-        return await generate_profile_brief_with_retry(prompt=prompt, call_llm=call_llm)
+    def _sender(self, sink: CountingSink, *, stage: str) -> SendTurn:
+        async def send(request: ConversationRequest) -> ActionTurnReply:
+            return await self._generate_llm_action_turn(
+                sink=sink,
+                prompt=request.prompt,
+                tools=request.tools,
+                max_parallel_tool_calls=request.max_parallel_tool_calls,
+                system_instruction=request.system_instruction,
+                conversation=request.conversation,
+                stage=stage,
+            )
+
+        return send
 
     def _selected_tool_ids(
         self, tool_definitions: tuple[ReactToolDefinition, ...]
@@ -189,9 +254,35 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         return tuple(item for item in self.TOOL_IDS if item in available)
 
 
+def saved_results_for_run(
+    *, tool_results_path: Path, db_path: Path
+) -> tuple[Callable[[JSONValue], JSONValue], ReactToolDefinition]:
+    """Save oversized results in the run's folder, which goes with its workspace,
+    the way an Action saves its own, and read them back the same way."""
+
+    # Saved results are named by the same path read checks them against.
+    root = tool_results_path.resolve(strict=True)
+
+    def save_result(output: JSONValue) -> JSONValue:
+        stored = store_tool_result(
+            action_tool_results_path=root, invocation_id=uuid.uuid4().hex, output=output
+        )
+        release_error = release_stored_tool_result(stored)
+        if release_error is not None:
+            raise release_error
+        return stored.output_json
+
+    # read's db_path locates the Office converter, which no saved result needs.
+    return save_result, build_saved_result_read_tool(db_path=db_path, spill_root=root)
+
+
 __all__ = [
+    "MEMORY_CONSOLIDATION_PROMPT_NAME",
+    "MEMORY_CONSOLIDATION_PROMPT_VERSION",
     "MEMORY_UPDATE_MAX_LLM_TURNS",
     "MEMORY_UPDATE_MAX_TOOL_CALLS",
+    "MemoryConsolidationRequest",
     "MemoryUpdateAgent",
     "MemoryUpdateAgentResult",
+    "saved_results_for_run",
 ]

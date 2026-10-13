@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
@@ -227,10 +227,22 @@ def discard_run_tool_results(spill_root: Path) -> None:
     except OSError:
         logger.exception("failed to move away a run's tool result folder")
         return
-    try:
-        shutil.rmtree(discarding)
-    except OSError:
-        logger.exception("failed to remove a run's tool result folder")
+    shutil.rmtree(discarding, onexc=_skip_vanished)
+
+
+def _skip_vanished(
+    _function: Callable[..., object], path: str, exc: BaseException
+) -> None:
+    """Let the removal go on past one failure, logging all but a file gone.
+
+    A late save removing its own files may get to one the removal listed first;
+    without this, the removal would stop there and leave every file after it.
+    """
+
+    if not isinstance(exc, FileNotFoundError):
+        logger.error(
+            "failed to remove %s from a run's tool result folder", path, exc_info=exc
+        )
 
 
 def _stored_result(

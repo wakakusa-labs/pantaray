@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -968,11 +969,11 @@ def test_a_save_arriving_while_its_run_is_removed_leaves_nothing(
     assert store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
     remove_tree = shutil.rmtree
 
-    def late_save_mid_removal(path: Path) -> None:
+    def late_save_mid_removal(path: Path, **kwargs: object) -> None:
         # A canceled run's tool finishes once the folder is moved away.
         with pytest.raises(FileNotFoundError):
             store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
-        remove_tree(path)
+        remove_tree(path, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(tool_result_storage.shutil, "rmtree", late_save_mid_removal)
 
@@ -1007,17 +1008,55 @@ def test_a_save_whose_folder_is_moved_away_mid_write_removes_its_files(
     assert _files_under(moved) == []
 
 
+def _unlink_once_with(
+    monkeypatch: pytest.MonkeyPatch, before: Callable[[str, int | None], None]
+) -> None:
+    """Run ``before`` just ahead of the removal's first unlink of a file."""
+
+    unlink = os.unlink
+    pending = [before]
+
+    def unlink_after(path: str, *, dir_fd: int | None = None) -> None:
+        if pending:
+            pending.pop()(path, dir_fd)
+        unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", unlink_after)
+
+
+def test_a_late_save_removing_its_own_files_does_not_stop_the_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = tmp_path / "runs"
+    spill_root = runs / "run-1"
+    spill_root.mkdir(parents=True)
+    for _call in range(4):
+        store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
+    assert len(_files_under(spill_root)) == 4
+
+    def removed_by_its_save(path: str, dir_fd: int | None) -> None:
+        # The save's own removal reaches a file the removal listed first.
+        os.unlink(path, dir_fd=dir_fd)
+
+    _unlink_once_with(monkeypatch, removed_by_its_save)
+
+    discard_run_tool_results(spill_root)
+
+    assert list(runs.iterdir()) == []
+
+
 def test_a_failed_removal_is_logged_not_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     spill_root = tmp_path / "run-1"
     spill_root.mkdir()
+    store_run_tool_result(spill_root=spill_root, output=_LONG_OUTPUT)
 
-    def fail(path: Path) -> None:
+    def fail(path: str, _dir_fd: int | None) -> None:
         raise PermissionError(f"cannot remove {path}")
 
-    monkeypatch.setattr(tool_result_storage.shutil, "rmtree", fail)
+    _unlink_once_with(monkeypatch, fail)
 
     discard_run_tool_results(spill_root)
 
-    assert "failed to remove a run's tool result folder" in caplog.text
+    assert "failed to remove" in caplog.text

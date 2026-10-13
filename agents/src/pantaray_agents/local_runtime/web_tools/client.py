@@ -1,4 +1,4 @@
-"""Web tools の唯一の送信点。要求ごとに cloud / direct の経路を 1 回決める。"""
+"""Web tools の唯一の送信点。要求ごとに cloud / direct / local の経路を 1 回決める。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import NotRequired, Required, TypedDict
+from typing import TypedDict
 
 import httpx2
 from pydantic import ValidationError
@@ -46,6 +46,14 @@ from pantaray_llm.errors import (
 from pantaray_llm.web_tools.schemas import WebToolsProxyRequest
 from pantaray_llm.web_tools.tavily import execute_web_tools_proxy_request
 
+from .contract import (
+    WebContentExecutionError,
+    WebContentInvalidResponseError,
+    WebToolsWrapperContext,
+    WebToolsWrapperResponse,
+)
+from .local_fetch import extract_pages_locally
+
 WEB_TOOLS_PROXY_URL_ENV = "WEB_TOOLS_PROXY_URL"
 HTTP_STATUS_BAD_REQUEST = 400
 HTTP_STATUS_UNAUTHORIZED = 401
@@ -55,60 +63,6 @@ HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_BAD_GATEWAY = 502
 HTTP_STATUS_SERVICE_UNAVAILABLE = 503
 HTTP_STATUS_GATEWAY_TIMEOUT = 504
-
-
-class WebContentExecutionError(RuntimeError):
-    """外部本文取得の実行失敗。"""
-
-    def __init__(
-        self,
-        *,
-        error_code: ProxyErrorCode,
-        error_message: str,
-        retryable: bool,
-        suggested_action: ProxySuggestedAction | None = None,
-        request_id: str | None = None,
-        upstream_provider: ProxyProvider | None = None,
-        upstream_request_id: str | None = None,
-        profile_id: str | None = None,
-        upstream_status_code: int | None = None,
-        upstream_code: str | None = None,
-    ) -> None:
-        super().__init__(error_message)
-        self.error_code = error_code
-        self.error_message = error_message
-        self.retryable = retryable
-        # One error code has different fixes per connection kind: a lapsed
-        # Pantaray session needs a new sign-in, a rejected Tavily key needs a
-        # new key. Only the side that raised the failure knows which, so it
-        # states the guidance here and the Action boundary forwards it. Left
-        # unset, the shared contract derives guidance from the code alone.
-        self.suggested_action = suggested_action
-        self.request_id = request_id
-        self.upstream_provider = upstream_provider
-        self.upstream_request_id = upstream_request_id
-        self.profile_id = profile_id
-        self.upstream_status_code = upstream_status_code
-        self.upstream_code = upstream_code
-
-
-class WebContentInvalidResponseError(ValueError):
-    """外部レスポンス shape 不正。"""
-
-
-class WebToolsWrapperContext(TypedDict, total=False):
-    user_id: Required[str]
-    action_id: NotRequired[str]
-    request_id: Required[str]
-
-
-class WebToolsWrapperResponse(TypedDict, total=False):
-    tool_id: Required[str]
-    status: Required[str]
-    request_id: Required[str]
-    response_time_ms: NotRequired[int]
-    result: NotRequired[dict[str, JSONValue]]
-    error: NotRequired[dict[str, JSONValue]]
 
 
 class _ProxyErrorBody(TypedDict, total=False):
@@ -575,6 +529,12 @@ async def invoke_web_tools_wrapper(
                 context=context,
                 api_key=credential.api_key,
                 max_retries=max_retries,
+            )
+        # Without either connection a page is still read, from this computer;
+        # search and crawl have nothing to fall back to.
+        case "unconfigured" if tool_id == "web_extract":
+            return await extract_pages_locally(
+                args=args, context=context, web_tool_profile=web_tool_profile
             )
         case _:
             raise _connection_not_configured_error(

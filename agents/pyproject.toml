@@ -130,6 +130,7 @@ files = [
     "src/pantaray_agents/local_runtime/embedding_local",
     # 文書の読み取り（documents パッケージ。read ツールの文書分岐は tools にある）。
     "src/pantaray_agents/local_runtime/tooling/documents",
+    "src/pantaray_agents/local_runtime/web_tools",
 ]
 warn_return_any = true
 warn_unused_configs = true

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -68,6 +68,7 @@ def web_extract_pages(
     offset: int,
     limit: int,
     snapshots: Mapping[tuple[str, str | None], str],
+    whole_pages: Collection[tuple[str, str | None]],
     failures: tuple[WebExtractFailure, ...],
 ) -> dict[str, JSONValue]:
     _validate_page(offset=offset, limit=limit)
@@ -103,10 +104,11 @@ def web_extract_pages(
         page = content[start : start + limit]
         end_offset = start + len(page)
         next_offset = end_offset + 1 if end_offset < len(content) else None
+        excerpts = query is not None and (url, query) not in whole_pages
         hints: list[str] = []
         if next_offset is not None:
             hints.append("Continue this URL with offset=next_offset.")
-        if query is not None:
+        if excerpts:
             hints.append(WEB_EXTRACT_QUERY_EXCERPTS_HINT)
         results.append(
             {
@@ -120,7 +122,7 @@ def web_extract_pages(
                 # next_offset already shows paging, so name the larger cut.
                 "truncation_reason": (
                     "query_excerpts"
-                    if query is not None
+                    if excerpts
                     else "page_limit"
                     if next_offset is not None
                     else None

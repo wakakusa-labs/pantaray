@@ -1,0 +1,267 @@
+"""web_extract reads pages from this computer when no web provider is connected.
+
+Pages come from a server on 127.0.0.1 under the name ``site.test``, which the
+fetch's address check is told resolves there; every other name and address
+goes through the real check.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from pantaray_agents.local_runtime.runtime.connection_store import (
+    WebSearchCredential,
+    set_web_search_credential,
+)
+from pantaray_agents.local_runtime.runtime.session_store import (
+    mark_configured,
+    restore_expired_cloud_identity,
+)
+from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
+from pantaray_agents.local_runtime.web_tools import local_fetch
+from pantaray_agents.local_runtime.web_tools.client import (
+    WebContentExecutionError,
+    WebToolsWrapperContext,
+    invoke_web_tools_wrapper,
+)
+from pantaray_agents.local_runtime.web_tools.html_markdown import html_to_markdown
+from pantaray_agents.tools.contract import (
+    ReactToolCall,
+    ReactToolRegistry,
+    ToolCallEnvelope,
+)
+from pantaray_agents.tools.web.session import WebResearchToolSession
+from pantaray_llm.profiles import WEB_EXTRACT_PROFILE_ID
+
+from .migrated_db import prepare_test_database
+
+CONTEXT: WebToolsWrapperContext = {"user_id": "user-1", "request_id": "request-1"}
+ARTICLE = b"""<!doctype html><html><head><title>t</title>
+<script>var hidden = "script text";</script></head>
+<body><header>Site banner</header><nav>Menu</nav>
+<main><h1>Providers</h1><p>Use <a href="/docs/zen">Zen</a> or <code>/connect</code>.</p>
+<ul><li>First</li><li>Second</li></ul></main>
+<footer>Copyright</footer></body></html>"""
+
+
+class _Site(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802 - the stdlib's hook name
+        self.server.requests.append(self.path)  # type: ignore[attr-defined]
+        if self.path == "/slow":
+            time.sleep(2)
+        private = f"http://127.0.0.1:{self.server.server_address[1]}/article"
+        status, headers, body = {
+            "/article": (200, {"Content-Type": "text/html; charset=utf-8"}, ARTICLE),
+            "/blocked": (403, {"Content-Type": "text/html"}, b"denied"),
+            "/large": (200, {"Content-Type": "text/plain"}, b"x" * 4096),
+            "/script-only": (200, {"Content-Type": "text/html"}, b"<div id=app>"),
+            "/to-private": (302, {"Location": private}, b""),
+        }.get(self.path, (404, {}, b""))
+        self.send_response(status)
+        for name, value in {**headers, "Content-Length": str(len(body))}.items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return None
+
+
+@pytest.fixture
+def site(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, list[str]]]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Site)
+    server.requests = []  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    real_check = local_fetch._public_address
+
+    async def resolve(host: str, port: int | None, scheme: str) -> str:
+        if host == "site.test":
+            return "127.0.0.1"
+        return await real_check(host, port, scheme)
+
+    monkeypatch.setattr(local_fetch, "_public_address", resolve)
+    yield f"http://site.test:{server.server_address[1]}", server.requests  # type: ignore[attr-defined]
+    server.shutdown()
+    server.server_close()
+
+
+async def _extract(urls: list[str]) -> dict[str, object]:
+    response = await invoke_web_tools_wrapper(
+        tool_id="web_extract",
+        web_tool_profile=WEB_EXTRACT_PROFILE_ID,
+        args={"urls": urls},  # type: ignore[dict-item]
+        context=CONTEXT,
+        max_retries=1,
+    )
+    result = response["result"]
+    assert isinstance(result, dict)
+    return result
+
+
+def _failures(result: dict[str, object]) -> dict[str, object]:
+    rows = result["failed_results"]
+    assert isinstance(rows, list)
+    return {row["url"]: row["error"] for row in rows}
+
+
+@pytest.mark.asyncio
+async def test_with_no_provider_a_page_is_read_here_and_says_so(
+    site: tuple[str, list[str]],
+) -> None:
+    base, requests = site
+    mark_configured()
+
+    result = await _extract([f"{base}/article"])
+
+    assert result["failed_results"] == []
+    assert result["results"] == [
+        {
+            "url": f"{base}/article",
+            "raw_content": "# Providers\n\n"
+            f"Use [Zen]({base}/docs/zen) or `/connect`.\n\n- First\n- Second",
+        }
+    ]
+    assert result["meta"]["upstream_provider"] == "local"  # type: ignore[index]
+    assert requests == ["/article"]
+
+
+@pytest.mark.asyncio
+async def test_a_lapsed_sign_in_is_not_read_here_instead(
+    site: tuple[str, list[str]],
+    tmp_path: Path,
+) -> None:
+    base, requests = site
+    db_path = tmp_path / "runtime.db"
+    prepare_test_database(
+        db_path=db_path, busy_timeout_ms=1_000, migrations=load_default_migrations()
+    )
+    set_web_search_credential(WebSearchCredential(api_key="tvly-key"))
+    restore_expired_cloud_identity(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id=CONTEXT["user_id"],
+        session_version="1",
+    )
+    mark_configured()
+
+    with pytest.raises(WebContentExecutionError) as exc_info:
+        await _extract([f"{base}/article"])
+
+    assert exc_info.value.suggested_action == "reauthenticate"
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_each_page_fails_on_its_own_with_the_reason(
+    site: tuple[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, _requests = site
+    mark_configured()
+    monkeypatch.setattr(local_fetch, "FETCH_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(local_fetch, "MAX_PAGE_BYTES", 1024)
+    urls = [
+        f"{base}/article",
+        f"{base}/blocked",
+        f"{base}/slow",
+        f"{base}/large",
+        f"{base}/script-only",
+    ]
+
+    result = await _extract(urls)
+
+    assert [row["url"] for row in result["results"]] == [f"{base}/article"]  # type: ignore[union-attr,index]
+    failures = _failures(result)
+    assert failures[f"{base}/blocked"] == "The site answered HTTP 403 Forbidden."
+    assert failures[f"{base}/slow"] == "No complete response within 0.5 seconds."
+    assert "larger than" in str(failures[f"{base}/large"])
+    assert "JavaScript" in str(failures[f"{base}/script-only"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/",
+        "http://127.0.0.1/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://10.0.0.1/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://100.100.100.100/",
+    ],
+)
+async def test_this_computer_and_private_networks_are_never_requested(
+    url: str,
+) -> None:
+    mark_configured()
+
+    result = await _extract([url])
+
+    assert "private network" in str(_failures(result)[url])
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_into_a_private_network_is_not_followed(
+    site: tuple[str, list[str]],
+) -> None:
+    base, requests = site
+    mark_configured()
+
+    result = await _extract([f"{base}/to-private"])
+
+    assert "private network" in str(_failures(result)[f"{base}/to-private"])
+    assert requests == ["/to-private"]
+
+
+@pytest.mark.asyncio
+async def test_research_does_not_present_a_whole_page_as_query_excerpts(
+    site: tuple[str, list[str]],
+) -> None:
+    base, _requests = site
+    mark_configured()
+    args: dict[str, object] = {
+        "urls": [f"{base}/article"],
+        "query": "providers",
+        "offset": 1,
+        "limit": 1_000,
+    }
+    call = ReactToolCall(
+        tool_name="web_extract",
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope(
+            tool_id="web_extract",
+            reason=None,
+            args=args,  # type: ignore[arg-type]
+        ),
+    )
+    registry = ReactToolRegistry(
+        WebResearchToolSession(user_id="user-1", speaks_to_user=True).definitions()
+    )
+
+    result = await registry.execute(call, 1)
+
+    page = result.output["results"][0]  # type: ignore[index]
+    assert page["raw_content"].startswith("# Providers")
+    assert page["truncation_reason"] is None
+    assert page["retry_hint"] is None
+
+
+def test_page_markup_keeps_structure_and_drops_site_chrome() -> None:
+    page = """<html><body><header><h1>Site</h1></header><nav>Menu</nav>
+    <div><h2>Install</h2><ol><li>Run<pre><code><div>a</div><div>b</div></code></pre></li>
+    <li>Done</li></ol><table><tr><th>Name</th><th>Use</th></tr>
+    <tr><td>zen</td><td>models</td></tr></table></div>
+    <footer>Copyright</footer></body></html>"""
+
+    assert html_to_markdown(page, base_url="https://example.com/") == (
+        "## Install\n\n"
+        "1. Run\n   ```\n   a\n   b\n   ```\n2. Done\n\n"
+        "| Name | Use |\n| --- | --- |\n| zen | models |"
+    )

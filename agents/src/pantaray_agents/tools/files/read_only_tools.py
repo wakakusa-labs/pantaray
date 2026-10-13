@@ -76,7 +76,7 @@ from .render_pages import (
     RenderPdfPageToolArgs,
     draw_document_pages,
 )
-from .ripgrep import RIPGREP_TIMEOUT_SECONDS
+from .ripgrep import DISCOVERY_IGNORE_NOTE, RIPGREP_TIMEOUT_SECONDS
 
 _SPILL_ROOT_MODE = 0o700
 _MEMORY_NOTE = (
@@ -248,7 +248,8 @@ class _ReadOnlyFileTools:
                     "List files and directories under an absolute directory "
                     "path, max_depth levels deep (1 lists its own entries), in "
                     "path order, stopping at limit entries. Symlinks are not "
-                    "followed; warning and retry_hint say what was left out. " + notes
+                    "followed; warning and retry_hint say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "path": _PATH,
@@ -268,7 +269,8 @@ class _ReadOnlyFileTools:
                     "base_path/path. Symlinks "
                     f"are not followed; the search stops after "
                     f"{RIPGREP_TIMEOUT_SECONDS:g} seconds; warning and "
-                    "retry_hint say what was left out. " + notes
+                    "retry_hint say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "base_path": _PATH,
@@ -293,7 +295,8 @@ class _ReadOnlyFileTools:
                     "in warning. Output stops at max_matches lines or "
                     f"{GREP_MAX_OUTPUT_BYTES // 1024} KB, and the search after "
                     f"{RIPGREP_TIMEOUT_SECONDS:g} seconds; warning and retry_hint "
-                    "say what was left out. " + notes
+                    "say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "base_path": _PATH,

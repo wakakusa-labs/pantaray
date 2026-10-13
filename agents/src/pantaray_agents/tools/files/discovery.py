@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from pantaray_agents.local_runtime.tooling.documents.page_render_sandbox import (
+    interpreter_read_roots,
+)
 from pantaray_agents.local_runtime.tooling.sandbox.seatbelt_profiles import (
     render_ripgrep_seatbelt_profile,
 )
@@ -13,6 +17,7 @@ from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 from pantaray_agents.tools.contract import BrokerPolicyError
 
 from .discovery_paths import (
+    LIST_IGNORE_WORKER,
     entry_for_discovery_path,
     list_discovery_paths,
 )
@@ -40,6 +45,7 @@ from .read_target import resolve_read_target
 from .ripgrep import (
     RIPGREP_TIMEOUT_SECONDS,
     RipgrepGrepResult,
+    ancestor_rule_files,
     run_ripgrep_files,
     run_ripgrep_grep,
 )
@@ -87,6 +93,14 @@ def run_list(*, scope: ReadScope, request: ListToolArgs) -> ReadToolResult:
         limit=request.limit,
         include_path=lambda path: not scope.hides(path),
         exclude_subtree=scope.private_storage.prunes,
+        sandbox_profile=_discovery_sandbox_profile(
+            scope=scope,
+            base=base,
+            runtime_roots=(
+                *interpreter_read_roots(Path(sys.executable)),
+                str(LIST_IGNORE_WORKER),
+            ),
+        ),
     )
     entries = [entry_for_discovery_path(path) for path in bounded.selected]
     entry_values: list[JSONValue] = [_discovery_entry_json(entry) for entry in entries]
@@ -125,7 +139,7 @@ def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
     search_scope = scope.private_storage.search_scope(base.path)
     backend_result = run_ripgrep_files(
         cwd=base.path,
-        sandbox_profile=_ripgrep_sandbox_profile(scope=scope, base=base),
+        sandbox_profile=_discovery_sandbox_profile(scope=scope, base=base),
         glob_pattern=request.pattern,
         limit=request.limit,
         follow_symlinks=False,
@@ -165,13 +179,21 @@ def run_glob(*, scope: ReadScope, request: GlobToolArgs) -> ReadToolResult:
     )
 
 
-def _ripgrep_sandbox_profile(*, scope: ReadScope, base: ResolvedManifestPath) -> str:
-    # ripgrep reopens what it walks by name, so only the kernel's check on what
-    # it really opens holds; the backend's paths are reported as they come.
+def _discovery_sandbox_profile(
+    *,
+    scope: ReadScope,
+    base: ResolvedManifestPath,
+    runtime_roots: tuple[str, ...] = (),
+) -> str:
+    # ripgrep and the list worker reopen what they walk by name, so only the
+    # kernel's check on what they really open holds.
     full_access = scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     storage = scope.private_storage
+    folder = base.root.canonical_real_path
     return render_ripgrep_seatbelt_profile(
-        read_roots=("/",) if full_access else (str(base.root.canonical_real_path),),
+        read_roots=("/",) if full_access else (str(folder),),
+        read_files=() if full_access else ancestor_rule_files(folder),
+        runtime_roots=runtime_roots,
         private_storage_roots=tuple(str(root) for root in storage.storage_roots),
         readable_private_roots=tuple(str(root) for root in storage.readable_roots),
     )
@@ -276,7 +298,7 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
     search_scope = scope.private_storage.search_scope(base.path)
     backend_result = run_ripgrep_grep(
         cwd=base.path,
-        sandbox_profile=_ripgrep_sandbox_profile(scope=scope, base=base),
+        sandbox_profile=_discovery_sandbox_profile(scope=scope, base=base),
         pattern=request.pattern,
         include_glob=request.include_glob,
         max_matches=request.max_matches,

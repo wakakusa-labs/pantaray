@@ -15,7 +15,10 @@ from pantaray_agents.tools.files.read_contract import (
     GrepToolArgs,
     ListToolArgs,
 )
-from pantaray_agents.tools.files.ripgrep import RIPGREP_TIMEOUT_SECONDS
+from pantaray_agents.tools.files.ripgrep import (
+    DISCOVERY_IGNORE_NOTE,
+    RIPGREP_TIMEOUT_SECONDS,
+)
 
 from .base import (
     ToolDefinition,
@@ -163,7 +166,8 @@ LIST_TOOL = ToolDefinition.from_spec(
                 "max_depth is listed without its contents; symlinks are not "
                 "followed or listed; Pantaray's private app storage is not listed. "
                 "When a limit applies, warning and retry_hint say which one and "
-                "what to do next. Use glob for path patterns and grep for text search."
+                "what to do next. Use glob for path patterns and grep for text search. "
+                + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),
@@ -218,7 +222,8 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "are not followed or listed; output stops at limit matches; the "
                 f"search stops after {RIPGREP_TIMEOUT_SECONDS:g} seconds. When a "
                 "limit applies, truncated, warning and retry_hint say which one and "
-                "what to do next; skipped_files counts paths that could not be read."
+                "what to do next; skipped_files counts paths that could not be read. "
+                + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),
@@ -287,7 +292,7 @@ GREP_TOOL = ToolDefinition.from_spec(
                 f"its first match; the search stops after {RIPGREP_TIMEOUT_SECONDS:g} "
                 "seconds. When a limit applies, truncated, warning and retry_hint say "
                 "which one and what to do next; skipped_files counts paths that could "
-                "not be read."
+                "not be read. " + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),

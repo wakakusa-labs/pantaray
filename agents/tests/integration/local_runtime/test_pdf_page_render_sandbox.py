@@ -47,11 +47,14 @@ print(json.dumps({
 """
 
 
-def run_probe(allowed: Path, forbidden: Path) -> dict[str, str]:
+def run_probe(
+    allowed: Path, forbidden: Path, *, allow_network: bool = False
+) -> dict[str, str]:
     argv = sandboxed_argv(
         (sys.executable, "-I", "-B", "-c", _PROBE, str(allowed), str(forbidden)),
         read_files=(allowed,),
         python_executable=Path(sys.executable),
+        allow_network=allow_network,
     )
     done = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
@@ -73,4 +76,21 @@ def test_the_sandbox_allows_the_named_file_and_nothing_else_around_it(
     assert report["other_file"] == "PermissionError"
     assert report["listing"] == "PermissionError"
     assert report["network"] == "PermissionError"
+    assert report["write"] == "PermissionError"
+
+
+def test_the_web_page_worker_sandbox_opens_the_network_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    allowed = tmp_path / "page_worker.py"
+    allowed.write_text("", encoding="utf-8")
+    forbidden = tmp_path / "salary.txt"
+    forbidden.write_text("private\n", encoding="utf-8")
+
+    report = run_probe(allowed, forbidden, allow_network=True)
+
+    assert report["network"] == "allowed"
+    assert report["named_file"] == "allowed"
+    assert report["other_file"] == "PermissionError"
+    assert report["listing"] == "PermissionError"
     assert report["write"] == "PermissionError"

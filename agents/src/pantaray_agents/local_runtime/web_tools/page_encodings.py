@@ -7,6 +7,9 @@ windows-1252, and EUC-KR to the Windows code page 949. Following the same table
 reads a page the way the person's browser shows it. A label outside the table,
 or one of WHATWG's encodings Python has no codec for (x-user-defined,
 replacement), reads as UTF-8 with replacement characters.
+
+The page worker loads this module by file path, so it imports nothing but the
+standard library.
 """
 
 from __future__ import annotations

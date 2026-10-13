@@ -275,10 +275,15 @@ def _load_whole_step_output(
         raise ToolResultRecoveryError(
             "a pending approval's stored output is too large to check"
         ) from exc
-    except ToolResultLoadError:
-        # Gone or unreadable, it names nothing a reader could still reach; its own
-        # reference is counted as missing.
-        return None
+    except ToolResultLoadError as exc:
+        # Only a file that is gone names nothing: its own reference is counted as
+        # missing. A read that failed or found it damaged proves nothing about the
+        # summary files it names, so recovery stops before deleting any of them.
+        if isinstance(exc.__cause__, FileNotFoundError):
+            return None
+        raise ToolResultRecoveryError(
+            "a pending approval's stored output could not be read"
+        ) from exc
 
 
 def _parse_formal_step_output(*, raw_json: object) -> FormalToolStepOutput:

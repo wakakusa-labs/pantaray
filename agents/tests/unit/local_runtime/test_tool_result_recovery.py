@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sqlite3
 import stat
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -523,10 +525,10 @@ def test_recovery_keeps_every_moved_text_and_removes_unreferenced_ones(
     assert result.removed_file_count == 1
 
 
-def test_recovery_keeps_summary_texts_named_only_inside_a_whole_approval_output(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "runtime.db"
+def _pending_approval_named_only_inside_json(db_path: Path) -> tuple[Path, Path]:
+    """A pending approval kept whole as JSON around a summary stored as files:
+    the summary's text file and the approval's JSON file."""
+
     _create_reference_db(db_path)
     root = _tool_results_root(db_path)
     root.mkdir(parents=True)
@@ -551,10 +553,9 @@ def test_recovery_keeps_summary_texts_named_only_inside_a_whole_approval_output(
     for stored in (summary, envelope):
         release_stored_tool_result(stored)
     # The summary already holds a reference, so the envelope is kept whole.
-    assert envelope.output_json["media_type"] == "application/json"  # type: ignore[index,call-overload]
-    kept = [Path(str(text["path"])) for text in spilled_texts(summary.output_json)] + [
-        Path(str(envelope.output_json["path"]))
-    ]  # type: ignore[index,call-overload]
+    metadata = cast(dict[str, object], envelope.output_json)
+    assert metadata["media_type"] == "application/json"
+    [summary_text] = spilled_texts(summary.output_json)
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
@@ -566,19 +567,60 @@ def test_recovery_keeps_summary_texts_named_only_inside_a_whole_approval_output(
                     {
                         "schema_version": 1,
                         "status": "processing",
-                        "output": envelope.output_json,
+                        "output": metadata,
                         "output_storage_kind": "action_file",
                         "output_owner_kind": "action_step",
                     }
                 ),
             ),
         )
+    return Path(str(summary_text["path"])), Path(str(metadata["path"]))
+
+
+def test_recovery_keeps_summary_texts_named_only_inside_a_whole_approval_output(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    summary_text, envelope = _pending_approval_named_only_inside_json(db_path)
 
     result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
 
-    assert all(path.is_file() for path in kept)
+    assert summary_text.is_file()
+    assert envelope.is_file()
     assert result.removed_file_count == 0
     assert result.preserved_file_count == 2
+
+
+@pytest.mark.parametrize("failure", ["read_error", "damaged"])
+def test_recovery_stops_before_deleting_when_an_approval_output_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    summary_text, envelope = _pending_approval_named_only_inside_json(db_path)
+    if failure == "damaged":
+        envelope.write_bytes(b"#" * envelope.stat().st_size)
+    else:
+
+        def fail_read(_descriptor: int, _size: int) -> bytes:
+            raise OSError(errno.EIO, "input/output error")
+
+        monkeypatch.setattr(tool_result_recovery.os, "read", fail_read)
+
+    with pytest.raises(ToolResultRecoveryError, match="could not be read"):
+        reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert summary_text.is_file()
+    assert envelope.is_file()
+
+
+def test_recovery_counts_a_gone_approval_output_as_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    _summary_text, envelope = _pending_approval_named_only_inside_json(db_path)
+    envelope.unlink()
+
+    result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert result.missing_reference_count == 1
 
 
 def test_recovery_fails_closed_for_action_file_kind_with_inline_payload(

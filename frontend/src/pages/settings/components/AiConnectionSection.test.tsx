@@ -120,9 +120,9 @@ it('offers only selectable Codex models for ChatGPT', () => {
   const picker = screen.getByRole('combobox', { name: 'settings.aiConnection.modelLabel' });
   expect([...picker.querySelectorAll('option')].map((option) => option.value)).toEqual([
     '',
+    'gpt-6.1-sol',
     'gpt-6-luna',
     'gpt-6-astra',
-    'gpt-6.1-sol',
     'gpt-6-sol',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
@@ -149,8 +149,8 @@ it('lists every Anthropic model while one is saved and saves the one chosen', as
   const picker = screen.getByRole('combobox', MODEL_PICKER);
   expect(picker).toHaveValue('claude-opus-5-5');
   expect(optionLabels(picker)).toEqual([
-    'claude-opus-5-5',
     'claude-sonnet-5-5',
+    'claude-opus-5-5',
     'claude-haiku-5-5',
     'claude-fable-5-1',
   ]);
@@ -177,6 +177,7 @@ it('lists every OpenAI model and offers to type another, saved on Enter', async 
   const actions = renderSection({ model: 'gpt-5.6' });
   const picker = screen.getByRole('combobox', MODEL_PICKER);
   expect(optionLabels(picker)).toEqual([
+    'gpt-6.1-sol',
     'gpt-5.6',
     'gpt-5.6-sol',
     'gpt-5.6-terra',

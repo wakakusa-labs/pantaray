@@ -22,7 +22,7 @@ it('keeps a model the target actually offers', () => {
 
 it('does not carry a model into a provider that never serves it', () => {
   expect(modelForTarget({ method: 'api_key', provider: 'anthropic', model: 'gpt-6-luna' })).toBe(
-    'claude-opus-5-5'
+    'claude-sonnet-5-5'
   );
 });
 

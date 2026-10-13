@@ -14,6 +14,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_llm.profiles import (
     WEB_EXCERPTS_PER_PAGE,
     WEB_SEARCH_COUNTRIES,
+    WEB_SEARCH_MAX_QUERIES,
     WEB_SEARCH_RESULT_LIMIT,
     WEB_SEARCH_TOPICS,
 )
@@ -26,8 +27,10 @@ WEB_URL_MAX_CHARS: Final = 2_048
 # What, when and what to avoid: the Action shows them as its tool guide, and
 # Suggestion and the chat show the same three as one description.
 WEB_SEARCH_WHAT: Final = (
-    f"Search the web and return up to {WEB_SEARCH_RESULT_LIMIT} results for one "
-    "focused query, each with an excerpt of its page. Use web_extract to read a "
+    f"Search the web for up to {WEB_SEARCH_MAX_QUERIES} queries at once. Each "
+    f"query is its own search and returns up to {WEB_SEARCH_RESULT_LIMIT} results, "
+    "each with an excerpt of its page, under that query; a URL another query "
+    "already found is listed only under the first. Use web_extract to read a "
     "whole page."
 )
 WEB_SEARCH_WHEN: Final = (
@@ -36,7 +39,9 @@ WEB_SEARCH_WHEN: Final = (
     "organisations outside the user's own records."
 )
 WEB_SEARCH_PITFALLS: Final = (
-    "Keep each query to one subject. Set topic only when it changes what should "
+    "Give each product, source or angle a query of its own rather than one query "
+    "that covers them all, and send them together. Set topic only when it "
+    "changes what should "
     "be found (news for recent reporting, finance for markets and companies), "
     "and country only with the general topic when regional results matter."
 )
@@ -60,11 +65,16 @@ WEB_EXTRACT_PITFALLS: Final = (
 )
 
 WEB_SEARCH_FIELDS: Final[dict[str, JSONValue]] = {
-    "query": {
-        "type": "string",
-        "minLength": 1,
-        "pattern": r"\S",
-        "description": "The search query, focused on one subject.",
+    "queries": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": WEB_SEARCH_MAX_QUERIES,
+        "uniqueItems": True,
+        "items": {"type": "string", "minLength": 1, "pattern": r"\S"},
+        "description": (
+            f"1 to {WEB_SEARCH_MAX_QUERIES} search queries, each focused on one "
+            "subject; they run side by side."
+        ),
     },
     "topic": {
         "type": "string",
@@ -82,7 +92,7 @@ WEB_SEARCH_FIELDS: Final[dict[str, JSONValue]] = {
         ),
     },
 }
-WEB_SEARCH_REQUIRED: Final = ("query",)
+WEB_SEARCH_REQUIRED: Final = ("queries",)
 
 WEB_EXTRACT_FIELDS: Final[dict[str, JSONValue]] = {
     "urls": {
@@ -131,12 +141,11 @@ _META: Final[dict[str, JSONValue]] = {
 }
 _NULLABLE_STRING: Final[dict[str, JSONValue]] = {"type": ["string", "null"]}
 
-WEB_SEARCH_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
+_SEARCH_FOUND: Final[dict[str, JSONValue]] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["status", "query", "results", "meta"],
+    "required": ["query", "results", "meta"],
     "properties": {
-        "status": {"const": "success"},
         "query": {"type": "string"},
         "results": {
             "type": "array",
@@ -153,6 +162,24 @@ WEB_SEARCH_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
             },
         },
         "meta": _META,
+    },
+}
+_SEARCH_FAILED: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["query", "error"],
+    "properties": {"query": {"type": "string"}, "error": {"type": "string"}},
+}
+WEB_SEARCH_RESULT_SCHEMA: Final[dict[str, JSONValue]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "searches"],
+    "properties": {
+        "status": {"const": "success"},
+        "searches": {
+            "type": "array",
+            "items": {"oneOf": [_SEARCH_FOUND, _SEARCH_FAILED]},
+        },
     },
 }
 

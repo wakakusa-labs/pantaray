@@ -94,7 +94,7 @@ async def test_non_broker_failure_history_uses_finalized_status(
         allowed_tool_ids=("web_search",),
     )
     agent._generate_llm_action_turn = AsyncMock(
-        return_value=_turn(("web_search", {"query": "pantaray"}))
+        return_value=_turn(("web_search", {"queries": ["pantaray"]}))
     )
     state = await _think(agent, runtime, state)
     # Simulate a transport failure at the network boundary. Failure shaping,

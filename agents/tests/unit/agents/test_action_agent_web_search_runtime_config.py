@@ -60,10 +60,10 @@ async def test_web_search_runtime_config_passes_max_retries_to_wrapper(
         agent=MagicMock(),
         step_id="step",
         tool_def=tool_def,
-        args={"query": "q1"},
+        args={"queries": ["q1"]},
         state={"user_id": "user-1", "action_id": "act-1", "context": {}},  # type: ignore[arg-type]
     )
 
-    assert result.output["query"] == "q1"
+    assert result.output["searches"][0]["query"] == "q1"
     assert captured["max_retries"] == 7
     assert captured["web_tool_profile"] == "web_search.default"

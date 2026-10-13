@@ -112,7 +112,7 @@ async def test_action_step_keeps_recoverable_validation_error_internal(
     state["next_action"] = build_next_action(
         tool=build_tool_call(
             tool_id="web_search",
-            args={"query": "pantaray", "topic": "invalid"},
+            args={"queries": ["pantaray"], "topic": "invalid"},
         ),
         decided_at="2025-01-01T00:00:01Z",
     )

@@ -240,14 +240,29 @@ def _pdf_text(body: bytes) -> str:
         document = _module("pdf").extract_pdf(BytesIO(body), None)
     except model.DocumentExtractionError as exc:
         raise PageFailure(f"The PDF could not be read: {exc}") from exc
-    if not document.text.strip():
-        raise PageFailure("The PDF has no text layer; it may be scanned images.")
-    if document.next_start_unit is None:
-        return str(document.text)
-    return (
-        f"{document.text}\n\n[Only pages 1-{document.next_start_unit - 1} of "
-        f"{document.total_units} fit; the rest of this PDF was not read.]"
+    # Every page read is headed "## Page N" whether or not it has text, so it
+    # is the pages without text, not the text, that tell a scan apart.
+    read_through = (
+        document.total_units
+        if document.next_start_unit is None
+        else document.next_start_unit - 1
     )
+    without_text = document.pages_without_text
+    if len(without_text) >= read_through:
+        raise PageFailure("The PDF has no text layer; it may be scanned images.")
+    notes = []
+    if without_text:
+        # The same pages the read tool lists as pages_without_text.
+        notes.append(
+            "[Pages without a text layer (scans or figures): "
+            f"{', '.join(str(number) for number in without_text)}]"
+        )
+    if document.next_start_unit is not None:
+        notes.append(
+            f"[Only pages 1-{read_through} of {document.total_units} fit; the "
+            "rest of this PDF was not read.]"
+        )
+    return "\n\n".join([str(document.text).rstrip(), *notes])
 
 
 _PACKAGE: Final = "_page_worker"

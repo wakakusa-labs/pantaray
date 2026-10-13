@@ -60,6 +60,47 @@ ARTICLE_TEXT = "# Providers\n\nUse [Zen](/docs/zen) or `/connect`.\n\n- First\n-
 JAPANESE = "日本語髙①"
 _TEXT = {"Content-Type": "text/plain"}
 _HTML = {"Content-Type": "text/html"}
+_PDF = {"Content-Type": "application/pdf"}
+_TEXT_PAGE = b"BT /F1 12 Tf 72 720 Td (Readable words) Tj ET"
+_IMAGE_PAGE = b"q 100 0 0 100 72 600 cm /Im0 Do Q"
+
+
+def _pdf(*contents: bytes) -> bytes:
+    """A PDF with one page per content stream, each with a font and an image."""
+
+    count = len(contents)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>"
+        % (b" ".join(b"%d 0 R" % (5 + 2 * i) for i in range(count)), count),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace "
+        b"/DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x00\nendstream",
+    ]
+    for index, content in enumerate(contents):
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+            b"/Resources << /Font << /F1 3 0 R >> /XObject << /Im0 4 0 R >> >> >>"
+            % (6 + 2 * index)
+        )
+        objects.append(
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content)
+        )
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return out
+
+
 _WRAPPER = """
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("page_worker", {worker!r})
@@ -97,6 +138,8 @@ def _pages(port: int) -> dict[str, tuple[int, dict[str, str], bytes]]:
         ),
         "/scripts": (200, _HTML, b"<script></script>a" * 250_000),
         "/broken.pdf": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4 junk"),
+        "/scan.pdf": (200, _PDF, _pdf(_IMAGE_PAGE, _IMAGE_PAGE)),
+        "/mixed.pdf": (200, _PDF, _pdf(_TEXT_PAGE, _IMAGE_PAGE, _TEXT_PAGE)),
         "/far-port": (302, {"Location": "http://site.test:65536/"}, b""),
         "/to-private": (302, {"Location": f"http://127.0.0.1:{port}/article"}, b""),
         "/set-cookie": (
@@ -238,6 +281,23 @@ async def test_a_page_that_hangs_expands_or_breaks_a_parser_fails_alone(
     assert failed["/broken.pdf"] == "The page could not be read."
     assert "/far-port" in failed
     assert more_read == {"/gzip-twice": "plain", "/scripts": "a" * 250_000}
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_says_which_pages_have_no_text_and_a_scan_fails(
+    site: tuple[str, list[str]],
+) -> None:
+    base, _requests = site
+
+    read, failed = await _beside_article(base, ["/scan.pdf", "/mixed.pdf"])
+
+    assert failed == {
+        "/scan.pdf": "The PDF has no text layer; it may be scanned images."
+    }
+    assert read["/mixed.pdf"].count("Readable words") == 2
+    assert read["/mixed.pdf"].endswith(
+        "[Pages without a text layer (scans or figures): 2]"
+    )
 
 
 @pytest.mark.asyncio

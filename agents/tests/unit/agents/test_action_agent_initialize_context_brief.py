@@ -14,6 +14,7 @@ from tests.unit.local_runtime.action_seed import insert_agent_action
 from tests.unit.local_runtime.test_memory_indexes import _publish_indexes
 
 from pantaray_agents.agents.action_agent import ActionAgent
+from pantaray_agents.agents.action_agent.runtime import checkouts_behind
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     PANTARAY_DEFAULT_AGENTS_MD,
     load_pantaray_agents_md,
@@ -441,6 +442,36 @@ async def test_a_folder_the_runtime_can_no_longer_read_does_not_stop_the_action(
         updated = await initialize_context(agent, state, _runtime(agent))  # type: ignore[arg-type]
     finally:
         locked.chmod(0o755)
+
+    prompt = updated["context"]["workspace_context_prompt"]
+    assert "- Repo: " in prompt
+    assert "Git checkouts behind" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_failure_counting_a_checkout_does_not_stop_the_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whatever goes wrong reading one checkout only drops its behind count."""
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    execution_context, _db_path = _bootstrap_execution_context_with_db(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        workspace_folders=((repo, "Repo"),),
+    )
+    agent_repo = MockActionAgentRepository()
+    agent = _build_agent(agent_repo)
+    await _save_suggestion(agent_repo)
+    state = _state_with_execution_context(execution_context)
+
+    def _broken(_path: str) -> str:
+        raise LookupError("a codec git output could not be read with")
+
+    monkeypatch.setattr(checkouts_behind, "_behind_line", _broken)
+    updated = await initialize_context(agent, state, _runtime(agent))  # type: ignore[arg-type]
 
     prompt = updated["context"]["workspace_context_prompt"]
     assert "- Repo: " in prompt

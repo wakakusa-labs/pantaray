@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -98,3 +99,38 @@ def test_merge_commits_alone_do_not_make_a_checkout_behind(tmp_path: Path) -> No
     _git(work, "fetch")
 
     assert render_checkouts_behind([str(work)]) == ""
+
+
+def test_a_ref_name_that_is_not_utf8_is_counted_and_shown_safely(
+    tmp_path: Path,
+) -> None:
+    """A Shift-JIS branch name goes back to git byte for byte; the model reads
+    replacement characters instead of the Action failing to start."""
+
+    work, other = _clone_pair(tmp_path)
+    _commit(other, "landed")
+    _git(other, "push")
+    _git(work, "fetch")
+    landed = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=work,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    branch = "日本".encode("shift_jis")
+    # Packed, because a file system may refuse a ref file named in these bytes
+    # (APFS takes UTF-8 names only).
+    with (work / ".git" / "packed-refs").open("ab") as packed:
+        packed.write(landed.encode() + b" refs/remotes/origin/" + branch + b"\n")
+    subprocess.run(
+        [b"git", b"config", b"branch.main.merge", b"refs/heads/" + branch],
+        cwd=work,
+        check=True,
+    )
+
+    shown = os.fsencode(os.fsdecode(branch)).decode("utf-8", errors="replace")
+    assert render_checkouts_behind([str(work)]) == (
+        f"{_HEADING}- {work}: 1 commits behind origin/{shown}; "
+        "1 commits behind origin/main"
+    )

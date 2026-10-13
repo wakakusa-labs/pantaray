@@ -8,10 +8,12 @@ the user's last fetch.
 
 from __future__ import annotations
 
+import functools
 import logging
+import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,10 +26,9 @@ _GIT_TIMEOUT_SECONDS = 2
 def render_checkouts_behind(folder_paths: Sequence[str]) -> str:
     """Lines for the folders whose checkout is behind, or "" when none is."""
 
-    in_repositories = [path for path in folder_paths if _inside_git_work_tree(path)]
-    if not in_repositories or not _git_runs_without_prompt():
-        return ""
-    lines = [line for path in in_repositories if (line := _behind_line(path))]
+    # Asked once per render, and only once a folder is in a repository.
+    can_run_git = functools.cache(_git_runs_without_prompt)
+    lines = [line for path in folder_paths if (line := _folder_line(path, can_run_git))]
     if not lines:
         return ""
     heading = (
@@ -37,15 +38,23 @@ def render_checkouts_behind(folder_paths: Sequence[str]) -> str:
     return "\n".join((heading, *lines))
 
 
+def _folder_line(path: str, can_run_git: Callable[[], bool]) -> str | None:
+    try:
+        if not _inside_git_work_tree(path) or not can_run_git():
+            return None
+        return _behind_line(path)
+    except Exception as exc:  # noqa: BLE001
+        # The count is an aside to the Action's context. Whatever goes wrong
+        # for one folder -- a revoked permission, a ref name git and Python read
+        # differently, a git that misbehaves -- drops that folder's line and
+        # must never stop the Action from starting.
+        logger.warning("Skipped a checkout's behind count: %s", type(exc).__name__)
+        return None
+
+
 def _inside_git_work_tree(path: str) -> bool:
     folder = Path(path)
-    try:
-        return any((parent / ".git").exists() for parent in (folder, *folder.parents))
-    except OSError:
-        # A folder the runtime may no longer read, such as one whose permission
-        # was revoked, has no line: the count is an aside and must not stop
-        # the Action from starting.
-        return False
+    return any((parent / ".git").exists() for parent in (folder, *folder.parents))
 
 
 def _git_runs_without_prompt() -> bool:
@@ -71,7 +80,7 @@ def _behind_line(path: str) -> str | None:
         if ref is not None
     )
     behind = [
-        f"{count} commits behind {ref}"
+        f"{count} commits behind {_shown(ref)}"
         for ref in refs
         if (count := _git(path, "rev-list", "--count", "--no-merges", f"HEAD..{ref}"))
         not in (None, "0")
@@ -79,18 +88,28 @@ def _behind_line(path: str) -> str | None:
     return f"- {path}: {'; '.join(behind)}" if behind else None
 
 
+def _shown(ref: str) -> str:
+    """A ref name as the model reads it: bytes git gave that are not UTF-8
+    become replacement characters, which the request can always encode."""
+
+    return os.fsencode(ref).decode("utf-8", errors="replace")
+
+
 def _git(path: str, *args: str) -> str | None:
     return _run(["git", "-C", path, *args])
 
 
 def _run(command: list[str]) -> str | None:
-    """The command's trimmed output, or None when it fails or is missing."""
+    """The command's trimmed output, or None when it fails or is missing.
+
+    The output is decoded the way the OS decodes file names, so a ref name in
+    any encoding goes back to git byte for byte.
+    """
 
     try:
         completed = subprocess.run(
             command,
             capture_output=True,
-            text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
             check=False,
         )
@@ -104,7 +123,7 @@ def _run(command: list[str]) -> str | None:
         return None
     if completed.returncode != 0:
         return None
-    return completed.stdout.strip() or None
+    return os.fsdecode(completed.stdout).strip() or None
 
 
 __all__ = ["render_checkouts_behind"]

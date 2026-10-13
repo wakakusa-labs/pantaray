@@ -99,3 +99,30 @@ async def test_web_extract_says_excerpts_only_when_the_route_made_them(
 
     assert result.output["retry_hint"] == hint
     assert result.output["meta"]["upstream_provider"] == (provider or "tavily")
+
+
+@pytest.mark.asyncio
+async def test_web_extract_names_a_requested_url_the_provider_left_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _FETCH,
+        AsyncMock(
+            return_value={
+                "result": {
+                    "results": [{"url": "https://e.com/a", "raw_content": "body"}],
+                    "failed_results": [],
+                }
+            }
+        ),
+    )
+
+    result = await _run_tool({"urls": ["https://e.com/a", "https://e.com/b"]})
+
+    assert result.output["results"] == [
+        {"url": "https://e.com/a", "raw_content": "body"}
+    ]
+    assert result.output["failed_results"] == [
+        {"url": "https://e.com/b", "error": "No content was returned for this URL."}
+    ]
+    assert result.output["meta"]["outcome"] == "partial_results"

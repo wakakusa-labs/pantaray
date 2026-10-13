@@ -52,6 +52,7 @@ QUERY_EXCERPTS_RETRY_HINT = (
     "excerpts relevant to it, joined by [...], not the full page. Call "
     "web_extract again without query to read the full page."
 )
+_NOTHING_RETURNED = "No content was returned for this URL."
 # Where the web search key is set, as the app labels it: the UI's i18n keys
 # nav.settings > settings.aiConnection.title > settings.aiConnection.webSearch.title
 # and settings.aiConnection.webSearch.keyLabel (frontend/src/i18n/messageCatalog).
@@ -156,6 +157,15 @@ async def run_web_extract(
         {"url": failure.url, "error": failure.error}
         for failure in response.failed_results
     ]
+    # A requested URL the provider answered for in neither list is named as a
+    # failure rather than vanishing. A URL it returned that was not asked for
+    # is kept: providers return a page under a normalized spelling of its URL.
+    answered = {row["url"] for row in (*pages, *failures)}
+    failures.extend(
+        {"url": url, "error": _NOTHING_RETURNED}
+        for url in dict.fromkeys(str(url) for url in urls)
+        if url not in answered
+    )
     outcome: ProxyResultOutcome = (
         PROXY_OUTCOME_PARTIAL_RESULTS
         if pages and failures

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import ipaddress
+import logging
 import re
 import socket
 import time
@@ -41,6 +42,8 @@ from .contract import (
     WebToolsWrapperResponse,
 )
 from .html_markdown import html_to_markdown
+
+logger = logging.getLogger(__name__)
 
 # Some sites, Cloudflare's bot rules among them, refuse a library's default
 # User-Agent (Python-urllib was refused with 403 where a browser's was served).
@@ -152,7 +155,6 @@ async def _read_page(url: str) -> str | _PageFailure:
     try:
         async with asyncio.timeout(FETCH_TIMEOUT_SECONDS):
             download = await _download(url)
-        return await asyncio.to_thread(_page_text, download)
     except _PageFailure as failure:
         return failure
     except (TimeoutError, httpx2.TimeoutException):
@@ -161,6 +163,19 @@ async def _read_page(url: str) -> str | _PageFailure:
         )
     except httpx2.HTTPError as exc:
         return _PageFailure(f"The connection failed ({type(exc).__name__}).")
+    try:
+        return await asyncio.to_thread(_page_text, download)
+    except _PageFailure as failure:
+        return failure
+    except Exception as exc:
+        # The body is untrusted, and the parsers that turn it into text (lxml,
+        # pypdf) raise more than their documented errors on malformed input:
+        # pypdf raises AssertionError on a broken inline image. Results are per
+        # URL, so whatever converting one page raises fails that page alone.
+        logger.warning(
+            "web_extract could not convert a page to text: %s", type(exc).__name__
+        )
+        return _PageFailure("The page could not be converted to text.")
 
 
 async def _download(url: str) -> _Download:
@@ -171,6 +186,10 @@ async def _download(url: str) -> _Download:
         trust_env=False,
     ) as client:
         for _hop in range(MAX_REDIRECTS + 1):
+            # Requests go to the checked IP, so the jar would key a cookie by
+            # that IP and hand it to another host on it after a redirect. A
+            # page read keeps no session, so no cookie outlives its response.
+            client.cookies.clear()
             target = _parse_url(current)
             if target.scheme not in {"http", "https"} or not target.host:
                 raise _PageFailure("Only http and https URLs can be read.")

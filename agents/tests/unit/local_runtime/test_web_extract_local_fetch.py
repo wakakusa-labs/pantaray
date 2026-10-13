@@ -56,8 +56,21 @@ class _Site(BaseHTTPRequestHandler):
         self.server.requests.append(self.path)  # type: ignore[attr-defined]
         if self.path == "/slow":
             time.sleep(2)
-        private = f"http://127.0.0.1:{self.server.server_address[1]}/article"
+        port = self.server.server_address[1]
+        private = f"http://127.0.0.1:{port}/article"
+        other_host = f"http://other.test:{port}/echo-cookie"
         status, headers, body = {
+            "/set-cookie": (
+                302,
+                {"Set-Cookie": "session=secret; Path=/", "Location": other_host},
+                b"",
+            ),
+            "/echo-cookie": (
+                200,
+                {"Content-Type": "text/plain"},
+                f"cookie: {self.headers.get('Cookie', 'none')}".encode(),
+            ),
+            "/broken.pdf": (200, {"Content-Type": "application/pdf"}, b"%PDF-1.4"),
             "/article": (200, {"Content-Type": "text/html; charset=utf-8"}, ARTICLE),
             "/blocked": (403, {"Content-Type": "text/html"}, b"denied"),
             "/large": (200, {"Content-Type": "text/plain"}, b"x" * 4096),
@@ -97,7 +110,7 @@ def site(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, list[str]]]:
     real_check = local_fetch._public_address
 
     async def resolve(host: str, port: int | None, scheme: str) -> str:
-        if host == "site.test":
+        if host in {"site.test", "other.test"}:
             return "127.0.0.1"
         return await real_check(host, port, scheme)
 
@@ -227,6 +240,40 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
         "plain\ufffd",
         "日本語",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_converter_failing_on_one_page_leaves_the_others(
+    site: tuple[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, _requests = site
+    mark_configured()
+
+    def broken_pdf(**_kwargs: object) -> None:
+        # What pypdf raised on a malformed inline image, outside its own errors.
+        raise AssertionError
+
+    monkeypatch.setattr(local_fetch, "extract_document", broken_pdf)
+
+    result = await _extract([f"{base}/article", f"{base}/broken.pdf"])
+
+    assert [row["url"] for row in result["results"]] == [f"{base}/article"]  # type: ignore[union-attr,index]
+    assert _failures(result) == {
+        f"{base}/broken.pdf": "The page could not be converted to text."
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_cookie_does_not_follow_a_redirect_to_another_host_on_the_same_ip(
+    site: tuple[str, list[str]],
+) -> None:
+    base, _requests = site
+    mark_configured()
+
+    result = await _extract([f"{base}/set-cookie"])
+
+    assert result["results"][0]["raw_content"] == "cookie: none"  # type: ignore[index]
 
 
 def test_skipped_elements_repeated_up_to_the_size_limit_render_quickly() -> None:

@@ -69,6 +69,20 @@ _META_CHARSET: Final = re.compile(
     rb"""<meta[^>]+charset\s*=\s*["']?([A-Za-z0-9_.:-]+)""", re.I
 )
 _SNIFF_BYTES: Final = 4096
+# The WHATWG Encoding Standard's encodings that Python can decode, by Python's
+# canonical name. A page may declare any codec Python knows, and some of those
+# are not text encodings (rot_13), have no replace handler (idna) or decode in
+# quadratic time (punycode); a page declaring anything else is read as UTF-8.
+_PAGE_ENCODINGS: Final = frozenset(
+    codecs.lookup(name).name
+    for name in (
+        "utf-8 utf-16 utf-16-le utf-16-be cp866 cp874 cp1250 cp1251 cp1252 cp1253 "
+        "cp1254 cp1255 cp1256 cp1257 cp1258 iso8859-1 iso8859-2 iso8859-3 "
+        "iso8859-4 iso8859-5 iso8859-6 iso8859-7 iso8859-8 iso8859-10 iso8859-13 "
+        "iso8859-14 iso8859-15 iso8859-16 koi8-r koi8-u mac-roman mac-cyrillic "
+        "shift_jis cp932 euc_jp iso2022_jp gb2312 gbk gb18030 big5 euc_kr"
+    ).split()
+)
 _INVALID_URL: Final = "The URL, or a redirect's target, is not a valid URL."
 
 
@@ -307,12 +321,9 @@ def _charset(download: _Download) -> str:
     )
     try:
         codec = codecs.lookup(name).name
-        # The body is decoded with errors="replace", which rot_13 (not a text
-        # encoding) and idna (no replace handler) refuse whatever the content.
-        b"x".decode(codec, errors="replace")
-    except (LookupError, UnicodeError):
+    except LookupError:
         return "utf-8"
-    return codec
+    return codec if codec in _PAGE_ENCODINGS else "utf-8"
 
 
 __all__ = ["LOCAL_PROVIDER", "extract_pages_locally"]

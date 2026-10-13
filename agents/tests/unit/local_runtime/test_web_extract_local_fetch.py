@@ -67,6 +67,16 @@ class _Site(BaseHTTPRequestHandler):
             "/bad-link": (200, {"Content-Type": "text/html"}, BAD_LINK),
             "/rot13": (200, {"Content-Type": "text/plain; charset=rot_13"}, b"plain"),
             "/idna": (200, {"Content-Type": "text/plain; charset=idna"}, b"plain"),
+            "/punycode": (
+                200,
+                {"Content-Type": "text/plain; charset=punycode"},
+                b"plain\xff",
+            ),
+            "/sjis": (
+                200,
+                {"Content-Type": "text/plain; charset=Shift_JIS"},
+                "日本語".encode("shift_jis"),
+            ),
         }.get(self.path, (404, {}, b""))
         self.send_response(status)
         for name, value in {**headers, "Content-Length": str(len(body))}.items():
@@ -200,7 +210,9 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
     pages = ("/article", "/bad-link", "/rot13", "/bad-redirect")
 
     result = await _extract([*(base + page for page in pages), bad_port])
-    idna = await _extract([f"{base}/article", f"{base}/idna"])
+    charsets = await _extract(
+        [f"{base}/article", f"{base}/idna", f"{base}/punycode", f"{base}/sjis"]
+    )
 
     read = {row["url"]: row["raw_content"] for row in result["results"]}  # type: ignore[union-attr,index]
     assert read[f"{base}/article"].startswith("# Providers")
@@ -209,7 +221,12 @@ async def test_a_malformed_page_never_takes_the_other_pages_down(
     failures = _failures(result)
     assert set(failures) == {f"{base}/bad-redirect", bad_port}
     assert "not a valid URL" in str(failures[bad_port])
-    assert [row["raw_content"] for row in idna["results"]][1] == "plain"  # type: ignore[index,union-attr]
+    # A codec that is not a page encoding is ignored; a real one is still used.
+    assert [row["raw_content"] for row in charsets["results"]][1:] == [  # type: ignore[index,union-attr]
+        "plain",
+        "plain\ufffd",
+        "日本語",
+    ]
 
 
 def test_skipped_elements_repeated_up_to_the_size_limit_render_quickly() -> None:

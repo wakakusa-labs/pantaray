@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -26,6 +27,8 @@ from pantaray_agents.conversation import provider_turns
 from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.local_runtime.runtime.connection_store import (
     ApiKeyConnection,
+    ChatGptConnection,
+    ChatGptCredential,
     LlmConnection,
     request_llm_connection,
 )
@@ -333,6 +336,45 @@ def test_direct_replay_identity_is_built_from_the_connection_to_send(
 
     assert snapshot is connection
     assert identity is not None and ":gpt-6-luna:" in identity
+
+
+def test_a_named_model_is_sent_only_where_the_connection_offers_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A subagent whose instructions name a model runs on it, or fails saying so."""
+
+    chatgpt = ChatGptConnection(
+        model="gpt-6.1-sol",
+        credential=ChatGptCredential(
+            access_token="not-a-token",
+            expires_at="2999-01-01T00:00:00+00:00",
+            account_id="account-1",
+        ),
+    )
+    monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "direct")
+    monkeypatch.setattr(provider_turns, "peek_llm_connection", lambda: chatgpt)
+
+    def target(model: str | None) -> tuple[str | None, LlmConnection | None]:
+        return provider_turns.read_provider_turn_target(
+            inference_profile=ACTION_EXECUTING_PROFILE_ID, model=model
+        )
+
+    assert target(None) == (target(None)[0], chatgpt)
+    identity, connection = target("gpt-6-luna")
+    assert connection == replace(chatgpt, model="gpt-6-luna")
+    assert identity is not None and ":gpt-6-luna:" in identity
+    # Only the ChatGPT catalog counts on a ChatGPT connection.
+    with pytest.raises(provider_turns.ModelNotAvailable, match="gpt-6-astra"):
+        target("gpt-9")
+    # A model outside the catalog is still the user's own when they set it.
+    custom = ApiKeyConnection(provider="openai", model="ft:custom", api_key="sk-x")
+    monkeypatch.setattr(provider_turns, "peek_llm_connection", lambda: custom)
+    assert target("ft:custom")[1] == custom
+    with pytest.raises(provider_turns.ModelNotAvailable):
+        target("claude-opus-5-5")
+    monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
+    with pytest.raises(provider_turns.ModelNotAvailable, match="Pantaray Cloud"):
+        target("gpt-6-luna")
 
 
 @pytest.mark.asyncio

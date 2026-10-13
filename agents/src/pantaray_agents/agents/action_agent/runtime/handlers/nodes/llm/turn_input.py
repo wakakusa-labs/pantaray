@@ -36,6 +36,7 @@ from pantaray_agents.agents.action_agent.support.world_state import (
     WorldStateUpdate,
     world_state_fields,
 )
+from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.budget import input_bytes
 from pantaray_agents.conversation.prefix import (
     TURN_CONTEXT_HEADING,
@@ -58,6 +59,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 HISTORY_PLACEHOLDER = "{action_history}"
 ROLE_RULES_PLACEHOLDER = "{role_rules}"
+MAX_PARALLEL_TOOL_CALLS_PLACEHOLDER = "{max_parallel_tool_calls}"
 SUPERVISOR_ROLE = "supervisor"
 SUBAGENT_ROLE = "subagent"
 _FINAL_ANSWER_LANGUAGE_PLACEHOLDER = "{final_answer_language}"
@@ -272,9 +274,16 @@ def frozen_executing_head(agent: ActionAgent, state: ActionAgentState) -> str:
 
 
 def role_system_instruction(instruction: str, *, role_rule: str) -> str:
-    """The shared Executing rules with one role's own section in place."""
+    """The shared Executing rules with one role's own section in place.
 
-    return instruction.replace(ROLE_RULES_PLACEHOLDER, role_rule)
+    The Supervisor and its subagents run under the same per-turn call limit,
+    read from the one tunable that also cuts their turns.
+    """
+
+    max_parallel = load_local_runtime_tunables().action_agent.max_parallel_tool_calls
+    return instruction.replace(ROLE_RULES_PLACEHOLDER, role_rule).replace(
+        MAX_PARALLEL_TOOL_CALLS_PLACEHOLDER, str(max_parallel)
+    )
 
 
 def _split_head(prompt: str) -> tuple[str, bool]:

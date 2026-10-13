@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.support.conversation_projection import 
 )
 from pantaray_agents.agents.action_agent.support.formatter import ActionAgentFormatter
 from pantaray_agents.agents.action_agent.support.world_state import WorldState
+from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.prefix import (
     TURN_CONTEXT_HEADING,
     UNCHANGED_TURN_CONTEXT,
@@ -1164,7 +1165,10 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
 
     config = PromptLoader().load_config("action/executing")
     assert config.system_instruction is not None
-    shared = config.system_instruction.partition(turn_input.ROLE_RULES_PLACEHOLDER)[2]
+    limit = load_local_runtime_tunables().action_agent.max_parallel_tool_calls
+    shared = config.system_instruction.partition(turn_input.ROLE_RULES_PLACEHOLDER)[
+        2
+    ].replace(turn_input.MAX_PARALLEL_TOOL_CALLS_PLACEHOLDER, str(limit))
     runtime = SimpleNamespace(
         services=SimpleNamespace(rendering=_RENDERING),
         request=SimpleNamespace(language="ja"),
@@ -1180,7 +1184,7 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
     assert parent.endswith(shared) and child.endswith(shared)
     for rule in (
         "## Tool Use Rules",
-        "One turn may request several read-only calls at once",
+        f"One turn runs at most {limit} tool calls.",
         "Do not request two changing tools",
         "## Reporting Completion",
         "## AGENTS.md",

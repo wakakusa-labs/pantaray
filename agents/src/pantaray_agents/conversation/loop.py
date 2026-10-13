@@ -34,8 +34,9 @@ from pantaray_agents.conversation.provider_turns import (
     send_dropping_refused_turns,
 )
 from pantaray_agents.conversation.tool_batch import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
+    FIXED_EXCLUSION_NOTICES,
+    exclusion_notice,
+    over_limit_notice,
     plan_tool_batch,
 )
 from pantaray_agents.conversation.window import (
@@ -187,6 +188,9 @@ class ConversationRun[T]:
     ]
     on_notice: Callable[[LlmTurnUserItem], Awaitable[None]]
     decide: Callable[[IdleTurn], Finish[T] | Continue]
+    model: str | None = None
+    """A model the connection offers to use instead of its own; ``None`` keeps
+    the connection's."""
 
 
 class ConversationOutputInvalid(RuntimeError):
@@ -306,7 +310,9 @@ class _Run[T]:
             try:
                 if stop is not None:
                     raise stop
-                finished = await self._finish_turn(response, final=final)
+                finished = await self._finish_turn(
+                    response, final=final, limit=sent.max_parallel_tool_calls
+                )
             except BaseException as failure:
                 await _to_the_end(self._settle(failure))
                 raise
@@ -330,7 +336,7 @@ class _Run[T]:
                 for reason in reasons[-1:]
             ]
             identity, connection = read_provider_turn_target(
-                inference_profile=self.spec.inference_profile
+                inference_profile=self.spec.inference_profile, model=self.spec.model
             )
             self.store.use_identity(identity)
             prepare = functools.partial(self._request, notices, max_parallel)
@@ -408,15 +414,16 @@ class _Run[T]:
         )
 
     async def _finish_turn(
-        self, response: LlmActionTurnResponse, *, final: bool
+        self, response: LlmActionTurnResponse, *, final: bool, limit: int
     ) -> Finish[T] | None:
         ran = await self._run_calls(response, final=final)
         if response.dropped_call_names:
-            # Such a call has no id to answer, so a message names it.
+            # Such a call has no id to answer, so a message names it. The
+            # provider cut it at ``limit``, the limit this turn was sent with.
             await self._notice(
                 "# System Notice\nNot run this turn: "
                 f"{', '.join(response.dropped_call_names)} "
-                f"({PROVIDER_DROPPED_NOTICE})."
+                f"({over_limit_notice(limit)})."
             )
         if ran:
             return None
@@ -448,7 +455,7 @@ class _Run[T]:
             ending = [call for call in response.calls if call.name in self.ending_names]
             turn.ending = ending[0] if len(ending) == 1 else None
             turn.held = {
-                call.call_id: _not_run(EXCLUSION_NOTICES["run_ending_tool"])
+                call.call_id: _not_run(FIXED_EXCLUSION_NOTICES["run_ending_tool"])
                 if call.name in self.ending_names
                 else self.last_not_run
                 for call in response.calls
@@ -462,7 +469,11 @@ class _Run[T]:
             remaining_tool_steps=self.spec.max_tool_calls - self.tool_calls,
         )
         turn.held = {
-            entry.call.call.call_id: _not_run(EXCLUSION_NOTICES[entry.reason])
+            entry.call.call.call_id: _not_run(
+                exclusion_notice(
+                    entry.reason, max_parallel=self.spec.max_parallel_tool_calls
+                )
+            )
             for entry in (*plan.deferred, *plan.dropped)
         }
         runnable = [planned.call for planned in plan.calls]
@@ -472,7 +483,7 @@ class _Run[T]:
                 turn.ending = runnable[0]
                 return False
             turn.held[runnable.pop().call_id] = _not_run(
-                EXCLUSION_NOTICES["run_ending_tool"]
+                FIXED_EXCLUSION_NOTICES["run_ending_tool"]
             )
         if plan.mode == "parallel":
             for call in runnable:

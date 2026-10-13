@@ -15,25 +15,43 @@ from pantaray_agents.tools.contract import ToolConcurrency
 
 type BatchMode = Literal["parallel", "sequential"]
 
-type ExclusionReason = Literal[
+type FixedExclusionReason = Literal[
     "run_ending_tool",
     "solo_turn_tool",
     "after_solo_turn_tool",
-    "max_parallel_exceeded",
     "tool_step_budget_exhausted",
 ]
+type ExclusionReason = FixedExclusionReason | Literal["max_parallel_exceeded"]
 
 
-EXCLUSION_NOTICES: dict[ExclusionReason, str] = {
+FIXED_EXCLUSION_NOTICES: dict[FixedExclusionReason, str] = {
     "run_ending_tool": "must be the only call of its turn; send exactly one, alone",
     "solo_turn_tool": "must be the only call of its turn",
     "after_solo_turn_tool": "was queued behind a call that must run alone",
-    "max_parallel_exceeded": "exceeded the parallel tool call limit of this turn",
     "tool_step_budget_exhausted": "exceeded the remaining tool step budget",
 }
-"""What the model is told about a call this turn did not run."""
 
-PROVIDER_DROPPED_NOTICE = "was dropped by the model provider above the requested limit"
+
+def over_limit_notice(limit: int) -> str:
+    """What a call past a turn's limit is told, cut here or by the provider.
+
+    It names the limit and that calls up to it still run together: told only
+    that calls were not run, a model went on to one call per turn.
+    """
+
+    return (
+        f"exceeded the limit of {limit} tool calls per turn; "
+        f"up to {limit} independent calls still run together"
+    )
+
+
+def exclusion_notice(reason: ExclusionReason, *, max_parallel: int) -> str:
+    """What the model is told about a call this turn did not run."""
+
+    if reason == "max_parallel_exceeded":
+        return over_limit_notice(max_parallel)
+    return FIXED_EXCLUSION_NOTICES[reason]
+
 
 # A call naming no declared tool runs in order; the tool registry answers it.
 _UNDECLARED = ToolConcurrency("sequential")

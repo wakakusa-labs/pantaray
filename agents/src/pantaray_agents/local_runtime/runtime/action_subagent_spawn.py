@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
@@ -79,7 +79,9 @@ class ActionSubagentSpawnRequest:
     root_execution_session_id: str
     manifest_id: str
     origin: ActionToolCallOrigin
-    model_selector: str
+    # A model the connection offers, as the Supervisor named it; None runs the
+    # child on the user's model.
+    model: str | None
     action_context: str
     task: str
     context_refs: tuple[str, ...]
@@ -114,24 +116,26 @@ def spawn_action_subagent(
     if busy_timeout_ms <= 0:
         raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
     _validate_request_identity(request)
-    inference_profile_id = _inference_profile_id(request.model_selector)
     child_process_id = _durable_id("child", request)
     job_id = _durable_id("job", request)
     claims = _build_resource_claims(request, child_process_id=child_process_id)
-    payload = _build_validated_action_subagent_job_payload(
-        ActionSubagentJobPayload(
-            job_id=job_id,
-            process_id=child_process_id,
-            user_id=request.user_id,
-            action_id=request.action_id,
-            parent_process_id=request.parent_process_id,
-            inference_profile_id=inference_profile_id,
-            action_context=request.action_context,
-            task=request.task,
-            context_refs=list(request.context_refs),
-            resource_claim_ids=[claim.claim_id for claim in claims],
-        )
+    unvalidated = ActionSubagentJobPayload(
+        job_id=job_id,
+        process_id=child_process_id,
+        user_id=request.user_id,
+        action_id=request.action_id,
+        parent_process_id=request.parent_process_id,
+        # The Supervisor's own profile: on every route the child gets the
+        # model and reasoning effort its parent runs with.
+        inference_profile_id=ACTION_EXECUTING_PROFILE_ID,
+        action_context=request.action_context,
+        task=request.task,
+        context_refs=list(request.context_refs),
+        resource_claim_ids=[claim.claim_id for claim in claims],
     )
+    if request.model is not None:
+        unvalidated["model"] = request.model
+    payload = _build_validated_action_subagent_job_payload(unvalidated)
 
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
@@ -221,7 +225,6 @@ def _validate_request_identity(request: ActionSubagentSpawnRequest) -> None:
         "parent_job_id": request.parent_job_id,
         "root_execution_session_id": request.root_execution_session_id,
         "manifest_id": request.manifest_id,
-        "model_selector": request.model_selector,
         "action_context": request.action_context,
         "task": request.task,
         "spawned_at": request.spawned_at,
@@ -229,22 +232,6 @@ def _validate_request_identity(request: ActionSubagentSpawnRequest) -> None:
     for field, value in values.items():
         if not value.strip():
             raise ActionSubagentSpawnRequestError(f"{field} must not be blank")
-
-
-def _inference_profile_id(model_selector: str) -> str:
-    setting = next(
-        (
-            candidate
-            for candidate in SUBAGENT_MODEL_SETTINGS
-            if candidate.selector == model_selector
-        ),
-        None,
-    )
-    if setting is None:
-        raise ActionSubagentSpawnRequestError(
-            "model_selector must name a configured subagent model"
-        )
-    return setting.profile_id
 
 
 def _durable_id(kind: str, request: ActionSubagentSpawnRequest) -> str:

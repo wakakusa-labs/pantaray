@@ -6,7 +6,10 @@ from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     claim_repository_context,
-    render_repository_context,
+    unclaimed_checkouts,
+)
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    checkout_statuses,
 )
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
@@ -255,11 +258,21 @@ async def _claim_agents_md(
     except BrokerPolicyError:
         # A child that may not read files gets no AGENTS.md either.
         return
-    # Claimed before any await, so parallel siblings never claim the same file.
-    claimed = claim_repository_context(
-        agents_md.attached, tool_id=tool_id, args=args, read_context=read_context
+    statuses = await checkout_statuses(
+        unclaimed_checkouts(
+            agents_md.attached, tool_id=tool_id, args=args, read_context=read_context
+        )
     )
-    agents_md.record(claimed.keys, await render_repository_context(claimed))
+    # Claimed after the await and stored with no await between, so parallel
+    # siblings never claim the same file and a stop never strands a claim.
+    claimed = claim_repository_context(
+        agents_md.attached,
+        tool_id=tool_id,
+        args=args,
+        read_context=read_context,
+        statuses=statuses,
+    )
+    agents_md.record(claimed.keys, claimed.text)
 
 
 def _bounded_failure_message(outcome: BrokerToolOutcome) -> str:

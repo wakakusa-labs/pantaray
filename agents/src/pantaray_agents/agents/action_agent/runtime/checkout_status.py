@@ -18,7 +18,9 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
+from contextvars import ContextVar
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,10 @@ _GIT_TIMEOUT_SECONDS = 2
 # git calls of up to _GIT_TIMEOUT_SECONDS each, run off the event loop; past
 # this the result goes on without the sentence.
 _STATUS_TIMEOUT_SECONDS = 2
+# The end of the read under way in this thread; no git starts past it.
+_DEADLINE: ContextVar[float | None] = ContextVar(
+    "checkout_status_deadline", default=None
+)
 # What ``attached`` holds for a checkout already described, beside AGENTS.md paths.
 CHECKOUT_KEY_PREFIX = "checkout:"
 
@@ -67,26 +73,37 @@ def checkout_status(checkout: Path) -> str | None:
         return None
 
 
-async def checkout_statuses(checkouts: Sequence[Path]) -> list[str]:
-    """The sentences for the checkouts that are behind, read in a thread.
+async def checkout_statuses(checkouts: Sequence[Path]) -> dict[Path, str]:
+    """The sentence for each checkout that is behind, read in a thread.
 
     The git calls block, so they never run on the event loop: sibling tool
-    calls and the Stop watch keep going while they run.
+    calls and the Stop watch keep going while they run. The thread gets the
+    same deadline, so it starts no git past it and leaves nothing running for
+    the loop's executor to wait on when a run ends.
     """
 
+    if not checkouts:
+        return {}
+    deadline = time.monotonic() + _STATUS_TIMEOUT_SECONDS
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(_statuses, checkouts), _STATUS_TIMEOUT_SECONDS
+            asyncio.to_thread(_statuses, checkouts, deadline),
+            _STATUS_TIMEOUT_SECONDS,
         )
     except TimeoutError:
         logger.warning(
             "Skipped checkout status: took over %ss", _STATUS_TIMEOUT_SECONDS
         )
-        return []
+        return {}
 
 
-def _statuses(checkouts: Sequence[Path]) -> list[str]:
-    return [status for checkout in checkouts if (status := checkout_status(checkout))]
+def _statuses(checkouts: Sequence[Path], deadline: float) -> dict[Path, str]:
+    _DEADLINE.set(deadline)
+    return {
+        checkout: status
+        for checkout in checkouts
+        if (status := checkout_status(checkout)) is not None
+    }
 
 
 @functools.cache
@@ -187,11 +204,16 @@ def _run(command: list[str]) -> str | None:
     any encoding goes back to git byte for byte.
     """
 
+    timeout: float = _GIT_TIMEOUT_SECONDS
+    if (deadline := _DEADLINE.get()) is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            return None
     try:
         completed = subprocess.run(
             command,
             capture_output=True,
-            timeout=_GIT_TIMEOUT_SECONDS,
+            timeout=timeout,
             check=False,
         )
     except OSError:

@@ -18,13 +18,12 @@ from __future__ import annotations
 import logging
 import os
 import stat
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent.runtime.checkout_status import (
     CHECKOUT_KEY_PREFIX,
-    checkout_statuses,
     enclosing_checkout,
 )
 from pantaray_agents.local_runtime.descriptor_access import (
@@ -101,12 +100,31 @@ def load_pantaray_agents_md() -> str:
 
 @dataclass(frozen=True, slots=True)
 class RepositoryContextClaim:
-    """What one call is the first to reach: rendered AGENTS.md files, and the
-    checkouts whose status is still to be read off the event loop."""
+    """What one call claimed, and the text that goes beside its result."""
 
     keys: tuple[str, ...]
-    agents_md: str | None
-    checkouts: tuple[Path, ...]
+    text: str | None
+
+
+def unclaimed_checkouts(
+    attached: Sequence[str],
+    *,
+    tool_id: str,
+    args: Mapping[str, JSONValue],
+    read_context: BrokerContext,
+) -> tuple[Path, ...]:
+    """The checkouts this call works in whose status has not been sent yet.
+
+    Their status is read (``checkout_statuses``) before anything is claimed, so
+    a run saved while it is read still owes it.
+    """
+
+    checkouts: dict[Path, None] = {}
+    for touched in _touched(tool_id, args, read_context):
+        checkout = enclosing_checkout(touched.path)
+        if checkout is not None and _checkout_key(checkout) not in attached:
+            checkouts.setdefault(checkout)
+    return tuple(checkouts)
 
 
 def claim_repository_context(
@@ -115,30 +133,25 @@ def claim_repository_context(
     tool_id: str,
     args: Mapping[str, JSONValue],
     read_context: BrokerContext,
+    statuses: Mapping[Path, str],
 ) -> RepositoryContextClaim:
-    """Claim the AGENTS.md files and the checkouts this call is the first to reach.
+    """Claim and render the AGENTS.md files and checkouts this call is the
+    first to reach, with the checkout ``statuses`` read for it.
 
     ``read_context`` is the Action's read-tool context, so a file is attached only
     when the ``read`` tool could open it: inside the read scope, outside private
     app storage, and not through a symlink that leaves its root. Each file and
     checkout it claims is appended to ``attached``, which also says what is
-    already sent; a checkout is claimed even when it turns out level, so it is
-    read once per Action. Runs without an ``await`` so parallel sibling calls
-    sharing one set cannot claim twice; ``render_repository_context`` then reads
-    the checkouts.
+    already sent; a checkout is claimed even when level or unread, so it is read
+    once per Action. Runs without an ``await`` so parallel sibling calls sharing
+    one set cannot claim twice: of two that read the same checkout at once, the
+    first to claim it sends its status.
     """
 
     blocks: list[str] = []
     keys: list[str] = []
-    checkouts: list[Path] = []
     remaining = AGENTS_MD_MAX_BYTES
-    for raw_path in _touched_paths(tool_id, args):
-        try:
-            touched = resolve_read_tool_path(
-                context=read_context, raw_path=raw_path, must_exist=True
-            )
-        except (BrokerPolicyError, OSError):
-            continue
+    for touched in _touched(tool_id, args, read_context):
         for scope, root, relative in _instruction_files(read_context, touched):
             key = str(root / relative)
             if key in attached or remaining == 0:
@@ -151,26 +164,30 @@ def claim_repository_context(
             remaining -= len(data)
             blocks.append(_render_block(f"for {scope}", data))
         checkout = enclosing_checkout(touched.path)
-        if (
-            checkout is not None
-            and (key := f"{CHECKOUT_KEY_PREFIX}{checkout}") not in attached
-        ):
+        if checkout is not None and (key := _checkout_key(checkout)) not in attached:
             attached.append(key)
             keys.append(key)
-            checkouts.append(checkout)
+            if (status := statuses.get(checkout)) is not None:
+                blocks.append(status)
     return RepositoryContextClaim(
-        keys=tuple(keys),
-        agents_md="\n\n".join(blocks) if blocks else None,
-        checkouts=tuple(checkouts),
+        keys=tuple(keys), text="\n\n".join(blocks) if blocks else None
     )
 
 
-async def render_repository_context(claim: RepositoryContextClaim) -> str | None:
-    """The claimed AGENTS.md files and the status of each claimed checkout."""
+def _touched(
+    tool_id: str, args: Mapping[str, JSONValue], read_context: BrokerContext
+) -> Iterator[ResolvedManifestPath]:
+    for raw_path in _touched_paths(tool_id, args):
+        try:
+            yield resolve_read_tool_path(
+                context=read_context, raw_path=raw_path, must_exist=True
+            )
+        except (BrokerPolicyError, OSError):
+            continue
 
-    statuses = await checkout_statuses(claim.checkouts) if claim.checkouts else []
-    parts = [part for part in (claim.agents_md, *statuses) if part]
-    return "\n\n".join(parts) if parts else None
+
+def _checkout_key(checkout: Path) -> str:
+    return f"{CHECKOUT_KEY_PREFIX}{checkout}"
 
 
 def _touched_paths(tool_id: str, args: Mapping[str, JSONValue]) -> Iterator[str]:
@@ -306,6 +323,6 @@ __all__ = [
     "PANTARAY_DEFAULT_AGENTS_MD",
     "RepositoryContextClaim",
     "claim_repository_context",
-    "render_repository_context",
+    "unclaimed_checkouts",
     "load_pantaray_agents_md",
 ]

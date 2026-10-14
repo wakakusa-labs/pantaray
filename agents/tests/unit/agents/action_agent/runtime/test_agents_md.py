@@ -30,6 +30,7 @@ from pantaray_agents.agents.action_agent.runtime.agents_md import (
     RepositoryContextClaim,
     claim_repository_context,
     load_pantaray_agents_md,
+    unclaimed_checkouts,
 )
 from pantaray_agents.agents.action_agent.runtime.checkout_status import (
     checkout_status,
@@ -120,14 +121,24 @@ class _Action:
     def attach(self, tool_id: str, args: dict[str, JSONValue]) -> str | None:
         context = self.state["context"]
         attached = list(context.get("agents_md_attached_paths", []))
-        claimed = claim_repository_context(
-            attached, tool_id=tool_id, args=args, read_context=self.read_context()
-        )
-        context["agents_md_attached_paths"] = attached
+        read_context = self.read_context()
         # The status a live call reads off the event loop, read here in line.
-        statuses = [checkout_status(checkout) for checkout in claimed.checkouts]
-        parts = [part for part in (claimed.agents_md, *statuses) if part]
-        return "\n\n".join(parts) if parts else None
+        statuses = {
+            checkout: status
+            for checkout in unclaimed_checkouts(
+                attached, tool_id=tool_id, args=args, read_context=read_context
+            )
+            if (status := checkout_status(checkout)) is not None
+        }
+        text = claim_repository_context(
+            attached,
+            tool_id=tool_id,
+            args=args,
+            read_context=read_context,
+            statuses=statuses,
+        ).text
+        context["agents_md_attached_paths"] = attached
+        return text
 
     async def read(self, path: Path | str, **extra: JSONValue) -> Any:
         with TraceContextManager(extra={"process_id": BROKER_ACTOR_PROCESS_ID}):
@@ -598,10 +609,13 @@ async def test_a_slow_git_never_holds_a_subagents_event_loop(
         subagent_broker, "load_broker_context", lambda **_kwargs: object()
     )
     monkeypatch.setattr(
+        subagent_broker, "unclaimed_checkouts", lambda _attached, **_kwargs: (work,)
+    )
+    monkeypatch.setattr(
         subagent_broker,
         "claim_repository_context",
-        lambda attached, **_kwargs: RepositoryContextClaim(
-            keys=("checkout",), agents_md=None, checkouts=(work,)
+        lambda _attached, *, statuses, **_kwargs: RepositoryContextClaim(
+            keys=("checkout",), text=statuses.get(work)
         ),
     )
     recorded: list[str | None] = []
@@ -625,3 +639,33 @@ async def test_a_slow_git_never_holds_a_subagents_event_loop(
 
     assert ticks >= 10
     assert recorded and recorded[0] is not None and "1 commits behind" in recorded[0]
+
+
+@pytest.mark.asyncio
+async def test_a_run_saved_while_a_status_is_read_still_owes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sibling saving the run mid-read stores no claim for what is not yet
+    sent, so a run resumed from that save still gets the status and AGENTS.md."""
+
+    action = _Action(tmp_path, monkeypatch)
+    work = _behind_checkout(tmp_path / "behind")
+    (work / "AGENTS.md").write_text("RULE\n", encoding="utf-8")
+    _slow_git(monkeypatch, seconds=0.3)
+
+    reading = asyncio.create_task(action.read(work / "x.py"))
+    await asyncio.sleep(0.1)
+    saved = build_runtime_state_checkpoint(action.state)
+    assert (await reading).agents_md is not None
+
+    action.state = restore_runtime_state_checkpoint(
+        saved,
+        expected_action_id=ACTION_ID,
+        expected_suggestion_id=None,
+        expected_user_id=USER_ID,
+    )
+    resumed = await action.read(work / "x.py")
+
+    assert resumed.agents_md is not None
+    assert "RULE" in resumed.agents_md
+    assert "1 commits behind origin/main" in resumed.agents_md

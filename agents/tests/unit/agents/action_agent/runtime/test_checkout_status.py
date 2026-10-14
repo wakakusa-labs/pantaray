@@ -3,8 +3,10 @@ fetched."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -186,3 +188,24 @@ def test_any_failure_leaves_the_status_out(
     monkeypatch.setattr(status, "_describe", _broken)
 
     assert checkout_status(work) is None
+
+
+def test_a_hung_git_lets_the_run_end_within_the_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the limit the thread starts no more git, so nothing is left for the
+    loop's executor to wait on when the run (or a subagent) ends."""
+
+    work, _other = _clone_pair(tmp_path)
+    hung = tmp_path / "bin"
+    hung.mkdir()
+    (hung / "git").write_text("#!/bin/sh\nexec sleep 30\n")
+    (hung / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{hung}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(status, "_STATUS_TIMEOUT_SECONDS", 0.5)
+
+    started = time.monotonic()
+    statuses = asyncio.run(status.checkout_statuses([work]))
+
+    assert statuses == {}
+    assert time.monotonic() - started < 1.5

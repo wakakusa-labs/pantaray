@@ -183,7 +183,11 @@ async def execute_tool_call(
     last_exception: Exception | None = None
     last_traceback = ""
     tool_invocation_ids: tuple[str, ...] = ()
-    tool_step_id = consume_resumed_tool_step_id(state) or str(uuid.uuid4())
+    tool_step_id = consume_resumed_tool_step_id(state) or (
+        slot.origin.shared_turn_step_id()
+        if shares_turn and slot.origin is not None
+        else str(uuid.uuid4())
+    )
     if stop_watch.stop_observed:
         # 停止はこの呼び出しを発行する前に確定していた。外部への影響が無いことは
         # 確定しているので、打ち切った呼び出しとは別の終端で残す。

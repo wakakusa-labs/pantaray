@@ -42,6 +42,7 @@ from ..tooling.tool_result_finalization import (
     ToolResultFinalizationRequest,
     finalize_local_tool_result,
 )
+from .action_batch_call_recovery import restore_settled_batch_calls_in_connection
 from .action_startup_recovery_authority import (
     ActionStartupRecoveryAuthority,
     load_action_startup_recovery_authority_in_connection,
@@ -297,6 +298,11 @@ def _persist_requeue(
             _remove_checkpoint_execution_context(
                 connection=connection,
                 authority=authority,
+            )
+            restore_settled_batch_calls_in_connection(
+                connection,
+                user_id=authority.envelope.user_id,
+                action_id=authority.envelope.action_id,
             )
             _requeue_job_in_connection(
                 connection=connection,

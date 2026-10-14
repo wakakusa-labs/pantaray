@@ -475,7 +475,11 @@ async def test_commands_that_share_a_turn_never_pause_for_approval(
     batch = state["next_action"].batch
     assert batch is not None and batch.mode == "parallel"
 
+    step_ids: list[tuple[str, str]] = []
+
     async def _needs_approval(*_args, **kwargs) -> ToolExecutionResult:
+        # Startup recovery finds what a shared-turn call ran by this step id.
+        step_ids.append((kwargs["step_id"], kwargs["origin"].shared_turn_step_id()))
         result = _success_result(step_id=kwargs["step_id"], tool_id="bash")
         result.control = ApprovalRequiredToolControl(
             approval_session_id=f"session-{kwargs['step_id']}",
@@ -504,3 +508,4 @@ async def test_commands_that_share_a_turn_never_pause_for_approval(
         "bash: failed APPROVAL_NEEDS_OWN_TURN"
     ] * 2
     assert len(set(withdrawn)) == 2
+    assert len(step_ids) == 2 and all(used == derived for used, derived in step_ids)

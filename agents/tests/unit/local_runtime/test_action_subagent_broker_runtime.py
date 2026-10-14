@@ -18,7 +18,7 @@ from pantaray_agents.local_runtime.runtime.job_payload_builder import (
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 from .resource_recovery_test_support import bootstrap_runtime_db
 
@@ -36,7 +36,7 @@ def _running_child(
             "user_id": "user-1",
             "action_id": "action-1",
             "parent_process_id": "parent-process",
-            "inference_profile_id": SUBAGENT_MODEL_SETTINGS[0].profile_id,
+            "inference_profile_id": ACTION_EXECUTING_PROFILE_ID,
             "action_context": "# Workspace Paths\nparent context",
             "task": "Inspect the assigned boundary",
             "context_refs": [],

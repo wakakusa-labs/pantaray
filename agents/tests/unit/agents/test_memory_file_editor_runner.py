@@ -133,7 +133,8 @@ async def test_a_large_text_is_saved_and_read_on_from_its_hint(tmp_path: Path) -
             assert result["status"] == "success"
             moved = result["text"]
             assert isinstance(moved, dict)
-            read_back.append(str(moved["preview"]) + "\n")
+            # The preview's head runs up to the line the hint says to read on from.
+            read_back.append(str(moved["preview"]).split("\n[… lines ")[0] + "\n")
             hint = str(moved["retry_hint"])
             path = hint.split("path=")[1].split(" ")[0]
             offset, column = int(hint.split("offset=")[1].split(",")[0]), 1

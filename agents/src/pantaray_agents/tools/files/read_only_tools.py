@@ -12,7 +12,6 @@ import asyncio
 import hashlib
 import os
 import tempfile
-import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,8 +24,7 @@ from pantaray_agents.local_runtime.tooling.documents import (
     RENDERED_PAGE_MEDIA_TYPE,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    release_stored_tool_result,
-    store_tool_result,
+    store_run_tool_result,
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
@@ -76,7 +74,7 @@ from .render_pages import (
     RenderPdfPageToolArgs,
     draw_document_pages,
 )
-from .ripgrep import RIPGREP_TIMEOUT_SECONDS
+from .ripgrep import DISCOVERY_IGNORE_NOTE, RIPGREP_TIMEOUT_SECONDS
 
 _SPILL_ROOT_MODE = 0o700
 _MEMORY_NOTE = (
@@ -248,7 +246,8 @@ class _ReadOnlyFileTools:
                     "List files and directories under an absolute directory "
                     "path, max_depth levels deep (1 lists its own entries), in "
                     "path order, stopping at limit entries. Symlinks are not "
-                    "followed; warning and retry_hint say what was left out. " + notes
+                    "followed; warning and retry_hint say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "path": _PATH,
@@ -263,10 +262,13 @@ class _ReadOnlyFileTools:
                 name="glob",
                 description=(
                     "Find files by a glob pattern, such as **/*.md, relative to "
-                    "an absolute base_path, stopping at limit matches. Symlinks "
+                    "an absolute base_path, stopping at limit matches. matches "
+                    "are relative to the base_path the result gives; read "
+                    "base_path/path. Symlinks "
                     f"are not followed; the search stops after "
                     f"{RIPGREP_TIMEOUT_SECONDS:g} seconds; warning and "
-                    "retry_hint say what was left out. " + notes
+                    "retry_hint say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "base_path": _PATH,
@@ -282,13 +284,17 @@ class _ReadOnlyFileTools:
                 description=(
                     "Search text files of any size under an absolute base_path "
                     "for a ripgrep regular expression; include_glob, relative "
-                    "to base_path, narrows the files. A line over "
+                    "to base_path, narrows the files. Matching lines come under "
+                    "files, one entry per file, as line_number:line; path is "
+                    "relative to the base_path the result gives, so read "
+                    "base_path/path. A line over "
                     f"{GREP_MAX_LINE_CHARS} characters comes back as an excerpt "
                     "around its first match and a matching binary file is named "
                     "in warning. Output stops at max_matches lines or "
                     f"{GREP_MAX_OUTPUT_BYTES // 1024} KB, and the search after "
                     f"{RIPGREP_TIMEOUT_SECONDS:g} seconds; warning and retry_hint "
-                    "say what was left out. " + notes
+                    "say what was left out. "
+                    f"{DISCOVERY_IGNORE_NOTE} {notes}"
                 ),
                 properties={
                     "base_path": _PATH,
@@ -503,18 +509,10 @@ class _ReadOnlyFileTools:
                     }
                 ],
             }
-        stored = store_tool_result(
-            action_tool_results_path=self.spill_root,
-            invocation_id=uuid.uuid4().hex,
-            output=output,
-        )
-        release_error = release_stored_tool_result(stored)
-        if release_error is not None:
-            raise release_error
         return ReactToolResult(
             tool_name=call.tool_name,
             status="success",
-            output=stored.output_json,
+            output=store_run_tool_result(spill_root=self.spill_root, output=output),
             images=images,
         )
 

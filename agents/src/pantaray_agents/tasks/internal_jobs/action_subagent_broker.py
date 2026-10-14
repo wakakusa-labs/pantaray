@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
-    attach_repository_agents_md,
+    claim_repository_context,
+    unclaimed_checkouts,
+)
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    checkout_statuses,
 )
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
@@ -212,7 +216,7 @@ async def execute_action_subagent_broker_tool(
             message=_bounded_failure_message(outcome),
         )
     if isinstance(outcome, BrokerToolOutcome) and outcome.failure is None:
-        _claim_agents_md(
+        await _claim_agents_md(
             agents_md,
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -228,7 +232,7 @@ async def execute_action_subagent_broker_tool(
     )
 
 
-def _claim_agents_md(
+async def _claim_agents_md(
     agents_md: AgentsMdClaims,
     *,
     db_path: Path,
@@ -254,11 +258,21 @@ def _claim_agents_md(
     except BrokerPolicyError:
         # A child that may not read files gets no AGENTS.md either.
         return
-    agents_md.claim(
-        lambda attached: attach_repository_agents_md(
-            attached, tool_id=tool_id, args=args, read_context=read_context
+    statuses = await checkout_statuses(
+        unclaimed_checkouts(
+            agents_md.attached, tool_id=tool_id, args=args, read_context=read_context
         )
     )
+    # Claimed after the await and stored with no await between, so parallel
+    # siblings never claim the same file and a stop never strands a claim.
+    claimed = claim_repository_context(
+        agents_md.attached,
+        tool_id=tool_id,
+        args=args,
+        read_context=read_context,
+        statuses=statuses,
+    )
+    agents_md.record(claimed.keys, claimed.text)
 
 
 def _bounded_failure_message(outcome: BrokerToolOutcome) -> str:

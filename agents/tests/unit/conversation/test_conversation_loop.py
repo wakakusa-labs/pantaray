@@ -342,6 +342,21 @@ async def test_calls_the_plan_holds_back_are_answered_as_not_run() -> None:
     assert len(run.idle) == 1
 
 
+async def test_calls_past_the_limit_are_told_the_limit_they_can_send_again() -> None:
+    """Told only "not run", a subagent fell back to one call per turn."""
+
+    over = "exceeded the limit of 4 tool calls per turn; up to 4 independent calls"
+    calls = [_call(f"c{n}", "a") for n in range(1, 6)]
+    run = _Run([_reply(*calls, dropped=["a"]), _reply(_end("c6"))])
+
+    await run()
+
+    assert run.log.count("start a") == 4
+    message = run.results["c5"].output
+    assert isinstance(message, dict) and over in str(message["message"])
+    assert over in run.notices[0]
+
+
 async def test_a_refused_output_is_resent_as_an_append_and_not_kept() -> None:
     script: list[_Step] = [_refused(), _reply(_call("c1", "a")), _reply(_end("c2"))]
     run = _Run(script)

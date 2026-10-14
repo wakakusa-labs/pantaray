@@ -140,7 +140,6 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
                 name="spawn_subagent",
                 arguments={
                     STEP_NOTE_ARG: "分担した範囲の調査を開始する。",
-                    "model": "gpt-6-luna",
                     "task": f"Inspect scope {index}",
                     "context_refs": ["S-1-USER"],
                     "resource_claims": [
@@ -269,7 +268,9 @@ async def test_adopted_spawn_calls_execute_and_resume_with_their_original_identi
         "Inspect scope 2",
     ]
     assert all(
-        json.loads(row[0])["inference_profile_id"] == "action.subagent.luna"
+        # No model named: the child runs on the Supervisor's profile.
+        json.loads(row[0])["inference_profile_id"] == "action.executing"
+        and "model" not in json.loads(row[0])
         and json.loads(row[0])["action_context"] == "T0"
         for row in payloads
     )

@@ -15,7 +15,6 @@ from pantaray_agents.schema.agent.action_subagent import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 from .base import (
     FieldSpec,
@@ -34,10 +33,6 @@ WAIT_SUBAGENTS_TOOL_ID = "wait_subagents"
 CANCEL_SUBAGENT_TOOL_ID = "cancel_subagent"
 # The subagent's own terminal tool; the child job defines its contract.
 SUBMIT_SUBAGENT_REPORT_TOOL_ID = "submit_subagent_report"
-_MODEL_GUIDANCE = " ".join(
-    f"{setting.selector}: {setting.recommendation}"
-    for setting in SUBAGENT_MODEL_SETTINGS
-)
 _NON_BLANK_STRING: SchemaMapping = {
     "type": "string",
     "minLength": 1,
@@ -113,13 +108,20 @@ SPAWN_SUBAGENT_TOOL = ToolDefinition.from_spec(
     ToolSpec(
         tool_id=SPAWN_SUBAGENT_TOOL_ID,
         name="Spawn Subagent",
-        description=(
-            "Start one bounded subagent job with an explicit configured model and "
-            "resource claims. " + _MODEL_GUIDANCE
-        ),
+        description="Start one bounded subagent job with resource claims.",
         guide=ToolGuideSpec(
             what="Delegate one bounded task to an independently executing subagent.",
-            when=_MODEL_GUIDANCE,
+            when=(
+                "Delegate only independent, sizable work: a part that takes many "
+                "calls, reading many files when only the conclusion is needed, or "
+                "an independent review that materially lowers the risk of a wrong "
+                "result. Do it yourself when a few calls finish it, when you know "
+                "where to look, or when your next step waits on its result, and do "
+                "not split small work across subagents. A subagent rebuilds its "
+                "context from scratch, its report drops detail, and it adds "
+                "tokens, so when unsure, do not spawn. While it runs, work on a "
+                "part it does not cover; do not reread or redo what you delegated."
+            ),
             pitfalls=(
                 "Claim every resource the child may write. Replaying the same decision "
                 "with changed content is rejected."
@@ -132,15 +134,14 @@ SPAWN_SUBAGENT_TOOL = ToolDefinition.from_spec(
         ),
         input_spec=InputSpec(
             fields=(
-                _required_field(
-                    "model",
-                    {
-                        "type": "string",
-                        "enum": [
-                            setting.selector for setting in SUBAGENT_MODEL_SETTINGS
-                        ],
-                    },
-                    _MODEL_GUIDANCE,
+                field_spec(
+                    name="model",
+                    schema=_NON_BLANK_STRING,
+                    description=(
+                        "Omit to run the subagent on the user's model. Set it only "
+                        "when the user's instructions, such as an AGENTS.md, name a "
+                        "model for subagents."
+                    ),
                 ),
                 _required_field(
                     "task",

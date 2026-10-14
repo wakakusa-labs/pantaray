@@ -15,7 +15,10 @@ from pantaray_agents.tools.files.read_contract import (
     GrepToolArgs,
     ListToolArgs,
 )
-from pantaray_agents.tools.files.ripgrep import RIPGREP_TIMEOUT_SECONDS
+from pantaray_agents.tools.files.ripgrep import (
+    DISCOVERY_IGNORE_NOTE,
+    RIPGREP_TIMEOUT_SECONDS,
+)
 
 from .base import (
     ToolDefinition,
@@ -163,7 +166,8 @@ LIST_TOOL = ToolDefinition.from_spec(
                 "max_depth is listed without its contents; symlinks are not "
                 "followed or listed; Pantaray's private app storage is not listed. "
                 "When a limit applies, warning and retry_hint say which one and "
-                "what to do next. Use glob for path patterns and grep for text search."
+                "what to do next. Use glob for path patterns and grep for text search. "
+                + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),
@@ -212,11 +216,14 @@ GLOB_TOOL = ToolDefinition.from_spec(
                 "access in Workspace Path Rules. pattern "
                 "is relative to base_path and must not be absolute or contain parent "
                 "directory parts. Use ** only when recursive matching is intended. "
-                "Typical first call: base_path=., pattern=**/*.py. Limits: symlinks "
+                "Typical first call: base_path=., pattern=**/*.py. matches are "
+                "relative to the base_path the result gives; read base_path/path. "
+                "Limits: symlinks "
                 "are not followed or listed; output stops at limit matches; the "
                 f"search stops after {RIPGREP_TIMEOUT_SECONDS:g} seconds. When a "
                 "limit applies, truncated, warning and retry_hint say which one and "
-                "what to do next; skipped_files counts paths that could not be read."
+                "what to do next; skipped_files counts paths that could not be read. "
+                + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),
@@ -230,7 +237,12 @@ GLOB_TOOL = ToolDefinition.from_spec(
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
-                "matches": {"type": "array", "items": DISCOVERY_ENTRY_SCHEMA},
+                "base_path": {"type": "string"},
+                "matches": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths relative to base_path.",
+                },
                 "truncated": {"type": "boolean"},
                 "truncation_reason": DISCOVERY_TRUNCATION_REASON_SCHEMA,
                 "retry_hint": DISCOVERY_RETRY_HINT_SCHEMA,
@@ -239,6 +251,7 @@ GLOB_TOOL = ToolDefinition.from_spec(
             },
             "required": [
                 "status",
+                "base_path",
                 "matches",
                 "truncated",
                 "truncation_reason",
@@ -268,7 +281,10 @@ GREP_TOOL = ToolDefinition.from_spec(
                 "include_glob is relative to base_path; use it to narrow file types before searching. "
                 "pattern is a ripgrep regular expression; escape regex metacharacters "
                 "when searching literal text. Typical first call: base_path=., "
-                "pattern=TODO, include_glob=**/*.py. "
+                "pattern=TODO, include_glob=**/*.py. Matching lines come under "
+                "files, one entry per file, as line_number:line; path is "
+                "relative to the base_path the result gives, so read "
+                "base_path/path. "
                 "Limits: symlinks are not followed; a binary file (with NUL bytes) "
                 "that matches is named in warning, without lines; output stops at "
                 f"max_matches lines or {GREP_MAX_OUTPUT_BYTES // 1024} KB; a line longer "
@@ -276,7 +292,7 @@ GREP_TOOL = ToolDefinition.from_spec(
                 f"its first match; the search stops after {RIPGREP_TIMEOUT_SECONDS:g} "
                 "seconds. When a limit applies, truncated, warning and retry_hint say "
                 "which one and what to do next; skipped_files counts paths that could "
-                "not be read."
+                "not be read. " + DISCOVERY_IGNORE_NOTE
             ),
         ),
         concurrency=ToolConcurrency("parallel"),
@@ -290,16 +306,23 @@ GREP_TOOL = ToolDefinition.from_spec(
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
-                "matches": {
+                "base_path": {"type": "string"},
+                "files": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string"},
-                            "line_number": {"type": "integer"},
-                            "line": {"type": "string"},
+                            "path": {
+                                "type": "string",
+                                "description": "Relative to base_path.",
+                            },
+                            "matches": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Each line_number:line.",
+                            },
                         },
-                        "required": ["path", "line_number", "line"],
+                        "required": ["path", "matches"],
                         "additionalProperties": False,
                     },
                 },
@@ -311,7 +334,8 @@ GREP_TOOL = ToolDefinition.from_spec(
             },
             "required": [
                 "status",
-                "matches",
+                "base_path",
+                "files",
                 "truncated",
                 "truncation_reason",
                 "retry_hint",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, cast
@@ -11,12 +13,13 @@ from urllib.parse import quote
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import (
     UnprojectedToolOutput,
+    largest_fitting_size,
     serialize_json_tool_output,
 )
 from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
-from .tool_result_spill import spill_long_texts, spill_preview
+from .tool_result_spill import outline_previewer, spill_long_texts
 
 TOOL_RESULT_JSON_MEDIA_TYPE: Literal["application/json"] = "application/json"
 TOOL_RESULT_BINARY_MEDIA_TYPE: Literal["application/octet-stream"] = (
@@ -28,6 +31,10 @@ TOOL_RESULT_FILENAME_PREFIX = "output-"
 TOOL_RESULT_JSON_SUFFIX = ".json"
 TOOL_RESULT_BINARY_SUFFIX = ".bin"
 TOOL_RESULT_TEXT_SUFFIX = ".txt"
+# A run's folder is renamed to this, beside it, before it is removed.
+_DISCARDING_PREFIX = ".discarding-"
+
+logger = logging.getLogger(__name__)
 
 
 class ActionFileToolResultMetadata(TypedDict):
@@ -119,30 +126,123 @@ def store_tool_result(
 
     file_name = _result_file_name(TOOL_RESULT_JSON_SUFFIX)
     payload = history_text.encode("utf-8")
-    preview, retry_hint = spill_preview(
-        text=history_text, path=str(owner_path / file_name)
+    previewer = outline_previewer(
+        output=output, text=history_text, path=str(owner_path / file_name)
     )
-    metadata: ActionFileToolResultMetadata = {
+    reference: ActionFileToolResultMetadata = {
         "storage": "action_file",
         "path": str(owner_path / file_name),
         "media_type": TOOL_RESULT_JSON_MEDIA_TYPE,
         "byte_size": len(payload),
         "character_count": len(history_text),
         "line_count": count_text_lines(history_text),
-        "preview": preview,
-        "retry_hint": retry_hint,
     }
     # A result's status says how the call ended, not what it returned. Keeping it beside
     # the reference lets a reader tell, say, a patch that applied nothing from one that
     # did without opening the file.
     if isinstance(output, dict) and isinstance(status := output.get("status"), str):
-        metadata["status"] = status
+        reference["status"] = status
+
+    def with_preview(window: int) -> JSONValue:
+        preview, retry_hint = previewer(window)
+        metadata: ActionFileToolResultMetadata = {
+            **reference,
+            "preview": preview,
+            "retry_hint": retry_hint,
+        }
+        return cast(dict[str, JSONValue], metadata)
+
     return _stored_result(
         action_tool_results_path=action_tool_results_path,
         invocation_id=invocation_id,
-        output_json=cast(dict[str, JSONValue], metadata),
+        output_json=with_preview(
+            largest_fitting_size(
+                with_preview,
+                high=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+                limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+            )
+        ),
         payloads=((file_name, payload),),
     )
+
+
+def store_run_tool_result(*, spill_root: Path, output: JSONValue) -> JSONValue:
+    """What the model reads of one result of a run with no Action: the result
+    itself, or, when too large, what storage leaves in its place, the rest saved
+    under ``spill_root`` (the run's own folder) for read to page.
+
+    The run creates ``spill_root`` when it starts and removes it with
+    discard_run_tool_results when it ends; this never creates it. A tool still
+    working in a thread after its run was canceled would otherwise leave what it
+    saved where nothing removes it, so such a result fails here, unsaved.
+    """
+
+    # Raises when the folder is gone; saved results are named by the same path
+    # read checks them against.
+    root = spill_root.resolve(strict=True)
+    invocation_id = uuid.uuid4().hex
+    stored = store_tool_result(
+        action_tool_results_path=root, invocation_id=invocation_id, output=output
+    )
+    directory_fd = stored.storage_directory_fd
+    # The folder may have been taken away while the files were written; then
+    # its removal may have missed them, so they go here.
+    if directory_fd is not None and not _reachable_at(
+        directory_fd, root / invocation_id
+    ):
+        discard_stored_tool_result(stored)
+        raise FileNotFoundError(f"the run's tool result folder was removed: {root}")
+    release_error = release_stored_tool_result(stored)
+    if release_error is not None:
+        raise release_error
+    return stored.output_json
+
+
+def _reachable_at(directory_fd: int, path: Path) -> bool:
+    try:
+        return os.path.samestat(os.fstat(directory_fd), os.stat(path))
+    except FileNotFoundError:
+        return False
+
+
+def discard_run_tool_results(spill_root: Path) -> None:
+    """Remove a finished run's folder and everything saved in it.
+
+    The folder is first renamed away within its parent, atomically, so a save
+    still running from a canceled run can no longer reach it by its path and
+    saves nothing; one already writing removes its own files when it finds the
+    folder gone. A failure to remove is logged, not raised: the run's outcome
+    stands.
+    """
+
+    # Design limit: a worker that dies mid-run, or a removal that fails, leaves
+    # a folder behind; sweep these roots at startup if leftovers are seen to grow.
+    discarding = spill_root.with_name(
+        f"{_DISCARDING_PREFIX}{spill_root.name}-{uuid.uuid4().hex}"
+    )
+    try:
+        os.rename(spill_root, discarding)
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.exception("failed to move away a run's tool result folder")
+        return
+    shutil.rmtree(discarding, onexc=_skip_vanished)
+
+
+def _skip_vanished(
+    _function: Callable[..., object], path: str, exc: BaseException
+) -> None:
+    """Let the removal go on past one failure, logging all but a file gone.
+
+    A late save removing its own files may get to one the removal listed first;
+    without this, the removal would stop there and leave every file after it.
+    """
+
+    if not isinstance(exc, FileNotFoundError):
+        logger.error(
+            "failed to remove %s from a run's tool result folder", path, exc_info=exc
+        )
 
 
 def _stored_result(
@@ -320,8 +420,10 @@ __all__ = [
     "TOOL_RESULT_JSON_MEDIA_TYPE",
     "ToolResultStorageError",
     "ToolResultStorageResult",
+    "discard_run_tool_results",
     "discard_stored_tool_result",
     "release_stored_tool_result",
+    "store_run_tool_result",
     "store_tool_result",
     "validate_invocation_id",
 ]

@@ -8,11 +8,16 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm.turn_input i
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
+    optional_string_arg,
     require_string_arg,
     require_string_list_arg,
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.conversation.provider_turns import (
+    ModelNotAvailable,
+    read_provider_turn_target,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_spawn import (
     ActionSubagentSpawnRequest,
     ActionSubagentSpawnRequestError,
@@ -33,6 +38,7 @@ from pantaray_agents.local_runtime.tooling.action_subagent_resource_identity imp
 )
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.utils.trace_context import get_trace_context
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 from .shared import (
     ToolExecutionActor,
@@ -61,6 +67,15 @@ async def run_spawn_subagent_tool(
         )
     if origin is None:
         raise ToolValidationError("spawn_subagent requires an adopted call origin.")
+    model = optional_string_arg(args, "model")
+    try:
+        # Refused here, the Supervisor reads why in this call's result instead
+        # of in a child that fails on its first send.
+        read_provider_turn_target(
+            inference_profile=ACTION_EXECUTING_PROFILE_ID, model=model
+        )
+    except ModelNotAvailable as exc:
+        raise ToolValidationError(str(exc)) from exc
     trace = get_trace_context()
     process_id = trace.extra.get("process_id") if trace is not None else None
     if (
@@ -94,7 +109,7 @@ async def run_spawn_subagent_tool(
                 root_execution_session_id=state["execution_session_id"],
                 manifest_id=state["manifest_id"],
                 origin=origin,
-                model_selector=require_string_arg(args, "model"),
+                model=model,
                 action_context=frozen_executing_head(agent, state),
                 task=require_string_arg(args, "task"),
                 context_refs=tuple(require_string_list_arg(args, "context_refs")),

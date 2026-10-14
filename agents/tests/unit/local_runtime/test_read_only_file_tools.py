@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import sys
 import uuid
 from collections.abc import Callable
@@ -16,9 +17,11 @@ from pantaray_agents.local_runtime.runtime.office_runtime import (
 from pantaray_agents.local_runtime.tooling.documents import RenderedPage
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     release_stored_tool_result,
+    store_run_tool_result,
     store_tool_result,
 )
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import ReadAccessScope
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -26,12 +29,13 @@ from pantaray_agents.tools.contract import (
     ReactToolResult,
     ToolCallEnvelope,
 )
-from pantaray_agents.tools.files import ripgrep
+from pantaray_agents.tools.files import read_only_tools, ripgrep
 from pantaray_agents.tools.files.read_only_tools import (
     RENDER_PDF_PAGE_TOOL_NAME,
     build_read_only_file_tools,
 )
 
+from .discovery_output_support import grep_matches
 from .test_pdf_page_render import write_pdf
 from .test_read_document_broker import (
     PIXEL_PNG,
@@ -165,6 +169,51 @@ async def test_a_large_result_is_spilled_to_a_file_the_tools_can_read(
     assert "document-with-a-long-name-0000.md" in read.output["content"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name",
+    [
+        "list",
+        pytest.param(
+            "grep",
+            marks=pytest.mark.skipif(
+                sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+                reason="grep runs ripgrep under sandbox-exec",
+            ),
+        ),
+    ],
+)
+async def test_a_result_finishing_after_its_run_was_cleaned_up_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """A canceled run's list or grep may still finish in its thread after the
+    run removed its folder; the call fails without saving, and the folder stays
+    gone."""
+
+    registry, folder, _storage, spill_root = _tools(tmp_path)
+    for index in range(400):
+        (folder / f"document-with-a-long-name-{index:04}.md").write_text(
+            "private line\n", encoding="utf-8"
+        )
+
+    def cleaned_up_first(*, spill_root: Path, output: JSONValue) -> JSONValue:
+        # The run's end removes the folder while the scan is still going.
+        shutil.rmtree(spill_root)
+        return store_run_tool_result(spill_root=spill_root, output=output)
+
+    monkeypatch.setattr(read_only_tools, "store_run_tool_result", cleaned_up_first)
+    args: dict[str, object] = (
+        {"path": str(folder), "limit": 500}
+        if name == "list"
+        else {"pattern": "private", "base_path": str(folder)}
+    )
+
+    result = await _call(registry, name, args)
+
+    assert result.output["error_code"] == f"{name.upper()}_FAILED"
+    assert not spill_root.exists()
+
+
 def _write_text(text: str) -> Callable[[Path], None]:
     return lambda path: path.write_text(text, encoding="utf-8")
 
@@ -261,7 +310,7 @@ async def test_grep_does_not_follow_a_swapped_link_out_of_scope_for_an_encoding(
         registry, "grep", {"base_path": str(folder), "pattern": "needle"}
     )
 
-    assert [match["line"] for match in result.output["matches"]] == [
+    assert [match["line"] for match in grep_matches(result.output)] == [
         line.decode("utf-8", errors="replace").removesuffix("\n")
     ]
 
@@ -287,8 +336,8 @@ async def test_grep_skips_app_storage_but_searches_a_spilled_result(
         registry, "grep", {"base_path": spill_dir, "pattern": "name-0399"}
     )
 
-    assert in_folder.output["matches"] == []
-    assert len(in_spill.output["matches"]) == 2
+    assert in_folder.output["files"] == []
+    assert len(grep_matches(in_spill.output)) == 2
 
 
 @pytest.mark.asyncio

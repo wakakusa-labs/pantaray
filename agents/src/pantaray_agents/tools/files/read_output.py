@@ -39,7 +39,9 @@ class ReadTextPageOutput(BaseModel):
 
 class ReadFileOutput(ReadTextPageOutput):
     kind: Literal["file"]
-    truncation_reason: Literal["line_count_budget", "page_limit"] | None = None
+    truncation_reason: (
+        Literal["line_count_budget", "line_length", "page_limit"] | None
+    ) = None
     encoding: TextEncoding
 
 
@@ -70,7 +72,8 @@ class ReadDocumentOutput(ReadTextPageOutput):
 
     kind: Literal["document"]
     truncation_reason: (
-        Literal["document_budget", "line_count_budget", "page_limit"] | None
+        Literal["document_budget", "line_count_budget", "line_length", "page_limit"]
+        | None
     ) = None
     document_format: Literal["docx", "ipynb", "pdf", "pptx", "xlsx"]
     unit_kind: Literal["cell", "page", "paragraph", "sheet", "slide"]

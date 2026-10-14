@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
-    attach_repository_agents_md,
+    claim_repository_context,
+    unclaimed_checkouts,
+)
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    checkout_statuses,
 )
 from pantaray_agents.agents.action_agent.runtime.state.context import ensure_context
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
@@ -250,10 +254,24 @@ async def run_broker_tool_wrapper(
             read_context = None
         if read_context is not None:
             context = ensure_context(state)
-            attached = list(context.get("agents_md_attached_paths", []))
-            agents_md = attach_repository_agents_md(
-                attached, tool_id=tool_def.tool_id, args=args, read_context=read_context
+            statuses = await checkout_statuses(
+                unclaimed_checkouts(
+                    context.get("agents_md_attached_paths", []),
+                    tool_id=tool_def.tool_id,
+                    args=args,
+                    read_context=read_context,
+                )
             )
+            # Claimed after the await and before the next one, so a sibling
+            # saving the run meanwhile never stores a claim not yet sent.
+            attached = list(context.get("agents_md_attached_paths", []))
+            agents_md = claim_repository_context(
+                attached,
+                tool_id=tool_def.tool_id,
+                args=args,
+                read_context=read_context,
+                statuses=statuses,
+            ).text
             context["agents_md_attached_paths"] = attached
     return ToolExecutionPreparation(
         result=UnprojectedToolExecutionResult(

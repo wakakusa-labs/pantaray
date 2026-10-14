@@ -4,7 +4,7 @@ import errno
 import os
 import re
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
 from typing import TextIO
 
@@ -23,6 +23,10 @@ READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT = (
 READ_FILE_PAGE_LIMIT_RETRY_HINT = (
     "Continue with offset=next_offset and column=next_column."
 )
+READ_FILE_LINE_LENGTH_RETRY_HINT = (
+    f"Lines longer than {MAX_LINE_LENGTH:,} characters were cut; each cut line "
+    "ends with the offset and column that read the rest of it."
+)
 
 _LINE_READ_AHEAD_CHARS = MAX_LINE_LENGTH + 1
 _SKIP_CHUNK_BYTES = 1024 * 1024
@@ -32,8 +36,54 @@ _LINE_BREAK = re.compile(LINE_BREAK.pattern.encode())
 
 
 @dataclass(frozen=True, slots=True)
+class PageLine:
+    """One line of a page: its source text from ``column``, and how it ends.
+
+    ``cut`` means the line went on past ``MAX_LINE_LENGTH`` characters, so the
+    page shows a marker saying where the rest starts instead of the rest.
+    """
+
+    number: int
+    column: int
+    text: str
+    newline: str
+    cut: bool
+
+    @property
+    def end_column(self) -> int:
+        return self.column + len(self.text) - 1
+
+    def rendered(self) -> str:
+        if not self.cut:
+            return self.text + self.newline
+        marker = (
+            f" … [line cut; read offset={self.number} "
+            f"column={self.end_column + 1} for the rest]"
+        )
+        return self.text + marker + self.newline
+
+
+def render_page_lines(lines: tuple[PageLine, ...]) -> str:
+    return "".join(line.rendered() for line in lines)
+
+
+def page_retry_hint(
+    *, page_incomplete: bool, line_count_incomplete: bool, lines_cut: bool
+) -> str | None:
+    cursor_hint = (
+        READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT
+        if line_count_incomplete
+        else READ_FILE_PAGE_LIMIT_RETRY_HINT
+        if page_incomplete
+        else None
+    )
+    cut_hint = READ_FILE_LINE_LENGTH_RETRY_HINT if lines_cut else None
+    return " ".join(hint for hint in (cursor_hint, cut_hint) if hint) or None
+
+
+@dataclass(frozen=True, slots=True)
 class ReadLinesResult:
-    content: str
+    lines: tuple[PageLine, ...]
     column: int
     total_lines: int | None
     end_line: int
@@ -44,6 +94,10 @@ class ReadLinesResult:
     truncation_reason: str | None
     retry_hint: str | None
 
+    @property
+    def content(self) -> str:
+        return render_page_lines(self.lines)
+
 
 @dataclass(frozen=True, slots=True)
 class TextLineRead:
@@ -52,6 +106,8 @@ class TextLineRead:
     line_complete: bool
     stream_has_line_remainder: bool
     consumed_chars: int
+    # The line goes on past MAX_LINE_LENGTH characters after ``text``.
+    exceeds_line_length: bool = False
 
 
 def read_text_descriptor_lines(
@@ -149,7 +205,7 @@ def _read_text_lines(
     if max_bytes <= 0 or max_bytes > MAX_BYTES:
         raise ValueError(f"max_bytes must be within 1..{MAX_BYTES}")
     should_count_exact_total = text_size_bytes <= MAX_TOTAL_LINE_COUNT_BYTES
-    content_lines: list[str] = []
+    lines: list[PageLine] = []
     content_bytes = 0
     current_line = skipped_lines
     end_line = max(offset - 1, 0)
@@ -171,7 +227,7 @@ def _read_text_lines(
             break
         current_line += 1
 
-    while len(content_lines) < limit:
+    while len(lines) < limit:
         remaining_bytes = max_bytes - content_bytes
         line = _read_bounded_text_line(
             handle,
@@ -189,21 +245,32 @@ def _read_text_lines(
             next_column = current_column
             pending_current_line_remainder = line.stream_has_line_remainder
             break
-        line_bytes = len(line.text.encode("utf-8"))
-        content_lines.append(line.text)
-        content_bytes += line_bytes
+        text, newline = _split_line_newline(line.text)
+        page_line = PageLine(
+            number=current_line,
+            column=current_column,
+            text=text,
+            newline=newline,
+            cut=False,
+        )
+        line_complete = line.line_complete
+        # A line past MAX_LINE_LENGTH is cut with a marker and the page goes on
+        # to the next line, so one long line does not stop a page of many.
+        if line.exceeds_line_length:
+            cut_line = replace(page_line, cut=True, newline="\n")
+            if _encoded_len(cut_line.rendered()) <= remaining_bytes:
+                page_line = replace(cut_line, newline=_discard_line_remainder(handle))
+                line_complete = True
+        lines.append(page_line)
+        content_bytes += _encoded_len(page_line.rendered())
         end_line = current_line
-        end_column = current_column + line.consumed_chars - 1
-        if not line.line_complete:
+        end_column = page_line.end_column
+        if not line_complete:
             next_offset = current_line
-            next_column = current_column + line.consumed_chars
+            next_column = page_line.end_column + 1
             pending_current_line_remainder = line.stream_has_line_remainder
             break
-        if content_bytes >= max_bytes:
-            next_offset = current_line + 1
-            next_column = 1
-            break
-        if len(content_lines) >= limit:
+        if content_bytes >= max_bytes or len(lines) >= limit:
             next_offset = current_line + 1
             next_column = 1
             break
@@ -232,32 +299,31 @@ def _read_text_lines(
         )
     page_incomplete = next_offset is not None
     line_count_incomplete = total_lines is None
-    truncated = page_incomplete or line_count_incomplete
+    lines_cut = any(line.cut for line in lines)
     truncation_reason = (
         "line_count_budget"
         if line_count_incomplete
         else "page_limit"
         if page_incomplete
-        else None
-    )
-    retry_hint = (
-        READ_FILE_LINE_COUNT_BUDGET_RETRY_HINT
-        if line_count_incomplete
-        else READ_FILE_PAGE_LIMIT_RETRY_HINT
-        if page_incomplete
+        else "line_length"
+        if lines_cut
         else None
     )
     return ReadLinesResult(
-        content="".join(content_lines),
+        lines=tuple(lines),
         column=column,
         total_lines=total_lines,
         end_line=end_line,
         end_column=end_column,
         next_offset=next_offset,
         next_column=next_column,
-        truncated=truncated,
+        truncated=truncation_reason is not None,
         truncation_reason=truncation_reason,
-        retry_hint=retry_hint,
+        retry_hint=page_retry_hint(
+            page_incomplete=page_incomplete,
+            line_count_incomplete=line_count_incomplete,
+            lines_cut=lines_cut,
+        ),
     )
 
 
@@ -338,6 +404,7 @@ def _read_bounded_text_line(
             line_complete=False,
             stream_has_line_remainder=True,
             consumed_chars=len(line),
+            exceeds_line_length=True,
         )
 
     suffix_newline = newline or _discard_line_remainder(handle)
@@ -449,9 +516,10 @@ def _split_line_newline(line: str) -> tuple[str, str]:
 
 __all__ = [
     "LINE_BREAK",
-    "READ_FILE_PAGE_LIMIT_RETRY_HINT",
+    "PageLine",
     "ReadLinesResult",
     "count_text_lines",
+    "page_retry_hint",
     "read_text_descriptor_lines",
     "read_text_value_lines",
 ]

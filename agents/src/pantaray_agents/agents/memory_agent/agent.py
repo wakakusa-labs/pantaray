@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,8 +31,7 @@ from pantaray_agents.local_runtime.tooling.agent_experience import (
     SEARCH_ACTION_STEPS_TOOL_NAME,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    release_stored_tool_result,
-    store_tool_result,
+    store_run_tool_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
@@ -264,13 +262,7 @@ def saved_results_for_run(
     root = tool_results_path.resolve(strict=True)
 
     def save_result(output: JSONValue) -> JSONValue:
-        stored = store_tool_result(
-            action_tool_results_path=root, invocation_id=uuid.uuid4().hex, output=output
-        )
-        release_error = release_stored_tool_result(stored)
-        if release_error is not None:
-            raise release_error
-        return stored.output_json
+        return store_run_tool_result(spill_root=root, output=output)
 
     # read's db_path locates the Office converter, which no saved result needs.
     return save_result, build_saved_result_read_tool(db_path=db_path, spill_root=root)

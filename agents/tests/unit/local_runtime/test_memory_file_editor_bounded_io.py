@@ -92,17 +92,19 @@ async def test_read_file_continues_long_line_from_exact_column(tmp_path: Path) -
             {
                 "root": "memory_draft",
                 "path": "long.txt",
-                "offset": first.output["next_offset"],
-                "column": first.output["next_column"],
+                "offset": 1,
+                "column": 2_001,
                 "limit": 1,
             },
         ),
         2,
     )
 
-    assert first.output["text"] == "x" * 2_000
-    assert first.output["next_offset"] == 1
-    assert first.output["next_column"] == 2_001
+    assert first.output["text"] == (
+        "x" * 2_000 + " … [line cut; read offset=1 column=2001 for the rest]\n"
+    )
+    assert first.output["truncated"] is True
+    assert first.output["next_offset"] is None
     assert second.output["text"] == "x" * 100 + "\n"
     assert second.output["next_offset"] is None
 

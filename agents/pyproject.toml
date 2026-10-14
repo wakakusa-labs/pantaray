@@ -52,6 +52,10 @@ dependencies = [
     # It is a C++ parser fed files the user did not write, so it is loaded only
     # in the short-lived sandboxed worker, never in the helper itself.
     "pypdfium2>=5.13.0",
+    # list leaves out what glob and grep leave out; ripgrep prints no
+    # directories, so list's sandboxed worker asks the ignore library ripgrep
+    # is built on.
+    "rignore>=0.7.6",
 ]
 
 [project.optional-dependencies]

@@ -8,6 +8,9 @@ const { buildUiLanguageAdditionalArguments } = require('./ui_language_bootstrap'
 const { buildContentSecurityPolicy } = require('./content_security_policy');
 const { PANTARAY_ACCOUNT_LOGIN_ENABLED } = require('./dist/auth/accountLoginFeature');
 const { keepWindowOnItsDocument } = require('./dist/security/windowOpenPolicy');
+const { createLogger } = require('./logger');
+
+const logger = createLogger();
 
 const BROWSER_WINDOW_EINTR_RETRY_LIMIT = 8;
 const WINDOW_STARTUP_STEP_EINTR_RETRY_LIMIT = 8;
@@ -76,6 +79,12 @@ function loadPackagedIndex(win, hashRoute) {
   }
 }
 
+/** The app's pages and workers: the packaged files, or the dev server in development. */
+function isAppOwnUrl(url, isDev) {
+  if (!isDev) return url.startsWith('file:');
+  return new URL(url).origin === buildFrontendDevOrigin();
+}
+
 function setupWindowEventListeners(win) {
   if (!win) return;
 
@@ -103,13 +112,13 @@ function setupWindowEventListeners(win) {
     'csp-listener',
     () => {
       win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-        // The window's policy forbids being framed; a previewed PDF is framed by design and
-        // carries no script of the app's.
-        if (details.url.startsWith('pantaray-action-file:')) {
+        const isDev = isDevRuntime();
+        // The policy is the app's own: stamped on anything else, its frame-ancestors 'none'
+        // blocks Chromium's PDF viewer inside a previewed PDF's frame.
+        if (!isAppOwnUrl(details.url, isDev)) {
           callback({});
           return;
         }
-        const isDev = isDevRuntime();
         let apiOrigin = null;
         if (!isDev) {
           // prod は許可先を固定（VITE_API_HOST相当 + アカウントログインが有効なら Supabase）
@@ -391,18 +400,20 @@ function createMainWindow(options = {}) {
   runWindowStartupStepWithRetry(
     'did-fail-load-listener',
     () => {
-      win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-        if (!isDevRuntime()) {
-          console.error('MAIN_WINDOW_LOAD_FAILED', {
-            errorCode,
-            errorDescription,
-            validatedURL,
-          });
-          if (hasRetried) return;
-          hasRetried = true;
-          loadPackagedIndex(win, retryRoute);
+      win.webContents.on(
+        'did-fail-load',
+        (_event, errorCode, errorDescription, _url, isMainFrame) => {
+          // A frame inside the page, such as a previewed PDF's, failing leaves the app loaded.
+          if (!isMainFrame) return;
+          if (!isDevRuntime()) {
+            // The URL is the app's own index; its route can name a task, so it stays out.
+            logger.event('MAIN_WINDOW_LOAD_FAILED', { errorCode, errorDescription }, 'error');
+            if (hasRetried) return;
+            hasRetried = true;
+            loadPackagedIndex(win, retryRoute);
+          }
         }
-      });
+      );
     },
     { optional: true }
   );

@@ -41,6 +41,7 @@ from pantaray_agents.local_runtime.tooling.action_subagent_resource_identity imp
 )
 from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 from .action_seed import insert_agent_action
 from .resource_recovery_test_support import bootstrap_runtime_db
@@ -142,7 +143,7 @@ def _request(
         root_execution_session_id=context.execution_session_id,
         manifest_id=context.manifest_id,
         origin=ActionToolCallOrigin(llm_step_id=llm_step_id, call_id="call-1"),
-        model_selector="gpt-6-luna",
+        model=None,
         action_context="# Workspace Paths\nparent context",
         task="Inspect the assigned boundary",
         context_refs=("conversation:step-1",),
@@ -221,7 +222,7 @@ def test_exact_replay_is_stable_and_changed_content_conflicts(
     for changed in (
         replace(request, task="Different task"),
         replace(request, context_refs=("conversation:different",)),
-        replace(request, model_selector="gpt-5.6-sol"),
+        replace(request, model="gpt-5.6-sol"),
         replace(
             request,
             resource_claims=(ExternalSpawnResourceClaim("workspace", "other"),),
@@ -450,23 +451,13 @@ def test_child_message_replay_conflict_and_terminal_boundary(tmp_path: Path) -> 
     assert event_count == 1
 
 
-@pytest.mark.parametrize(
-    ("model_selector", "profile_id"),
-    (
-        ("gpt-6-luna", "action.subagent.luna"),
-        ("gpt-5.6-sol", "action.subagent.sol"),
-    ),
-)
-def test_spawn_persists_the_selected_configured_profile(
+@pytest.mark.parametrize("model", (None, "gpt-5.6-sol"))
+def test_spawn_runs_the_child_on_the_supervisor_profile_and_a_named_model(
     tmp_path: Path,
-    model_selector: str,
-    profile_id: str,
+    model: str | None,
 ) -> None:
     db_path, context = _runtime(tmp_path)
-    request = replace(
-        _request(context, llm_step_id=f"think-{model_selector}"),
-        model_selector=model_selector,
-    )
+    request = replace(_request(context, llm_step_id=f"think-{model}"), model=model)
     _insert_think(db_path, request)
 
     result = _spawn(db_path, request)
@@ -476,10 +467,9 @@ def test_spawn_persists_the_selected_configured_profile(
             "SELECT payload_json FROM job_payloads WHERE job_id = ?",
             (result.job_id,),
         ).fetchone()[0]
-    assert (
-        parse_action_subagent_job_payload_json(payload_json)["inference_profile_id"]
-        == profile_id
-    )
+    payload = parse_action_subagent_job_payload_json(payload_json)
+    assert payload["inference_profile_id"] == ACTION_EXECUTING_PROFILE_ID
+    assert payload.get("model") == model
 
 
 @pytest.mark.parametrize(

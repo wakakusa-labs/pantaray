@@ -2,19 +2,26 @@
 
 The result keeps its own shape: only its longest text values move to files of
 their own, written as the text itself so a line-based read pages through it, and
-each moved value leaves a reference that holds its head and says how to read the
-rest. Small fields such as a status or an exit code stay where they were.
+each moved value leaves a reference that holds its head and tail and says how to
+read the rest. Small fields such as a status or an exit code stay where they were.
+The previews share whatever room the inline limit leaves, so what is shown inline
+is as much of the result as fits.
 """
 
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Callable, Iterator, Set
+from dataclasses import dataclass
 from functools import partial
 from typing import Literal, TypeGuard
 
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import serialize_json_tool_output
+from pantaray_agents.schema.tool_result import (
+    largest_fitting_size,
+    serialize_json_tool_output,
+)
 from pantaray_agents.tools.files.read_sniffing import SAMPLE_BYTES, reads_as_text
 from pantaray_agents.tools.files.text_lines import LINE_BREAK, count_text_lines
 
@@ -35,7 +42,17 @@ TOOL_RESULT_PREVIEW_KEYS = frozenset({"preview", "retry_hint"})
 # The result's own status, kept beside the reference only when the result has one.
 TOOL_RESULT_STATUS_KEY = "status"
 SPILLED_TEXT_KEYS = TOOL_RESULT_JSON_METADATA_KEYS | TOOL_RESULT_PREVIEW_KEYS
-TOOL_RESULT_PREVIEW_CHARS = 2_000
+# A text this short is not moved out alone: a result whose bulk is in many such
+# values is stored whole, and its outline shows them better than many previews
+# too small to say anything.
+SPILL_MIN_TEXT_CHARS = 2_000
+# A preview gives one part in this many to the end of its text. Command output
+# ends with what matters most (the error, the failing tests, the exit summary),
+# pages and listings start with it, so the head keeps the larger share.
+_PREVIEW_TAIL_DIVISOR = 4
+# What the outline of a result stored whole counts as a short value, such as a
+# title, a URL, a path or a status; longer texts are only in the file.
+OUTLINE_VALUE_CHARS = 200
 
 
 def is_json_spill_shape(keys: Set[str]) -> bool:
@@ -59,16 +76,23 @@ def spilled_texts(output: JSONValue) -> list[dict[str, JSONValue]]:
     return [value for value in _values(output) if is_spilled_text(value)]
 
 
+# A preview and how to read the rest of what it shows part of, for a window of
+# at most this many characters of preview.
+type Previewer = Callable[[int], tuple[str, str]]
+
+
 def spill_long_texts(
     output: JSONValue, *, limit: int, new_path: Callable[[], str]
 ) -> tuple[JSONValue, list[tuple[str, str]]] | None:
-    """Move the longest text values out until the result fits ``limit`` characters.
+    """Move long text values out until the result fits ``limit`` characters.
 
-    Returns the result with references in place of the moved values, and each moved
-    value's path and text. A text read would not page as text is not moved. Returns
-    None when the bulk is not in long text values that read can page,
-    or when the result already holds something shaped like a reference, which a
-    reader could not tell from the ones this puts in.
+    The long texts share the room under ``limit`` alike: each up to one length
+    stays in place, and each longer one moves out, leaving a reference whose
+    preview shows that much of it. Returns the result and each moved value's
+    path and text. A text read would not page as text is not moved. Returns None
+    when the result does not fit even with every long text moved, or when it
+    already holds something shaped like a reference, which a reader could not
+    tell from the ones this puts in.
     """
 
     if any(
@@ -77,26 +101,65 @@ def spill_long_texts(
     ):
         return None
     holder: list[JSONValue] = [copy.deepcopy(output)]
-    candidates = sorted(
-        (
-            (text, put)
-            for text, put in _texts(holder)
-            if len(text) > TOOL_RESULT_PREVIEW_CHARS and _readable_as_text(text)
-        ),
-        key=lambda candidate: len(candidate[0]),
-        reverse=True,
+    texts = [
+        _LongText.of(text=text, path=new_path(), put=put)
+        for text, put in _texts(holder)
+        if len(text) > SPILL_MIN_TEXT_CHARS and _readable_as_text(text)
+    ]
+
+    def shown_up_to(length: int) -> JSONValue:
+        for text in texts:
+            text.put(text.shown(length))
+        return holder[0]
+
+    if not texts or len(serialize_json_tool_output(shown_up_to(0))) > limit:
+        return None
+    # Neither a text kept in place nor a preview can be longer than the limit.
+    length = largest_fitting_size(
+        shown_up_to,
+        high=min(limit, max(len(text.text) for text in texts)),
+        limit=limit,
     )
-    # Design limit: each moved value keeps a preview of up to 2,000 characters, so
-    # about eight fit the 20,000-character limit and a result with more moves whole
-    # as JSON. Share the preview budget when such results show up.
-    moved: list[tuple[str, str]] = []
-    for text, put in candidates:
-        file_path = new_path()
-        put(_spilled_text(text=text, path=file_path))
-        moved.append((file_path, text))
-        if len(serialize_json_tool_output(holder[0])) <= limit:
-            return holder[0], moved
-    return None
+    return shown_up_to(length), [
+        (text.path, text.text) for text in texts if len(text.text) > length
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class _LongText:
+    text: str
+    path: str
+    put: Callable[[JSONValue], None]
+    # The reference without its preview, measured once however often it is shown.
+    reference: dict[str, JSONValue]
+    previewer: Previewer
+
+    @classmethod
+    def of(cls, *, text: str, path: str, put: Callable[[JSONValue], None]) -> _LongText:
+        line_count = count_text_lines(text)
+        return cls(
+            text=text,
+            path=path,
+            put=put,
+            reference={
+                "storage": ACTION_FILE_STORAGE,
+                "path": path,
+                "media_type": SPILLED_TEXT_MEDIA_TYPE,
+                "byte_size": len(text.encode("utf-8")),
+                "character_count": len(text),
+                "line_count": line_count,
+            },
+            previewer=spill_previewer(text=text, path=path, line_count=line_count),
+        )
+
+    def shown(self, length: int) -> JSONValue:
+        """The text itself when it is at most ``length`` long, else its reference
+        with a preview of up to ``length`` characters."""
+
+        if len(self.text) <= length:
+            return self.text
+        preview, retry_hint = self.previewer(length)
+        return {**self.reference, "preview": preview, "retry_hint": retry_hint}
 
 
 def _readable_as_text(text: str) -> bool:
@@ -107,14 +170,57 @@ def _readable_as_text(text: str) -> bool:
     return reads_as_text(text[:SAMPLE_BYTES].encode("utf-8")[:SAMPLE_BYTES])
 
 
-def spill_preview(*, text: str, path: str) -> tuple[str, str]:
-    """The head of a spilled text, cut at a line end, and how to read all of it.
+def spill_previewer(*, text: str, path: str, line_count: int) -> Previewer:
+    """The head and tail of a spilled text, cut at line ends, and how to read the
+    lines between.
 
     Lines end where read ends them (also at a lone carriage return, as progress
-    output writes), so the offset given here is the line read starts after it.
+    output writes), so the line numbers given here are the ones read takes. A
+    text with no line start near its end shows only its head.
     """
 
-    window = TOOL_RESULT_PREVIEW_CHARS
+    size = f"This result is {len(text):,} characters in {line_count:,} lines"
+
+    def preview(window: int) -> tuple[str, str]:
+        tail_window = window // _PREVIEW_TAIL_DIVISOR
+        head, next_line, head_end = _head(text, window - tail_window)
+        # The tail starts at the first line start that leaves it within its window.
+        tail_start = next(
+            (
+                line_end.end()
+                for line_end in LINE_BREAK.finditer(
+                    text, max(head_end, len(text) - tail_window - 1)
+                )
+                if len(text) - tail_window <= line_end.end() < len(text)
+            ),
+            None,
+        )
+        if tail_start is None:
+            head, next_line, _end = _head(text, window)
+            return head, (
+                f"{size}, too large to show inline; preview holds only its first "
+                f"{len(head):,}. Read the rest with read path={path} "
+                f"offset={next_line}, continuing with next_offset, or search it "
+                "with grep."
+            )
+        tail = text[tail_start:]
+        last_left_out = line_count - count_text_lines(tail)
+        marker = f"[… lines {next_line:,}–{last_left_out:,} left out …]"
+        return f"{head}\n{marker}\n{tail}", (
+            f"{size}, too large to show inline; preview holds its first "
+            f"{len(head):,} and last {len(tail):,} characters, with lines "
+            f"{next_line:,} to {last_left_out:,} left out where it says so. Read "
+            f"them with read path={path} offset={next_line}, continuing with "
+            "next_offset, or search it with grep."
+        )
+
+    return preview
+
+
+def _head(text: str, window: int) -> tuple[str, int, int]:
+    """Up to ``window`` characters from the start of ``text``, cut at a line end;
+    the line read starts after it, and where in ``text`` what it leaves begins."""
+
     # One character past the window keeps a CRLF that straddles its end whole.
     breaks = [
         line_end
@@ -126,32 +232,91 @@ def spill_preview(*, text: str, path: str) -> tuple[str, str]:
         None,
     )
     if len(text) > window and cut is not None:
-        preview = text[: breaks[cut].start()]
-        next_line = cut + 2
-    else:
-        # No line end to cut at: the preview stops inside the line read starts on.
-        preview = text[:window]
-        next_line = 1 + sum(1 for line_end in breaks if line_end.end() <= window)
-    return preview, (
-        f"This result is {len(text):,} characters in {count_text_lines(text):,} "
-        f"lines, too large to show inline; preview holds only its first "
-        f"{len(preview):,}. Read the rest with read path={path} offset={next_line}, "
-        "continuing with next_offset, or search it with grep."
+        return text[: breaks[cut].start()], cut + 2, breaks[cut].end()
+    # No line end to cut at: the preview stops inside the line read starts on.
+    head = text[:window]
+    next_line = 1 + sum(1 for line_end in breaks if line_end.end() <= window)
+    return head, next_line, len(head)
+
+
+def outline_previewer(*, output: JSONValue, text: str, path: str) -> Previewer:
+    """An outline of a result stored whole as JSON, and how to read all of it.
+
+    Such a result holds many values, none long enough to move out alone, so its
+    head would show only the first few. The outline lists the short values of
+    every object instead, one object per line under its place in the result,
+    so what the result holds and where can be seen without opening the file.
+    """
+
+    line_count = count_text_lines(text)
+    lines = list(_outline_lines(output, place=""))
+    if len(lines) <= 1:
+        # A result this large with at most one line of short values holds its
+        # bulk in the texts the outline leaves out, so their head says more.
+        return spill_previewer(text=text, path=path, line_count=line_count)
+    retry_hint = (
+        f"This result is {len(text):,} characters in {line_count:,} lines of "
+        "JSON, too large to show inline; preview outlines it with its values of "
+        f"up to {OUTLINE_VALUE_CHARS} characters, without the longer texts. Read "
+        f"all of it with read path={path} offset=1, continuing with next_offset, "
+        "or search it with grep."
     )
 
+    def more(shown: int) -> list[str]:
+        hidden = len(lines) - shown
+        return [f"… {hidden:,} more of {len(lines):,} lines"] if hidden else []
 
-def _spilled_text(*, text: str, path: str) -> dict[str, JSONValue]:
-    preview, retry_hint = spill_preview(text=text, path=path)
-    return {
-        "storage": ACTION_FILE_STORAGE,
-        "path": path,
-        "media_type": SPILLED_TEXT_MEDIA_TYPE,
-        "byte_size": len(text.encode("utf-8")),
-        "character_count": len(text),
-        "line_count": count_text_lines(text),
-        "preview": preview,
-        "retry_hint": retry_hint,
-    }
+    def preview(window: int) -> tuple[str, str]:
+        shown, length = 0, -1
+        # The lines shown so far, joined, with the line saying how many are left.
+        while shown < len(lines) and (
+            length
+            + 1
+            + len(lines[shown])
+            + sum(len(line) + 1 for line in more(shown + 1))
+            <= window
+        ):
+            length += 1 + len(lines[shown])
+            shown += 1
+        head = lines[:shown] or [lines[0][: window // 2] + "…"]
+        return "\n".join([*head, *more(len(head))]), retry_hint
+
+    return preview
+
+
+def _outline_lines(value: JSONValue, *, place: str) -> Iterator[str]:
+    prefix = f"{place}: " if place else ""
+    if isinstance(value, dict):
+        fields = " ".join(
+            f"{key}={_outline_value(child)}"
+            for key, child in value.items()
+            if _is_short(child)
+        )
+        if fields:
+            yield prefix + fields
+        for key, child in value.items():
+            if isinstance(child, dict | list):
+                yield from _outline_lines(
+                    child, place=f"{place}.{key}" if place else key
+                )
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            if isinstance(child, dict | list):
+                yield from _outline_lines(child, place=f"{place}[{index}]")
+            elif _is_short(child):
+                yield f"{place}[{index}]: {_outline_value(child)}"
+    elif _is_short(value):
+        yield _outline_value(value)
+
+
+def _is_short(value: JSONValue) -> bool:
+    if isinstance(value, str):
+        return len(value) <= OUTLINE_VALUE_CHARS and LINE_BREAK.search(value) is None
+    return not isinstance(value, dict | list)
+
+
+def _outline_value(value: JSONValue) -> str:
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _values(value: JSONValue) -> Iterator[JSONValue]:

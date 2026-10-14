@@ -7,7 +7,6 @@ tools' results do, and the model reads the rest from there.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +15,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_spill import (
     accepting_spilled_texts,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    release_stored_tool_result,
-    store_tool_result,
+    store_run_tool_result,
 )
 from pantaray_agents.local_runtime.web_tools.client import (
     WebToolsWrapperContext,
@@ -65,7 +63,8 @@ class WebResearchToolSession:
 
     ``speaks_to_user`` is set where the model answers the user directly (the
     chat): only there does a failure the user can fix ask the model to tell
-    them how. ``spill_root`` is the run's folder for large results.
+    them how. ``spill_root`` is the run's folder for large results, created
+    when the tools are built at the start of the run.
     """
 
     user_id: str
@@ -77,6 +76,7 @@ class WebResearchToolSession:
             raise ValueError("web research session user_id must not be empty")
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
+        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
         return (
             self._definition(
                 name=WEB_SEARCH_TOOL_NAME,
@@ -137,17 +137,10 @@ class WebResearchToolSession:
                 output=output,
                 error_message=message if isinstance(message, str) else None,
             )
-        self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
-        stored = store_tool_result(
-            action_tool_results_path=self.spill_root,
-            invocation_id=uuid.uuid4().hex,
-            output=output,
-        )
-        release_error = release_stored_tool_result(stored)
-        if release_error is not None:
-            raise release_error
         return ReactToolResult(
-            tool_name=tool_name, status="success", output=stored.output_json
+            tool_name=tool_name,
+            status="success",
+            output=store_run_tool_result(spill_root=self.spill_root, output=output),
         )
 
     def _context(self) -> WebToolsWrapperContext:

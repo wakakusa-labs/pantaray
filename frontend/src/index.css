@@ -12,6 +12,8 @@
 }
 
 :root {
+  /* Every window is dark: native scrollbars and form controls draw in their dark defaults. */
+  color-scheme: dark;
   /* The window's title bar row, where the traffic lights sit (see .app-titlebar). */
   --app-titlebar-height: 40px;
   /* The detail panes' header row; the sidebar panel's top edge runs on from its bottom line. */
@@ -120,24 +122,6 @@ body {
   background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
-}
-
-body::-webkit-scrollbar {
-  width: 7px;
-}
-
-body::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 999px;
-}
-
-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-}
-
-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Electron overlay window specific styles */

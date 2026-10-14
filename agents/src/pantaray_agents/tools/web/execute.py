@@ -17,12 +17,19 @@ from dataclasses import dataclass
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+)
 from pantaray_agents.local_runtime.web_tools.client import (
     WebContentExecutionError,
     WebContentInvalidResponseError,
     WebToolsWrapperContext,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.tool_result import (
+    largest_fitting_size,
+    serialize_json_tool_output,
+)
 from pantaray_agents.tools.contract import tool_error_output
 from pantaray_llm.errors import (
     PROXY_AUTHENTICATION_FAILED,
@@ -45,7 +52,12 @@ from pantaray_llm.profiles import (
 )
 
 from .definitions import WEB_SEARCH_QUERY_SECONDS
-from .fetch import WebSearchResponse, fetch_web_extract, fetch_web_search
+from .fetch import (
+    WebSearchResponse,
+    WebSearchResult,
+    fetch_web_extract,
+    fetch_web_search,
+)
 from .validation import (
     ArgumentProblem,
     extract_argument_problem,
@@ -56,6 +68,10 @@ QUERY_EXCERPTS_RETRY_HINT = (
     f"query was set, so each raw_content holds only up to {WEB_EXCERPTS_PER_PAGE} "
     "excerpts relevant to it, joined by [...], not the full page. Call "
     "web_extract again without query to read the full page."
+)
+_CUT_EXCERPTS_RETRY_HINT = (
+    "To keep every result inline, each content longer than {chars:,} characters "
+    "was cut there and ends with …. Read a page whole with web_extract."
 )
 _NOTHING_RETURNED = "No content was returned for this URL."
 # Where the web search key is set, as the app labels it: the UI's i18n keys
@@ -137,40 +153,84 @@ async def run_web_search(
     if not any(isinstance(outcome, _Found) for outcome in outcomes):
         return outcomes[0]  # type: ignore[return-value]
     seen: set[str] = set()
-    searches: list[JSONValue] = []
+    found: list[tuple[str, _Found | dict[str, JSONValue], list[WebSearchResult]]] = []
     for query, outcome in zip(queries, outcomes, strict=True):
-        if not isinstance(outcome, _Found):
-            searches.append({"query": query, "error": outcome["message"]})
-            continue
         # A URL stays under the first query that found it.
-        rows = [row for row in outcome.response.results if row.url not in seen]
-        seen.update(row.url for row in rows)
-        searches.append(
-            {
-                "query": query,
-                "results": [
-                    {
-                        "title": row.title,
-                        "url": row.url,
-                        "content": row.content,
-                        "score": row.score,
-                    }
-                    for row in rows
-                ],
-                # Judged on what the query found, before repeats were dropped.
-                "meta": _meta(
-                    context=outcome.context,
-                    profile_id=WEB_SEARCH_PROFILE_ID,
-                    provider="tavily",
-                    outcome=PROXY_OUTCOME_COMPLETE
-                    if outcome.response.results
-                    else PROXY_OUTCOME_NO_RESULTS,
-                    upstream_request_id=outcome.response.upstream_request_id,
-                    on_nothing=PROXY_SUGGESTED_ACTION_REFINE_QUERY,
-                ),
-            }
+        rows = (
+            [row for row in outcome.response.results if row.url not in seen]
+            if isinstance(outcome, _Found)
+            else []
         )
-    return {"status": "success", "searches": searches}
+        seen.update(row.url for row in rows)
+        found.append((str(query), outcome, rows))
+
+    def result(excerpt_chars: int | None) -> dict[str, JSONValue]:
+        searches: list[JSONValue] = []
+        for query, outcome, rows in found:
+            if not isinstance(outcome, _Found):
+                searches.append({"query": query, "error": outcome["message"]})
+                continue
+            searches.append(
+                {
+                    "query": query,
+                    "results": [
+                        {
+                            "title": row.title,
+                            "url": row.url,
+                            "content": _excerpt(row.content, excerpt_chars),
+                            "score": row.score,
+                        }
+                        for row in rows
+                    ],
+                    # Judged on what the query found, before repeats were dropped.
+                    "meta": _meta(
+                        context=outcome.context,
+                        profile_id=WEB_SEARCH_PROFILE_ID,
+                        provider="tavily",
+                        outcome=PROXY_OUTCOME_COMPLETE
+                        if outcome.response.results
+                        else PROXY_OUTCOME_NO_RESULTS,
+                        upstream_request_id=outcome.response.upstream_request_id,
+                        on_nothing=PROXY_SUGGESTED_ACTION_REFINE_QUERY,
+                    ),
+                }
+            )
+        cut = excerpt_chars is not None and any(
+            len(row.content) > excerpt_chars for _q, _o, rows in found for row in rows
+        )
+        return {
+            "status": "success",
+            "searches": searches,
+            "retry_hint": _CUT_EXCERPTS_RETRY_HINT.format(chars=excerpt_chars)
+            if cut
+            else None,
+        }
+
+    # Every title and URL stays inline, with the excerpts cut to one length so
+    # the whole fits: a result stored away for being too large shows only a
+    # preview, and a model rarely reads on past it. When even the titles and
+    # URLs alone do not fit, the result is stored away whole rather than losing
+    # its excerpts.
+    whole = result(None)
+    if _fits_inline(whole) or not _fits_inline(result(0)):
+        return whole
+    longest = max(len(row.content) for _q, _o, rows in found for row in rows)
+    return result(
+        largest_fitting_size(
+            result, high=longest, limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+        )
+    )
+
+
+def _excerpt(content: str, chars: int | None) -> str:
+    return content if chars is None or len(content) <= chars else content[:chars] + "…"
+
+
+def _fits_inline(output: dict[str, JSONValue]) -> bool:
+    return (
+        len(serialize_json_tool_output(cast(JSONValue, output)))
+        <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    )
 
 
 @dataclass(frozen=True, slots=True)

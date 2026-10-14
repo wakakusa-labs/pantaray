@@ -91,8 +91,17 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
             return [_count(body, "attachments", "page", "pages")]
         case "list":
             return [_count(body, "entries", "entry", "entries")]
-        case "glob" | "grep":
+        case "glob":
             return [_count(body, "matches", "match", "matches")]
+        case "grep":
+            files = [
+                item for item in _items(body, "files") if isinstance(item, Mapping)
+            ]
+            found = sum(len(_items(item, "matches")) for item in files)
+            return [
+                f"{found:,} {'match' if found == 1 else 'matches'}",
+                f"{len(files):,} {'file' if len(files) == 1 else 'files'}",
+            ]
         case "bash" | "run_python":
             return _command_detail(body)
         case "apply_patch":

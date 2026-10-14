@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from ..action_session_temp_paths import (
     validate_action_storage_component,
 )
 from ..outside_workspace_grant import app_owned_roots
+from ..tool_result_storage import discard_run_tool_results
 from .commands import SuggestionCommandSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
@@ -47,12 +47,9 @@ def suggestion_tool_results_root(*, db_path: Path, run_id: str) -> Path:
 def discard_suggestion_tool_results(*, db_path: Path, run_id: str) -> None:
     """Remove a finished run's large tool results, which only that run reads."""
 
-    # Design limit: a worker that dies mid-run leaves its folder behind; sweep
-    # this root at startup if leftovers are seen to grow.
-    try:
-        shutil.rmtree(suggestion_tool_results_root(db_path=db_path, run_id=run_id))
-    except FileNotFoundError:
-        return
+    discard_run_tool_results(
+        suggestion_tool_results_root(db_path=db_path, run_id=run_id)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +68,7 @@ class LocalSuggestionResearchTools:
         run_id: str,
     ) -> tuple[ReactToolDefinition, ...]:
         memory_context = MemoryContextSession(user_id=user_id, run_id=run_id)
+        spill_root = suggestion_tool_results_root(db_path=self.db_path, run_id=run_id)
         memory_tools = MemoryRetrievalSession(
             db_path=self.db_path,
             busy_timeout_ms=self.busy_timeout_ms,
@@ -104,17 +102,13 @@ class LocalSuggestionResearchTools:
                 folders=self.snapshot.folders,
                 read_access_scope=self.snapshot.read_access_scope,
                 app_storage_roots=app_owned_roots(self.db_path),
-                spill_root=suggestion_tool_results_root(
-                    db_path=self.db_path, run_id=run_id
-                ),
+                spill_root=spill_root,
                 memory_folders=self.snapshot.memory_folders,
             ),
             *WebResearchToolSession(
                 user_id=user_id,
                 speaks_to_user=False,
-                spill_root=suggestion_tool_results_root(
-                    db_path=self.db_path, run_id=run_id
-                ),
+                spill_root=spill_root,
             ).definitions(),
             *SuggestionZaneiSession(
                 reader=SourceReader(context_source_control.gate),
@@ -127,6 +121,7 @@ class LocalSuggestionResearchTools:
                     user_id=user_id,
                     workspace_roots=self.snapshot.folders,
                     read_access_scope=self.snapshot.read_access_scope,
+                    spill_root=spill_root,
                 ).definitions()
                 if self.snapshot.commands_allowed
                 else ()

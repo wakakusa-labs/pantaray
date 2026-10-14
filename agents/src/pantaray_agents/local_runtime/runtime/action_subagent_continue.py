@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
 
 from ..storage.migrations import MigrationError
 from ..storage.migrations.connection import configure_connection
@@ -92,18 +91,6 @@ def continue_action_subagent(
             (request.child_process_id,),
         ).fetchall()
     finished = parse_action_subagent_job_payload_json(str(row[0]))
-    model_selector = next(
-        (
-            setting.selector
-            for setting in SUBAGENT_MODEL_SETTINGS
-            if setting.profile_id == finished["inference_profile_id"]
-        ),
-        None,
-    )
-    if model_selector is None:
-        raise ActionSubagentContinueInputError(
-            "the finished subagent's model is no longer configured"
-        )
     return spawn_action_subagent(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
@@ -115,7 +102,7 @@ def continue_action_subagent(
             root_execution_session_id=request.root_execution_session_id,
             manifest_id=request.manifest_id,
             origin=request.origin,
-            model_selector=model_selector,
+            model=finished.get("model"),
             action_context=request.action_context,
             task=finished["task"],
             context_refs=tuple(finished["context_refs"]),

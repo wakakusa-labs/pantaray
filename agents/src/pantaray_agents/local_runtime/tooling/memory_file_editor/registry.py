@@ -129,7 +129,8 @@ class LocalMemoryFileEditorTools:
                 name=READ_FILE_TOOL_NAME,
                 description=self._read_description(
                     "Read one bounded page of a UTF-8 text file. Continue with "
-                    "offset=next_offset and column=next_column when truncated. "
+                    "offset=next_offset and column=next_column while next_offset "
+                    "is not null; when truncated, follow retry_hint. "
                     "This is the canonical source for apply_patch context/remove "
                     "lines when editing an existing file."
                 ),

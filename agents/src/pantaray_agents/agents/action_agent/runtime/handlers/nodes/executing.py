@@ -58,9 +58,9 @@ from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.budget import ContextCapacityExceeded
 from pantaray_agents.conversation.provider_turns import read_provider_turn_target
 from pantaray_agents.conversation.tool_batch import (
-    EXCLUSION_NOTICES,
-    PROVIDER_DROPPED_NOTICE,
     ToolBatchPlan,
+    exclusion_notice,
+    over_limit_notice,
     plan_tool_batch,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
@@ -149,23 +149,31 @@ def _accept_native_calls(
 def _build_batch_notice(
     plan: ToolBatchPlan[PendingToolCallModel],
     *,
+    max_parallel: int,
     provider_dropped_call_names: Sequence[str],
+    provider_limit: int,
 ) -> str | None:
-    """このターンで実行しない呼び出しをモデルへ伝える結果行を作る。"""
+    """このターンで実行しない呼び出しをモデルへ伝える結果行を作る。
 
-    excluded = [
-        f"{entry.call.tool_id} ({EXCLUSION_NOTICES[entry.reason]})"
-        for entry in (*plan.deferred, *plan.dropped)
-    ]
-    excluded.extend(
-        f"{name} ({PROVIDER_DROPPED_NOTICE})" for name in provider_dropped_call_names
-    )
-    if not excluded:
+    Calls not run for the same reason are named together, the reason once.
+    """
+
+    names_by_notice: dict[str, list[str]] = {}
+    for entry in (*plan.deferred, *plan.dropped):
+        notice = exclusion_notice(entry.reason, max_parallel=max_parallel)
+        names_by_notice.setdefault(notice, []).append(entry.call.tool_id)
+    for name in provider_dropped_call_names:
+        names_by_notice.setdefault(over_limit_notice(provider_limit), []).append(name)
+    if not names_by_notice:
         return None
-    requested = len(plan.calls) + len(excluded)
+    excluded = sum(len(names) for names in names_by_notice.values())
+    requested = len(plan.calls) + excluded
+    not_run = "; ".join(
+        f"{', '.join(names)} ({notice})" for notice, names in names_by_notice.items()
+    )
     return (
         f"Ran {len(plan.calls)} of {requested} requested tool calls. "
-        f"Not run this turn: {', '.join(excluded)}. "
+        f"Not run this turn: {not_run}. "
         "Request whatever is still needed in a later turn."
     )
 
@@ -419,7 +427,9 @@ async def execution_think_step(  # noqa: C901
             )
             batch_notice = _build_batch_notice(
                 plan,
+                max_parallel=max_parallel_tool_calls,
                 provider_dropped_call_names=native_turn.dropped_call_names,
+                provider_limit=requested_max_calls,
             )
         accepted_turn = native_turn
         accepted_provider_turn = reply.provider_turn

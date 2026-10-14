@@ -119,21 +119,22 @@ def read_document(
         column=column,
         result=result,
     )
-    if document.content_truncated:
-        # An extraction cut is not a page cut, so the envelope has to carry it
-        # or the final page would read as a complete document.
+    if document.content_truncated and result.next_offset is None:
+        # An extraction cut is not a page cut, so the last page has to carry it
+        # or it would read as a complete document; earlier pages say page_limit.
         page = {
             **page,
             "truncated": True,
-            "truncation_reason": page["truncation_reason"]
-            or DOCUMENT_BUDGET_TRUNCATION_REASON,
-            "retry_hint": page["retry_hint"] or _budget_retry_hint(document),
+            "truncation_reason": DOCUMENT_BUDGET_TRUNCATION_REASON,
+            "retry_hint": " ".join(
+                hint
+                for hint in (result.retry_hint, _budget_retry_hint(document))
+                if hint
+            ),
         }
     output = bound_text_page(
         {**page, **_document_summary(document, start_unit=request.start_unit or 1)},
-        content=result.content,
-        offset=offset,
-        column=column,
+        result=result,
     )
     return ReadToolResult(
         output=output,

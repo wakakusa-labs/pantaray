@@ -361,8 +361,10 @@ async def test_two_final_answers_in_one_turn_run_neither(
     assert state["status"] == "processing"
     notice = _think_history_entry(state)["result_line"]
     assert isinstance(notice, str)
-    assert notice.count("submit_final_answer (must be the only call of its turn") == 2
-    assert "send exactly one, alone" in notice
+    assert (
+        "submit_final_answer, submit_final_answer (must be the only call of its "
+        "turn; send exactly one, alone)"
+    ) in notice
     assert notice in runtime.services.rendering.format_history(state)
 
 
@@ -384,8 +386,11 @@ async def test_calls_above_the_limit_are_trimmed_in_declared_order(
     notice = _think_history_entry(state)["result_line"]
     assert isinstance(notice, str)
     assert notice.startswith(f"Ran {MAX_PARALLEL} of 5 requested tool calls.")
-    assert "grep (exceeded the parallel tool call limit of this turn)" in notice
-    assert "web_search (exceeded the parallel tool call limit of this turn)" in notice
+    # The limit and that calls up to it still run together, said once for both.
+    assert (
+        f"grep, web_search (exceeded the limit of {MAX_PARALLEL} tool calls per "
+        f"turn; up to {MAX_PARALLEL} independent calls still run together)"
+    ) in notice
 
 
 @pytest.mark.asyncio
@@ -423,7 +428,9 @@ async def test_provider_dropped_calls_are_announced(
 
     notice = _think_history_entry(state)["result_line"]
     assert isinstance(notice, str)
-    assert "web_search (was dropped by the model provider" in notice
+    assert (
+        f"web_search (exceeded the limit of {MAX_PARALLEL} tool calls per turn"
+    ) in notice
 
 
 @pytest.mark.asyncio

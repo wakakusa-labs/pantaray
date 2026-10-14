@@ -49,7 +49,7 @@ from pantaray_llm.contracts.conversation import (
     OpenAiProviderTurn,
 )
 from pantaray_llm.contracts.tool_use import LlmToolCall, LlmToolDefinition
-from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
+from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
 
 _TASK = "# Assigned Task\nInspect the boundary"
 _REPORT = LlmToolDefinition(
@@ -202,7 +202,7 @@ def child(
 ) -> tuple[Path, ActionSubagentJobPayload]:
     # The cloud route names a provider-turn identity with no stored connection.
     monkeypatch.setattr(provider_turns, "read_llm_route", lambda: "cloud")
-    return _running_child(tmp_path, profile_id=SUBAGENT_MODEL_SETTINGS[0].profile_id)
+    return _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
 
 
 async def test_a_run_resumed_from_its_rows_sends_the_same_request_and_goes_on(

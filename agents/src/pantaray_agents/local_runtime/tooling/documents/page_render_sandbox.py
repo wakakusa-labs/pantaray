@@ -80,7 +80,7 @@ def seatbelt_profile(
     read_roots = (
         *MACOS_SYSTEM_RUNTIME_READ_ROOTS,
         *_FONT_READ_ROOTS,
-        *_interpreter_read_roots(python_executable),
+        *interpreter_read_roots(python_executable),
     )
     named = tuple(str(path) for path in read_files)
     return "\n".join(
@@ -119,7 +119,7 @@ def seatbelt_profile(
     )
 
 
-def _interpreter_read_roots(python_executable: Path) -> tuple[str, ...]:
+def interpreter_read_roots(python_executable: Path) -> tuple[str, ...]:
     """The directories the worker reads to start and to import pypdfium2 and Pillow.
 
     The worker runs the interpreter the helper itself runs on, so the helper's
@@ -191,4 +191,4 @@ def _quote(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-__all__ = ["sandboxed_argv", "seatbelt_profile"]
+__all__ = ["interpreter_read_roots", "sandboxed_argv", "seatbelt_profile"]

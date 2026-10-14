@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
-    attach_repository_agents_md,
+    attach_repository_context,
 )
 from pantaray_agents.agents.action_agent.runtime.state.context import ensure_context
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
@@ -251,7 +251,7 @@ async def run_broker_tool_wrapper(
         if read_context is not None:
             context = ensure_context(state)
             attached = list(context.get("agents_md_attached_paths", []))
-            agents_md = attach_repository_agents_md(
+            agents_md = attach_repository_context(
                 attached, tool_id=tool_def.tool_id, args=args, read_context=read_context
             )
             context["agents_md_attached_paths"] = attached

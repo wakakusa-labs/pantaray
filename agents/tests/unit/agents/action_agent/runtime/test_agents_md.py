@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from tests.unit.agents.action_agent.runtime.test_checkout_status import (
+    _clone_pair,
+    _commit,
+    _git,
+)
 from tests.unit.local_runtime.broker_test_support import BROKER_ACTOR_PROCESS_ID
 from tests.unit.local_runtime.path_access_policy_support import (
     ACTION_ID,
@@ -13,9 +18,12 @@ from tests.unit.local_runtime.path_access_policy_support import (
 )
 
 from pantaray_agents.agents.action_agent.runtime import agents_md
+from pantaray_agents.agents.action_agent.runtime import (
+    checkout_status as checkout_status_module,
+)
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     AGENTS_MD_MAX_BYTES,
-    attach_repository_agents_md,
+    attach_repository_context,
     load_pantaray_agents_md,
 )
 from pantaray_agents.agents.action_agent.runtime.checkpoint import (
@@ -101,7 +109,7 @@ class _Action:
     def attach(self, tool_id: str, args: dict[str, JSONValue]) -> str | None:
         context = self.state["context"]
         attached = list(context.get("agents_md_attached_paths", []))
-        text = attach_repository_agents_md(
+        text = attach_repository_context(
             attached, tool_id=tool_id, args=args, read_context=self.read_context()
         )
         context["agents_md_attached_paths"] = attached
@@ -446,3 +454,66 @@ def test_attached_instructions_survive_output_omission() -> None:
     rendered = ActionAgentFormatter().format_history(state, omit_before_step_number=3)
     assert "RULES" in rendered
     assert "BODY" not in rendered
+
+
+def _behind_checkout(root: Path) -> Path:
+    """A checkout with a file to read, one commit behind origin/main."""
+
+    root.mkdir(parents=True)
+    work, other = _clone_pair(root)
+    _commit(other, "landed")
+    _git(other, "push")
+    _git(work, "fetch")
+    (work / "x.py").write_text("print(1)\n", encoding="utf-8")
+    return work.resolve()
+
+
+@pytest.mark.asyncio
+async def test_the_first_call_in_a_checkout_says_how_far_it_is_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action = _Action(tmp_path, monkeypatch)
+    work = _behind_checkout(tmp_path / "behind")
+    level, _other = _clone_pair(tmp_path)
+    checked: list[Path] = []
+    real_status = agents_md.checkout_status
+    monkeypatch.setattr(
+        agents_md,
+        "checkout_status",
+        lambda checkout: checked.append(checkout) or real_status(checkout),
+    )
+
+    first = await action.read(work / "x.py")
+
+    assert first.status == "success"
+    assert first.agents_md == (
+        f"Git checkout {work} (branch main) is 1 commits behind origin/main, "
+        "as of the last fetch (merge commits not counted); "
+        "`git fetch` updates these counts."
+    )
+    # Once per checkout per Action, a resumed run included.
+    assert (await action.read(work / "x.py")).agents_md is None
+    action.resume()
+    assert action.attach("bash", {"command": "ls", "cwd": str(work)}) is None
+    # A level checkout gets nothing, and is not read again either.
+    assert action.attach("list", {"path": str(level)}) is None
+    assert action.attach("list", {"path": str(level)}) is None
+    assert checked == [work, level.resolve()]
+
+
+@pytest.mark.asyncio
+async def test_a_checkout_that_cannot_be_read_leaves_the_call_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action = _Action(tmp_path, monkeypatch)
+    work = _behind_checkout(tmp_path / "behind")
+
+    def _broken(_path: str) -> str:
+        raise LookupError("a codec git output could not be read with")
+
+    monkeypatch.setattr(checkout_status_module, "_describe", _broken)
+
+    result = await action.read(work / "x.py")
+
+    assert result.status == "success"
+    assert result.agents_md is None

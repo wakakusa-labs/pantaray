@@ -1,4 +1,5 @@
-"""How far a workspace checkout is behind, read from refs already fetched."""
+"""How far the checkout a tool call works in is behind, from refs already
+fetched."""
 
 from __future__ import annotations
 
@@ -6,14 +7,21 @@ import os
 import subprocess
 from pathlib import Path
 
-from pantaray_agents.agents.action_agent.runtime.checkouts_behind import (
-    render_checkouts_behind,
+import pytest
+
+from pantaray_agents.agents.action_agent.runtime import checkout_status as status
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    checkout_status,
 )
 
-_HEADING = (
-    "Git checkouts behind their remote, as of the last fetch "
-    "(merge commits not counted):\n"
+_TAIL = (
+    ", as of the last fetch (merge commits not counted); "
+    "`git fetch` updates these counts."
 )
+
+
+def _line(work: Path, state: str, behind: str) -> str:
+    return f"Git checkout {work} ({state}) is {behind}{_TAIL}"
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -55,17 +63,17 @@ def test_a_checkout_behind_its_upstream_is_named_with_the_count(
     tmp_path: Path,
 ) -> None:
     work, other = _clone_pair(tmp_path)
-    assert render_checkouts_behind([str(work)]) == ""
+    assert checkout_status(work) is None
 
     _commit(other, "one")
     _commit(other, "two")
     _git(other, "push")
     # Nothing is fetched: the count is as fresh as the last fetch.
-    assert render_checkouts_behind([str(work)]) == ""
+    assert checkout_status(work) is None
     _git(work, "fetch")
 
-    assert render_checkouts_behind([str(work), str(tmp_path / "plain")]) == (
-        f"{_HEADING}- {work}: 2 commits behind origin/main"
+    assert checkout_status(work) == _line(
+        work, "branch main", "2 commits behind origin/main"
     )
 
 
@@ -79,11 +87,41 @@ def test_a_feature_branch_level_with_its_upstream_still_shows_the_default_branch
     _commit(other, "landed")
     _git(other, "push")
     _git(work, "fetch")
-    (work / "sub").mkdir()
 
-    assert render_checkouts_behind([str(work / "sub")]) == (
-        f"{_HEADING}- {work / 'sub'}: 1 commits behind origin/main"
+    assert checkout_status(work) == _line(
+        work, "branch feature", "1 commits behind origin/main"
     )
+
+
+def test_the_line_of_work_updated_last_is_counted_but_not_a_feature_branch(
+    tmp_path: Path,
+) -> None:
+    """Work that lands on develop never shows against the default branch, and a
+    feature branch pushed after it does not stand in for it."""
+
+    work, other = _clone_pair(tmp_path)
+    _git(other, "checkout", "-b", "develop")
+    _commit(other, "landed")
+    _git(other, "push", "origin", "develop")
+    _git(other, "checkout", "-b", "fix/typo")
+    (other / "typo").write_text("typo")
+    _git(other, "add", "typo")
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+        + ["-c", "commit.gpgsign=false", "commit", "-m", "typo"],
+        cwd=other,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_COMMITTER_DATE": "2090-01-01T00:00:00 +0000"},
+    )
+    _git(other, "push", "origin", "fix/typo")
+    _git(work, "fetch")
+    _git(work, "checkout", "--detach")
+
+    line = checkout_status(work)
+    assert line is not None
+    assert line.startswith(f"Git checkout {work} (detached at ")
+    assert line.endswith(f") is 1 commits behind origin/develop{_TAIL}")
 
 
 def test_merge_commits_alone_do_not_make_a_checkout_behind(tmp_path: Path) -> None:
@@ -98,14 +136,14 @@ def test_merge_commits_alone_do_not_make_a_checkout_behind(tmp_path: Path) -> No
     _git(other, "push")
     _git(work, "fetch")
 
-    assert render_checkouts_behind([str(work)]) == ""
+    assert checkout_status(work) is None
 
 
 def test_a_ref_name_that_is_not_utf8_is_counted_and_shown_safely(
     tmp_path: Path,
 ) -> None:
     """A Shift-JIS branch name goes back to git byte for byte; the model reads
-    replacement characters instead of the Action failing to start."""
+    replacement characters instead of the call failing."""
 
     work, other = _clone_pair(tmp_path)
     _commit(other, "landed")
@@ -130,7 +168,21 @@ def test_a_ref_name_that_is_not_utf8_is_counted_and_shown_safely(
     )
 
     shown = os.fsencode(os.fsdecode(branch)).decode("utf-8", errors="replace")
-    assert render_checkouts_behind([str(work)]) == (
-        f"{_HEADING}- {work}: 1 commits behind origin/{shown}; "
-        "1 commits behind origin/main"
+    assert checkout_status(work) == _line(
+        work,
+        "branch main",
+        f"1 commits behind origin/{shown}; 1 commits behind origin/main",
     )
+
+
+def test_any_failure_leaves_the_status_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work, _other = _clone_pair(tmp_path)
+
+    def _broken(_path: str) -> str:
+        raise LookupError("a codec git output could not be read with")
+
+    monkeypatch.setattr(status, "_describe", _broken)
+
+    assert checkout_status(work) is None

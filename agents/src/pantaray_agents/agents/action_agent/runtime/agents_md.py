@@ -21,6 +21,11 @@ import stat
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    CHECKOUT_KEY_PREFIX,
+    checkout_status,
+    enclosing_checkout,
+)
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     DescriptorPathMissingError,
@@ -93,14 +98,15 @@ def load_pantaray_agents_md() -> str:
     return _render_block(f"for {PANTARAY_AGENTS_MD_DISPLAY_DIR}", data)
 
 
-def attach_repository_agents_md(
+def attach_repository_context(
     attached: list[str],
     *,
     tool_id: str,
     args: Mapping[str, JSONValue],
     read_context: BrokerContext,
 ) -> str | None:
-    """Claim and render the AGENTS.md files this call is the first to reach.
+    """Claim and render the AGENTS.md files this call is the first to reach,
+    and how far the checkout it works in is behind (``checkout_status``).
 
     ``read_context`` is the Action's read-tool context, so a file is attached only
     when the ``read`` tool could open it: inside the read scope, outside private
@@ -129,6 +135,15 @@ def attach_repository_agents_md(
             attached.append(key)
             remaining -= len(data)
             blocks.append(_render_block(f"for {scope}", data))
+        checkout = enclosing_checkout(touched.path)
+        if (
+            checkout is not None
+            and (key := f"{CHECKOUT_KEY_PREFIX}{checkout}") not in attached
+        ):
+            # Claimed even when level, so the checkout is read once per Action.
+            attached.append(key)
+            if (status := checkout_status(checkout)) is not None:
+                blocks.append(status)
     return "\n\n".join(blocks) if blocks else None
 
 
@@ -263,6 +278,6 @@ def _read_regular_file(descriptor: int, path: Path, *, max_bytes: int) -> bytes 
 __all__ = [
     "AGENTS_MD_MAX_BYTES",
     "PANTARAY_DEFAULT_AGENTS_MD",
-    "attach_repository_agents_md",
+    "attach_repository_context",
     "load_pantaray_agents_md",
 ]

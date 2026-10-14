@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
-    attach_repository_agents_md,
+    attach_repository_context,
 )
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
@@ -255,7 +255,7 @@ def _claim_agents_md(
         # A child that may not read files gets no AGENTS.md either.
         return
     agents_md.claim(
-        lambda attached: attach_repository_agents_md(
+        lambda attached: attach_repository_context(
             attached, tool_id=tool_id, args=args, read_context=read_context
         )
     )

@@ -19,11 +19,12 @@ import logging
 import os
 import stat
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.agents.action_agent.runtime.checkout_status import (
     CHECKOUT_KEY_PREFIX,
-    checkout_status,
+    checkout_statuses,
     enclosing_checkout,
 )
 from pantaray_agents.local_runtime.descriptor_access import (
@@ -98,25 +99,38 @@ def load_pantaray_agents_md() -> str:
     return _render_block(f"for {PANTARAY_AGENTS_MD_DISPLAY_DIR}", data)
 
 
-def attach_repository_context(
+@dataclass(frozen=True, slots=True)
+class RepositoryContextClaim:
+    """What one call is the first to reach: rendered AGENTS.md files, and the
+    checkouts whose status is still to be read off the event loop."""
+
+    keys: tuple[str, ...]
+    agents_md: str | None
+    checkouts: tuple[Path, ...]
+
+
+def claim_repository_context(
     attached: list[str],
     *,
     tool_id: str,
     args: Mapping[str, JSONValue],
     read_context: BrokerContext,
-) -> str | None:
-    """Claim and render the AGENTS.md files this call is the first to reach,
-    and how far the checkout it works in is behind (``checkout_status``).
+) -> RepositoryContextClaim:
+    """Claim the AGENTS.md files and the checkouts this call is the first to reach.
 
     ``read_context`` is the Action's read-tool context, so a file is attached only
     when the ``read`` tool could open it: inside the read scope, outside private
-    app storage, and not through a symlink that leaves its root. Each file it
-    attaches is appended to ``attached``, which also says what is already sent.
-    Runs without an ``await`` so parallel sibling calls sharing one set cannot
-    claim twice.
+    app storage, and not through a symlink that leaves its root. Each file and
+    checkout it claims is appended to ``attached``, which also says what is
+    already sent; a checkout is claimed even when it turns out level, so it is
+    read once per Action. Runs without an ``await`` so parallel sibling calls
+    sharing one set cannot claim twice; ``render_repository_context`` then reads
+    the checkouts.
     """
 
     blocks: list[str] = []
+    keys: list[str] = []
+    checkouts: list[Path] = []
     remaining = AGENTS_MD_MAX_BYTES
     for raw_path in _touched_paths(tool_id, args):
         try:
@@ -133,6 +147,7 @@ def attach_repository_context(
             if data is None:
                 continue
             attached.append(key)
+            keys.append(key)
             remaining -= len(data)
             blocks.append(_render_block(f"for {scope}", data))
         checkout = enclosing_checkout(touched.path)
@@ -140,11 +155,22 @@ def attach_repository_context(
             checkout is not None
             and (key := f"{CHECKOUT_KEY_PREFIX}{checkout}") not in attached
         ):
-            # Claimed even when level, so the checkout is read once per Action.
             attached.append(key)
-            if (status := checkout_status(checkout)) is not None:
-                blocks.append(status)
-    return "\n\n".join(blocks) if blocks else None
+            keys.append(key)
+            checkouts.append(checkout)
+    return RepositoryContextClaim(
+        keys=tuple(keys),
+        agents_md="\n\n".join(blocks) if blocks else None,
+        checkouts=tuple(checkouts),
+    )
+
+
+async def render_repository_context(claim: RepositoryContextClaim) -> str | None:
+    """The claimed AGENTS.md files and the status of each claimed checkout."""
+
+    statuses = await checkout_statuses(claim.checkouts) if claim.checkouts else []
+    parts = [part for part in (claim.agents_md, *statuses) if part]
+    return "\n\n".join(parts) if parts else None
 
 
 def _touched_paths(tool_id: str, args: Mapping[str, JSONValue]) -> Iterator[str]:
@@ -278,6 +304,8 @@ def _read_regular_file(descriptor: int, path: Path, *, max_bytes: int) -> bytes 
 __all__ = [
     "AGENTS_MD_MAX_BYTES",
     "PANTARAY_DEFAULT_AGENTS_MD",
-    "attach_repository_context",
+    "RepositoryContextClaim",
+    "claim_repository_context",
+    "render_repository_context",
     "load_pantaray_agents_md",
 ]

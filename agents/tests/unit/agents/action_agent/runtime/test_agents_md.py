@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import time
+from collections.abc import Awaitable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -23,8 +27,12 @@ from pantaray_agents.agents.action_agent.runtime import (
 )
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     AGENTS_MD_MAX_BYTES,
-    attach_repository_context,
+    RepositoryContextClaim,
+    claim_repository_context,
     load_pantaray_agents_md,
+)
+from pantaray_agents.agents.action_agent.runtime.checkout_status import (
+    checkout_status,
 )
 from pantaray_agents.agents.action_agent.runtime.checkpoint import (
     build_runtime_state_checkpoint,
@@ -56,6 +64,9 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 )
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tasks.internal_jobs import (
+    action_subagent_broker as subagent_broker,
+)
 from pantaray_agents.utils.trace_context import TraceContextManager
 
 
@@ -109,11 +120,14 @@ class _Action:
     def attach(self, tool_id: str, args: dict[str, JSONValue]) -> str | None:
         context = self.state["context"]
         attached = list(context.get("agents_md_attached_paths", []))
-        text = attach_repository_context(
+        claimed = claim_repository_context(
             attached, tool_id=tool_id, args=args, read_context=self.read_context()
         )
         context["agents_md_attached_paths"] = attached
-        return text
+        # The status a live call reads off the event loop, read here in line.
+        statuses = [checkout_status(checkout) for checkout in claimed.checkouts]
+        parts = [part for part in (claimed.agents_md, *statuses) if part]
+        return "\n\n".join(parts) if parts else None
 
     async def read(self, path: Path | str, **extra: JSONValue) -> Any:
         with TraceContextManager(extra={"process_id": BROKER_ACTOR_PROCESS_ID}):
@@ -476,11 +490,11 @@ async def test_the_first_call_in_a_checkout_says_how_far_it_is_behind(
     work = _behind_checkout(tmp_path / "behind")
     level, _other = _clone_pair(tmp_path)
     checked: list[Path] = []
-    real_status = agents_md.checkout_status
+    real_describe = checkout_status_module._describe
     monkeypatch.setattr(
-        agents_md,
-        "checkout_status",
-        lambda checkout: checked.append(checkout) or real_status(checkout),
+        checkout_status_module,
+        "_describe",
+        lambda path: checked.append(Path(path)) or real_describe(path),
     )
 
     first = await action.read(work / "x.py")
@@ -517,3 +531,97 @@ async def test_a_checkout_that_cannot_be_read_leaves_the_call_as_it_was(
 
     assert result.status == "success"
     assert result.agents_md is None
+
+
+async def _ticks_while(work: Awaitable[Any]) -> tuple[Any, int]:
+    """Run ``work`` and count how often the event loop got to run meanwhile."""
+
+    ticks = 0
+    done = asyncio.Event()
+
+    async def tick() -> None:
+        nonlocal ticks
+        while not done.is_set():
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        return await work, ticks
+    finally:
+        done.set()
+        await ticker
+
+
+def _slow_git(monkeypatch: pytest.MonkeyPatch, *, seconds: float) -> None:
+    real_describe = checkout_status_module._describe
+
+    def slow(path: str) -> str | None:
+        time.sleep(seconds)
+        return real_describe(path)
+
+    monkeypatch.setattr(checkout_status_module, "_describe", slow)
+
+
+@pytest.mark.asyncio
+async def test_a_slow_git_never_holds_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sibling calls and the Stop watch keep running while a checkout is read,
+    and a read past the time limit only drops the sentence."""
+
+    action = _Action(tmp_path, monkeypatch)
+    work = _behind_checkout(tmp_path / "behind")
+    _slow_git(monkeypatch, seconds=0.5)
+
+    result, ticks = await _ticks_while(action.read(work / "x.py"))
+
+    assert result.agents_md is not None and "1 commits behind" in result.agents_md
+    assert ticks >= 10
+
+    other = _behind_checkout(tmp_path / "other")
+    monkeypatch.setattr(checkout_status_module, "_STATUS_TIMEOUT_SECONDS", 0.1)
+    result, ticks = await _ticks_while(action.read(other / "x.py"))
+
+    assert result.status == "success"
+    assert result.agents_md is None
+    assert ticks >= 2
+
+
+@pytest.mark.asyncio
+async def test_a_slow_git_never_holds_a_subagents_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = _behind_checkout(tmp_path / "behind")
+    _slow_git(monkeypatch, seconds=0.5)
+    monkeypatch.setattr(
+        subagent_broker, "load_broker_context", lambda **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        subagent_broker,
+        "claim_repository_context",
+        lambda attached, **_kwargs: RepositoryContextClaim(
+            keys=("checkout",), agents_md=None, checkouts=(work,)
+        ),
+    )
+    recorded: list[str | None] = []
+    claims = SimpleNamespace(
+        attached=[], record=lambda _paths, text: recorded.append(text)
+    )
+
+    _, ticks = await _ticks_while(
+        subagent_broker._claim_agents_md(
+            cast(Any, claims),
+            db_path=tmp_path / "unused.sqlite3",
+            busy_timeout_ms=1_000,
+            payload=cast(Any, {"user_id": "u", "process_id": "p"}),
+            authority=cast(
+                Any, SimpleNamespace(manifest_id="m", execution_session_id="s")
+            ),
+            tool_id="read",
+            args={"path": str(work / "x.py")},
+        )
+    )
+
+    assert ticks >= 10
+    assert recorded and recorded[0] is not None and "1 commits behind" in recorded[0]

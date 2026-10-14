@@ -12,11 +12,13 @@ which the model can renew itself.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,10 @@ logger = logging.getLogger(__name__)
 # Local refs answer in milliseconds; a repository that takes longer is skipped,
 # so a hung git delays a tool result by at most this per call.
 _GIT_TIMEOUT_SECONDS = 2
+# How long a tool result waits for its checkouts' status. Reading it takes a few
+# git calls of up to _GIT_TIMEOUT_SECONDS each, run off the event loop; past
+# this the result goes on without the sentence.
+_STATUS_TIMEOUT_SECONDS = 2
 # What ``attached`` holds for a checkout already described, beside AGENTS.md paths.
 CHECKOUT_KEY_PREFIX = "checkout:"
 
@@ -59,6 +65,28 @@ def checkout_status(checkout: Path) -> str | None:
         # that misbehaves -- leaves it out and must never fail the call.
         logger.warning("Skipped a checkout's status: %s", type(exc).__name__)
         return None
+
+
+async def checkout_statuses(checkouts: Sequence[Path]) -> list[str]:
+    """The sentences for the checkouts that are behind, read in a thread.
+
+    The git calls block, so they never run on the event loop: sibling tool
+    calls and the Stop watch keep going while they run.
+    """
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_statuses, checkouts), _STATUS_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        logger.warning(
+            "Skipped checkout status: took over %ss", _STATUS_TIMEOUT_SECONDS
+        )
+        return []
+
+
+def _statuses(checkouts: Sequence[Path]) -> list[str]:
+    return [status for checkout in checkouts if (status := checkout_status(checkout))]
 
 
 @functools.cache
@@ -179,4 +207,9 @@ def _run(command: list[str]) -> str | None:
     return os.fsdecode(completed.stdout).strip() or None
 
 
-__all__ = ["CHECKOUT_KEY_PREFIX", "checkout_status", "enclosing_checkout"]
+__all__ = [
+    "CHECKOUT_KEY_PREFIX",
+    "checkout_status",
+    "checkout_statuses",
+    "enclosing_checkout",
+]

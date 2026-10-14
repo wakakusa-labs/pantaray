@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 
+from ...tool_runtime.execution import PREFLIGHT_APPROVAL_TOOL_IDS
 from ...tool_runtime.shared import (
     ToolExecutionActor,
 )
@@ -267,16 +268,15 @@ async def _run_parallel_batch(
     remaining: RemainingToolBatch,
     stop_watch: ActionStopWatch,
 ) -> ActionAgentState:
-    """読み取り専用の呼び出しをセマフォ下で同時に走らせる。
+    """``parallel`` を宣言した呼び出しをセマフォ下で同時に走らせる。
 
-    ``parallel`` を宣言したツールは state を書き換えないので、兄弟呼び出しは 1 つの state
-    を共有し、履歴と永続化だけをそれぞれの slot に書く。
+    ``parallel`` を宣言したツールは run の state を書き換えないので、兄弟呼び出しは 1 つの
+    state を共有し、履歴と永続化だけをそれぞれの slot に書く。
 
-    このパスは承認 pause を持たない。``parallel`` を宣言したツールのうち broker を通るのは
-    ``read`` / ``list`` / ``glob`` / ``grep`` だけで、いずれも
-    ``NON_PREFLIGHT_BROKERED_TOOL_IDS`` に入っていて capability 検査しか受けない。承認を
-    要求しうるツール（``apply_patch`` / ``bash`` / ``run_python``）は ``sequential`` なので、
-    バッチに 1 件でもあれば逐次パスへ落ちる。
+    This path never pauses: a call that needs approval (``bash``) is answered
+    as not run and its request withdrawn (``shares_turn``), since the run
+    pauses on one request at a time. ``bash`` times out its own command and
+    cleans up its process group, so it gets no timeout of the batch.
     """
 
     semaphore = asyncio.Semaphore(
@@ -294,8 +294,13 @@ async def _run_parallel_batch(
                 actor=actor,
                 remaining=remaining,
                 isolate_state=False,
-                timeout_seconds=call_timeout_seconds(slot),
+                timeout_seconds=(
+                    None
+                    if slot.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS
+                    else call_timeout_seconds(slot)
+                ),
                 stop_watch=stop_watch,
+                shares_turn=True,
             )
 
     # 停止要求が届いたら ``stop_watch`` が兄弟呼び出しをまとめて cancel し、各呼び出しが

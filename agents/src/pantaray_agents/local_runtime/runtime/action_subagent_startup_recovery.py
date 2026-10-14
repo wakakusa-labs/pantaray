@@ -128,9 +128,9 @@ ORDER BY child.process_id
 """
 
 # ``tool_request_id`` is ``<child process id>:<process event seq at request>:<call
-# id>``, so the sequence orders invocations against the child's own history rows
-# (CAST reads the leading integer) and the call id names the call it answers.
-_UNRECORDED_INVOCATION_SQL = """
+# id>``: the call id names the call it answers, and the sequence orders the
+# calls of one turn's batch, which all share it.
+_CLAIMED_INVOCATIONS_SQL = """
 SELECT invocation.tool_id, invocation.status, invocation.command_summary_json,
        output.output_json, invocation.tool_request_id
 FROM tool_invocations AS invocation
@@ -138,11 +138,13 @@ LEFT JOIN tool_outputs AS output
   ON output.invocation_id = invocation.invocation_id
 WHERE invocation.user_id = :user_id AND invocation.action_id = :action_id
   AND invocation.tool_request_id LIKE :request_prefix
-  AND CAST(substr(invocation.tool_request_id, :seq_offset) AS INTEGER) > (
-        SELECT COALESCE(MAX(event_seq), 0) FROM process_events
-        WHERE process_id = :process_id AND event_name = :tool_event)
-ORDER BY invocation.started_at DESC, invocation.tool_request_id DESC
-LIMIT 1
+ORDER BY CAST(substr(invocation.tool_request_id, :seq_offset) AS INTEGER),
+         invocation.started_at, invocation.tool_request_id
+"""
+
+_ANSWERED_CALLS_SQL = """
+SELECT json_extract(payload_json, '$.call_id') FROM process_events
+WHERE process_id = :process_id AND event_name = :tool_event
 """
 
 
@@ -267,13 +269,12 @@ def recover_action_subagent_children_for_startup(
             )
             settled_child_count += 1
             continue
-        if _collect_claimed_invocation(
+        collected_invocation_count += _collect_claimed_invocations(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             payload=payload,
             job_id=child.job_id,
-        ):
-            collected_invocation_count += 1
+        )
     return ActionSubagentStartupRecovery(
         preserved_roots=frozenset(preserved),
         settled_child_count=settled_child_count,
@@ -458,39 +459,60 @@ def _settle_canceled_child(
                 )
 
 
-def _collect_claimed_invocation(
+def _collect_claimed_invocations(
     *,
     db_path: Path,
     busy_timeout_ms: int,
     payload: ActionSubagentJobPayload,
     job_id: str,
-) -> bool:
-    """Write back a claimed Tool result the child died before recording.
+) -> int:
+    """Write back every claimed Tool result the child died before recording.
 
     A child commits its invocation row before its own transcript entry, and a
     settings-approved call reaches that window with no pause anchor to key on.
-    The child's request identity carries the process event sequence it claimed
-    at, so an invocation newer than the last recorded Tool event is exactly the
-    one the crash swallowed. Replaying it stops the resumed child from running
-    an approved side effect twice.
+    Commands of one turn run at once and are recorded one by one, so a crash
+    can leave any number of them unrecorded, before or after an answered
+    sibling. Each invocation whose call has no answer is replayed by its call
+    id, which stops the resumed child from running a side effect twice.
     """
 
     process_id = payload["process_id"]
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
-        row = connection.execute(
-            _UNRECORDED_INVOCATION_SQL,
+        answered = {
+            str(row[0])
+            for row in connection.execute(
+                _ANSWERED_CALLS_SQL,
+                {"process_id": process_id, "tool_event": ACTION_SUBAGENT_TOOL_EVENT},
+            )
+        }
+        rows = connection.execute(
+            _CLAIMED_INVOCATIONS_SQL,
             {
                 "action_id": payload["action_id"],
-                "process_id": process_id,
                 "request_prefix": f"{process_id}:%:%",
                 "seq_offset": len(process_id) + 2,
-                "tool_event": ACTION_SUBAGENT_TOOL_EVENT,
                 "user_id": payload["user_id"],
             },
-        ).fetchone()
-    if row is None:
-        return False
+        ).fetchall()
+    collected = 0
+    for row in rows:
+        call_id = str(row[4])[len(process_id) + 1 :].split(":", 1)[1]
+        if call_id in answered:
+            continue
+        _record_recovered_tool(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            payload=payload,
+            job_id=job_id,
+            entry=_recovered_entry(row, call_id=call_id),
+        )
+        answered.add(call_id)
+        collected += 1
+    return collected
+
+
+def _recovered_entry(row: sqlite3.Row, *, call_id: str) -> dict[str, JSONValue]:
     completed = str(row[1]) == "completed" and isinstance(row[3], str)
     output = _decoded_json(
         row[3],
@@ -510,21 +532,14 @@ def _collect_claimed_invocation(
                 message=_ATTACHMENT_UNSUPPORTED_MESSAGE,
             ),
         )
-    _record_recovered_tool(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        payload=payload,
-        job_id=job_id,
-        entry={
-            "call_id": str(row[4])[len(process_id) + 1 :].split(":", 1)[1],
-            "tool_name": str(row[0]),
-            "status": "completed" if completed else "error",
-            "arguments": _decoded_json(row[2], default={}),
-            "output": output,
-            "error_message": error_message,
-        },
-    )
-    return True
+    return {
+        "call_id": call_id,
+        "tool_name": str(row[0]),
+        "status": "completed" if completed else "error",
+        "arguments": _decoded_json(row[2], default={}),
+        "output": output,
+        "error_message": error_message,
+    }
 
 
 def _carries_attachment(output: JSONValue) -> bool:

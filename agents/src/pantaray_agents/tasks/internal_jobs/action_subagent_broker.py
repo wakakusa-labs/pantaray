@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_pause import (
     next_action_subagent_tool_request_id,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.tooling.bootstrap import HIGH_RISK_TOOL_IDS
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
@@ -40,6 +41,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     READ_TOOL_ID,
     load_broker_context,
+    withdraw_unasked_approval,
 )
 from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
@@ -56,6 +58,8 @@ from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
 )
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.tools.contract import (
+    APPROVAL_NEEDS_OWN_TURN,
+    APPROVAL_NEEDS_OWN_TURN_CODE,
     BrokerPolicyError,
     JsonSchema,
     ReactToolCall,
@@ -146,8 +150,13 @@ async def execute_action_subagent_broker_tool(
     tool_request_id: str,
     call_id: str,
     agents_md: AgentsMdClaims,
+    shares_turn: bool = False,
 ) -> ReactToolResult:
-    """Run one child broker call, turning approval control into a typed pause."""
+    """Run one child broker call, turning approval control into a typed pause.
+
+    A call that shares its turn does not pause: its approval is withdrawn and
+    it is answered with ``APPROVAL_NEEDS_OWN_TURN``.
+    """
 
     try:
         outcome = await execute_broker_tool(
@@ -163,6 +172,21 @@ async def execute_action_subagent_broker_tool(
             requested_at=now_utc_iso(),
         )
     except BrokerApprovalRequiredError as exc:
+        if shares_turn:
+            withdraw_unasked_approval(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=payload["user_id"],
+                action_id=payload["action_id"],
+                approval_session_id=exc.approval_session_id,
+                tool_request_id=tool_request_id,
+                withdrawn_at=now_utc_iso(),
+            )
+            return tool_error_response(
+                tool_name=tool_id,
+                error_code=APPROVAL_NEEDS_OWN_TURN_CODE,
+                message=APPROVAL_NEEDS_OWN_TURN,
+            )
         raise _approval_pause(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -320,13 +344,12 @@ def _build_tool(
     async def execute(call: ReactToolCall, _step_number: int) -> ReactToolResult:
         if call.call_id is None:
             raise RuntimeError("A child tool runs only on the conversation loop")
-        # The durable identity is the next history row, which calls running at
-        # once would share. Only read-only calls run at once, and they need no
-        # replay after a restart, so each gets an identity of its own; a
-        # changing call keeps the durable one that lets a restart replay it.
+        # A call that can change something keeps the durable identity a
+        # restart replays it by; it names the call, so calls of one turn get
+        # one each. A read needs no replay and gets an identity of its own.
         tool_request_id = (
             str(uuid.uuid4())
-            if definition.concurrency.placement == "parallel"
+            if definition.tool_id not in HIGH_RISK_TOOL_IDS
             else next_action_subagent_tool_request_id(
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
@@ -344,6 +367,7 @@ def _build_tool(
             tool_request_id=tool_request_id,
             call_id=call.call_id,
             agents_md=agents_md,
+            shares_turn=call.shares_turn,
         )
 
     return ReactToolDefinition(

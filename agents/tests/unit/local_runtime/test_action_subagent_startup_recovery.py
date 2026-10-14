@@ -38,6 +38,7 @@ from pantaray_agents.local_runtime.runtime.job_payload_builder import (
     build_action_subagent_job_payload,
 )
 from pantaray_agents.local_runtime.runtime.process_events import (
+    append_process_event_in_connection,
     mark_local_action_job_paused,
 )
 from pantaray_agents.local_runtime.storage.migrations import (
@@ -465,6 +466,86 @@ def test_restart_reports_a_claimed_gated_invocation_instead_of_redoing_it(
     # A second pass sees the recorded Tool event and leaves the result alone.
     assert _recover_children(db_path).collected_invocation_count == 0
     assert expected_transcript in _transcript(db_path, CHILD_PROCESS_ID)[-1]
+
+
+def _claim_second_command_of_the_turn(db_path: Path) -> None:
+    """A sibling claimed in the same turn: same event sequence, its own call."""
+
+    replaced = {
+        "invocation_id": "invocation-2",
+        "tool_request_id": f"{CHILD_PROCESS_ID}:1:call-2",
+    }
+    with sqlite3.connect(db_path) as connection, connection:
+        columns = [
+            row[1] for row in connection.execute("PRAGMA table_info(tool_invocations)")
+        ]
+        selected = ", ".join(
+            f":{name}" if name in replaced else name for name in columns
+        )
+        connection.execute(
+            f"INSERT INTO tool_invocations ({', '.join(columns)}) "
+            f"SELECT {selected} FROM tool_invocations WHERE invocation_id = :source",
+            {**replaced, "source": INVOCATION_ID},
+        )
+
+
+def _complete(db_path: Path, invocation_id: str, path: str) -> None:
+    record_tool_invocation_completion(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        completion=ToolInvocationCompletionInput(
+            invocation_id=invocation_id,
+            status="completed",
+            completed_at=TIMESTAMP,
+            output_json={"status": "ok", "applied_paths": [path]},
+            output_storage_kind="inline_json",
+            search_text=None,
+            stdout_text=None,
+            stderr_text=None,
+            redaction_applied=False,
+        ),
+    )
+
+
+@pytest.mark.parametrize("second_answered", [False, True])
+def test_restart_collects_every_unanswered_command_of_a_parallel_turn(
+    tmp_path: Path, second_answered: bool
+) -> None:
+    """Commands of one turn share an event sequence and are answered one by one;
+    a crash between those answers must lose none of them nor run any again."""
+
+    db_path, context, _payload = _restart_scenario(tmp_path)
+    _claim_child_gated_tool(db_path, context)
+    _claim_second_command_of_the_turn(db_path)
+    _complete(db_path, INVOCATION_ID, "one.txt")
+    _complete(db_path, "invocation-2", "two.txt")
+    if second_answered:
+        # The later call's answer landed first, after the turn's sequence.
+        with sqlite3.connect(db_path) as connection, connection:
+            append_process_event_in_connection(
+                connection=connection,
+                process_id=CHILD_PROCESS_ID,
+                event_name=ACTION_SUBAGENT_TOOL_EVENT,
+                payload={
+                    "call_id": "call-2",
+                    "tool_name": "apply_patch",
+                    "status": "completed",
+                    "arguments": {},
+                    "output": {"status": "ok", "applied_paths": ["two.txt"]},
+                    "error_message": None,
+                },
+                created_at=TIMESTAMP,
+            )
+
+    outcome = _recover_children(db_path)
+
+    assert outcome.collected_invocation_count == (1 if second_answered else 2)
+    transcript = _transcript(db_path, CHILD_PROCESS_ID)
+    assert sorted(line.split(":", 1)[0] for line in transcript) == [
+        "Tool apply_patch completed for call-1",
+        "Tool apply_patch completed for call-2",
+    ]
+    assert _recover_children(db_path).collected_invocation_count == 0
 
 
 SECOND_CHILD_JOB_ID = "child-job-2"

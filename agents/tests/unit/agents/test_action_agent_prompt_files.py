@@ -152,7 +152,8 @@ def test_executing_prompt_states_the_tool_batch_rules() -> None:
     assert "exactly one provided tool" not in text
     assert "One turn runs at most {max_parallel_tool_calls} tool calls" in text
     for tool_id, declared in TOOL_CONCURRENCY.items():
-        if declared.placement != "sequential":
+        # bash says itself which commands may share a turn.
+        if declared.placement != "sequential" and tool_id != "bash":
             assert f"`{tool_id}`" in text
     assert "must be the only call of their turn" in text
     assert "Do not request two changing tools" in text

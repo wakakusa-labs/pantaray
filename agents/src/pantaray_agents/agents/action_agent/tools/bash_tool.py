@@ -147,7 +147,9 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "and inspection. For short waits, use sleep 10 or sleep 0.5, then "
                 "check status in a separate call. Read Pantaray's own records "
                 "(suggestions, actions, insights, activity logs) with memory_sql, "
-                "not by opening the app database. " + _ACCESS_REQUEST_GUIDE
+                "not by opening the app database. Commands that do not depend on "
+                "each other's results or files may share a turn and run at once. "
+                + _ACCESS_REQUEST_GUIDE
             ),
             pitfalls=(
                 "Set cwd to a directory under Workspace Roots, or outside them only "
@@ -162,7 +164,7 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "intended to survive this call. Shell startup files are not loaded."
             ),
         ),
-        concurrency=ToolConcurrency("sequential"),
+        concurrency=ToolConcurrency("parallel"),
         execution_policy=tool_execution_policy(
             intent_class="process_exec_local",
             required_capabilities=("process_exec_local",),

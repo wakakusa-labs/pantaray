@@ -40,6 +40,25 @@ WHERE user_id = :user_id AND action_id = :action_id
   ) = 0
 """
 
+# Calls of one parallel batch finish in any order, yet readers take the batch's
+# highest step_number row as its newest checkpoint. The snapshot written last
+# holds every call settled so far (the calls share one state), so it also goes
+# onto the siblings already saved behind it: the newest row then holds the
+# whole batch whichever call finished last.
+_CARRY_BATCH_CHECKPOINT_SQL = """
+UPDATE agent_action_steps
+SET runtime_state_checkpoint = :checkpoint,
+    runtime_state_checkpoint_version = :checkpoint_version
+WHERE user_id = :user_id AND action_id = :action_id
+  AND llm_step_id = :llm_step_id AND step_type = 'tool_execution'
+  AND step_number > :step_number
+  AND runtime_state_checkpoint IS NOT NULL
+  AND json_extract(runtime_state_checkpoint, '$.pending_approval_request') IS NULL
+  AND COALESCE(
+      json_array_length(runtime_state_checkpoint, '$.current_approval_blockers'), 0
+  ) = 0
+"""
+
 _APPROVAL_PAUSE_CHECKPOINT_SQL = """
 SELECT step_id, step_number FROM agent_action_steps AS step
 WHERE step.user_id = :user_id AND step.action_id = :action_id
@@ -96,6 +115,31 @@ def prune_action_checkpoints_in_connection(
     )
 
 
+def carry_batch_checkpoint_in_connection(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    action_id: str,
+    llm_step_id: str,
+    step_number: int,
+    checkpoint: str,
+    checkpoint_version: int,
+) -> None:
+    """Put a tool row's snapshot on its batch siblings saved after it."""
+
+    connection.execute(
+        _CARRY_BATCH_CHECKPOINT_SQL,
+        {
+            "user_id": user_id,
+            "action_id": action_id,
+            "llm_step_id": llm_step_id,
+            "step_number": step_number,
+            "checkpoint": checkpoint,
+            "checkpoint_version": checkpoint_version,
+        },
+    )
+
+
 def load_tool_approval_resume_anchor_in_connection(
     connection: sqlite3.Connection,
     *,
@@ -128,6 +172,7 @@ def load_tool_approval_resume_anchor_in_connection(
 
 __all__ = [
     "ToolApprovalResumeAnchor",
+    "carry_batch_checkpoint_in_connection",
     "load_tool_approval_resume_anchor_in_connection",
     "prune_action_checkpoints_in_connection",
 ]

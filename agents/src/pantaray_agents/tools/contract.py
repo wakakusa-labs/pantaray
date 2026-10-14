@@ -46,6 +46,9 @@ class ReactToolCall:
     # The id the model gave the call, which the conversation loop answers it by;
     # None from a caller that pairs results by order.
     call_id: str | None = None
+    # Whether the call runs at once with others of its turn. Such a call never
+    # pauses for the user's approval: see ``APPROVAL_NEEDS_OWN_TURN``.
+    shares_turn: bool = False
 
     def __post_init__(self) -> None:
         if not self.tool_name.strip():
@@ -161,6 +164,14 @@ class ToolResponseValidationError(RuntimeError):
 
 type ToolTurnPlacement = Literal["parallel", "sequential", "solo_turn", "run_ending"]
 
+APPROVAL_NEEDS_OWN_TURN_CODE = "APPROVAL_NEEDS_OWN_TURN"
+APPROVAL_NEEDS_OWN_TURN = (
+    "Not run: this call needs the user's approval, which is asked only for a "
+    "call that is alone in its turn. Request it again as the only call of a turn."
+)
+"""What a call that shares its turn is answered when it needs approval. The
+approval request it raised is withdrawn unasked, so none is left pending."""
+
 
 @dataclass(frozen=True)
 class ToolConcurrency:
@@ -168,11 +179,12 @@ class ToolConcurrency:
 
     Each tool declares this about itself; the turn planner reads only this.
 
-    - ``parallel``: the call only reads. It changes nothing outside its own
-      result (no file, memory, run state or external system), never pauses
-      for the user's approval, holds no workspace lock, takes no token sink,
-      and returns the same whatever the order its siblings run in. A batch of
-      such calls may run at once.
+    - ``parallel``: the call changes no run state, holds no workspace lock,
+      takes no token sink, and is safe to run beside its siblings: most only
+      read, and ``bash`` runs the commands the model chose as independent. A
+      batch of such calls may run at once. One that would pause for the
+      user's approval is answered with ``APPROVAL_NEEDS_OWN_TURN`` instead,
+      since a run pauses on one request at a time.
     - ``sequential``: the call may share its turn, but runs alone, in the
       order the model gave the calls. Any call that does not meet
       ``parallel`` is at least this.

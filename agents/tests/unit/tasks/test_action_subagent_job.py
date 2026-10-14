@@ -1561,10 +1561,21 @@ def test_read_only_calls_of_one_turn_all_run_and_keep_their_own_results(
     assert json.loads(terminal[0]) == {"outcome": "success", "report": "Child report"}
 
 
-def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
+def _two_commands() -> tuple[LlmToolCall, LlmToolCall]:
+    return (
+        LlmToolCall(
+            call_id="c1", name="bash", arguments={"command": "echo one", "cwd": "."}
+        ),
+        LlmToolCall(
+            call_id="c2", name="bash", arguments={"command": "echo two", "cwd": "."}
+        ),
+    )
+
+
+def test_two_commands_of_one_turn_run_at_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """変更系 2 件は親と同じく宣言順に 1 件ずつ走る。"""
+    """Independent commands of one turn overlap, each under its own request."""
 
     db_path, payload = _running_child(
         tmp_path,
@@ -1573,17 +1584,18 @@ def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
     )
     _allow_workspace_commands(db_path)
     running: list[str] = []
-    started: list[str] = []
+    overlapped: list[bool] = []
+    request_ids: list[str] = []
 
     async def command(
         *, request: ValidatedCommandRequest, **_kwargs: object
     ) -> UnprojectedBrokerToolOutcome:
         script = request.argv[-1]
-        assert not running, "a changing call started while another was running"
         running.append(script)
-        started.append(script)
-        await asyncio.sleep(0.01)
-        running.pop()
+        request_ids.append(request.tool_request_id)
+        await asyncio.sleep(0.05)
+        overlapped.append(len(running) == 2)
+        running.remove(script)
         return UnprojectedBrokerToolOutcome(
             status="success",
             output={
@@ -1595,32 +1607,63 @@ def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
         )
 
     monkeypatch.setattr(broker_module, "run_command_via_sandbox", command)
-    client = _Client(
-        calls=(
-            (
-                LlmToolCall(
-                    call_id="c1",
-                    name="bash",
-                    arguments={"command": "echo one", "cwd": "."},
-                ),
-                LlmToolCall(
-                    call_id="c2",
-                    name="bash",
-                    arguments={"command": "echo two", "cwd": "."},
-                ),
-            ),
-            _REPORT_CALL,
-        )
-    )
+    client = _Client(calls=(_two_commands(), _REPORT_CALL))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
     ):
         subagent_job.run_action_subagent_job(payload)
 
-    assert len(started) == 2
-    assert "echo one" in started[0] and "echo two" in started[1]
+    assert any(overlapped)
+    assert len(set(request_ids)) == 2
     assert _results(client, 1) == [("bash", "completed"), ("bash", "completed")]
+
+
+def test_commands_of_one_turn_that_need_approval_ask_one_at_a_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a standing approval, neither command of a shared turn runs or
+    pauses: each is told to come alone, and no request is left pending."""
+
+    db_path, payload = _running_child(
+        tmp_path,
+        profile_id=ACTION_EXECUTING_PROFILE_ID,
+        claim_workspace=True,
+    )
+
+    async def command(**_kwargs: object) -> UnprojectedBrokerToolOutcome:
+        raise AssertionError("a command that needs approval must not run")
+
+    monkeypatch.setattr(broker_module, "run_command_via_sandbox", command)
+    client = _Client(calls=(_two_commands(), _REPORT_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    request = client.tool_uses[1]
+    assert request.conversation is not None
+    answers = [
+        cast(dict[str, JSONValue], item.output)
+        for item in request.conversation
+        if isinstance(item, LlmTurnToolResultItem)
+    ]
+    assert [
+        cast(dict[str, JSONValue], answer["result"])["error_code"] for answer in answers
+    ] == [
+        "APPROVAL_NEEDS_OWN_TURN",
+        "APPROVAL_NEEDS_OWN_TURN",
+    ]
+    with sqlite3.connect(db_path) as connection:
+        statuses = connection.execute(
+            "SELECT status FROM approval_sessions ORDER BY tool_request_id"
+        ).fetchall()
+        child = connection.execute(
+            "SELECT status FROM processes WHERE process_id='child-process'"
+        ).fetchone()
+    assert [row[0] for row in statuses] == ["interrupted", "interrupted"]
+    assert child == ("completed",)
 
 
 def _patch_call(call_id: str, path: str) -> LlmToolCall:

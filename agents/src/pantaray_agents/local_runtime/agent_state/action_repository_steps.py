@@ -36,6 +36,7 @@ from pantaray_agents.schema.repositories.repository import (
 )
 
 from ..runtime.action_checkpoint_retention import (
+    carry_batch_checkpoint_in_connection,
     load_tool_approval_resume_anchor_in_connection,
     prune_action_checkpoints_in_connection,
 )
@@ -274,6 +275,20 @@ class LocalActionRepositoryStepsMixin:
                             connection, payload=payload, turn=llm_turn
                         )
                     if runtime_state_checkpoint is not None:
+                        if (
+                            step_type == StepType.TOOL_EXECUTION
+                            and origin is not None
+                            and runtime_state_checkpoint_version is not None
+                        ):
+                            carry_batch_checkpoint_in_connection(
+                                connection,
+                                user_id=user_id,
+                                action_id=action_id,
+                                llm_step_id=origin.llm_step_id,
+                                step_number=step_number,
+                                checkpoint=str(payload["runtime_state_checkpoint"]),
+                                checkpoint_version=runtime_state_checkpoint_version,
+                            )
                         prune_action_checkpoints_in_connection(
                             connection, user_id=user_id, action_id=action_id
                         )

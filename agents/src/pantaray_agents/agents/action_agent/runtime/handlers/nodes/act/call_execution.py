@@ -42,7 +42,11 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.core import TokenBudgetExceeded
 from pantaray_agents.application.action.ports import ActionStepEventPersistenceError
+from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    withdraw_unasked_approval,
+)
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
     canceled_command_output,
 )
@@ -68,6 +72,7 @@ from .call_slots import (
 )
 from .failures import (
     finalize_tool_call_interrupted,
+    finalize_tool_call_needs_own_turn,
     finalize_tool_call_not_executed,
     finalize_tool_call_timeout,
     finalize_tool_execution_failure,
@@ -105,8 +110,7 @@ class RemainingToolBatch:
     ``ORDER BY step_number DESC`` で checkpoint を 1 行選ぶ
     （``action_startup_recovery_authority.py:219``）。先に完了した後ろの呼び出しの行が選ばれると、
     その残りには既に完了・永続化済みの前の呼び出しが載っており、再実行した結果がその呼び出しの
-    History Ref を奪ってしまう。並列バッチは読み取り専用 allowlist だけなので、持ち越さず次の
-    THINK に決め直させるほうが安い。
+    History Ref を奪ってしまう。並列バッチは持ち越さず、次の THINK に決め直させる。
 
     ``mode`` が ``None`` なのは ``batch`` を持たない next_action（batch 以前の checkpoint と
     承認再開の単発経路）で、そこにも持ち越す残りは存在しない。
@@ -161,8 +165,14 @@ async def execute_tool_call(
     isolate_state: bool,
     timeout_seconds: float | None,
     stop_watch: ActionStopWatch,
+    shares_turn: bool = False,
 ) -> ActionAgentState:
-    """1 呼び出しを実行し、その終端ステップを永続化する。"""
+    """1 呼び出しを実行し、その終端ステップを永続化する。
+
+    ``shares_turn`` is a call running at once with its siblings. The run pauses
+    on one request at a time, so such a call that needs approval does not
+    pause: its request is withdrawn unasked and it is answered as not run.
+    """
 
     tool_def = slot.tool_def
     tool_id = slot.tool_id
@@ -313,6 +323,28 @@ async def execute_tool_call(
         else None
     )
     approval_required = approval_control is not None
+    if approval_control is not None and shares_turn:
+        db_path, busy_timeout_ms = read_local_runtime_db_config()
+        withdraw_unasked_approval(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=state["user_id"],
+            action_id=state["action_id"],
+            approval_session_id=approval_control.approval_session_id,
+            tool_request_id=approval_control.tool_request_id,
+            withdrawn_at=now_utc_iso(),
+        )
+        await finalize_tool_call_needs_own_turn(
+            agent,
+            state,
+            runtime,
+            slot=slot,
+            step_id=exec_result.step_id,
+            args_payload=args_payload,
+            started_at=started_at,
+        )
+        return state
+
     formal_result = finalized_execution_step(
         exec_result,
         error=(

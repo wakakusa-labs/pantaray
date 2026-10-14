@@ -25,6 +25,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act import (
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act import step as act
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
+    ApprovalRequiredToolControl,
     CompletedToolControl,
     ToolExecutionResult,
 )
@@ -448,3 +449,58 @@ async def test_sequential_batch_never_overlaps_workspace_lock_tools(
         state["step"] - 2,
         state["step"] - 1,
     ]
+
+
+@pytest.mark.asyncio
+async def test_commands_that_share_a_turn_never_pause_for_approval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Two commands of one turn that need approval: neither runs nor pauses.
+
+    The run pauses on one request at a time, so each is told to come alone and
+    its own request is withdrawn; no approval is left pending or reused.
+    """
+
+    agent, runtime, state, _request = await _build_fixture(
+        monkeypatch,
+        tmp_path,
+        action_id="act-batch-bash-approval",
+        allowed_tool_ids=("bash",),
+    )
+    command: dict[str, JSONValue] = {"command": "make", "cwd": "."}
+    agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
+        return_value=_turn(("bash", command), ("bash", command))
+    )
+    state = await _think(agent, runtime, state)
+    batch = state["next_action"].batch
+    assert batch is not None and batch.mode == "parallel"
+
+    async def _needs_approval(*_args, **kwargs) -> ToolExecutionResult:
+        result = _success_result(step_id=kwargs["step_id"], tool_id="bash")
+        result.control = ApprovalRequiredToolControl(
+            approval_session_id=f"session-{kwargs['step_id']}",
+            tool_request_id=f"request-{kwargs['step_id']}",
+            intent_class="process_exec_local",
+            command_summary={},
+        )
+        return result
+
+    withdrawn: list[tuple[str, str]] = []
+    monkeypatch.setattr(call_execution, "run_tool", _needs_approval)
+    monkeypatch.setattr(
+        call_execution,
+        "withdraw_unasked_approval",
+        lambda **kwargs: withdrawn.append(
+            (kwargs["approval_session_id"], kwargs["tool_request_id"])
+        ),
+    )
+
+    state = await _act(agent, runtime, state)
+
+    assert state.get("pending_approval_request") is None
+    assert state["status"] == "processing"
+    entries = _tool_history(state)
+    assert [entry["result_line"] for entry in entries] == [
+        "bash: failed APPROVAL_NEEDS_OWN_TURN"
+    ] * 2
+    assert len(set(withdrawn)) == 2

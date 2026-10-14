@@ -69,6 +69,9 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "web_crawl",
             "memory_sql",
             "history_fetch",
+            # Commands the model chose as independent run at once, as in Codex;
+            # one that needs approval is answered instead of pausing.
+            "bash",
         )
     },
     "memory_search": ToolConcurrency("parallel", shared_state=_EPOCH),
@@ -84,7 +87,6 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "unlink_memory",
             "remember",
             "apply_patch",
-            "bash",
             "run_python",
             "capture_screen",
             "render_pdf_page",
@@ -136,6 +138,7 @@ PARALLEL_SAFE_HANDLERS: dict[str, Callable[..., object]] = {
     "list": run_broker_tool_wrapper,
     "glob": run_broker_tool_wrapper,
     "grep": run_broker_tool_wrapper,
+    "bash": run_broker_tool_wrapper,
     "web_search": run_web_search_wrapper,
     "web_extract": run_web_extract_wrapper,
     "web_crawl": run_web_crawl_wrapper,

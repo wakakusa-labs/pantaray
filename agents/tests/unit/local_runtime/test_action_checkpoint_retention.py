@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.runtime.action_resumability import (
 from pantaray_agents.local_runtime.runtime.action_startup_recovery_envelope import (
     _load_anchor,
 )
+from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 from pantaray_agents.schema.agent.base import JSONValue, StepStatusType
@@ -89,6 +90,7 @@ async def _save_step(
     checkpoint: dict[str, JSONValue],
     step_type: StepType = StepType.LLM_OUTPUT,
     status: StepStatusType = StepStatusType.SUCCESS,
+    origin: ActionToolCallOrigin | None = None,
 ) -> None:
     result = await repo.save_action_step(
         step_id=step_id,
@@ -111,6 +113,7 @@ async def _save_step(
             else f"S-{step_number}-TOOL"
         ),
         local_step_number=step_number,
+        origin=origin,
     )
     assert result.error is None
 
@@ -244,3 +247,52 @@ async def test_settled_approval_pause_is_superseded_like_any_step(
     await _save_step(repo, step_id="step-3", step_number=3, checkpoint={"step": 4})
 
     assert _checkpoint_rows(db_path) == {"step-3": {"step": 4}}
+
+
+def _batch_state(*settled: str) -> dict[str, JSONValue]:
+    """What the shared state of a parallel batch holds once these calls settled."""
+
+    return {
+        "history_by_scope": {"S": [{"call_id": call} for call in settled]},
+        "next_action": None,
+    }
+
+
+async def _save_batch_call(
+    repo: LocalActionRepository, call: str, step_number: int, *settled: str
+) -> None:
+    await _save_step(
+        repo,
+        step_id=f"tool-{call}",
+        step_number=step_number,
+        checkpoint=_batch_state(*settled),
+        step_type=StepType.TOOL_EXECUTION,
+        origin=ActionToolCallOrigin(llm_step_id="think-2", call_id=call),
+    )
+
+
+async def _restored(repo: LocalActionRepository) -> JSONValue:
+    resume = await repo.get_runtime_resume_context_for_user_step(
+        user_id=USER_ID, action_id=ACTION_ID, current_user_step_number=9
+    )
+    assert resume.data is not None and resume.data.checkpoint_row is not None
+    return resume.data.checkpoint_row["runtime_state_checkpoint"]
+
+
+@pytest.mark.asyncio
+async def test_a_restart_after_a_batch_finished_in_reverse_keeps_every_result(
+    tmp_path: Path,
+) -> None:
+    """The later call finished first, so its row carried only itself; the row
+    saved last must not be dropped for its lower step number."""
+
+    db_path, repo = await _repository(tmp_path)
+    await _save_step(repo, step_id="think-2", step_number=2, checkpoint={"step": 3})
+    await _save_batch_call(repo, "b", 4, "b")
+    assert await _restored(repo) == _batch_state("b")
+
+    await _save_batch_call(repo, "a", 3, "b", "a")
+
+    # Both settled calls come back, and nothing is left to run again.
+    assert await _restored(repo) == _batch_state("b", "a")
+    assert _checkpoint_rows(db_path) == {"tool-b": _batch_state("b", "a")}

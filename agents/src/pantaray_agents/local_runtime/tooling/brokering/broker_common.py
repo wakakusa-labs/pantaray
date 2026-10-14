@@ -51,6 +51,7 @@ APPROVAL_MODE_ALWAYS_ALLOW: Literal["always_allow"] = "always_allow"
 APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
 APPROVAL_STATUS_APPROVED_ONCE: Literal["approved_once"] = "approved_once"
 APPROVAL_STATUS_DENIED: Literal["denied"] = "denied"
+APPROVAL_STATUS_INTERRUPTED: Literal["interrupted"] = "interrupted"
 BROKER_TOOL_TIMEOUT_ERROR_TYPE = "ToolTimeoutError"
 
 
@@ -436,6 +437,39 @@ def ensure_tool_authorization(
     )
 
 
+def withdraw_unasked_approval(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    action_id: str,
+    approval_session_id: str,
+    tool_request_id: str,
+    withdrawn_at: str,
+) -> None:
+    """Close a pending approval the user was never asked, so none is left open.
+
+    A pending session holds the Action's finalization and startup recovery,
+    which expect each one to be the request the run is paused on.
+    """
+
+    result = apply_approval_decision_with_grants(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=user_id,
+        tool_request_id=tool_request_id,
+        action_id=action_id,
+        approval_session_id=approval_session_id,
+        expected_current_status=APPROVAL_STATUS_PENDING,
+        next_status=APPROVAL_STATUS_INTERRUPTED,
+        decided_at=withdrawn_at,
+    )
+    if result.status != "updated":
+        raise BrokerPolicyError(
+            f"the unasked approval could not be withdrawn: {result.status}"
+        )
+
+
 def apply_approval_decision(
     *,
     db_path: Path,
@@ -554,6 +588,7 @@ __all__ = [
     "APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND",
     "APPROVAL_STATUS_APPROVED_ONCE",
     "APPROVAL_STATUS_DENIED",
+    "APPROVAL_STATUS_INTERRUPTED",
     "APPROVAL_STATUS_PENDING",
     "ApprovalDecisionError",
     "BASH_TOOL_ID",
@@ -571,4 +606,5 @@ __all__ = [
     "ensure_tool_authorization",
     "load_broker_context",
     "resolve_workspace_relative_path",
+    "withdraw_unasked_approval",
 ]

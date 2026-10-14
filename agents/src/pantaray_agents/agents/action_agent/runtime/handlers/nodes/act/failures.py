@@ -21,6 +21,10 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
 )
 from pantaray_agents.schema.agent.base import AgentError, JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
+from pantaray_agents.tools.contract import (
+    APPROVAL_NEEDS_OWN_TURN,
+    APPROVAL_NEEDS_OWN_TURN_CODE,
+)
 
 from ...tool_runtime.formal_step import (
     finalize_error_step,
@@ -283,6 +287,35 @@ async def finalize_tool_call_not_executed(
     )
 
 
+async def finalize_tool_call_needs_own_turn(
+    agent: ActionAgent,
+    state: ActionAgentState,
+    runtime: ActionGraphRuntime,
+    *,
+    slot: ToolCallSlot,
+    step_id: str,
+    args_payload: ToolArgsPayload,
+    started_at: str,
+) -> None:
+    """A call that shared its turn and needed approval: it never ran."""
+
+    await _record_stopped_call(
+        agent,
+        state,
+        runtime,
+        slot=slot,
+        step_id=step_id,
+        args_payload=args_payload,
+        started_at=started_at,
+        error_code=APPROVAL_NEEDS_OWN_TURN_CODE,
+        message=APPROVAL_NEEDS_OWN_TURN,
+        output={"kind": NOT_EXECUTED_OUTPUT_KIND},
+        outcome_status="failed",
+        error_type="tool_error",
+        output_error_type="ApprovalNeedsOwnTurn",
+    )
+
+
 def _interrupted_output(
     partial_output: CanceledCommandOutput | None,
 ) -> dict[str, JSONValue]:
@@ -315,11 +348,13 @@ async def _record_stopped_call(
     message: str,
     output: dict[str, JSONValue],
     outcome_status: OutcomeStatus,
+    error_type: str = "canceled_error",
+    output_error_type: str = "ActionStopped",
 ) -> None:
     state["next_action"] = None
     completed_at = now_utc_iso()
     tool_error = runtime.services.response.build_agent_error(
-        error_type="canceled_error",
+        error_type=error_type,
         error_code=error_code,
         error_message=f"{slot.tool_id}: {message}",
         severity="warning",
@@ -330,7 +365,7 @@ async def _record_stopped_call(
         step_id=step_id,
         status="error",
         output=build_runtime_tool_error_output(
-            error_type="ActionStopped",
+            error_type=output_error_type,
             message=message,
             details={"tool_id": slot.tool_id},
         )
@@ -353,6 +388,7 @@ async def _record_stopped_call(
             slot.tool_id,
             formal_result.output.output,
             status=outcome_status,
+            error_code=error_code,
         ),
         started_at=started_at,
         completed_at=completed_at,

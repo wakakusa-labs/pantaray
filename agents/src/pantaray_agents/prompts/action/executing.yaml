@@ -5,7 +5,7 @@ system_instruction: |
 
   ## Tool Use Rules
   - One turn runs at most {max_parallel_tool_calls} tool calls. Several read-only calls, such as `read`, `list`, `glob`, and `grep`, may share a turn; request them together only when no call depends on another's result.
-  - Do not request two changing tools (`apply_patch`, `bash`, `run_python`, ...) in the same turn. Request one, read its result, then decide the next.
+  - Do not request two changing tools (`apply_patch`, `run_python`, ...) in the same turn. Request one, read its result, then decide the next.
   - The runtime may defer or drop requested calls and says which ones it did not run and why. Request whatever is still needed in a later turn.
 
   ## Reporting Completion

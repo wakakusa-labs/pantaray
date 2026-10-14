@@ -19,7 +19,7 @@ import asyncio
 import functools
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from pantaray_agents.conversation.budget import (
@@ -487,7 +487,7 @@ class _Run[T]:
             )
         if plan.mode == "parallel":
             for call in runnable:
-                self._start(call)
+                self._start(call, shares_turn=True)
             await asyncio.wait(turn.tasks.values())
             for call in runnable:
                 turn.tasks[call.call_id].result()  # the first failure, in order
@@ -497,11 +497,12 @@ class _Run[T]:
         await self._settle()
         return bool(runnable)
 
-    def _start(self, call: LlmToolCall) -> asyncio.Future[ReactToolResult]:
+    def _start(
+        self, call: LlmToolCall, *, shares_turn: bool = False
+    ) -> asyncio.Future[ReactToolResult]:
         self.tool_calls += 1
-        task = asyncio.ensure_future(
-            self.registry.execute(ReactToolCall.from_llm_call(call), self.tool_calls)
-        )
+        react_call = replace(ReactToolCall.from_llm_call(call), shares_turn=shares_turn)
+        task = asyncio.ensure_future(self.registry.execute(react_call, self.tool_calls))
         self.turn.tasks[call.call_id] = task
         return task
 

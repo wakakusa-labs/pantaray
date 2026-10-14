@@ -3,6 +3,31 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.5.2
+
+- A PDF a task names now shows in the preview beside the conversation, and opening it no longer
+  closes the task.
+- Scrollbars now match the dark window.
+- Tasks see more of a long result at once and read on through long files, command output and
+  search results more reliably.
+- File search and listing leave out what your .gitignore excludes, such as dependencies and
+  build output.
+- Suggestions can read all of a long command output.
+- Subagents run on the model you chose, and tasks hand work to them only when it is large enough to
+  be worth it, so answers come sooner and use fewer tokens.
+- When a git checkout a task works in is behind its remote, the task is told, so it does not take
+  old code for the current one.
+
+---
+
+- タスクが示した PDF が会話の横のプレビューに表示されるようになり、開いてもタスクが閉じなくなりました。
+- スクロールバーが暗い画面に合う色になりました。
+- タスクが長い結果を一度に多く見られるようになり、長いファイルやコマンドの出力、検索結果を最後まで読み進めやすくなりました。
+- ファイルの検索や一覧で、.gitignore で除外した依存やビルドの出力などを含めないようになりました。
+- 提案で、長いコマンドの出力を最後まで読めるようになりました。
+- サブエージェントはあなたが選んだモデルで動き、任せる価値のある大きさの作業だけを任せるようになったため、回答が速くなり、トークンも減りました。
+- タスクが作業する git のチェックアウトがリモートより遅れているときは、それを伝えるので、古いコードを現状と取り違えなくなりました。
+
 ## 0.5.1
 
 - Activity recording now also reads windows whose text could not be read before. It needs the

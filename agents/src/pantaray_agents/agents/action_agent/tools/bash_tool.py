@@ -74,8 +74,9 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "Non-interactive shell command or script. "
             "Pipes, redirections, heredocs, environment assignments, "
             "and multiple commands are supported. Only one bash call runs per "
-            "turn, so put independent commands you need now into one call, "
-            "joined with `;` or `&&`."
+            "turn, so put independent read-only commands you need now into one "
+            "call, joined with `;`. Run a command that changes something in its "
+            "own call, so that a retry after a failure does not repeat it."
         ),
     ),
     BrokerToolFieldPresentation(

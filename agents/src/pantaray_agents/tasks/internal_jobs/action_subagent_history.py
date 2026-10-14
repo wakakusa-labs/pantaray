@@ -9,7 +9,7 @@ task leads the history and is the job payload's, never a row.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
@@ -110,14 +110,12 @@ class AgentsMdClaims:
         self.attached = list(history.agents_md_paths)
         self.pending = list(history.pending_agents_md)
 
-    def claim(self, attach: Callable[[list[str]], str | None]) -> None:
-        """``attach`` appends what it attaches to the set and renders it."""
+    def record(self, paths: Sequence[str], text: str | None) -> None:
+        """Store what one call claimed, already in ``attached``, with its text."""
 
-        before = len(self.attached)
-        text = attach(self.attached)
         if text is None:
             return
-        row = _AgentsMdRow(paths=self.attached[before:], text=text)
+        row = _AgentsMdRow(paths=list(paths), text=text)
         append_action_subagent_event(
             db_path=self.db_path,
             busy_timeout_ms=self.busy_timeout_ms,

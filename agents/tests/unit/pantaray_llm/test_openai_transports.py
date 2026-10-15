@@ -153,8 +153,16 @@ _ECHO_CALL = {
 }
 
 
-def _sse_client(*, items: list[dict[str, object]], terminal_output: list[object]):
-    """An SDK client whose /responses answers one SSE stream of `items`."""
+def _sse_client(
+    *,
+    items: list[dict[str, object]],
+    terminal_output: list[object],
+    terminal_event: dict[str, object] | None = None,
+):
+    """An SDK client whose /responses answers one SSE stream of `items`.
+
+    `terminal_event` replaces the closing `response.completed` event.
+    """
 
     response = {
         "id": "resp_1",
@@ -175,7 +183,9 @@ def _sse_client(*, items: list[dict[str, object]], terminal_output: list[object]
         events.append(
             {"type": "response.output_item.done", "output_index": index, "item": item}
         )
-    events.append({"type": "response.completed", "response": response})
+    events.append(
+        terminal_event or {"type": "response.completed", "response": response}
+    )
     body = "".join(
         f"event: {event['type']}\ndata: {json.dumps({**event, 'sequence_number': index})}\n\n"
         for index, event in enumerate(events)
@@ -221,6 +231,88 @@ async def test_chatgpt_stream_recovers_done_items_from_empty_terminal() -> None:
     assert result.usage is not None and result.usage.total_tokens == 12
     assert [item.type for item in result.output] == ["message", "function_call"]
     assert result.output_text == "hello"
+
+
+async def _stream_with_terminal(terminal_event: dict[str, object]):
+    http_client, client = _sse_client(
+        items=[], terminal_output=[], terminal_event=terminal_event
+    )
+    async with http_client:
+        return await openai_provider._create_response(
+            client=client,
+            create_kwargs={
+                "model": "test-model",
+                "input": "hi",
+                "store": False,
+                "stream": False,
+            },
+            stream=True,
+        )
+
+
+_FAILED_RESPONSE = {
+    "id": "resp_1",
+    "object": "response",
+    "created_at": 1,
+    "model": "test-model",
+    "status": "failed",
+    "output": [],
+    "error": {"code": "context_length_exceeded", "message": "too long"},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_event",
+    [
+        {"type": "response.failed", "response": _FAILED_RESPONSE},
+        {
+            "type": "error",
+            "code": "context_length_exceeded",
+            "message": "too long",
+            "param": None,
+        },
+    ],
+    ids=["response.failed", "error"],
+)
+async def test_chatgpt_stream_failure_names_the_provider_code(
+    terminal_event: dict[str, object],
+) -> None:
+    http_client, client = _sse_client(
+        items=[], terminal_output=[], terminal_event=terminal_event
+    )
+    async with http_client:
+        with pytest.raises(ProviderError) as exc_info:
+            await execute_openai_request(
+                request=_plain_text_request().to_request(),
+                profile=_PROFILE,
+                uploaded_blobs={},
+                transport=chatgpt_codex_transport(
+                    access_token="token", account_id="account"
+                ),
+                client=client,
+            )
+
+    assert exc_info.value.code == "PROXY_REQUEST_FAILED"
+    assert exc_info.value.details is not None
+    assert exc_info.value.details["upstream_code"] == "context_length_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_stream_incomplete_returns_the_terminal_response() -> None:
+    result = await _stream_with_terminal(
+        {
+            "type": "response.incomplete",
+            "response": {
+                **_FAILED_RESPONSE,
+                "status": "incomplete",
+                "error": None,
+                "incomplete_details": {"reason": "max_output_tokens"},
+            },
+        }
+    )
+
+    assert result.status == "incomplete"
 
 
 @pytest.mark.asyncio

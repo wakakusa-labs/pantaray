@@ -13,10 +13,13 @@ from openai.types.responses.response_create_params import (
     ResponseCreateParamsNonStreaming,
     ResponseCreateParamsStreaming,
 )
+from openai.types.responses.response_error_event import ResponseErrorEvent
+from openai.types.responses.response_failed_event import ResponseFailedEvent
 from openai.types.responses.response_format_text_json_schema_config_param import (
     ResponseFormatTextJSONSchemaConfigParam,
 )
 from openai.types.responses.response_includable import ResponseIncludable
+from openai.types.responses.response_incomplete_event import ResponseIncompleteEvent
 from openai.types.responses.response_input_item_param import ResponseInputItemParam
 from openai.types.responses.response_output_item import ResponseOutputItem
 from openai.types.responses.response_output_item_done_event import (
@@ -63,6 +66,7 @@ from pantaray_llm.providers.openai_responses.request_budget import (
     prepare_openai_request,
 )
 from pantaray_llm.providers.openai_responses.response_error import (
+    OpenAiStreamError,
     build_openai_response_error,
     map_openai_exception,
     openai_request_details,
@@ -132,8 +136,15 @@ async def _create_response(
         async for event in events:
             if isinstance(event, ResponseOutputItemDoneEvent):
                 completed_items[event.output_index] = event.item
-            elif isinstance(event, ResponseCompletedEvent):
+            elif isinstance(event, ResponseCompletedEvent | ResponseIncompleteEvent):
+                # An incomplete terminal response goes through the same status
+                # mappers as a non-streamed one.
                 response = event.response
+            elif isinstance(event, ResponseFailedEvent):
+                failure = event.response.error
+                raise OpenAiStreamError(failure.code if failure is not None else None)
+            elif isinstance(event, ResponseErrorEvent):
+                raise OpenAiStreamError(event.code)
     if response is None:
         raise RuntimeError("Didn't receive a `response.completed` event.")
     # Codex can leave the terminal response.output empty after streaming

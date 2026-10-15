@@ -37,6 +37,18 @@ UPSTREAM_PROVIDER_OPENAI: LlmProvider = "openai"
 _EXHAUSTED_USAGE_ERROR_TYPES = frozenset({"usage_not_included", "insufficient_quota"})
 
 
+class OpenAiStreamError(RuntimeError):
+    """The provider ended a stream with a failure event instead of a response.
+
+    `code` is the provider's own failure code. The message carries it so the
+    chained traceback in the log names the reason.
+    """
+
+    def __init__(self, code: str | None) -> None:
+        super().__init__(f"The provider ended the stream with a failure: {code}")
+        self.code = code
+
+
 def build_openai_response_error(
     *,
     response: object,
@@ -240,11 +252,14 @@ def map_openai_exception(
             message="The model provider is temporarily unavailable.",
             details=openai_request_details(request=request, provider=provider),
         )
+    details = openai_request_details(request=request, provider=provider)
+    if isinstance(exc, OpenAiStreamError) and exc.code:
+        details["upstream_code"] = exc.code
     return ProviderError(
         status_code=502,
         code=PROXY_REQUEST_FAILED,
         message="The model provider request failed before a valid response was returned.",
-        details=openai_request_details(request=request, provider=provider),
+        details=details,
     )
 
 

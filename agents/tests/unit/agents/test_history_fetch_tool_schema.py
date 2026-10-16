@@ -52,3 +52,13 @@ def test_history_fetch_rejects_noncanonical_or_unbounded_input(
 ) -> None:
     with pytest.raises(ToolValidationError):
         _validate_tool_args(HISTORY_FETCH_TOOL, args)
+
+
+def test_history_fetch_cursor_bounds_its_length_in_the_pattern_alone() -> None:
+    # A strict tool schema whose string carries both `pattern` and `maxLength` made
+    # gpt-6.1-sol, gpt-6-luna and gpt-6-astra answer `incomplete: max_output_tokens`
+    # with zero tokens, so every Action turn that offered the tool failed.
+    cursor = HISTORY_FETCH_TOOL.input_schema["properties"]["cursor"]
+
+    assert "pattern" in cursor
+    assert "maxLength" not in cursor

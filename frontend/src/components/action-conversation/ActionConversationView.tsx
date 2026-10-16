@@ -15,7 +15,7 @@ import { useI18n } from '@/context/useI18n';
 
 import type { ImageGridCopy } from './AttachedImages';
 import { UserItem } from './UserMessage';
-import { CopyAnswerButton } from './CopyAnswerButton';
+import { CopyTextButton } from './CopyTextButton';
 import { ToolRow, type ToolRowStatus } from './ToolRow';
 import { terminalOutcomeText } from './terminalOutcomeText';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
@@ -255,7 +255,15 @@ export function StepItem({
       ) : (
         <p>{terminalOutcomeText(line.text, t)}</p>
       )}
-      {line.kind === 'final_output' ? <CopyAnswerButton markdown={line.text} /> : null}
+      {line.kind === 'final_output' ? (
+        <div className="action-conversation__answer-actions">
+          <CopyTextButton
+            text={line.text}
+            label={t('overlay.copyThisAnswer')}
+            failedLabel={t('overlay.copyThisAnswerFailed')}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

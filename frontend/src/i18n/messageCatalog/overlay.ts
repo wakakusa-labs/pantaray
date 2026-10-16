@@ -75,6 +75,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.copyLinkFailed': 'Couldn’t copy the link. Try again.',
     'overlay.copyThisAnswer': 'Copy this answer',
     'overlay.copyThisAnswerFailed': 'Couldn’t copy this answer. Try again.',
+    'overlay.copyThisMessage': 'Copy this message',
+    'overlay.copyThisMessageFailed': 'Couldn’t copy this message. Try again.',
     'overlay.transcript.you': 'You',
     'overlay.transcript.pantaray': 'Pantaray',
     'overlay.transcript.image': '(1 image)',
@@ -214,6 +216,9 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.copyLinkFailed': 'リンクをコピーできませんでした。もう一度お試しください。',
     'overlay.copyThisAnswer': 'この回答をコピー',
     'overlay.copyThisAnswerFailed': 'この回答をコピーできませんでした。もう一度お試しください。',
+    'overlay.copyThisMessage': 'このメッセージをコピー',
+    'overlay.copyThisMessageFailed':
+      'このメッセージをコピーできませんでした。もう一度お試しください。',
     'overlay.transcript.you': 'あなた',
     'overlay.transcript.pantaray': 'Pantaray',
     'overlay.transcript.image': '（画像 1 枚）',

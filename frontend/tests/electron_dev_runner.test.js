@@ -12,6 +12,7 @@ const {
   assertPortAvailable,
   buildFrontendUrl,
   requestHttpOk,
+  resignElectronBundle,
   resolveFrontendPort,
   waitForViteReady,
 } = require('../scripts/run-electron-dev');
@@ -23,6 +24,42 @@ function createChild() {
   child.kill = () => {};
   return child;
 }
+
+test('resignElectronBundle signs the whole .app that holds the Electron executable', () => {
+  const calls = [];
+  resignElectronBundle({
+    identity: 'Developer ID Application: Example (TEAM)',
+    executable: '/x/dist/Electron.app/Contents/MacOS/Electron',
+    run: (command, args) => {
+      calls.push([command, args]);
+      return { status: 0 };
+    },
+  });
+  assert.deepEqual(calls, [
+    [
+      'codesign',
+      [
+        '--force',
+        '--deep',
+        '--sign',
+        'Developer ID Application: Example (TEAM)',
+        '/x/dist/Electron.app',
+      ],
+    ],
+  ]);
+});
+
+test('resignElectronBundle fails loudly when codesign fails', () => {
+  assert.throws(
+    () =>
+      resignElectronBundle({
+        identity: 'missing',
+        executable: '/x/dist/Electron.app/Contents/MacOS/Electron',
+        run: () => ({ status: 1, stderr: 'no identity found' }),
+      }),
+    /no identity found/
+  );
+});
 
 test('run-electron-dev builds the loopback frontend URL', () => {
   assert.equal(buildFrontendUrl(3001), 'http://127.0.0.1:3001/');

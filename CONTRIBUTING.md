@@ -90,6 +90,15 @@ variable takes precedence. Vite and Electron use the same port; an invalid value
 occupied port stops startup with an error. Packaged desktop builds load bundled HTML
 and do not use this setting.
 
+On macOS the downloaded Electron is only ad-hoc signed, so System Settings forgets its Screen
+Recording and Accessibility grants whenever the Electron version or your checkout changes. To keep
+them, export a signing identity before `electron:dev`; the runner re-signs the dev Electron with it
+(`security find-identity -v -p codesigning` lists yours):
+
+```bash
+export PANTARAY_DEV_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+```
+
 That one command fetches the pinned activity recorder and local embedding model, then starts Vite,
 Electron main, and the local Python runtime. The runtime is launched by Electron with `uv` on
 a loopback port chosen at startup, so you do not need to start it yourself.

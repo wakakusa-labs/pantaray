@@ -3,12 +3,17 @@
 const { spawn, spawnSync } = require('node:child_process');
 const http = require('node:http');
 const net = require('node:net');
+const path = require('node:path');
 
 const SHUTDOWN_SIGNAL = 'SIGTERM';
 const FORCE_KILL_DELAY_MS = 3_000;
 const VITE_READY_TIMEOUT_MS = 30_000;
 const VITE_READY_POLL_INTERVAL_MS = 300;
 const VITE_READY_REQUEST_TIMEOUT_MS = 1_500;
+// The downloaded Electron is only ad-hoc signed, so macOS ties its Screen Recording and
+// Accessibility grants to that exact binary and drops them whenever the Electron version
+// or the checkout changes. Signing with a real identity ties them to the identity instead.
+const DEV_SIGN_IDENTITY_ENV = 'PANTARAY_DEV_SIGN_IDENTITY';
 async function resolveFrontendPort() {
   const { resolveConfig } = await import('vite');
   const config = await resolveConfig({}, 'serve', 'development');
@@ -51,6 +56,19 @@ function assertPortAvailable(port) {
       server.close(() => resolve());
     });
   });
+}
+
+function resignElectronBundle({ identity, executable, run = spawnSync }) {
+  // <bundle>.app/Contents/MacOS/Electron
+  const bundle = path.resolve(executable, '..', '..', '..');
+  const result = run('codesign', ['--force', '--deep', '--sign', identity, bundle], {
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${DEV_SIGN_IDENTITY_ENV}: codesign could not sign ${bundle}.\n${result.stderr || result.error}`
+    );
+  }
 }
 
 function spawnChild(name, command, args) {
@@ -186,6 +204,17 @@ async function main() {
     throw error;
   }
 
+  const signIdentity = process.env[DEV_SIGN_IDENTITY_ENV];
+  if (signIdentity && process.platform === 'darwin') {
+    try {
+      resignElectronBundle({ identity: signIdentity, executable: require('electron') });
+    } catch (error) {
+      shuttingDown = true;
+      stopChildren(null);
+      throw error;
+    }
+  }
+
   const electron = spawnChild('electron', process.execPath, [
     './node_modules/electron/cli.js',
     '.',
@@ -205,6 +234,7 @@ module.exports = {
   assertPortAvailable,
   buildFrontendUrl,
   requestHttpOk,
+  resignElectronBundle,
   resolveFrontendPort,
   waitForViteReady,
 };

@@ -59,9 +59,10 @@ HISTORY_FETCH_TOOL = ToolDefinition.from_spec(
                     name="cursor",
                     schema={
                         "type": ["string", "null"],
-                        "pattern": "^[0-9a-f]{64}:[0-9]+$",
-                        # SHA-256 hex, a colon, and at most 20 offset digits.
-                        "maxLength": 85,
+                        # SHA-256 hex, a colon, and at most 20 offset digits. The bound
+                        # lives in the pattern: with `maxLength` beside it, the gpt-6 models
+                        # stop with `max_output_tokens` before writing any token.
+                        "pattern": "^[0-9a-f]{64}:[0-9]{1,20}$",
                     },
                     required=False,
                     description="Use next_cursor from the preceding page with the same refs; omit for the first page.",

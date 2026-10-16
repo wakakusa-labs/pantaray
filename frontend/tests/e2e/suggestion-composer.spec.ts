@@ -404,7 +404,10 @@ for (const language of ['ja', 'en'] as const) {
 
     const history = page.getByRole('article', { name: copy.you });
     await expect(history.getByRole('list', { name: copy.files })).toContainText('1.2 MB');
-    await expect(history.getByRole('button')).toHaveCount(0);
+    // The sent chips are plain, unlike the removable ones in the composer.
+    await expect(history.getByRole('list', { name: copy.files }).getByRole('button')).toHaveCount(
+      0
+    );
     await capture(page, info, `documents-history-${language}`);
 
     await expect(page.getByRole('button', { name: copy.attach })).toBeVisible();

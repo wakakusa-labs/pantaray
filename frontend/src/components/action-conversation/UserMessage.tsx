@@ -5,6 +5,7 @@ import type { ActionConversationUserItem } from '../../../electron/src/actions/a
 import { useI18n } from '@/context/useI18n';
 import { AttachedFileChip } from './AttachedFileChip';
 import { AttachedImages } from './AttachedImages';
+import { CopyTextButton } from './CopyTextButton';
 import { QuotedMessageText } from './QuotedMessageText';
 import { OpenWorkContext, sentMessageRefs } from './sentMessageRefs';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
@@ -106,6 +107,14 @@ export function UserItem({
           </ul>
         ) : null}
         {state}
+        {content !== null ? (
+          <CopyTextButton
+            className="action-conversation__user-copy"
+            text={content}
+            label={t('overlay.copyThisMessage')}
+            failedLabel={t('overlay.copyThisMessageFailed')}
+          />
+        ) : null}
       </article>
       {note}
       {withdraw}

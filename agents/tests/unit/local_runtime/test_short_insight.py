@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from pantaray_agents.local_runtime.context.source_protocol import (
     PageReadRequest,
     PageResponse,
 )
+from pantaray_agents.local_runtime.integrations import registry
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -68,6 +70,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
+    set_integration_account_access,
+)
 from pantaray_agents.schema.context_source import (
     ActivateSource,
     RecorderBinding,
@@ -83,6 +88,7 @@ from pantaray_agents.tools.zanei import (
 )
 
 from .migrated_db import prepare_test_database
+from .test_integration_change_probe import _account, _FakeGateway, _gmail
 
 USER = "user-1"
 RUN = "run-1"
@@ -213,11 +219,13 @@ class _FakeAgent:
     calls: int = 0
     before_output: object = None
     read_event: str | None = None
+    external_changes: list[str | None] = field(default_factory=list)
 
     async def generate(
-        self, *, zanei: ZaneiTools, **_kwargs: object
+        self, *, zanei: ZaneiTools, external_changes: str | None, **_kwargs: object
     ) -> ShortInsightOutput:
         self.calls += 1
+        self.external_changes.append(external_changes)
         await zanei.timeline(_timeline_call(), 1)
         if self.read_event is not None:
             await zanei.query(_query_call(self.read_event), 2)
@@ -893,3 +901,59 @@ def test_a_record_id_separates_fields_a_joined_string_would_blur() -> None:
     assert _source_record_id(run_id=RUN, record=left) == _source_record_id(
         run_id=RUN, record=_record("案件A", "さとう:りく")
     )
+
+
+async def test_without_integrations_the_run_adds_no_external_changes(
+    db_path: Path,
+) -> None:
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
+    agent = _FakeAgent(output=_output())
+
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    assert agent.external_changes == [None]
+
+
+async def test_each_window_probes_its_accounts_once_while_recording(
+    db_path: Path,
+) -> None:
+    gateway = _FakeGateway(
+        entries=[_gmail()],
+        accounts={"gmail": [_account("work"), _account("broken")]},
+        results={"broken": ConnectionError("probe failed")},
+    )
+    for account in ("work", "broken"):
+        set_integration_account_access(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            user_id=USER,
+            toolkit="gmail",
+            account=account,
+            access="read_only",
+            updated_at=PERIOD_START,
+        )
+    registry.set_integration_gateway(gateway)
+    try:
+        gate = SourceGate()
+        # Not recording: no run, so no probe.
+        await _run(db_path=db_path, gate=gate, reader=None, agent=None)
+        assert gateway.executed == Counter()
+
+        await _active_source(gate)
+        agent = _FakeAgent(output=_output())
+        reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
+        await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+        # The window's committed run is a no-op when replayed.
+        await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+    finally:
+        registry.set_integration_gateway(None)
+
+    assert gateway.executed == Counter({"work": 1, "broken": 1})
+    assert agent.calls == 1
+    (block,) = agent.external_changes
+    assert block is not None
+    assert "### Gmail (work@x)" in block
+    assert "broken@x" not in block
+    assert _stored(db_path)["cursor"] == "cursor-2"

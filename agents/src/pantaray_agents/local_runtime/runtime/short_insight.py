@@ -14,6 +14,7 @@ from pantaray_agents.agents.insight_agent.record_verification import (
     VerifiedRecord,
     verify_source_records,
 )
+from pantaray_agents.local_runtime.activity_summary_schedule import parse_iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_gate import (
     SourceGate,
@@ -26,6 +27,9 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 )
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.context.source_transport import source_scope
+from pantaray_agents.local_runtime.integrations.change_probe import (
+    collect_external_changes,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -92,6 +96,13 @@ async def run_short_insight(
             (user_id,),
         ).fetchone()
     try:
+        external_changes = await collect_external_changes(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=user_id,
+            run_id=run_id,
+            window_start=parse_iso_z(period_start),
+        )
         async with gate.track(source):
             with source_scope(gate, source):
                 page = await reader.read_page(
@@ -119,6 +130,7 @@ async def run_short_insight(
                         user_id=user_id,
                     ),
                     previous_insight=str(previous[0]) if previous else "(none)",
+                    external_changes=external_changes,
                     db_path=db_path,
                     busy_timeout_ms=busy_timeout_ms,
                 )

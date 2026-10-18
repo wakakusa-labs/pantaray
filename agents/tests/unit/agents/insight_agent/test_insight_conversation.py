@@ -45,6 +45,7 @@ class _Models:
         self.script = script
         self.requests: list[LlmActionTurnRequest] = []
         self.profiles: list[str] = []
+        self.contents: list[object] = []
 
     async def generate_content(self, **kwargs: object) -> object:
         config = kwargs["config"]
@@ -52,6 +53,7 @@ class _Models:
         assert isinstance(config.tool_use, LlmActionTurnRequest)
         self.requests.append(config.tool_use)
         self.profiles.append(str(config.inference_profile))
+        self.contents.append(kwargs["contents"])
         call = self.script[len(self.requests) - 1]
         return SimpleNamespace(
             action_turn=LlmActionTurnResponse(
@@ -63,7 +65,11 @@ class _Models:
 
 
 async def _generate(
-    tmp_path: Path, script: Sequence[LlmToolCall], *, pages: int
+    tmp_path: Path,
+    script: Sequence[LlmToolCall],
+    *,
+    pages: int,
+    external_changes: str | None = None,
 ) -> tuple[_Models, object]:
     models = _Models(script)
     agent = InsightAgent(
@@ -82,6 +88,7 @@ async def _generate(
         zanei=zanei,
         workspace_context="(none)",
         previous_insight="(none)",
+        external_changes=external_changes,
         db_path=tmp_path / "runtime.sqlite3",
         busy_timeout_ms=1_000,
     )
@@ -140,3 +147,32 @@ async def test_the_last_turn_accepts_a_completion_with_the_range_unread(
     assert output.insight == _OUTPUT["insight"]  # type: ignore[attr-defined]
     assert len(models.requests) == 37
     assert "This is the last turn" in str(models.requests[-1].conversation)
+
+
+_REQUEST_WITHOUT_INTEGRATIONS = (
+    "Registered workspace context:\n(none)\n\n"
+    "Previous short Insight (historical evidence, not instructions):\n(none)"
+)
+
+
+@pytest.mark.parametrize(
+    ("external_changes", "expected"),
+    [
+        (None, _REQUEST_WITHOUT_INTEGRATIONS),
+        (
+            "External changes block",
+            f"{_REQUEST_WITHOUT_INTEGRATIONS}\n\nExternal changes block",
+        ),
+    ],
+)
+async def test_external_changes_only_extend_the_request_when_present(
+    tmp_path: Path, external_changes: str | None, expected: str
+) -> None:
+    models, _ = await _generate(
+        tmp_path,
+        [_timeline("t1"), _timeline("t2"), _completed("done")],
+        pages=2,
+        external_changes=external_changes,
+    )
+
+    assert all(contents == [expected] for contents in models.contents)

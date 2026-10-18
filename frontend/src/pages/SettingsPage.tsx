@@ -1,13 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
+import { useAuth } from '@/hooks/useAuth';
 import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
+import { IntegrationSettingsSection } from './settings/components/IntegrationSettingsSection';
+import { useIntegrationSettingsController } from './settings/components/IntegrationSettingsController';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
@@ -20,6 +23,7 @@ type SettingsSectionId =
   | 'ai_connection'
   | 'language'
   | 'execution'
+  | 'integrations'
   | 'shortcuts'
   | 'overlay_position'
   | 'screenshots';
@@ -28,6 +32,7 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
   'language',
   'execution',
+  'integrations',
   'shortcuts',
   'overlay_position',
   'screenshots',
@@ -40,27 +45,39 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
  */
 const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
 
-function getSectionFromSearch(value: string | null): SettingsSectionId {
-  return SETTINGS_SECTIONS.includes(value as SettingsSectionId)
-    ? (value as SettingsSectionId)
-    : 'language';
+function getSectionFromSearch(
+  value: string | null,
+  sections: SettingsSectionId[]
+): SettingsSectionId {
+  return sections.includes(value as SettingsSectionId) ? (value as SettingsSectionId) : 'language';
 }
 
 const SettingsPage: React.FC = () => {
   const { t, language, setLanguage } = useI18n();
+  const { runtimeState } = useAuth();
+  const integrations = useIntegrationSettingsController(
+    runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
+  );
+  const hasIntegrations = integrations.toolkits !== null;
+  // Users without a connected account see no integrations section at all.
+  const sections = useMemo(
+    () => SETTINGS_SECTIONS.filter((id) => id !== 'integrations' || hasIntegrations),
+    [hasIntegrations]
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() =>
-    getSectionFromSearch(searchParams.get('section'))
+    getSectionFromSearch(searchParams.get('section'), sections)
   );
 
   useEffect(() => {
-    setActiveSection(getSectionFromSearch(searchParams.get('section')));
-  }, [searchParams]);
+    setActiveSection(getSectionFromSearch(searchParams.get('section'), sections));
+  }, [searchParams, sections]);
 
   const sectionLabels: Record<SettingsSectionId, string> = {
     ai_connection: t('settings.aiConnection.title'),
     language: t('settings.language.title'),
     execution: t('settings.approvalMode.title'),
+    integrations: t('settings.integrations.title'),
     shortcuts: t('settings.shortcut.title'),
     overlay_position: t('settings.overlayPosition.title'),
     screenshots: t('settings.screenshotCapture.title'),
@@ -70,7 +87,7 @@ const SettingsPage: React.FC = () => {
     <div className="app-split">
       <aside className="app-split-master settings-page-nav" aria-label={t('nav.settings')}>
         <h2 className="app-split-title settings-page-nav-title">{t('nav.settings')}</h2>
-        {SETTINGS_SECTIONS.map((sectionId) => {
+        {sections.map((sectionId) => {
           const isActive = activeSection === sectionId;
           return (
             <button
@@ -99,6 +116,14 @@ const SettingsPage: React.FC = () => {
         {activeSection === 'ai_connection' ? <AiConnectionSettingsSection /> : null}
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
+        ) : null}
+        {activeSection === 'integrations' && integrations.toolkits !== null ? (
+          <IntegrationSettingsSection
+            t={t}
+            toolkits={integrations.toolkits}
+            rows={integrations.rows}
+            actions={integrations.actions}
+          />
         ) : null}
         {activeSection === 'shortcuts' ? <ShortcutSection t={t} /> : null}
         {activeSection === 'overlay_position' ? <OverlayPositionSection t={t} /> : null}

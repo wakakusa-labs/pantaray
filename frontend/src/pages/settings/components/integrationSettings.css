@@ -1,0 +1,57 @@
+/* Built on aiConnection.css: the segmented radio, group heading, notes and status text. */
+.integration-accounts,
+.integration-tool-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.integration-account {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-md) 0;
+}
+
+.integration-account-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+/* Greyed out but still pressable, so the press can say why. */
+.integration-settings .ai-segment:has(.ai-segment-input[aria-disabled='true']),
+.integration-tool .settings-toggle[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.integration-tools-summary {
+  color: #bcd3ec;
+  cursor: pointer;
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-semibold);
+  width: fit-content;
+}
+
+.integration-tool {
+  align-items: center;
+  display: grid;
+  gap: 2px var(--space-md);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 6px 0;
+}
+
+.integration-tool-name {
+  color: var(--text-primary);
+  font-size: var(--text-body-size);
+  overflow-wrap: anywhere;
+}
+
+.integration-tool-reason {
+  grid-column: 1 / -1;
+}

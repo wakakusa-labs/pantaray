@@ -122,6 +122,19 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     path: /^\/v1\/agents\/users\/[^/]+\/approval-preferences\/workspace-edit-and-command$/,
     methods: new Set(['GET', 'PUT']),
   },
+  { path: /^\/v1\/agents\/users\/[^/]+\/integrations$/, methods: new Set(['GET']) },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/integrations\/[^/]+\/accounts\/[^/]+\/access$/,
+    methods: new Set(['PUT']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/integrations\/[^/]+\/accounts\/[^/]+\/tools$/,
+    methods: new Set(['GET']),
+  },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/integrations\/[^/]+\/accounts\/[^/]+\/tools\/[^/]+\/block$/,
+    methods: new Set(['PUT', 'DELETE']),
+  },
 ];
 
 export class LocalBackendRequestError extends Error {

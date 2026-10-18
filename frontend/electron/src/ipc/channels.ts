@@ -68,6 +68,11 @@ export const validInvokeChannels = [
   'auth:startBrowserLogin',
   'approval:getWorkspaceEditCommandPreference',
   'approval:setWorkspaceEditCommandPreference',
+  // Main window only: connected external apps' permissions
+  'integrations:getStatus',
+  'integrations:setAccountAccess',
+  'integrations:listAccountTools',
+  'integrations:setToolBlocked',
   'shortcut:getState',
   'shortcut:setAccelerator',
   'overlayPlacement:get',

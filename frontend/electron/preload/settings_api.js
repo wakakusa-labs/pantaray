@@ -15,6 +15,12 @@ function createSettingsApi({ ipcRenderer }) {
       setWorkspaceEditCommandPreference: (approvalMode) =>
         ipcRenderer.invoke('approval:setWorkspaceEditCommandPreference', approvalMode),
     },
+    integrations: {
+      getStatus: () => ipcRenderer.invoke('integrations:getStatus'),
+      setAccountAccess: (update) => ipcRenderer.invoke('integrations:setAccountAccess', update),
+      listAccountTools: (ref) => ipcRenderer.invoke('integrations:listAccountTools', ref),
+      setToolBlocked: (update) => ipcRenderer.invoke('integrations:setToolBlocked', update),
+    },
     shortcut: {
       getState: () => ipcRenderer.invoke('shortcut:getState'),
       setAccelerator: (accelerator) => ipcRenderer.invoke('shortcut:setAccelerator', accelerator),

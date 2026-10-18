@@ -61,6 +61,7 @@ import {
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
+import { createIntegrationSettingsFetcher } from '../settings/integrationSettingsFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
 import type { DesktopRuntime } from './desktopRuntime';
@@ -392,6 +393,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           ...createChatFetcher({ requestJson, getUserId }),
           getTurnState: orchestration.getChatTurnState,
         },
+        integrations: createIntegrationSettingsFetcher({ requestJson, getUserId }),
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,
           decodeImageDimensions: (bytes) => {

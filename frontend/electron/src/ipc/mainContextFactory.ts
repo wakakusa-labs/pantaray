@@ -62,6 +62,7 @@ export function buildMainContext(params: {
   update: MainContext['update'];
   actions: MainContext['actions'];
   chat: MainContext['chat'];
+  integrations: MainContext['integrations'];
   actionImages: MainContext['actionImages'];
 
   // ui language
@@ -280,6 +281,7 @@ export function buildMainContext(params: {
 
     actions: params.actions,
     chat: params.chat,
+    integrations: params.integrations,
 
     actionImages: params.actionImages,
     taskDrafts: createTaskDraftStore({

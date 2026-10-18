@@ -219,9 +219,11 @@ def move_integration_account_permissions(
     """Give ``to_account`` the access and tool blocks of ``from_account``, then
     revoke ``from_account``'s rows.
 
-    One immediate transaction: no reader sees the new account allowed before
-    its blocks, and on failure nothing is written. A new account that already
-    has a saved access was moved before, so nothing happens.
+    The access is copied only when ``to_account`` has none: one the user saved
+    for the new account wins. The blocks are always added, since a block only
+    narrows access and adding it again changes nothing. One immediate
+    transaction: no reader sees the new account allowed before its blocks, and
+    on failure nothing is written.
     """
 
     with sqlite3.connect(db_path) as connection:
@@ -229,23 +231,21 @@ def move_integration_account_permissions(
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             to_read_scope = integration_read_scope(toolkit=toolkit, account=to_account)
-            if (
-                _saved_mode(connection, user_id=user_id, scope=to_read_scope)
-                is not None
-            ):
-                return
-            access = _account_access(
-                connection, user_id=user_id, toolkit=toolkit, account=from_account
-            )
+            if _saved_mode(connection, user_id=user_id, scope=to_read_scope) is None:
+                _save_access(
+                    connection,
+                    user_id=user_id,
+                    toolkit=toolkit,
+                    account=to_account,
+                    access=_account_access(
+                        connection,
+                        user_id=user_id,
+                        toolkit=toolkit,
+                        account=from_account,
+                    ),
+                    updated_at=updated_at,
+                )
             blocked = _blocked_tools(connection, user_id=user_id, account=from_account)
-            _save_access(
-                connection,
-                user_id=user_id,
-                toolkit=toolkit,
-                account=to_account,
-                access=access,
-                updated_at=updated_at,
-            )
             for slug in sorted(blocked):
                 _save_scope(
                     connection,

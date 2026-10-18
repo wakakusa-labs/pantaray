@@ -565,6 +565,35 @@ def test_a_link_that_ends_without_consent_is_deleted(
     assert "ca_elsewhere" in composio.statuses
 
 
+def test_an_access_saved_before_the_first_poll_is_kept_with_the_old_blocks(
+    composio: FakeComposio, gateway: ComposioGateway, store: PermissionStore
+) -> None:
+    _save(store, WORK, "off")
+    _block(store, WORK, "GMAIL_FETCH_EMAILS")
+
+    with _client() as client:
+        connection_id = client.post(
+            f"{BASE}/gmail/accounts/{WORK}/reconnect", json={}
+        ).json()["connection_id"]
+        # The new account shows up active, and the user sets it before any poll.
+        composio.statuses[connection_id] = "ACTIVE"
+        gateway.invalidate_accounts()
+        chosen = client.put(
+            f"{BASE}/gmail/accounts/{connection_id}/access",
+            json={"access": "read_only"},
+        )
+        assert chosen.status_code == 200
+        assert client.get(f"{BASE}/connections/{connection_id}").json() == {
+            "state": "active"
+        }
+
+    assert _access(store, connection_id) == "read_only"
+    assert _blocked(store, connection_id) == {"GMAIL_FETCH_EMAILS"}
+    assert WORK not in composio.statuses
+    assert _access(store, WORK) == "off"
+    assert not _blocked(store, WORK)
+
+
 def test_a_failed_move_leaves_the_new_account_without_access(
     composio: FakeComposio,
     gateway: ComposioGateway,

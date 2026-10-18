@@ -284,7 +284,8 @@ def carry_over_account_setting(
 ) -> None:
     """A reconnect's new account takes over the replaced account's setting.
 
-    All or nothing, and a new account that already took it over is left alone.
+    All or nothing; an access already saved for the new account is kept, and
+    the replaced account's tool blocks are always added.
     """
 
     move_integration_account_permissions(

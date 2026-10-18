@@ -39,6 +39,7 @@ function saved(): Loaded {
       preferences: { method: 'api_key', provider: 'openai', model: 'test-model' },
       hasSavedApiKey: false,
       hasSavedWebSearchKey: false,
+      hasSavedIntegrationKey: false,
       canStoreSecrets: true,
       chatgpt: { status: 'disconnected' },
     },

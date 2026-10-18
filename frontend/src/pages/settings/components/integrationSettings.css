@@ -286,3 +286,27 @@
 .integration-dialog-empty {
   padding: 0 18px var(--space-lg);
 }
+
+.integration-key {
+  margin-top: var(--space-lg);
+}
+
+.integration-flow {
+  margin-top: var(--space-md);
+}
+
+.integration-confirm {
+  padding: var(--space-lg) 18px;
+  width: 440px;
+}
+
+.integration-confirm .dashboard-section-description {
+  margin-top: var(--space-sm);
+}
+
+.integration-confirm-actions {
+  display: flex;
+  gap: var(--space-md);
+  justify-content: flex-end;
+  margin-top: var(--space-lg);
+}

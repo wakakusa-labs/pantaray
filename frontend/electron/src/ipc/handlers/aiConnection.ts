@@ -22,6 +22,8 @@ function recovery(target: ConnectionSettingsReadError['target']): ConnectionReco
       return { operation: 'save_preferences', preferences: EMPTY_CONNECTION_PREFERENCES };
     case 'tavily':
       return { operation: 'remove_web_search_key' };
+    case 'composio':
+      return { operation: 'remove_integration_key' };
     default:
       return { operation: 'remove_api_key', provider: target };
   }
@@ -55,6 +57,12 @@ async function apply(
       break;
     case 'remove_web_search_key':
       await connection.removeWebSearchKey();
+      break;
+    case 'save_integration_key':
+      await connection.saveIntegrationKey(command.apiKey);
+      break;
+    case 'remove_integration_key':
+      await connection.removeIntegrationKey();
       break;
     case 'sign_in_chatgpt':
       return connection.signInToChatgpt();

@@ -1,16 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
-import { useAuth } from '@/hooks/useAuth';
 import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
-import { IntegrationSettingsSection } from './settings/components/IntegrationSettingsSection';
-import { useIntegrationSettingsController } from './settings/components/IntegrationSettingsController';
+import { IntegrationSettings } from './settings/components/IntegrationSettings';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
@@ -45,35 +43,22 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
  */
 const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
 
-function getSectionFromSearch(
-  value: string | null,
-  sections: SettingsSectionId[]
-): SettingsSectionId {
-  return sections.includes(value as SettingsSectionId) ? (value as SettingsSectionId) : 'language';
+function getSectionFromSearch(value: string | null): SettingsSectionId {
+  return SETTINGS_SECTIONS.includes(value as SettingsSectionId)
+    ? (value as SettingsSectionId)
+    : 'language';
 }
 
 const SettingsPage: React.FC = () => {
   const { t, language, setLanguage } = useI18n();
-  const { runtimeState } = useAuth();
-  const integrations = useIntegrationSettingsController(
-    runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
-  );
-  // Production has no connect flow yet, so the section needs an account that is already connected.
-  const hasIntegrations =
-    integrations.toolkits?.some((toolkit) => toolkit.accounts.length > 0) ?? false;
-  // Users without a connected account see no integrations section at all.
-  const sections = useMemo(
-    () => SETTINGS_SECTIONS.filter((id) => id !== 'integrations' || hasIntegrations),
-    [hasIntegrations]
-  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() =>
-    getSectionFromSearch(searchParams.get('section'), sections)
+    getSectionFromSearch(searchParams.get('section'))
   );
 
   useEffect(() => {
-    setActiveSection(getSectionFromSearch(searchParams.get('section'), sections));
-  }, [searchParams, sections]);
+    setActiveSection(getSectionFromSearch(searchParams.get('section')));
+  }, [searchParams]);
 
   const sectionLabels: Record<SettingsSectionId, string> = {
     ai_connection: t('settings.aiConnection.title'),
@@ -89,7 +74,7 @@ const SettingsPage: React.FC = () => {
     <div className="app-split">
       <aside className="app-split-master settings-page-nav" aria-label={t('nav.settings')}>
         <h2 className="app-split-title settings-page-nav-title">{t('nav.settings')}</h2>
-        {sections.map((sectionId) => {
+        {SETTINGS_SECTIONS.map((sectionId) => {
           const isActive = activeSection === sectionId;
           return (
             <button
@@ -119,14 +104,7 @@ const SettingsPage: React.FC = () => {
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
-        {activeSection === 'integrations' && hasIntegrations && integrations.toolkits ? (
-          <IntegrationSettingsSection
-            t={t}
-            toolkits={integrations.toolkits}
-            rows={integrations.rows}
-            actions={integrations.actions}
-          />
-        ) : null}
+        {activeSection === 'integrations' ? <IntegrationSettings t={t} /> : null}
         {activeSection === 'shortcuts' ? <ShortcutSection t={t} /> : null}
         {activeSection === 'overlay_position' ? <OverlayPositionSection t={t} /> : null}
         {/* Editing the filter pauses the recorder, and that pause outlives a section

@@ -8,7 +8,7 @@ import type { ConnectionConfiguration, LlmConnection } from './runtimeConnection
 
 type AuthControllerParams = Parameters<typeof createLocalBackendAuthContextController>[0];
 
-type SettingsStoreTarget = 'chatgpt' | 'preferences' | 'tavily' | ApiKeyProvider;
+type SettingsStoreTarget = 'chatgpt' | 'preferences' | 'tavily' | 'composio' | ApiKeyProvider;
 
 /** Identifies only the failed store, never its path or contents. */
 export class ConnectionSettingsReadError extends CredentialStorageError {
@@ -79,9 +79,13 @@ export function createLocalConnectionRuntime(params: {
       }
     }
     const searchKey = store.readWebSearchKey();
+    const integrationKey = store.readIntegrationKey();
     return {
       llmConnection,
       webSearchCredential: searchKey ? { provider: 'tavily', api_key: searchKey } : null,
+      integrationCredential: integrationKey
+        ? { provider: 'composio', api_key: integrationKey }
+        : null,
     };
   }
 
@@ -116,10 +120,13 @@ export function createLocalConnectionRuntime(params: {
         const hasSavedApiKey = store.readApiKey(preferences.provider) !== null;
         target = 'tavily';
         const hasSavedWebSearchKey = store.readWebSearchKey() !== null;
+        target = 'composio';
+        const hasSavedIntegrationKey = store.readIntegrationKey() !== null;
         return {
           preferences,
           hasSavedApiKey,
           hasSavedWebSearchKey,
+          hasSavedIntegrationKey,
           canStoreSecrets: params.safeStorage.isEncryptionAvailable(),
           chatgpt: { status: state.status },
         };
@@ -140,6 +147,8 @@ export function createLocalConnectionRuntime(params: {
     removeApiKey: (provider: ApiKeyProvider) => mutate(() => store.removeApiKey(provider)),
     saveWebSearchKey: (key: string) => mutate(() => store.saveWebSearchKey(key)),
     removeWebSearchKey: () => mutate(store.removeWebSearchKey),
+    saveIntegrationKey: (key: string) => mutate(() => store.saveIntegrationKey(key)),
+    removeIntegrationKey: () => mutate(store.removeIntegrationKey),
     async signInToChatgpt() {
       const result = await (await initialize()).signIn();
       if (!result.ok) return { ok: false as const, error: result.error };

@@ -53,6 +53,9 @@ function fixture(t, overrides = {}) {
         calls.push(['search', credential]);
         return credential ? 'direct' : 'unconfigured';
       },
+      setIntegrationCredential: async (credential) => {
+        calls.push(['integration', credential]);
+      },
       clearCloudSession: async () => {
         calls.push(['clearCloud']);
         return { cloudSessionState: 'absent', stale: false };
@@ -98,6 +101,7 @@ test('saved settings are included in the first configure, only after Electron is
   f.store.savePreferences(PREFERENCES);
   f.store.saveApiKey('openai', 'private-api-key');
   f.store.saveWebSearchKey('private-search-key');
+  f.store.saveIntegrationKey('private-integration-key');
   const apply = f.runtime.authContext.applyAuthContextChange(ABSENT);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(f.calls, [], 'no credential/configuration is sent before app readiness');
@@ -115,9 +119,30 @@ test('saved settings are included in the first configure, only after Electron is
           api_key: 'private-api-key',
         },
         webSearchCredential: { provider: 'tavily', api_key: 'private-search-key' },
+        integrationCredential: { provider: 'composio', api_key: 'private-integration-key' },
       },
     ],
   ]);
+});
+
+test('the integration key reaches the running helper, and a restarted one gets it in configure', async (t) => {
+  const f = fixture(t);
+  await f.runtime.authContext.applyAuthContextChange(ABSENT);
+  await f.runtime.saveIntegrationKey('private-integration-key');
+  const credential = { provider: 'composio', api_key: 'private-integration-key' };
+  assert.deepEqual(f.calls.at(-1), ['integration', credential]);
+  const settings = await f.runtime.getSettings();
+  assert.equal(settings.hasSavedIntegrationKey, true);
+  assert.equal(JSON.stringify(settings).includes('private-'), false);
+
+  f.restartHelper();
+  await f.runtime.savePreferences(PREFERENCES);
+  assert.equal(f.calls.at(-1)[0], 'configure');
+  assert.deepEqual(f.calls.at(-1)[2].integrationCredential, credential);
+
+  await f.runtime.removeIntegrationKey();
+  assert.deepEqual(f.calls.at(-1), ['integration', null]);
+  assert.equal((await f.runtime.getSettings()).hasSavedIntegrationKey, false);
 });
 
 test('editing before cloud restoration persists without briefly enabling direct routing', async (t) => {

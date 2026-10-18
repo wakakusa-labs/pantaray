@@ -2,31 +2,30 @@ import { useEffect, useId, useState } from 'react';
 
 import { MenuButton, type MenuButtonItem } from '@/components/ui/MenuButton';
 import type {
-  ApiDenial,
   IntegrationAccountStatus,
   IntegrationToolkitStatus,
   IntegrationToolSetting,
 } from '../../../../electron/src/settings/integrationSettingsFetch';
 import type { Translate } from '../types';
 import {
+  denialText,
   integrationRow,
   type IntegrationAccountRowState,
   type IntegrationSettingsActions,
   type IntegrationToolsState,
 } from './IntegrationSettingsController';
+import type { IntegrationFlow, IntegrationFlowActions } from './IntegrationConnectFlow';
+import { IntegrationDisconnectDialog, IntegrationFlowStatus } from './IntegrationFlowStatus';
 import { IntegrationLogo } from './IntegrationLogo';
 
-export type IntegrationAccountCallbacks = {
-  onConnect?: (toolkit: string) => void;
-  onReconnect?: (toolkit: string, account: string) => void;
-  onDisconnect?: (toolkit: string, account: string) => void;
-};
-
-type DetailProps = IntegrationAccountCallbacks & {
+type DetailProps = {
   t: Translate;
   toolkit: IntegrationToolkitStatus;
   rows: Record<string, IntegrationAccountRowState>;
   actions: IntegrationSettingsActions;
+  /** The running or last flow, when it is about this service. */
+  flow: IntegrationFlow | null;
+  flowActions: IntegrationFlowActions;
   onBack: () => void;
 };
 
@@ -36,9 +35,11 @@ export function IntegrationServiceDetail({
   toolkit,
   rows,
   actions,
+  flow,
+  flowActions,
   onBack,
-  ...callbacks
 }: DetailProps) {
+  const [confirming, setConfirming] = useState<IntegrationAccountStatus | null>(null);
   // Loaded up front, so each row can say how many tools are turned off. Only accounts never
   // loaded: a failed load is retried when the user opens that account's tools.
   useEffect(() => {
@@ -74,31 +75,41 @@ export function IntegrationServiceDetail({
             account={account}
             row={integrationRow(rows, account.account)}
             actions={actions}
-            {...callbacks}
+            flow={flow?.account === account.account ? flow : null}
+            onReconnect={() => flowActions.reconnect(toolkit.toolkit, account.account)}
+            onDisconnect={() => setConfirming(account)}
+            onCancelFlow={flowActions.cancel}
           />
         ))}
       </ul>
-      {callbacks.onConnect ? (
-        <button
-          type="button"
-          className="integration-text-button integration-add-account"
-          onClick={() => callbacks.onConnect?.(toolkit.toolkit)}
-        >
-          {t('settings.integrations.addAccount')}
-        </button>
+      {flow?.account === null ? (
+        <IntegrationFlowStatus
+          t={t}
+          flow={flow}
+          service={toolkit.display_name}
+          showService={false}
+          onCancel={flowActions.cancel}
+        />
       ) : null}
+      <button
+        type="button"
+        className="integration-text-button integration-add-account"
+        onClick={() => flowActions.connect(toolkit.toolkit)}
+      >
+        {t('settings.integrations.addAccount')}
+      </button>
       <p className="ai-note integration-consent">{t('settings.integrations.consent')}</p>
+      {confirming ? (
+        <IntegrationDisconnectDialog
+          t={t}
+          service={toolkit.display_name}
+          account={confirming.label}
+          onConfirm={() => flowActions.disconnect(toolkit.toolkit, confirming.account)}
+          onClose={() => setConfirming(null)}
+        />
+      ) : null}
     </>
   );
-}
-
-function denialText(t: Translate, reason: ApiDenial, service: string): string {
-  if (reason.source === 'account_grant') {
-    return reason.detail
-      ? t('settings.integrations.denial.grantDetail', { service, detail: reason.detail })
-      : t('settings.integrations.denial.grant', { service });
-  }
-  return t(`settings.integrations.denial.${reason.capability}`);
 }
 
 function AccountRow({
@@ -107,14 +118,20 @@ function AccountRow({
   account,
   row,
   actions,
+  flow,
   onReconnect,
   onDisconnect,
-}: IntegrationAccountCallbacks & {
+  onCancelFlow,
+}: {
   t: Translate;
   toolkit: IntegrationToolkitStatus;
   account: IntegrationAccountStatus;
   row: IntegrationAccountRowState;
   actions: IntegrationSettingsActions;
+  flow: IntegrationFlow | null;
+  onReconnect: () => void;
+  onDisconnect: () => void;
+  onCancelFlow: () => void;
 }) {
   const toolsId = useId();
   const [expanded, setExpanded] = useState(false);
@@ -134,17 +151,9 @@ function AccountRow({
     onSelect: () => actions.setAccess(toolkit.toolkit, account.account, option.value),
   }));
   const moreItems: MenuButtonItem[] = [
-    onReconnect && {
-      key: 'reconnect',
-      title: t('settings.integrations.reconnect'),
-      onSelect: () => onReconnect(toolkit.toolkit, account.account),
-    },
-    onDisconnect && {
-      key: 'disconnect',
-      title: t('settings.integrations.disconnect'),
-      onSelect: () => onDisconnect(toolkit.toolkit, account.account),
-    },
-  ].filter((item): item is MenuButtonItem => Boolean(item));
+    { key: 'reconnect', title: t('settings.integrations.reconnect'), onSelect: onReconnect },
+    { key: 'disconnect', title: t('settings.integrations.disconnect'), onSelect: onDisconnect },
+  ];
 
   return (
     <li className="integration-account">
@@ -191,16 +200,23 @@ function AccountRow({
             ▾
           </span>
         </MenuButton>
-        {moreItems.length > 0 ? (
-          <MenuButton
-            variant="icon"
-            label={t('settings.integrations.moreActions', { account: account.label })}
-            items={moreItems}
-          >
-            <span aria-hidden="true">•••</span>
-          </MenuButton>
-        ) : null}
+        <MenuButton
+          variant="icon"
+          label={t('settings.integrations.moreActions', { account: account.label })}
+          items={moreItems}
+        >
+          <span aria-hidden="true">•••</span>
+        </MenuButton>
       </div>
+      {flow ? (
+        <IntegrationFlowStatus
+          t={t}
+          flow={flow}
+          service={service}
+          showService={false}
+          onCancel={onCancelFlow}
+        />
+      ) : null}
       {row.notice ? (
         <p role="alert" className="dashboard-section-description settings-section-error">
           {row.notice.kind === 'not_allowed'

@@ -266,6 +266,7 @@ export function createLocalBackendAuthContextController(params: {
     try {
       await params.sessionSync.setLlmConnection(connections.llmConnection);
       await params.sessionSync.setWebSearchCredential(connections.webSearchCredential);
+      await params.sessionSync.setIntegrationCredential(connections.integrationCredential);
     } catch (error) {
       // A lost response can leave an old credential active. Stop the helper before reporting failure.
       session = { kind: 'unknown' };

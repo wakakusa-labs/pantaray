@@ -3,6 +3,19 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.5.4
+
+- When a task is working and your message is waiting, press ↑ under it to send it now: the task
+  stops what it is doing and carries on with your message right away.
+- The copy button for a message you sent now sits under its bubble, so it no longer covers the text.
+- In Settings, the web search key field links to app.tavily.com, where you can create a key.
+
+---
+
+- タスクが作業中で送ったメッセージが待っているとき、その下の ↑ を押すと今すぐ送れるようになりました。実行中の作業を止めて、すぐにそのメッセージの続きに進みます。
+- 送ったメッセージのコピーボタンが吹き出しの下に出るようになり、文字に重ならなくなりました。
+- 設定の Web 検索キーの欄から、キーを作成できる app.tavily.com を開けるようになりました。
+
 ## 0.5.3
 
 - Tasks run again when you use ChatGPT with gpt-6.1-sol, gpt-6-luna or gpt-6-astra. Before, they

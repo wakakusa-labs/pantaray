@@ -85,7 +85,8 @@ export function IntegrationSettingsSection({
     rootRef.current?.querySelector<HTMLElement>(`[data-integration-focus="${target}"]`)?.focus();
   }, [view]);
 
-  // A finished connect opens its service, where the new account shows with its default access.
+  // A finished connect opens its service. The account shows the access the backend reports:
+  // it decides the default for a new account and carries a reconnected one's over.
   useEffect(() => {
     if (flow?.phase !== 'active') return;
     setOpenToolkit((open) => {

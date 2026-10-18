@@ -14,6 +14,9 @@ from pantaray_agents.local_runtime.tooling.repository import (
     apply_approval_preference_setting,
     upsert_approval_preference,
 )
+from pantaray_agents.local_runtime.tooling.repository import (
+    integration_permissions as permissions_repository,
+)
 from pantaray_agents.local_runtime.tooling.repository.approval_preferences import (
     IntegrationWriteAllowError,
 )
@@ -25,6 +28,7 @@ from pantaray_agents.local_runtime.tooling.repository.integration_permissions im
     integration_tool_scope,
     integration_write_scope,
     load_integration_account_access,
+    move_integration_account_permissions,
     resolve_integration_tool,
     revoke_integration_account,
     set_integration_account_access,
@@ -253,3 +257,52 @@ def test_saving_an_integration_write_as_always_allow_is_rejected(
 def test_scope_parts_cannot_carry_the_separator(account: str, slug: str) -> None:
     with pytest.raises(ValueError, match="integration scope parts"):
         integration_tool_scope(account=account, slug=slug)
+
+
+def test_a_resolution_never_mixes_rows_from_before_and_after_a_move(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Before the move the new account has nothing (denied); after it, the tool
+    # is blocked (denied). Only a mix of the two would allow it.
+    slug = "GMAIL_FETCH_EMAILS"
+    _set_access(db_path, "ca_old", "read_only")
+    _block(db_path, "ca_old", slug, blocked=True)
+    saved_mode = permissions_repository._saved_mode
+    reads: list[str] = []
+
+    def move_after_the_first_read(
+        connection: sqlite3.Connection, *, user_id: str, scope: str
+    ) -> str | None:
+        mode = saved_mode(connection, user_id=user_id, scope=scope)
+        reads.append(scope)
+        if len(reads) == 1:
+            move_integration_account_permissions(
+                db_path=db_path,
+                busy_timeout_ms=BUSY_TIMEOUT_MS,
+                user_id=USER_ID,
+                toolkit=TOOLKIT,
+                from_account="ca_old",
+                to_account="ca_new",
+                updated_at=LATER,
+            )
+        return mode
+
+    monkeypatch.setattr(
+        permissions_repository, "_saved_mode", move_after_the_first_read
+    )
+
+    assert _resolve(db_path, "ca_new", slug, "read") == "denied"
+    assert reads[0] == integration_tool_scope(account="ca_new", slug=slug)
+    # The move did commit in between.
+    monkeypatch.undo()
+    assert _resolve(db_path, "ca_new", slug, "read") == "denied"
+    assert (
+        load_integration_account_access(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            user_id=USER_ID,
+            toolkit=TOOLKIT,
+            account="ca_new",
+        )
+        == "read_only"
+    )

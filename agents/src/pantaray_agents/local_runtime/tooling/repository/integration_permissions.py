@@ -13,6 +13,8 @@ No row means no permission: the resolver denies until a setting is saved.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
 
@@ -315,18 +317,22 @@ def resolve_integration_tool(
     `ask` means the user must approve the write for each execution.
     """
 
+    tool_scope = integration_tool_scope(account=account, slug=slug)
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        tool_scope = integration_tool_scope(account=account, slug=slug)
-        if _saved_mode(connection, user_id=user_id, scope=tool_scope) == "never_allow":
-            return "denied"
-        if tool_class == "write":
-            write_scope = integration_write_scope(toolkit=toolkit, account=account)
-            write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
-            return "ask" if write_mode == "prompt_each_time" else "denied"
-        read_scope = integration_read_scope(toolkit=toolkit, account=account)
-        read_mode = _saved_mode(connection, user_id=user_id, scope=read_scope)
-        return "allow" if read_mode == "always_allow" else "denied"
+        with _read_snapshot(connection):
+            if (
+                _saved_mode(connection, user_id=user_id, scope=tool_scope)
+                == "never_allow"
+            ):
+                return "denied"
+            if tool_class == "write":
+                write_scope = integration_write_scope(toolkit=toolkit, account=account)
+                write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
+                return "ask" if write_mode == "prompt_each_time" else "denied"
+            read_scope = integration_read_scope(toolkit=toolkit, account=account)
+            read_mode = _saved_mode(connection, user_id=user_id, scope=read_scope)
+            return "allow" if read_mode == "always_allow" else "denied"
 
 
 def load_integration_account_access(
@@ -339,9 +345,10 @@ def load_integration_account_access(
 ) -> IntegrationAccess:
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        return _account_access(
-            connection, user_id=user_id, toolkit=toolkit, account=account
-        )
+        with _read_snapshot(connection):
+            return _account_access(
+                connection, user_id=user_id, toolkit=toolkit, account=account
+            )
 
 
 def load_integration_blocked_tools(
@@ -385,6 +392,18 @@ def _blocked_tools(
         (user_id, tool_scope_prefix, tool_scope_prefix),
     ).fetchall()
     return frozenset(str(row["scope"])[len(tool_scope_prefix) :] for row in rows)
+
+
+@contextmanager
+def _read_snapshot(connection: sqlite3.Connection) -> Iterator[None]:
+    """One read transaction: a decision made from several rows reads them all
+    from one committed state, never half of a permission move."""
+
+    connection.execute("BEGIN")
+    try:
+        yield
+    finally:
+        connection.rollback()
 
 
 def _preference_id(*, user_id: str, scope: str) -> str:

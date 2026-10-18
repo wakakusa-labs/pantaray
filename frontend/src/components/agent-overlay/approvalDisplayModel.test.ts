@@ -69,4 +69,26 @@ describe('buildApprovalDisplay', () => {
     expect(display.operationKey).toBe('overlay.approvalRequired.operation.generic');
     expect(display.primaryValue).toBe('url: https://example.com');
   });
+
+  // JSON.parse rounds integers past 2^53 while the backend runs the exact value, so the
+  // display must show the source text rather than a rounded number.
+  it.each([
+    ['top-level', '{\n  "message_id": 9007199254740993,\n  "subject": "Hi"\n}'],
+    ['nested', '{\n  "items": [\n    {\n      "quantity": 12345678901234567890\n    }\n  ]\n}'],
+  ])('shows integration arguments verbatim when a %s integer is unsafe', (_case, raw) => {
+    const display = buildApprovalDisplay(
+      blocker('integration_run_tool', 'integration_write', {
+        summary_kind: 'integration_tool',
+        account: 'work@example.com',
+        toolkit: 'Gmail',
+        tool: 'Create email draft',
+        arguments: raw,
+      }),
+      t
+    );
+
+    expect(display.argumentFields).toEqual([
+      { label: 'overlay.approvalRequired.arguments', format: 'json', value: raw },
+    ]);
+  });
 });

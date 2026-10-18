@@ -129,13 +129,21 @@ function parseJson(text: string): unknown {
 
 // The runtime binds the approval to the arguments as a JSON string. Anything that is
 // not an object is still shown whole, since the user approves exactly what will be sent.
+// The backend serializes Python values: its ints are unbounded, while its floats are
+// shortest-repr doubles that parse back exactly. An integer beyond 2^53 would display
+// rounded, so the user would approve a different ID or amount than the one that runs.
+function hasUnsafeInteger(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value);
+  return isNested(value) && Object.values(value).some(hasUnsafeInteger);
+}
+
 function readIntegrationArguments(
   summary: Record<string, unknown>,
   t: ApprovalDisplayTranslator
 ): ApprovalArgumentField[] {
   const raw = summary.arguments;
   const parsed = typeof raw === 'string' ? parseJson(raw) : raw;
-  if (isRecord(parsed)) {
+  if (isRecord(parsed) && !hasUnsafeInteger(parsed)) {
     return Object.entries(parsed).map(([key, value]) => toArgumentField(key, value));
   }
   return raw === undefined

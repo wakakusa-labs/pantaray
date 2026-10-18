@@ -1511,11 +1511,13 @@ describe('copying a message you sent', () => {
       )
     );
 
-    await userEvent.click(
-      within(screen.getByRole('article', { name: 'You' })).getByRole('button', {
-        name: 'Copy this message',
-      })
-    );
+    const bubble = screen.getByRole('article', { name: 'You' });
+    const button = screen.getByRole('button', { name: 'Copy this message' });
+    // Under the bubble, never over its text.
+    expect(within(bubble).queryByRole('button')).toBeNull();
+    expect(bubble.nextElementSibling).toContainElement(button);
+
+    await userEvent.click(button);
 
     expect(writeText).toHaveBeenCalledWith('First line\nSecond **line**');
   });
@@ -1582,7 +1584,11 @@ describe('withdrawing a message no run has taken', () => {
       ).toBeNull();
       expect(bubble(key).nextElementSibling).toContainElement(button);
     }
-    expect(bubble('ran').nextElementSibling).toBeNull();
+    expect(
+      within(bubble('ran').parentElement!).queryByRole('button', {
+        name: 'このメッセージを取り消す',
+      })
+    ).toBeNull();
   });
 
   it('withdraws the message and removes it at once', async () => {

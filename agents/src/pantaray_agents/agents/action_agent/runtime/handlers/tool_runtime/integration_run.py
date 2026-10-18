@@ -105,7 +105,7 @@ class IntegrationIdentityError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class _Refusal:
+class IntegrationRefusal:
     error: IntegrationError
     message: str
     # The validator's text quotes the external schema and the model's arguments.
@@ -145,7 +145,7 @@ async def run_integration_run_preflight(
         identity = _resolve_identity(state)
     except IntegrationIdentityError as exc:
         return _failed_preparation(step_id, tool_def, requested_at, error=exc)
-    resolved = await _resolve(user_id=identity.user_id, args=args)
+    resolved = await _resolve(user_id=identity.user_id, args=args, read_only=False)
     if isinstance(resolved, _Resolved) and resolved.tool.tool_class == "write":
         try:
             _authorize_write(identity, resolved, tool_request_id, requested_at)
@@ -201,11 +201,10 @@ async def run_integration_run_tool(
     requested_at: str,
 ) -> UnprojectedToolExecutionResult:
     identity = _resolve_identity(state)
-    resolved = await _resolve(user_id=identity.user_id, args=args)
-    if isinstance(resolved, _Refusal):
+    resolved = await _resolve(user_id=identity.user_id, args=args, read_only=False)
+    if isinstance(resolved, IntegrationRefusal):
         return _refusal_result(step_id, tool_def, requested_at, resolved)
-    is_write = resolved.tool.tool_class == "write"
-    if is_write:
+    if resolved.tool.tool_class == "write":
         try:
             _claim_write(
                 identity, resolved, tool_request_id, tool_invocation_id, requested_at
@@ -228,6 +227,37 @@ async def run_integration_run_tool(
                 error_type=APPROVAL_STATE_CHANGED,
                 message=message,
             )
+    executed = await _execute(resolved, tool_request_id=tool_request_id)
+    if isinstance(executed, IntegrationRefusal):
+        return _refusal_result(step_id, tool_def, requested_at, executed)
+    return UnprojectedToolExecutionResult(
+        step_id=step_id,
+        tool_id=tool_def.tool_id,
+        status="success",
+        started_at=requested_at,
+        completed_at=now_utc_iso(),
+        output=executed,
+    )
+
+
+async def run_integration_read(
+    *, user_id: str, args: ToolArgs, tool_request_id: str
+) -> dict[str, JSONValue] | IntegrationRefusal:
+    """Run a read tool for a caller that cannot ask the user; a write is refused.
+
+    A read never asks in this permission model, so nothing here needs consent.
+    """
+
+    resolved = await _resolve(user_id=user_id, args=args, read_only=True)
+    if isinstance(resolved, IntegrationRefusal):
+        return resolved
+    return await _execute(resolved, tool_request_id=tool_request_id)
+
+
+async def _execute(
+    resolved: _Resolved, *, tool_request_id: str
+) -> dict[str, JSONValue] | IntegrationRefusal:
+    is_write = resolved.tool.tool_class == "write"
     try:
         outcome: ToolOutcome = await resolved.gateway.execute(
             slug=resolved.tool.slug,
@@ -248,32 +278,26 @@ async def run_integration_run_tool(
         )
         outcome = ToolFailed(error=IntegrationError(kind=kind))
     if isinstance(outcome, ToolFailed):
-        refusal = _Refusal(error=outcome.error, message=_MESSAGES[outcome.error.kind])
-        return _refusal_result(step_id, tool_def, requested_at, refusal)
-    return UnprojectedToolExecutionResult(
-        step_id=step_id,
-        tool_id=tool_def.tool_id,
-        status="success",
-        started_at=requested_at,
-        completed_at=now_utc_iso(),
-        output={
-            "source": resolved.tool.toolkit,
-            "untrusted": True,
-            "data": outcome.data,
-        },
-    )
+        return IntegrationRefusal(
+            error=outcome.error, message=_MESSAGES[outcome.error.kind]
+        )
+    return {"source": resolved.tool.toolkit, "untrusted": True, "data": outcome.data}
 
 
-async def _resolve(*, user_id: str, args: ToolArgs) -> _Resolved | _Refusal:
+async def _resolve(
+    *, user_id: str, args: ToolArgs, read_only: bool
+) -> _Resolved | IntegrationRefusal:
     try:
-        return await _resolve_with_gateway(user_id=user_id, args=args)
+        return await _resolve_with_gateway(
+            user_id=user_id, args=args, read_only=read_only
+        )
     except IntegrationGatewayError:
         return _refuse("upstream_failed", _MESSAGES["upstream_failed"])
 
 
 async def _resolve_with_gateway(
-    *, user_id: str, args: ToolArgs
-) -> _Resolved | _Refusal:
+    *, user_id: str, args: ToolArgs, read_only: bool
+) -> _Resolved | IntegrationRefusal:
     slug = require_string_arg(args, "slug")
     requested = optional_string_arg(args, "account")
     gateway = get_integration_gateway()
@@ -283,13 +307,17 @@ async def _resolve_with_gateway(
             "invalid_arguments",
             f"No tool has the slug {slug!r}; find one with integration_search_tools.",
         )
+    if read_only and tool.tool_class == "write":
+        return _refuse(
+            "permission_denied", f"{slug} writes to the app; only read tools run here."
+        )
     connected = await gateway_await(gateway.list_accounts(tool.toolkit))
     usable = [
         item.account for item in usable_accounts(gateway, user_id, tool, connected)
     ]
     if requested is None:
         if len(usable) >= 2:
-            return _Refusal(
+            return IntegrationRefusal(
                 error=IntegrationError(kind="account_required", candidates=usable),
                 message=_MESSAGES["account_required"],
             )
@@ -471,13 +499,29 @@ def _resolve_identity(state) -> _Identity:
 
 def _refuse(
     kind: IntegrationErrorKind, message: str, detail: str | None = None
-) -> _Refusal:
-    return _Refusal(IntegrationError(kind=kind), message, untrusted_detail=detail)
+) -> IntegrationRefusal:
+    return IntegrationRefusal(
+        IntegrationError(kind=kind), message, untrusted_detail=detail
+    )
 
 
 def _refusal_result(
-    step_id: str, tool_def: ToolDefinition, requested_at: str, refusal: _Refusal
+    step_id: str,
+    tool_def: ToolDefinition,
+    requested_at: str,
+    refusal: IntegrationRefusal,
 ) -> UnprojectedToolExecutionResult:
+    return _error_result(
+        step_id,
+        tool_def,
+        requested_at,
+        error_type=refusal.error.kind,
+        message=refusal.message,
+        details=refusal_details(refusal),
+    )
+
+
+def refusal_details(refusal: IntegrationRefusal) -> dict[str, JSONValue] | None:
     error = refusal.error
     details: dict[str, JSONValue] = {}
     if error.candidates:
@@ -488,14 +532,7 @@ def _refusal_result(
         details["retry_after_seconds"] = error.retry_after_seconds
     if refusal.untrusted_detail is not None:
         details["detail"] = {"untrusted": True, "text": refusal.untrusted_detail}
-    return _error_result(
-        step_id,
-        tool_def,
-        requested_at,
-        error_type=error.kind,
-        message=refusal.message,
-        details=details or None,
-    )
+    return details or None
 
 
 def _error_result(

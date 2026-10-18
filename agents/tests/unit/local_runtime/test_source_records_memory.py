@@ -188,7 +188,7 @@ async def test_suggestion_memory_search_returns_only_the_users_evidence(
     db_path: Path,
 ) -> None:
     prepare_test_database(db_path, 1000, load_default_migrations())
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=1000,
         snapshot=SuggestionResearchSnapshot(

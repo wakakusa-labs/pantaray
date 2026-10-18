@@ -31,7 +31,7 @@ def _insert_activity_log(
     )
 
 
-def _registry(db_path: Path) -> ReactToolRegistry:
+async def _registry(db_path: Path) -> ReactToolRegistry:
     runtime = LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
@@ -39,7 +39,7 @@ def _registry(db_path: Path) -> ReactToolRegistry:
         activity_start=None,
     )
     return ReactToolRegistry(
-        runtime.build_tool_definitions(user_id="user-1", run_id="suggestion-1")
+        await runtime.build_tool_definitions(user_id="user-1", run_id="suggestion-1")
     )
 
 
@@ -61,7 +61,7 @@ async def test_suggestion_memory_sql_reads_only_the_run_users_rows(
             connection, log_id="log-2", user_id="user-2", description="theirs"
         )
 
-    result = await _registry(db_path).execute(
+    result = await (await _registry(db_path)).execute(
         _tool_call(
             "memory_sql",
             {"sql": "SELECT description FROM activity_logs ORDER BY period_start"},
@@ -80,7 +80,7 @@ async def test_suggestion_memory_sql_rejects_a_write_as_a_tool_error(
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
 
-    result = await _registry(db_path).execute(
+    result = await (await _registry(db_path)).execute(
         _tool_call("memory_sql", {"sql": "DELETE FROM activity_logs"}),
         1,
     )

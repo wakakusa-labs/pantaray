@@ -99,23 +99,42 @@ async def run_integration_search_tool(
     *, step_id: str, tool_def: ToolDefinition, args: ToolArgs, state
 ) -> UnprojectedToolExecutionResult:
     started_at = now_utc_iso()
+    try:
+        output = await search_integration_tools(
+            user_id=state["user_id"], args=args, read_only=False
+        )
+    except IntegrationGatewayError:
+        return UnprojectedToolExecutionResult(
+            step_id=step_id,
+            tool_id=tool_def.tool_id,
+            status="error",
+            started_at=started_at,
+            completed_at=now_utc_iso(),
+            output=build_runtime_tool_error_output(
+                error_type="upstream_failed", message=UPSTREAM_FAILED_MESSAGE
+            ),
+        )
+    return UnprojectedToolExecutionResult(
+        step_id=step_id,
+        tool_id=tool_def.tool_id,
+        status="success",
+        started_at=started_at,
+        completed_at=now_utc_iso(),
+        output=output,
+    )
+
+
+async def search_integration_tools(
+    *, user_id: str, args: ToolArgs, read_only: bool
+) -> dict[str, JSONValue]:
+    """The search result; ``read_only`` leaves out write tools for a caller that
+    cannot ask the user. Raises IntegrationGatewayError when the gateway raises."""
+
     gateway = get_integration_gateway()
     found: list[tuple[IntegrationTool, list[UsableAccount]]] = []
     if gateway is not None:
-        try:
-            found = await _search(gateway, user_id=state["user_id"], args=args)
-        except IntegrationGatewayError:
-            return UnprojectedToolExecutionResult(
-                step_id=step_id,
-                tool_id=tool_def.tool_id,
-                status="error",
-                started_at=started_at,
-                completed_at=now_utc_iso(),
-                output=build_runtime_tool_error_output(
-                    error_type="upstream_failed", message=UPSTREAM_FAILED_MESSAGE
-                ),
-            )
-    output: dict[str, JSONValue] = {
+        found = await _search(gateway, user_id=user_id, args=args, read_only=read_only)
+    return {
         "tools": [
             {
                 "slug": tool.slug,
@@ -136,18 +155,10 @@ async def run_integration_search_tool(
             for tool, usable in found
         ]
     }
-    return UnprojectedToolExecutionResult(
-        step_id=step_id,
-        tool_id=tool_def.tool_id,
-        status="success",
-        started_at=started_at,
-        completed_at=now_utc_iso(),
-        output=output,
-    )
 
 
 async def _search(
-    gateway: IntegrationGateway, *, user_id: str, args: ToolArgs
+    gateway: IntegrationGateway, *, user_id: str, args: ToolArgs, read_only: bool
 ) -> list[tuple[IntegrationTool, list[UsableAccount]]]:
     toolkit = optional_string_arg(args, "toolkit")
     names = (
@@ -161,6 +172,8 @@ async def _search(
     usable_by_slug: dict[str, list[UsableAccount]] = {}
 
     def usable(tool: IntegrationTool) -> bool:
+        if read_only and tool.tool_class == "write":
+            return False
         # Design limit: one permission read per tool and account; read each
         # account's rows once per search when a search's p95 exceeds 200 ms.
         usable_by_slug[tool.slug] = usable_accounts(

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
+    integration_tools_available,
+)
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.tools.contract import ReactToolDefinition
@@ -22,6 +25,7 @@ from ..action_session_temp_paths import (
 from ..outside_workspace_grant import app_owned_roots
 from ..tool_result_storage import discard_run_tool_results
 from .commands import SuggestionCommandSession
+from .integrations import IntegrationRunBudget, SuggestionIntegrationSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
 
@@ -54,14 +58,21 @@ def discard_suggestion_tool_results(*, db_path: Path, run_id: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class LocalSuggestionResearchTools:
-    """Compose run-bound common tools available to SuggestionAgent."""
+    """Compose run-bound common tools available to SuggestionAgent.
+
+    One instance serves one Suggestion, so its lens runs share the integration
+    call budget.
+    """
 
     db_path: Path
     busy_timeout_ms: int
     snapshot: SuggestionResearchSnapshot
     activity_start: InsightActivityStart | None
+    integration_runs: IntegrationRunBudget = field(
+        default_factory=IntegrationRunBudget, init=False
+    )
 
-    def build_tool_definitions(
+    async def build_tool_definitions(
         self,
         *,
         user_id: str,
@@ -124,6 +135,14 @@ class LocalSuggestionResearchTools:
                     spill_root=spill_root,
                 ).definitions()
                 if self.snapshot.commands_allowed
+                else ()
+            ),
+            # Decided when each lens run starts, as an Action decides when it starts.
+            *(
+                SuggestionIntegrationSession(
+                    user_id=user_id, budget=self.integration_runs, spill_root=spill_root
+                ).definitions()
+                if await integration_tools_available()
                 else ()
             ),
         )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -556,3 +557,48 @@ async def test_gateway_exceptions_never_reach_the_model(
         assert "synthetic-secret" not in json.dumps(payload)
     assert "synthetic-secret" not in caplog.text
     assert env.gateway.executed == []
+
+
+@pytest.mark.asyncio
+async def test_input_schemas_resolve_only_their_own_refs(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetched: list[object] = []
+
+    def no_network(*args: object, **kwargs: object) -> None:
+        # Recorded, not raised: the validator would wrap the error as unresolvable.
+        fetched.append(args)
+        raise OSError("network is off in this test")
+
+    monkeypatch.setattr(urllib.request, "urlopen", no_network)
+    remote_url = "http://127.0.0.1:9/schema.json"
+    get_integration_tool_index().replace(
+        "gmail",
+        [
+            *TOOLS,
+            _tool("GMAIL_REMOTE_REF", "read", {"$ref": remote_url}),
+            _tool("GMAIL_BAD_SCHEMA", "read", {"type": 5}),
+            _tool(
+                "GMAIL_LOCAL_REF",
+                "read",
+                {
+                    "definitions": {"id": {"type": "string"}},
+                    "type": "object",
+                    "properties": {"id": {"$ref": "#/definitions/id"}},
+                },
+            ),
+        ],
+    )
+
+    remote = await _run(env, _args("GMAIL_REMOTE_REF", WORK.account, {}))
+    broken = await _run(env, _args("GMAIL_BAD_SCHEMA", WORK.account, {}))
+    local_bad = await _run(env, _args("GMAIL_LOCAL_REF", WORK.account, {"id": 1}))
+    local_ok = await _run(env, _args("GMAIL_LOCAL_REF", WORK.account, {"id": "a"}))
+
+    assert fetched == []
+    assert _error(remote)["error_type"] == "upstream_failed"
+    assert "127.0.0.1" not in json.dumps(remote)
+    assert _error(broken)["error_type"] == "upstream_failed"
+    assert _error(local_bad)["error_type"] == "invalid_arguments"
+    assert local_ok["untrusted"] is True
+    assert env.gateway.executed == [("GMAIL_LOCAL_REF", WORK.account, {"id": "a"})]

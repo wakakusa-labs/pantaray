@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
-from jsonschema import Draft7Validator, ValidationError
+from jsonschema import Draft7Validator, SchemaError, ValidationError
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
@@ -312,7 +314,13 @@ async def _resolve_with_gateway(
         parsed = json.loads(require_string_arg(args, "arguments"))
         if not isinstance(parsed, dict):
             return _refuse("invalid_arguments", "arguments must be one JSON object.")
-        Draft7Validator(tool.input_schema).validate(parsed)
+        Draft7Validator.check_schema(tool.input_schema)
+        # An empty registry resolves only refs inside the schema: the default one
+        # would fetch a remote $ref, synchronously and without a timeout.
+        Draft7Validator(tool.input_schema, registry=Registry()).validate(parsed)
+    except (SchemaError, Unresolvable):
+        # The schema is the connection's, and its error text may name a URL.
+        return _refuse("upstream_failed", "The tool's input schema could not be used.")
     except json.JSONDecodeError as exc:
         return _refuse("invalid_arguments", "arguments is not valid JSON.", str(exc))
     except ValidationError as exc:

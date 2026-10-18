@@ -404,6 +404,42 @@ describe('integration settings', () => {
     );
   });
 
+  it('ignores a stale tool list that answers after a newer list and a saved unblock', async () => {
+    let answerFirst: (tools: IntegrationToolSetting[]) => void = () => undefined;
+    let workLoads = 0;
+    api.listAccountTools.mockImplementation(async (ref) => {
+      if (ref.account === 'acct-work' && ++workLoads === 1) {
+        return new Promise((resolve) => (answerFirst = resolve));
+      }
+      return TOOLS;
+    });
+    renderSettings();
+    await openGmail();
+    await waitFor(() => expect(workLoads).toBe(1));
+
+    // A reload (after disconnecting home) drops work's loading row, so its list loads again.
+    api.getStatus.mockResolvedValue({
+      state: 'configured',
+      toolkits: [{ ...GMAIL, accounts: [GMAIL.accounts[0]] }, ...UNCONNECTED],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for home@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    const dialog = screen.getByRole('dialog', { name: 'Disconnect home@example.com?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(workLoads).toBe(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose tool by tool' }));
+    const archive = await screen.findByRole('switch', { name: 'Use Archive' });
+    expect(archive).not.toBeChecked();
+    fireEvent.click(archive);
+    const unblock = { toolkit: 'gmail', account: 'acct-work', slug: 'ARCHIVE', blocked: false };
+    expect(api.setToolBlocked).toHaveBeenCalledWith(unblock);
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Use Archive' })).toBeChecked());
+
+    await act(async () => answerFirst(TOOLS));
+    expect(screen.getByRole('switch', { name: 'Use Archive' })).toBeChecked();
+  });
+
   it('holds the other tools while one block saves, and reads the result back if its answer is lost', async () => {
     let fail: (error: Error) => void = () => undefined;
     api.setToolBlocked.mockImplementation(() => new Promise((_resolve, reject) => (fail = reject)));

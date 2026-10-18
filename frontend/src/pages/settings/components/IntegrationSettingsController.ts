@@ -128,6 +128,19 @@ export function useIntegrationSettingsController(ownerId: string | null): {
   const lastWrite = useRef(new Map<string, number>());
   const savesInFlight = useRef(0);
   const readAfterSaves = useRef(false);
+  // A tool list answers only if it is still the newest request for its account: a later load,
+  // a reload or a block save takes a newer number. Accounts saving a block keep theirs.
+  const toolSeq = useRef(0);
+  const toolGeneration = useRef(new Map<string, number>());
+  const savingTools = useRef(new Set<string>());
+
+  const newToolGeneration = (account: string): number => {
+    const generation = ++toolSeq.current;
+    toolGeneration.current.set(account, generation);
+    return generation;
+  };
+  const isNewestTools = (account: string, generation: number) =>
+    toolGeneration.current.get(account) === generation;
 
   const reload = useCallback((): Promise<void> => {
     const read = (): Promise<void> => {
@@ -152,6 +165,11 @@ export function useIntegrationSettingsController(ownerId: string | null): {
           if (request !== latestRead.current) return;
           const savedSinceRead = (account: string) =>
             (lastWrite.current.get(account) ?? 0) > startedAt;
+          for (const toolkit of next.toolkits ?? []) {
+            for (const { account } of toolkit.accounts) {
+              if (!savingTools.current.has(account)) newToolGeneration(account);
+            }
+          }
           setLoaded((prev) => applyStatus(prev, ownerId, next, savedSinceRead));
           if (next.loadFailed || ![...lastWrite.current.keys()].some(savedSinceRead)) return;
           // Read once more after the saves end, so the screen settles on one answer.
@@ -289,9 +307,15 @@ export function useIntegrationSettingsController(ownerId: string | null): {
     const setTools = (next: IntegrationToolsState) =>
       patchRow(forOwner, account, () => ({ tools: next }));
     setTools({ state: 'loading' });
+    const generation = newToolGeneration(account);
     api.listAccountTools({ toolkit, account }).then(
-      (list) => setTools({ state: 'loaded', tools: list, savingSlug: null, saveFailed: false }),
-      () => setTools({ state: 'failed', unconfirmed: false })
+      (list) => {
+        if (!isNewestTools(account, generation)) return;
+        setTools({ state: 'loaded', tools: list, savingSlug: null, saveFailed: false });
+      },
+      () => {
+        if (isNewestTools(account, generation)) setTools({ state: 'failed', unconfirmed: false });
+      }
     );
   };
 
@@ -310,29 +334,43 @@ export function useIntegrationSettingsController(ownerId: string | null): {
         row.tools?.state === 'loaded' ? { tools: change(row.tools) } : {}
       );
     changeTools((loadedTools) => ({ ...loadedTools, savingSlug: slug, saveFailed: false }));
+    savingTools.current.add(account);
+    const generation = newToolGeneration(account);
+    const end = (change: () => void) => {
+      savingTools.current.delete(account);
+      if (isNewestTools(account, generation)) change();
+    };
     api.setToolBlocked({ toolkit, account, slug, blocked }).then(
       () =>
-        changeTools((loadedTools) => ({
-          ...loadedTools,
-          savingSlug: null,
-          tools: loadedTools.tools.map((tool) =>
-            tool.slug === slug ? { ...tool, blocked } : tool
-          ),
-        })),
+        end(() =>
+          changeTools((loadedTools) => ({
+            ...loadedTools,
+            savingSlug: null,
+            tools: loadedTools.tools.map((tool) =>
+              tool.slug === slug ? { ...tool, blocked } : tool
+            ),
+          }))
+        ),
       // As with access: the block may be stored although its answer was lost, so read it back.
       () =>
         api.listAccountTools({ toolkit, account }).then(
           (list) =>
-            patchRow(forOwner, account, () => ({
-              tools: {
-                state: 'loaded',
-                tools: list,
-                savingSlug: null,
-                saveFailed: list.find((tool) => tool.slug === slug)?.blocked !== blocked,
-              },
-            })),
+            end(() =>
+              patchRow(forOwner, account, () => ({
+                tools: {
+                  state: 'loaded',
+                  tools: list,
+                  savingSlug: null,
+                  saveFailed: list.find((tool) => tool.slug === slug)?.blocked !== blocked,
+                },
+              }))
+            ),
           () =>
-            patchRow(forOwner, account, () => ({ tools: { state: 'failed', unconfirmed: true } }))
+            end(() =>
+              patchRow(forOwner, account, () => ({
+                tools: { state: 'failed', unconfirmed: true },
+              }))
+            )
         )
     );
   };

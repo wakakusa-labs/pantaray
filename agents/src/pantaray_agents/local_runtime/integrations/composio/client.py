@@ -29,7 +29,7 @@ ACCOUNTS_TIMEOUT: Final = httpx2.Timeout(4.0, connect=2.0)
 EXECUTE_TIMEOUT: Final = httpx2.Timeout(60.0, connect=5.0)
 _PAGE_LIMIT: Final = 1000
 
-type Method = Literal["GET", "POST"]
+type Method = Literal["GET", "POST", "DELETE"]
 
 
 @dataclass(frozen=True, slots=True)

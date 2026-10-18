@@ -13,6 +13,8 @@ No row means no permission: the resolver denies until a setting is saved.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
 
@@ -82,21 +84,73 @@ def set_integration_account_access(
     access: IntegrationAccess,
     updated_at: str,
 ) -> None:
-    read_mode, write_mode = _ACCESS_MODES[access]
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
-            for scope, approval_mode in (
-                (integration_read_scope(toolkit=toolkit, account=account), read_mode),
-                (integration_write_scope(toolkit=toolkit, account=account), write_mode),
-            ):
-                _save_scope(
-                    connection,
-                    user_id=user_id,
-                    scope=scope,
-                    approval_mode=approval_mode,
-                    updated_at=updated_at,
-                )
+            _save_access(
+                connection,
+                user_id=user_id,
+                toolkit=toolkit,
+                account=account,
+                access=access,
+                updated_at=updated_at,
+            )
+
+
+def initialize_integration_account_access(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    toolkit: str,
+    account: str,
+    access: IntegrationAccess,
+    updated_at: str,
+) -> None:
+    """Save the access only when the account has no saved setting yet.
+
+    One immediate transaction, so callers racing on the same account save it
+    once and never overwrite a setting saved first.
+    """
+
+    read_scope = integration_read_scope(toolkit=toolkit, account=account)
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if _saved_mode(connection, user_id=user_id, scope=read_scope) is not None:
+                return
+            _save_access(
+                connection,
+                user_id=user_id,
+                toolkit=toolkit,
+                account=account,
+                access=access,
+                updated_at=updated_at,
+            )
+
+
+def _save_access(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    toolkit: str,
+    account: str,
+    access: IntegrationAccess,
+    updated_at: str,
+) -> None:
+    read_mode, write_mode = _ACCESS_MODES[access]
+    for scope, approval_mode in (
+        (integration_read_scope(toolkit=toolkit, account=account), read_mode),
+        (integration_write_scope(toolkit=toolkit, account=account), write_mode),
+    ):
+        _save_scope(
+            connection,
+            user_id=user_id,
+            scope=scope,
+            approval_mode=approval_mode,
+            updated_at=updated_at,
+        )
 
 
 def set_integration_tool_blocked(
@@ -140,38 +194,112 @@ def revoke_integration_account(
 ) -> None:
     """Revoke every permission row of one account, leaving other accounts as they are."""
 
-    tool_scope_prefix = (
-        _scope(INTEGRATION_TOOL_SCOPE_PREFIX, account) + _SCOPE_SEPARATOR
-    )
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
-            rows = connection.execute(
-                """
-                SELECT DISTINCT preference.preference_id
-                FROM approval_preferences AS preference,
-                    json_each(preference.applies_to_json) AS scope
-                WHERE
-                    preference.user_id = ?
-                    AND preference.revoked_at IS NULL
-                    AND (
-                        scope.value IN (?, ?)
-                        OR substr(scope.value, 1, length(?)) = ?
-                    )
-                """,
-                (
-                    user_id,
-                    integration_read_scope(toolkit=toolkit, account=account),
-                    integration_write_scope(toolkit=toolkit, account=account),
-                    tool_scope_prefix,
-                    tool_scope_prefix,
-                ),
-            ).fetchall()
-            _revoke_preferences(
+            _revoke_account(
                 connection,
-                preference_ids=tuple(str(row["preference_id"]) for row in rows),
+                user_id=user_id,
+                toolkit=toolkit,
+                account=account,
                 revoked_at=revoked_at,
             )
+
+
+def move_integration_account_permissions(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    toolkit: str,
+    from_account: str,
+    to_account: str,
+    updated_at: str,
+) -> None:
+    """Give ``to_account`` the access and tool blocks of ``from_account``, then
+    revoke ``from_account``'s rows.
+
+    The access is copied only when ``to_account`` has none: one the user saved
+    for the new account wins. The blocks are always added, since a block only
+    narrows access and adding it again changes nothing. One immediate
+    transaction: no reader sees the new account allowed before its blocks, and
+    on failure nothing is written.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            to_read_scope = integration_read_scope(toolkit=toolkit, account=to_account)
+            if _saved_mode(connection, user_id=user_id, scope=to_read_scope) is None:
+                _save_access(
+                    connection,
+                    user_id=user_id,
+                    toolkit=toolkit,
+                    account=to_account,
+                    access=_account_access(
+                        connection,
+                        user_id=user_id,
+                        toolkit=toolkit,
+                        account=from_account,
+                    ),
+                    updated_at=updated_at,
+                )
+            blocked = _blocked_tools(connection, user_id=user_id, account=from_account)
+            for slug in sorted(blocked):
+                _save_scope(
+                    connection,
+                    user_id=user_id,
+                    scope=integration_tool_scope(account=to_account, slug=slug),
+                    approval_mode="never_allow",
+                    updated_at=updated_at,
+                )
+            _revoke_account(
+                connection,
+                user_id=user_id,
+                toolkit=toolkit,
+                account=from_account,
+                revoked_at=updated_at,
+            )
+
+
+def _revoke_account(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    toolkit: str,
+    account: str,
+    revoked_at: str,
+) -> None:
+    tool_scope_prefix = (
+        _scope(INTEGRATION_TOOL_SCOPE_PREFIX, account) + _SCOPE_SEPARATOR
+    )
+    rows = connection.execute(
+        """
+        SELECT DISTINCT preference.preference_id
+        FROM approval_preferences AS preference,
+            json_each(preference.applies_to_json) AS scope
+        WHERE
+            preference.user_id = ?
+            AND preference.revoked_at IS NULL
+            AND (
+                scope.value IN (?, ?)
+                OR substr(scope.value, 1, length(?)) = ?
+            )
+        """,
+        (
+            user_id,
+            integration_read_scope(toolkit=toolkit, account=account),
+            integration_write_scope(toolkit=toolkit, account=account),
+            tool_scope_prefix,
+            tool_scope_prefix,
+        ),
+    ).fetchall()
+    _revoke_preferences(
+        connection,
+        preference_ids=tuple(str(row["preference_id"]) for row in rows),
+        revoked_at=revoked_at,
+    )
 
 
 def resolve_integration_tool(
@@ -189,18 +317,22 @@ def resolve_integration_tool(
     `ask` means the user must approve the write for each execution.
     """
 
+    tool_scope = integration_tool_scope(account=account, slug=slug)
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        tool_scope = integration_tool_scope(account=account, slug=slug)
-        if _saved_mode(connection, user_id=user_id, scope=tool_scope) == "never_allow":
-            return "denied"
-        if tool_class == "write":
-            write_scope = integration_write_scope(toolkit=toolkit, account=account)
-            write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
-            return "ask" if write_mode == "prompt_each_time" else "denied"
-        read_scope = integration_read_scope(toolkit=toolkit, account=account)
-        read_mode = _saved_mode(connection, user_id=user_id, scope=read_scope)
-        return "allow" if read_mode == "always_allow" else "denied"
+        with _read_snapshot(connection):
+            if (
+                _saved_mode(connection, user_id=user_id, scope=tool_scope)
+                == "never_allow"
+            ):
+                return "denied"
+            if tool_class == "write":
+                write_scope = integration_write_scope(toolkit=toolkit, account=account)
+                write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
+                return "ask" if write_mode == "prompt_each_time" else "denied"
+            read_scope = integration_read_scope(toolkit=toolkit, account=account)
+            read_mode = _saved_mode(connection, user_id=user_id, scope=read_scope)
+            return "allow" if read_mode == "always_allow" else "denied"
 
 
 def load_integration_account_access(
@@ -211,14 +343,12 @@ def load_integration_account_access(
     toolkit: str,
     account: str,
 ) -> IntegrationAccess:
-    read_scope = integration_read_scope(toolkit=toolkit, account=account)
-    write_scope = integration_write_scope(toolkit=toolkit, account=account)
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        if _saved_mode(connection, user_id=user_id, scope=read_scope) != "always_allow":
-            return "off"
-        write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
-        return "read_write" if write_mode == "prompt_each_time" else "read_only"
+        with _read_snapshot(connection):
+            return _account_access(
+                connection, user_id=user_id, toolkit=toolkit, account=account
+            )
 
 
 def load_integration_blocked_tools(
@@ -226,25 +356,54 @@ def load_integration_blocked_tools(
 ) -> frozenset[str]:
     """The slugs of the tools blocked for one account."""
 
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        return _blocked_tools(connection, user_id=user_id, account=account)
+
+
+def _account_access(
+    connection: sqlite3.Connection, *, user_id: str, toolkit: str, account: str
+) -> IntegrationAccess:
+    read_scope = integration_read_scope(toolkit=toolkit, account=account)
+    write_scope = integration_write_scope(toolkit=toolkit, account=account)
+    if _saved_mode(connection, user_id=user_id, scope=read_scope) != "always_allow":
+        return "off"
+    write_mode = _saved_mode(connection, user_id=user_id, scope=write_scope)
+    return "read_write" if write_mode == "prompt_each_time" else "read_only"
+
+
+def _blocked_tools(
+    connection: sqlite3.Connection, *, user_id: str, account: str
+) -> frozenset[str]:
     tool_scope_prefix = (
         _scope(INTEGRATION_TOOL_SCOPE_PREFIX, account) + _SCOPE_SEPARATOR
     )
-    with sqlite3.connect(db_path) as connection:
-        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        rows = connection.execute(
-            """
-            SELECT DISTINCT scope.value AS scope
-            FROM approval_preferences AS preference,
-                json_each(preference.applies_to_json) AS scope
-            WHERE
-                preference.user_id = ?
-                AND preference.revoked_at IS NULL
-                AND preference.approval_mode = 'never_allow'
-                AND substr(scope.value, 1, length(?)) = ?
-            """,
-            (user_id, tool_scope_prefix, tool_scope_prefix),
-        ).fetchall()
+    rows = connection.execute(
+        """
+        SELECT DISTINCT scope.value AS scope
+        FROM approval_preferences AS preference,
+            json_each(preference.applies_to_json) AS scope
+        WHERE
+            preference.user_id = ?
+            AND preference.revoked_at IS NULL
+            AND preference.approval_mode = 'never_allow'
+            AND substr(scope.value, 1, length(?)) = ?
+        """,
+        (user_id, tool_scope_prefix, tool_scope_prefix),
+    ).fetchall()
     return frozenset(str(row["scope"])[len(tool_scope_prefix) :] for row in rows)
+
+
+@contextmanager
+def _read_snapshot(connection: sqlite3.Connection) -> Iterator[None]:
+    """One read transaction: a decision made from several rows reads them all
+    from one committed state, never half of a permission move."""
+
+    connection.execute("BEGIN")
+    try:
+        yield
+    finally:
+        connection.rollback()
 
 
 def _preference_id(*, user_id: str, scope: str) -> str:

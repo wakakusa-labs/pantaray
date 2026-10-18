@@ -17,8 +17,10 @@ from pydantic import Field
 from pantaray_agents.local_runtime.tooling.models import InternalStrictModel
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
     IntegrationAccess,
+    initialize_integration_account_access,
     load_integration_account_access,
     load_integration_blocked_tools,
+    move_integration_account_permissions,
     set_integration_account_access,
     set_integration_tool_blocked,
 )
@@ -255,18 +257,44 @@ async def set_tool_blocked(
 def apply_new_account_default(
     *, store: PermissionStore, toolkit: ToolkitSlug, account: str, updated_at: str
 ) -> None:
-    """Save the default access once, when the connect flow first sees the account.
+    """Save the default access when the connect flow sees the account active.
 
-    Reads never write it: an account with no saved row stays unusable.
+    A setting already saved, such as a reconnected account's, is kept. Reads
+    never write it: an account with no saved row stays unusable.
     """
 
-    set_integration_account_access(
+    initialize_integration_account_access(
         db_path=store.db_path,
         busy_timeout_ms=store.busy_timeout_ms,
         user_id=store.user_id,
         toolkit=toolkit,
         account=account,
         access=NEW_ACCOUNT_ACCESS,
+        updated_at=updated_at,
+    )
+
+
+def carry_over_account_setting(
+    *,
+    store: PermissionStore,
+    toolkit: ToolkitSlug,
+    replaced: str,
+    account: str,
+    updated_at: str,
+) -> None:
+    """A reconnect's new account takes over the replaced account's setting.
+
+    All or nothing; an access already saved for the new account is kept, and
+    the replaced account's tool blocks are always added.
+    """
+
+    move_integration_account_permissions(
+        db_path=store.db_path,
+        busy_timeout_ms=store.busy_timeout_ms,
+        user_id=store.user_id,
+        toolkit=toolkit,
+        from_account=replaced,
+        to_account=account,
         updated_at=updated_at,
     )
 

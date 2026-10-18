@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Final, Literal
+from typing import Final
 
 import httpx2
 from pydantic import ValidationError
@@ -51,13 +51,13 @@ from .client import (
     ComposioRequestError,
     ComposioResponse,
 )
+from .connect import ComposioConnections
+from .limits import UNPROBED_LIMITS, probe_limits, warn_composio_failure
 from .mapping import (
     CODE_KEY_PERMISSION_DENIED,
     CODE_NO_ACTIVE_CONNECTION,
     CODE_SESSION_NOT_FOUND,
     CODE_TOOLKIT_NOT_IN_SESSION,
-    CODE_VALIDATION_ERROR,
-    PENDING_STATUSES,
     RawAccount,
     RawTool,
     ScopeGroups,
@@ -67,6 +67,7 @@ from .mapping import (
     execute_outcome,
     granted_scopes,
     integration_tool,
+    is_account,
     missing_scope,
     required_scopes,
     tool_disposition,
@@ -80,24 +81,6 @@ logger = logging.getLogger(__name__)
 ACCOUNTS_TTL_SECONDS: Final = 60.0
 # The whole account read, every page; below the Action turn's 5 s budget.
 ACCOUNTS_FETCH_SECONDS: Final = 4.0
-# Composio checks a key's permission before the body, so an empty body to an
-# area's write route answers 403/812 when denied and 400/10400 when allowed,
-# creating nothing (verified on 2026-10-18; no route reports a key's permissions).
-_PROBE_SESSION: Final = "trs_pantaray_probe"
-_LIMIT_PROBES: Final[tuple[tuple[Literal["connect", "execute"], str, str], ...]] = (
-    ("connect", "auth_configs", "/auth_configs"),
-    ("connect", "connected_accounts", "/connected_accounts/link"),
-    ("connect", "session_management", f"/tool_router/session/{_PROBE_SESSION}/link"),
-    ("execute", "session_management", "/tool_router/session"),
-    (
-        "execute",
-        "session_tool_execution",
-        f"/tool_router/session/{_PROBE_SESSION}/execute",
-    ),
-)
-# Until a probe settles nothing says the key falls short; a real shortfall still
-# answers 403/812 at the first call, which probes again.
-_UNPROBED_LIMITS: Final = GatewayLimits(can_connect=True, can_execute=True, reasons=[])
 # Refused before the tool ran, so asking once more cannot run a write twice.
 _RENEW_SESSION_CODES: Final = (CODE_TOOLKIT_NOT_IN_SESSION, CODE_SESSION_NOT_FOUND)
 
@@ -147,6 +130,7 @@ class ComposioGateway:
         # asyncio keeps only weak references to tasks.
         self._fetch_tasks: set[asyncio.Task[None]] = set()
         self._syncing = False
+        self.connections = ComposioConnections(self, client)
 
     def close(self) -> None:
         """The key was removed or replaced: no request not yet started is sent."""
@@ -169,7 +153,7 @@ class ComposioGateway:
         return found.health if found else "not_connected"
 
     def limits(self) -> GatewayLimits:
-        return self._limits or _UNPROBED_LIMITS
+        return self._limits or UNPROBED_LIMITS
 
     async def list_tools(self, toolkit: ToolkitSlug) -> list[IntegrationTool]:
         entry = TOOLKITS_BY_SLUG[toolkit]
@@ -230,7 +214,7 @@ class ComposioGateway:
         try:
             accounts = await self._current_accounts()
         except (ComposioRequestError, httpx2.TransportError, TimeoutError) as exc:
-            _warn("Composio accounts unavailable", exc)
+            warn_composio_failure("Composio accounts unavailable", exc)
             return _failed("upstream_failed")
         if account not in accounts.by_id:
             # Composio would answer 4300; nothing to send.
@@ -267,6 +251,26 @@ class ComposioGateway:
         if snapshot is not None:
             self._accounts = replace(snapshot, fetched_at=float("-inf"))
 
+    async def session_with(self, toolkit: ToolkitSlug) -> str | ComposioResponse:
+        """A session that also enables ``toolkit``: Composio links only those.
+
+        The next call finds the toolkits differ and makes the connected ones' session.
+        """
+        accounts = await self._current_accounts()
+        return await self._session_id(accounts.toolkits | {toolkit}, renew=False)
+
+    async def refresh_accounts(self, account: str, *, listed: bool) -> None:
+        """Read the accounts until ``account`` is listed or not, then fill the index.
+
+        A read already in flight may predate the change, so one more read follows
+        when it disagrees. Raises what the account read raises.
+        """
+        self.invalidate_accounts()
+        accounts = await self._fetch_accounts()
+        if (account in accounts.by_id) != listed:
+            accounts = await self._fetch_accounts()
+        await self._sync_index(accounts.toolkits)
+
     async def sync(self) -> None:
         """Probe the key's limits if unknown, read the accounts, fill the tool index.
 
@@ -299,7 +303,7 @@ class ComposioGateway:
             TimeoutError,
         ) as exc:
             # The next account read that finds the index behind syncs again.
-            _warn("Composio sync failed", exc)
+            warn_composio_failure("Composio sync failed", exc)
         finally:
             with self._lock:
                 self._syncing = False
@@ -376,10 +380,7 @@ class ComposioGateway:
             except ValidationError:
                 logger.warning("Composio connected account skipped")
                 continue
-            if (
-                raw.toolkit.slug not in TOOLKITS_BY_SLUG
-                or raw.status in PENDING_STATUSES
-            ):
+            if raw.toolkit.slug not in TOOLKITS_BY_SLUG or not is_account(raw):
                 continue
             by_id[raw.id] = _Account(
                 account=IntegrationAccount(
@@ -402,7 +403,7 @@ class ComposioGateway:
             try:
                 tools = await self.list_tools(toolkit)
             except (ComposioRequestError, httpx2.TransportError) as exc:
-                _warn("Composio tool list failed", exc, toolkit=toolkit)
+                warn_composio_failure("Composio tool list failed", exc, toolkit=toolkit)
                 continue
             index.replace(toolkit, tools)
             with self._lock:
@@ -414,51 +415,9 @@ class ComposioGateway:
             index.replace(toolkit, [])
 
     async def _probe_limits(self) -> None:
-        denied: dict[Literal["connect", "execute"], list[str]] = {
-            "connect": [],
-            "execute": [],
-        }
-        for capability, area, path in _LIMIT_PROBES:
-            try:
-                response = await self._client.send(
-                    "POST", path, json={}, timeout=METADATA_TIMEOUT
-                )
-            except httpx2.TransportError as exc:
-                # Inconclusive: the next sync probes again.
-                _warn("Composio key probe failed", exc)
-                return
-            if response.status == 401:
-                self._limits = GatewayLimits(
-                    can_connect=False,
-                    can_execute=False,
-                    reasons=[
-                        ApiDenial(source="connection_method", capability="connect"),
-                        ApiDenial(source="connection_method", capability="execute"),
-                    ],
-                )
-                return
-            if response.status == 403 and response.code == CODE_KEY_PERMISSION_DENIED:
-                if area not in denied[capability]:
-                    denied[capability].append(area)
-            elif not (
-                response.status == 400 and response.code == CODE_VALIDATION_ERROR
-            ):
-                _warn("Composio key probe failed", ComposioRequestError(response))
-                return
-        self._limits = GatewayLimits(
-            can_connect=not denied["connect"],
-            can_execute=not denied["execute"],
-            reasons=[
-                # The areas are Composio's identifiers, shown as they are.
-                ApiDenial(
-                    source="connection_method",
-                    capability=capability,
-                    detail=", ".join(areas),
-                )
-                for capability, areas in denied.items()
-                if areas
-            ],
-        )
+        limits = await probe_limits(self._client)
+        if limits is not None:
+            self._limits = limits
 
     async def _send(
         self,
@@ -471,7 +430,7 @@ class ComposioGateway:
         try:
             session_id = await self._session_id(toolkits, renew=renew)
         except httpx2.TransportError as exc:
-            _warn("Composio session failed", exc)
+            warn_composio_failure("Composio session failed", exc)
             return _failed("upstream_failed")
         if isinstance(session_id, ComposioResponse):
             # Refused before any tool ran.
@@ -485,10 +444,10 @@ class ComposioGateway:
             )
         except (httpx2.ConnectError, httpx2.ConnectTimeout) as exc:
             # The request never left this computer.
-            _warn("Composio call failed", exc)
+            warn_composio_failure("Composio call failed", exc)
             return _failed("upstream_failed")
         except httpx2.TransportError as exc:
-            _warn("Composio call failed", exc)
+            warn_composio_failure("Composio call failed", exc)
             return _failed("outcome_unknown" if is_write else "upstream_failed")
 
     async def _session_id(
@@ -545,16 +504,6 @@ def _session_body(toolkits: frozenset[ToolkitSlug]) -> JSONValue:
 
 def _failed(kind: IntegrationErrorKind) -> ToolFailed:
     return ToolFailed(error=IntegrationError(kind=kind))
-
-
-def _warn(message: str, exc: Exception, *, toolkit: str | None = None) -> None:
-    # Only the status and code: Composio's text can quote part of the key.
-    reason = (
-        f"status={exc.response.status} code={exc.response.code}"
-        if isinstance(exc, ComposioRequestError)
-        else type(exc).__name__
-    )
-    logger.warning(message, extra={"reason": reason, "toolkit": toolkit})
 
 
 def install_composio_gateway(api_key: str | None) -> None:

@@ -20,6 +20,10 @@ from pantaray_agents.local_runtime.chat.turn_runs import (
     chat_turn_running,
     run_chat_turn_in_thread,
 )
+from pantaray_agents.local_runtime.integrations.composio import gateway as composio
+from pantaray_agents.local_runtime.integrations.registry import (
+    get_integration_gateway,
+)
 from pantaray_agents.local_runtime.runtime import (
     control_socket,
     session_store,
@@ -59,6 +63,16 @@ from pantaray_agents.local_runtime.runtime.identity import (
     logged_out_owner_id,
     register_logged_out_owner,
     reset_logged_out_owner,
+)
+from pantaray_agents.local_runtime.runtime.integration_credentials import (
+    CLEAR_OPERATION as CLEAR_INTEGRATION_CREDENTIAL_OPERATION,
+)
+from pantaray_agents.local_runtime.runtime.integration_credentials import (
+    SET_OPERATION as SET_INTEGRATION_CREDENTIAL_OPERATION,
+)
+from pantaray_agents.local_runtime.runtime.integration_credentials import (
+    ComposioCredential,
+    apply_integration_credential,
 )
 from pantaray_agents.local_runtime.runtime.job_queue_runtime import (
     claim_next_pending_action_job,
@@ -1384,3 +1398,89 @@ async def test_stopping_the_runtime_lets_an_interrupted_settlement_reopen_admiss
     # The control socket's loop is about to close; a settlement left pending
     # inside the barrier would never run the finally that admits work again.
     assert admission_is_open()
+
+
+COMPOSIO_KEY = "ak_composio_secret_key"
+
+
+@pytest.fixture
+def composio_without_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr(composio.ComposioGateway, "start_sync", lambda self: None)
+    yield
+    apply_integration_credential(None)
+
+
+@pytest.mark.asyncio
+async def test_the_integration_credential_registers_and_removes_the_gateway(
+    local_runtime_env: Path, composio_without_network: None
+) -> None:
+    response = await dispatch_control_request(
+        request={
+            "operation": SET_INTEGRATION_CREDENTIAL_OPERATION,
+            "payload": {"provider": "composio", "api_key": COMPOSIO_KEY},
+        }
+    )
+    gateway = get_integration_gateway()
+    status = await dispatch_control_request(
+        request={"operation": STATUS_OPERATION, "payload": {}}
+    )
+    # Sent again unchanged, the running gateway and its caches stay.
+    await dispatch_control_request(
+        request={
+            "operation": SET_INTEGRATION_CREDENTIAL_OPERATION,
+            "payload": {"provider": "composio", "api_key": COMPOSIO_KEY},
+        }
+    )
+
+    assert response == {"ok": True, "integration_configured": True}
+    assert isinstance(gateway, composio.ComposioGateway)
+    assert get_integration_gateway() is gateway
+    assert COMPOSIO_KEY not in json.dumps(status)
+    assert await dispatch_control_request(
+        request={"operation": CLEAR_INTEGRATION_CREDENTIAL_OPERATION, "payload": {}}
+    ) == {"ok": True, "integration_configured": False}
+    assert get_integration_gateway() is None
+
+
+@pytest.mark.asyncio
+async def test_configure_replaces_the_integration_credential(
+    local_runtime_env: Path, composio_without_network: None
+) -> None:
+    await dispatch_control_request(
+        request={
+            "operation": CONFIGURE_OPERATION,
+            "payload": {
+                "cloud_session": {"state": "absent"},
+                "integration_credential": {
+                    "provider": "composio",
+                    "api_key": COMPOSIO_KEY,
+                },
+            },
+        }
+    )
+    assert get_integration_gateway() is not None
+
+    await dispatch_control_request(
+        request={
+            "operation": CONFIGURE_OPERATION,
+            "payload": {"cloud_session": {"state": "absent"}},
+        }
+    )
+    assert get_integration_gateway() is None
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_integration_credential_is_not_quoted(
+    local_runtime_env: Path, composio_without_network: None
+) -> None:
+    with pytest.raises(MigrationError) as raised:
+        await dispatch_control_request(
+            request={
+                "operation": SET_INTEGRATION_CREDENTIAL_OPERATION,
+                "payload": {"provider": COMPOSIO_KEY, "api_key": COMPOSIO_KEY},
+            }
+        )
+
+    assert COMPOSIO_KEY not in str(raised.value)
+    assert COMPOSIO_KEY not in repr(ComposioCredential(api_key=COMPOSIO_KEY))
+    assert get_integration_gateway() is None

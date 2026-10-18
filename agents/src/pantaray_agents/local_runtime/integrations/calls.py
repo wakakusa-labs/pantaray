@@ -140,7 +140,9 @@ async def execute_integration_call(
         outcome = ToolFailed(error=IntegrationError(kind=kind))
     if isinstance(outcome, ToolFailed):
         return IntegrationRefusal(
-            error=outcome.error, message=_MESSAGES[outcome.error.kind]
+            error=outcome.error,
+            message=_MESSAGES[outcome.error.kind],
+            untrusted_detail=outcome.untrusted_detail,
         )
     return {"source": resolved.tool.toolkit, "untrusted": True, "data": outcome.data}
 

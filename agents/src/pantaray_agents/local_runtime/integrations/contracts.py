@@ -105,6 +105,9 @@ class ToolSucceeded(InternalStrictModel):
 class ToolFailed(InternalStrictModel):
     outcome: Literal["failed"] = "failed"
     error: IntegrationError
+    # The external service's own error text, such as why it rejected the
+    # arguments; it reaches the model only marked untrusted.
+    untrusted_detail: str | None = None
 
 
 type ToolOutcome = ToolSucceeded | ToolFailed

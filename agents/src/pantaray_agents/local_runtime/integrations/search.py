@@ -9,12 +9,13 @@ saved permission allows or asks for it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
     resolve_integration_tool,
@@ -28,6 +29,9 @@ from .tool_index import SEARCH_LIMIT_DEFAULT
 logger = logging.getLogger(__name__)
 
 UPSTREAM_FAILED_MESSAGE = "The service failed or timed out; trying later may work."
+# Every Action start waits for this, integrations used or not; past it the
+# Action runs without the integration tools.
+AVAILABILITY_TIMEOUT_SECONDS: Final = 3.0
 
 _ACCOUNT_SCHEMA: dict[str, JSONValue] = {
     "type": "object",
@@ -112,18 +116,19 @@ class UsableAccount:
 async def integration_tools_available() -> bool:
     """Whether a run starting now is offered the integration tools.
 
-    A gateway that raises offers none: a run that never uses an integration must
-    still start when the connection method is broken.
+    A gateway that raises or is too slow offers none: a run that never uses an
+    integration must still start when the connection method is broken.
     """
 
     gateway = get_integration_gateway()
     if gateway is None:
         return False
     try:
-        for entry in gateway_call(gateway.toolkits):
-            if await gateway_await(gateway.list_accounts(entry.toolkit)):
-                return True
-    except IntegrationGatewayError:
+        async with asyncio.timeout(AVAILABILITY_TIMEOUT_SECONDS):
+            for entry in gateway_call(gateway.toolkits):
+                if await gateway_await(gateway.list_accounts(entry.toolkit)):
+                    return True
+    except (IntegrationGatewayError, TimeoutError):
         return False
     return False
 

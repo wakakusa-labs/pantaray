@@ -48,6 +48,11 @@ CODE_VALIDATION_ERROR: Final = 10400
 _CODE_ACCOUNT_NOT_FOUND: Final = 4300
 _CODE_TOOL_NOT_FOUND: Final = 4301  # 404
 _SCOPE_SEPARATOR: Final = re.compile(r"[\s,]+")
+# Composio's advice to the model, added beside the provider's data (for Gmail,
+# when a search finds nothing). It is the only such key the tool schemas of the
+# supported toolkits declare (checked on 2026-10-19). Composio's text never
+# reaches the model, and with it an empty result would read as content.
+_COMPOSIO_MESSAGE_KEY: Final = "composio_execution_message"
 # Pantaray's own text: Composio's questions for the user are not passed on.
 NEEDS_INPUT_DETAIL: Final = "The tool asked for more input before it would run."
 
@@ -255,7 +260,10 @@ def execute_outcome(body: JSONValue, *, is_write: bool) -> ToolOutcome:
             untrusted_detail=NEEDS_INPUT_DETAIL,
         )
     if reply.result_type == "completed" and not reply.error:
-        return ToolSucceeded(data=reply.data)
+        data = reply.data
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != _COMPOSIO_MESSAGE_KEY}
+        return ToolSucceeded(data=data)
     return _tool_failure(reply.data, reply.error or "", is_write=is_write)
 
 

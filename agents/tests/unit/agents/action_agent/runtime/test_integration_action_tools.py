@@ -56,7 +56,10 @@ from pantaray_agents.local_runtime.integrations.registry import (
     set_integration_gateway,
 )
 from pantaray_agents.local_runtime.integrations.search import (
+    RECONNECT_REMEDY,
     integration_tools_available,
+    search_integration_tools,
+    setting_remedy,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     apply_approval_decision,
@@ -121,6 +124,7 @@ class FakeGateway:
         self.outcome: ToolOutcome | Exception = ToolSucceeded(data={"id": "msg-1"})
         self.executed: list[tuple[str, str, dict[str, JSONValue]]] = []
         self.accounts_error: Exception | None = None
+        self.unhealthy: set[str] = set()
 
     def toolkits(self) -> list[ToolkitEntry]:
         return [ToolkitEntry(toolkit="gmail", display_name="Gmail")]
@@ -131,7 +135,7 @@ class FakeGateway:
         return self.accounts if toolkit == "gmail" else []
 
     def health(self, account: str) -> IntegrationHealth:
-        return "ok"
+        return "reauthorization_required" if account in self.unhealthy else "ok"
 
     def limits(self) -> GatewayLimits:
         return self.limits_value
@@ -208,7 +212,7 @@ def _set_access(
     )
 
 
-async def _search(env: SimpleNamespace, query: str) -> dict[str, list[str]]:
+async def _search_output(env: SimpleNamespace, query: str) -> dict[str, JSONValue]:
     result = await integration_search.run_integration_search_tool(
         step_id="step-0",
         tool_def=INTEGRATION_SEARCH_TOOLS_TOOL,
@@ -216,7 +220,11 @@ async def _search(env: SimpleNamespace, query: str) -> dict[str, list[str]]:
         state=env.state,
     )
     assert isinstance(result.output, dict)
-    tools = result.output["tools"]
+    return result.output
+
+
+async def _search(env: SimpleNamespace, query: str) -> dict[str, list[str]]:
+    tools = (await _search_output(env, query))["tools"]
     assert isinstance(tools, list)
     return {
         str(tool["slug"]): [
@@ -362,6 +370,174 @@ async def test_search_lists_only_usable_tools_with_their_accounts(
         reasons=[ApiDenial(source="connection_method", capability="execute")],
     )
     assert await _search(env, "email") == {}
+
+
+READ_ONLY_REMEDY = setting_remedy("read_only")
+READ_WRITE_REMEDY = setting_remedy("read_write")
+
+
+def _hidden(
+    output: dict[str, JSONValue],
+) -> tuple[JSONValue, dict[str, JSONValue]] | None:
+    hidden = output.get("hidden_by_account_setting")
+    if hidden is None:
+        return None
+    assert isinstance(hidden, dict) and isinstance(hidden["accounts"], list)
+    return hidden["tool_count"], {
+        str(item["account"]): item["remedy"]  # type: ignore[index]
+        for item in hidden["accounts"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_counts_tools_only_an_account_setting_hides(
+    env: SimpleNamespace,
+) -> None:
+    assert '"Read and write" (「読み取りと書き込み」)' in READ_WRITE_REMEDY
+    assert '"Read only" (「読み取りのみ」)' in READ_ONLY_REMEDY
+    assert "Settings → Integrations (設定 → 連携)" in READ_ONLY_REMEDY
+    # The work account can send: nothing is hidden.
+    assert _hidden(await _search_output(env, "send email")) is None
+
+    _set_access(env, WORK, "read_only")
+    _set_access(env, HOME, "off")
+    output = await _search_output(env, "send email")
+
+    assert "GMAIL_SEND_EMAIL" not in str(output["tools"])
+    assert _hidden(output) == (
+        1,
+        {"acct-work": READ_WRITE_REMEDY, "acct-home": READ_WRITE_REMEDY},
+    )
+    assert output["hidden_by_account_setting"]["accounts"][0] == {  # type: ignore[index]
+        "toolkit": "gmail",
+        "account": "acct-work",
+        "label": "work@example.com",
+        "remedy": READ_WRITE_REMEDY,
+    }
+
+    # "Read and write" would not help where the user turned the tool off, the
+    # account's grant lacks it, or the connection needs reconnecting.
+    set_integration_tool_blocked(
+        db_path=env.db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        account=HOME.account,
+        slug="GMAIL_SEND_EMAIL",
+        blocked=True,
+        updated_at=NOW,
+    )
+    env.gateway.denied[(WORK.account, "GMAIL_SEND_EMAIL")] = ApiDenial(
+        source="account_grant", capability="tool", detail="gmail.send"
+    )
+    assert _hidden(await _search_output(env, "send email")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_read_names_read_only_and_skips_unhealthy_accounts(
+    env: SimpleNamespace,
+) -> None:
+    _set_access(env, WORK, "off")
+    _set_access(env, HOME, "off")
+    # The grant lacks every write, so "Read and write" is not an option at all.
+    for account in (WORK, HOME):
+        env.gateway.denied[(account.account, "GMAIL_SEND_EMAIL")] = ApiDenial(
+            source="account_grant", capability="tool", detail="gmail.send"
+        )
+    env.gateway.unhealthy.add(WORK.account)
+
+    assert _hidden(await _search_output(env, "fetch emails")) == (
+        1,
+        {"acct-home": READ_ONLY_REMEDY},
+    )
+
+
+@pytest.mark.asyncio
+async def test_suggestion_research_search_names_no_setting_remedy(
+    env: SimpleNamespace,
+) -> None:
+    _set_access(env, WORK, "off")
+    _set_access(env, HOME, "off")
+
+    output = await search_integration_tools(
+        db_path=env.db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        query="fetch emails",
+        toolkit=None,
+        limit=None,
+        read_only=True,
+    )
+
+    assert output == {"tools": []}
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_names_the_remedy_that_would_work(
+    env: SimpleNamespace,
+) -> None:
+    from_home = str(
+        _error(
+            await _run(env, _args("GMAIL_SEND_EMAIL", HOME.account, SEND_ARGUMENTS))
+        )["message"]
+    )
+    assert "home@example.com" in from_home and READ_WRITE_REMEDY in from_home
+
+    _set_access(env, HOME, "off")
+    read_home = str(
+        _error(await _run(env, _args("GMAIL_FETCH_EMAILS", HOME.account, {})))[
+            "message"
+        ]
+    )
+    assert READ_ONLY_REMEDY in read_home
+
+    _set_access(env, WORK, "read_only")
+    unnamed = _error(await _run(env, _args("GMAIL_SEND_EMAIL", None, SEND_ARGUMENTS)))
+    assert unnamed["error_type"] == "permission_denied"
+    message = str(unnamed["message"])
+    assert "work@example.com" in message and "home@example.com" in message
+    assert message.count(READ_WRITE_REMEDY) == 2
+
+    # A tool the user turned off stays off under any account setting.
+    set_integration_tool_blocked(
+        db_path=env.db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        account=WORK.account,
+        slug="GMAIL_FETCH_EMAILS",
+        blocked=True,
+        updated_at=NOW,
+    )
+    blocked = str(
+        _error(await _run(env, _args("GMAIL_FETCH_EMAILS", WORK.account, {})))[
+            "message"
+        ]
+    )
+    assert "blocked" in blocked
+    assert READ_ONLY_REMEDY not in blocked and READ_WRITE_REMEDY not in blocked
+    assert env.gateway.executed == []
+
+
+@pytest.mark.asyncio
+async def test_a_connection_to_reconnect_is_told_before_any_setting(
+    env: SimpleNamespace,
+) -> None:
+    env.gateway.unhealthy.add(HOME.account)
+    home = (
+        "Cannot run GMAIL_SEND_EMAIL with home@example.com: the account must be"
+        f" reconnected. {RECONNECT_REMEDY} Do not retry."
+    )
+
+    from_home = _error(
+        await _run(env, _args("GMAIL_SEND_EMAIL", HOME.account, SEND_ARGUMENTS))
+    )
+    assert from_home["message"] == home
+
+    _set_access(env, WORK, "read_only")
+    unnamed = _error(await _run(env, _args("GMAIL_SEND_EMAIL", None, SEND_ARGUMENTS)))
+    message = str(unnamed["message"])
+    assert home in message
+    assert message.count(READ_WRITE_REMEDY) == 1  # the work account's alone
+    assert env.gateway.executed == []
 
 
 @pytest.mark.asyncio

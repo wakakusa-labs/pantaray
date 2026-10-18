@@ -19,9 +19,6 @@ from typing import cast
 from jsonschema import Draft7Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry
 
-from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
-    load_integration_account_access,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 
 from .contracts import (
@@ -35,10 +32,14 @@ from .contracts import (
 )
 from .registry import get_integration_gateway, get_integration_tool_index
 from .search import (
+    RECONNECT_REMEDY,
     UPSTREAM_FAILED_MESSAGE,
     IntegrationGatewayError,
     gateway_await,
     gateway_call,
+    load_account_setting,
+    setting_fix,
+    setting_remedy,
     usable_accounts,
 )
 
@@ -201,10 +202,21 @@ async def _resolve_with_gateway(
                 message=_MESSAGES["account_required"],
             )
         if not usable:
-            return _refuse(
-                "permission_denied",
-                f"No connected {tool.toolkit} account may run {slug} now.",
-            )
+            message = f"No connected {tool.toolkit} account may run {slug} now."
+            if connected and not read_only:
+                message = " ".join(
+                    _denial(
+                        gateway,
+                        db_path=db_path,
+                        busy_timeout_ms=busy_timeout_ms,
+                        user_id=user_id,
+                        tool=tool,
+                        account=item,
+                        read_only=read_only,
+                    )
+                    for item in connected
+                )
+            return _refuse("permission_denied", message)
         account = usable[0]
     else:
         target = next((item for item in connected if item.account == requested), None)
@@ -221,6 +233,7 @@ async def _resolve_with_gateway(
                 user_id=user_id,
                 tool=tool,
                 account=target,
+                read_only=read_only,
             )
             return _refuse("permission_denied", why)
         account = target
@@ -270,11 +283,18 @@ def _denial(
     user_id: str,
     tool: IntegrationTool,
     account: IntegrationAccount,
+    read_only: bool,
 ) -> str:
     """Say why the current permission refuses, without the connection's own text."""
 
+    retry = "The permission may have changed during this run; do not retry."
     if not gateway_call(gateway.limits).can_execute:
         why = "the connection method does not allow running tools now"
+    elif gateway_call(partial(gateway.health, account.account)) != "ok":
+        # Reconnecting comes first: no setting makes this connection run.
+        why = "the account must be reconnected"
+        if not read_only:
+            retry = f"{RECONNECT_REMEDY} Do not retry."
     elif (
         gateway_call(
             partial(gateway.api_denied_reason, slug=tool.slug, account=account.account)
@@ -283,23 +303,22 @@ def _denial(
     ):
         why = "the account's connection does not grant this tool"
     else:
-        access = load_integration_account_access(
+        setting = load_account_setting(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
-            toolkit=tool.toolkit,
-            account=account.account,
+            account=account,
         )
-        if access == "off":
+        if setting.access == "off":
             why = "the account is turned off"
-        elif access == "read_only" and tool.tool_class == "write":
+        elif setting.access == "read_only" and tool.tool_class == "write":
             why = "the account allows read tools only"
         else:
             why = "this tool is blocked for the account"
-    return (
-        f"Cannot run {tool.slug} with {account.label}: {why}. The permission may "
-        "have changed during this run; do not retry."
-    )
+        fix = setting_fix(gateway, tool=tool, account=account, setting=setting)
+        if not read_only and fix is not None:
+            retry = f"{setting_remedy(fix)} Do not retry."
+    return f"Cannot run {tool.slug} with {account.label}: {why}. {retry}"
 
 
 def _refuse(

@@ -18,17 +18,33 @@ from pathlib import Path
 from typing import Final, Literal
 
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
+    IntegrationAccess,
+    load_integration_account_access,
+    load_integration_blocked_tools,
     resolve_integration_tool,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
 from .contracts import IntegrationAccount, IntegrationGateway, IntegrationTool
 from .registry import get_integration_gateway, get_integration_tool_index
+from .settings import access_options
 from .tool_index import SEARCH_LIMIT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
+type SettingFix = Literal["read_only", "read_write"]
+
 UPSTREAM_FAILED_MESSAGE = "The service failed or timed out; trying later may work."
+# The remedies told to the Action's model where the refusal happens: in the
+# search result and the run's refusal. Suggestion research never gets them; the
+# user did not ask for anything. The labels are the settings screen's own.
+_OPTION_LABELS: Final[dict[SettingFix, str]] = {
+    "read_only": '"Read only" (「読み取りのみ」)',
+    "read_write": '"Read and write" (「読み取りと書き込み」)',
+}
+RECONNECT_REMEDY: Final = (
+    "The user can reconnect this account in Settings → Integrations (設定 → 連携)."
+)
 # Every Action start waits for this, integrations used or not; past it the
 # Action runs without the integration tools.
 AVAILABILITY_TIMEOUT_SECONDS: Final = 3.0
@@ -42,6 +58,18 @@ _ACCOUNT_SCHEMA: dict[str, JSONValue] = {
         "permission": {"type": "string", "enum": ["allow", "ask"]},
     },
     "required": ["account", "label", "permission"],
+}
+
+_HIDDEN_ACCOUNT_SCHEMA: dict[str, JSONValue] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "toolkit": {"type": "string"},
+        "account": {"type": "string"},
+        "label": {"type": "string"},
+        "remedy": {"type": "string"},
+    },
+    "required": ["toolkit", "account", "label", "remedy"],
 }
 
 # What search_integration_tools returns.
@@ -77,6 +105,21 @@ SEARCH_RESULT_SCHEMA: dict[str, JSONValue] = {
                     "accounts",
                 ],
             },
+        },
+        # Present only when tools matching the query exist that only these
+        # accounts' setting ("Off" or "Read only") keeps out of "tools".
+        "hidden_by_account_setting": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "tool_count": {"type": "integer", "minimum": 1},
+                "accounts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": _HIDDEN_ACCOUNT_SCHEMA,
+                },
+            },
+            "required": ["tool_count", "accounts"],
         },
     },
     "required": ["tools"],
@@ -144,8 +187,8 @@ async def search_integration_tools(
     read_only: bool,
 ) -> dict[str, JSONValue]:
     """The usable tools matching ``query``; ``read_only`` leaves out write tools
-    for a caller that cannot ask the user. Raises IntegrationGatewayError when the
-    gateway raises."""
+    for a caller that cannot ask the user, and the count of tools the account
+    setting hides. Raises IntegrationGatewayError when the gateway raises."""
 
     gateway = get_integration_gateway()
     if gateway is None:
@@ -159,10 +202,27 @@ async def search_integration_tools(
         name: await gateway_await(gateway.list_accounts(name)) for name in names
     }
     usable_by_slug: dict[str, list[UsableAccount]] = {}
+    hidden_by_slug: dict[str, list[tuple[IntegrationAccount, SettingFix]]] = {}
+    settings: dict[str, AccountSetting] = {}
+
+    def fix_for(
+        tool: IntegrationTool, account: IntegrationAccount
+    ) -> SettingFix | None:
+        if account.account not in settings:
+            settings[account.account] = load_account_setting(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+                account=account,
+            )
+        return setting_fix(
+            gateway, tool=tool, account=account, setting=settings[account.account]
+        )
 
     def usable(tool: IntegrationTool) -> bool:
         if read_only and tool.tool_class == "write":
             return False
+        candidates = accounts.get(tool.toolkit, [])
         # Design limit: one permission read per tool and account; read each
         # account's rows once per search when a search's p95 exceeds 200 ms.
         usable_by_slug[tool.slug] = usable_accounts(
@@ -171,14 +231,23 @@ async def search_integration_tools(
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
             tool=tool,
-            accounts=accounts.get(tool.toolkit, []),
+            accounts=candidates,
         )
+        if not usable_by_slug[tool.slug] and not read_only:
+            hidden = [
+                (item, fix)
+                for item in candidates
+                if (fix := fix_for(tool, item)) is not None
+            ]
+            if hidden:
+                hidden_by_slug[tool.slug] = hidden
         return bool(usable_by_slug[tool.slug])
 
-    tools = get_integration_tool_index().search(
+    index = get_integration_tool_index()
+    tools = index.search(
         query, usable=usable, toolkit=toolkit, limit=limit or SEARCH_LIMIT_DEFAULT
     )
-    return {
+    result: dict[str, JSONValue] = {
         "tools": [
             {
                 "slug": tool.slug,
@@ -199,6 +268,34 @@ async def search_integration_tools(
             for tool in tools
         ]
     }
+    if hidden_by_slug:
+        matched = index.search(
+            query,
+            usable=lambda tool: tool.slug in hidden_by_slug,
+            toolkit=toolkit,
+            limit=len(hidden_by_slug),
+        )
+        # One option per account: "Read and write" also covers its hidden reads.
+        owners: dict[str, tuple[IntegrationAccount, SettingFix]] = {}
+        for tool in matched:
+            for item, fix in hidden_by_slug[tool.slug]:
+                current = owners.get(item.account)
+                if current is None or current[1] == "read_only":
+                    owners[item.account] = (item, fix)
+        if matched:
+            result["hidden_by_account_setting"] = {
+                "tool_count": len(matched),
+                "accounts": [
+                    {
+                        "toolkit": item.toolkit,
+                        "account": item.account,
+                        "label": item.label,
+                        "remedy": setting_remedy(fix),
+                    }
+                    for item, fix in owners.values()
+                ],
+            }
+    return result
 
 
 def usable_accounts(
@@ -235,7 +332,76 @@ def usable_accounts(
     return usable
 
 
+@dataclass(frozen=True, slots=True)
+class AccountSetting:
+    """What the user set for one account: its access and the tools turned off."""
+
+    access: IntegrationAccess
+    blocked: frozenset[str]
+
+
+def load_account_setting(
+    *, db_path: Path, busy_timeout_ms: int, user_id: str, account: IntegrationAccount
+) -> AccountSetting:
+    access = load_integration_account_access(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=user_id,
+        toolkit=account.toolkit,
+        account=account.account,
+    )
+    blocked = load_integration_blocked_tools(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=user_id,
+        account=account.account,
+    )
+    return AccountSetting(access=access, blocked=blocked)
+
+
+def setting_fix(
+    gateway: IntegrationGateway,
+    *,
+    tool: IntegrationTool,
+    account: IntegrationAccount,
+    setting: AccountSetting,
+) -> SettingFix | None:
+    """The option that would let ``tool`` run with ``account``, when changing the
+    account's setting alone would and the settings screen offers that option.
+
+    Raises IntegrationGatewayError when the gateway raises.
+    """
+
+    target: SettingFix = "read_only" if tool.tool_class == "read" else "read_write"
+    if (
+        setting.access in (target, "read_write")
+        or tool.slug in setting.blocked
+        # A connection that needs reconnecting is not fixed by a setting.
+        or gateway_call(partial(gateway.health, account.account)) != "ok"
+    ):
+        return None
+    denial = gateway_call(
+        partial(gateway.api_denied_reason, slug=tool.slug, account=account.account)
+    )
+    # This tool alone decides: an option the API allows for it is one the
+    # screen allows for the account.
+    options = access_options(
+        limits=gateway_call(gateway.limits), tools=[tool], denials={tool.slug: denial}
+    )
+    allowed = next(option.allowed for option in options if option.value == target)
+    return target if allowed else None
+
+
+def setting_remedy(fix: SettingFix) -> str:
+    return (
+        "The user can change this in Settings → Integrations (設定 → 連携) by"
+        f" setting the account to {_OPTION_LABELS[fix]}."
+    )
+
+
 __all__ = [
+    "RECONNECT_REMEDY",
+    "AccountSetting",
     "IntegrationGatewayError",
     "SEARCH_RESULT_SCHEMA",
     "UPSTREAM_FAILED_MESSAGE",
@@ -243,6 +409,9 @@ __all__ = [
     "gateway_await",
     "gateway_call",
     "integration_tools_available",
+    "load_account_setting",
+    "setting_fix",
+    "setting_remedy",
     "search_integration_tools",
     "usable_accounts",
 ]

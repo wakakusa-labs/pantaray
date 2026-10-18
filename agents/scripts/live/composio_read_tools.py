@@ -22,7 +22,10 @@ from jsonschema import Draft7Validator  # type: ignore[import-untyped]
 from pantaray_agents.local_runtime.integrations.change_probe import (
     substitute_window,
 )
-from pantaray_agents.local_runtime.integrations.composio.client import ComposioClient
+from pantaray_agents.local_runtime.integrations.composio.client import (
+    METADATA_TIMEOUT,
+    ComposioClient,
+)
 from pantaray_agents.local_runtime.integrations.composio.mapping import (
     RawTool,
     tool_disposition,
@@ -66,7 +69,9 @@ async def main() -> int:
     failures = 0
     for entry in TOOLKITS:
         items = await client.list_all(
-            "/tools", {"toolkit_slug": entry.toolkit, "include_deprecated": "false"}
+            "/tools",
+            {"toolkit_slug": entry.toolkit, "include_deprecated": "false"},
+            timeout=METADATA_TIMEOUT,
         )
         reads: list[tuple[RawTool, list[str]]] = []
         for item in items:

@@ -420,6 +420,36 @@ async def test_no_reply_maps_by_whether_a_write_may_have_run(
     assert outcome.error.kind == kind
 
 
+async def test_composio_advice_is_dropped_from_a_success(
+    composio: FakeComposio, gateway: ComposioGateway
+) -> None:
+    # The reply to a Gmail search that found nothing (seen on 2026-10-19).
+    await _ready(gateway)
+    composio.execute_replies.append(
+        httpx2.Response(
+            200,
+            json={
+                "data": {
+                    "composio_execution_message": "SEARCH RETURNED NO RESULTS. "
+                    "Consider: (1) Broadening date ranges if using after:/before:",
+                    "messages": [],
+                    "nextPageToken": "",
+                    "resultSizeEstimate": 0,
+                },
+                "error": None,
+                "log_id": "log_1",
+                "result_type": "completed",
+            },
+        )
+    )
+
+    outcome = await _run(gateway)
+
+    assert outcome == ToolSucceeded(
+        data={"messages": [], "nextPageToken": "", "resultSizeEstimate": 0}
+    )
+
+
 async def test_a_session_without_the_toolkit_is_renewed_once(
     composio: FakeComposio, gateway: ComposioGateway
 ) -> None:

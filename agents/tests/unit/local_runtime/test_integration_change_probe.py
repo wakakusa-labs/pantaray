@@ -17,6 +17,9 @@ from pantaray_agents.local_runtime.integrations.change_probe import (
     collect_external_changes,
     substitute_window,
 )
+from pantaray_agents.local_runtime.integrations.composio.mapping import (
+    execute_outcome,
+)
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
     ChangeProbe,
@@ -238,8 +241,19 @@ async def test_failures_and_empty_results_add_nothing_and_log_no_content(
         results={
             "failed": ToolFailed(error=IntegrationError(kind="rate_limited")),
             "raised": RuntimeError("upstream said: secret body text"),
-            "empty": ToolSucceeded(
-                data={"messages": [], "nextPageToken": None, "resultSizeEstimate": 0}
+            # Composio's reply to a Gmail search that found nothing.
+            "empty": execute_outcome(
+                {
+                    "data": {
+                        "composio_execution_message": "SEARCH RETURNED NO RESULTS.",
+                        "messages": [],
+                        "nextPageToken": "",
+                        "resultSizeEstimate": 0,
+                    },
+                    "error": None,
+                    "result_type": "completed",
+                },
+                is_write=False,
             ),
         },
         failing_toolkits={"slack"},

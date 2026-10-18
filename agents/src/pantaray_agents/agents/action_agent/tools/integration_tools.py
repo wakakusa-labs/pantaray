@@ -61,7 +61,9 @@ INTEGRATION_SEARCH_TOOLS_TOOL = ToolDefinition.from_spec(
             pitfalls=(
                 "Only tools usable now are returned, so an empty result means no "
                 "usable tool matched: try other English words or another toolkit "
-                "instead of guessing a slug. " + _UNTRUSTED_RULE
+                "instead of guessing a slug. hidden_by_account_setting counts the "
+                "matching tools an account's setting keeps out, with the remedy to "
+                "tell the user. " + _UNTRUSTED_RULE
             ),
         ),
         # Sequential although it only reads the local index: the executing prompt

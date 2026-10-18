@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.agents.action_agent.tools import INTEGRATION_RUN_TOOL_TOOL_ID
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     serialize_memory_epoch,
 )
@@ -51,6 +52,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     finalize_local_tool_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.files.manifest_paths import load_tool_results_root
 
 from .embedding_test_support import TEST_EMBEDDING_SPECIFICATION
 from .migrated_db import prepare_test_database
@@ -402,6 +404,83 @@ def test_memory_folder_read_keeps_audit_without_registering_memory(
     assert json.loads(str(audit_row[1])) == output
 
 
+@pytest.mark.parametrize(
+    ("producer_tool_id", "registered"),
+    [(INTEGRATION_RUN_TOOL_TOOL_ID, False), ("read", True)],
+)
+def test_a_stored_integration_result_read_back_never_becomes_memory(
+    tmp_path: Path, producer_tool_id: str, registered: bool
+) -> None:
+    db_path, context = _runtime_with_action(tmp_path)
+    producer_id = "producer-invocation-1"
+    _start_invocation(
+        db_path=db_path,
+        context=context,
+        invocation_id=producer_id,
+        tool_id=producer_tool_id,
+    )
+    body = "Dear team, the venue quote is attached. " * 1_000
+    produced: dict[str, JSONValue] = (
+        {"source": "gmail", "untrusted": True, "data": {"messages": [{"body": body}]}}
+        if producer_tool_id == INTEGRATION_RUN_TOOL_TOOL_ID
+        else _file_output(content=body)
+    )
+    finalized = finalize_local_tool_result(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        request=ToolResultFinalizationRequest(
+            owner=InvocationToolResultOwner(
+                invocation_id=producer_id,
+                completed_at=COMPLETED_AT,
+                status="completed",
+                completion_scope="invocation",
+            ),
+            output=produced,
+            search_text=None,
+        ),
+    )
+    assert finalized.storage_kind == "action_file"
+    results_root = load_tool_results_root(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id=USER_ID,
+        manifest_id=context.manifest_id,
+        action_id=ACTION_ID,
+    )
+    (stored_file,) = (results_root / producer_id).iterdir()
+    _start_read_invocation(db_path=db_path, context=context)
+    output = _file_output(
+        path=str(stored_file.resolve()), content="the venue quote is attached"
+    )
+
+    record_tool_invocation_completion(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        completion=ToolInvocationCompletionInput(
+            invocation_id=INVOCATION_ID,
+            status="completed",
+            completed_at=COMPLETED_AT,
+            output_json=output,
+            output_storage_kind="inline_json",
+            search_text=str(output["content"]),
+            stdout_text=None,
+            stderr_text=None,
+            redaction_applied=False,
+            read_memory=build_action_file_read_memory_input(
+                tool_id="read", status="completed", output=output
+            ),
+        ),
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        memory_count = connection.execute(
+            "SELECT COUNT(*) FROM memory_nodes "
+            "WHERE source_type = 'action_file_read' AND source_record_id = ?",
+            (INVOCATION_ID,),
+        ).fetchone()[0]
+    assert memory_count == (1 if registered else 0)
+
+
 def _runtime_with_action(tmp_path: Path) -> tuple[Path, ActionExecutionContext]:
     db_path = tmp_path / "runtime.db"
     prepare_test_database(
@@ -456,16 +535,28 @@ def _runtime_with_action(tmp_path: Path) -> tuple[Path, ActionExecutionContext]:
 
 
 def _start_read_invocation(*, db_path: Path, context: ActionExecutionContext) -> None:
+    _start_invocation(
+        db_path=db_path, context=context, invocation_id=INVOCATION_ID, tool_id="read"
+    )
+
+
+def _start_invocation(
+    *,
+    db_path: Path,
+    context: ActionExecutionContext,
+    invocation_id: str,
+    tool_id: str,
+) -> None:
     record_tool_invocation_start(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         invocation=ToolInvocationStartInput(
-            invocation_id=INVOCATION_ID,
-            tool_request_id="read-request-1",
+            invocation_id=invocation_id,
+            tool_request_id=f"{invocation_id}-request",
             user_id=USER_ID,
             action_id=ACTION_ID,
-            step_id="read-step-1",
-            tool_id="read",
+            step_id=f"{invocation_id}-step",
+            tool_id=tool_id,
             manifest_id=context.manifest_id,
             execution_session_id=context.execution_session_id,
             cwd=".",

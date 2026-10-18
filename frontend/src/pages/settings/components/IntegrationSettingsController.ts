@@ -78,6 +78,39 @@ export function denialText(t: Translate, reason: ApiDenial, service: string): st
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 
+/**
+ * Applies a status read. An account with an access save in flight, or one saved after the read
+ * started, keeps what the screen shows: the read is older than that save.
+ */
+function applyStatus(
+  prev: Loaded | null,
+  ownerId: string,
+  next: Pick<Loaded, 'toolkits' | 'loadFailed'>,
+  savedSinceRead: (account: string) => boolean
+): Loaded {
+  if (prev === null || prev.ownerId !== ownerId) return { ownerId, rows: {}, ...next };
+  if (next.loadFailed) return { ...prev, loadFailed: true };
+  const shown = new Map(
+    (prev.toolkits ?? []).flatMap((toolkit) =>
+      toolkit.accounts.map((account) => [account.account, account] as const)
+    )
+  );
+  const rows: Record<string, IntegrationAccountRowState> = {};
+  const toolkits =
+    next.toolkits?.map((toolkit) => ({
+      ...toolkit,
+      accounts: toolkit.accounts.map((account) => {
+        const row = prev.rows[account.account];
+        const keepAccess = savedSinceRead(account.account) || row?.busy === true;
+        const savingTool = row?.tools?.state === 'loaded' && row.tools.savingSlug !== null;
+        // Idle rows start over, since a reconnect can change what an account's tools allow.
+        if (row && (keepAccess || savingTool)) rows[account.account] = row;
+        return keepAccess ? (shown.get(account.account) ?? account) : account;
+      }),
+    })) ?? null;
+  return { ownerId, toolkits, rows, loadFailed: false };
+}
+
 /** Loads the owner's toolkits and accounts; `toolkits` is null until the gateway is configured. */
 export function useIntegrationSettingsController(ownerId: string | null): {
   toolkits: IntegrationToolkitStatus[] | null;
@@ -90,32 +123,43 @@ export function useIntegrationSettingsController(ownerId: string | null): {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   // Only the newest read may land: an older answer, or one for another owner, is stale.
   const latestRead = useRef(0);
+  // Orders access saves against reads: each save's start and end takes the next number.
+  const writeSeq = useRef(0);
+  const lastWrite = useRef(new Map<string, number>());
+  const savesInFlight = useRef(0);
+  const readAfterSaves = useRef(false);
 
   const reload = useCallback((): Promise<void> => {
-    const request = ++latestRead.current;
-    const api = window.electron?.integrations;
-    if (ownerId === null || !api) return Promise.resolve();
-    return api
-      .getStatus()
-      .then(
-        // Accounts may have come or gone, and a reconnect can change what their tools allow.
-        (status): Pick<Loaded, 'toolkits' | 'loadFailed'> => ({
-          toolkits: status.state === 'configured' ? status.toolkits : null,
-          loadFailed: false,
-        }),
-        (error: unknown) => {
-          console.warn('Failed to load integration settings', error);
-          return { toolkits: null, loadFailed: true };
-        }
-      )
-      .then((next) => {
-        if (request !== latestRead.current) return;
-        setLoaded((prev) =>
-          next.loadFailed && prev?.ownerId === ownerId
-            ? { ...prev, loadFailed: true }
-            : { ownerId, rows: {}, ...next }
-        );
-      });
+    const read = (): Promise<void> => {
+      const request = ++latestRead.current;
+      const startedAt = writeSeq.current;
+      const api = window.electron?.integrations;
+      if (ownerId === null || !api) return Promise.resolve();
+      return api
+        .getStatus()
+        .then(
+          // Accounts may have come or gone, and a reconnect can change what their tools allow.
+          (status): Pick<Loaded, 'toolkits' | 'loadFailed'> => ({
+            toolkits: status.state === 'configured' ? status.toolkits : null,
+            loadFailed: false,
+          }),
+          (error: unknown) => {
+            console.warn('Failed to load integration settings', error);
+            return { toolkits: null, loadFailed: true };
+          }
+        )
+        .then((next) => {
+          if (request !== latestRead.current) return;
+          const savedSinceRead = (account: string) =>
+            (lastWrite.current.get(account) ?? 0) > startedAt;
+          setLoaded((prev) => applyStatus(prev, ownerId, next, savedSinceRead));
+          if (next.loadFailed || ![...lastWrite.current.keys()].some(savedSinceRead)) return;
+          // Read once more after the saves end, so the screen settles on one answer.
+          if (savesInFlight.current > 0) readAfterSaves.current = true;
+          else void read();
+        });
+    };
+    return read();
   }, [ownerId]);
 
   useEffect(() => {
@@ -150,6 +194,31 @@ export function useIntegrationSettingsController(ownerId: string | null): {
       };
     });
 
+  const markWrite = (account: string) => lastWrite.current.set(account, ++writeSeq.current);
+  const startSave = (
+    forOwner: string,
+    account: string,
+    change: Partial<IntegrationAccountRowState>
+  ) => {
+    savesInFlight.current += 1;
+    markWrite(account);
+    patchRow(forOwner, account, () => change);
+  };
+  const endSave = (
+    forOwner: string,
+    account: string,
+    change: Partial<IntegrationAccountRowState>,
+    saved?: IntegrationAccountStatus
+  ) => {
+    markWrite(account);
+    patchRow(forOwner, account, () => change, saved);
+    savesInFlight.current -= 1;
+    if (savesInFlight.current === 0 && readAfterSaves.current) {
+      readAfterSaves.current = false;
+      void reload();
+    }
+  };
+
   // A failed answer does not prove a failed save: the backend writes before it answers, so
   // the stored access is read back. `requested` is null for a plain re-read.
   const confirmAccess = (
@@ -160,12 +229,7 @@ export function useIntegrationSettingsController(ownerId: string | null): {
   ) => {
     if (!api) return;
     const unconfirmed = () =>
-      patchRow(forOwner, account, () => ({
-        busy: false,
-        pending: null,
-        notice: null,
-        unconfirmed: true,
-      }));
+      endSave(forOwner, account, { busy: false, pending: null, notice: null, unconfirmed: true });
     api.getStatus().then((status) => {
       const stored =
         status.state === 'configured'
@@ -175,15 +239,15 @@ export function useIntegrationSettingsController(ownerId: string | null): {
           : undefined;
       if (!stored) return unconfirmed();
       const saved = requested === null || stored.access === requested;
-      patchRow(
+      endSave(
         forOwner,
         account,
-        () => ({
+        {
           busy: false,
           pending: null,
           notice: saved ? null : { kind: 'save_failed' },
           unconfirmed: false,
-        }),
+        },
         stored
       );
     }, unconfirmed);
@@ -192,28 +256,28 @@ export function useIntegrationSettingsController(ownerId: string | null): {
   const setAccess: IntegrationSettingsActions['setAccess'] = (toolkit, account, access) => {
     if (!current || !api || integrationRow(current.rows, account).busy) return;
     const forOwner = current.ownerId;
-    patchRow(forOwner, account, () => ({ busy: true, pending: access, notice: null }));
+    startSave(forOwner, account, { busy: true, pending: access, notice: null });
     api.setAccountAccess({ toolkit, account, access }).then(
       (result) =>
         result.kind === 'saved'
-          ? patchRow(
+          ? endSave(
               forOwner,
               account,
-              () => ({ busy: false, pending: null, notice: null, unconfirmed: false }),
+              { busy: false, pending: null, notice: null, unconfirmed: false },
               result.account
             )
-          : patchRow(forOwner, account, () => ({
+          : endSave(forOwner, account, {
               busy: false,
               pending: null,
               notice: { kind: 'not_allowed', reason: result.reason },
-            })),
+            }),
       () => confirmAccess(forOwner, toolkit, account, access)
     );
   };
 
   const recheckAccess: IntegrationSettingsActions['recheckAccess'] = (toolkit, account) => {
-    if (!current || integrationRow(current.rows, account).busy) return;
-    patchRow(current.ownerId, account, () => ({ busy: true }));
+    if (!current || !api || integrationRow(current.rows, account).busy) return;
+    startSave(current.ownerId, account, { busy: true });
     confirmAccess(current.ownerId, toolkit, account, null);
   };
 

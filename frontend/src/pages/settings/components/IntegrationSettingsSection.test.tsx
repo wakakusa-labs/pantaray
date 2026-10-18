@@ -326,6 +326,44 @@ describe('integration settings', () => {
     expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
   });
 
+  it('keeps a save that ends while an older reload is in flight, then reads again', async () => {
+    api.setAccountAccess.mockImplementation(async (update) => ({
+      kind: 'saved',
+      account: { ...HOME, access: update.access },
+    }));
+    renderSettings();
+    await openGmail();
+    let answerReload: (status: IntegrationsStatus) => void = () => undefined;
+    api.getStatus.mockImplementationOnce(() => new Promise((resolve) => (answerReload = resolve)));
+
+    // Disconnecting work starts a reload, which the backend answers only after the save below.
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for work@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    const dialog = screen.getByRole('dialog', { name: 'Disconnect work@example.com?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(api.getStatus).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+    await waitFor(() => expect(accessButton('home@example.com')).toHaveTextContent('Off'));
+
+    const afterSave = { ...GMAIL, accounts: [{ ...HOME, access: 'off' as const }] };
+    let answerReread: (status: IntegrationsStatus) => void = () => undefined;
+    api.getStatus.mockImplementationOnce(() => new Promise((resolve) => (answerReread = resolve)));
+    const beforeSave = { ...GMAIL, accounts: [HOME] };
+    await act(async () =>
+      answerReload({ state: 'configured', toolkits: [beforeSave, ...UNCONNECTED] })
+    );
+
+    expect(accessButton('home@example.com')).toHaveTextContent('Off');
+    expect(screen.queryByText('work@example.com')).not.toBeInTheDocument();
+    expect(api.getStatus).toHaveBeenCalledTimes(3);
+    await act(async () =>
+      answerReread({ state: 'configured', toolkits: [afterSave, ...UNCONNECTED] })
+    );
+    expect(accessButton('home@example.com')).toHaveTextContent('Off');
+  });
+
   it('takes no second choice while a save is pending, and says it is saving', async () => {
     let answer: (result: IntegrationAccessUpdateResult) => void = () => undefined;
     api.setAccountAccess.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
@@ -507,6 +545,32 @@ describe('connecting an account', () => {
     expect(api.reconnect).toHaveBeenCalledWith({ toolkit: 'gmail', account: 'acct-work' });
     const [work] = screen.getAllByRole('listitem');
     expect(await within(work).findByText(/^Continue in your browser…/)).toBeInTheDocument();
+  });
+
+  it('after a reconnect, shows the new account that replaced the old one', async () => {
+    useFakeClock();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    api.reconnect.mockResolvedValue({ ...STARTED, connection_id: 'acct-work-2' });
+    api.getConnectionState.mockResolvedValue('active');
+    renderSettings();
+    await openGmail();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for work@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reconnect' }));
+    await screen.findByText(/^Continue in your browser…/);
+    // The backend moves the old account's access to the new one and removes the old one.
+    const replaced = { ...GMAIL.accounts[0], account: 'acct-work-2', access: 'off' as const };
+    api.getStatus.mockResolvedValue({
+      state: 'configured',
+      toolkits: [{ ...GMAIL, accounts: [replaced, HOME] }, ...UNCONNECTED],
+    });
+    await poll();
+
+    expect(api.getConnectionState).toHaveBeenCalledWith({ connection_id: 'acct-work-2' });
+    await waitFor(() => expect(accessButton('work@example.com')).toHaveTextContent('Off'));
+    expect(screen.getByRole('heading', { name: 'Gmail' })).toBeInTheDocument();
+    expect(screen.queryByText(/Continue in your browser/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('disconnects only after the question is confirmed, then reloads the list', async () => {

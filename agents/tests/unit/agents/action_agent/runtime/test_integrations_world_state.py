@@ -34,9 +34,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm import (
     integrations_state,
     turn_input,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    integration_search,
-)
 from pantaray_agents.conversation.prefix import TURN_CONTEXT_HEADING
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
@@ -72,10 +69,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNames
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         migrations=load_default_migrations(),
     )
-    for module in (integration_search, integrations_state):
-        monkeypatch.setattr(
-            module, "read_local_runtime_db_config", lambda: (db_path, BUSY_TIMEOUT_MS)
-        )
+    monkeypatch.setattr(
+        integrations_state,
+        "read_local_runtime_db_config",
+        lambda: (db_path, BUSY_TIMEOUT_MS),
+    )
     gateway = FakeGateway(accounts=[WORK, HOME])
     set_integration_gateway(gateway)
     get_integration_tool_index().replace("gmail", TOOLS)

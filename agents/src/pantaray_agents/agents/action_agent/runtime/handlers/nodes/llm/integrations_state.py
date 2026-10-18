@@ -14,12 +14,6 @@ from collections.abc import Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
-    IntegrationGatewayError,
-    gateway_await,
-    gateway_call,
-    usable_accounts,
-)
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
     GatewayLimits,
@@ -31,6 +25,12 @@ from pantaray_agents.local_runtime.integrations.contracts import (
 from pantaray_agents.local_runtime.integrations.registry import (
     get_integration_gateway,
     get_integration_tool_index,
+)
+from pantaray_agents.local_runtime.integrations.search import (
+    IntegrationGatewayError,
+    gateway_await,
+    gateway_call,
+    usable_accounts,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
@@ -131,7 +131,17 @@ def _account_lines(
     usable = {
         tool_class
         for tool_class, members in of_class.items()
-        if any(usable_accounts(gateway, user_id, tool, [account]) for tool in members)
+        if any(
+            usable_accounts(
+                gateway,
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+                tool=tool,
+                accounts=[account],
+            )
+            for tool in members
+        )
     }
     effective = _EFFECTIVE["read" in usable, "write" in usable]
     lines = [

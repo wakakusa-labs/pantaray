@@ -7,6 +7,14 @@ export type ApprovalDetail = {
   value: string;
 };
 
+// One top-level argument of an integration write. Short single-line text reads as a
+// row; longer text keeps its line breaks in a scrolling block; nested values stay JSON.
+export type ApprovalArgumentField = {
+  label: string;
+  format: 'inline' | 'text' | 'json';
+  value: string;
+};
+
 export type ApprovalDecision = 'approved_once' | 'approved_for_conversation' | 'denied';
 
 export type ApprovalOutsideFolder = {
@@ -36,6 +44,7 @@ export type ApprovalDisplay = {
   primaryLabelKey: MessageKey;
   primaryValue: string;
   details: ApprovalDetail[];
+  argumentFields: ApprovalArgumentField[];
   outsideWorkspace: ApprovalOutsideWorkspace | null;
   // A decision without a label is not offered for this approval.
   decisionLabelKeys: Partial<Record<ApprovalDecision, MessageKey>>;
@@ -43,8 +52,17 @@ export type ApprovalDisplay = {
 
 type ToolApprovalDisplay = Pick<
   ApprovalDisplay,
-  'operationKey' | 'usesLoginEnvironment' | 'primaryLabelKey' | 'primaryValue' | 'details'
+  | 'operationKey'
+  | 'operationVars'
+  | 'usesLoginEnvironment'
+  | 'primaryLabelKey'
+  | 'primaryValue'
+  | 'details'
+  | 'argumentFields'
 >;
+
+// Longer text would stretch a label/value row; it gets its own block instead.
+const INLINE_ARGUMENT_MAX_CHARS = 80;
 
 export type ApprovalDisplayTranslator = (
   key: MessageKey,
@@ -74,9 +92,73 @@ function buildGenericPrimaryValue(summary: Record<string, unknown>): string {
     .join('\n');
 }
 
-function readOutsideFolder(value: unknown): ApprovalOutsideFolder | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNested(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
+}
+
+function formatPlainValue(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function toArgumentField(key: string, value: unknown): ApprovalArgumentField {
+  const label = key.replace(/_/g, ' ');
+  // A list of plain values, such as cc addresses, reads like a single value.
+  const plainList =
+    Array.isArray(value) && value.length > 0 && value.every((item) => !isNested(item));
+  if (isNested(value) && !plainList) {
+    return { label, format: 'json', value: JSON.stringify(value, null, 2) };
+  }
+  const text = plainList ? value.map(formatPlainValue).join(', ') : formatPlainValue(value);
+  return text.length > INLINE_ARGUMENT_MAX_CHARS || text.includes('\n')
+    ? { label, format: 'text', value: text }
+    : { label, format: 'inline', value: text };
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (error instanceof SyntaxError) return text;
+    throw error;
+  }
+}
+
+// The runtime binds the approval to the arguments as a JSON string. Anything that is
+// not an object is still shown whole, since the user approves exactly what will be sent.
+// The backend serializes Python values: its ints are unbounded, while its floats are
+// shortest-repr doubles that parse back exactly. An integer beyond 2^53 would display
+// rounded, so the user would approve a different ID or amount than the one that runs.
+function hasUnsafeInteger(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value);
+  return isNested(value) && Object.values(value).some(hasUnsafeInteger);
+}
+
+function readIntegrationArguments(
+  summary: Record<string, unknown>,
+  t: ApprovalDisplayTranslator
+): ApprovalArgumentField[] {
+  const raw = summary.arguments;
+  const parsed = typeof raw === 'string' ? parseJson(raw) : raw;
+  if (isRecord(parsed) && !hasUnsafeInteger(parsed)) {
+    return Object.entries(parsed).map(([key, value]) => toArgumentField(key, value));
+  }
+  return raw === undefined
+    ? []
+    : [
+        {
+          label: t('overlay.approvalRequired.arguments'),
+          format: 'json',
+          value: typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2),
+        },
+      ];
+}
+
+function readOutsideFolder(record: unknown): ApprovalOutsideFolder | null {
+  if (!isRecord(record)) return null;
   const path = readStringValue(record, 'path');
   const displayName = readStringValue(record, 'display_name');
   return path && displayName ? { path, displayName } : null;
@@ -85,9 +167,8 @@ function readOutsideFolder(value: unknown): ApprovalOutsideFolder | null {
 // Any tool that would act outside the registered workspace carries this key, so
 // the panel keys on it rather than on the tool.
 function readOutsideWorkspace(summary: Record<string, unknown>): ApprovalOutsideWorkspace | null {
-  const value = summary.outside_workspace;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
+  const record = summary.outside_workspace;
+  if (!isRecord(record)) return null;
   const folders = Array.isArray(record.folders)
     ? record.folders
         .map(readOutsideFolder)
@@ -185,6 +266,7 @@ function buildToolApprovalDisplay(
       details: [
         ...(cwd ? [{ labelKey: 'overlay.approvalRequired.cwd' as MessageKey, value: cwd }] : []),
       ],
+      argumentFields: [],
     };
   }
 
@@ -215,6 +297,7 @@ function buildToolApprovalDisplay(
             ]
           : []),
       ],
+      argumentFields: [],
     };
   }
 
@@ -228,6 +311,30 @@ function buildToolApprovalDisplay(
         ? targetPaths.join('\n')
         : t('overlay.approvalRequired.unavailable'),
       details: [],
+      argumentFields: [],
+    };
+  }
+
+  // The slug, IDs and the service's own tool description bind the approval to this
+  // exact write; the user approves the service, account, action and arguments.
+  if (summaryKind === 'integration_tool') {
+    const unavailable = t('overlay.approvalRequired.unavailable');
+    return {
+      operationKey: 'overlay.approvalRequired.operation.integration',
+      operationVars: {
+        service: readStringValue(summary, 'toolkit') ?? unavailable,
+        account: readStringValue(summary, 'account') ?? unavailable,
+      },
+      usesLoginEnvironment: false,
+      primaryLabelKey: 'overlay.approvalRequired.details',
+      primaryValue: '',
+      details: [
+        {
+          labelKey: 'overlay.approvalRequired.integration.tool',
+          value: readStringValue(summary, 'tool') ?? unavailable,
+        },
+      ],
+      argumentFields: readIntegrationArguments(summary, t),
     };
   }
 
@@ -241,6 +348,7 @@ function buildToolApprovalDisplay(
       primaryValue:
         readStringValue(summary, 'app_name') ?? t('overlay.approvalRequired.unavailable'),
       details: [],
+      argumentFields: [],
     };
   }
 
@@ -250,5 +358,6 @@ function buildToolApprovalDisplay(
     primaryLabelKey: 'overlay.approvalRequired.details',
     primaryValue: buildGenericPrimaryValue(summary),
     details: [],
+    argumentFields: [],
   };
 }

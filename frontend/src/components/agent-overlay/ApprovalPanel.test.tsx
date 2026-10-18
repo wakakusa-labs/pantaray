@@ -449,4 +449,93 @@ describe('ApprovalPanel', () => {
       expect(handlers.onDecide.mock.calls).toEqual([['denied'], ['approved_once']]);
     }
   );
+
+  const DRAFT_BODY = [
+    'Hi Aiko,',
+    '',
+    'Thanks for the call today. As agreed, I will send the revised estimate by Friday.',
+    'Let me know if the scope changes before then.',
+    '',
+    'Best,',
+    'Ken',
+  ].join('\n');
+  const COMPOSIO_DESCRIPTION =
+    'Creates a Gmail email draft. On rate limits apply exponential backoff and retry.';
+
+  function integrationBlocker(): ActionApprovalBlocker {
+    return {
+      ...applyPatchBlocker({}),
+      toolId: 'integration_run_tool',
+      intentClass: 'integration_write',
+      commandSummary: {
+        summary_kind: 'integration_tool',
+        account: 'work@example.com',
+        toolkit: 'Gmail',
+        tool: 'Create email draft',
+        description: COMPOSIO_DESCRIPTION,
+        arguments: JSON.stringify(
+          {
+            attachment: { mimetype: 'text/plain', name: 'notes.txt' },
+            body: DRAFT_BODY,
+            cc: ['sato@example.com', 'ito@example.com'],
+            recipient_email: 'aiko@example.com',
+            subject: 'Revised estimate',
+          },
+          null,
+          2
+        ),
+        toolkit_id: 'gmail',
+        account_id: 'ca_internal_account',
+        slug: 'GMAIL_CREATE_EMAIL_DRAFT',
+      },
+    };
+  }
+
+  it.each([
+    ['ja', 'Gmail（work@example.com）で書き込みます。', '操作', ['拒否', '許可']],
+    ['en', 'Write to Gmail (work@example.com).', 'Action', ['Deny', 'Approve']],
+  ] as const)(
+    'shows an integration write as its service, account, action and arguments (%s)',
+    (language, header, toolLabel, buttons) => {
+      const { container, onDecide } = renderPanel(language, integrationBlocker());
+
+      expect(screen.getByText(header)).toBeTruthy();
+      expect(screen.getByText(toolLabel).nextElementSibling?.textContent).toBe(
+        'Create email draft'
+      );
+      expect(screen.getByText('recipient email').nextElementSibling?.textContent).toBe(
+        'aiko@example.com'
+      );
+      expect(screen.getByText('subject').nextElementSibling?.textContent).toBe('Revised estimate');
+      expect(screen.getByText('cc').nextElementSibling?.textContent).toBe(
+        'sato@example.com, ito@example.com'
+      );
+      // The whole body, line breaks included, not a truncated row.
+      expect(screen.getByRole('region', { name: 'body' }).textContent).toBe(DRAFT_BODY);
+      expect(JSON.parse(screen.getByRole('region', { name: 'attachment' }).textContent!)).toEqual({
+        mimetype: 'text/plain',
+        name: 'notes.txt',
+      });
+
+      // These bind the approval to the exact write; the user never needs to read them.
+      const text = container.textContent ?? '';
+      for (const hidden of [
+        'integration_tool',
+        'gmail',
+        'ca_internal_account',
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        'exponential backoff',
+        'toolkit_id',
+        'account_id',
+        'slug',
+        'summary_kind',
+      ]) {
+        expect(text).not.toContain(hidden);
+      }
+
+      expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(buttons);
+      fireEvent.click(screen.getByRole('button', { name: buttons[1] }));
+      expect(onDecide.mock.calls).toEqual([['approved_once']]);
+    }
+  );
 });

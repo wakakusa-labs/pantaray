@@ -28,7 +28,15 @@ from .client import ComposioResponse
 # A tag that says the tool changes something outweighs readOnlyHint.
 _CHANGE_HINTS: Final = frozenset({"createHint", "updateHint", "destructiveHint"})
 # A connection still waiting for the user's consent is not an account yet.
-PENDING_STATUSES: Final = frozenset({"INITIALIZING", "INITIATED"})
+_PENDING_STATUSES: Final = frozenset({"INITIALIZING", "INITIATED"})
+# Composio expires a link nobody completed about 10 minutes after creating it,
+# with one of these reasons (seen on 2026-10-18); it never was an account.
+_ABANDONED_LINK_REASONS: Final = frozenset(
+    {
+        "Connection expired before authorization was started",
+        "Authorization was started but not completed within 10 minutes",
+    }
+)
 # The provider's text quotes the arguments back; enough to fix them.
 _DETAIL_MAX_CHARS: Final = 1_000
 # Composio's error codes (status 400 unless noted).
@@ -94,6 +102,17 @@ class RawAccount(_External):
     toolkit: _ToolkitRef
     data: dict[str, JSONValue] | None = None
     state: _AccountState | None = None
+    status_reason: str | None = None
+
+
+def is_account(raw: RawAccount) -> bool:
+    """Whether the connection was ever authorized, as far as Composio says."""
+
+    if raw.status in _PENDING_STATUSES:
+        return False
+    return not (
+        raw.status == "EXPIRED" and raw.status_reason in _ABANDONED_LINK_REASONS
+    )
 
 
 def tool_disposition(

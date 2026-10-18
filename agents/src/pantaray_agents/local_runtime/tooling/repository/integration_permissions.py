@@ -82,21 +82,73 @@ def set_integration_account_access(
     access: IntegrationAccess,
     updated_at: str,
 ) -> None:
-    read_mode, write_mode = _ACCESS_MODES[access]
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
-            for scope, approval_mode in (
-                (integration_read_scope(toolkit=toolkit, account=account), read_mode),
-                (integration_write_scope(toolkit=toolkit, account=account), write_mode),
-            ):
-                _save_scope(
-                    connection,
-                    user_id=user_id,
-                    scope=scope,
-                    approval_mode=approval_mode,
-                    updated_at=updated_at,
-                )
+            _save_access(
+                connection,
+                user_id=user_id,
+                toolkit=toolkit,
+                account=account,
+                access=access,
+                updated_at=updated_at,
+            )
+
+
+def initialize_integration_account_access(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    toolkit: str,
+    account: str,
+    access: IntegrationAccess,
+    updated_at: str,
+) -> None:
+    """Save the access only when the account has no saved setting yet.
+
+    One immediate transaction, so callers racing on the same account save it
+    once and never overwrite a setting saved first.
+    """
+
+    read_scope = integration_read_scope(toolkit=toolkit, account=account)
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if _saved_mode(connection, user_id=user_id, scope=read_scope) is not None:
+                return
+            _save_access(
+                connection,
+                user_id=user_id,
+                toolkit=toolkit,
+                account=account,
+                access=access,
+                updated_at=updated_at,
+            )
+
+
+def _save_access(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    toolkit: str,
+    account: str,
+    access: IntegrationAccess,
+    updated_at: str,
+) -> None:
+    read_mode, write_mode = _ACCESS_MODES[access]
+    for scope, approval_mode in (
+        (integration_read_scope(toolkit=toolkit, account=account), read_mode),
+        (integration_write_scope(toolkit=toolkit, account=account), write_mode),
+    ):
+        _save_scope(
+            connection,
+            user_id=user_id,
+            scope=scope,
+            approval_mode=approval_mode,
+            updated_at=updated_at,
+        )
 
 
 def set_integration_tool_blocked(

@@ -959,7 +959,8 @@ async def test_pantaray_default_agents_md_leads_the_head_without_a_user_file(
         tmp_path, monkeypatch, user_agents_md=None
     )
 
-    head = build_executing_turn(_executing_agent(), updated, runtime, tools=()).head  # type: ignore[arg-type]
+    turn = await build_executing_turn(_executing_agent(), updated, runtime, tools=())  # type: ignore[arg-type]
+    head = turn.head
     assert PANTARAY_DEFAULT_AGENTS_MD.startswith(
         "# AGENTS.md instructions (Pantaray default)\n\n"
         "<INSTRUCTIONS>\n# Working principles\n"
@@ -990,11 +991,11 @@ async def test_pantaray_agents_md_rides_in_a_head_that_resume_keeps_identical(
     )
     executing = _executing_agent()
 
-    def head(of: ActionAgentState) -> bytes:
-        turn = build_executing_turn(executing, of, runtime, tools=())  # type: ignore[arg-type]
+    async def head(of: ActionAgentState) -> bytes:
+        turn = await build_executing_turn(executing, of, runtime, tools=())  # type: ignore[arg-type]
         return turn.head.encode("utf-8")
 
-    first = head(updated).decode("utf-8")
+    first = (await head(updated)).decode("utf-8")
     block = (
         "# AGENTS.md instructions for ~/.pantaray\n\n"
         "<INSTRUCTIONS>\nBe brief.\n\n</INSTRUCTIONS>"
@@ -1015,10 +1016,10 @@ async def test_pantaray_agents_md_rides_in_a_head_that_resume_keeps_identical(
         expected_suggestion_id="sug-1",
         expected_user_id="user-1",
     )
-    assert head(updated) == head(restored) == first.encode("utf-8")
+    assert await head(updated) == await head(restored) == first.encode("utf-8")
     # A later run reads the edited file: the head stays, the turn appends it.
     restored["context"]["agents_md_instructions"] = load_pantaray_agents_md()
-    turn = build_executing_turn(executing, restored, runtime, tools=())  # type: ignore[arg-type]
+    turn = await build_executing_turn(executing, restored, runtime, tools=())  # type: ignore[arg-type]
     assert turn.head == first
     prepared = turn.prepare(
         restored,

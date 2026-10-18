@@ -48,6 +48,7 @@ from pantaray_agents.utils.local_time import local_now_for_model
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
 from .context_budget import PreparedWindow, prepare_window
+from .integrations_state import render_integrations_state
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent
@@ -63,6 +64,9 @@ MAX_PARALLEL_TOOL_CALLS_PLACEHOLDER = "{max_parallel_tool_calls}"
 SUPERVISOR_ROLE = "supervisor"
 SUBAGENT_ROLE = "subagent"
 _FINAL_ANSWER_LANGUAGE_PLACEHOLDER = "{final_answer_language}"
+# Head fields added after Actions had recorded heads, with the value those
+# Actions showed: the integrations section was simply absent.
+_FIELDS_ADDED_TO_RECORDED_HEADS: dict[str, str] = {"integrations_state": ""}
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +203,7 @@ class ExecutingTurn:
         return self.world_state.update_since(entries, omit_before_step_number=boundary)
 
 
-def build_executing_turn(
+async def build_executing_turn(
     agent: ActionAgent,
     state: ActionAgentState,
     runtime: ActionGraphRuntime,
@@ -225,6 +229,7 @@ def build_executing_turn(
         "workspace_context_prompt": rendering.render_workspace_context_prompt(state),
         "pantaray_default_agents_md": PANTARAY_DEFAULT_AGENTS_MD,
         "agents_md_instructions": _agents_md_section(state),
+        "integrations_state": await render_integrations_state(state),
     }
     head: str | None = None
     world_state = None
@@ -235,8 +240,8 @@ def build_executing_turn(
         # (an Action that outlived a template change) is frozen once, now.
         unrecorded = {
             name: fields[name]
-            for _, name, _, _ in Formatter().parse(head_template)
-            if name is not None and name not in recorded
+            for name in _field_names(head_template)
+            if name not in recorded
         }
         if unrecorded:
             recorded = {**recorded, **unrecorded}
@@ -270,7 +275,24 @@ def frozen_executing_head(agent: ActionAgent, state: ActionAgentState) -> str:
 
     head_template, _ = _split_head(agent.executing_prompt)
     # A head without fields records none; one with fields fails to format.
-    return head_template.format(**state["context"].get("executing_head_fields", {}))
+    recorded = state["context"].get("executing_head_fields", {})
+    # A checkpoint resumed straight into ACT reaches here before any turn has
+    # frozen a field the head gained since. Each such field is frozen at the
+    # value the Action showed before it existed, and a later turn that reads
+    # otherwise sends an update.
+    added = {
+        name: value
+        for name, value in _FIELDS_ADDED_TO_RECORDED_HEADS.items()
+        if recorded and name not in recorded and name in _field_names(head_template)
+    }
+    if added:
+        recorded = {**recorded, **added}
+        state["context"]["executing_head_fields"] = recorded
+    return head_template.format(**recorded)
+
+
+def _field_names(template: str) -> set[str]:
+    return {name for _, name, _, _ in Formatter().parse(template) if name is not None}
 
 
 def role_system_instruction(instruction: str, *, role_rule: str) -> str:

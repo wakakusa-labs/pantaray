@@ -103,6 +103,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.applyPatch': 'Modify files.',
     'overlay.approvalRequired.operation.captureScreen': 'Capture a window.',
     'overlay.approvalRequired.operation.generic': 'Run this operation.',
+    'overlay.approvalRequired.operation.integration': 'Write to {service} ({account}).',
+    'overlay.approvalRequired.integration.tool': 'Action',
     'overlay.approvalRequired.loginEnvironmentNotice':
       'It runs with access to your login information.',
     'overlay.approvalRequired.command': 'Command',
@@ -244,6 +246,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.applyPatch': 'ファイルを変更します。',
     'overlay.approvalRequired.operation.captureScreen': 'ウィンドウを撮影します。',
     'overlay.approvalRequired.operation.generic': 'この操作を実行します。',
+    'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
+    'overlay.approvalRequired.integration.tool': '操作',
     'overlay.approvalRequired.loginEnvironmentNotice': 'ログイン情報を使える状態で実行します。',
     'overlay.approvalRequired.command': 'コマンド',
     'overlay.approvalRequired.app': 'アプリ',

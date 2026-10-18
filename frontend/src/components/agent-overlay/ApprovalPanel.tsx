@@ -104,6 +104,22 @@ const ApprovalCodeBlock = styled.pre`
   word-break: break-word;
 `;
 
+// Integration arguments can be a whole email or message; the block scrolls so the
+// decision buttons stay close.
+const ApprovalArgumentBlock = styled(ApprovalCodeBlock)<{ $format: 'text' | 'json' }>`
+  max-height: 220px;
+  overflow-y: auto;
+  ${({ $format }) =>
+    $format === 'text'
+      ? 'font-family: var(--font-sans); font-size: var(--text-ui-size-sm); line-height: 1.5;'
+      : ''}
+
+  &:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
+  }
+`;
+
 const ApprovalDisclosure = styled.details`
   margin-top: 12px;
 `;
@@ -200,6 +216,7 @@ export function ApprovalPanel({
       </ApprovalFolderList>
     );
 
+  const inlineArguments = display.argumentFields.filter((field) => field.format === 'inline');
   const toolDetails = (
     <ApprovalDetailGroup>
       {display.primaryValue ? (
@@ -208,7 +225,7 @@ export function ApprovalPanel({
           <ApprovalCodeBlock>{display.primaryValue}</ApprovalCodeBlock>
         </>
       ) : null}
-      {display.details.length > 0 ? (
+      {display.details.length > 0 || inlineArguments.length > 0 ? (
         <ApprovalDetailList>
           {display.details.map((detail, index) => (
             <Fragment key={`${detail.labelKey}-${index}`}>
@@ -216,8 +233,29 @@ export function ApprovalPanel({
               <ApprovalDetailValue>{detail.value}</ApprovalDetailValue>
             </Fragment>
           ))}
+          {inlineArguments.map((field) => (
+            <Fragment key={field.label}>
+              <ApprovalDetailTerm>{field.label}</ApprovalDetailTerm>
+              <ApprovalDetailValue>{field.value}</ApprovalDetailValue>
+            </Fragment>
+          ))}
         </ApprovalDetailList>
       ) : null}
+      {display.argumentFields.map((field) =>
+        field.format === 'inline' ? null : (
+          <ApprovalDetailGroup key={field.label}>
+            <ApprovalDetailLabel>{field.label}</ApprovalDetailLabel>
+            <ApprovalArgumentBlock
+              $format={field.format}
+              role="region"
+              aria-label={field.label}
+              tabIndex={0}
+            >
+              {field.value}
+            </ApprovalArgumentBlock>
+          </ApprovalDetailGroup>
+        )
+      )}
     </ApprovalDetailGroup>
   );
 

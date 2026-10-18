@@ -20,6 +20,10 @@ type MenuButtonProps = {
   variant?: 'value' | 'icon';
   /** Work started from the menu is still running: the button does not open until it ends. */
   busy?: boolean;
+  /** Which edge of the button the menu lines up with; `start` when the button sits at the left. */
+  align?: 'start' | 'end';
+  /** An element that says more about the current choice, such as a note under the control. */
+  describedBy?: string;
   items: readonly MenuButtonItem[];
   children: ReactNode;
 };
@@ -36,6 +40,8 @@ export function MenuButton({
   label,
   variant = 'value',
   busy = false,
+  align = 'end',
+  describedBy,
   items,
   children,
 }: MenuButtonProps) {
@@ -93,6 +99,7 @@ export function MenuButton({
         type="button"
         className={`menu-button__trigger menu-button__trigger--${variant}`}
         aria-label={label}
+        aria-describedby={describedBy}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? id : undefined}
@@ -113,7 +120,7 @@ export function MenuButton({
         <div
           ref={menuRef}
           id={id}
-          className="menu-button__menu"
+          className={`menu-button__menu menu-button__menu--${align}`}
           role="menu"
           aria-label={label}
           onKeyDown={onMenuKeyDown}

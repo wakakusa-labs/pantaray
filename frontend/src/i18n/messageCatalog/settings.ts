@@ -120,8 +120,14 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.method.cloud.title': 'Pantaray Cloud',
     'settings.aiConnection.method.cloud.requiresLogin':
       'Sign in to your Pantaray account to use this.',
+    'settings.aiConnection.method.cloud.statusUnknown':
+      "Pantaray can't check your sign-in right now, so this can't be chosen.",
+    'settings.aiConnection.method.cloud.description': 'Uses your Pantaray account',
     'settings.aiConnection.method.chatgpt.title': 'ChatGPT account',
+    'settings.aiConnection.method.chatgpt.description': 'Sign in and use your ChatGPT plan',
     'settings.aiConnection.method.api_key.title': 'API key',
+    'settings.aiConnection.method.api_key.description':
+      'Paste a key from OpenAI, Anthropic or Fireworks AI',
     'settings.aiConnection.chatgpt.account': 'Account',
     'settings.aiConnection.chatgpt.connected': 'Connected',
     'settings.aiConnection.chatgpt.signIn': 'Sign in with ChatGPT',
@@ -439,8 +445,14 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.method.cloud.title': 'Pantaray Cloud',
     'settings.aiConnection.method.cloud.requiresLogin':
       'Pantaray アカウントにログインすると選べます。',
+    'settings.aiConnection.method.cloud.statusUnknown':
+      'ログインの状態をいま確認できないため、選べません。',
+    'settings.aiConnection.method.cloud.description': 'Pantaray のアカウントで使います',
     'settings.aiConnection.method.chatgpt.title': 'ChatGPT アカウント',
+    'settings.aiConnection.method.chatgpt.description': 'ChatGPT のプランでサインインして使います',
     'settings.aiConnection.method.api_key.title': 'API キー',
+    'settings.aiConnection.method.api_key.description':
+      'OpenAI・Anthropic・Fireworks AI のキーを貼って使います',
     'settings.aiConnection.chatgpt.account': 'アカウント',
     'settings.aiConnection.chatgpt.connected': '接続済み',
     'settings.aiConnection.chatgpt.signIn': 'ChatGPT でログイン',

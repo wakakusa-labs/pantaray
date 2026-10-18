@@ -13,9 +13,6 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request imp
     has_persisted_user_request_step,
     project_persisted_user_request_step,
 )
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
-    integration_tools_available,
-)
 from pantaray_agents.agents.action_agent.runtime.models.execution_context import (
     ExecutionContextModel,
     execution_context_from_state,
@@ -34,6 +31,9 @@ from pantaray_agents.agents.action_agent.runtime.state.context import (
 from pantaray_agents.agents.action_agent.runtime.state.types import TargetContextState
 from pantaray_agents.agents.action_agent.runtime.user_image_attachments import (
     build_user_image_attachments,
+)
+from pantaray_agents.local_runtime.integrations.search import (
+    integration_tools_available,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
     load_memory_heads,

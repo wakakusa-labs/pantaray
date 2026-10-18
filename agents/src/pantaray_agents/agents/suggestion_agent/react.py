@@ -79,6 +79,11 @@ _SUBMIT_REQUIRED = (
 _SEND_FAILED_MESSAGE = "LLM provider request failed."
 # Offered only while the user lets commands run without asking.
 SUGGESTION_COMMAND_TOOL_ID = "bash"
+# Offered only while an integration account is connected, for read tools only.
+SUGGESTION_INTEGRATION_TOOL_IDS = ("integration_search_tools", "integration_run_tool")
+_OFFERED_ONLY_TOOL_IDS = frozenset(
+    {SUGGESTION_COMMAND_TOOL_ID, *SUGGESTION_INTEGRATION_TOOL_IDS}
+)
 SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "memory_search",
     "get_memory_reference",
@@ -93,6 +98,7 @@ SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "zanei_timeline",
     "zanei_query",
     SUGGESTION_COMMAND_TOOL_ID,
+    *SUGGESTION_INTEGRATION_TOOL_IDS,
 )
 
 # Raw computer activity reaches the model within this run only. Like the short
@@ -252,7 +258,7 @@ async def run_suggestion_react(
     sent back once per condition with its notice.
     """
 
-    definitions = research_tools.build_tool_definitions(
+    definitions = await research_tools.build_tool_definitions(
         user_id=user_id,
         run_id=suggestion_id,
     )
@@ -262,7 +268,7 @@ async def run_suggestion_react(
         tool_ids=tuple(
             tool_id
             for tool_id in SUGGESTION_TOOL_IDS
-            if tool_id != SUGGESTION_COMMAND_TOOL_ID or tool_id in offered
+            if tool_id not in _OFFERED_ONLY_TOOL_IDS or tool_id in offered
         ),
     )
     # What the run is asked, as one text: its first step and its extraction keep it.
@@ -444,6 +450,7 @@ __all__ = [
     "SuggestionStepRecorder",
     "SuggestionTurnSender",
     "SUGGESTION_COMMAND_TOOL_ID",
+    "SUGGESTION_INTEGRATION_TOOL_IDS",
     "SUGGESTION_TOOL_IDS",
     "SUGGESTION_MAX_LLM_TURNS",
     "SUGGESTION_MAX_RESEARCH_TOOL_CALLS",

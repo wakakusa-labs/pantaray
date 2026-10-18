@@ -242,7 +242,7 @@ async def test_suggestion_reads_a_linked_fact_file_whole_from_the_snapshot_revis
     snapshot = _snapshot(db_path=db_path, artifact_root=artifact_root)
     (facts,) = snapshot.memory_folders
     registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
+        await LocalSuggestionResearchTools(
             db_path=db_path,
             busy_timeout_ms=BUSY_TIMEOUT_MS,
             snapshot=snapshot,
@@ -586,7 +586,7 @@ def test_snapshot_without_experience_head_excludes_later_experience_revision(
     assert [row["source"] for row in current] == ["agent_experience"]
 
 
-def test_suggestion_research_tool_set_is_read_only(
+async def test_suggestion_research_tool_set_is_read_only(
     tmp_path: Path,
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
@@ -600,7 +600,7 @@ def test_suggestion_research_tool_set_is_read_only(
         activity_start=None,
     )
 
-    definitions = runtime.build_tool_definitions(
+    definitions = await runtime.build_tool_definitions(
         user_id="user-1",
         run_id="suggestion-1",
     )
@@ -631,7 +631,7 @@ def test_suggestion_research_tool_set_is_read_only(
         assert "evidence_goal" not in required
 
 
-def test_suggestion_research_tool_build_uses_preloaded_snapshot(
+async def test_suggestion_research_tool_build_uses_preloaded_snapshot(
     tmp_path: Path,
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
@@ -640,7 +640,7 @@ def test_suggestion_research_tool_build_uses_preloaded_snapshot(
     _register_workspace(db_path=db_path, root=root)
     snapshot = _snapshot(db_path=db_path)
 
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=tmp_path / "unavailable.db",
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=snapshot,
@@ -715,7 +715,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         follow_reference,
     )
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=_snapshot(db_path=db_path),
@@ -787,7 +787,7 @@ async def test_suggestion_memory_search_uses_snapshot_revision(
         "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=snapshot,
@@ -860,7 +860,7 @@ async def test_suggestion_reads_memory_through_memory_search_not_read(
         "pantaray_agents.tools.memory.retrieval.execute_memory_search",
         execute_memory_search,
     )
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=_snapshot(db_path=db_path),
@@ -896,10 +896,10 @@ async def test_suggestion_reads_memory_through_memory_search_not_read(
         assert "memory_search" in refused.output["details"]["fix_hint"]
 
 
-def _research_registry(tmp_path: Path) -> tuple[ReactToolRegistry, Path]:
+async def _research_registry(tmp_path: Path) -> tuple[ReactToolRegistry, Path]:
     db_path = _bootstrap_db(tmp_path)
     registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
+        await LocalSuggestionResearchTools(
             db_path=db_path,
             busy_timeout_ms=BUSY_TIMEOUT_MS,
             snapshot=_snapshot(db_path=db_path),
@@ -925,7 +925,7 @@ async def test_suggestion_web_search_returns_shared_client_response(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    registry, _db_path = _research_registry(tmp_path)
+    registry, _db_path = await _research_registry(tmp_path)
 
     result = await registry.execute(
         _tool_call("web_search", {"queries": ["current evidence"]}), 1
@@ -958,7 +958,7 @@ async def test_suggestion_web_extract_stores_a_long_page_in_the_run_folder(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    registry, db_path = _research_registry(tmp_path)
+    registry, db_path = await _research_registry(tmp_path)
 
     result = await registry.execute(
         _tool_call("web_extract", {"urls": ["https://e.com/a"]}), 1
@@ -988,7 +988,7 @@ async def test_suggestion_web_extract_with_query_reports_excerpts_not_full_page(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper",
         invoke_web_tools_wrapper,
     )
-    registry, _db_path = _research_registry(tmp_path)
+    registry, _db_path = await _research_registry(tmp_path)
 
     result = await registry.execute(
         _tool_call("web_extract", {"urls": ["https://e.com/a"], "query": "pricing"}),
@@ -1018,7 +1018,7 @@ async def test_suggestion_web_tools_refuse_what_the_action_refuses(
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
     )
-    registry, _db_path = _research_registry(tmp_path)
+    registry, _db_path = await _research_registry(tmp_path)
 
     result = await registry.execute(_tool_call(tool_name, args), 1)
 
@@ -1035,7 +1035,7 @@ async def test_suggestion_web_search_rejects_a_result_for_another_query(
     monkeypatch.setattr(
         "pantaray_agents.tools.web.fetch.invoke_web_tools_wrapper", invoke
     )
-    registry, _db_path = _research_registry(tmp_path)
+    registry, _db_path = await _research_registry(tmp_path)
 
     result = await registry.execute(
         _tool_call("web_search", {"queries": ["evidence"]}), 1
@@ -1368,7 +1368,7 @@ async def test_suggestion_reads_an_image_into_its_own_run_folder_scope(
     (folder / "chart.png").write_bytes(PIXEL_PNG)
     snapshot = dataclasses.replace(_snapshot(db_path=db_path), folders=(folder,))
     registry = ReactToolRegistry(
-        LocalSuggestionResearchTools(
+        await LocalSuggestionResearchTools(
             db_path=db_path,
             busy_timeout_ms=BUSY_TIMEOUT_MS,
             snapshot=snapshot,

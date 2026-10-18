@@ -104,7 +104,11 @@ function applyStatus(
         const keepAccess = savedSinceRead(account.account) || row?.busy === true;
         const savingTool = row?.tools?.state === 'loaded' && row.tools.savingSlug !== null;
         // Idle rows start over, since a reconnect can change what an account's tools allow.
-        if (row && (keepAccess || savingTool)) rows[account.account] = row;
+        // A kept row's tools start over too, unless a block is saving: the reload retired
+        // any list request in flight, and a null list is loaded again.
+        if (row && (keepAccess || savingTool)) {
+          rows[account.account] = savingTool ? row : { ...row, tools: null };
+        }
         return keepAccess ? (shown.get(account.account) ?? account) : account;
       }),
     })) ?? null;

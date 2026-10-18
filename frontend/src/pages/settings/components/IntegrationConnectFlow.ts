@@ -8,6 +8,8 @@ import type {
 
 /** How often the backend is asked whether the browser step finished. */
 const POLL_INTERVAL_MS = 2_000;
+/** Failed checks in a row before the screen says it is still checking. */
+const QUIET_FAILED_CHECKS = 2;
 
 type Target = {
   toolkit: string;
@@ -17,11 +19,11 @@ type Target = {
 
 /** One connect, reconnect or disconnect at a time; null when none is shown. */
 export type IntegrationFlow = Target &
-  (
-    | { phase: 'starting' | 'pending' | 'disconnecting' }
+  /** `retrying`: checks keep failing, and polling goes on until the link expires. */
+  (| { phase: 'starting' | 'pending' | 'retrying' | 'disconnecting' }
     /** The new or reconnected account is in the reloaded list; its service opens. */
     | { phase: 'active' }
-    | { phase: 'failed' | 'expired' | 'start_failed' | 'check_failed' | 'disconnect_failed' }
+    | { phase: 'failed' | 'expired' | 'start_failed' | 'disconnect_failed' }
     | { phase: 'not_allowed'; reason: ApiDenial }
   );
 
@@ -68,20 +70,31 @@ export function useIntegrationConnectFlow(
   ): Promise<void> => {
     const api = window.electron?.integrations;
     if (!api) return;
+    // The state check is what finishes a connection in the backend, so a failed check is
+    // retried with the same connection instead of ending the flow.
+    let failedChecks = 0;
     for (;;) {
       await sleep(POLL_INTERVAL_MS);
       if (!live()) return;
-      let phase: IntegrationConnectionState | 'check_failed';
+      let phase: IntegrationConnectionState;
       if (Date.now() >= expiresAt) {
         phase = 'expired';
       } else {
         try {
           phase = await api.getConnectionState({ connection_id: connectionId });
         } catch {
-          phase = 'check_failed';
+          failedChecks += 1;
+          if (live() && failedChecks === QUIET_FAILED_CHECKS) {
+            setFlow({ ...target, phase: 'retrying' });
+          }
+          continue;
         }
         if (!live()) return;
-        if (phase === 'pending') continue;
+        if (phase === 'pending') {
+          if (failedChecks >= QUIET_FAILED_CHECKS) setFlow({ ...target, phase: 'pending' });
+          failedChecks = 0;
+          continue;
+        }
       }
       await reload();
       if (live()) setFlow({ ...target, phase });

@@ -440,6 +440,40 @@ describe('integration settings', () => {
     expect(screen.getByRole('switch', { name: 'Use Archive' })).toBeChecked();
   });
 
+  it('loads the tools again when a reload lands during an access save and a tool load', async () => {
+    let answerFirst: (tools: IntegrationToolSetting[]) => void = () => undefined;
+    let homeLoads = 0;
+    api.listAccountTools.mockImplementation(async (ref) => {
+      if (ref.account === 'acct-home' && ++homeLoads === 1) {
+        return new Promise((resolve) => (answerFirst = resolve));
+      }
+      return TOOLS;
+    });
+    let answerSave: (result: IntegrationAccessUpdateResult) => void = () => undefined;
+    api.setAccountAccess.mockImplementation(() => new Promise((resolve) => (answerSave = resolve)));
+    renderSettings();
+    await openGmail();
+    await waitFor(() => expect(homeLoads).toBe(1));
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+
+    // Disconnecting work reloads the status while home's save and tool load are in flight.
+    api.getStatus.mockResolvedValue(withHome(HOME));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for work@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    const dialog = screen.getByRole('dialog', { name: 'Disconnect work@example.com?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(api.getStatus).toHaveBeenCalledTimes(2));
+    await act(async () => answerFirst(TOOLS));
+    await act(async () => answerSave({ kind: 'saved', account: { ...HOME, access: 'off' } }));
+
+    expect(homeLoads).toBe(2);
+    const [homeTools] = screen.getAllByRole('button', { name: 'Choose tool by tool' }).slice(-1);
+    fireEvent.click(homeTools);
+    const tools = within(document.getElementById(homeTools.getAttribute('aria-controls')!)!);
+    expect(await tools.findByRole('switch', { name: 'Use Fetch emails' })).toBeInTheDocument();
+  });
+
   it('holds the other tools while one block saves, and reads the result back if its answer is lost', async () => {
     let fail: (error: Error) => void = () => undefined;
     api.setToolBlocked.mockImplementation(() => new Promise((_resolve, reject) => (fail = reject)));
@@ -518,6 +552,31 @@ describe('connecting an account', () => {
     expect(screen.getByRole('button', { name: 'Back to Integrations' })).toHaveFocus();
     expect(accessButton('team@example.com')).toHaveTextContent('Read only');
     expect(api.getConnectionState).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps polling the same connection after failed checks, until it is active', async () => {
+    useFakeClock();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    api.connect.mockResolvedValue(STARTED);
+    api.getConnectionState
+      .mockRejectedValueOnce(new Error('Local backend request failed.'))
+      .mockRejectedValueOnce(new Error('Local backend request failed.'))
+      .mockResolvedValueOnce('active');
+    await connectSlack();
+    await screen.findByText(/Continue in your browser/);
+
+    await poll();
+    expect(screen.getByText(/^Slack: Continue in your browser…/)).toBeInTheDocument();
+    await poll();
+    expect(screen.getByText(/^Slack: Still checking…/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    api.getStatus.mockResolvedValue(WITH_SLACK);
+    await poll();
+
+    expect(await screen.findByRole('heading', { name: 'Slack' })).toBeInTheDocument();
+    expect(api.getConnectionState).toHaveBeenCalledTimes(3);
+    expect(api.getConnectionState).toHaveBeenLastCalledWith({ connection_id: 'conn-1' });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
   });
 
   it('stops polling when cancelled', async () => {

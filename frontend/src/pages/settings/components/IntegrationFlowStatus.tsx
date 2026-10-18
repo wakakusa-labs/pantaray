@@ -21,7 +21,10 @@ export function IntegrationFlowStatus({
 }) {
   if (flow.phase === 'active') return null;
   const running =
-    flow.phase === 'starting' || flow.phase === 'pending' || flow.phase === 'disconnecting';
+    flow.phase === 'starting' ||
+    flow.phase === 'pending' ||
+    flow.phase === 'retrying' ||
+    flow.phase === 'disconnecting';
   const status =
     flow.phase === 'not_allowed'
       ? denialText(t, flow.reason, service)
@@ -32,7 +35,7 @@ export function IntegrationFlowStatus({
       className={`integration-flow ${running ? 'ai-note' : 'settings-section-error'}`}
     >
       {showService ? t('settings.integrations.flow.service', { service, status }) : status}
-      {flow.phase === 'pending' ? (
+      {flow.phase === 'pending' || flow.phase === 'retrying' ? (
         <>
           {' '}
           <button type="button" className="integration-text-button" onClick={onCancel}>

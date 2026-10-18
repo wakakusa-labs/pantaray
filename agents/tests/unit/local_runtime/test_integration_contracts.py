@@ -31,3 +31,5 @@ def test_other_errors_carry_no_candidates() -> None:
     )
     with pytest.raises(ValidationError):
         IntegrationError(kind="permission_denied", candidates=[WORK, HOME])
+    with pytest.raises(ValidationError):
+        IntegrationError(kind="permission_denied", candidates=[WORK])

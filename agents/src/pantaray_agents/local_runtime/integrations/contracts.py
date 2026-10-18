@@ -83,7 +83,12 @@ class IntegrationError(InternalStrictModel):
     @model_validator(mode="after")
     def _candidates_only_when_choosing(self) -> Self:
         # account_required exists because two or more accounts could run the tool.
-        if (self.kind == "account_required") != (len(self.candidates) >= 2):
+        expected_ok = (
+            len(self.candidates) >= 2
+            if self.kind == "account_required"
+            else not self.candidates
+        )
+        if not expected_ok:
             raise ValueError(
                 "account_required carries two or more candidates; other kinds carry none"
             )

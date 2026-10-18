@@ -19,10 +19,6 @@ from tests.unit.agents.action_agent.runtime.test_integration_action_tools import
 )
 from tests.unit.local_runtime.broker_test_support import _bootstrap_runtime_db
 
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
-    integration_run,
-    integration_search,
-)
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
@@ -58,12 +54,8 @@ NOW = "2026-03-23T00:00:02Z"
 
 
 @pytest.fixture
-def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def db_path(tmp_path: Path) -> Iterator[Path]:
     db_path, _context = _bootstrap_runtime_db(tmp_path)
-    for module in (integration_run, integration_search):
-        monkeypatch.setattr(
-            module, "read_local_runtime_db_config", lambda: (db_path, BUSY_TIMEOUT_MS)
-        )
     yield db_path
     set_integration_gateway(None)
 

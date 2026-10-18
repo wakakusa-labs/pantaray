@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
-    integration_tools_available,
-)
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
+from pantaray_agents.local_runtime.integrations.search import (
+    integration_tools_available,
+)
 from pantaray_agents.tools.contract import ReactToolDefinition
 from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
 from pantaray_agents.tools.memory.retrieval import (
@@ -140,7 +140,11 @@ class LocalSuggestionResearchTools:
             # Decided when each lens run starts, as an Action decides when it starts.
             *(
                 SuggestionIntegrationSession(
-                    user_id=user_id, budget=self.integration_runs, spill_root=spill_root
+                    db_path=self.db_path,
+                    busy_timeout_ms=self.busy_timeout_ms,
+                    user_id=user_id,
+                    budget=self.integration_runs,
+                    spill_root=spill_root,
                 ).definitions()
                 if await integration_tools_available()
                 else ()

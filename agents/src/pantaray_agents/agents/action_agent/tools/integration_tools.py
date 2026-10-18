@@ -7,11 +7,12 @@ index with one tool and runs what it found with the other.
 
 from __future__ import annotations
 
+from pantaray_agents.local_runtime.integrations.calls import RUN_RESULT_SCHEMA
+from pantaray_agents.local_runtime.integrations.search import SEARCH_RESULT_SCHEMA
 from pantaray_agents.local_runtime.integrations.tool_index import (
     SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
@@ -35,17 +36,6 @@ _PERMISSIONS_HINT = (
     "The integrations section of the context lists the connected toolkits, "
     "accounts and their permissions."
 )
-
-_ACCOUNT_SCHEMA: dict[str, JSONValue] = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "account": {"type": "string"},
-        "label": {"type": "string"},
-        "permission": {"type": "string", "enum": ["allow", "ask"]},
-    },
-    "required": ["account", "label", "permission"],
-}
 
 INTEGRATION_SEARCH_TOOLS_TOOL = ToolDefinition.from_spec(
     ToolSpec(
@@ -108,42 +98,7 @@ INTEGRATION_SEARCH_TOOLS_TOOL = ToolDefinition.from_spec(
             ),
             description="Search the connected apps' tools.",
         ),
-        output_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "tools": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "slug": {"type": "string"},
-                            "toolkit": {"type": "string"},
-                            "name": {"type": "string"},
-                            "description": {"type": "string"},
-                            "tool_class": {"type": "string", "enum": ["read", "write"]},
-                            "input_schema": {"type": "object"},
-                            "accounts": {
-                                "type": "array",
-                                "minItems": 1,
-                                "items": _ACCOUNT_SCHEMA,
-                            },
-                        },
-                        "required": [
-                            "slug",
-                            "toolkit",
-                            "name",
-                            "description",
-                            "tool_class",
-                            "input_schema",
-                            "accounts",
-                        ],
-                    },
-                },
-            },
-            "required": ["tools"],
-        },
+        output_schema=SEARCH_RESULT_SCHEMA,
     )
 )
 
@@ -210,16 +165,7 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
             ),
             description="Run one connected app's tool.",
         ),
-        output_schema={
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "source": {"type": "string"},
-                "untrusted": {"type": "boolean", "enum": [True]},
-                "data": {},
-            },
-            "required": ["source", "untrusted", "data"],
-        },
+        output_schema=RUN_RESULT_SCHEMA,
     )
 )
 

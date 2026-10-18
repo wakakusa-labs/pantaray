@@ -55,6 +55,9 @@ from pantaray_agents.local_runtime.integrations.registry import (
     get_integration_tool_index,
     set_integration_gateway,
 )
+from pantaray_agents.local_runtime.integrations.search import (
+    integration_tools_available,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     apply_approval_decision,
 )
@@ -310,12 +313,12 @@ def _error(output: dict[str, JSONValue]) -> dict[str, JSONValue]:
 @pytest.mark.asyncio
 async def test_tools_are_offered_only_with_a_connected_account() -> None:
     set_integration_gateway(None)
-    assert await integration_search.integration_tools_available() is False
+    assert await integration_tools_available() is False
     gateway = FakeGateway(accounts=[])
     set_integration_gateway(gateway)
-    assert await integration_search.integration_tools_available() is False
+    assert await integration_tools_available() is False
     gateway.accounts = [WORK]
-    assert await integration_search.integration_tools_available() is True
+    assert await integration_tools_available() is True
     set_integration_gateway(None)
 
     # AC-C6: without integrations the Action's tool set is exactly today's.

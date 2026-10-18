@@ -315,6 +315,7 @@ test('configure carries saved direct credentials alongside an absent cloud sessi
       api_key: 'test-key',
     },
     webSearchCredential: { provider: 'tavily', api_key: 'test-search-key' },
+    integrationCredential: { provider: 'composio', api_key: 'test-integration-key' },
   };
   await createSync(connect).configure({ state: 'absent' }, connections);
   assert.deepStrictEqual(observed, [
@@ -324,8 +325,30 @@ test('configure carries saved direct credentials alongside an absent cloud sessi
         cloud_session: { state: 'absent' },
         llm_connection: connections.llmConnection,
         web_search_credential: connections.webSearchCredential,
+        integration_credential: connections.integrationCredential,
       },
     },
+  ]);
+});
+
+test('the integration credential is set and cleared, and a mismatched answer is a failure', async () => {
+  const observed = [];
+  let configured = true;
+  const { connect } = createConnectStub({
+    onWrite(_path, chunk, socket) {
+      observed.push(JSON.parse(chunk));
+      socket.emit('data', JSON.stringify({ ok: true, integration_configured: configured }) + '\n');
+    },
+  });
+  const sync = createSync(connect);
+  const credential = { provider: 'composio', api_key: 'integration-key' };
+  await sync.setIntegrationCredential(credential);
+  configured = false;
+  await sync.setIntegrationCredential(null);
+  await assert.rejects(sync.setIntegrationCredential(credential), /response is invalid/);
+  assert.deepStrictEqual(observed.slice(0, 2), [
+    { operation: 'set_integration_credential', payload: credential },
+    { operation: 'clear_integration_credential', payload: {} },
   ]);
 });
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   ConnectionConfiguration,
   ConnectionRoute,
+  IntegrationCredential,
   LlmConnection,
   WebSearchCredential,
 } from '../aiConnection/runtimeConnection';
@@ -61,12 +62,18 @@ type ControlSocketRequest =
         cloud_session: CloudSessionPayload;
         llm_connection: LlmConnection | null;
         web_search_credential: WebSearchCredential | null;
+        integration_credential: IntegrationCredential | null;
       };
     }
   | { operation: 'set_llm_connection'; payload: LlmConnection }
   | { operation: 'set_web_search_credential'; payload: WebSearchCredential }
+  | { operation: 'set_integration_credential'; payload: IntegrationCredential }
   | {
-      operation: 'clear_llm_connection' | 'clear_web_search_credential' | 'status';
+      operation:
+        | 'clear_llm_connection'
+        | 'clear_web_search_credential'
+        | 'clear_integration_credential'
+        | 'status';
       payload: Record<string, never>;
     }
   | { operation: typeof SET_CLOUD_SESSION_OPERATION; payload: PresentCloudSessionPayload }
@@ -102,6 +109,7 @@ export type LocalBackendSessionSync = {
   ) => Promise<CloudSessionResult>;
   setLlmConnection: (connection: LlmConnection | null) => Promise<ConnectionRoute>;
   setWebSearchCredential: (credential: WebSearchCredential | null) => Promise<ConnectionRoute>;
+  setIntegrationCredential: (credential: IntegrationCredential | null) => Promise<void>;
   getConnectionStatus: () => Promise<LocalConnectionStatus>;
   setCloudSession: (
     accountUserId: string,
@@ -364,6 +372,7 @@ export function createLocalBackendSessionSync(params: {
             cloud_session: payload,
             llm_connection: connections.llmConnection,
             web_search_credential: connections.webSearchCredential,
+            integration_credential: connections.integrationCredential,
           },
         });
         if (response.configured !== true) {
@@ -388,6 +397,17 @@ export function createLocalBackendSessionSync(params: {
             : { operation: 'clear_web_search_credential', payload: {} }
         );
         return readRoute(response.web_search_route);
+      }),
+    setIntegrationCredential: (credential) =>
+      enqueue(async () => {
+        const response = await send(
+          credential
+            ? { operation: 'set_integration_credential', payload: credential }
+            : { operation: 'clear_integration_credential', payload: {} }
+        );
+        if (response.integration_configured !== (credential !== null)) {
+          throw new Error('Local control socket integration credential response is invalid.');
+        }
       }),
     getConnectionStatus: () =>
       enqueue(async () => {

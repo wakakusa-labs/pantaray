@@ -25,6 +25,8 @@ export const ConnectionCommandSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('remove_api_key'), provider: ApiKeyProviderSchema }).strict(),
   z.object({ operation: z.literal('save_web_search_key'), apiKey: Key }).strict(),
   z.object({ operation: z.literal('remove_web_search_key') }).strict(),
+  z.object({ operation: z.literal('save_integration_key'), apiKey: Key }).strict(),
+  z.object({ operation: z.literal('remove_integration_key') }).strict(),
   z.object({ operation: z.literal('sign_in_chatgpt') }).strict(),
   z.object({ operation: z.literal('cancel_chatgpt_sign_in') }).strict(),
   z.object({ operation: z.literal('disconnect_chatgpt') }).strict(),
@@ -37,6 +39,7 @@ export type ConnectionRecoveryCommand = Extract<
       | 'save_preferences'
       | 'remove_api_key'
       | 'remove_web_search_key'
+      | 'remove_integration_key'
       | 'disconnect_chatgpt';
   }
 >;

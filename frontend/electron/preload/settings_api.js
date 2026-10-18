@@ -20,6 +20,10 @@ function createSettingsApi({ ipcRenderer }) {
       setAccountAccess: (update) => ipcRenderer.invoke('integrations:setAccountAccess', update),
       listAccountTools: (ref) => ipcRenderer.invoke('integrations:listAccountTools', ref),
       setToolBlocked: (update) => ipcRenderer.invoke('integrations:setToolBlocked', update),
+      connect: (ref) => ipcRenderer.invoke('integrations:connect', ref),
+      reconnect: (ref) => ipcRenderer.invoke('integrations:reconnect', ref),
+      disconnect: (ref) => ipcRenderer.invoke('integrations:disconnect', ref),
+      getConnectionState: (ref) => ipcRenderer.invoke('integrations:getConnectionState', ref),
     },
     shortcut: {
       getState: () => ipcRenderer.invoke('shortcut:getState'),

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { Translate } from '../types';
 import type {
   ApiDenial,
   IntegrationAccess,
@@ -50,8 +51,11 @@ export type IntegrationSettingsActions = {
 /** Rows are keyed by account: the connection method's account ID is unique across toolkits. */
 type Loaded = {
   ownerId: string;
-  toolkits: IntegrationToolkitStatus[];
+  /** Null while the backend has no connection method configured. */
+  toolkits: IntegrationToolkitStatus[] | null;
   rows: Record<string, IntegrationAccountRowState>;
+  /** The last read failed; what was read before stays on screen. */
+  loadFailed: boolean;
 };
 
 const EMPTY_ROW: IntegrationAccountRowState = {
@@ -62,36 +66,61 @@ const EMPTY_ROW: IntegrationAccountRowState = {
   tools: null,
 };
 
+export function denialText(t: Translate, reason: ApiDenial, service: string): string {
+  if (reason.source === 'account_grant') {
+    return reason.detail
+      ? t('settings.integrations.denial.grantDetail', { service, detail: reason.detail })
+      : t('settings.integrations.denial.grant', { service });
+  }
+  return t(`settings.integrations.denial.${reason.capability}`);
+}
+
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 
 /** Loads the owner's toolkits and accounts; `toolkits` is null until the gateway is configured. */
 export function useIntegrationSettingsController(ownerId: string | null): {
   toolkits: IntegrationToolkitStatus[] | null;
+  loadFailed: boolean;
   rows: Record<string, IntegrationAccountRowState>;
   actions: IntegrationSettingsActions;
+  /** Reads the status again; it settles once the screen shows the answer, and never rejects. */
+  reload: () => Promise<void>;
 } {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // Only the newest read may land: an older answer, or one for another owner, is stale.
+  const latestRead = useRef(0);
+
+  const reload = useCallback((): Promise<void> => {
+    const request = ++latestRead.current;
+    const api = window.electron?.integrations;
+    if (ownerId === null || !api) return Promise.resolve();
+    return api
+      .getStatus()
+      .then(
+        // Accounts may have come or gone, and a reconnect can change what their tools allow.
+        (status): Pick<Loaded, 'toolkits' | 'loadFailed'> => ({
+          toolkits: status.state === 'configured' ? status.toolkits : null,
+          loadFailed: false,
+        }),
+        (error: unknown) => {
+          console.warn('Failed to load integration settings', error);
+          return { toolkits: null, loadFailed: true };
+        }
+      )
+      .then((next) => {
+        if (request !== latestRead.current) return;
+        setLoaded((prev) =>
+          next.loadFailed && prev?.ownerId === ownerId
+            ? { ...prev, loadFailed: true }
+            : { ownerId, rows: {}, ...next }
+        );
+      });
+  }, [ownerId]);
 
   useEffect(() => {
-    const api = window.electron?.integrations;
-    if (ownerId === null || !api) return;
-    let cancelled = false;
-    api.getStatus().then(
-      (status) => {
-        if (!cancelled && status.state === 'configured') {
-          setLoaded({ ownerId, toolkits: status.toolkits, rows: {} });
-        }
-      },
-      (error: unknown) => {
-        // The section is optional: without it the page is today's page.
-        console.warn('Failed to load integration settings', error);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [ownerId]);
+    void reload();
+  }, [reload]);
 
   // A result that lands after the owner changed belongs to the previous owner's screen.
   const current = loaded !== null && loaded.ownerId === ownerId ? loaded : null;
@@ -108,14 +137,15 @@ export function useIntegrationSettingsController(ownerId: string | null): {
       const row = integrationRow(prev.rows, account);
       return {
         ...prev,
-        toolkits: saved
-          ? prev.toolkits.map((toolkit) => ({
-              ...toolkit,
-              accounts: toolkit.accounts.map((status) =>
-                status.account === account ? saved : status
-              ),
-            }))
-          : prev.toolkits,
+        toolkits:
+          saved && prev.toolkits
+            ? prev.toolkits.map((toolkit) => ({
+                ...toolkit,
+                accounts: toolkit.accounts.map((status) =>
+                  status.account === account ? saved : status
+                ),
+              }))
+            : prev.toolkits,
         rows: { ...prev.rows, [account]: { ...row, ...change(row) } },
       };
     });
@@ -245,7 +275,9 @@ export function useIntegrationSettingsController(ownerId: string | null): {
 
   return {
     toolkits: current?.toolkits ?? null,
+    loadFailed: current?.loadFailed ?? false,
     rows: current?.rows ?? {},
     actions: { setAccess, recheckAccess, loadTools, setToolBlocked },
+    reload,
   };
 }

@@ -3,23 +3,41 @@ import { useEffect, useRef, useState } from 'react';
 import type { IntegrationToolkitStatus } from '../../../../electron/src/settings/integrationSettingsFetch';
 import type { Translate } from '../types';
 import { IntegrationAddServiceDialog } from './IntegrationAddServiceDialog';
+import type { IntegrationFlow, IntegrationFlowActions } from './IntegrationConnectFlow';
+import { IntegrationFlowStatus } from './IntegrationFlowStatus';
 import { IntegrationLogo } from './IntegrationLogo';
-import {
-  IntegrationServiceDetail,
-  type IntegrationAccountCallbacks,
-} from './IntegrationServiceDetail';
+import { IntegrationServiceDetail } from './IntegrationServiceDetail';
 import type {
   IntegrationAccountRowState,
   IntegrationSettingsActions,
 } from './IntegrationSettingsController';
+import { SecretRow } from './SecretRow';
 import './aiConnection.css';
 import './integrationSettings.css';
 
-type Props = IntegrationAccountCallbacks & {
+const COMPOSIO_DASHBOARD_URL = 'https://dashboard.composio.dev';
+
+/** The connection method's key. Only whether one is saved reaches the renderer. */
+type IntegrationKeyState = {
+  hasSavedKey: boolean;
+  canStoreSecrets: boolean;
+  /** Another connection setting is being applied. */
+  disabled: boolean;
+  onSave: (apiKey: string) => Promise<void>;
+  onClear: () => Promise<void>;
+};
+
+type Props = {
   t: Translate;
-  toolkits: IntegrationToolkitStatus[];
+  integrationKey: IntegrationKeyState;
+  /** Null until the backend reports a configured connection method. */
+  toolkits: IntegrationToolkitStatus[] | null;
+  loadFailed: boolean;
+  onReload: () => void;
   rows: Record<string, IntegrationAccountRowState>;
   actions: IntegrationSettingsActions;
+  flow: IntegrationFlow | null;
+  flowActions: IntegrationFlowActions;
   /** The service whose detail view shows first, for rendering it from fixtures. */
   initialToolkit?: string;
 };
@@ -27,16 +45,20 @@ type Props = IntegrationAccountCallbacks & {
 const NEEDS_RECONNECTION = new Set(['not_connected', 'reauthorization_required']);
 
 /**
- * Presentational: what it shows comes from props. Two levels in place: the connected services,
- * and one service's accounts. Connecting is offered only when `onConnect` is supplied.
+ * Presentational: what it shows comes from props. Without a key, only the key and how to get
+ * one. With a key, two levels in place: the connected services, and one service's accounts.
  */
 export function IntegrationSettingsSection({
   t,
+  integrationKey,
   toolkits,
+  loadFailed,
+  onReload,
   rows,
   actions,
+  flow,
+  flowActions,
   initialToolkit,
-  ...callbacks
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -45,101 +67,175 @@ export function IntegrationSettingsSection({
   // Where focus goes after the user moves between the two levels; null on first render.
   const focusAfterMove = useRef<string | null>(null);
 
+  const shown = integrationKey.hasSavedKey ? toolkits : null;
+  const detail = shown?.find(
+    (toolkit) => toolkit.toolkit === openToolkit && toolkit.accounts.length > 0
+  );
+
+  // A service's view also closes when its last account is disconnected; focus then goes to
+  // the add button instead of being lost with the removed view.
+  const view = detail?.toolkit ?? null;
+  const shownView = useRef(view);
   useEffect(() => {
-    const target = focusAfterMove.current;
+    const previous = shownView.current;
+    shownView.current = view;
+    const target = focusAfterMove.current ?? (previous !== null && view === null ? 'add' : null);
     if (target === null) return;
     focusAfterMove.current = null;
     rootRef.current?.querySelector<HTMLElement>(`[data-integration-focus="${target}"]`)?.focus();
-  }, [openToolkit]);
+  }, [view]);
 
-  const detail = toolkits.find((toolkit) => toolkit.toolkit === openToolkit);
-  const connected = toolkits.filter((toolkit) => toolkit.accounts.length > 0);
-  const { onConnect } = callbacks;
+  // A finished connect opens its service, where the new account shows with its default access.
+  useEffect(() => {
+    if (flow?.phase !== 'active') return;
+    setOpenToolkit((open) => {
+      if (open !== flow.toolkit) focusAfterMove.current = 'back';
+      return flow.toolkit;
+    });
+  }, [flow]);
 
-  return (
-    <div ref={rootRef} className="dashboard-section integration-settings">
-      {detail ? (
+  if (detail) {
+    return (
+      <div ref={rootRef} className="dashboard-section integration-settings">
         <IntegrationServiceDetail
           t={t}
           toolkit={detail}
           rows={rows}
           actions={actions}
+          flow={flow?.toolkit === detail.toolkit ? flow : null}
+          flowActions={flowActions}
           onBack={() => {
             focusAfterMove.current = `row-${detail.toolkit}`;
             setOpenToolkit(null);
           }}
-          {...callbacks}
         />
-      ) : (
-        <>
-          <div className="integration-head">
-            <div>
-              <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
-              <p className="dashboard-section-description">
-                {t('settings.integrations.description')}
-              </p>
-            </div>
-            {onConnect ? (
-              <button
-                ref={addButtonRef}
-                type="button"
-                className="settings-action-button"
-                onClick={() => setIsAdding(true)}
-              >
-                {t('settings.integrations.addService.open')}
-              </button>
-            ) : null}
-          </div>
-          {connected.length > 0 ? (
-            <ul className="integration-list">
-              {connected.map((toolkit) => (
-                <li key={toolkit.toolkit}>
-                  <button
-                    type="button"
-                    className="integration-row"
-                    data-integration-focus={`row-${toolkit.toolkit}`}
-                    onClick={() => {
-                      focusAfterMove.current = 'back';
-                      setOpenToolkit(toolkit.toolkit);
-                    }}
-                  >
-                    <IntegrationLogo toolkit={toolkit} />
-                    <span className="integration-row-copy">
-                      <span className="integration-name">{toolkit.display_name}</span>
-                      <span className="integration-sub">
-                        {toolkit.accounts.length === 1
-                          ? toolkit.accounts[0].label
-                          : t('settings.integrations.accountCount', {
-                              count: toolkit.accounts.length,
-                            })}
-                      </span>
-                    </span>
-                    {toolkit.accounts.some((account) => NEEDS_RECONNECTION.has(account.health)) ? (
-                      <span className="integration-badge">
-                        {t('settings.integrations.needsReconnection')}
-                      </span>
-                    ) : null}
-                    <span className="integration-chevron" aria-hidden="true">
-                      ›
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {onConnect && isAdding ? (
-            <IntegrationAddServiceDialog
-              t={t}
-              toolkits={toolkits.filter((toolkit) => toolkit.accounts.length === 0)}
-              onConnect={onConnect}
-              onClose={() => {
-                setIsAdding(false);
-                addButtonRef.current?.focus();
-              }}
-            />
-          ) : null}
-        </>
+      </div>
+    );
+  }
+
+  const connected = shown?.filter((toolkit) => toolkit.accounts.length > 0) ?? [];
+  const flowService =
+    shown?.find((toolkit) => toolkit.toolkit === flow?.toolkit)?.display_name ?? flow?.toolkit;
+
+  return (
+    <div ref={rootRef} className="dashboard-section integration-settings">
+      <div className="integration-head">
+        <div>
+          <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
+          <p className="dashboard-section-description">{t('settings.integrations.description')}</p>
+        </div>
+        {shown ? (
+          <button
+            ref={addButtonRef}
+            type="button"
+            className="settings-action-button"
+            data-integration-focus="add"
+            onClick={() => setIsAdding(true)}
+          >
+            {t('settings.integrations.addService.open')}
+          </button>
+        ) : null}
+      </div>
+      {integrationKey.canStoreSecrets ? null : (
+        <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       )}
+      <div className="integration-key">
+        <SecretRow
+          label={t('settings.integrations.key.label')}
+          inputId="integration-key"
+          disabled={!integrationKey.canStoreSecrets || integrationKey.disabled}
+          hasSavedKey={integrationKey.hasSavedKey}
+          placeholder={t('settings.integrations.key.placeholder')}
+          onSave={integrationKey.onSave}
+          onClear={integrationKey.onClear}
+          hint={
+            integrationKey.hasSavedKey ? undefined : (
+              <>
+                <a
+                  className="settings-inline-link"
+                  href={COMPOSIO_DASHBOARD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t('settings.integrations.setup.open')}
+                </a>
+                <p className="ai-note ai-note--control">
+                  {t('settings.integrations.setup.createKey')}
+                </p>
+                <p className="ai-note ai-note--control">
+                  {t('settings.integrations.setup.permissions')}
+                </p>
+              </>
+            )
+          }
+          t={t}
+        />
+      </div>
+      {integrationKey.hasSavedKey && loadFailed ? (
+        <p role="alert" className="dashboard-section-description settings-section-error">
+          {t('settings.integrations.loadFailed')}{' '}
+          <button type="button" className="integration-text-button" onClick={onReload}>
+            {t('settings.integrations.reload')}
+          </button>
+        </p>
+      ) : null}
+      {flow && flowService ? (
+        <IntegrationFlowStatus
+          t={t}
+          flow={flow}
+          service={flowService}
+          showService
+          onCancel={flowActions.cancel}
+        />
+      ) : null}
+      {connected.length > 0 ? (
+        <ul className="integration-list">
+          {connected.map((toolkit) => (
+            <li key={toolkit.toolkit}>
+              <button
+                type="button"
+                className="integration-row"
+                data-integration-focus={`row-${toolkit.toolkit}`}
+                onClick={() => {
+                  focusAfterMove.current = 'back';
+                  setOpenToolkit(toolkit.toolkit);
+                }}
+              >
+                <IntegrationLogo toolkit={toolkit} />
+                <span className="integration-row-copy">
+                  <span className="integration-name">{toolkit.display_name}</span>
+                  <span className="integration-sub">
+                    {toolkit.accounts.length === 1
+                      ? toolkit.accounts[0].label
+                      : t('settings.integrations.accountCount', {
+                          count: toolkit.accounts.length,
+                        })}
+                  </span>
+                </span>
+                {toolkit.accounts.some((account) => NEEDS_RECONNECTION.has(account.health)) ? (
+                  <span className="integration-badge">
+                    {t('settings.integrations.needsReconnection')}
+                  </span>
+                ) : null}
+                <span className="integration-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {shown && isAdding ? (
+        <IntegrationAddServiceDialog
+          t={t}
+          toolkits={shown.filter((toolkit) => toolkit.accounts.length === 0)}
+          onConnect={flowActions.connect}
+          onClose={() => {
+            setIsAdding(false);
+            addButtonRef.current?.focus();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

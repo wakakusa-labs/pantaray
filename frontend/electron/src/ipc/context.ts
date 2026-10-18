@@ -117,6 +117,8 @@ export type MainContext = {
     | 'removeApiKey'
     | 'saveWebSearchKey'
     | 'removeWebSearchKey'
+    | 'saveIntegrationKey'
+    | 'removeIntegrationKey'
     | 'signInToChatgpt'
     | 'cancelChatgptSignIn'
     | 'disconnectChatgpt'

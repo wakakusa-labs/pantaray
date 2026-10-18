@@ -105,6 +105,11 @@ test('IPC normalizes input once, binds it to its provider, and exposes only non-
     operation: 'save_web_search_key',
     apiKey: ' private-search-key ',
   });
+  await f.invoke('aiConnection:update', {
+    operation: 'save_integration_key',
+    apiKey: ' private-integration-key ',
+  });
+  assert.equal(f.store.readIntegrationKey(), 'private-integration-key');
   assert.equal(f.store.readApiKey('anthropic'), 'private-api-key');
   assert.equal(f.store.readApiKey('openai'), null);
   assert.equal(f.store.readWebSearchKey(), 'private-search-key');
@@ -115,14 +120,19 @@ test('IPC normalizes input once, binds it to its provider, and exposes only non-
   assert.equal(result.runtime.ok, true);
   assert.equal(result.runtime.status.activeOwnerId, 'local-owner');
   assert.equal(result.settings.hasSavedWebSearchKey, true);
+  assert.equal(result.settings.hasSavedIntegrationKey, true);
   assert.equal(JSON.stringify(result).includes('private-'), false);
   assert.equal(JSON.stringify(f.audits).includes('private-'), false);
-  assert.deepEqual(f.events, ['changed', 'changed', 'changed']);
+  assert.deepEqual(f.events, ['changed', 'changed', 'changed', 'changed']);
   await f.invoke('aiConnection:update', { operation: 'remove_api_key', provider: 'anthropic' });
   assert.equal(f.store.readApiKey('anthropic'), null);
   assert.equal(f.store.readWebSearchKey(), 'private-search-key');
   await f.invoke('aiConnection:update', { operation: 'remove_web_search_key' });
   assert.equal(f.store.readWebSearchKey(), null);
+  assert.equal(f.store.readIntegrationKey(), 'private-integration-key');
+  await f.invoke('aiConnection:update', { operation: 'remove_integration_key' });
+  assert.equal(f.store.readIntegrationKey(), null);
+  assert.equal((await f.invoke('aiConnection:getState')).settings.hasSavedIntegrationKey, false);
 });
 
 test('IPC rejects invalid or extra fields before storage and does not echo their contents', async (t) => {
@@ -277,6 +287,7 @@ for (const [name, fileName, recovery] of [
     { operation: 'remove_api_key', provider },
   ]),
   ['Tavily', 'tavily-api-key.enc.json', { operation: 'remove_web_search_key' }],
+  ['Composio', 'composio-api-key.enc.json', { operation: 'remove_integration_key' }],
 ]) {
   test(`IPC identifies unreadable ${name} and recovers only that store`, async (t) => {
     const f = fixture(t);
@@ -288,6 +299,7 @@ for (const [name, fileName, recovery] of [
     for (const provider of ['openai', 'anthropic', 'fireworks'])
       f.store.saveApiKey(provider, `private-${provider}`);
     f.store.saveWebSearchKey('private-tavily');
+    f.store.saveIntegrationKey('private-composio');
     fs.writeFileSync(path.join(f.userDataDir, fileName), 'invalid-private-content');
     const others = fs
       .readdirSync(f.userDataDir)

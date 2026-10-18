@@ -1,22 +1,24 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { t as translate } from '@/i18n/translate';
 import SettingsPage from '../../SettingsPage';
-import type { Translate } from '../types';
-import { IntegrationSettingsSection } from './IntegrationSettingsSection';
 import type {
   IntegrationAccessUpdateResult,
   IntegrationAccountStatus,
+  IntegrationConnectResult,
   IntegrationsStatus,
-  IntegrationToolkitStatus,
   IntegrationToolSetting,
 } from '../../../../electron/src/settings/integrationSettingsFetch';
+import type {
+  ConnectionCommand,
+  ConnectionStateResult,
+} from '../../../../electron/src/ipc/schemas/aiConnection';
 
 type IntegrationsApi = NonNullable<NonNullable<Window['electron']>['integrations']>;
+type AiConnectionApi = NonNullable<NonNullable<Window['electron']>['aiConnection']>;
 
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 vi.mock('@/components/LocalOwnerBoundary', () => ({ LocalOwnerBoundary: () => null }));
@@ -70,19 +72,55 @@ const auth = {
 } as AuthContextType;
 
 let api: { [Key in keyof IntegrationsApi]: Mock<IntegrationsApi[Key]> };
+let aiConnection: { [Key in keyof AiConnectionApi]: Mock<AiConnectionApi[Key]> };
+let keySaved: boolean;
+
+function connectionState(): ConnectionStateResult {
+  return {
+    ok: true,
+    settings: {
+      preferences: { method: 'api_key', provider: 'openai', model: '' },
+      hasSavedApiKey: false,
+      hasSavedWebSearchKey: false,
+      hasSavedIntegrationKey: keySaved,
+      canStoreSecrets: true,
+      chatgpt: { status: 'disconnected' },
+    },
+    runtime: { ok: false, error: 'runtime_unavailable' },
+  };
+}
 
 beforeEach(() => {
+  keySaved = true;
   api = {
-    getStatus: vi.fn(async () => CONFIGURED),
+    getStatus: vi.fn(async () => (keySaved ? CONFIGURED : { state: 'not_configured' })),
     setAccountAccess: vi.fn<IntegrationsApi['setAccountAccess']>(),
     listAccountTools: vi.fn(async () => TOOLS),
     setToolBlocked: vi.fn(async () => undefined),
+    connect: vi.fn<IntegrationsApi['connect']>(),
+    reconnect: vi.fn<IntegrationsApi['reconnect']>(),
+    disconnect: vi.fn(async () => undefined),
+    getConnectionState: vi.fn<IntegrationsApi['getConnectionState']>(),
   };
-  Object.defineProperty(window, 'electron', { configurable: true, value: { integrations: api } });
+  aiConnection = {
+    getState: vi.fn(async () => connectionState()),
+    update: vi.fn(async (command: ConnectionCommand) => {
+      if (command.operation === 'save_integration_key') keySaved = true;
+      if (command.operation === 'remove_integration_key') keySaved = false;
+      return { ok: true as const };
+    }),
+    onChanged: vi.fn(() => () => undefined),
+  };
+  Object.defineProperty(window, 'electron', {
+    configurable: true,
+    value: { integrations: api, aiConnection },
+  });
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   delete window.electron;
 });
 
@@ -106,24 +144,48 @@ function accessButton(label: string) {
   return screen.getByRole('button', { name: new RegExp(`^What Pantaray can do with ${label}:`) });
 }
 
-describe('integration settings', () => {
-  it.each([
-    ['not configured', async () => ({ state: 'not_configured' }) as IntegrationsStatus],
-    ['unreachable', async () => Promise.reject(new Error('Not Found'))],
-    [
-      'configured with nothing connected',
-      async () => ({ state: 'configured', toolkits: UNCONNECTED }) as IntegrationsStatus,
-    ],
-  ])('adds nothing to the page when integrations are %s', async (_case, getStatus) => {
-    api.getStatus.mockImplementation(getStatus);
+describe('the Composio key', () => {
+  it('without a key, shows only the key row and how to get one', async () => {
+    keySaved = false;
     renderSettings();
 
-    await waitFor(() => expect(api.getStatus).toHaveBeenCalled());
+    expect(await screen.findByLabelText('Composio API key')).toHaveAttribute('type', 'password');
     const nav = screen.getByRole('complementary', { name: 'Settings' });
-    expect(within(nav).queryByRole('button', { name: 'Integrations' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Integrations' })).not.toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'Integrations' })).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Open Composio' });
+    expect(link).toHaveAttribute('href', 'https://dashboard.composio.dev');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(
+      screen.getByText('Create a key under Settings → Project Settings → API Keys.')
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Session tool execution\.$/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Add a service' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
+  it('saves and removes the key through main, loading the services in between', async () => {
+    keySaved = false;
+    renderSettings();
+
+    fireEvent.change(await screen.findByLabelText('Composio API key'), {
+      target: { value: ' ak_test ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Composio API key: Save' }));
+    expect(await screen.findByRole('button', { name: /^Gmail/ })).toBeInTheDocument();
+    expect(aiConnection.update).toHaveBeenCalledWith({
+      operation: 'save_integration_key',
+      apiKey: 'ak_test',
+    });
+    expect(screen.queryByRole('link', { name: 'Open Composio' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Composio API key: Remove' }));
+    expect(await screen.findByRole('link', { name: 'Open Composio' })).toBeInTheDocument();
+    expect(aiConnection.update).toHaveBeenLastCalledWith({ operation: 'remove_integration_key' });
+    expect(screen.queryByRole('button', { name: /^Gmail/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('integration settings', () => {
   it('lists connected services only, and loads their tools when one is opened', async () => {
     renderSettings();
 
@@ -131,7 +193,6 @@ describe('integration settings', () => {
     expect(gmail).toHaveTextContent('2 accounts');
     expect(gmail).toHaveTextContent('Needs reconnecting');
     expect(screen.queryByRole('button', { name: /^Slack/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '+ Add a service' })).not.toBeInTheDocument();
     expect(api.listAccountTools).not.toHaveBeenCalled();
 
     fireEvent.click(gmail);
@@ -331,40 +392,143 @@ describe('integration settings', () => {
   });
 });
 
-describe('adding a service', () => {
-  const t = ((key, vars) => translate('en', key, vars)) as Translate;
-  const actions = {
-    setAccess: vi.fn(),
-    recheckAccess: vi.fn(),
-    loadTools: vi.fn(),
-    setToolBlocked: vi.fn(),
-  };
-  const toolkits: IntegrationToolkitStatus[] = [GMAIL, ...UNCONNECTED];
+const STARTED: IntegrationConnectResult = {
+  kind: 'started',
+  redirect_url: 'https://connect.composio.dev/link/abc',
+  expires_at: '2026-10-18T10:10:00Z',
+  connection_id: 'conn-1',
+};
+const NOW = Date.parse('2026-10-18T10:00:00Z');
+const SLACK_ACCOUNT = { ...account('team', 'read_only', false), label: 'team@example.com' };
+const WITH_SLACK: IntegrationsStatus = {
+  state: 'configured',
+  toolkits: [GMAIL, toolkit('slack', 'Slack', [SLACK_ACCOUNT]), UNCONNECTED[1]],
+};
 
-  it('lists the unconnected services, filters them, and connects the chosen one', () => {
-    const onConnect = vi.fn();
-    render(
-      <IntegrationSettingsSection
-        t={t}
-        toolkits={toolkits}
-        rows={{}}
-        actions={actions}
-        onConnect={onConnect}
-      />
-    );
-    const open = screen.getByRole('button', { name: '+ Add a service' });
-    fireEvent.click(open);
+/** The fake clock still moves on its own, so Testing Library's own timeouts keep running. */
+function useFakeClock() {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], shouldAdvanceTime: true });
+  vi.setSystemTime(NOW);
+}
 
-    const dialog = screen.getByRole('dialog', { name: 'Add a service' });
-    expect(within(dialog).queryByText('Gmail')).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Search services' }), {
-      target: { value: 'git' },
+async function connectSlack() {
+  renderSettings();
+  fireEvent.click(await screen.findByRole('button', { name: '+ Add a service' }));
+  const dialog = screen.getByRole('dialog', { name: 'Add a service' });
+  expect(within(dialog).queryByText('Gmail')).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Connect Slack' }));
+}
+
+async function poll() {
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+}
+
+describe('connecting an account', () => {
+  it('opens the link, polls until active, and opens the service with the new account', async () => {
+    useFakeClock();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    api.connect.mockResolvedValue(STARTED);
+    api.getConnectionState.mockResolvedValueOnce('pending').mockResolvedValueOnce('active');
+    await connectSlack();
+
+    expect(api.connect).toHaveBeenCalledWith({ toolkit: 'slack' });
+    await waitFor(() => expect(open).toHaveBeenCalledWith(STARTED.redirect_url, '_blank'));
+    expect(screen.getByText(/^Slack: Continue in your browser…/)).toBeInTheDocument();
+
+    await poll();
+    expect(api.getConnectionState).toHaveBeenCalledWith({ connection_id: 'conn-1' });
+    api.getStatus.mockResolvedValue(WITH_SLACK);
+    await poll();
+
+    expect(await screen.findByRole('heading', { name: 'Slack' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to Integrations' })).toHaveFocus();
+    expect(accessButton('team@example.com')).toHaveTextContent('Read only');
+    expect(api.getConnectionState).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops polling when cancelled', async () => {
+    useFakeClock();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    api.connect.mockResolvedValue(STARTED);
+    api.getConnectionState.mockResolvedValue('pending');
+    await connectSlack();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await poll();
+    await poll();
+    expect(api.getConnectionState).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Continue in your browser/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['the connection fails', STARTED, 'failed' as const, "Slack: Couldn't connect."],
+    [
+      'the link expires',
+      { ...STARTED, expires_at: '2026-10-18T10:00:01Z' },
+      'pending' as const,
+      'Slack: The connection link expired. Try again.',
+    ],
+  ])('says so when %s', async (_case, started, state, message) => {
+    useFakeClock();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    api.connect.mockResolvedValue(started);
+    api.getConnectionState.mockResolvedValue(state);
+    await connectSlack();
+    await screen.findByText(/Continue in your browser/);
+
+    await poll();
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows why the API refuses a new connection, and opens nothing', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    api.connect.mockResolvedValue({
+      kind: 'not_allowed',
+      reason: { source: 'connection_method', capability: 'connect', detail: null },
     });
-    expect(within(dialog).queryByText('Slack')).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Connect GitHub' }));
+    await connectSlack();
 
-    expect(onConnect).toHaveBeenCalledWith('github');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Slack: The API does not allow new connections.'
+    );
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('reconnects the chosen account and shows its pending state on that account', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    api.reconnect.mockResolvedValue(STARTED);
+    renderSettings();
+    await openGmail();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for work@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reconnect' }));
+
+    expect(api.reconnect).toHaveBeenCalledWith({ toolkit: 'gmail', account: 'acct-work' });
+    const [work] = screen.getAllByRole('listitem');
+    expect(await within(work).findByText(/^Continue in your browser…/)).toBeInTheDocument();
+  });
+
+  it('disconnects only after the question is confirmed, then reloads the list', async () => {
+    renderSettings();
+    await openGmail();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for home@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    let dialog = screen.getByRole('dialog', { name: 'Disconnect home@example.com?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'Pantaray loses access to this account. Disconnecting also revokes its access at Gmail.'
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(open).toHaveFocus();
+    expect(api.disconnect).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for home@example.com' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    dialog = screen.getByRole('dialog', { name: 'Disconnect home@example.com?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+
+    expect(api.disconnect).toHaveBeenCalledWith({ toolkit: 'gmail', account: 'acct-home' });
+    await waitFor(() => expect(api.getStatus).toHaveBeenCalledTimes(2));
   });
 });

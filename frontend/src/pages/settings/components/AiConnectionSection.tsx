@@ -465,11 +465,8 @@ export function AiConnectionSection({
             <a
               className="settings-inline-link"
               href={TAVILY_KEYS_URL}
-              onClick={(event) => {
-                // The app window never navigates away; main opens the site in the default browser.
-                event.preventDefault();
-                window.electron?.ipcRenderer.send('open-external-url', TAVILY_KEYS_URL);
-              }}
+              target="_blank"
+              rel="noopener noreferrer"
             >
               {t('settings.aiConnection.webSearch.getKey')}
             </a>

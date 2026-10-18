@@ -15,16 +15,6 @@ export type ExternalUrlPolicyOptions = {
   webAppOrigin: string | null;
 };
 
-/**
- * Provider sites the app links to, where users create and manage their keys and connections.
- * They open whether or not webAppOrigin is configured. Fixed here, never user-configurable.
- */
-const PROVIDER_ORIGINS: ReadonlySet<string> = new Set([
-  'https://app.tavily.com',
-  'https://dashboard.composio.dev',
-  'https://connect.composio.dev',
-]);
-
 function isPrivateIp(ip: string): boolean {
   // NOTE: net.isIP は "1.2.3.4" / "::1" などの literal のみ判定する。
   const v = net.isIP(ip);
@@ -80,10 +70,6 @@ export function validateExternalUrl(
 
   const host = String(u.hostname || '').toLowerCase();
   if (!host) return { ok: false, reason: 'missing_host' };
-
-  if (protocol === 'https:' && PROVIDER_ORIGINS.has(u.origin)) {
-    return { ok: true, url: u.toString() };
-  }
 
   const webAppOrigin = opts.webAppOrigin;
   if (!webAppOrigin) return { ok: false, reason: 'web_app_origin_not_configured' };

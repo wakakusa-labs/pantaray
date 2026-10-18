@@ -53,6 +53,11 @@ const GMAIL = toolkit('gmail', 'Gmail', [account('work', 'read_only', false), HO
 const UNCONNECTED = [toolkit('slack', 'Slack', []), toolkit('github', 'GitHub', [])];
 const CONFIGURED: IntegrationsStatus = { state: 'configured', toolkits: [GMAIL, ...UNCONNECTED] };
 
+function withHome(home: IntegrationAccountStatus): IntegrationsStatus {
+  const gmail = { ...GMAIL, accounts: [GMAIL.accounts[0], home] };
+  return { state: 'configured', toolkits: [gmail, ...UNCONNECTED] };
+}
+
 const TOOLS: IntegrationToolSetting[] = [
   { slug: 'FETCH', name: 'Fetch emails', tool_class: 'read', blocked: false, api_denial: null },
   { slug: 'ARCHIVE', name: 'Archive', tool_class: 'read', blocked: true, api_denial: null },
@@ -185,7 +190,7 @@ describe('integration settings', () => {
       'The API does not allow running tools.',
     ],
     [
-      'the save fails',
+      'the save fails and the backend still has the old value',
       async () => Promise.reject(new Error('Local backend request failed.')),
       "Couldn't save the change. The previous setting is kept.",
     ],
@@ -199,6 +204,62 @@ describe('integration settings', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
     expect(accessButton('home@example.com')).toHaveTextContent('Read and write');
+  });
+
+  it('shows the stored value when the save went through but its answer was lost', async () => {
+    api.setAccountAccess.mockRejectedValue(new Error('Local backend request failed.'));
+    renderSettings();
+    await openGmail();
+    api.getStatus.mockResolvedValue(withHome({ ...HOME, access: 'read_only' }));
+
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Read only' }));
+
+    await waitFor(() => expect(api.getStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(accessButton('home@example.com')).toHaveTextContent('Read only'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('claims no value when neither the save nor the re-read answers, and can check again', async () => {
+    api.setAccountAccess.mockRejectedValue(new Error('Local backend request failed.'));
+    renderSettings();
+    await openGmail();
+    api.getStatus.mockRejectedValueOnce(new Error('Local backend request failed.'));
+
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't confirm whether the change was saved."
+    );
+    expect(accessButton('home@example.com')).toHaveTextContent('Unconfirmed');
+    fireEvent.click(accessButton('home@example.com'));
+    expect(screen.queryByRole('menuitemradio', { checked: true })).not.toBeInTheDocument();
+
+    api.getStatus.mockResolvedValue(withHome({ ...HOME, access: 'off' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(accessButton('home@example.com')).toHaveTextContent('Off'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('takes no second choice while a save is pending, and says it is saving', async () => {
+    let answer: (result: IntegrationAccessUpdateResult) => void = () => undefined;
+    api.setAccountAccess.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    renderSettings();
+    await openGmail();
+
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+    const button = accessButton('home@example.com');
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText(/Saving…/)).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    answer({ kind: 'saved', account: { ...HOME, access: 'off' } });
+    await waitFor(() => expect(accessButton('home@example.com')).not.toHaveAttribute('aria-busy'));
+    expect(api.setAccountAccess).toHaveBeenCalledTimes(1);
   });
 
   it('blocks one tool, and keeps writes inactive while the account is read only', async () => {
@@ -220,11 +281,41 @@ describe('integration settings', () => {
       expect(tools.getByRole('switch', { name: 'Use Fetch emails' })).not.toBeChecked()
     );
   });
+
+  it('holds the other tools while one block saves, and reads the result back if its answer is lost', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    api.setToolBlocked.mockImplementation(() => new Promise((_resolve, reject) => (fail = reject)));
+    renderSettings();
+    await openGmail();
+    const [workTools] = screen.getAllByRole('button', { name: 'Choose tool by tool' });
+    fireEvent.click(workTools);
+    const tools = within(document.getElementById(workTools.getAttribute('aria-controls')!)!);
+
+    fireEvent.click(await tools.findByRole('switch', { name: 'Use Fetch emails' }));
+    const archive = tools.getByRole('switch', { name: 'Use Archive' });
+    expect(archive).toHaveAttribute('aria-disabled', 'true');
+    expect(archive).toHaveAttribute('aria-busy', 'true');
+    expect(tools.getByRole('status')).toHaveTextContent('Saving…');
+    fireEvent.click(archive);
+    expect(api.setToolBlocked).toHaveBeenCalledTimes(1);
+
+    const stored = TOOLS.map((tool) => (tool.slug === 'FETCH' ? { ...tool, blocked: true } : tool));
+    api.listAccountTools.mockResolvedValue(stored);
+    fail(new Error('Local backend request failed.'));
+    await waitFor(() => expect(archive).not.toHaveAttribute('aria-busy'));
+    expect(tools.getByRole('switch', { name: 'Use Fetch emails' })).not.toBeChecked();
+    expect(tools.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
 
 describe('adding a service', () => {
   const t = ((key, vars) => translate('en', key, vars)) as Translate;
-  const actions = { setAccess: vi.fn(), loadTools: vi.fn(), setToolBlocked: vi.fn() };
+  const actions = {
+    setAccess: vi.fn(),
+    recheckAccess: vi.fn(),
+    loadTools: vi.fn(),
+    setToolBlocked: vi.fn(),
+  };
   const toolkits: IntegrationToolkitStatus[] = [GMAIL, ...UNCONNECTED];
 
   it('lists the unconnected services, filters them, and connects the chosen one', () => {

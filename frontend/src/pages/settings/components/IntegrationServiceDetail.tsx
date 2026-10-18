@@ -119,8 +119,9 @@ function AccountRow({
   const toolsId = useId();
   const [expanded, setExpanded] = useState(false);
   const service = toolkit.display_name;
-  const chosen = row.pending ?? account.access;
-  const chosenTitle = t(`settings.integrations.access.${chosen}`);
+  // An unconfirmed save leaves no value to show: the control says so instead of guessing.
+  const chosen = row.pending ?? (row.notice?.kind === 'unconfirmed' ? null : account.access);
+  const chosenTitle = t(`settings.integrations.access.${chosen ?? 'unconfirmed'}`);
   const blockedCount =
     row.tools?.state === 'loaded' ? row.tools.tools.filter((tool) => tool.blocked).length : 0;
 
@@ -174,6 +175,7 @@ function AccountRow({
                 {t('settings.integrations.tools.blockedCount', { count: blockedCount })}
               </span>
             ) : null}
+            <span role="status">{row.busy ? ` · ${t('settings.integrations.saving')}` : null}</span>
           </div>
         </div>
         <MenuButton
@@ -181,6 +183,7 @@ function AccountRow({
             account: account.label,
             access: chosenTitle,
           })}
+          busy={row.busy}
           items={accessItems}
         >
           <span>{chosenTitle}</span>
@@ -202,7 +205,24 @@ function AccountRow({
         <p role="alert" className="dashboard-section-description settings-section-error">
           {row.notice.kind === 'not_allowed'
             ? denialText(t, row.notice.reason, service)
-            : t('settings.integrations.saveFailed')}
+            : t(
+                row.notice.kind === 'unconfirmed'
+                  ? 'settings.integrations.unconfirmed'
+                  : 'settings.integrations.saveFailed'
+              )}
+          {row.notice.kind === 'unconfirmed' ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="integration-text-button"
+                disabled={row.busy}
+                onClick={() => actions.recheckAccess(toolkit.toolkit, account.account)}
+              >
+                {t('settings.integrations.recheck')}
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       <div id={toolsId} hidden={!expanded}>
@@ -211,6 +231,7 @@ function AccountRow({
           service={service}
           tools={row.tools}
           writesUnused={chosen === 'read_only'}
+          onRetry={() => actions.loadTools(toolkit.toolkit, account.account)}
           onBlockedChange={(slug, blocked) =>
             actions.setToolBlocked(toolkit.toolkit, account.account, slug, blocked)
           }
@@ -225,12 +246,14 @@ function ToolList({
   service,
   tools,
   writesUnused,
+  onRetry,
   onBlockedChange,
 }: {
   t: Translate;
   service: string;
   tools: IntegrationToolsState | null;
   writesUnused: boolean;
+  onRetry: () => void;
   onBlockedChange: (slug: string, blocked: boolean) => void;
 }) {
   if (tools === null || tools.state === 'loading') {
@@ -239,7 +262,14 @@ function ToolList({
   if (tools.state === 'failed') {
     return (
       <p role="alert" className="dashboard-section-description settings-section-error">
-        {t('settings.integrations.tools.loadFailed')}
+        {t(
+          tools.unconfirmed
+            ? 'settings.integrations.tools.unconfirmed'
+            : 'settings.integrations.tools.loadFailed'
+        )}{' '}
+        <button type="button" className="integration-text-button" onClick={onRetry}>
+          {t('settings.integrations.tools.retry')}
+        </button>
       </p>
     );
   }
@@ -258,6 +288,9 @@ function ToolList({
     <div className="integration-tools">
       {group('read', false)}
       {group('write', writesUnused)}
+      <p role="status" className="ai-note">
+        {tools.savingSlug === null ? null : t('settings.integrations.saving')}
+      </p>
       {tools.saveFailed ? (
         <p role="alert" className="dashboard-section-description settings-section-error">
           {t('settings.integrations.saveFailed')}
@@ -296,6 +329,8 @@ function ToolGroup({
       <ul className="integration-tool-list" aria-labelledby={`${id}-title`}>
         {tools.map((tool) => {
           const blocked = savingSlug === tool.slug ? !tool.blocked : tool.blocked;
+          // One block saves at a time; the others wait, visibly, instead of losing the press.
+          const busy = savingSlug !== null;
           const on = !blocked && tool.api_denial === null && unusedNote === null;
           const reasonId = `${id}-${tool.slug}`;
           return (
@@ -313,12 +348,13 @@ function ToolGroup({
                 role="switch"
                 aria-checked={on}
                 aria-label={t('settings.integrations.tools.use', { tool: tool.name })}
-                aria-disabled={tool.api_denial ? true : undefined}
+                aria-disabled={tool.api_denial || busy ? true : undefined}
+                aria-busy={busy || undefined}
                 aria-describedby={tool.api_denial ? reasonId : undefined}
                 disabled={unusedNote !== null}
                 className={`settings-toggle settings-toggle--fixed${on ? ' settings-toggle--on' : ''}`}
                 onClick={() => {
-                  if (tool.api_denial === null) onBlockedChange(tool.slug, !tool.blocked);
+                  if (tool.api_denial === null && !busy) onBlockedChange(tool.slug, !tool.blocked);
                 }}
               >
                 <span className="settings-toggle-thumb" />

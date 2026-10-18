@@ -18,6 +18,8 @@ type MenuButtonProps = {
   label: string;
   /** `value` shows the current choice; `icon` is a compact actions button such as •••. */
   variant?: 'value' | 'icon';
+  /** Work started from the menu is still running: the button does not open until it ends. */
+  busy?: boolean;
   items: readonly MenuButtonItem[];
   children: ReactNode;
 };
@@ -30,7 +32,13 @@ const ITEM_SELECTOR = '[role="menuitem"], [role="menuitemradio"]';
  * choose, and Escape closes it and returns focus to the button. An unavailable item stays
  * focusable so its reason can be read, but cannot be chosen.
  */
-export function MenuButton({ label, variant = 'value', items, children }: MenuButtonProps) {
+export function MenuButton({
+  label,
+  variant = 'value',
+  busy = false,
+  items,
+  children,
+}: MenuButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -88,9 +96,13 @@ export function MenuButton({ label, variant = 'value', items, children }: MenuBu
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? id : undefined}
-        onClick={() => setIsOpen((open) => !open)}
+        aria-disabled={busy || undefined}
+        aria-busy={busy || undefined}
+        onClick={() => {
+          if (!busy) setIsOpen((open) => !open);
+        }}
         onKeyDown={(event) => {
-          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          if (busy || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
           event.preventDefault();
           setIsOpen(true);
         }}

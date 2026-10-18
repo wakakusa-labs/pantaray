@@ -10,7 +10,9 @@ import type {
 
 export type IntegrationAccountNotice =
   | { kind: 'save_failed' }
-  | { kind: 'not_allowed'; reason: ApiDenial };
+  | { kind: 'not_allowed'; reason: ApiDenial }
+  /** Neither the save's answer nor a re-read arrived: the stored access is not known. */
+  | { kind: 'unconfirmed' };
 
 type LoadedTools = {
   state: 'loaded';
@@ -20,9 +22,15 @@ type LoadedTools = {
   saveFailed: boolean;
 };
 
-export type IntegrationToolsState = { state: 'loading' } | { state: 'failed' } | LoadedTools;
+export type IntegrationToolsState =
+  | { state: 'loading' }
+  /** `unconfirmed`: a block's save and the re-read after it both failed. */
+  | { state: 'failed'; unconfirmed: boolean }
+  | LoadedTools;
 
 export type IntegrationAccountRowState = {
+  /** A save or a re-read is in flight; the access control takes no new choice until it ends. */
+  busy: boolean;
   /** The option being saved; it shows as chosen until the backend answers. */
   pending: IntegrationAccess | null;
   notice: IntegrationAccountNotice | null;
@@ -31,6 +39,8 @@ export type IntegrationAccountRowState = {
 
 export type IntegrationSettingsActions = {
   setAccess: (toolkit: string, account: string, access: IntegrationAccess) => void;
+  /** Re-reads an account's stored access after it could not be confirmed. */
+  recheckAccess: (toolkit: string, account: string) => void;
   /** Loads an account's tools once; after a failed load it tries again. */
   loadTools: (toolkit: string, account: string) => void;
   setToolBlocked: (toolkit: string, account: string, slug: string, blocked: boolean) => void;
@@ -43,7 +53,12 @@ type Loaded = {
   rows: Record<string, IntegrationAccountRowState>;
 };
 
-const EMPTY_ROW: IntegrationAccountRowState = { pending: null, notice: null, tools: null };
+const EMPTY_ROW: IntegrationAccountRowState = {
+  busy: false,
+  pending: null,
+  notice: null,
+  tools: null,
+};
 
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
@@ -103,19 +118,65 @@ export function useIntegrationSettingsController(ownerId: string | null): {
       };
     });
 
+  // A failed answer does not prove a failed save: the backend writes before it answers, so
+  // the stored access is read back. `requested` is null for a plain re-read.
+  const confirmAccess = (
+    forOwner: string,
+    toolkit: string,
+    account: string,
+    requested: IntegrationAccess | null
+  ) => {
+    if (!api) return;
+    const unconfirmed = () =>
+      patchRow(forOwner, account, () => ({
+        busy: false,
+        pending: null,
+        notice: { kind: 'unconfirmed' },
+      }));
+    api.getStatus().then((status) => {
+      const stored =
+        status.state === 'configured'
+          ? status.toolkits
+              .find((entry) => entry.toolkit === toolkit)
+              ?.accounts.find((entry) => entry.account === account)
+          : undefined;
+      if (!stored) return unconfirmed();
+      const saved = requested === null || stored.access === requested;
+      patchRow(
+        forOwner,
+        account,
+        () => ({ busy: false, pending: null, notice: saved ? null : { kind: 'save_failed' } }),
+        stored
+      );
+    }, unconfirmed);
+  };
+
   const setAccess: IntegrationSettingsActions['setAccess'] = (toolkit, account, access) => {
-    if (!current || !api || integrationRow(current.rows, account).pending !== null) return;
+    if (!current || !api || integrationRow(current.rows, account).busy) return;
     const forOwner = current.ownerId;
-    const settle = (notice: IntegrationAccountNotice | null, saved?: IntegrationAccountStatus) =>
-      patchRow(forOwner, account, () => ({ pending: null, notice }), saved);
-    patchRow(forOwner, account, () => ({ pending: access, notice: null }));
+    patchRow(forOwner, account, () => ({ busy: true, pending: access, notice: null }));
     api.setAccountAccess({ toolkit, account, access }).then(
       (result) =>
         result.kind === 'saved'
-          ? settle(null, result.account)
-          : settle({ kind: 'not_allowed', reason: result.reason }),
-      () => settle({ kind: 'save_failed' })
+          ? patchRow(
+              forOwner,
+              account,
+              () => ({ busy: false, pending: null, notice: null }),
+              result.account
+            )
+          : patchRow(forOwner, account, () => ({
+              busy: false,
+              pending: null,
+              notice: { kind: 'not_allowed', reason: result.reason },
+            })),
+      () => confirmAccess(forOwner, toolkit, account, access)
     );
+  };
+
+  const recheckAccess: IntegrationSettingsActions['recheckAccess'] = (toolkit, account) => {
+    if (!current || integrationRow(current.rows, account).busy) return;
+    patchRow(current.ownerId, account, () => ({ busy: true }));
+    confirmAccess(current.ownerId, toolkit, account, null);
   };
 
   const loadTools: IntegrationSettingsActions['loadTools'] = (toolkit, account) => {
@@ -128,7 +189,7 @@ export function useIntegrationSettingsController(ownerId: string | null): {
     setTools({ state: 'loading' });
     api.listAccountTools({ toolkit, account }).then(
       (list) => setTools({ state: 'loaded', tools: list, savingSlug: null, saveFailed: false }),
-      () => setTools({ state: 'failed' })
+      () => setTools({ state: 'failed', unconfirmed: false })
     );
   };
 
@@ -156,13 +217,27 @@ export function useIntegrationSettingsController(ownerId: string | null): {
             tool.slug === slug ? { ...tool, blocked } : tool
           ),
         })),
-      () => changeTools((loadedTools) => ({ ...loadedTools, savingSlug: null, saveFailed: true }))
+      // As with access: the block may be stored although its answer was lost, so read it back.
+      () =>
+        api.listAccountTools({ toolkit, account }).then(
+          (list) =>
+            patchRow(forOwner, account, () => ({
+              tools: {
+                state: 'loaded',
+                tools: list,
+                savingSlug: null,
+                saveFailed: list.find((tool) => tool.slug === slug)?.blocked !== blocked,
+              },
+            })),
+          () =>
+            patchRow(forOwner, account, () => ({ tools: { state: 'failed', unconfirmed: true } }))
+        )
     );
   };
 
   return {
     toolkits: current?.toolkits ?? null,
     rows: current?.rows ?? {},
-    actions: { setAccess, loadTools, setToolBlocked },
+    actions: { setAccess, recheckAccess, loadTools, setToolBlocked },
   };
 }

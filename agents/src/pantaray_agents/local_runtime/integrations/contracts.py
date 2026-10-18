@@ -108,13 +108,44 @@ class ToolFailed(InternalStrictModel):
 type ToolOutcome = ToolSucceeded | ToolFailed
 
 
+class ApiDenial(InternalStrictModel):
+    """Why the API does not allow something, as data the settings screen localizes."""
+
+    # The whole connection method (GatewayLimits), or one account's grant such
+    # as its OAuth scopes (IntegrationGateway.api_denied_reason).
+    source: Literal["connection_method", "account_grant"]
+    capability: Literal["connect", "execute", "tool"]
+    # An identifier from the external service shown as is, such as a missing
+    # OAuth scope; never prose, which could not be localized.
+    detail: str | None = None
+
+
 class GatewayLimits(InternalStrictModel):
     """What the connection method allows, known before the user chooses."""
 
     can_connect: bool
     can_execute: bool
-    # One reason per unavailable capability, naming where the limit comes from.
-    reasons: list[str]
+    # Exactly one reason per unavailable capability, so a greyed-out option
+    # always has one to show.
+    reasons: list[ApiDenial]
+
+    @model_validator(mode="after")
+    def _one_reason_per_denied_capability(self) -> Self:
+        denied = [
+            capability
+            for capability, allowed in (
+                ("connect", self.can_connect),
+                ("execute", self.can_execute),
+            )
+            if not allowed
+        ]
+        if sorted(reason.capability for reason in self.reasons) != denied or any(
+            reason.source != "connection_method" for reason in self.reasons
+        ):
+            raise ValueError(
+                "limits carry one connection_method reason per denied capability"
+            )
+        return self
 
 
 class IntegrationGateway(Protocol):
@@ -130,7 +161,7 @@ class IntegrationGateway(Protocol):
         """Return the toolkit's tools already classified; blocked tools are absent."""
         ...
 
-    def api_denied_reason(self, *, slug: str, account: str) -> str | None:
+    def api_denied_reason(self, *, slug: str, account: str) -> ApiDenial | None:
         """Why this account's grant does not allow the tool, or None when it does."""
         ...
 

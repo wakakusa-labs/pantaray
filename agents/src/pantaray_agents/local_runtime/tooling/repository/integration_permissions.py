@@ -221,6 +221,32 @@ def load_integration_account_access(
         return "read_write" if write_mode == "prompt_each_time" else "read_only"
 
 
+def load_integration_blocked_tools(
+    *, db_path: Path, busy_timeout_ms: int, user_id: str, account: str
+) -> frozenset[str]:
+    """The slugs of the tools blocked for one account."""
+
+    tool_scope_prefix = (
+        _scope(INTEGRATION_TOOL_SCOPE_PREFIX, account) + _SCOPE_SEPARATOR
+    )
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        rows = connection.execute(
+            """
+            SELECT DISTINCT scope.value AS scope
+            FROM approval_preferences AS preference,
+                json_each(preference.applies_to_json) AS scope
+            WHERE
+                preference.user_id = ?
+                AND preference.revoked_at IS NULL
+                AND preference.approval_mode = 'never_allow'
+                AND substr(scope.value, 1, length(?)) = ?
+            """,
+            (user_id, tool_scope_prefix, tool_scope_prefix),
+        ).fetchall()
+    return frozenset(str(row["scope"])[len(tool_scope_prefix) :] for row in rows)
+
+
 def _preference_id(*, user_id: str, scope: str) -> str:
     return build_approval_preference_id(
         user_id=user_id, scope_type="global", scope_ref=None, applies_to=(scope,)

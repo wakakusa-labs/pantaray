@@ -178,6 +178,10 @@ class ActionAgentContext(TypedDict, total=False):
     workspace_context_prompt: str
     # ~/.pantaray/AGENTS.md as this run read it ("" when absent).
     agents_md_instructions: str
+    # Whether an integration was connected on the Action's first conversation
+    # turn; the integration tools are offered for the whole Action or not at all,
+    # so the tool schemas never change mid-Action.
+    integration_tools_exposed: bool
     # The Executing head's field values from the Action's first conversation
     # turn. Every later turn renders the head from them, byte for byte.
     executing_head_fields: dict[str, str]

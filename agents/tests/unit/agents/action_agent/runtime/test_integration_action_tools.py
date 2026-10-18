@@ -602,3 +602,43 @@ async def test_input_schemas_resolve_only_their_own_refs(
     assert _error(local_bad)["error_type"] == "invalid_arguments"
     assert local_ok["untrusted"] is True
     assert env.gateway.executed == [("GMAIL_LOCAL_REF", WORK.account, {"id": "a"})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"$ref": "#/$defs/input", "$defs": {"input": {"type": "EXTERNAL_TEXT"}}},
+        {"$ref": "#", "description": "EXTERNAL_TEXT"},
+    ],
+    ids=["unknown_type", "self_reference"],
+)
+async def test_an_unusable_input_schema_is_refused_without_its_text(
+    env: SimpleNamespace,
+    caplog: pytest.LogCaptureFixture,
+    schema: dict[str, JSONValue],
+) -> None:
+    get_integration_tool_index().replace(
+        "gmail", [_tool("GMAIL_ODD_SCHEMA", "write", schema)]
+    )
+    args = _args("GMAIL_ODD_SCHEMA", WORK.account, {"to": "someone@example.com"})
+
+    preparation = await _preflight(env, args, "odd")
+    run = await _run(env, args, "odd")
+
+    # The write never reached the user: the preflight left the refusal to the call.
+    assert isinstance(preparation.control, CompletedToolControl)
+    assert (
+        load_approval_session_by_request(
+            db_path=env.db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            user_id="user-1",
+            tool_request_id="odd",
+        )
+        is None
+    )
+    assert _error(run)["error_type"] == "upstream_failed"
+    for payload in (preparation.result.output, run):
+        assert "EXTERNAL_TEXT" not in json.dumps(payload)
+    assert "EXTERNAL_TEXT" not in caplog.text
+    assert env.gateway.executed == []

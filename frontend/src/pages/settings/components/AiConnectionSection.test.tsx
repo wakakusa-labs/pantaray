@@ -68,13 +68,40 @@ function renderSection(state: Partial<AiConnectionState> = {}): AiConnectionActi
 
 afterEach(cleanup);
 
+function openMethodMenu() {
+  fireEvent.click(screen.getByRole('button', { name: /^settings\.aiConnection\.methodTitle: / }));
+}
+
+function methodItem(method: string) {
+  return screen.getByRole('menuitemradio', {
+    name: `settings.aiConnection.method.${method}.title`,
+  });
+}
+
 it('offers Pantaray Cloud only while a cloud session exists', () => {
-  renderSection({ runtime: runtime({ cloudSessionState: 'absent' }) });
-  expect(screen.getByRole('radio', { name: /method.cloud/ })).toBeDisabled();
+  const absent = renderSection({ runtime: runtime({ cloudSessionState: 'absent' }) });
+  openMethodMenu();
+  expect(methodItem('cloud')).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(methodItem('cloud'));
+  expect(absent.selectMethod).not.toHaveBeenCalled();
 
   cleanup();
-  renderSection({ runtime: runtime({ cloudSessionState: 'present' }) });
-  expect(screen.getByRole('radio', { name: /method.cloud/ })).toBeEnabled();
+  const present = renderSection({ runtime: runtime({ cloudSessionState: 'present' }) });
+  openMethodMenu();
+  expect(methodItem('cloud')).not.toHaveAttribute('aria-disabled');
+  fireEvent.click(methodItem('cloud'));
+  expect(present.selectMethod).toHaveBeenCalledWith('cloud');
+});
+
+it('switches the method from the menu, and does nothing for the current one', () => {
+  const actions = renderSection();
+  openMethodMenu();
+  fireEvent.click(methodItem('api_key'));
+  expect(actions.selectMethod).not.toHaveBeenCalled();
+
+  openMethodMenu();
+  fireEvent.click(methodItem('chatgpt'));
+  expect(actions.selectMethod).toHaveBeenCalledWith('chatgpt');
 });
 
 it('says an expired session needs a new sign-in instead of a direct fallback', () => {
@@ -328,9 +355,11 @@ it('locks the key field while a save is in flight', async () => {
 
 it('states why Pantaray Cloud is unavailable instead of hiding it in a tooltip', () => {
   renderSection({ runtime: runtime({ cloudSessionState: 'absent' }) });
-  const reason = screen.getByText('settings.aiConnection.method.cloud.requiresLogin');
-  expect(reason).toBeInTheDocument();
-  expect(screen.getByRole('radiogroup')).toHaveAttribute('aria-describedby', 'ai-method-login');
+  openMethodMenu();
+  expect(screen.getByText('settings.aiConnection.method.cloud.requiresLogin')).toBeVisible();
+  expect(methodItem('cloud')).toHaveAccessibleDescription(
+    /settings\.aiConnection\.method\.cloud\.requiresLogin/
+  );
 });
 
 it('lets a replacement be abandoned without losing the saved key', () => {
@@ -523,7 +552,11 @@ it('edits a model as a draft and preserves it when applying fails', async () => 
 it('keeps credential editing available when the runtime status is unavailable', () => {
   renderSection({ runtime: { ok: false, error: 'runtime_unavailable' } });
   expect(screen.getByLabelText('settings.aiConnection.key.label')).toBeEnabled();
-  expect(screen.getByRole('radio', { name: /method.cloud/ })).toBeDisabled();
+  openMethodMenu();
+  expect(methodItem('cloud')).toHaveAttribute('aria-disabled', 'true');
+  expect(methodItem('cloud')).toHaveAccessibleDescription(
+    /settings\.aiConnection\.method\.cloud\.statusUnknown/
+  );
 });
 
 it('locks settings while authorizing but keeps cancellation available', () => {
@@ -541,6 +574,9 @@ it('locks settings while authorizing but keeps cancellation available', () => {
   expect(screen.getByText('settings.aiConnection.chatgpt.waiting')).toBeInTheDocument();
   expect(screen.getByLabelText('settings.aiConnection.modelLabel')).toBeDisabled();
   expect(screen.getByText('settings.aiConnection.chatgpt.signIn')).toBeDisabled();
+  expect(
+    screen.getByRole('button', { name: /^settings\.aiConnection\.methodTitle: / })
+  ).toBeDisabled();
   const cancel = screen.getByText('settings.aiConnection.chatgpt.cancel');
   expect(cancel).toBeEnabled();
   expect(cancel).toHaveFocus();

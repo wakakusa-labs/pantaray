@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+import { MenuButton, type MenuButtonItem } from '@/components/ui/MenuButton';
 import type { Translate } from '../types';
 import {
   API_KEY_PROVIDERS,
@@ -263,6 +264,25 @@ export function AiConnectionSection({
   const candidates = modelCandidates(state.method, state.apiKey.provider);
   const methodNoteId =
     state.method === 'cloud' && cloudSession === 'expired' ? 'ai-method-note' : undefined;
+  const methodTitle = t(`settings.aiConnection.method.${state.method}.title`);
+  const methodItems: MenuButtonItem[] = METHODS.map((method) => ({
+    key: method,
+    title: t(`settings.aiConnection.method.${method}.title`),
+    description: t(`settings.aiConnection.method.${method}.description`),
+    // Pantaray Cloud needs a cloud session; without the runtime status none is known.
+    unavailableReason:
+      method !== 'cloud'
+        ? null
+        : cloudSession === 'absent'
+          ? t('settings.aiConnection.method.cloud.requiresLogin')
+          : cloudSession === null
+            ? t('settings.aiConnection.method.cloud.statusUnknown')
+            : null,
+    checked: state.method === method,
+    onSelect: () => {
+      if (state.method !== method) actions.selectMethod(method);
+    },
+  }));
 
   return (
     <section className="dashboard-section ai-connection">
@@ -298,48 +318,20 @@ export function AiConnectionSection({
         <h4 className="ai-group">{t('settings.aiConnection.inferenceGroup')}</h4>
 
         <Row label={t('settings.aiConnection.methodTitle')}>
-          <div
-            className="ai-segmented"
-            role="radiogroup"
-            aria-label={t('settings.aiConnection.methodTitle')}
-            aria-describedby={
-              methodNoteId ?? (cloudSession === 'absent' ? 'ai-method-login' : undefined)
-            }
+          <MenuButton
+            label={`${t('settings.aiConnection.methodTitle')}: ${methodTitle}`}
+            align="start"
+            describedBy={methodNoteId}
+            items={methodItems}
           >
-            {METHODS.map((method) => {
-              const selected = state.method === method;
-              const disabled =
-                method === 'cloud' && (cloudSession === 'absent' || cloudSession === null);
-              return (
-                // 素の radio にして、矢印キーでの移動と読み上げをブラウザに任せる。
-                <label
-                  key={method}
-                  className={['ai-segment', selected ? 'ai-segment--selected' : null]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <input
-                    className="ai-segment-input"
-                    type="radio"
-                    name="ai-connection-method"
-                    value={method}
-                    checked={selected}
-                    disabled={disabled}
-                    onChange={() => actions.selectMethod(method)}
-                  />
-                  {t(`settings.aiConnection.method.${method}.title`)}
-                </label>
-              );
-            })}
-          </div>
+            <span>{methodTitle}</span>
+            <span className="ai-caret" aria-hidden="true">
+              ▾
+            </span>
+          </MenuButton>
           {methodNoteId ? (
             <p className="ai-note ai-note--control" id={methodNoteId}>
               {t('settings.aiConnection.status.expiredDetail')}
-            </p>
-          ) : null}
-          {PANTARAY_ACCOUNT_LOGIN_ENABLED && cloudSession === 'absent' ? (
-            <p className="ai-note ai-note--control" id="ai-method-login">
-              {t('settings.aiConnection.method.cloud.requiresLogin')}
             </p>
           ) : null}
         </Row>

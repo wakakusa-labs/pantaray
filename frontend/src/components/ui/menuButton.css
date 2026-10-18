@@ -55,10 +55,17 @@
   gap: 2px;
   padding: 6px;
   position: absolute;
-  right: 0;
   top: calc(100% + 6px);
   width: 300px;
   z-index: 20;
+}
+
+.menu-button__menu--start {
+  left: 0;
+}
+
+.menu-button__menu--end {
+  right: 0;
 }
 
 .menu-button__item {

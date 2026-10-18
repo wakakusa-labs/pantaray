@@ -17,6 +17,8 @@ type UserMessageCopy = {
   >;
   /** The ✕ under a message no run has taken yet. */
   withdraw: string;
+  /** Under a message waiting for the running run: stop that run and resume it with the message. */
+  sendNow: string;
 };
 /** The labels of a user's message and its attachments, shared by the Overlay and the chat. */
 export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
@@ -45,6 +47,7 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
       failed: 'Send failed',
     },
     withdraw: 'Withdraw this message',
+    sendNow: 'Send now',
   },
   ja: {
     you: 'あなた',
@@ -70,5 +73,6 @@ export const USER_MESSAGE_COPY: Record<'en' | 'ja', UserMessageCopy> = {
       failed: '送信失敗',
     },
     withdraw: 'このメッセージを取り消す',
+    sendNow: '今すぐ送信',
   },
 };

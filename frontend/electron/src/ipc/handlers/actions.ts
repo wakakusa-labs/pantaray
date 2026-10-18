@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 import type { IpcMainInvokeEvent } from 'electron';
 
 import type { MainContext } from '../context';
@@ -45,6 +47,17 @@ function resolveTurnSender(ctx: MainContext, sender: IpcSenderIdentity): TurnSen
   return overlayId === null ? null : { kind: 'panel', overlayId };
 }
 
+type Turn = { sender: TurnSender; subjectId: string };
+
+/** The window and owner a turn is opened for, pinned when the window asks for it. */
+function resolveTurn(ctx: MainContext, event: IpcMainInvokeEvent): Turn {
+  const sender = resolveTurnSender(ctx, event.sender);
+  if (sender === null) throw new IpcSenderRejectedError('overlay_window_not_registered');
+  const subjectId = ctx.actions.getCurrentSubjectId();
+  if (subjectId === null) throw new Error('Missing authenticated user id.');
+  return { sender, subjectId };
+}
+
 /**
  * ひとつの USER ターンを開く要求を、その結果の引き回しごと実行する。
  *
@@ -56,13 +69,10 @@ function resolveTurnSender(ctx: MainContext, sender: IpcSenderIdentity): TurnSen
 async function openUserTurn(
   ctx: MainContext,
   event: IpcMainInvokeEvent,
+  { sender: turnSender, subjectId }: Turn,
   open: () => Promise<ActionMessageResponse>,
   replyToSuggestionId: string | null
 ): Promise<ActionMessageSubmitResult> {
-  const turnSender = resolveTurnSender(ctx, event.sender);
-  if (turnSender === null) throw new IpcSenderRejectedError('overlay_window_not_registered');
-  const subjectId = ctx.actions.getCurrentSubjectId();
-  if (subjectId === null) throw new Error('Missing authenticated user id.');
   let response: ActionMessageResponse;
   try {
     response = await open();
@@ -153,6 +163,7 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
       const result = await openUserTurn(
         ctx,
         event,
+        resolveTurn(ctx, event),
         () => ctx.actions.submitMessage(parsed),
         replyTo
       );
@@ -173,6 +184,7 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     openUserTurn(
       ctx,
       event,
+      resolveTurn(ctx, event),
       () =>
         ctx.actions.resumeAction(parseInput(ActionResumeRequestSchema, 'action:resume', request)),
       null
@@ -209,6 +221,28 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
     } finally {
       await ctx.actions.refreshAndResumeActionConversation(parsed.actionId);
     }
+  });
+  // Send now: stop the run the waiting messages are queued for and, once it has ended, resume,
+  // which runs them first. Main carries it through, so a window closed meanwhile does not drop it.
+  // A run that ended on its own has already handed them to a successor run, so the Stop naming
+  // it is refused, or, once that run has ended too, the resume is; either way nothing changes.
+  registrar.handle('action:sendNow', async (event, request) => {
+    const parsed = parseInput(ActionStopRequestSchema, 'action:sendNow', request);
+    const turn = resolveTurn(ctx, event);
+    try {
+      await ctx.actions.stopAction(parsed);
+    } finally {
+      await ctx.actions.refreshAndResumeActionConversation(parsed.actionId);
+    }
+    await ctx.actions.whenRunEnds(parsed);
+    if (ctx.actions.getCurrentSubjectId() !== turn.subjectId) return;
+    await openUserTurn(
+      ctx,
+      event,
+      turn,
+      () => ctx.actions.resumeAction({ actionId: parsed.actionId, messageId: randomUUID() }),
+      null
+    );
   });
   // The main window shows an Action in place: its page, and its live run if one is unfinished.
   // Without the page no run is resumed, so the window must hear of the failure to retry.

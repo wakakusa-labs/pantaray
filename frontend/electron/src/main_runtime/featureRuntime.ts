@@ -386,6 +386,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           registerActionAssociation: params.notificationWindow.registerActionAssociation,
           refreshActionConversation: orchestration.refreshActionConversation,
           refreshAndResumeActionConversation: orchestration.refreshAndResumeActionConversation,
+          whenRunEnds: orchestration.whenRunEnds,
         },
         chat: {
           ...createChatFetcher({ requestJson, getUserId }),

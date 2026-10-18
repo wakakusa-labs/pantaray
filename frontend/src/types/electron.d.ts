@@ -279,6 +279,11 @@ declare global {
         openConversation: (request: { actionId: string }) => Promise<void>;
         /** Stops the run the window shows; rejects when the Stop was not accepted. */
         stopAction: (request: ActionStopRequest) => Promise<void>;
+        /**
+         * Stops that run and, once it has ended, resumes it with the messages waiting for it.
+         * Rejects when the Stop was not accepted.
+         */
+        sendNow: (request: ActionStopRequest) => Promise<void>;
         attachImage: (request: {
           bytes: ArrayBuffer;
           declaredMimeType: ActionImageMimeType;

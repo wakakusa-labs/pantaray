@@ -1623,3 +1623,89 @@ describe('withdrawing a message no run has taken', () => {
     expect(screen.queryByRole('button', { name: 'Withdraw this message' })).toBeNull();
   });
 });
+
+describe('sending the waiting messages now', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  type Status = CanonicalUserItem['entry']['status'];
+  const user = (key: string, status: Status): CanonicalUserItem => {
+    const item = canonicalUser(key, `text ${key}`);
+    const step_number = status === 'adopted' ? 1 : null;
+    return { ...item, entry: { ...item.entry, status, step_number } };
+  };
+  const run = (status: ActionConversationRunItem['status']): ActionConversationRunItem => ({
+    kind: 'run',
+    runId: 'run-1',
+    status,
+    startedAt: '2026-08-30T00:00:00.000000Z',
+    completedAt: null,
+    lines: [user('ran', 'adopted')],
+  });
+  const waiting = [
+    user('late', 'not_executed'),
+    user('first', 'pending'),
+    user('second', 'pending'),
+  ];
+
+  it('offers it under each message waiting for the running run, and only then', () => {
+    vi.stubGlobal('electron', { actions: { sendNow: vi.fn() } });
+    const { unmount } = renderView(viewWith([run('running'), ...waiting]), 'ja');
+
+    const buttons = screen.getAllByRole('button', { name: '今すぐ送信' });
+    expect(buttons).toHaveLength(2);
+    for (const [key, button] of [
+      ['first', buttons[0]],
+      ['second', buttons[1]],
+    ] as const) {
+      expect(
+        screen.getByText(`text ${key}`).closest('article')!.nextElementSibling
+      ).toContainElement(button);
+    }
+    unmount();
+
+    // Not once the run has stopped, nor while it waits for the user's approval.
+    for (const view of [
+      viewWith(
+        [{ ...run('canceled'), completedAt: '2026-08-30T00:01:00.000000Z' }, ...waiting],
+        'canceled'
+      ),
+      viewWith([run('approval_pending'), ...waiting]),
+    ]) {
+      const rendered = renderView(view);
+      expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull();
+      rendered.unmount();
+    }
+  });
+
+  it('sends them all once, stays busy meanwhile, and says when the run could not be stopped', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const sendNow = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject;
+        })
+    );
+    vi.stubGlobal('electron', { actions: { sendNow } });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderView(viewWith([run('running'), ...waiting]));
+    const buttons = () => screen.getAllByRole('button', { name: 'Send now' });
+
+    await userEvent.click(buttons()[1]);
+    for (const button of buttons()) expect(button).toHaveAttribute('aria-disabled', 'true');
+    // One Send now covers every waiting message, so another press stops nothing twice.
+    await userEvent.click(buttons()[0]);
+    expect(sendNow).toHaveBeenCalledTimes(1);
+    expect(sendNow).toHaveBeenCalledWith({ actionId: 'action-1', processId: 'run-1' });
+
+    await act(async () => fail(new Error('stop refused')));
+    expect(screen.getAllByRole('alert')[0]).toHaveTextContent(
+      'The run could not be stopped. Try again.'
+    );
+    expect(buttons()[0]).toHaveAttribute('aria-disabled', 'false');
+    await userEvent.click(buttons()[0]);
+    expect(sendNow).toHaveBeenCalledTimes(2);
+  });
+});

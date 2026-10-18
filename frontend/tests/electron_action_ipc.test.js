@@ -662,3 +662,85 @@ test('Withdrawing validates the request, maps a run that took it first, and refr
     'withdraw:step-2',
   ]);
 });
+
+function sendNowHarness(overrides = {}) {
+  const calls = [];
+  let endRun;
+  const invoke = register(
+    {
+      stopAction: async (request) => calls.push(`stop:${request.processId}`),
+      refreshAndResumeActionConversation: async (actionId) => {
+        calls.push(`reread:${actionId}`);
+        return 'refreshed';
+      },
+      whenRunEnds: (request) => {
+        calls.push(`wait:${request.processId}`);
+        return new Promise((resolve) => {
+          endRun = resolve;
+        });
+      },
+      resumeAction: async (request) => {
+        calls.push('resume');
+        assert.equal(request.actionId, 'action-1');
+        assert.match(request.messageId, /^[0-9a-f-]{36}$/);
+        return { ...MESSAGE_RESPONSE, message_id: request.messageId, process_id: 'run-2' };
+      },
+      refreshActionConversation: (actionId) => calls.push(`refresh:${actionId}`),
+      ...overrides,
+    },
+    { resumeLiveProcess: (request) => calls.push(`live:${request.processId}`) }
+  );
+  const sendNow = (request = { actionId: 'action-1', processId: 'run-1' }) =>
+    invoke('action:sendNow', request);
+  return { calls, sendNow, endRun: () => endRun() };
+}
+
+test('Send now resumes only once the stopped run has ended, so the resume takes the messages', async () => {
+  const harness = sendNowHarness();
+  const sent = harness.sendNow();
+  await new Promise(setImmediate);
+  // A resume before the run ends is refused, leaving the waiting messages unrun.
+  assert.deepEqual(harness.calls, ['stop:run-1', 'reread:action-1', 'wait:run-1']);
+
+  harness.endRun();
+  assert.equal(await sent, undefined);
+  assert.deepEqual(harness.calls.slice(3), ['resume', 'refresh:action-1', 'live:run-2']);
+  await assert.rejects(
+    async () => harness.sendNow({ actionId: 'action-1', processId: ' run-1' }),
+    (error) => error?.name === 'IpcValidationError'
+  );
+});
+
+test('Send now still resumes after the window that asked was closed', async () => {
+  let panelOpen = true;
+  const harness = sendNowHarness({
+    resolveOverlayIdForSender: () => (panelOpen ? 'overlay-1' : null),
+  });
+  const sent = harness.sendNow();
+  await new Promise(setImmediate);
+  panelOpen = false;
+  harness.endRun();
+  await sent;
+  assert.ok(harness.calls.includes('resume'));
+});
+
+test('Send now resumes nothing when the Stop is refused or the owner changed meanwhile', async () => {
+  const refusal = new LocalBackendRequestError('conflict', 409);
+  const refused = sendNowHarness({
+    stopAction: async () => {
+      throw refusal;
+    },
+  });
+  await assert.rejects(refused.sendNow(), (error) => error === refusal);
+  // The page is read again, since the run the Stop named may already have ended.
+  assert.deepEqual(refused.calls, ['reread:action-1']);
+
+  let subjectId = 'user-1';
+  const switched = sendNowHarness({ getCurrentSubjectId: () => subjectId });
+  const sent = switched.sendNow();
+  await new Promise(setImmediate);
+  subjectId = 'user-2';
+  switched.endRun();
+  assert.equal(await sent, undefined);
+  assert.ok(!switched.calls.includes('resume'));
+});

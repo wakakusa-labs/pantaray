@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from typing import Final
+from typing import Final, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -20,6 +20,8 @@ from ..contracts import (
     IntegrationTool,
     ToolClass,
     ToolFailed,
+    ToolOutcome,
+    ToolSucceeded,
 )
 from .client import ComposioResponse
 
@@ -38,6 +40,8 @@ CODE_VALIDATION_ERROR: Final = 10400
 _CODE_ACCOUNT_NOT_FOUND: Final = 4300
 _CODE_TOOL_NOT_FOUND: Final = 4301  # 404
 _SCOPE_SEPARATOR: Final = re.compile(r"[\s,]+")
+# Pantaray's own text: Composio's questions for the user are not passed on.
+NEEDS_INPUT_DETAIL: Final = "The tool asked for more input before it would run."
 
 type ScopeGroups = tuple[tuple[str, ...], ...]
 
@@ -70,6 +74,14 @@ class RawTool(_External):
     scopes: list[str] | None = None
     scope_requirements: _ScopeRequirements | None = None
     is_deprecated: bool = False
+
+
+class _ExecuteReply(_External):
+    # 'completed' is the only value that means the tool ran and succeeded
+    # (seen on 2026-10-18); input_required means it has not run.
+    result_type: Literal["completed", "failed", "input_required"]
+    data: JSONValue = None
+    error: str | None = None
 
 
 class _AccountState(_External):
@@ -210,12 +222,28 @@ def api_failure(response: ComposioResponse, *, is_write: bool) -> IntegrationErr
     return IntegrationError(kind=kind)
 
 
-def tool_failure(body: Mapping[str, JSONValue], *, is_write: bool) -> ToolFailed:
-    """Map a 200 reply whose tool call failed at the provider or at validation."""
+def execute_outcome(body: JSONValue, *, is_write: bool) -> ToolOutcome:
+    """Map the body of a 200 reply to a session execute."""
 
-    error = body.get("error")
-    text = error if isinstance(error, str) else ""
-    status = _provider_status(body.get("data"), text)
+    try:
+        reply = _ExecuteReply.model_validate(body)
+    except ValidationError:
+        # Missing or unknown result_type: whether the tool ran is not known.
+        return ToolFailed(error=IntegrationError(kind=_never_ran_or_unknown(is_write)))
+    if reply.result_type == "input_required":
+        return ToolFailed(
+            error=IntegrationError(kind="invalid_arguments"),
+            untrusted_detail=NEEDS_INPUT_DETAIL,
+        )
+    if reply.result_type == "completed" and not reply.error:
+        return ToolSucceeded(data=reply.data)
+    return _tool_failure(reply.data, reply.error or "", is_write=is_write)
+
+
+def _tool_failure(data: JSONValue, text: str, *, is_write: bool) -> ToolFailed:
+    """The tool call failed at the provider or at Composio's argument check."""
+
+    status = _provider_status(data, text)
     kind: IntegrationErrorKind
     if status in (400, 404, 409, 422, "INVALID_ARGUMENT", "NOT_FOUND", "OUT_OF_RANGE"):
         return ToolFailed(

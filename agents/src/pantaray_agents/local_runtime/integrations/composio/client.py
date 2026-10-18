@@ -8,6 +8,7 @@ part of the key.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 from typing import Final, Literal
 
 import httpx2
@@ -21,6 +22,9 @@ BASE_URL: Final = "https://backend.composio.dev/api/v3.1"
 USER_ID = "pantaray-desktop"
 # Listing calls sit on every Action turn's 5 s budget and on the settings poll.
 METADATA_TIMEOUT: Final = httpx2.Timeout(10.0, connect=5.0)
+# The account list sits on every Action start and turn; a slow reply leaves the
+# Action without integrations instead of holding it.
+ACCOUNTS_TIMEOUT: Final = httpx2.Timeout(4.0, connect=2.0)
 # A tool call runs a provider API behind Composio; a large read can take a while.
 EXECUTE_TIMEOUT: Final = httpx2.Timeout(60.0, connect=5.0)
 _PAGE_LIMIT: Final = 1000
@@ -55,17 +59,28 @@ class ComposioRequestError(Exception):
         self.response = response
 
 
+class ComposioClientClosedError(Exception):
+    """The key was removed or replaced; nothing more is sent with it."""
+
+
 class ComposioClient:
-    __slots__ = ("_headers", "_transport")
+    __slots__ = ("_closed", "_headers", "_lock", "_transport")
 
     def __init__(
         self, api_key: str, *, transport: httpx2.AsyncBaseTransport | None = None
     ) -> None:
         self._headers = {"x-api-key": api_key}
         self._transport = transport
+        self._lock = Lock()
+        self._closed = False
 
     def __repr__(self) -> str:
         return "ComposioClient()"
+
+    def close(self) -> None:
+        """Refuse every request not started yet; called from another thread."""
+        with self._lock:
+            self._closed = True
 
     async def send(
         self,
@@ -76,7 +91,14 @@ class ComposioClient:
         json: JSONValue = None,
         params: dict[str, str] | None = None,
     ) -> ComposioResponse:
-        """Raises httpx2.TransportError when no response arrived."""
+        """Raises httpx2.TransportError when no response arrived, and
+        ComposioClientClosedError, before sending anything, once closed."""
+
+        # Checked under the lock close() takes, so once close() returns no
+        # request starts; one that already started is not recalled.
+        with self._lock:
+            if self._closed:
+                raise ComposioClientClosedError
 
         # A client per call: callers run on several threads, each with its own
         # event loop, and a pooled connection is bound to the loop that opened it.
@@ -100,7 +122,9 @@ class ComposioClient:
             retry_after_seconds=int(retry_after) if retry_after.isdigit() else None,
         )
 
-    async def list_all(self, path: str, params: dict[str, str]) -> list[JSONValue]:
+    async def list_all(
+        self, path: str, params: dict[str, str], *, timeout: httpx2.Timeout
+    ) -> list[JSONValue]:
         """Every item of a paged listing, following ``next_cursor``.
 
         Raises ComposioRequestError on a non-200 reply and httpx2.TransportError
@@ -113,9 +137,7 @@ class ComposioClient:
             page_params = {**params, "limit": str(_PAGE_LIMIT)}
             if cursor is not None:
                 page_params["cursor"] = cursor
-            response = await self.send(
-                "GET", path, timeout=METADATA_TIMEOUT, params=page_params
-            )
+            response = await self.send("GET", path, timeout=timeout, params=page_params)
             body = response.body
             if response.status != 200 or not isinstance(body, dict):
                 raise ComposioRequestError(response)

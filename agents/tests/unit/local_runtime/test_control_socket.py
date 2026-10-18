@@ -1405,7 +1405,7 @@ COMPOSIO_KEY = "ak_composio_secret_key"
 
 @pytest.fixture
 def composio_without_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setattr(composio, "_first_sync", lambda gateway: None)
+    monkeypatch.setattr(composio.ComposioGateway, "start_sync", lambda self: None)
     yield
     apply_integration_credential(None)
 

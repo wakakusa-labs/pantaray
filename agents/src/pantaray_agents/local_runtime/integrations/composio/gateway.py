@@ -3,13 +3,14 @@
 Every tool call runs through one Tool Router session with Composio's own meta
 tools off, so the session is only the execution path; Pantaray searches its own
 index and connects from its own screen. Callers run on several threads, each
-with its own event loop, so the cached state is replaced whole, never shared
-through asyncio primitives.
+with its own event loop, so the cached state is replaced whole and the one
+shared account read is a thread-safe future, never an asyncio primitive.
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
 import time
@@ -34,7 +35,6 @@ from ..contracts import (
     ToolkitEntry,
     ToolkitSlug,
     ToolOutcome,
-    ToolSucceeded,
 )
 from ..registry import (
     get_integration_gateway,
@@ -43,9 +43,11 @@ from ..registry import (
 )
 from . import client as composio_client
 from .client import (
+    ACCOUNTS_TIMEOUT,
     EXECUTE_TIMEOUT,
     METADATA_TIMEOUT,
     ComposioClient,
+    ComposioClientClosedError,
     ComposioRequestError,
     ComposioResponse,
 )
@@ -62,12 +64,12 @@ from .mapping import (
     account_health,
     account_label,
     api_failure,
+    execute_outcome,
     granted_scopes,
     integration_tool,
     missing_scope,
     required_scopes,
     tool_disposition,
-    tool_failure,
 )
 from .toolkits import TOOLKITS, TOOLKITS_BY_SLUG
 
@@ -76,6 +78,8 @@ logger = logging.getLogger(__name__)
 # Every Action turn and every Insight probe asks for the accounts; connecting
 # and a refused call drop the cache at once, so this bounds only outside changes.
 ACCOUNTS_TTL_SECONDS: Final = 60.0
+# The whole account read, every page; below the Action turn's 5 s budget.
+ACCOUNTS_FETCH_SECONDS: Final = 4.0
 # Composio checks a key's permission before the body, so an empty body to an
 # area's write route answers 403/812 when denied and 400/10400 when allowed,
 # creating nothing (verified on 2026-10-18; no route reports a key's permissions).
@@ -138,6 +142,15 @@ class ComposioGateway:
         # Toolkits whose tools this gateway has put in the tool index.
         self._indexed: frozenset[ToolkitSlug] = frozenset()
         self._session: _Session | None = None
+        # The one account read in flight, shared by callers on every thread.
+        self._accounts_fetch: concurrent.futures.Future[_Accounts | None] | None = None
+        # asyncio keeps only weak references to tasks.
+        self._fetch_tasks: set[asyncio.Task[None]] = set()
+        self._syncing = False
+
+    def close(self) -> None:
+        """The key was removed or replaced: no request not yet started is sent."""
+        self._client.close()
 
     def toolkits(self) -> list[ToolkitEntry]:
         return list(TOOLKITS)
@@ -161,7 +174,9 @@ class ComposioGateway:
     async def list_tools(self, toolkit: ToolkitSlug) -> list[IntegrationTool]:
         entry = TOOLKITS_BY_SLUG[toolkit]
         items = await self._client.list_all(
-            "/tools", {"toolkit_slug": toolkit, "include_deprecated": "false"}
+            "/tools",
+            {"toolkit_slug": toolkit, "include_deprecated": "false"},
+            timeout=METADATA_TIMEOUT,
         )
         tools: list[IntegrationTool] = []
         metas: dict[str, _ToolMeta] = {}
@@ -201,11 +216,20 @@ class ComposioGateway:
         tool_request_id: str,
     ) -> ToolOutcome:
         # Composio takes no idempotency key, so tool_request_id has no use here.
+        try:
+            return await self._execute(slug=slug, account=account, arguments=arguments)
+        except ComposioClientClosedError:
+            # The key went away while the call waited; nothing was sent.
+            return _failed("connection_missing")
+
+    async def _execute(
+        self, *, slug: str, account: str, arguments: dict[str, JSONValue]
+    ) -> ToolOutcome:
         meta = self._tools.get(slug)
         is_write = meta is None or meta.tool_class == "write"
         try:
             accounts = await self._current_accounts()
-        except (ComposioRequestError, httpx2.TransportError) as exc:
+        except (ComposioRequestError, httpx2.TransportError, TimeoutError) as exc:
             _warn("Composio accounts unavailable", exc)
             return _failed("upstream_failed")
         if account not in accounts.by_id:
@@ -225,20 +249,14 @@ class ComposioGateway:
             )
         if isinstance(result, ToolFailed):
             return result
-        response_body = result.body
-        if result.status == 200 and isinstance(response_body, dict):
-            error = response_body.get("error")
-            if response_body.get("result_type") == "failed" or (
-                isinstance(error, str) and error
-            ):
-                failed = tool_failure(response_body, is_write=is_write)
-                logger.warning(
-                    "Composio tool failed",
-                    extra={"slug": slug, "kind": failed.error.kind},
-                )
-                return failed
-            return ToolSucceeded(data=response_body.get("data"))
-        return await self._refused(result, slug=slug, is_write=is_write)
+        if result.status != 200:
+            return await self._refused(result, slug=slug, is_write=is_write)
+        outcome = execute_outcome(result.body, is_write=is_write)
+        if isinstance(outcome, ToolFailed):
+            logger.warning(
+                "Composio tool failed", extra={"slug": slug, "kind": outcome.error.kind}
+            )
+        return outcome
 
     def invalidate_accounts(self) -> None:
         """Make the next account read ask Composio (a connection was added or changed).
@@ -249,30 +267,107 @@ class ComposioGateway:
         if snapshot is not None:
             self._accounts = replace(snapshot, fetched_at=float("-inf"))
 
-    async def sync(self) -> _Accounts:
-        """Read the accounts, then bring the key's limits and the tool index up to date.
+    async def sync(self) -> None:
+        """Probe the key's limits if unknown, read the accounts, fill the tool index.
 
-        Raises ComposioRequestError or httpx2.TransportError when the accounts
-        cannot be read; a toolkit whose tool list fails is tried at the next sync.
+        Raises what the account read raises; a toolkit whose tool list fails is
+        tried at the next sync.
         """
 
         if self._limits is None:
             await self._probe_limits()
-        accounts = await self._load_accounts()
+        accounts = await self._fetch_accounts()
         await self._sync_index(accounts.toolkits)
-        return accounts
+
+    def start_sync(self) -> None:
+        """Run sync on its own thread, once at a time, without waiting for it."""
+        with self._lock:
+            if self._syncing:
+                return
+            self._syncing = True
+        threading.Thread(
+            target=self._run_sync, name="composio-sync", daemon=True
+        ).start()
+
+    def _run_sync(self) -> None:
+        try:
+            asyncio.run(self.sync())
+        except (
+            ComposioRequestError,
+            ComposioClientClosedError,
+            httpx2.TransportError,
+            TimeoutError,
+        ) as exc:
+            # The next account read that finds the index behind syncs again.
+            _warn("Composio sync failed", exc)
+        finally:
+            with self._lock:
+                self._syncing = False
 
     async def _current_accounts(self) -> _Accounts:
+        """The accounts only: never waits for the key probes or the tool lists."""
+
         snapshot = self._accounts
         if snapshot is not None and (
             time.monotonic() - snapshot.fetched_at < ACCOUNTS_TTL_SECONDS
         ):
             return snapshot
-        return await self.sync()
+        snapshot = await self._fetch_accounts()
+        behind = snapshot.toolkits != self._indexed or self._limits is None
+        if behind and get_integration_gateway() is self:
+            self.start_sync()
+        return snapshot
+
+    async def _fetch_accounts(self) -> _Accounts:
+        while True:
+            with self._lock:
+                pending = self._accounts_fetch
+                owner = pending is None
+                if pending is None:
+                    pending = self._accounts_fetch = concurrent.futures.Future()
+            if owner:
+                # A task, so a caller that gives up at its own deadline does not
+                # abandon the read the other callers wait for.
+                task = asyncio.get_running_loop().create_task(
+                    self._run_accounts_fetch(pending)
+                )
+                self._fetch_tasks.add(task)
+                task.add_done_callback(self._fetch_tasks.discard)
+            snapshot = await asyncio.shield(asyncio.wrap_future(pending))
+            if snapshot is not None:
+                return snapshot
+            # The loop that ran the read closed first; read again.
+
+    async def _run_accounts_fetch(
+        self, pending: concurrent.futures.Future[_Accounts | None]
+    ) -> None:
+        try:
+            async with asyncio.timeout(ACCOUNTS_FETCH_SECONDS):
+                snapshot = await self._load_accounts()
+        except asyncio.CancelledError:
+            self._end_fetch(pending)
+            pending.set_result(None)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Handed to every waiter, which handles it as its own.
+            self._end_fetch(pending)
+            pending.set_exception(exc)
+        else:
+            self._end_fetch(pending)
+            pending.set_result(snapshot)
+
+    def _end_fetch(self, pending: concurrent.futures.Future[_Accounts | None]) -> None:
+        # Cleared before the result is set, so a waiter that reads again starts
+        # a new read instead of finding this one.
+        with self._lock:
+            if self._accounts_fetch is pending:
+                self._accounts_fetch = None
 
     async def _load_accounts(self) -> _Accounts:
         items = await self._client.list_all(
-            "/connected_accounts", {"user_ids": composio_client.USER_ID}
+            "/connected_accounts",
+            {"user_ids": composio_client.USER_ID},
+            timeout=ACCOUNTS_TIMEOUT,
         )
         by_id: dict[str, _Account] = {}
         for item in items:
@@ -466,22 +561,17 @@ def install_composio_gateway(api_key: str | None) -> None:
     """Register a gateway for the key, or none without one.
 
     The first sync runs on its own thread: Composio being slow or down must not
-    hold up the control socket or the backend's start.
+    hold up the control socket or the backend's start. The replaced gateway is
+    closed first, so a call that already resolved it sends nothing.
     """
 
+    previous = get_integration_gateway()
+    if isinstance(previous, ComposioGateway):
+        # A call already holding the old gateway must not send with the old key.
+        previous.close()
     if api_key is None:
         set_integration_gateway(None)
         return
     gateway = ComposioGateway(ComposioClient(api_key))
     set_integration_gateway(gateway)
-    threading.Thread(
-        target=_first_sync, args=(gateway,), name="composio-sync", daemon=True
-    ).start()
-
-
-def _first_sync(gateway: ComposioGateway) -> None:
-    try:
-        asyncio.run(gateway.sync())
-    except (ComposioRequestError, httpx2.TransportError) as exc:
-        # The next account read syncs again.
-        _warn("Composio first sync failed", exc)
+    gateway.start_sync()

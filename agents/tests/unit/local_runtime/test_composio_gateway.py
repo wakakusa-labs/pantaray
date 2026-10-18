@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from collections.abc import Callable, Iterator
+import threading
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 
 import httpx2
 import pytest
 
+from pantaray_agents.local_runtime.integrations import search
 from pantaray_agents.local_runtime.integrations.composio import (
     gateway as gateway_module,
 )
@@ -15,6 +19,10 @@ from pantaray_agents.local_runtime.integrations.composio.client import ComposioC
 from pantaray_agents.local_runtime.integrations.composio.gateway import (
     ACCOUNTS_TTL_SECONDS,
     ComposioGateway,
+    install_composio_gateway,
+)
+from pantaray_agents.local_runtime.integrations.composio.mapping import (
+    NEEDS_INPUT_DETAIL,
 )
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
@@ -239,8 +247,7 @@ async def test_an_inconclusive_probe_is_tried_again_at_the_next_sync(
     assert gateway.limits().can_execute
 
     composio.probe_replies["/auth_configs"] = _error(403, 812)
-    gateway.invalidate_accounts()
-    await gateway.list_accounts("gmail")
+    await gateway.sync()
 
     assert not gateway.limits().can_connect
 
@@ -419,7 +426,10 @@ async def test_a_session_without_the_toolkit_is_renewed_once(
     await _ready(gateway)
     composio.execute_replies += [
         _error(400, 4324),
-        httpx2.Response(200, json={"data": {"messages": []}, "error": None}),
+        httpx2.Response(
+            200,
+            json={"data": {"messages": []}, "error": None, "result_type": "completed"},
+        ),
     ]
 
     outcome = await _run(gateway, "GMAIL_SEND_EMAIL")
@@ -447,7 +457,9 @@ async def test_the_session_follows_the_connected_toolkits(
     composio: FakeComposio, gateway: ComposioGateway
 ) -> None:
     await _ready(gateway)
-    ok = httpx2.Response(200, json={"data": {}, "error": None})
+    ok = httpx2.Response(
+        200, json={"data": {}, "error": None, "result_type": "completed"}
+    )
     composio.execute_replies += [ok, ok, ok]
 
     await _run(gateway)
@@ -620,3 +632,155 @@ async def test_the_key_never_reaches_logs_or_reprs(
     )
     assert API_KEY not in records
     assert API_KEY not in repr(gateway) + repr(gateway._client) + repr(outcome)
+
+
+def _held(
+    composio: FakeComposio,
+    holds: Callable[[httpx2.Request], Awaitable[object] | None],
+) -> ComposioGateway:
+    """A gateway whose transport waits on ``holds`` before Composio answers."""
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        waiting = holds(request)
+        if waiting is not None:
+            await waiting
+        return composio.handle(request)
+
+    return ComposioGateway(
+        ComposioClient(API_KEY, transport=httpx2.MockTransport(handle))
+    )
+
+
+async def test_a_cleared_key_sends_nothing_a_waiting_call_had_not_sent(
+    composio: FakeComposio,
+) -> None:
+    session_seen, release = asyncio.Event(), asyncio.Event()
+
+    def hold_session(request: httpx2.Request) -> Awaitable[object] | None:
+        creating = request.url.path.endswith("/tool_router/session")
+        if not creating or request.content == b"{}":
+            return None
+        session_seen.set()
+        return release.wait()
+
+    held = _held(composio, hold_session)
+    await held.sync()
+    await held.list_tools("gmail")
+    set_integration_gateway(held)
+    try:
+        call = asyncio.create_task(
+            held.execute(
+                slug="GMAIL_SEND_EMAIL",
+                account=GMAIL_ACCOUNT,
+                arguments={},
+                tool_request_id="req-1",
+            )
+        )
+        await session_seen.wait()
+        install_composio_gateway(None)
+        release.set()
+        outcome = await call
+    finally:
+        set_integration_gateway(None)
+
+    assert isinstance(outcome, ToolFailed)
+    assert outcome.error.kind == "connection_missing"
+    assert composio.paths("POST", "/execute") == []
+
+
+@pytest.mark.parametrize(
+    ("body", "slug", "kind"),
+    [
+        (
+            {"result_type": "input_required", "input_requests": {"q": "Composio asks"}},
+            "GMAIL_SEND_EMAIL",
+            "invalid_arguments",
+        ),
+        (
+            {"data": {"sent": True}, "error": None},
+            "GMAIL_SEND_EMAIL",
+            "outcome_unknown",
+        ),
+        ({"data": {}, "error": None}, "GMAIL_FETCH_EMAILS", "upstream_failed"),
+        (
+            {"data": {}, "error": None, "result_type": "queued"},
+            "GMAIL_FETCH_EMAILS",
+            "upstream_failed",
+        ),
+    ],
+)
+async def test_only_a_completed_result_is_a_success(
+    composio: FakeComposio,
+    gateway: ComposioGateway,
+    body: JSONValue,
+    slug: str,
+    kind: str,
+) -> None:
+    await _ready(gateway)
+    composio.execute_replies.append(httpx2.Response(200, json=body))
+
+    outcome = await _run(gateway, slug)
+
+    assert isinstance(outcome, ToolFailed)
+    assert outcome.error.kind == kind
+    assert outcome.untrusted_detail == (
+        NEEDS_INPUT_DETAIL if kind == "invalid_arguments" else None
+    )
+
+
+async def test_concurrent_account_reads_share_one_request(
+    composio: FakeComposio,
+) -> None:
+    held = _held(composio, lambda request: asyncio.sleep(0.05))
+
+    await asyncio.gather(held.list_accounts("gmail"), held.list_accounts("gmail"))
+
+    assert len(composio.paths("GET", "/connected_accounts")) == 1
+
+
+async def test_a_held_tool_list_does_not_delay_action_start(
+    composio: FakeComposio, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(search, "AVAILABILITY_TIMEOUT_SECONDS", 1.0)
+    release = threading.Event()
+
+    def hold_tools(request: httpx2.Request) -> None:
+        if request.url.path.endswith("/tools"):
+            # Blocks the background sync's own thread and loop.
+            release.wait(timeout=10)
+
+    held = _held(composio, hold_tools)
+    set_integration_gateway(held)
+    try:
+        started = time.monotonic()
+        available = await search.integration_tools_available()
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+        set_integration_gateway(None)
+
+    assert available is True
+    assert elapsed < 1.0
+
+
+async def test_a_held_account_read_gives_up_at_the_action_start_deadline(
+    composio: FakeComposio, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(search, "AVAILABILITY_TIMEOUT_SECONDS", 0.2)
+    never = asyncio.Event()
+
+    def hold_accounts(request: httpx2.Request) -> Awaitable[object] | None:
+        if request.url.path.endswith("/connected_accounts"):
+            return never.wait()
+        return None
+
+    set_integration_gateway(_held(composio, hold_accounts))
+    try:
+        started = time.monotonic()
+        available = await search.integration_tools_available()
+        elapsed = time.monotonic() - started
+    finally:
+        set_integration_gateway(None)
+
+    assert available is False
+    assert elapsed < 1.0

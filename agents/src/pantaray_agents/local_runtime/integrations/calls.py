@@ -32,13 +32,14 @@ from .contracts import (
 )
 from .registry import get_integration_gateway, get_integration_tool_index
 from .search import (
-    ACCOUNT_SETTING_REMEDY,
+    RECONNECT_REMEDY,
     UPSTREAM_FAILED_MESSAGE,
     IntegrationGatewayError,
     gateway_await,
     gateway_call,
     load_account_setting,
-    refused_only_by_setting,
+    setting_fix,
+    setting_remedy,
     usable_accounts,
 )
 
@@ -202,27 +203,19 @@ async def _resolve_with_gateway(
             )
         if not usable:
             message = f"No connected {tool.toolkit} account may run {slug} now."
-            if not read_only:
-                refused = [
-                    item.label
-                    for item in connected
-                    if refused_only_by_setting(
+            if connected and not read_only:
+                message = " ".join(
+                    _denial(
                         gateway,
+                        db_path=db_path,
+                        busy_timeout_ms=busy_timeout_ms,
+                        user_id=user_id,
                         tool=tool,
                         account=item,
-                        setting=load_account_setting(
-                            db_path=db_path,
-                            busy_timeout_ms=busy_timeout_ms,
-                            user_id=user_id,
-                            account=item,
-                        ),
+                        read_only=read_only,
                     )
-                ]
-                if refused:
-                    message = (
-                        f"{slug} cannot run: the setting of {', '.join(refused)}"
-                        f" does not allow it. {ACCOUNT_SETTING_REMEDY}"
-                    )
+                    for item in connected
+                )
             return _refuse("permission_denied", message)
         account = usable[0]
     else:
@@ -297,6 +290,11 @@ def _denial(
     retry = "The permission may have changed during this run; do not retry."
     if not gateway_call(gateway.limits).can_execute:
         why = "the connection method does not allow running tools now"
+    elif gateway_call(partial(gateway.health, account.account)) != "ok":
+        # Reconnecting comes first: no setting makes this connection run.
+        why = "the account must be reconnected"
+        if not read_only:
+            retry = f"{RECONNECT_REMEDY} Do not retry."
     elif (
         gateway_call(
             partial(gateway.api_denied_reason, slug=tool.slug, account=account.account)
@@ -317,10 +315,9 @@ def _denial(
             why = "the account allows read tools only"
         else:
             why = "this tool is blocked for the account"
-        if not read_only and refused_only_by_setting(
-            gateway, tool=tool, account=account, setting=setting
-        ):
-            retry = f"{ACCOUNT_SETTING_REMEDY} Do not retry."
+        fix = setting_fix(gateway, tool=tool, account=account, setting=setting)
+        if not read_only and fix is not None:
+            retry = f"{setting_remedy(fix)} Do not retry."
     return f"Cannot run {tool.slug} with {account.label}: {why}. {retry}"
 
 

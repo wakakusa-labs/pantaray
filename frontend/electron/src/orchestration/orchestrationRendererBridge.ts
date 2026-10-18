@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import type { BrowserWindow } from 'electron';
 
+import type { ActionConversationPage } from '../actions/actionContracts';
 import type { ActionLatestPages } from '../actions/actionLatestPageReader';
 import {
   createActionLiveCoordinator,
@@ -37,6 +38,13 @@ type TimerApi = {
   clearTimeout: typeof globalThis.clearTimeout;
 };
 
+function isActiveRun(action: ActionConversationPage['action'], processId: string): boolean {
+  return (
+    (action.status === 'queued' || action.status === 'processing') &&
+    action.latest_run_id === processId
+  );
+}
+
 export function createOrchestrationRendererBridge(params: {
   notificationWindow: NotificationWindowApi;
   getMainWindow: () => BrowserWindow | null;
@@ -61,8 +69,22 @@ export function createOrchestrationRendererBridge(params: {
     onRecordsChanged: () => syncPrestartReplayLoop(),
   });
   const liveProcesses = new Map<string, string>();
+  // Runs a Send now waits on: each is released by the first page that shows its run is no longer
+  // the Action's active one, or by an owner change, which resets every Action.
+  const runEndWaiters = new Set<{ actionId: string; processId: string; release: () => void }>();
 
   function sendActionLiveUpdate(update: ActionLiveUpdate): void {
+    for (const waiter of runEndWaiters) {
+      if (
+        update.kind === 'reset' ||
+        (update.snapshot.actionId === waiter.actionId &&
+          update.snapshot.page !== null &&
+          !isActiveRun(update.snapshot.page.action, waiter.processId))
+      ) {
+        runEndWaiters.delete(waiter);
+        waiter.release();
+      }
+    }
     const mainWin = params.getMainWindow();
     if (mainWin && !mainWin.isDestroyed()) {
       try {
@@ -413,6 +435,13 @@ export function createOrchestrationRendererBridge(params: {
     return outcome;
   }
 
+  /** Resolves once the Action's page no longer shows `processId` as its active run. */
+  function whenRunEnds(request: { actionId: string; processId: string }): Promise<void> {
+    const page = actionLive.getSnapshot(request.actionId)?.page ?? null;
+    if (page === null || !isActiveRun(page.action, request.processId)) return Promise.resolve();
+    return new Promise((release) => runEndWaiters.add({ ...request, release }));
+  }
+
   function handleApprovalDecisionSettled(identity: {
     actionId: string;
     processId: string;
@@ -493,6 +522,7 @@ export function createOrchestrationRendererBridge(params: {
     getOverlaySnapshot: suggestionRecords.getSnapshot,
     refreshActionConversation,
     refreshAndResumeActionConversation,
+    whenRunEnds,
     handleApprovalDecisionSettled,
     handleDisconnect,
     resetActionLive,

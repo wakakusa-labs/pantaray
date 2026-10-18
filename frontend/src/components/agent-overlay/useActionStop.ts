@@ -14,7 +14,7 @@ type StopRequest = { actionId: string; processId: string; state: ActionStopState
  */
 export function actionStopTarget(
   lifecycle: ActionLiveSnapshot['lifecycle'],
-  page: ActionConversationPage | null,
+  page: Pick<ActionConversationPage, 'action'> | null,
   pageless: string | null
 ): string | null {
   if (lifecycle) return lifecycle.status === 'processing' ? lifecycle.processId : null;

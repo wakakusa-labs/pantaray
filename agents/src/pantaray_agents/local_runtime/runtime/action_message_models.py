@@ -24,11 +24,15 @@ ACTION_USER_STEP_NAME = "user_request"
 ACTION_RESUME_STEP_NAME = "resume_request"
 
 # What the model reads at the top of a resumed turn. It is the whole message the
-# user "sent", so it must say what happened and what not to redo.
+# user "sent", so it must say what happened and what not to redo. A resume also
+# carries the messages the user sent while the run worked (Send now), which this
+# text must not talk over: it never asks to continue ahead of them.
 ACTION_RESUME_REQUEST_TEXT = (
-    "The user stopped this run before it finished and has now asked you to "
-    "continue it. Pick up from where the work stopped: do not repeat a tool "
-    "call that already took effect, and do not restate what you already "
+    "The user stopped this run before it finished and has started a new turn. "
+    "Any messages the user sent while it worked come before this one: they say "
+    "what the user wants now, so follow them even where they differ from the work "
+    "already done. Otherwise pick up from where the work stopped: do not repeat a "
+    "tool call that already took effect, and do not restate what you already "
     "reported."
 )
 

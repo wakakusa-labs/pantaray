@@ -130,6 +130,11 @@
   max-width: 52ch;
 }
 
+/* Keep a link's hit area and focus ring to its text, not the whole column. */
+.ai-row-control > .settings-inline-link {
+  align-self: flex-start;
+}
+
 /* 入力欄は既存の history-filter 系統を使う（設計システム 3.2: 4 系統目を作らない）。
    この画面では値が短いので幅だけ絞る。 */
 .ai-row-control .history-filter-input,

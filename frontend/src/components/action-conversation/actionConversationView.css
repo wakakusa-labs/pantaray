@@ -39,7 +39,6 @@
 
 /* ユーザー発話だけを吹き出しにし、エージェントの返答は地の文として置く。 */
 .action-conversation__user {
-  position: relative;
   width: fit-content;
   max-width: 85%;
   margin-left: auto;
@@ -82,6 +81,7 @@
 }
 
 .action-conversation__copy,
+.action-conversation__send-now,
 .action-conversation__withdraw {
   display: inline-flex;
   align-items: center;
@@ -95,31 +95,20 @@
 }
 
 .action-conversation__copy:hover,
+.action-conversation__send-now:hover,
 .action-conversation__withdraw:hover {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* 発話の右下。ホバーかフォーカスの間だけ見せ、本文に重なっても読めるよう吹き出しと同じ地を敷く。 */
+/* 吹き出しの下、右端。吹き出しか行にカーソルがある間かフォーカス中だけ見せる。 */
 .action-conversation__user-copy {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  border: 1px solid var(--border-color);
-  background: var(--surface-bg);
   opacity: 0;
 }
 
-.action-conversation__user:hover .action-conversation__user-copy,
+.action-conversation__user-turn:hover .action-conversation__user-copy,
 .action-conversation__user-copy:focus-visible {
   opacity: 1;
-}
-
-/* 汎用のホバー色は半透明なので、下の本文が透けないよう吹き出しの地の上に重ねる。 */
-.action-conversation__user-copy:hover,
-.action-conversation__user-copy:focus-visible {
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)), var(--surface-bg);
 }
 
 /*
@@ -127,6 +116,7 @@
  * スクロール領域に切られるので、ボタンの内側に描く。
  */
 .action-conversation__copy:focus-visible,
+.action-conversation__send-now:focus-visible,
 .action-conversation__withdraw:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: -2px;
@@ -200,13 +190,14 @@
   opacity: 0.5;
 }
 
-/* 未実行のメッセージを取り消す ✕。吹き出しの外、右端の下に置く。 */
+/* 吹き出しの外、右端の下。コピーと、未実行のメッセージを取り消す ✕ を並べる。 */
 .action-conversation__user-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: var(--space-xs);
 }
 
+.action-conversation__send-now[aria-disabled='true'],
 .action-conversation__withdraw[aria-disabled='true'] {
   cursor: default;
   opacity: 0.5;

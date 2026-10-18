@@ -19,7 +19,6 @@ from pantaray_agents.local_runtime.integrations.composio.connect import (
     ConnectionState,
     ConnectLink,
     ConnectNotAllowedError,
-    Reconnect,
     UnknownConnectionError,
     UnknownToolkitError,
 )
@@ -42,8 +41,6 @@ from pantaray_agents.local_runtime.integrations.settings import (
     PermissionStore,
     UnknownIntegrationAccountError,
     UnknownIntegrationToolError,
-    apply_new_account_default,
-    carry_over_account_setting,
     list_account_tools,
     load_integrations_status,
     set_account_access,
@@ -236,10 +233,10 @@ async def start_connect(
     toolkit: str,
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> ConnectLink:
-    _check_user(user_id, resolved_user_id)
+    store = _store(user_id, resolved_user_id)
     connections = _connections()
     with _connect_errors():
-        return await connections.connect(toolkit)
+        return await connections.connect(toolkit, store=store)
 
 
 @router.post(f"{_ACCOUNT_PATH}/reconnect", response_model=ConnectLink)
@@ -249,10 +246,10 @@ async def start_reconnect(
     account: str,
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> ConnectLink:
-    _check_user(user_id, resolved_user_id)
+    store = _store(user_id, resolved_user_id)
     connections = _connections()
     with _connect_errors():
-        return await connections.reconnect(toolkit, account)
+        return await connections.reconnect(toolkit, account, store=store)
 
 
 @router.delete(_ACCOUNT_PATH, status_code=status.HTTP_204_NO_CONTENT)
@@ -299,35 +296,11 @@ async def get_connection_state(
     connection_id: str,
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> ConnectionStateResponse:
-    store = _store(user_id, resolved_user_id)
+    _check_user(user_id, resolved_user_id)
     connections = _connections()
     with _connect_errors():
-        found = await connections.status(connection_id)
-    if found.state != "active":
-        return ConnectionStateResponse(state=found.state)
-    # Both writes are idempotent, so overlapping polls and a poll after a
-    # failed one land in the same state. They come before the replaced account
-    # is deleted, so a failure in between loses no setting.
-    if isinstance(found.origin, Reconnect):
-        carry_over_account_setting(
-            store=store,
-            toolkit=found.toolkit,
-            replaced=found.origin.replaces,
-            account=found.account,
-            updated_at=now_utc_iso(),
-        )
-    elif found.origin == "connect":
-        apply_new_account_default(
-            store=store,
-            toolkit=found.toolkit,
-            account=found.account,
-            updated_at=now_utc_iso(),
-        )
-    # Origin unknown (a restart since the link): nothing is saved, so the
-    # account shows off until the user chooses.
-    with _connect_errors():
-        await connections.activate(found)
-    return ConnectionStateResponse(state=found.state)
+        state = await connections.status(connection_id)
+    return ConnectionStateResponse(state=state)
 
 
 @contextmanager

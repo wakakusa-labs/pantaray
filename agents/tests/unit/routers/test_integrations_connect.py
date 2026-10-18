@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,9 @@ from tests.unit.local_runtime.migrated_db import prepare_test_database
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.integrations.composio import client as client_module
+from pantaray_agents.local_runtime.integrations.composio import (
+    connect as connect_module,
+)
 from pantaray_agents.local_runtime.integrations.composio.client import ComposioClient
 from pantaray_agents.local_runtime.integrations.composio.gateway import (
     ComposioGateway,
@@ -442,7 +446,7 @@ async def test_concurrent_first_active_polls_refresh_the_caches_once(
     )
     set_integration_gateway(created)
     await created.sync()
-    link = await created.connections.connect("gmail")
+    link = await created.connections.connect("gmail", store=store)
     composio.statuses[link.connection_id] = "ACTIVE"
     # Holds the first poll inside the activation while the others arrive.
     composio.tools_delay = 0.05
@@ -751,3 +755,84 @@ def test_links_and_link_tokens_never_reach_logs(
     assert caplog.records
     assert LINK_TOKEN not in logged
     assert API_KEY not in logged
+
+
+def _finalized() -> None:
+    for thread in threading.enumerate():
+        if thread.name == "composio-finalize":
+            thread.join(timeout=5)
+
+
+def _refresh(client: TestClient, gateway: ComposioGateway) -> None:
+    """An account read such as an Action turn's, after the cache went stale."""
+    gateway.invalidate_accounts()
+    assert client.get(BASE).status_code == 200
+    _finalized()
+
+
+def test_an_account_read_finalizes_links_nobody_polls_exactly_once(
+    composio: FakeComposio,
+    gateway: ComposioGateway,
+    store: PermissionStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    for name in ("apply_new_account_default", "carry_over_account_setting"):
+        real = getattr(connect_module, name)
+
+        def counted(*, _real=real, _name=name, **kwargs: object) -> None:
+            calls.append(_name)
+            _real(**kwargs)
+
+        monkeypatch.setattr(connect_module, name, counted)
+    _save(store, WORK, "read_write")
+    _block(store, WORK, "GMAIL_FETCH_EMAILS")
+
+    with _client() as client:
+        added = client.post(f"{BASE}/gmail/connect", json={}).json()["connection_id"]
+        reconnected = client.post(
+            f"{BASE}/gmail/accounts/{WORK}/reconnect", json={}
+        ).json()["connection_id"]
+        # The user finishes both in the browser; the screen polls neither.
+        composio.statuses[added] = "ACTIVE"
+        composio.statuses[reconnected] = "ACTIVE"
+        for _ in range(3):
+            _refresh(client, gateway)
+        # A late poll finds the work done.
+        assert client.get(f"{BASE}/connections/{added}").json() == {"state": "active"}
+        accounts = _accounts(client)
+
+    assert sorted(calls) == ["apply_new_account_default", "carry_over_account_setting"]
+    assert accounts[added]["access"] == "read_only"
+    assert accounts[reconnected]["access"] == "read_write"
+    assert _blocked(store, reconnected) == {"GMAIL_FETCH_EMAILS"}
+    assert WORK not in accounts
+    assert composio.sent("DELETE", "") == [f"/connected_accounts/{WORK}"]
+    assert _access(store, WORK) == "off"
+
+
+def test_a_failed_finalize_keeps_the_account_list_and_is_tried_again(
+    composio: FakeComposio,
+    gateway: ComposioGateway,
+    store: PermissionStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _save(store, WORK, "read_write")
+    delete_old = ("DELETE", f"/connected_accounts/{WORK}")
+    composio.replies[delete_old] = _error(503, 0)
+
+    with _client() as client:
+        connection_id = client.post(
+            f"{BASE}/gmail/accounts/{WORK}/reconnect", json={}
+        ).json()["connection_id"]
+        composio.statuses[connection_id] = "ACTIVE"
+        _refresh(client, gateway)
+        assert set(_accounts(client)) == {WORK, connection_id}
+        del composio.replies[delete_old]
+        _refresh(client, gateway)
+        accounts = _accounts(client)
+
+    assert list(accounts) == [connection_id]
+    [failure] = [r for r in caplog.records if "not finalized" in r.getMessage()]
+    assert vars(failure)["account"] == connection_id
+    assert LINK_TOKEN not in caplog.text

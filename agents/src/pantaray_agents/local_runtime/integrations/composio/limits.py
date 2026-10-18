@@ -82,7 +82,11 @@ async def probe_limits(client: ComposioClient) -> GatewayLimits | None:
 
 
 def warn_composio_failure(
-    message: str, exc: Exception, *, toolkit: str | None = None
+    message: str,
+    exc: Exception,
+    *,
+    toolkit: str | None = None,
+    account: str | None = None,
 ) -> None:
     # Only the status and code: Composio's text can quote part of the key, and
     # its bodies can hold a connect link, which is as good as a credential.
@@ -91,4 +95,6 @@ def warn_composio_failure(
         if isinstance(exc, ComposioRequestError)
         else type(exc).__name__
     )
-    logger.warning(message, extra={"reason": reason, "toolkit": toolkit})
+    logger.warning(
+        message, extra={"reason": reason, "toolkit": toolkit, "account": account}
+    )

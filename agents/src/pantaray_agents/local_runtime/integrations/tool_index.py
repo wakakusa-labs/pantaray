@@ -65,6 +65,9 @@ class ToolIndex:
                 return entry.tool
         return None
 
+    def tools(self, toolkit: ToolkitSlug) -> list[IntegrationTool]:
+        return [entry.tool for entry in self._snapshot(toolkit)]
+
     def search(
         self,
         query: str,

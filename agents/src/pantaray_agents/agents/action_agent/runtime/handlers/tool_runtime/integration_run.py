@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 from jsonschema import Draft7Validator, ValidationError
@@ -64,7 +65,13 @@ from .approval_preparation import (
     build_approval_denied_preparation,
     build_approval_required_preparation,
 )
-from .integration_search import usable_accounts
+from .integration_search import (
+    UPSTREAM_FAILED_MESSAGE,
+    IntegrationGatewayError,
+    gateway_await,
+    gateway_call,
+    usable_accounts,
+)
 from .shared import (
     CompletedToolControl,
     FailedToolControl,
@@ -85,7 +92,7 @@ _MESSAGES: dict[IntegrationErrorKind, str] = {
     "invalid_arguments": "The service rejected the arguments.",
     "rate_limited": "The service is limiting requests; wait before trying again.",
     "usage_limit_reached": "The connection's monthly usage limit is used up; do not retry.",
-    "upstream_failed": "The service failed or timed out; trying later may work.",
+    "upstream_failed": UPSTREAM_FAILED_MESSAGE,
     "outcome_unknown": "The write may or may not have run. Do not run it again; ask the user to check.",
     "permission_denied": "The current permission does not allow this call.",
     "account_required": "Several accounts can run this tool; pass account as one of the candidates.",
@@ -108,6 +115,7 @@ class _Refusal:
 class _Resolved:
     gateway: IntegrationGateway
     tool: IntegrationTool
+    toolkit_name: str
     account: IntegrationAccount
     arguments: dict[str, JSONValue]
 
@@ -256,6 +264,15 @@ async def run_integration_run_tool(
 
 
 async def _resolve(*, user_id: str, args: ToolArgs) -> _Resolved | _Refusal:
+    try:
+        return await _resolve_with_gateway(user_id=user_id, args=args)
+    except IntegrationGatewayError:
+        return _refuse("upstream_failed", _MESSAGES["upstream_failed"])
+
+
+async def _resolve_with_gateway(
+    *, user_id: str, args: ToolArgs
+) -> _Resolved | _Refusal:
     slug = require_string_arg(args, "slug")
     requested = optional_string_arg(args, "account")
     gateway = get_integration_gateway()
@@ -265,7 +282,7 @@ async def _resolve(*, user_id: str, args: ToolArgs) -> _Resolved | _Refusal:
             "invalid_arguments",
             f"No tool has the slug {slug!r}; find one with integration_search_tools.",
         )
-    connected = await gateway.list_accounts(tool.toolkit)
+    connected = await gateway_await(gateway.list_accounts(tool.toolkit))
     usable = [
         item.account for item in usable_accounts(gateway, user_id, tool, connected)
     ]
@@ -306,8 +323,15 @@ async def _resolve(*, user_id: str, args: ToolArgs) -> _Resolved | _Refusal:
             if exc.absolute_path
             else exc.message,
         )
+    names = {
+        entry.toolkit: entry.display_name for entry in gateway_call(gateway.toolkits)
+    }
     return _Resolved(
-        gateway=gateway, tool=tool, account=account, arguments=json_object_copy(parsed)
+        gateway=gateway,
+        tool=tool,
+        toolkit_name=names[tool.toolkit],
+        account=account,
+        arguments=json_object_copy(parsed),
     )
 
 
@@ -319,9 +343,14 @@ def _denial(
 ) -> str:
     """Say why the current permission refuses, without the connection's own text."""
 
-    if not gateway.limits().can_execute:
+    if not gateway_call(gateway.limits).can_execute:
         why = "the connection method does not allow running tools now"
-    elif gateway.api_denied_reason(slug=tool.slug, account=account.account) is not None:
+    elif (
+        gateway_call(
+            partial(gateway.api_denied_reason, slug=tool.slug, account=account.account)
+        )
+        is not None
+    ):
         why = "the account's connection does not grant this tool"
     else:
         db_path, busy_timeout_ms = read_local_runtime_db_config()
@@ -348,7 +377,6 @@ def _authorize_write(
     identity: _Identity, resolved: _Resolved, tool_request_id: str, requested_at: str
 ) -> tuple[str | None, Literal["settings", "prompt"] | None]:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    toolkits = {entry.toolkit: entry for entry in resolved.gateway.toolkits()}
     return ensure_tool_authorization(
         context=load_broker_context(
             db_path=db_path,
@@ -362,17 +390,21 @@ def _authorize_write(
         ),
         tool_invocation_id=None,
         tool_request_id=tool_request_id,
-        # No tool has its own summary, so the user approves the whole request:
-        # the account, the tool and every argument. The approval binds to it.
+        # The approval binds to this summary: a request that resolves to another
+        # toolkit, account, slug or arguments no longer matches it and is refused.
+        # No tool has its own summary, so the user sees the whole request.
         command_summary={
             "summary_kind": "integration_tool",
             "account": resolved.account.label,
-            "toolkit": toolkits[resolved.tool.toolkit].display_name,
+            "toolkit": resolved.toolkit_name,
             "tool": resolved.tool.name,
             "description": resolved.tool.description,
             "arguments": json.dumps(
                 resolved.arguments, ensure_ascii=False, indent=2, sort_keys=True
             ),
+            "toolkit_id": resolved.tool.toolkit,
+            "account_id": resolved.account.account,
+            "slug": resolved.tool.slug,
         },
         requested_at=requested_at,
         integration_tool_scope=integration_tool_scope(

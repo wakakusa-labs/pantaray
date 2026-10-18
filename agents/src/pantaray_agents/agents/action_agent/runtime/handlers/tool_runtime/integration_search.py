@@ -8,7 +8,10 @@ grant covers the tool, and the saved permission allows or asks for it.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
@@ -34,8 +37,37 @@ from pantaray_agents.local_runtime.tooling.repository.integration_permissions im
     resolve_integration_tool,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 
 from .shared import UnprojectedToolExecutionResult
+
+logger = logging.getLogger(__name__)
+
+UPSTREAM_FAILED_MESSAGE = "The service failed or timed out; trying later may work."
+
+
+class IntegrationGatewayError(RuntimeError):
+    """A gateway call raised. Its text is the connection's own, so it is dropped."""
+
+
+def gateway_call[T](call: Callable[[], T]) -> T:
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001
+        raise _dropped(exc) from None
+
+
+async def gateway_await[T](call: Awaitable[T]) -> T:
+    try:
+        return await call
+    except Exception as exc:  # noqa: BLE001
+        raise _dropped(exc) from None
+
+
+def _dropped(exc: Exception) -> IntegrationGatewayError:
+    # The exception text may carry credentials or external text: log the type only.
+    logger.warning("integration gateway call raised: %s", type(exc).__name__)
+    return IntegrationGatewayError(type(exc).__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +95,19 @@ async def run_integration_search_tool(
     gateway = get_integration_gateway()
     found: list[tuple[IntegrationTool, list[UsableAccount]]] = []
     if gateway is not None:
-        found = await _search(gateway, user_id=state["user_id"], args=args)
+        try:
+            found = await _search(gateway, user_id=state["user_id"], args=args)
+        except IntegrationGatewayError:
+            return UnprojectedToolExecutionResult(
+                step_id=step_id,
+                tool_id=tool_def.tool_id,
+                status="error",
+                started_at=started_at,
+                completed_at=now_utc_iso(),
+                output=build_runtime_tool_error_output(
+                    error_type="upstream_failed", message=UPSTREAM_FAILED_MESSAGE
+                ),
+            )
     output: dict[str, JSONValue] = {
         "tools": [
             {
@@ -99,8 +143,14 @@ async def _search(
     gateway: IntegrationGateway, *, user_id: str, args: ToolArgs
 ) -> list[tuple[IntegrationTool, list[UsableAccount]]]:
     toolkit = optional_string_arg(args, "toolkit")
-    names = [toolkit] if toolkit else [entry.toolkit for entry in gateway.toolkits()]
-    accounts = {name: await gateway.list_accounts(name) for name in names}
+    names = (
+        [toolkit]
+        if toolkit
+        else [entry.toolkit for entry in gateway_call(gateway.toolkits)]
+    )
+    accounts = {
+        name: await gateway_await(gateway.list_accounts(name)) for name in names
+    }
     usable_by_slug: dict[str, list[UsableAccount]] = {}
 
     def usable(tool: IntegrationTool) -> bool:
@@ -126,15 +176,17 @@ def usable_accounts(
     tool: IntegrationTool,
     accounts: list[IntegrationAccount],
 ) -> list[UsableAccount]:
-    if not gateway.limits().can_execute:
+    """Raises IntegrationGatewayError when the gateway raises."""
+
+    if not gateway_call(gateway.limits).can_execute:
         return []
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     usable: list[UsableAccount] = []
     for account in accounts:
-        if (
-            gateway.api_denied_reason(slug=tool.slug, account=account.account)
-            is not None
-        ):
+        denial = gateway_call(
+            partial(gateway.api_denied_reason, slug=tool.slug, account=account.account)
+        )
+        if denial is not None:
             continue
         decision = resolve_integration_tool(
             db_path=db_path,

@@ -116,11 +116,14 @@ class FakeGateway:
         self.denied: dict[tuple[str, str], ApiDenial] = {}
         self.outcome: ToolOutcome | Exception = ToolSucceeded(data={"id": "msg-1"})
         self.executed: list[tuple[str, str, dict[str, JSONValue]]] = []
+        self.accounts_error: Exception | None = None
 
     def toolkits(self) -> list[ToolkitEntry]:
         return [ToolkitEntry(toolkit="gmail", display_name="Gmail")]
 
     async def list_accounts(self, toolkit: ToolkitSlug) -> list[IntegrationAccount]:
+        if self.accounts_error is not None:
+            raise self.accounts_error
         return self.accounts if toolkit == "gmail" else []
 
     def health(self, account: str) -> IntegrationHealth:
@@ -278,8 +281,10 @@ async def _run(
     return result.output
 
 
-async def _approve_send(env: SimpleNamespace, request: str) -> dict[str, JSONValue]:
-    args = _args("GMAIL_SEND_EMAIL", WORK.account, SEND_ARGUMENTS)
+async def _approve_send(
+    env: SimpleNamespace, request: str, account: str | None = WORK.account
+) -> dict[str, JSONValue]:
+    args = _args("GMAIL_SEND_EMAIL", account, SEND_ARGUMENTS)
     asked = await _preflight(env, args, request)
     assert isinstance(asked.control, ApprovalRequiredToolControl)
     apply_approval_decision(
@@ -490,3 +495,64 @@ async def test_failures_reach_the_model_only_as_kinds(env: SimpleNamespace) -> N
     assert unknown["error_type"] == "outcome_unknown"
     assert "secret" not in json.dumps(unknown)
     assert len(env.gateway.executed) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_approval_does_not_carry_over_to_another_account(
+    env: SimpleNamespace,
+) -> None:
+    # Two accounts that look alike on screen; only one may send when approved.
+    first = IntegrationAccount(
+        account="acct-a", toolkit="gmail", label="me@example.com"
+    )
+    second = IntegrationAccount(
+        account="acct-b", toolkit="gmail", label="me@example.com"
+    )
+    env.gateway.accounts = [first, second]
+    _set_access(env, first, "read_write")
+    _set_access(env, second, "off")
+    args = await _approve_send(env, "send", account=None)
+
+    _set_access(env, first, "off")
+    _set_access(env, second, "read_write")
+    preparation = await _preflight(env, args, "send")
+    result = await integration_run.run_integration_run_tool(
+        step_id="step-1",
+        tool_def=INTEGRATION_RUN_TOOL_TOOL,
+        state=env.state,
+        args=args,
+        tool_request_id="send",
+        tool_invocation_id="invocation-send",
+        requested_at=NOW,
+    )
+
+    assert not isinstance(preparation.control, CompletedToolControl)
+    assert isinstance(result.output, dict)
+    assert _error(result.output)["error_type"] == "approval_state_changed"
+    assert env.gateway.executed == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_exceptions_never_reach_the_model(
+    env: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    env.gateway.accounts_error = RuntimeError("Bearer synthetic-secret-token")
+
+    search = await integration_search.run_integration_search_tool(
+        step_id="step-0",
+        tool_def=INTEGRATION_SEARCH_TOOLS_TOOL,
+        args={"query": "email"},
+        state=env.state,
+    )
+    args = _args("GMAIL_SEND_EMAIL", WORK.account, SEND_ARGUMENTS)
+    preparation = await _preflight(env, args, "send")
+    run = await _run(env, args, "send")
+
+    assert search.status == "error"
+    assert isinstance(search.output, dict)
+    assert _error(search.output)["error_type"] == "upstream_failed"
+    assert _error(run)["error_type"] == "upstream_failed"
+    for payload in (search.output, preparation.result.output, run):
+        assert "synthetic-secret" not in json.dumps(payload)
+    assert "synthetic-secret" not in caplog.text
+    assert env.gateway.executed == []

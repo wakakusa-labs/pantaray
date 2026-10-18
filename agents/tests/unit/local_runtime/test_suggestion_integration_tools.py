@@ -1,6 +1,6 @@
 """Suggestion research's read-only integration tools against a fake gateway.
 
-AC-C4: one Suggestion runs integration_run_tool at most four times in all.
+AC-C4: one Suggestion's integration_run_tool reaches the gateway at most four times.
 AC-C6: without a connected account the research tool set is today's.
 """
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from tests.unit.agents.action_agent.runtime.test_integration_action_tools import (
+    HOME,
     TOOLS,
     WORK,
     FakeGateway,
@@ -123,11 +124,13 @@ async def _call(
     )
 
 
-async def _run(registry: ReactToolRegistry, slug: str) -> ReactToolResult:
+async def _run(
+    registry: ReactToolRegistry, slug: str, account: str | None = None
+) -> ReactToolResult:
     return await _call(
         registry,
         "integration_run_tool",
-        {"slug": slug, "account": None, "arguments": json.dumps({})},
+        {"slug": slug, "account": account, "arguments": json.dumps({})},
     )
 
 
@@ -178,34 +181,52 @@ async def test_a_write_tool_is_never_offered_and_never_runs(db_path: Path) -> No
     assert gateway.executed == [("GMAIL_FETCH_EMAILS", WORK.account, {})]
 
 
-async def test_the_fifth_run_across_lens_runs_never_reaches_the_gateway(
+async def test_only_gateway_executions_count_and_the_fifth_never_runs(
     db_path: Path,
 ) -> None:
     gateway = _connect(db_path)
+    gateway.accounts = [WORK, HOME]
+    set_integration_account_access(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        toolkit="gmail",
+        account=HOME.account,
+        access="read_only",
+        updated_at=NOW,
+    )
     suggestion = _research_tools(db_path)
     lenses = [await _lens_run(suggestion) for _ in range(3)]
 
-    # Any call counts, a refused one too: each may cost the user's quota.
-    for registry, slug in zip(
-        (lenses[0], lenses[0], lenses[1], lenses[2]),
-        (
-            "GMAIL_FETCH_EMAILS",
-            "GMAIL_SEND_EMAIL",
-            "GMAIL_LIST_LABELS",
-            "GMAIL_FETCH_EMAILS",
-        ),
-        strict=True,
+    # Refused before the gateway, so none of these spends the budget.
+    for registry, slug, account, kind in (
+        (lenses[0], "GMAIL_FETCH_EMAILS", None, "account_required"),
+        (lenses[0], "GMAIL_SEND_EMAIL", WORK.account, "permission_denied"),
+        (lenses[1], "GMAIL_NO_SUCH_TOOL", WORK.account, "invalid_arguments"),
     ):
-        await _run(registry, slug)
-    assert len(gateway.executed) == SUGGESTION_INTEGRATION_RUN_LIMIT - 1
+        refused = await _run(registry, slug, account)
+        assert isinstance(refused.output, dict)
+        assert refused.output["error_code"] == kind
+    assert gateway.executed == []
 
-    refused = await _run(lenses[1], "GMAIL_FETCH_EMAILS")
-    assert refused.status == "error" and isinstance(refused.output, dict)
-    assert refused.output["error_code"] == INTEGRATION_CALL_LIMIT_REACHED
-    assert len(gateway.executed) == SUGGESTION_INTEGRATION_RUN_LIMIT - 1
+    for registry, slug, account in (
+        (lenses[0], "GMAIL_FETCH_EMAILS", WORK.account),
+        (lenses[1], "GMAIL_LIST_LABELS", WORK.account),
+        (lenses[2], "GMAIL_FETCH_EMAILS", HOME.account),
+        (lenses[2], "GMAIL_LIST_LABELS", HOME.account),
+    ):
+        assert (await _run(registry, slug, account)).status == "success"
+    assert len(gateway.executed) == SUGGESTION_INTEGRATION_RUN_LIMIT
+
+    capped = await _run(lenses[1], "GMAIL_FETCH_EMAILS", WORK.account)
+    assert isinstance(capped.output, dict)
+    assert capped.output["error_code"] == INTEGRATION_CALL_LIMIT_REACHED
+    assert len(gateway.executed) == SUGGESTION_INTEGRATION_RUN_LIMIT
 
     # The next Suggestion starts with its own budget.
-    fresh = await _run(await _lens_run(_research_tools(db_path)), "GMAIL_LIST_LABELS")
+    fresh = await _run(
+        await _lens_run(_research_tools(db_path)), "GMAIL_LIST_LABELS", WORK.account
+    )
     assert fresh.status == "success"
 
 

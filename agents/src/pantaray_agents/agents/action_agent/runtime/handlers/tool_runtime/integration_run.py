@@ -113,7 +113,7 @@ class IntegrationRefusal:
 
 
 @dataclass(frozen=True, slots=True)
-class _Resolved:
+class ResolvedIntegrationCall:
     gateway: IntegrationGateway
     tool: IntegrationTool
     toolkit_name: str
@@ -145,8 +145,13 @@ async def run_integration_run_preflight(
         identity = _resolve_identity(state)
     except IntegrationIdentityError as exc:
         return _failed_preparation(step_id, tool_def, requested_at, error=exc)
-    resolved = await _resolve(user_id=identity.user_id, args=args, read_only=False)
-    if isinstance(resolved, _Resolved) and resolved.tool.tool_class == "write":
+    resolved = await resolve_integration_call(
+        user_id=identity.user_id, args=args, read_only=False
+    )
+    if (
+        isinstance(resolved, ResolvedIntegrationCall)
+        and resolved.tool.tool_class == "write"
+    ):
         try:
             _authorize_write(identity, resolved, tool_request_id, requested_at)
         except BrokerApprovalRequiredError as exc:
@@ -201,7 +206,9 @@ async def run_integration_run_tool(
     requested_at: str,
 ) -> UnprojectedToolExecutionResult:
     identity = _resolve_identity(state)
-    resolved = await _resolve(user_id=identity.user_id, args=args, read_only=False)
+    resolved = await resolve_integration_call(
+        user_id=identity.user_id, args=args, read_only=False
+    )
     if isinstance(resolved, IntegrationRefusal):
         return _refusal_result(step_id, tool_def, requested_at, resolved)
     if resolved.tool.tool_class == "write":
@@ -227,7 +234,7 @@ async def run_integration_run_tool(
                 error_type=APPROVAL_STATE_CHANGED,
                 message=message,
             )
-    executed = await _execute(resolved, tool_request_id=tool_request_id)
+    executed = await execute_integration_call(resolved, tool_request_id=tool_request_id)
     if isinstance(executed, IntegrationRefusal):
         return _refusal_result(step_id, tool_def, requested_at, executed)
     return UnprojectedToolExecutionResult(
@@ -240,22 +247,8 @@ async def run_integration_run_tool(
     )
 
 
-async def run_integration_read(
-    *, user_id: str, args: ToolArgs, tool_request_id: str
-) -> dict[str, JSONValue] | IntegrationRefusal:
-    """Run a read tool for a caller that cannot ask the user; a write is refused.
-
-    A read never asks in this permission model, so nothing here needs consent.
-    """
-
-    resolved = await _resolve(user_id=user_id, args=args, read_only=True)
-    if isinstance(resolved, IntegrationRefusal):
-        return resolved
-    return await _execute(resolved, tool_request_id=tool_request_id)
-
-
-async def _execute(
-    resolved: _Resolved, *, tool_request_id: str
+async def execute_integration_call(
+    resolved: ResolvedIntegrationCall, *, tool_request_id: str
 ) -> dict[str, JSONValue] | IntegrationRefusal:
     is_write = resolved.tool.tool_class == "write"
     try:
@@ -284,9 +277,12 @@ async def _execute(
     return {"source": resolved.tool.toolkit, "untrusted": True, "data": outcome.data}
 
 
-async def _resolve(
+async def resolve_integration_call(
     *, user_id: str, args: ToolArgs, read_only: bool
-) -> _Resolved | IntegrationRefusal:
+) -> ResolvedIntegrationCall | IntegrationRefusal:
+    """Resolve the call without running it; ``read_only`` refuses a write for a
+    caller that cannot ask the user (a read never asks in this permission model)."""
+
     try:
         return await _resolve_with_gateway(
             user_id=user_id, args=args, read_only=read_only
@@ -297,7 +293,7 @@ async def _resolve(
 
 async def _resolve_with_gateway(
     *, user_id: str, args: ToolArgs, read_only: bool
-) -> _Resolved | IntegrationRefusal:
+) -> ResolvedIntegrationCall | IntegrationRefusal:
     slug = require_string_arg(args, "slug")
     requested = optional_string_arg(args, "account")
     gateway = get_integration_gateway()
@@ -365,7 +361,7 @@ async def _resolve_with_gateway(
     names = {
         entry.toolkit: entry.display_name for entry in gateway_call(gateway.toolkits)
     }
-    return _Resolved(
+    return ResolvedIntegrationCall(
         gateway=gateway,
         tool=tool,
         toolkit_name=names[tool.toolkit],
@@ -413,7 +409,10 @@ def _denial(
 
 
 def _authorize_write(
-    identity: _Identity, resolved: _Resolved, tool_request_id: str, requested_at: str
+    identity: _Identity,
+    resolved: ResolvedIntegrationCall,
+    tool_request_id: str,
+    requested_at: str,
 ) -> tuple[str | None, Literal["settings", "prompt"] | None]:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     return ensure_tool_authorization(
@@ -454,7 +453,7 @@ def _authorize_write(
 
 def _claim_write(
     identity: _Identity,
-    resolved: _Resolved,
+    resolved: ResolvedIntegrationCall,
     tool_request_id: str,
     tool_invocation_id: str,
     requested_at: str,

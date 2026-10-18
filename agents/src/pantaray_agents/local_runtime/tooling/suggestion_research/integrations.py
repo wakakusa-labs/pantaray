@@ -4,9 +4,10 @@ The run offers the Action's two integration tools, but nobody can answer an
 approval during research: search leaves out write tools and run refuses them. In
 this permission model a read never asks, so a read tool runs as is.
 
-Every ``integration_run_tool`` call may reach the connected service and spend the
-user's quota there, so the lens runs of one Suggestion share one cap on those
-calls; a call past it never reaches the gateway.
+Every ``integration_run_tool`` call that reaches the connected service may spend
+the user's quota there, so the lens runs of one Suggestion share one cap on those
+calls; a call refused locally costs nothing, and one past the cap never reaches
+the gateway.
 """
 
 from __future__ import annotations
@@ -17,8 +18,9 @@ from uuid import uuid4
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_run import (
     IntegrationRefusal,
+    execute_integration_call,
     refusal_details,
-    run_integration_read,
+    resolve_integration_call,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
     UPSTREAM_FAILED_MESSAGE,
@@ -55,7 +57,7 @@ _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
 
 @dataclass(slots=True)
 class IntegrationRunBudget:
-    """The integration_run_tool calls one Suggestion has left."""
+    """The gateway executions one Suggestion has left."""
 
     remaining: int = SUGGESTION_INTEGRATION_RUN_LIMIT
 
@@ -128,7 +130,13 @@ class SuggestionIntegrationSession:
 
     async def _run(self, call: ReactToolCall, _step: int) -> ReactToolResult:
         assert isinstance(call.tool_args, dict)  # Validated against request_schema.
-        # Spent before the first await: the lens runs share the budget concurrently.
+        outcome = await resolve_integration_call(
+            user_id=self.user_id, args=call.tool_args, read_only=True
+        )
+        if isinstance(outcome, IntegrationRefusal):
+            return self._refused(call, outcome)
+        # Only a call that reaches the service counts. Spent with no await before
+        # execute, so concurrent lens runs never exceed the budget.
         if not self.budget.spend():
             return tool_error_response(
                 tool_name=call.tool_name,
@@ -138,17 +146,20 @@ class SuggestionIntegrationSession:
                     "decide with what you found."
                 ),
             )
-        outcome = await run_integration_read(
-            user_id=self.user_id, args=call.tool_args, tool_request_id=str(uuid4())
+        executed = await execute_integration_call(outcome, tool_request_id=str(uuid4()))
+        if isinstance(executed, IntegrationRefusal):
+            return self._refused(call, executed)
+        return self._stored(call, executed)
+
+    def _refused(
+        self, call: ReactToolCall, refusal: IntegrationRefusal
+    ) -> ReactToolResult:
+        return tool_error_response(
+            tool_name=call.tool_name,
+            error_code=refusal.error.kind,
+            message=refusal.message,
+            details=refusal_details(refusal),
         )
-        if isinstance(outcome, IntegrationRefusal):
-            return tool_error_response(
-                tool_name=call.tool_name,
-                error_code=outcome.error.kind,
-                message=outcome.message,
-                details=refusal_details(outcome),
-            )
-        return self._stored(call, outcome)
 
     def _stored(
         self, call: ReactToolCall, output: dict[str, JSONValue]

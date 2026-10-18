@@ -104,6 +104,7 @@ files = [
     "src/pantaray_agents/schema/memory_catalog.py",
     "src/pantaray_agents/schema/chat.py",
     "src/pantaray_agents/local_runtime/chat",
+    "src/pantaray_agents/local_runtime/integrations",
     "src/pantaray_agents/routers/chat.py",
     "src/pantaray_agents/agents/chat_agent",
     "src/pantaray_agents/tasks/chat_turns.py",

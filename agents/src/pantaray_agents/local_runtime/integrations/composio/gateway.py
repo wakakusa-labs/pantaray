@@ -259,15 +259,22 @@ class ComposioGateway:
         accounts = await self._current_accounts()
         return await self._session_id(accounts.toolkits | {toolkit}, renew=False)
 
-    async def refresh_accounts(self, account: str, *, listed: bool) -> None:
-        """Read the accounts until ``account`` is listed or not, then fill the index.
+    async def refresh_accounts(
+        self,
+        *,
+        listed: frozenset[str] = frozenset(),
+        unlisted: frozenset[str] = frozenset(),
+    ) -> None:
+        """Read the accounts until they list ``listed`` and not ``unlisted``,
+        then fill the index.
 
         A read already in flight may predate the change, so one more read follows
         when it disagrees. Raises what the account read raises.
         """
         self.invalidate_accounts()
         accounts = await self._fetch_accounts()
-        if (account in accounts.by_id) != listed:
+        found = accounts.by_id.keys()
+        if not listed <= found or unlisted & found:
             accounts = await self._fetch_accounts()
         await self._sync_index(accounts.toolkits)
 
@@ -391,6 +398,11 @@ class ComposioGateway:
             )
         snapshot = _Accounts(by_id=by_id, fetched_at=time.monotonic())
         self._accounts = snapshot
+        if get_integration_gateway() is self:
+            # A link completed while nobody polled its state settles here.
+            self.connections.finalize_soon(
+                account for account, item in by_id.items() if item.health == "ok"
+            )
         return snapshot
 
     async def _sync_index(self, connected: frozenset[ToolkitSlug]) -> None:

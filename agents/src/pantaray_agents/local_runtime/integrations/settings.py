@@ -58,6 +58,7 @@ class AccountStatus(InternalStrictModel):
 class ToolkitStatus(InternalStrictModel):
     toolkit: ToolkitSlug
     display_name: str
+    logo_url: str | None
     accounts: list[AccountStatus]
 
 
@@ -158,6 +159,7 @@ async def load_integrations_status(
             ToolkitStatus(
                 toolkit=entry.toolkit,
                 display_name=entry.display_name,
+                logo_url=entry.logo_url,
                 accounts=[
                     _account_status(gateway, store, limits, tools, account)
                     for account in accounts

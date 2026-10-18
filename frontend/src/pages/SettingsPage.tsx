@@ -58,7 +58,9 @@ const SettingsPage: React.FC = () => {
   const integrations = useIntegrationSettingsController(
     runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
   );
-  const hasIntegrations = integrations.toolkits !== null;
+  // Production has no connect flow yet, so the section needs an account that is already connected.
+  const hasIntegrations =
+    integrations.toolkits?.some((toolkit) => toolkit.accounts.length > 0) ?? false;
   // Users without a connected account see no integrations section at all.
   const sections = useMemo(
     () => SETTINGS_SECTIONS.filter((id) => id !== 'integrations' || hasIntegrations),
@@ -117,7 +119,7 @@ const SettingsPage: React.FC = () => {
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
-        {activeSection === 'integrations' && integrations.toolkits !== null ? (
+        {activeSection === 'integrations' && hasIntegrations && integrations.toolkits ? (
           <IntegrationSettingsSection
             t={t}
             toolkits={integrations.toolkits}

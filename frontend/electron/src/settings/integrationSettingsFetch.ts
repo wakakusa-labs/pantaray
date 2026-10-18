@@ -30,6 +30,7 @@ const AccountStatusSchema = z.strictObject({
 const ToolkitStatusSchema = z.strictObject({
   toolkit: z.string(),
   display_name: z.string(),
+  logo_url: z.string().nullable(),
   accounts: z.array(AccountStatusSchema),
 });
 

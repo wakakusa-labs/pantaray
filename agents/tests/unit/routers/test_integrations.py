@@ -34,6 +34,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
 STATUS_URL = f"/v1/agents/users/{USER_ID}/integrations"
+GMAIL_LOGO = "https://logos.composio.dev/api/gmail"
 WORK = IntegrationAccount(account="ca_work", toolkit="gmail", label="work@example.com")
 HOME = IntegrationAccount(account="ca_home", toolkit="gmail", label="home@example.com")
 EXECUTE_DENIED = ApiDenial(source="connection_method", capability="execute")
@@ -74,7 +75,9 @@ class FakeGateway:
         self._denied = denied or {}
 
     def toolkits(self) -> list[ToolkitEntry]:
-        return [ToolkitEntry(toolkit="gmail", display_name="Gmail")]
+        return [
+            ToolkitEntry(toolkit="gmail", display_name="Gmail", logo_url=GMAIL_LOGO)
+        ]
 
     async def list_accounts(self, toolkit: ToolkitSlug) -> list[IntegrationAccount]:
         return [WORK, HOME] if toolkit == "gmail" else []
@@ -142,6 +145,7 @@ def _accounts(client: TestClient) -> dict[str, dict[str, object]]:
     assert body["state"] == "configured"
     [toolkit] = body["toolkits"]
     assert toolkit["display_name"] == "Gmail"
+    assert toolkit["logo_url"] == GMAIL_LOGO
     return {account["account"]: account for account in toolkit["accounts"]}
 
 

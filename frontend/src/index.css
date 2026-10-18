@@ -41,6 +41,19 @@
   --surface-bg-hover: rgba(255, 255, 255, 0.08);
   /* エラー文言の色（バッジの danger と同じ色相に揃える） */
   --danger-color: #fecaca;
+  /* 注意（再接続が必要・API が許さない理由など）。エラーではないが目を留めてほしいもの */
+  --warning-color: #f0c27a;
+  --warning-border: rgba(232, 170, 90, 0.45);
+  --warning-bg: rgba(232, 170, 90, 0.1);
+
+  /* ---- Controls (menus, bordered lists, logo tiles) ---- */
+  --accent-rgb: 125, 171, 220;
+  --control-border: rgba(255, 255, 255, 0.16);
+  --control-border-hover: rgba(255, 255, 255, 0.28);
+  --radius-control: 8px;
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.45);
+  /* Service logos are drawn for light backgrounds. */
+  --logo-tile-bg: #fff;
 
   /* ---- Focus ring (SSOT) ----
    * アプリ本体のキーボードフォーカスはこの1系統だけを使う。

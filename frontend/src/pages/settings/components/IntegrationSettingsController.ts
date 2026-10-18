@@ -31,7 +31,8 @@ export type IntegrationAccountRowState = {
 
 export type IntegrationSettingsActions = {
   setAccess: (toolkit: string, account: string, access: IntegrationAccess) => void;
-  openTools: (toolkit: string, account: string) => void;
+  /** Loads an account's tools once; after a failed load it tries again. */
+  loadTools: (toolkit: string, account: string) => void;
   setToolBlocked: (toolkit: string, account: string, slug: string, blocked: boolean) => void;
 };
 
@@ -47,10 +48,7 @@ const EMPTY_ROW: IntegrationAccountRowState = { pending: null, notice: null, too
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 
-/**
- * Loads the owner's connected accounts. `toolkits` stays null, and the section absent, until
- * at least one account is connected: users without one see no change.
- */
+/** Loads the owner's toolkits and accounts; `toolkits` is null until the gateway is configured. */
 export function useIntegrationSettingsController(ownerId: string | null): {
   toolkits: IntegrationToolkitStatus[] | null;
   rows: Record<string, IntegrationAccountRowState>;
@@ -64,9 +62,9 @@ export function useIntegrationSettingsController(ownerId: string | null): {
     let cancelled = false;
     api.getStatus().then(
       (status) => {
-        if (cancelled || status.state !== 'configured') return;
-        const toolkits = status.toolkits.filter((toolkit) => toolkit.accounts.length > 0);
-        if (toolkits.length > 0) setLoaded({ ownerId, toolkits, rows: {} });
+        if (!cancelled && status.state === 'configured') {
+          setLoaded({ ownerId, toolkits: status.toolkits, rows: {} });
+        }
       },
       (error: unknown) => {
         // The section is optional: without it the page is today's page.
@@ -120,7 +118,7 @@ export function useIntegrationSettingsController(ownerId: string | null): {
     );
   };
 
-  const openTools: IntegrationSettingsActions['openTools'] = (toolkit, account) => {
+  const loadTools: IntegrationSettingsActions['loadTools'] = (toolkit, account) => {
     if (!current || !api) return;
     const tools = integrationRow(current.rows, account).tools;
     if (tools !== null && tools.state !== 'failed') return;
@@ -165,6 +163,6 @@ export function useIntegrationSettingsController(ownerId: string | null): {
   return {
     toolkits: current?.toolkits ?? null,
     rows: current?.rows ?? {},
-    actions: { setAccess, openTools, setToolBlocked },
+    actions: { setAccess, loadTools, setToolBlocked },
   };
 }

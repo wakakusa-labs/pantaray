@@ -13,6 +13,9 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request imp
     has_persisted_user_request_step,
     project_persisted_user_request_step,
 )
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.integration_search import (
+    integration_tools_available,
+)
 from pantaray_agents.agents.action_agent.runtime.models.execution_context import (
     ExecutionContextModel,
     execution_context_from_state,
@@ -124,6 +127,8 @@ async def initialize_context(
         workspace_manifest_catalog.workspace_context
     )
     context["agents_md_instructions"] = load_pantaray_agents_md()
+    if "integration_tools_exposed" not in context:
+        context["integration_tools_exposed"] = await integration_tools_available()
 
     # 親ランタイムは単一 ReAct のみ。mandatory planning phase を経由せず executing に
     # 直行する。

@@ -16,8 +16,8 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.action_agent.tools import (
     CANCEL_SUBAGENT_TOOL_ID,
-    CAPTURE_SCREEN_TOOL_ID,
     DRAFT_FINAL_ANSWER_TOOL_ID,
+    INTEGRATION_SEARCH_TOOLS_TOOL_ID,
     REMEMBER_TOOL_ID,
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL_ID,
@@ -54,7 +54,11 @@ from pantaray_agents.utils.metrics import (
 )
 
 from .broker_tools import run_broker_tool_wrapper
-from .capture_screen import run_capture_screen_preflight, run_capture_screen_tool
+from .consent_gated import (
+    CONSENT_GATED_TOOL_IDS,
+    run_consent_gated_preflight,
+    run_consent_gated_tool,
+)
 from .draft_final_answer import run_draft_final_answer_tool
 from .external_tools import (
     run_history_fetch_wrapper,
@@ -68,6 +72,7 @@ from .finalization_boundary import (
     finalize_action_tool_invocation,
     start_action_tool_invocation,
 )
+from .integration_search import run_integration_search_tool
 from .memory_links import (
     run_get_memory_reference_tool,
     run_link_memory_tool,
@@ -110,12 +115,9 @@ NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
 PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS = (
     BROKERED_TOOL_IDS - NON_PREFLIGHT_BROKERED_TOOL_IDS
 )
-# capture_screen is not brokered - it touches no workspace path - but it needs the
-# same "settle consent, then run" preflight, so it shares that identity and pause
-# machinery instead of growing a second approval path.
-PREFLIGHT_APPROVAL_TOOL_IDS = PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS | {
-    CAPTURE_SCREEN_TOOL_ID
-}
+PREFLIGHT_APPROVAL_TOOL_IDS = (
+    PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS | CONSENT_GATED_TOOL_IDS
+)
 
 
 def _build_tool_runtime_context(*, runtime) -> ToolRuntimeContext:
@@ -306,9 +308,11 @@ async def run_validated_tool_impl(
         result = await run_history_fetch_wrapper(
             agent, resolved_step_id, tool_def, args, state
         )
-    elif tool_def.tool_id in BROKERED_TOOL_IDS or tool_def.tool_id == (
-        CAPTURE_SCREEN_TOOL_ID
-    ):
+    elif tool_def.tool_id == INTEGRATION_SEARCH_TOOLS_TOOL_ID:
+        result = await run_integration_search_tool(
+            step_id=resolved_step_id, tool_def=tool_def, args=args, state=state
+        )
+    elif tool_def.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS:
         raise RuntimeError("approval-gated tools must be dispatched from run_tool")
     else:
         raise ValueError(f"Unsupported tool_id: {tool_def.tool_id}")
@@ -391,16 +395,15 @@ async def run_tool(
     invocation_id: str | None = None
     if _requires_preflight_approval(tool_def.tool_id):
         preflight_result = (
-            await run_capture_screen_preflight(
+            await run_consent_gated_preflight(
                 step_id=step_id,
                 tool_def=tool_def,
                 state=state,
-                # The input schema requires a non-blank string.
-                app_name=str(validated_args["app_name"]),
+                args=validated_args,
                 tool_request_id=tool_request_id,
                 requested_at=format_utc_iso(started_at),
             )
-            if tool_def.tool_id == CAPTURE_SCREEN_TOOL_ID
+            if tool_def.tool_id in CONSENT_GATED_TOOL_IDS
             else await run_broker_tool_wrapper(
                 agent,
                 step_id,
@@ -461,16 +464,12 @@ async def run_tool(
                 state=state,
                 preparation=broker_preparation,
             )
-        elif tool_def.tool_id == CAPTURE_SCREEN_TOOL_ID:
-            if invocation_id is None:
-                # The claim that makes one approval run one capture binds to this
-                # row, so a capture without it would be unclaimable.
-                raise RuntimeError("capture_screen requires a tool invocation audit")
-            result = await run_capture_screen_tool(
+        elif tool_def.tool_id in CONSENT_GATED_TOOL_IDS:
+            result = await run_consent_gated_tool(
                 step_id=step_id,
                 tool_def=tool_def,
                 state=state,
-                app_name=str(validated_args["app_name"]),
+                args=validated_args,
                 tool_request_id=tool_request_id,
                 tool_invocation_id=invocation_id,
                 requested_at=format_utc_iso(started_at),

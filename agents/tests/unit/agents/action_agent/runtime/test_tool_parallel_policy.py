@@ -30,8 +30,8 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.memory_sq
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import ToolCallModel
 from pantaray_agents.agents.action_agent.tools import (
     SUBMIT_SUBAGENT_REPORT_TOOL_ID,
-    SUPERVISOR_SINGLE_REACT_TOOL_IDS,
     TOOL_CONCURRENCY,
+    select_supervisor_act_tool_ids,
 )
 from pantaray_agents.conversation.tool_batch import (
     ExcludedToolCall,
@@ -95,6 +95,8 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "draft_final_answer",
             "zanei_query",
             "zanei_timeline",
+            "integration_search_tools",
+            "integration_run_tool",
         )
     },
 }
@@ -202,7 +204,9 @@ def _state_write_keys(handler: Callable[..., object]) -> set[str]:
 
 
 def test_every_action_tool_declares_its_former_placement() -> None:
-    assert set(TOOL_CONCURRENCY) == set(SUPERVISOR_SINGLE_REACT_TOOL_IDS)
+    assert set(TOOL_CONCURRENCY) == set(
+        select_supervisor_act_tool_ids(integrations=True)
+    )
     assert dict(TOOL_CONCURRENCY) == {
         tool_id: EXPECTED_CONCURRENCY[tool_id] for tool_id in TOOL_CONCURRENCY
     }

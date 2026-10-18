@@ -10,6 +10,10 @@ from unittest.mock import patch
 import pytest
 import yaml
 from tests.unit.agents.action_agent.fixtures import build_action_request
+from tests.unit.agents.action_agent.runtime.test_integration_action_tools import (
+    WORK,
+    FakeGateway,
+)
 from tests.unit.local_runtime.action_seed import insert_agent_action
 from tests.unit.local_runtime.test_memory_indexes import _publish_indexes
 
@@ -19,6 +23,9 @@ from pantaray_agents.agents.action_agent.runtime.agents_md import (
     load_pantaray_agents_md,
 )
 from pantaray_agents.agents.action_agent.runtime.graph import ActionGraphRuntime
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.helpers import (
+    _resolve_act_tool_contract,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.initial import (
     initialize_context,
 )
@@ -32,6 +39,8 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     ActionAgentState,
     create_initial_state,
 )
+from pantaray_agents.agents.action_agent.tools import SUPERVISOR_SINGLE_REACT_TOOL_IDS
+from pantaray_agents.local_runtime.integrations.registry import set_integration_gateway
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -154,6 +163,36 @@ async def test_initialize_context_enters_react_without_planning_phase(
     assert updated["phase"] == "executing"
     # executing THINK が必須とする実行モードは init で確定している。
     assert "use_goal_workers" not in updated["context"]
+
+
+@pytest.mark.asyncio
+async def test_a_broken_gateway_still_starts_the_action_with_todays_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = MockActionAgentRepository()
+    agent = _build_agent(repo)
+    await _save_suggestion(repo)
+    execution_context = _bootstrap_execution_context(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    gateway = FakeGateway(accounts=[WORK])
+    gateway.accounts_error = RuntimeError("gateway down")
+    set_integration_gateway(gateway)
+    try:
+        updated = await initialize_context(  # type: ignore[arg-type]
+            agent, _state_with_execution_context(execution_context), _runtime(agent)
+        )
+        _, tool_ids, _ = _resolve_act_tool_contract(updated)
+        assert tool_ids == SUPERVISOR_SINGLE_REACT_TOOL_IDS
+
+        # The choice holds for the whole Action, so the tool schemas never change.
+        gateway.accounts_error = None
+        continued = await initialize_context(agent, updated, _runtime(agent))  # type: ignore[arg-type]
+        assert continued["context"]["integration_tools_exposed"] is False
+    finally:
+        set_integration_gateway(None)
 
 
 @pytest.mark.asyncio

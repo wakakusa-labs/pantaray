@@ -77,14 +77,21 @@ class UsableAccount:
 
 
 async def integration_tools_available() -> bool:
-    """Whether an Action starting now is offered the integration tools."""
+    """Whether an Action starting now is offered the integration tools.
+
+    A gateway that raises offers none: an Action that never uses an integration
+    must still start when the connection method is broken.
+    """
 
     gateway = get_integration_gateway()
     if gateway is None:
         return False
-    for entry in gateway.toolkits():
-        if await gateway.list_accounts(entry.toolkit):
-            return True
+    try:
+        for entry in gateway_call(gateway.toolkits):
+            if await gateway_await(gateway.list_accounts(entry.toolkit)):
+                return True
+    except IntegrationGatewayError:
+        return False
     return False
 
 

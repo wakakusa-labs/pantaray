@@ -5,7 +5,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
@@ -14,6 +14,7 @@ from pantaray_agents.agents.insight_agent.record_verification import (
     VerifiedRecord,
     verify_source_records,
 )
+from pantaray_agents.local_runtime.activity_summary_schedule import parse_iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_gate import (
     SourceGate,
@@ -26,6 +27,9 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 )
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.context.source_transport import source_scope
+from pantaray_agents.local_runtime.integrations.change_probe import (
+    collect_external_changes,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -35,6 +39,9 @@ from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.memory_catalog.source_records import (
     register_source_records_memory,
+)
+from pantaray_agents.local_runtime.runtime.insight_queue import (
+    SHORT_INSIGHT_WINDOW_SECONDS,
 )
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
@@ -92,6 +99,18 @@ async def run_short_insight(
             (user_id,),
         ).fetchone()
     try:
+        external_changes = await collect_external_changes(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=user_id,
+            run_id=run_id,
+            # The run starts just after its window does, so a probe bounded by
+            # `period_start` alone would miss what arrived during the previous
+            # run's window. Overlapping by one window closes that gap; a repeat
+            # is harmless because the run reads the previous Insight.
+            since=parse_iso_z(period_start)
+            - timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
+        )
         async with gate.track(source):
             with source_scope(gate, source):
                 page = await reader.read_page(
@@ -119,6 +138,7 @@ async def run_short_insight(
                         user_id=user_id,
                     ),
                     previous_insight=str(previous[0]) if previous else "(none)",
+                    external_changes=external_changes,
                     db_path=db_path,
                     busy_timeout_ms=busy_timeout_ms,
                 )

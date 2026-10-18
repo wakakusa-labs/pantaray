@@ -123,7 +123,7 @@ class ShortInsightOutput(BaseModel):
 
 class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
     PROMPT_NAME = "insight"
-    PROMPT_VERSION = "2.4"
+    PROMPT_VERSION = "2.5"
 
     def __init__(
         self,
@@ -148,6 +148,7 @@ class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
         zanei: ZaneiTools,
         workspace_context: str,
         previous_insight: str,
+        external_changes: str | None,
         db_path: Path,
         busy_timeout_ms: int,
     ) -> ShortInsightOutput:
@@ -159,6 +160,10 @@ class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
             workspace_context=workspace_context,
             previous_insight=previous_insight,
         )
+        # Appended only when an account reported something, so a user without
+        # integrations sends the same request as before they existed.
+        if external_changes is not None:
+            prompt = f"{prompt}\n\n{external_changes}"
         memory = MemoryRetrievalSession(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,

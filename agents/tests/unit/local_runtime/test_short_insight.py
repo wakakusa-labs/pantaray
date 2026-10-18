@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +30,7 @@ from pantaray_agents.local_runtime.context.source_protocol import (
     PageReadRequest,
     PageResponse,
 )
-from pantaray_agents.local_runtime.integrations import registry
+from pantaray_agents.local_runtime.integrations import change_probe, registry
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -269,13 +270,14 @@ async def _run(
     agent: object,
     run_id: str = RUN,
     user_id: str = USER,
+    period_start: str = PERIOD_START,
 ) -> None:
     await run_short_insight(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id=user_id,
         run_id=run_id,
-        period_start=PERIOD_START,
+        period_start=period_start,
         period_end=PERIOD_END,
         gate=gate,
         reader=reader,  # type: ignore[arg-type]
@@ -916,15 +918,17 @@ async def test_without_integrations_the_run_adds_no_external_changes(
     assert agent.external_changes == [None]
 
 
-async def test_each_window_probes_its_accounts_once_while_recording(
-    db_path: Path,
-) -> None:
-    gateway = _FakeGateway(
-        entries=[_gmail()],
-        accounts={"gmail": [_account("work"), _account("broken")]},
-        results={"broken": ConnectionError("probe failed")},
-    )
-    for account in ("work", "broken"):
+@pytest.fixture
+def gmail(db_path: Path) -> Iterator[_FakeGateway]:
+    gateway = _FakeGateway(entries=[_gmail()], accounts={"gmail": []})
+    registry.set_integration_gateway(gateway)
+    yield gateway
+    registry.set_integration_gateway(None)
+
+
+def _connect(db_path: Path, gateway: _FakeGateway, *accounts: str) -> None:
+    for account in accounts:
+        gateway.accounts["gmail"].append(_account(account))
         set_integration_account_access(
             db_path=db_path,
             busy_timeout_ms=1_000,
@@ -934,26 +938,81 @@ async def test_each_window_probes_its_accounts_once_while_recording(
             access="read_only",
             updated_at=PERIOD_START,
         )
-    registry.set_integration_gateway(gateway)
-    try:
-        gate = SourceGate()
-        # Not recording: no run, so no probe.
-        await _run(db_path=db_path, gate=gate, reader=None, agent=None)
-        assert gateway.executed == Counter()
 
-        await _active_source(gate)
-        agent = _FakeAgent(output=_output())
-        reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
-        await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
-        # The window's committed run is a no-op when replayed.
-        await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
-    finally:
-        registry.set_integration_gateway(None)
 
-    assert gateway.executed == Counter({"work": 1, "broken": 1})
+async def test_each_window_probes_its_accounts_once_while_recording(
+    db_path: Path, gmail: _FakeGateway
+) -> None:
+    _connect(db_path, gmail, "work", "broken")
+    gmail.results["broken"] = ConnectionError("probe failed")
+    gate = SourceGate()
+    # Not recording: no run, so no probe.
+    await _run(db_path=db_path, gate=gate, reader=None, agent=None)
+    assert gmail.executed == Counter()
+
+    await _active_source(gate)
+    agent = _FakeAgent(output=_output())
+    reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+    # The window's committed run is a no-op when replayed.
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    assert gmail.executed == Counter({"work": 1, "broken": 1})
     assert agent.calls == 1
     (block,) = agent.external_changes
     assert block is not None
     assert "### Gmail (work@x)" in block
     assert "broken@x" not in block
     assert _stored(db_path)["cursor"] == "cursor-2"
+
+
+async def test_a_hung_probe_does_not_hold_back_the_run(
+    db_path: Path, gmail: _FakeGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(change_probe, "PROBE_BUDGET_SECONDS", 0.05)
+    _connect(db_path, gmail, "hung")
+    gmail.hung.add("hung")
+    gate = SourceGate()
+    await _active_source(gate)
+    agent = _FakeAgent(output=_output())
+    reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
+
+    await asyncio.wait_for(
+        _run(db_path=db_path, gate=gate, reader=reader, agent=agent), timeout=5
+    )
+
+    assert agent.external_changes == [None]
+    assert _stored(db_path)["cursor"] == "cursor-2"
+
+
+async def test_a_change_between_two_runs_is_inside_the_second_runs_period(
+    db_path: Path, gmail: _FakeGateway
+) -> None:
+    _connect(db_path, gmail, "work")
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(
+        pages=[
+            _page(observations=1, next_cursor="cursor-2"),
+            _page(observations=1, next_cursor="cursor-3"),
+        ]
+    )
+    # Each run starts just after its window does, as the scheduler enqueues it.
+    for run_id, period_start in (
+        ("run-0915", "2026-09-07T09:15:00Z"),
+        ("run-0930", "2026-09-07T09:30:00Z"),
+    ):
+        await _run(
+            db_path=db_path,
+            gate=gate,
+            reader=reader,
+            agent=_FakeAgent(output=_output()),
+            run_id=run_id,
+            period_start=period_start,
+        )
+    # A mail at 09:20 arrived after the 09:15 run had probed.
+    arrived = int(datetime(2026, 9, 7, 9, 20, tzinfo=UTC).timestamp())
+
+    first, second = (str(arguments["query"]) for arguments in gmail.arguments)
+    assert int(second.removeprefix("after:")) <= arrived
+    assert int(first.removeprefix("after:")) < int(second.removeprefix("after:"))

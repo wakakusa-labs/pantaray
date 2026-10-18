@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
 from collections.abc import Iterator
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.integrations import registry
+from pantaray_agents.local_runtime.integrations import change_probe, registry
 from pantaray_agents.local_runtime.integrations.change_probe import (
     EXTERNAL_CHANGES_HEADING,
     PROBE_RESULT_MAX_CHARS,
@@ -17,6 +18,7 @@ from pantaray_agents.local_runtime.integrations.change_probe import (
     substitute_window,
 )
 from pantaray_agents.local_runtime.integrations.contracts import (
+    ApiDenial,
     ChangeProbe,
     GatewayLimits,
     IntegrationAccount,
@@ -55,6 +57,7 @@ class _FakeGateway:
     unhealthy: set[str] = field(default_factory=set)
     can_execute: bool = True
     failing_toolkits: set[str] = field(default_factory=set)
+    hung: set[str] = field(default_factory=set)
     executed: Counter[str] = field(default_factory=Counter)
     arguments: list[dict[str, JSONValue]] = field(default_factory=list)
 
@@ -70,12 +73,19 @@ class _FakeGateway:
         return "reauthorization_required" if account in self.unhealthy else "ok"
 
     def limits(self) -> GatewayLimits:
-        return GatewayLimits(can_connect=True, can_execute=self.can_execute, reasons=[])
+        denied = (
+            []
+            if self.can_execute
+            else [ApiDenial(source="connection_method", capability="execute")]
+        )
+        return GatewayLimits(
+            can_connect=True, can_execute=self.can_execute, reasons=denied
+        )
 
     async def list_tools(self, toolkit: str) -> list[IntegrationTool]:
         raise AssertionError("the probe does not list tools")
 
-    def api_denied_reason(self, *, slug: str, account: str) -> str | None:
+    def api_denied_reason(self, *, slug: str, account: str) -> ApiDenial | None:
         return None
 
     async def execute(
@@ -88,6 +98,8 @@ class _FakeGateway:
     ) -> ToolOutcome:
         self.executed[account] += 1
         self.arguments.append(arguments)
+        if account in self.hung:
+            await asyncio.Event().wait()
         result = self.results.get(account, ToolSucceeded(data=NEW_MAIL))
         if isinstance(result, Exception):
             raise result
@@ -146,7 +158,7 @@ async def _collect(db_path: Path) -> str | None:
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id=USER_ID,
         run_id=RUN_ID,
-        window_start=WINDOW_START,
+        since=WINDOW_START,
     )
 
 
@@ -267,6 +279,33 @@ async def test_each_result_is_cut_to_the_limit(db_path: Path) -> None:
     assert body.startswith('{"messages":["xxx')
     assert body.endswith("(truncated)")
     assert PROBE_RESULT_MAX_CHARS < len(body) < PROBE_RESULT_MAX_CHARS + 20
+
+
+async def test_a_hung_service_ends_at_the_budget_keeping_finished_sections(
+    db_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(change_probe, "PROBE_BUDGET_SECONDS", 0.05)
+    gateway = _FakeGateway(
+        entries=[_gmail()],
+        accounts={"gmail": [_account("work"), _account("hung"), _account("home")]},
+        hung={"hung"},
+    )
+    for account in ("work", "hung", "home"):
+        _allow(db_path, account)
+    registry.set_integration_gateway(gateway)
+
+    with caplog.at_level(logging.WARNING):
+        block = await _collect(db_path)
+
+    assert block is not None
+    assert "work@x" in block
+    assert "hung@x" not in block
+    assert gateway.executed == Counter({"work": 1, "hung": 1})
+    assert [record.getMessage() for record in caplog.records] == [
+        "External change probes ran out of time"
+    ]
 
 
 def test_placeholders_are_filled_from_the_window_start() -> None:

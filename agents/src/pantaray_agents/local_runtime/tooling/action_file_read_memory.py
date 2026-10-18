@@ -22,7 +22,6 @@ from pantaray_agents.tools.files.read_output import (
 )
 
 from .models import ToolInvocationReadMemoryInput, ToolInvocationStatus
-from .outside_workspace_grant import path_is_within
 
 ACTION_FILE_READ_SOURCE: Final[Literal["action_file_read"]] = "action_file_read"
 ACTION_FILE_READ_TOOL_ID: Final = "read"
@@ -176,10 +175,18 @@ def _is_tool_results_read(
         """,
         (invocation_id, user_id),
     ).fetchone()
-    return row is not None and path_is_within(
-        path=Path(path).resolve(),
-        root=Path(str(row["canonical_real_path"])).resolve(),
-    )
+    if row is None:
+        return False
+    root = Path(str(row["canonical_real_path"]))
+    read_path = Path(path).resolve()
+    for candidate in (read_path, *read_path.parents):
+        try:
+            if candidate.samefile(root):
+                return True
+        except OSError:
+            # A missing or unreadable ancestor cannot be the root; keep walking.
+            continue
+    return False
 
 
 def _render_search_document(read: ReadTextPageOutput) -> str:

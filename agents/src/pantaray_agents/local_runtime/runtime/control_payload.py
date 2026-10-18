@@ -162,6 +162,12 @@ class WebSearchRouteSuccessResponse(TypedDict):
     web_search_route: ConnectionRoute
 
 
+class IntegrationCredentialSuccessResponse(TypedDict):
+    ok: Literal[True]
+    # Whether a credential is held now; never the credential itself.
+    integration_configured: bool
+
+
 class StatusSuccessResponse(TypedDict):
     ok: Literal[True]
     helper_instance_id: str
@@ -191,6 +197,7 @@ ControlSuccessResponse = (
     | ClearCloudSessionSuccessResponse
     | LlmRouteSuccessResponse
     | WebSearchRouteSuccessResponse
+    | IntegrationCredentialSuccessResponse
     | StatusSuccessResponse
 )
 ControlResponse = ControlSuccessResponse | ErrorResponse

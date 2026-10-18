@@ -10,6 +10,7 @@ from .initialization import (
     initialize_local_runtime,
     release_initialized_local_runtime,
 )
+from .integration_credentials import apply_integration_credential
 from .local_api_auth import clear_local_api_token, issue_local_api_token
 from .session_store import reset_desktop_session_store
 from .worker_daemon import (
@@ -30,6 +31,7 @@ def start_local_runtime_if_enabled() -> None:
         stop_local_control_socket_server()
         stop_local_action_worker_daemon()
         reset_connection_store()
+        apply_integration_credential(None)
         reset_desktop_session_store()
         reset_logged_out_owner()
         clear_local_api_token()
@@ -42,6 +44,7 @@ def stop_local_runtime_if_enabled() -> None:
     stop_local_control_socket_server()
     stop_local_action_worker_daemon()
     reset_connection_store()
+    apply_integration_credential(None)
     reset_desktop_session_store()
     reset_logged_out_owner()
     clear_local_api_token()

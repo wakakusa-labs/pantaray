@@ -37,6 +37,8 @@ type AiConnectionSectionProps = {
   feedback: { message: string; isError: boolean } | null;
 };
 
+const TAVILY_KEYS_URL = 'https://app.tavily.com';
+
 const METHODS: readonly AiConnectionMethod[] = PANTARAY_ACCOUNT_LOGIN_ENABLED
   ? ['cloud', 'chatgpt', 'api_key']
   : ['chatgpt', 'api_key'];
@@ -49,6 +51,7 @@ function SecretRow({
   disabled,
   onSave,
   onClear,
+  hint,
   t,
 }: {
   label: string;
@@ -58,6 +61,7 @@ function SecretRow({
   disabled: boolean;
   onSave: (value: string) => Promise<void> | void;
   onClear: () => Promise<void> | void;
+  hint?: React.ReactNode;
   t: Translate;
 }): React.JSX.Element {
   const [draft, setDraft] = useState('');
@@ -178,6 +182,7 @@ function SecretRow({
           </button>
           {feedback}
         </div>
+        {hint}
       </Row>
     );
   }
@@ -224,6 +229,7 @@ function SecretRow({
         ) : null}
         {feedback}
       </div>
+      {hint}
     </Row>
   );
 }
@@ -455,6 +461,19 @@ export function AiConnectionSection({
           placeholder={t('settings.aiConnection.webSearch.keyPlaceholder')}
           onSave={actions.saveWebSearchKey}
           onClear={actions.clearWebSearchKey}
+          hint={
+            <a
+              className="settings-inline-link"
+              href={TAVILY_KEYS_URL}
+              onClick={(event) => {
+                // The app window never navigates away; main opens the site in the default browser.
+                event.preventDefault();
+                window.electron?.ipcRenderer.send('open-external-url', TAVILY_KEYS_URL);
+              }}
+            >
+              {t('settings.aiConnection.webSearch.getKey')}
+            </a>
+          }
           t={t}
         />
       </fieldset>

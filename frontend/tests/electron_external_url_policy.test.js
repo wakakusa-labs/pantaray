@@ -56,4 +56,41 @@ test('externalUrlPolicy: allows private ip in dev when origin matches', () => {
   assert.equal(res.ok, true);
 });
 
+test('externalUrlPolicy: allows each provider origin even without webAppOrigin', () => {
+  for (const url of [
+    'https://app.tavily.com',
+    'https://dashboard.composio.dev/settings',
+    'https://connect.composio.dev/link/abc',
+  ]) {
+    for (const webAppOrigin of [null, 'https://example.com']) {
+      const res = validateExternalUrl(url, { isDev: false, webAppOrigin });
+      assert.equal(res.ok, true, `${url} with ${webAppOrigin}`);
+      assert.equal(res.url, new URL(url).toString());
+    }
+  }
+});
 
+test('externalUrlPolicy: refuses near-misses of a provider origin', () => {
+  for (const [url, reason] of [
+    ['https://app.tavily.com.evil.example', 'origin_not_allowed'],
+    ['https://tavily.com', 'origin_not_allowed'],
+    ['https://app.tavily.com:8443', 'origin_not_allowed'],
+    ['https://user@app.tavily.com', 'userinfo_not_allowed'],
+    ['http://app.tavily.com', 'origin_not_allowed'],
+  ]) {
+    // isDev admits http, so the http case must still be refused by the origin check.
+    const res = validateExternalUrl(url, { isDev: true, webAppOrigin: 'https://example.com' });
+    assert.equal(res.ok, false, url);
+    assert.equal(res.reason, reason, url);
+  }
+  const noOrigin = validateExternalUrl('https://tavily.com', { isDev: false, webAppOrigin: null });
+  assert.equal(noOrigin.reason, 'web_app_origin_not_configured');
+});
+
+test('externalUrlPolicy: still allows the configured webAppOrigin', () => {
+  const res = validateExternalUrl('https://example.com/account', {
+    isDev: false,
+    webAppOrigin: 'https://example.com',
+  });
+  assert.equal(res.ok, true);
+});

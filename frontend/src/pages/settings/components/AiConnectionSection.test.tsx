@@ -240,6 +240,20 @@ it('explains that a saved search key applies while signed out of the cloud', () 
   expect(screen.getByText('settings.aiConnection.webSearch.cloudDescription')).toBeInTheDocument();
 });
 
+it('opens the Tavily key site in the default browser instead of the app window', () => {
+  const send = vi.fn();
+  window.electron = { ipcRenderer: { send } } as unknown as Window['electron'];
+  try {
+    renderSection();
+    const link = screen.getByRole('link', { name: 'settings.aiConnection.webSearch.getKey' });
+    // fireEvent returns false when the default action (navigating the app window) was prevented.
+    expect(fireEvent.click(link)).toBe(false);
+    expect(send).toHaveBeenCalledWith('open-external-url', 'https://app.tavily.com');
+  } finally {
+    delete window.electron;
+  }
+});
+
 it('does not carry a typed key across a provider change', () => {
   const actions: AiConnectionActions = {
     selectMethod: vi.fn(),

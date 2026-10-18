@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.integrations.composio.connect import (
     ConnectionState,
     ConnectLink,
     ConnectNotAllowedError,
+    Reconnect,
     UnknownConnectionError,
     UnknownToolkitError,
 )
@@ -304,36 +305,28 @@ async def get_connection_state(
         found = await connections.status(connection_id)
     if found.state != "active":
         return ConnectionStateResponse(state=found.state)
-    # Each step is idempotent, so overlapping polls and a poll after a failed
-    # one land in the same state; the setting is saved before the replaced
-    # account goes, so a failure in between loses neither.
-    updated_at = now_utc_iso()
-    if found.replaces is None:
+    # Both writes are idempotent, so overlapping polls and a poll after a
+    # failed one land in the same state. They come before the replaced account
+    # is deleted, so a failure in between loses no setting.
+    if isinstance(found.origin, Reconnect):
+        carry_over_account_setting(
+            store=store,
+            toolkit=found.toolkit,
+            replaced=found.origin.replaces,
+            account=found.account,
+            updated_at=now_utc_iso(),
+        )
+    elif found.origin == "connect":
         apply_new_account_default(
             store=store,
             toolkit=found.toolkit,
             account=found.account,
-            updated_at=updated_at,
+            updated_at=now_utc_iso(),
         )
-    else:
-        carry_over_account_setting(
-            store=store,
-            toolkit=found.toolkit,
-            replaced=found.replaces,
-            account=found.account,
-            updated_at=updated_at,
-        )
+    # Origin unknown (a restart since the link): nothing is saved, so the
+    # account shows off until the user chooses.
     with _connect_errors():
         await connections.activate(found)
-    if found.replaces is not None:
-        revoke_integration_account(
-            db_path=store.db_path,
-            busy_timeout_ms=store.busy_timeout_ms,
-            user_id=store.user_id,
-            toolkit=found.toolkit,
-            account=found.replaces,
-            revoked_at=updated_at,
-        )
     return ConnectionStateResponse(state=found.state)
 
 

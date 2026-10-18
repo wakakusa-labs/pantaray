@@ -20,6 +20,7 @@ from pantaray_agents.local_runtime.tooling.repository.integration_permissions im
     initialize_integration_account_access,
     load_integration_account_access,
     load_integration_blocked_tools,
+    move_integration_account_permissions,
     set_integration_account_access,
     set_integration_tool_blocked,
 )
@@ -281,41 +282,20 @@ def carry_over_account_setting(
     account: str,
     updated_at: str,
 ) -> None:
-    """A reconnect's new account takes the replaced account's access and blocks.
+    """A reconnect's new account takes over the replaced account's setting.
 
-    An access the new account already has is kept.
+    All or nothing, and a new account that already took it over is left alone.
     """
 
-    initialize_integration_account_access(
+    move_integration_account_permissions(
         db_path=store.db_path,
         busy_timeout_ms=store.busy_timeout_ms,
         user_id=store.user_id,
         toolkit=toolkit,
-        account=account,
-        access=load_integration_account_access(
-            db_path=store.db_path,
-            busy_timeout_ms=store.busy_timeout_ms,
-            user_id=store.user_id,
-            toolkit=toolkit,
-            account=replaced,
-        ),
+        from_account=replaced,
+        to_account=account,
         updated_at=updated_at,
     )
-    for slug in load_integration_blocked_tools(
-        db_path=store.db_path,
-        busy_timeout_ms=store.busy_timeout_ms,
-        user_id=store.user_id,
-        account=replaced,
-    ):
-        set_integration_tool_blocked(
-            db_path=store.db_path,
-            busy_timeout_ms=store.busy_timeout_ms,
-            user_id=store.user_id,
-            account=account,
-            slug=slug,
-            blocked=True,
-            updated_at=updated_at,
-        )
 
 
 async def _find_account(

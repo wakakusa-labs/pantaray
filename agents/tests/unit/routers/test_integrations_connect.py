@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -28,9 +29,13 @@ from pantaray_agents.local_runtime.integrations.registry import (
 )
 from pantaray_agents.local_runtime.integrations.settings import PermissionStore
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
+from pantaray_agents.local_runtime.tooling.repository import (
+    integration_permissions as permissions_repository,
+)
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
     IntegrationAccess,
     load_integration_account_access,
+    load_integration_blocked_tools,
     set_integration_account_access,
     set_integration_tool_blocked,
 )
@@ -166,6 +171,15 @@ def _access(store: PermissionStore, account: str) -> IntegrationAccess:
         busy_timeout_ms=store.busy_timeout_ms,
         user_id=USER_ID,
         toolkit="gmail",
+        account=account,
+    )
+
+
+def _blocked(store: PermissionStore, account: str) -> frozenset[str]:
+    return load_integration_blocked_tools(
+        db_path=store.db_path,
+        busy_timeout_ms=store.busy_timeout_ms,
+        user_id=USER_ID,
         account=account,
     )
 
@@ -384,8 +398,8 @@ def test_composio_statuses_map_to_the_connection_state(
     with _client() as client:
         response = client.get(f"{BASE}/connections/ca_new")
     assert response.json() == {"state": state}
-    # Only an active connection gets the default.
-    assert _access(store, "ca_new") == ("read_only" if state == "active" else "off")
+    # A connection this process did not link gets no setting, even active.
+    assert _access(store, "ca_new") == "off"
 
 
 def test_the_first_active_poll_saves_the_default_and_indexes_the_toolkit(
@@ -428,7 +442,8 @@ async def test_concurrent_first_active_polls_refresh_the_caches_once(
     )
     set_integration_gateway(created)
     await created.sync()
-    composio.statuses["ca_new"] = "ACTIVE"
+    link = await created.connections.connect("gmail")
+    composio.statuses[link.connection_id] = "ACTIVE"
     # Holds the first poll inside the activation while the others arrive.
     composio.tools_delay = 0.05
     composio.requests.clear()
@@ -436,7 +451,9 @@ async def test_concurrent_first_active_polls_refresh_the_caches_once(
     states = await asyncio.gather(
         *(
             integrations.get_connection_state(
-                user_id=USER_ID, connection_id="ca_new", resolved_user_id=USER_ID
+                user_id=USER_ID,
+                connection_id=link.connection_id,
+                resolved_user_id=USER_ID,
             )
             for _ in range(3)
         )
@@ -445,7 +462,7 @@ async def test_concurrent_first_active_polls_refresh_the_caches_once(
     assert [s.state for s in states] == ["active"] * 3
     assert len(composio.sent("GET", "/tools")) == 1
     assert len(composio.sent("GET", "/connected_accounts")) == 1
-    assert _access(store, "ca_new") == "read_only"
+    assert _access(store, link.connection_id) == "read_only"
 
 
 def test_a_failed_activation_is_502_and_the_next_poll_completes_it(
@@ -462,8 +479,8 @@ def test_a_failed_activation_is_502_and_the_next_poll_completes_it(
         composio.statuses[connection_id] = "ACTIVE"
         poll = f"{BASE}/connections/{connection_id}"
         assert client.get(poll).status_code == 502
-        # Neither account lost its setting.
-        assert _access(store, WORK) == "read_write"
+        # The setting moved before Composio was asked to delete the old one.
+        assert WORK in composio.statuses
         assert _access(store, connection_id) == "read_write"
         del composio.replies[delete_old]
         assert client.get(poll).json() == {"state": "active"}
@@ -546,6 +563,71 @@ def test_a_link_that_ends_without_consent_is_deleted(
     with _client() as client:
         client.get(f"{BASE}/connections/ca_elsewhere")
     assert "ca_elsewhere" in composio.statuses
+
+
+def test_a_failed_move_leaves_the_new_account_without_access(
+    composio: FakeComposio,
+    gateway: ComposioGateway,
+    store: PermissionStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _save(store, WORK, "read_write")
+    _block(store, WORK, "GMAIL_FETCH_EMAILS")
+    save_scope = permissions_repository._save_scope
+
+    def failing_on_blocks(
+        connection: sqlite3.Connection, *, scope: str, **kwargs: str
+    ) -> None:
+        if scope.startswith(permissions_repository.INTEGRATION_TOOL_SCOPE_PREFIX):
+            raise sqlite3.OperationalError("disk I/O error")
+        save_scope(connection, scope=scope, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(permissions_repository, "_save_scope", failing_on_blocks)
+
+    with _client() as client:
+        connection_id = client.post(
+            f"{BASE}/gmail/accounts/{WORK}/reconnect", json={}
+        ).json()["connection_id"]
+        composio.statuses[connection_id] = "ACTIVE"
+        with pytest.raises(sqlite3.OperationalError):
+            client.get(f"{BASE}/connections/{connection_id}")
+
+    # Rolled back whole: the new account has no access, the old keeps its own.
+    assert _access(store, connection_id) == "off"
+    assert _access(store, WORK) == "read_write"
+    assert WORK in composio.statuses
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_after_a_restart_an_active_link_gets_no_setting_and_replaces_nothing(
+    composio: FakeComposio,
+    gateway: ComposioGateway,
+    store: PermissionStore,
+    reconnect: bool,
+) -> None:
+    _save(store, WORK, "off")
+    _block(store, WORK, "GMAIL_FETCH_EMAILS")
+    path = f"/gmail/accounts/{WORK}/reconnect" if reconnect else "/gmail/connect"
+    with _client() as client:
+        connection_id = client.post(BASE + path, json={}).json()["connection_id"]
+
+    # A restart: a new gateway that never opened the link.
+    restarted = ComposioGateway(
+        ComposioClient(API_KEY, transport=httpx2.MockTransport(composio.handle))
+    )
+    set_integration_gateway(restarted)
+    asyncio.run(restarted.sync())
+    composio.statuses[connection_id] = "ACTIVE"
+    with _client() as client:
+        state = client.get(f"{BASE}/connections/{connection_id}").json()
+        accounts = _accounts(client)
+
+    assert state == {"state": "active"}
+    assert accounts[connection_id]["access"] == "off"
+    assert not _blocked(store, connection_id)
+    # The old account is left for the user to disconnect.
+    assert WORK in composio.statuses
+    assert _blocked(store, WORK) == {"GMAIL_FETCH_EMAILS"}
 
 
 def test_disconnect_revokes_then_deletes_then_clears_only_that_account(

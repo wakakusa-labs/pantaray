@@ -79,12 +79,22 @@ class ConnectLink(InternalStrictModel):
 
 
 @dataclass(frozen=True, slots=True)
+class Reconnect:
+    # The account this link's account replaces once active.
+    replaces: str
+
+
+# Where a link came from, as far as this process knows: None after a restart,
+# or for a connection this process did not link.
+type LinkOrigin = Literal["connect"] | Reconnect | None
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectionStatus:
     state: ConnectionState
     toolkit: ToolkitSlug
     account: str
-    # The account a reconnect's link replaces once active.
-    replaces: str | None
+    origin: LinkOrigin
 
 
 class ConnectNotAllowedError(Exception):
@@ -128,10 +138,11 @@ class ComposioConnections:
         self._gateway = gateway
         self._client = client
         self._lock = threading.Lock()
-        # Links this process opened and not yet settled, to the account each
-        # replaces. Lost on restart: a reconnect then lands as a new account
-        # beside the old one, which the user can disconnect.
-        self._links: dict[str, str | None] = {}
+        # Links this process opened and not yet settled. Not persisted: after
+        # a restart a link's origin is unknown, so its account gets no setting
+        # and an old account it would have replaced stays for the user to
+        # disconnect.
+        self._links: dict[str, Literal["connect"] | Reconnect] = {}
         # Activations run or running, so overlapping polls do the work once.
         self._activations: dict[str, concurrent.futures.Future[None]] = {}
 
@@ -139,14 +150,14 @@ class ComposioConnections:
         """A link for one more account of ``toolkit``."""
 
         self._check_can_connect(toolkit)
-        return await self._open_link(toolkit, replaces=None)
+        return await self._open_link(toolkit, "connect")
 
     async def reconnect(self, toolkit: ToolkitSlug, account: str) -> ConnectLink:
         """A link whose account replaces ``account`` once the user consents."""
 
         self._check_can_connect(toolkit)
         await self._find(toolkit, account)
-        return await self._open_link(toolkit, replaces=account)
+        return await self._open_link(toolkit, Reconnect(replaces=account))
 
     async def disconnect(self, toolkit: ToolkitSlug, account: str) -> None:
         """Revoke the grant at the provider, then delete the connected account.
@@ -193,9 +204,8 @@ class ComposioConnections:
             raise UnknownConnectionError(connection_id)
         state = _STATES[reply.status]
         with self._lock:
-            ours = connection_id in self._links
-            replaces = self._links.get(connection_id)
-        if state in ("failed", "expired") and ours:
+            origin = self._links.get(connection_id)
+        if state in ("failed", "expired") and origin is not None:
             await self._delete(connection_id)
             with self._lock:
                 self._links.pop(connection_id, None)
@@ -203,7 +213,7 @@ class ComposioConnections:
             state=state,
             toolkit=reply.toolkit.slug,
             account=connection_id,
-            replaces=replaces,
+            origin=origin,
         )
 
     async def activate(self, found: ConnectionStatus) -> None:
@@ -223,10 +233,10 @@ class ComposioConnections:
             await asyncio.shield(asyncio.wrap_future(pending))
             return
         try:
-            if found.replaces is not None:
+            if isinstance(found.origin, Reconnect):
                 # Deleted without a revoke: the provider may hold one grant
                 # for both connections, and revoking it would cut the new one.
-                await self._delete(found.replaces)
+                await self._delete(found.origin.replaces)
             await self._gateway.refresh_accounts(found.account, listed=True)
         except BaseException as exc:
             with self._lock:
@@ -238,7 +248,7 @@ class ComposioConnections:
         pending.set_result(None)
 
     async def _open_link(
-        self, toolkit: ToolkitSlug, *, replaces: str | None
+        self, toolkit: ToolkitSlug, origin: Literal["connect"] | Reconnect
     ) -> ConnectLink:
         session_id = await self._gateway.session_with(toolkit)
         if isinstance(session_id, ComposioResponse):
@@ -251,7 +261,7 @@ class ComposioConnections:
         )
         reply = _parse(_LinkReply, response, ok=(200, 201))
         with self._lock:
-            self._links[reply.connected_account_id] = replaces
+            self._links[reply.connected_account_id] = origin
         expires_at = datetime.now(UTC) + LINK_LIFETIME
         return ConnectLink(
             redirect_url=reply.redirect_url,

@@ -3,6 +3,17 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.5.3
+
+- Tasks run again when you use ChatGPT with gpt-6.1-sol, gpt-6-luna or gpt-6-astra. Before, they
+  failed on every message.
+- Hover a message you sent in a task and press the button at its bottom right to copy it.
+
+---
+
+- ChatGPT の gpt-6.1-sol、gpt-6-luna、gpt-6-astra を選んでいるとき、タスクがどのメッセージでも失敗していた問題を直しました。
+- タスクで自分が送ったメッセージにカーソルを合わせ、右下のボタンを押すとコピーできるようになりました。
+
 ## 0.5.2
 
 - A PDF a task names now shows in the preview beside the conversation, and opening it no longer

@@ -41,7 +41,10 @@ REMEMBER_TOOL = ToolDefinition.from_spec(
                 "Never tell the user that something is remembered, forgotten, or "
                 "updated without calling this tool. Do not call it unless the "
                 "user asked. Do not record secrets such as passwords, API keys, "
-                "or tokens."
+                "or tokens. From integration_run_tool results, note what they "
+                "tell about the user, such as a decision, request, plan, or who "
+                "sent what about which matter, never a copy or quote of a mail, "
+                "message, or file body."
             ),
         ),
         concurrency=ToolConcurrency("sequential"),

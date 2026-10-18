@@ -31,6 +31,7 @@ from pantaray_agents.local_runtime.context.source_protocol import (
     PageResponse,
 )
 from pantaray_agents.local_runtime.integrations import change_probe, registry
+from pantaray_agents.local_runtime.integrations.contracts import ToolSucceeded
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -1016,3 +1017,33 @@ async def test_a_change_between_two_runs_is_inside_the_second_runs_period(
     first, second = (str(arguments["query"]) for arguments in gmail.arguments)
     assert int(second.removeprefix("after:")) <= arrived
     assert int(first.removeprefix("after:")) < int(second.removeprefix("after:"))
+
+
+async def test_a_record_quoting_an_external_change_never_reaches_the_store(
+    db_path: Path, gmail: _FakeGateway
+) -> None:
+    """Records are grounded in fetched screen text only, never in a probe result."""
+    mail_body = "会場の見積もりは 32 万円です"
+    _connect(db_path, gmail, "work")
+    gmail.results["work"] = ToolSucceeded(
+        data={"messages": [{"subject": "会場の見積もり", "body": mail_body}]}
+    )
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(pages=[_page(observations=1, next_cursor="cursor-2")])
+    agent = _FakeAgent(
+        output=_output(
+            records=[
+                _claim(),
+                _claim(source="会場の見積もり", speaker="", quote=mail_body),
+                _claim(event_id="work", source="会場の見積もり", quote=mail_body),
+            ]
+        ),
+        read_event="event-1",
+    )
+
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    (block,) = agent.external_changes
+    assert block is not None and mail_body in block
+    assert [record[-1] for record in _stored(db_path)["records"]] == [QUOTE]

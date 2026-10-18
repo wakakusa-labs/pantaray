@@ -3,7 +3,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from typing import Final, Literal
-from urllib.parse import unquote
 
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_memory_document,
@@ -23,10 +22,10 @@ from pantaray_agents.tools.files.read_output import (
 )
 
 from .models import ToolInvocationReadMemoryInput, ToolInvocationStatus
+from .outside_workspace_grant import path_is_within
 
 ACTION_FILE_READ_SOURCE: Final[Literal["action_file_read"]] = "action_file_read"
 ACTION_FILE_READ_TOOL_ID: Final = "read"
-_INTEGRATION_RUN_TOOL_ID: Final = "integration_run_tool"
 _REFERENCE_PREFIX = "[[ref:"
 _ESCAPED_REFERENCE_PREFIX = r"[\[ref:"
 
@@ -47,7 +46,7 @@ def register_action_file_read_memory(
         invocation_id=invocation_id,
         user_id=user_id,
         path=read_memory.path,
-    ) or _is_integration_result_read(
+    ) or _is_tool_results_read(
         connection=connection,
         invocation_id=invocation_id,
         user_id=user_id,
@@ -155,16 +154,18 @@ def _is_memory_folder_read(
     )
 
 
-def _is_integration_result_read(
+def _is_tool_results_read(
     *,
     connection: sqlite3.Connection,
     invocation_id: str,
     user_id: str,
     path: str,
 ) -> bool:
-    # A large connected-app result is stored under the Action's tool results and
-    # read back with `read`. It is still the user's mail, messages and files,
-    # which never become memory documents.
+    # A stored tool result read back is the Action's record of an earlier call,
+    # not a file the user opened: a file read it holds was registered when it
+    # ran, and an integration result in it (the user's mail, messages and files)
+    # must never be. Containment is by directory identity, so a case variant of
+    # the path is caught too.
     row = connection.execute(
         """
         SELECT roots.canonical_real_path
@@ -175,23 +176,9 @@ def _is_integration_result_read(
         """,
         (invocation_id, user_id),
     ).fetchone()
-    if row is None:
-        return False
-    read_path = Path(path).resolve()
-    results_root = Path(str(row["canonical_real_path"])).resolve()
-    if not read_path.is_relative_to(results_root):
-        return False
-    # Each result is stored in a folder named after the invocation that produced it.
-    producer = unquote(read_path.relative_to(results_root).parts[0])
-    return (
-        connection.execute(
-            """
-            SELECT 1 FROM tool_invocations
-            WHERE invocation_id = ? AND user_id = ? AND tool_id = ?
-            """,
-            (producer, user_id, _INTEGRATION_RUN_TOOL_ID),
-        ).fetchone()
-        is not None
+    return row is not None and path_is_within(
+        path=Path(path).resolve(),
+        root=Path(str(row["canonical_real_path"])).resolve(),
     )
 
 

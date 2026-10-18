@@ -275,6 +275,7 @@ async def _run(fixture: dict[str, Any], db_path: Path, index: int) -> dict[str, 
             zanei=zanei,
             workspace_context=fixture.get("workspace_context", "(none)"),
             previous_insight=fixture.get("previous_insight", "(none)"),
+            external_changes=None,
             db_path=db_path,
             busy_timeout_ms=5_000,
         )

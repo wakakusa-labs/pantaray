@@ -10,9 +10,7 @@ import type {
 
 export type IntegrationAccountNotice =
   | { kind: 'save_failed' }
-  | { kind: 'not_allowed'; reason: ApiDenial }
-  /** Neither the save's answer nor a re-read arrived: the stored access is not known. */
-  | { kind: 'unconfirmed' };
+  | { kind: 'not_allowed'; reason: ApiDenial };
 
 type LoadedTools = {
   state: 'loaded';
@@ -33,7 +31,10 @@ export type IntegrationAccountRowState = {
   busy: boolean;
   /** The option being saved; it shows as chosen until the backend answers. */
   pending: IntegrationAccess | null;
+  /** What the last save's answer said. A 409 refuses only that save, so it leaves `unconfirmed`. */
   notice: IntegrationAccountNotice | null;
+  /** Neither a save's answer nor a re-read arrived: the stored access is not known. */
+  unconfirmed: boolean;
   tools: IntegrationToolsState | null;
 };
 
@@ -57,6 +58,7 @@ const EMPTY_ROW: IntegrationAccountRowState = {
   busy: false,
   pending: null,
   notice: null,
+  unconfirmed: false,
   tools: null,
 };
 
@@ -131,7 +133,8 @@ export function useIntegrationSettingsController(ownerId: string | null): {
       patchRow(forOwner, account, () => ({
         busy: false,
         pending: null,
-        notice: { kind: 'unconfirmed' },
+        notice: null,
+        unconfirmed: true,
       }));
     api.getStatus().then((status) => {
       const stored =
@@ -145,7 +148,12 @@ export function useIntegrationSettingsController(ownerId: string | null): {
       patchRow(
         forOwner,
         account,
-        () => ({ busy: false, pending: null, notice: saved ? null : { kind: 'save_failed' } }),
+        () => ({
+          busy: false,
+          pending: null,
+          notice: saved ? null : { kind: 'save_failed' },
+          unconfirmed: false,
+        }),
         stored
       );
     }, unconfirmed);
@@ -161,7 +169,7 @@ export function useIntegrationSettingsController(ownerId: string | null): {
           ? patchRow(
               forOwner,
               account,
-              () => ({ busy: false, pending: null, notice: null }),
+              () => ({ busy: false, pending: null, notice: null, unconfirmed: false }),
               result.account
             )
           : patchRow(forOwner, account, () => ({

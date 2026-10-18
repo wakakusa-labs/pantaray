@@ -242,6 +242,29 @@ describe('integration settings', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('keeps an unknown earlier save unconfirmed when a new save is refused', async () => {
+    api.setAccountAccess.mockRejectedValueOnce(new Error('Local backend request failed.'));
+    renderSettings();
+    await openGmail();
+    api.getStatus.mockRejectedValueOnce(new Error('Local backend request failed.'));
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+    await waitFor(() => expect(accessButton('home@example.com')).toHaveTextContent('Unconfirmed'));
+
+    api.setAccountAccess.mockResolvedValueOnce({
+      kind: 'not_allowed',
+      reason: { source: 'connection_method', capability: 'execute', detail: null },
+    });
+    fireEvent.click(accessButton('home@example.com'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Read only' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('The API does not allow running tools.')).toBeInTheDocument()
+    );
+    expect(accessButton('home@example.com')).toHaveTextContent('Unconfirmed');
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+  });
+
   it('takes no second choice while a save is pending, and says it is saving', async () => {
     let answer: (result: IntegrationAccessUpdateResult) => void = () => undefined;
     api.setAccountAccess.mockImplementation(() => new Promise((resolve) => (answer = resolve)));

@@ -120,7 +120,7 @@ function AccountRow({
   const [expanded, setExpanded] = useState(false);
   const service = toolkit.display_name;
   // An unconfirmed save leaves no value to show: the control says so instead of guessing.
-  const chosen = row.pending ?? (row.notice?.kind === 'unconfirmed' ? null : account.access);
+  const chosen = row.pending ?? (row.unconfirmed ? null : account.access);
   const chosenTitle = t(`settings.integrations.access.${chosen ?? 'unconfirmed'}`);
   const blockedCount =
     row.tools?.state === 'loaded' ? row.tools.tools.filter((tool) => tool.blocked).length : 0;
@@ -205,24 +205,20 @@ function AccountRow({
         <p role="alert" className="dashboard-section-description settings-section-error">
           {row.notice.kind === 'not_allowed'
             ? denialText(t, row.notice.reason, service)
-            : t(
-                row.notice.kind === 'unconfirmed'
-                  ? 'settings.integrations.unconfirmed'
-                  : 'settings.integrations.saveFailed'
-              )}
-          {row.notice.kind === 'unconfirmed' ? (
-            <>
-              {' '}
-              <button
-                type="button"
-                className="integration-text-button"
-                disabled={row.busy}
-                onClick={() => actions.recheckAccess(toolkit.toolkit, account.account)}
-              >
-                {t('settings.integrations.recheck')}
-              </button>
-            </>
-          ) : null}
+            : t('settings.integrations.saveFailed')}
+        </p>
+      ) : null}
+      {row.unconfirmed ? (
+        <p role="alert" className="dashboard-section-description settings-section-error">
+          {t('settings.integrations.unconfirmed')}{' '}
+          <button
+            type="button"
+            className="integration-text-button"
+            disabled={row.busy}
+            onClick={() => actions.recheckAccess(toolkit.toolkit, account.account)}
+          >
+            {t('settings.integrations.recheck')}
+          </button>
         </p>
       ) : null}
       <div id={toolsId} hidden={!expanded}>

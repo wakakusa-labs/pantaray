@@ -97,6 +97,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:resume',
     'action:withdrawMessage',
     'action:stop',
+    'action:sendNow',
     'overlay:submitApprovalDecision',
     'overlay:getActionApprovalMode',
     'overlay:setActionApprovalMode',

@@ -1167,6 +1167,31 @@ test('OrchestrationManager: すでに live 中の Action は再 resume しない
   assert.deepEqual(resumed, []);
 });
 
+test('OrchestrationManager: a run Send now waits on ends with the first page that shows it ended', async () => {
+  let status = 'processing';
+  const harness = createManagerHarness({
+    readLatestActionConversationPage: async (actionId) => conversationPage(actionId, status),
+  });
+  harness.manager.ensureConnected();
+  await harness.manager.refreshAndResumeActionConversation('action-1');
+  let ended = false;
+  const waiting = harness.manager
+    .whenRunEnds({ actionId: 'action-1', processId: 'run-1' })
+    .then(() => {
+      ended = true;
+    });
+
+  // Still running, as while its subagents settle after the Stop.
+  await harness.manager.refreshAndResumeActionConversation('action-1');
+  assert.equal(ended, false);
+
+  status = 'canceled';
+  await harness.manager.refreshAndResumeActionConversation('action-1');
+  await waiting;
+  // Once ended, a later wait does not hang on a page that will not change again.
+  await harness.manager.whenRunEnds({ actionId: 'action-1', processId: 'run-1' });
+});
+
 test('standalone terminal notification is delivered to the bound Overlay even if its read fails', async () => {
   const harness = createManagerHarness({
     resolveOverlayId: ({ actionId }) => (actionId === 'act-direct' ? 'overlay-direct' : null),

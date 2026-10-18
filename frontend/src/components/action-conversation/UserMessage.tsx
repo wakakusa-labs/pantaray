@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { ArrowUp, X } from 'lucide-react';
 import { useContext, useState } from 'react';
 
 import type { ActionConversationUserItem } from '../../../electron/src/actions/actionConversationModel';
@@ -8,6 +8,7 @@ import { AttachedImages } from './AttachedImages';
 import { CopyTextButton } from './CopyTextButton';
 import { QuotedMessageText } from './QuotedMessageText';
 import { OpenWorkContext, sentMessageRefs } from './sentMessageRefs';
+import type { SendNow } from './useUnadoptedMessages';
 import { USER_MESSAGE_COPY as COPY } from './userMessageCopy';
 
 /** No confirmation: the message has not run, so withdrawing it undoes nothing. */
@@ -34,13 +35,48 @@ function WithdrawButton({ label, onWithdraw }: { label: string; onWithdraw: () =
   );
 }
 
+/** Pressing it again while it runs does nothing: one Send now covers every waiting message. */
+function SendNowButton({
+  label,
+  failedLabel,
+  sendNow,
+}: {
+  label: string;
+  failedLabel: string;
+  sendNow: SendNow;
+}) {
+  const failed = sendNow.state === 'failed' ? failedLabel : null;
+  return (
+    <>
+      <button
+        type="button"
+        className="action-conversation__send-now"
+        aria-label={label}
+        data-tooltip={failed ?? label}
+        aria-disabled={sendNow.state === 'sending'}
+        onClick={sendNow.send}
+      >
+        <ArrowUp size={14} strokeWidth={1.75} aria-hidden />
+      </button>
+      {failed ? (
+        <span className="action-conversation__sr-only" role="alert">
+          {failed}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export function UserItem({
   item,
   onWithdraw,
+  sendNow = null,
 }: {
   item: ActionConversationUserItem;
   /** Offered only where the message can be withdrawn: a canonical one no run has taken. */
   onWithdraw?: (stepId: string) => Promise<void>;
+  /** Offered on a message waiting for the running run, while that run can be stopped. */
+  sendNow?: SendNow | null;
 }) {
   const { language, t } = useI18n();
   const openWork = useContext(OpenWorkContext);
@@ -73,10 +109,19 @@ export function UserItem({
     item.source === 'canonical' && status !== 'adopted' && onWithdraw ? (
       <WithdrawButton label={copy.withdraw} onWithdraw={() => onWithdraw(item.entry.step_id)} />
     ) : null;
+  const sendNowButton =
+    item.source === 'canonical' && status === 'pending' && sendNow ? (
+      <SendNowButton
+        label={copy.sendNow}
+        failedLabel={t('overlay.composer.stopFailed')}
+        sendNow={sendNow}
+      />
+    ) : null;
   const actions =
-    copyButton || withdrawButton ? (
+    copyButton || withdrawButton || sendNowButton ? (
       <div className="action-conversation__user-actions">
         {copyButton}
+        {sendNowButton}
         {withdrawButton}
       </div>
     ) : null;

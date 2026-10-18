@@ -1177,41 +1177,8 @@ def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
     """
 
     client, db_path = runtime_client
-    started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
+    started, queued = _stop_with_a_queued_message(client, db_path)
     action_id = str(started["action_id"])
-    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:first")
-    # The running turn's checkpoint, on its USER step as adoption writes it.
-    with sqlite3.connect(db_path) as connection, connection:
-        connection.execute(
-            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
-               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
-            (
-                json.dumps(
-                    _terminal_checkpoint(preparation, action_id, now_utc_iso(), "")
-                ),
-                RUNTIME_STATE_CHECKPOINT_VERSION,
-                started["step_id"],
-            ),
-        )
-    queued = client.post(
-        MESSAGES_PATH,
-        json=_message(
-            "message-queued",
-            "実行中に送った指示",
-            action_id=action_id,
-            expected_process_id=str(started["process_id"]),
-        ),
-    ).json()
-    assert queued["disposition"] == "pending"
-    stopped = client.post(
-        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
-        json={"reason": "user_stop"},
-    )
-    assert stopped.status_code == 202, stopped.text
-    assert [
-        (message["message_id"], message["status"])
-        for message in _all_unadopted(client, action_id)
-    ] == [("message-queued", "runs_with_next_message")]
 
     followup = client.post(
         MESSAGES_PATH,
@@ -1276,6 +1243,92 @@ def test_a_message_the_stopped_run_never_took_runs_before_the_next_one(
         for entry in checkpoint["history_by_scope"]["S"]
         if entry["step_type"] == "user_request"
     ] == ["最初", "実行中に送った指示", "次の指示"]
+
+
+def test_resume_runs_the_message_the_stopped_run_never_took(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """Queued message → Stop → Resume: the resumed run answers the queued message.
+
+    "Send now" is this sequence: it stops the run a waiting message was sent to
+    and resumes, so the message the Stop left untaken must be the resumed run's.
+    """
+
+    client, db_path = runtime_client
+    started, _ = _stop_with_a_queued_message(client, db_path)
+    action_id = str(started["action_id"])
+
+    resumed = _resume(client, action_id, "message-resume").json()
+    assert resumed["disposition"] == "started", resumed
+
+    assert _all_unadopted(client, action_id) == []
+    new_run = _read_state(client, action_id)["runs"][0]
+    assert new_run["run_id"] == resumed["process_id"]
+    # The resume note itself is never shown.
+    assert [
+        (entry["message_id"], entry["status"])
+        for entry in new_run["entries"]
+        if entry["step_kind"] == "user"
+    ] == [("message-queued", "adopted")]
+
+    payload, preparation = _claim_and_prepare(db_path, claimed_by="worker:resume")
+    assert payload["process_id"] == resumed["process_id"]
+    assert preparation.context.user_message.message_id == "message-queued"
+    with sqlite3.connect(db_path) as connection:
+        (checkpoint_json,) = connection.execute(
+            """SELECT runtime_state_checkpoint FROM agent_action_steps
+               WHERE action_id = ? AND runtime_state_checkpoint IS NOT NULL
+               ORDER BY step_number DESC LIMIT 1""",
+            (action_id,),
+        ).fetchone()
+    assert [
+        entry.get("user_request_text")
+        for entry in json.loads(checkpoint_json)["history_by_scope"]["S"]
+        if entry["step_type"] == "user_request"
+    ] == ["最初", "実行中に送った指示", ACTION_RESUME_REQUEST_TEXT]
+
+
+def _stop_with_a_queued_message(
+    client: TestClient, db_path: Path
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Start a run, queue a message for its next THINK, and stop it before then."""
+
+    started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
+    action_id = str(started["action_id"])
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:first")
+    # The running turn's checkpoint, on its USER step as adoption writes it.
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
+               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
+            (
+                json.dumps(
+                    _terminal_checkpoint(preparation, action_id, now_utc_iso(), "")
+                ),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                started["step_id"],
+            ),
+        )
+    queued = client.post(
+        MESSAGES_PATH,
+        json=_message(
+            "message-queued",
+            "実行中に送った指示",
+            action_id=action_id,
+            expected_process_id=str(started["process_id"]),
+        ),
+    ).json()
+    assert queued["disposition"] == "pending"
+    stopped = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={"reason": "user_stop"},
+    )
+    assert stopped.status_code == 202, stopped.text
+    assert [
+        (message["message_id"], message["status"])
+        for message in _all_unadopted(client, action_id)
+    ] == [("message-queued", "runs_with_next_message")]
+    return started, queued
 
 
 def _all_unadopted(client: TestClient, action_id: str) -> list[dict[str, object]]:

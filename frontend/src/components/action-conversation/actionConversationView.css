@@ -81,6 +81,7 @@
 }
 
 .action-conversation__copy,
+.action-conversation__send-now,
 .action-conversation__withdraw {
   display: inline-flex;
   align-items: center;
@@ -94,6 +95,7 @@
 }
 
 .action-conversation__copy:hover,
+.action-conversation__send-now:hover,
 .action-conversation__withdraw:hover {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.08);
@@ -114,6 +116,7 @@
  * スクロール領域に切られるので、ボタンの内側に描く。
  */
 .action-conversation__copy:focus-visible,
+.action-conversation__send-now:focus-visible,
 .action-conversation__withdraw:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: -2px;
@@ -194,6 +197,7 @@
   margin-top: var(--space-xs);
 }
 
+.action-conversation__send-now[aria-disabled='true'],
 .action-conversation__withdraw[aria-disabled='true'] {
   cursor: default;
   opacity: 0.5;

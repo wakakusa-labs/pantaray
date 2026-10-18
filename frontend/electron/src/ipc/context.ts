@@ -203,6 +203,8 @@ export type MainContext = {
     refreshActionConversation: (actionId: string) => void;
     /** Refreshes the Action's page and attaches its live run if one is unfinished. */
     refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
+    /** Resolves once the Action's page no longer shows the run as its active one, or on reset. */
+    whenRunEnds: (request: { actionId: string; processId: string }) => Promise<void>;
   };
 
   ui: {

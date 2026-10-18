@@ -106,6 +106,8 @@ export const validInvokeChannels = [
   'action:openConversation',
   // Both windows: stop the run they show
   'action:stop',
+  // Both windows: stop the run and resume it with the messages waiting for it
+  'action:sendNow',
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',
   'actionImage:reveal',

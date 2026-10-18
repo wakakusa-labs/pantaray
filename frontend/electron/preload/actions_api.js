@@ -45,6 +45,8 @@ function createActionsApi({ ipcRenderer }) {
       openConversation: (request) => ipcRenderer.invoke('action:openConversation', request),
       // Stop the run the window shows.
       stopAction: (request) => ipcRenderer.invoke('action:stop', request),
+      // Stop that run and resume it with the messages waiting for it.
+      sendNow: (request) => ipcRenderer.invoke('action:sendNow', request),
       attachImage: (request) => ipcRenderer.invoke('action:attachImage', request),
       revealImage: (request) => ipcRenderer.invoke('actionImage:reveal', request),
       attachFile: (request) => ipcRenderer.invoke('action:attachFile', request),

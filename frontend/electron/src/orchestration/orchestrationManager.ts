@@ -73,6 +73,7 @@ export type OrchestrationManager = {
   recordSuggestionReply: (suggestionId: string, actionId: string) => void;
   refreshActionConversation: (actionId: string) => void;
   refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
+  whenRunEnds: (request: { actionId: string; processId: string }) => Promise<void>;
   handleApprovalDecisionSettled: (identity: {
     actionId: string;
     processId: string;
@@ -527,6 +528,7 @@ export function createOrchestrationManager(params: {
     recordSuggestionReply: rendererBridge.recordSuggestionReply,
     refreshActionConversation: rendererBridge.refreshActionConversation,
     refreshAndResumeActionConversation: rendererBridge.refreshAndResumeActionConversation,
+    whenRunEnds: rendererBridge.whenRunEnds,
     handleApprovalDecisionSettled: rendererBridge.handleApprovalDecisionSettled,
     resetActionLive: () => {
       pendingResumeRequests = [];

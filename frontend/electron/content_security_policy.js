@@ -28,7 +28,8 @@ function buildContentSecurityPolicy({ isDev, apiOrigin, accountLoginEnabled }) {
     connectSrc,
     // pantaray-image: serves user-attached images out of the local artifact root. The scheme is
     // registered without bypassCSP, so it has to be named here to render at all.
-    "img-src 'self' data: blob: pantaray-image:;",
+    // logos.composio.dev: the connected-app logos on the Integrations settings screen.
+    "img-src 'self' data: blob: pantaray-image: https://logos.composio.dev;",
     // pantaray-action-file: serves a PDF an Action names to the preview frame, which Chromium's
     // PDF viewer draws. Frames only; it never serves a script or a page.
     "frame-src 'self' pantaray-action-file:;",

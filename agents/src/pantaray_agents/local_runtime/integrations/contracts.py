@@ -52,6 +52,8 @@ class ToolkitEntry(InternalStrictModel):
 
     toolkit: ToolkitSlug
     display_name: str
+    # The connection method's logo image; without one the settings screen draws a letter.
+    logo_url: str | None = None
     class_overrides: dict[str, ClassOverride] = Field(default_factory=dict)
     probe: ChangeProbe | None = None
 

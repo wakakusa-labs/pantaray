@@ -58,6 +58,7 @@ import type {
 } from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
+import type { IntegrationSettingsApi } from '../../electron/src/settings/integrationSettingsFetch';
 import type { ActionCompletionViewedRequest } from '../../electron/src/history/actionReadState';
 import type {
   ConversationHistoryListItem,
@@ -335,6 +336,8 @@ declare global {
           applies_to: ['workspace_edit_and_command'];
         }>;
       };
+      /** Connected external apps' permissions; main accepts these from the main window only. */
+      integrations?: IntegrationSettingsApi;
       aiConnection?: {
         getState: () => Promise<ConnectionStateResult>;
         update: (command: ConnectionCommand) => Promise<ConnectionUpdateResult>;

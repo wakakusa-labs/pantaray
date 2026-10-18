@@ -1,0 +1,112 @@
+.menu-button {
+  flex: none;
+  position: relative;
+}
+
+.menu-button__trigger {
+  align-items: center;
+  background: var(--surface-bg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--text-ui-size-sm);
+  gap: var(--space-sm);
+}
+
+.menu-button__trigger--value {
+  justify-content: space-between;
+  min-width: 150px;
+  padding: 6px 10px 6px 12px;
+}
+
+.menu-button__trigger--icon {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+}
+
+.menu-button__trigger[aria-disabled='true'] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.menu-button__trigger:hover:not([aria-disabled='true']) {
+  background: var(--surface-bg-hover);
+  border-color: var(--control-border-hover);
+}
+
+.menu-button__trigger:focus-visible,
+.menu-button__item:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* Opaque, so what is under the menu does not show through. */
+.menu-button__menu {
+  background: var(--fog-popover);
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-popover);
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 300px;
+  z-index: 20;
+}
+
+.menu-button__item {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 2px 10px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.menu-button__item:hover:not([aria-disabled='true']) {
+  background: var(--surface-bg-hover);
+}
+
+.menu-button__item[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.menu-button__check {
+  color: rgb(var(--accent-rgb));
+  font-size: var(--text-ui-size-sm);
+  line-height: 20px;
+}
+
+.menu-button__title {
+  font-size: 13px;
+}
+
+.menu-button__item[aria-disabled='true'] .menu-button__title {
+  opacity: 0.45;
+}
+
+.menu-button__description,
+.menu-button__reason {
+  font-size: var(--text-ui-size-sm);
+  grid-column: 2;
+}
+
+.menu-button__description {
+  color: var(--text-secondary);
+}
+
+.menu-button__reason {
+  color: var(--warning-color);
+}

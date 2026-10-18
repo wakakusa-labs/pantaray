@@ -1,24 +1,32 @@
 import { Check, CircleAlert, Copy } from 'lucide-react';
 
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
-import { useI18n } from '@/context/useI18n';
 
-/** Copies one final answer's Markdown source, so lists and emphasis survive pasting. */
-export function CopyAnswerButton({ markdown }: { markdown: string }) {
-  const { t } = useI18n();
+/** Copies `text` as given, so Markdown source and typed line breaks survive pasting. */
+export function CopyTextButton({
+  text,
+  label,
+  failedLabel,
+  className = '',
+}: {
+  text: string;
+  label: string;
+  failedLabel: string;
+  className?: string;
+}) {
   const { status, copy } = useClipboardCopy();
-  const failed = status === 'failed' ? t('overlay.copyThisAnswerFailed') : null;
+  const failed = status === 'failed' ? failedLabel : null;
   const Icon = status === 'copied' ? Check : status === 'failed' ? CircleAlert : Copy;
   return (
-    <div className="action-conversation__answer-actions">
+    <>
       <button
-        className="action-conversation__copy"
+        className={`action-conversation__copy ${className}`.trim()}
         type="button"
         // Stays clickable in the collapsed preview (useCollapsedFocusBoundary).
         data-collapsed-clickable
-        aria-label={t('overlay.copyThisAnswer')}
-        data-tooltip={failed ?? t('overlay.copyThisAnswer')}
-        onClick={() => void copy(() => markdown)}
+        aria-label={label}
+        data-tooltip={failed ?? label}
+        onClick={() => void copy(() => text)}
       >
         <Icon size={14} strokeWidth={1.75} aria-hidden />
       </button>
@@ -27,6 +35,6 @@ export function CopyAnswerButton({ markdown }: { markdown: string }) {
           {failed}
         </span>
       ) : null}
-    </div>
+    </>
   );
 }

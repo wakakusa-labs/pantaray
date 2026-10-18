@@ -1483,6 +1483,65 @@ describe('ActionConversationView', () => {
   });
 });
 
+describe('copying a message you sent', () => {
+  const writeText = vi.fn<(text: string) => Promise<void>>();
+  beforeEach(() => {
+    writeText.mockReset().mockResolvedValue(undefined);
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { clipboard: { writeText } },
+    });
+  });
+  afterEach(() => cleanup());
+
+  it('copies the message as typed, line breaks included', async () => {
+    renderView(
+      viewWith(
+        [
+          {
+            kind: 'run',
+            runId: 'run-1',
+            status: 'success',
+            startedAt: '2026-08-30T00:00:00.000000Z',
+            completedAt: '2026-08-30T00:01:00.000000Z',
+            lines: [canonicalUser('ask', 'First line\nSecond **line**')],
+          },
+        ],
+        'success'
+      )
+    );
+
+    await userEvent.click(
+      within(screen.getByRole('article', { name: 'You' })).getByRole('button', {
+        name: 'Copy this message',
+      })
+    );
+
+    expect(writeText).toHaveBeenCalledWith('First line\nSecond **line**');
+  });
+
+  it('offers no copy when the message carries no text', () => {
+    const imageOnly = canonicalUser('ask', 'unused');
+    renderView(
+      viewWith(
+        [
+          {
+            kind: 'run',
+            runId: 'run-1',
+            status: 'success',
+            startedAt: '2026-08-30T00:00:00.000000Z',
+            completedAt: '2026-08-30T00:01:00.000000Z',
+            lines: [{ ...imageOnly, entry: { ...imageOnly.entry, content: null } }],
+          },
+        ],
+        'success'
+      )
+    );
+
+    expect(screen.queryByRole('button', { name: 'Copy this message' })).toBeNull();
+  });
+});
+
 describe('withdrawing a message no run has taken', () => {
   afterEach(() => {
     cleanup();
@@ -1518,7 +1577,9 @@ describe('withdrawing a message no run has taken', () => {
       ['late', buttons[0]],
       ['queued', buttons[1]],
     ] as const) {
-      expect(within(bubble(key)).queryByRole('button')).toBeNull();
+      expect(
+        within(bubble(key)).queryByRole('button', { name: 'このメッセージを取り消す' })
+      ).toBeNull();
       expect(bubble(key).nextElementSibling).toContainElement(button);
     }
     expect(bubble('ran').nextElementSibling).toBeNull();

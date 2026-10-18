@@ -3,10 +3,10 @@
 The head is the first item of every Executing request, so rewriting it re-bills
 the whole conversation behind it: the first call after each new message read
 only the fixed prefix from the prompt cache. Every run re-reads the workspace
-and the Pantaray-wide AGENTS.md, and every turn re-reads the time, so the head
-instead shows them as they were on the Action's first turn and is never
-rewritten. (The memory indexes are read once per Action and are not sections
-here.) A turn that reads a different version appends it to its turn context,
+and the Pantaray-wide AGENTS.md, and every turn re-reads the integration
+permissions and the time, so the head instead shows them as they were on the
+Action's first turn and is never rewritten. (The memory indexes are read once
+per Action and are not sections here.) A turn that reads a different version appends it to its turn context,
 saying it replaces the earlier one, and a turn that reads the same version
 appends nothing -- the world-state pattern Codex uses for its own instructions
 and environment.
@@ -31,6 +31,7 @@ from pantaray_agents.agents.action_agent.support.conversation_projection import 
 WORLD_STATE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("workspace", ("workspace_path_contract", "workspace_context_prompt")),
     ("agents_md", ("agents_md_instructions",)),
+    ("integrations", ("integrations_state",)),
     ("current_time", ("current_time",)),
 )
 

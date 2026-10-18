@@ -173,6 +173,7 @@ def test_action_prompts_treat_request_summary_as_handoff_note() -> None:
 # reach the model through world_state_updates instead of a rewritten head:
 # - current_time: wall clock.
 # - the workspace and ~/.pantaray AGENTS.md: re-read by every run.
+# - integration permissions: re-read by every turn.
 _CHANGING_PROMPT_FIELDS = frozenset(
     field for _, fields in WORLD_STATE_SECTIONS for field in fields
 )
@@ -218,3 +219,4 @@ def test_every_world_state_section_has_an_update_naming_only_its_fields() -> Non
     for section, fields in WORLD_STATE_SECTIONS:
         assert _prompt_fields(updates[section]) == set(fields)
     assert _prompt_fields(updates["agents_md_removed"]) == set()
+    assert _prompt_fields(updates["integrations_removed"]) == set()

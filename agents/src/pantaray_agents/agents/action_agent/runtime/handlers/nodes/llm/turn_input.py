@@ -48,6 +48,7 @@ from pantaray_agents.utils.local_time import local_now_for_model
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
 from .context_budget import PreparedWindow, prepare_window
+from .integrations_state import render_integrations_state
 
 if TYPE_CHECKING:  # pragma: no cover
     from pantaray_agents.agents.action_agent import ActionAgent
@@ -199,7 +200,7 @@ class ExecutingTurn:
         return self.world_state.update_since(entries, omit_before_step_number=boundary)
 
 
-def build_executing_turn(
+async def build_executing_turn(
     agent: ActionAgent,
     state: ActionAgentState,
     runtime: ActionGraphRuntime,
@@ -225,6 +226,7 @@ def build_executing_turn(
         "workspace_context_prompt": rendering.render_workspace_context_prompt(state),
         "pantaray_default_agents_md": PANTARAY_DEFAULT_AGENTS_MD,
         "agents_md_instructions": _agents_md_section(state),
+        "integrations_state": await render_integrations_state(state),
     }
     head: str | None = None
     world_state = None

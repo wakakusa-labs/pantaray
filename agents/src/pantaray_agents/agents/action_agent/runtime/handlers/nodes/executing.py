@@ -290,7 +290,7 @@ async def execution_think_step(  # noqa: C901
         select_tool_registry(tuple(sorted(allowed_tool_ids)))
     )
 
-    turn = build_executing_turn(agent, state, runtime, tools=native_tools)
+    turn = await build_executing_turn(agent, state, runtime, tools=native_tools)
     provider_turns = await runtime.open_provider_turn_store(state)
     inference_profile = agent._resolve_inference_profile_id(stage=EXECUTING_STAGE)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from types import SimpleNamespace
 from typing import Any, cast
@@ -860,8 +861,10 @@ def _think_once(
     )
     state["context"]["context_body_omitted_before_step"] = omit
     with patch.object(turn_input, "local_now_for_model", return_value=now):
-        turn = turn_input.build_executing_turn(
-            _executing_agent(), state, cast(Any, runtime), tools=()
+        turn = asyncio.run(
+            turn_input.build_executing_turn(
+                _executing_agent(), state, cast(Any, runtime), tools=()
+            )
         )
     prepared = turn.prepare(
         state, rendering=_RENDERING, repair_notice="", provider_turns=turns or {}
@@ -1173,8 +1176,10 @@ def test_a_subagent_shares_the_supervisor_rules_after_its_role_section() -> None
         services=SimpleNamespace(rendering=_RENDERING),
         request=SimpleNamespace(language="ja"),
     )
-    parent = turn_input.build_executing_turn(
-        _executing_agent(), _state([_user(1)]), cast(Any, runtime), tools=()
+    parent = asyncio.run(
+        turn_input.build_executing_turn(
+            _executing_agent(), _state([_user(1)]), cast(Any, runtime), tools=()
+        )
     ).system_instruction
     child = subagent_job._subagent_system_instruction()
 
@@ -1385,7 +1390,9 @@ def test_build_executing_turn_splits_at_the_history_and_sends_the_items() -> Non
     )
     state = _state([_user(1)])
 
-    built = turn_input.build_executing_turn(agent, state, runtime, tools=())
+    built = asyncio.run(
+        turn_input.build_executing_turn(agent, state, runtime, tools=())
+    )
 
     assert built.head.startswith("Summary: (none)\nCurrent time: ")
     assert built.system_instruction == "SYS for Japanese"
@@ -1401,8 +1408,8 @@ def test_build_executing_turn_splits_at_the_history_and_sends_the_items() -> Non
         Any, SimpleNamespace(**{**vars(agent), "executing_prompt": "H {current_time}"})
     )
     assert (
-        turn_input.build_executing_turn(
-            seamless, state, runtime, tools=()
+        asyncio.run(
+            turn_input.build_executing_turn(seamless, state, runtime, tools=())
         ).sends_conversation
         is False
     )
@@ -1412,4 +1419,4 @@ def test_build_executing_turn_splits_at_the_history_and_sends_the_items() -> Non
         SimpleNamespace(**{**vars(agent), "executing_prompt": "H{action_history}T"}),
     )
     with pytest.raises(ValueError, match="must end with"):
-        turn_input.build_executing_turn(trailing, state, runtime, tools=())
+        asyncio.run(turn_input.build_executing_turn(trailing, state, runtime, tools=()))

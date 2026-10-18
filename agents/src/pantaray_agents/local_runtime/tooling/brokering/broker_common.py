@@ -12,6 +12,7 @@ from pantaray_agents.tools.files.manifest_paths import ManifestRoot, load_manife
 
 from ...storage.migrations import MigrationError
 from ..models import (
+    ApprovalMode,
     ApprovalSessionUpsertInput,
     StoredExecutionSession,
     StoredToolDefinition,
@@ -283,20 +284,28 @@ def ensure_tool_authorization(
     command_summary: dict[str, JSONValue],
     requested_at: str,
     require_user_prompt: bool = False,
+    integration_tool_scope: str | None = None,
 ) -> tuple[str | None, Literal["settings", "prompt"] | None]:
     """Authorize one tool request.
 
     `require_user_prompt` asks the user even under always_allow: that mode is
     consent for the registered workspace only, not for a write outside it.
+
+    `integration_tool_scope` (`integration_tool:<account>:<slug>`) marks a write
+    to a connected integration. It asks the user for every execution: neither
+    session capabilities, a saved setting nor an Action-level mode approve it.
+    The command summary must name the account, the tool and every argument,
+    because the approval binds to that summary.
     """
 
+    always_prompt = require_user_prompt or integration_tool_scope is not None
     allowed_capabilities = _load_allowed_capabilities(context)
     missing_capabilities = [
         capability
         for capability in context.tool_definition.required_capabilities
         if capability not in allowed_capabilities
     ]
-    if not missing_capabilities and not require_user_prompt:
+    if not missing_capabilities and not always_prompt:
         return None, None
     if context.execution_session.action_id is None:
         raise MigrationError(
@@ -306,7 +315,7 @@ def ensure_tool_authorization(
     # Resolved per tool request, so a mode change made from the Agent Overlay
     # while the Action runs takes effect from the next preflight onwards.
     # That control grants file/command consent, never screen-capture consent.
-    approval_scope = approval_scope_for_intent_class(
+    approval_scope = integration_tool_scope or approval_scope_for_intent_class(
         context.tool_definition.intent_class
     )
     action_approval_mode = (
@@ -319,7 +328,11 @@ def ensure_tool_authorization(
         if approval_scope == APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND
         else None
     )
-    if action_approval_mode is None:
+    if integration_tool_scope is not None:
+        # Consent to an integration write is never saved: each execution asks.
+        approval_mode: ApprovalMode = APPROVAL_MODE_PROMPT_EACH_TIME
+        requires_global_grants = False
+    elif action_approval_mode is None:
         user_default = load_effective_approval_preference(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
@@ -372,7 +385,7 @@ def ensure_tool_authorization(
         APPROVAL_MODE_PROMPT_EACH_TIME,
     }:
         raise MigrationError("unsupported approval mode")
-    if approval_mode == APPROVAL_MODE_ALWAYS_ALLOW and not require_user_prompt:
+    if approval_mode == APPROVAL_MODE_ALWAYS_ALLOW and not always_prompt:
         if requires_global_grants:
             active_grants = load_active_capability_grants(
                 db_path=context.db_path,

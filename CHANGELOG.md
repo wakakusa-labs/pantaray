@@ -3,6 +3,40 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.6.0
+
+- Connect Gmail, Google Calendar, Google Drive, Slack, Outlook, Teams, OneDrive, SharePoint, Box,
+  Notion, Linear, GitHub, Supabase, YouTube and LinkedIn in Settings with a free Composio API key,
+  including several accounts of one service.
+- Choose for each account whether Pantaray may not use it, only read it, or also write to it; a new
+  account starts as read only.
+- Tasks can read your connected apps, such as your unread mail or a Slack channel, and write to them
+  where you allow it; every write asks you first, showing the service, account, action and details.
+- Suggestions can read your connected apps too, and see what arrived in them since the last check.
+- Links to a Gmail message open it in the account it belongs to.
+- In Settings, the AI connection method is chosen from a menu.
+- After you stop a task right after sending a message, you can still send it more messages.
+- A command that runs outside the sandbox now uses your real home folder, so apps such as Chrome no
+  longer ask to reset your keychain.
+- Commands that use the temporary folder without quoting its path no longer fail.
+- A command can no longer reach Pantaray's private data by renaming a folder above it.
+- Suggestions now fit every kind of work and life, not only software, and the "external change"
+  kind no longer keeps raising security advisories.
+
+---
+
+- 設定から、無料の Composio の API キーで Gmail、Google カレンダー、Google ドライブ、Slack、Outlook、Teams、OneDrive、SharePoint、Box、Notion、Linear、GitHub、Supabase、YouTube、LinkedIn をつなげるようになりました。1 つのサービスで複数のアカウントもつなげます。
+- アカウントごとに「使わない」「読み取りのみ」「読み書き」を選べます。つないだ直後は「読み取りのみ」です。
+- タスクが、未読メールや Slack のチャンネルなど、つないだアプリの中身を読めるようになりました。許可したアカウントには書き込みもでき、書き込む前には毎回、サービス・アカウント・操作・内容を見せて確認します。
+- 提案も、つないだアプリを読めるようになり、前回の確認から届いたものを見られます。
+- Gmail のメールへのリンクが、そのメールのアカウントで開くようになりました。
+- 設定の AI 接続の方法を、メニューから選ぶようになりました。
+- メッセージを送ってすぐにタスクを止めたあとでも、続けてメッセージを送れるようになりました。
+- サンドボックスの外で動くコマンドが本来のホームフォルダを使うようになり、Chrome などがキーチェーンのリセットを求めることがなくなりました。
+- 一時フォルダのパスを引用符で囲まずに使うコマンドが、失敗しなくなりました。
+- コマンドが上の階層のフォルダの名前を変えて、Pantaray の非公開のデータに届くことがないようにしました。
+- 提案が、ソフトウェア開発に限らずどんな仕事や暮らしにも合うようになり、「外部の変化」の提案がセキュリティ情報ばかりになることもなくなりました。
+
 ## 0.5.4
 
 - When a task is working and your message is waiting, press ↑ under it to send it now: the task

@@ -1,11 +1,4 @@
 /* Uses aiConnection.css for .ai-note and settingsPage.css for the switches and buttons. */
-.integration-head {
-  align-items: flex-start;
-  display: flex;
-  gap: var(--space-lg);
-  justify-content: space-between;
-}
-
 .integration-list,
 .integration-tool-list,
 .integration-dialog-list {
@@ -45,6 +38,17 @@
   padding: var(--space-md) var(--space-lg);
   text-align: left;
   width: 100%;
+}
+
+.integration-add-icon {
+  border: 1px dashed var(--control-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: grid;
+  font-size: 18px;
+  height: 32px;
+  place-items: center;
+  width: 32px;
 }
 
 .integration-row:hover {

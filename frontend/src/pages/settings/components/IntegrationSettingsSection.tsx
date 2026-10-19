@@ -120,23 +120,8 @@ export function IntegrationSettingsSection({
 
   return (
     <div ref={rootRef} className="dashboard-section integration-settings">
-      <div className="integration-head">
-        <div>
-          <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
-          <p className="dashboard-section-description">{t('settings.integrations.description')}</p>
-        </div>
-        {shown ? (
-          <button
-            ref={addButtonRef}
-            type="button"
-            className="settings-action-button"
-            data-integration-focus="add"
-            onClick={() => setIsAdding(true)}
-          >
-            {t('settings.integrations.addService.open')}
-          </button>
-        ) : null}
-      </div>
+      <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
+      <p className="dashboard-section-description">{t('settings.integrations.description')}</p>
       {integrationKey.canStoreSecrets ? null : (
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       )}
@@ -189,7 +174,7 @@ export function IntegrationSettingsSection({
           onCancel={flowActions.cancel}
         />
       ) : null}
-      {connected.length > 0 ? (
+      {shown ? (
         <ul className="integration-list">
           {connected.map((toolkit) => (
             <li key={toolkit.toolkit}>
@@ -224,6 +209,23 @@ export function IntegrationSettingsSection({
               </button>
             </li>
           ))}
+          <li>
+            <button
+              ref={addButtonRef}
+              type="button"
+              className="integration-row"
+              data-integration-focus="add"
+              onClick={() => setIsAdding(true)}
+            >
+              <span className="integration-add-icon" aria-hidden="true">
+                +
+              </span>
+              <span className="integration-name">{t('settings.integrations.addService.open')}</span>
+              <span className="integration-chevron" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </li>
         </ul>
       ) : null}
       {shown && isAdding ? (

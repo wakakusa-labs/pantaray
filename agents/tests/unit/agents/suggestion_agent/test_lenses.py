@@ -17,12 +17,15 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
     LlmToolCallTurn,
 )
 from pantaray_agents.agents.suggestion_agent.lenses import (
+    EXAMPLES_PER_LENS_RUN,
     LENS_STEP_STRIDE,
     LENS_WEIGHTS,
     LENSES_PER_SUGGESTION,
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
+    SampledLens,
     decide_with_lenses,
+    lens_section,
     sample_lenses,
 )
 from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
@@ -32,7 +35,7 @@ from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationR
 from pantaray_agents.mock.suggestion_research import (
     build_mock_suggestion_research_tools,
 )
-from pantaray_agents.utils.prompt_loader import PromptLoader
+from pantaray_agents.utils.prompt_loader import PromptConfig, PromptLoader
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.conversation import LlmTurnUserItem
 from pantaray_llm.contracts.input_block import LlmInputTextBlock
@@ -112,7 +115,7 @@ async def _decide(model, steps: list[ReactLoopStep]):
         current_time="now",
         recent_suggestions="earlier ideas",
         past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
-        lenses=LENSES,
+        lenses=tuple(SampledLens(lens, 0) for lens in LENSES),
         lens_config=lens_config,
         selector_config=loader.load_config(SUGGESTION_SELECTOR_PROMPT_NAME),
         nudge_config=NUDGE_CONFIG,
@@ -127,15 +130,45 @@ def test_each_suggestion_samples_three_distinct_lenses_from_the_whole_pool() -> 
     rng = random.Random(1)
     seen: set[str] = set()
     for _ in range(200):
-        lenses = sample_lenses(rng)
-        assert len(set(lenses)) == LENSES_PER_SUGGESTION
-        seen.update(lenses)
+        names = {lens.name for lens in sample_lenses(rng)}
+        assert len(names) == LENSES_PER_SUGGESTION
+        seen.update(names)
     assert seen == set(LENS_WEIGHTS)
 
 
-def test_every_sampled_lens_has_a_text() -> None:
+def _shown_examples(section: str) -> list[str]:
+    return [line[2:] for line in section.splitlines() if line.startswith("- ")]
+
+
+def test_every_sampled_lens_has_a_text_and_examples_to_draw() -> None:
     config = PromptLoader().load_config(SUGGESTION_LENS_PROMPT_NAME)
     assert set(config.role_rules) == set(LENS_WEIGHTS)
+    for name in LENS_WEIGHTS:
+        section = lens_section(config, SampledLens(name, 0))
+        assert len(_shown_examples(section)) == EXAMPLES_PER_LENS_RUN, name
+
+
+def test_a_lens_run_shows_a_seeded_draw_from_the_lens_examples() -> None:
+    pool = [f"Person {n} faces case {n}, told over two lines." for n in range(5)]
+    wrapped = "".join(
+        f"\n- Person {n} faces case {n},\n  told over two lines." for n in range(5)
+    )
+    config = PromptConfig(
+        prompt="Kind:\n{lens}",
+        role_rules={"lens": f"### Lens\nLook for it.\nExamples:{wrapped}"},
+    )
+    draws: set[tuple[str, ...]] = set()
+    for seed in range(30):
+        section = lens_section(config, SampledLens("lens", seed))
+        shown = _shown_examples(section)
+
+        assert section.startswith("Kind:\n### Lens\nLook for it.\nExamples:\n")
+        assert len(shown) == len(set(shown)) == EXAMPLES_PER_LENS_RUN
+        assert set(shown) <= set(pool)
+        assert section == lens_section(config, SampledLens("lens", seed))
+        draws.add(tuple(shown))
+    # Different seeds show different examples, so no one case anchors every run.
+    assert len(draws) > 1
 
 
 @pytest.mark.asyncio

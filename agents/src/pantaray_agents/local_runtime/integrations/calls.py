@@ -177,7 +177,7 @@ async def _resolve_with_gateway(
     if gateway is None or tool is None:
         return _refuse(
             "invalid_arguments",
-            f"No tool has the slug {slug!r}; find one with integration_search_tools.",
+            f"No tool has the slug {slug!r}; find one with integration_list_tools.",
         )
     if read_only and tool.tool_class == "write":
         return _refuse(

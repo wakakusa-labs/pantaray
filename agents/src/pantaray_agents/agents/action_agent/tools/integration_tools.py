@@ -1,18 +1,14 @@
 """The two fixed tools that reach the user's connected external apps.
 
 Hundreds of external tool schemas cannot sit in the prompt, and changing the tool
-set mid-Action would break prompt caching, so the model searches the local tool
-index with one tool and runs what it found with the other.
+set mid-Action would break prompt caching, so the model lists a toolkit's tools
+from the local tool index with one tool and runs what it picked with the other.
 """
 
 from __future__ import annotations
 
 from pantaray_agents.local_runtime.integrations.calls import RUN_RESULT_SCHEMA
-from pantaray_agents.local_runtime.integrations.search import SEARCH_RESULT_SCHEMA
-from pantaray_agents.local_runtime.integrations.tool_index import (
-    SEARCH_LIMIT_DEFAULT,
-    SEARCH_LIMIT_MAX,
-)
+from pantaray_agents.local_runtime.integrations.search import LIST_RESULT_SCHEMA
 from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
@@ -24,7 +20,7 @@ from .base import (
     tool_execution_policy,
 )
 
-INTEGRATION_SEARCH_TOOLS_TOOL_ID = "integration_search_tools"
+INTEGRATION_LIST_TOOLS_TOOL_ID = "integration_list_tools"
 INTEGRATION_RUN_TOOL_TOOL_ID = "integration_run_tool"
 
 _UNTRUSTED_RULE = (
@@ -37,33 +33,37 @@ _PERMISSIONS_HINT = (
     "accounts and their permissions."
 )
 
-INTEGRATION_SEARCH_TOOLS_TOOL = ToolDefinition.from_spec(
+INTEGRATION_LIST_TOOLS_TOOL = ToolDefinition.from_spec(
     ToolSpec(
-        tool_id=INTEGRATION_SEARCH_TOOLS_TOOL_ID,
-        name="Search Integration Tools",
+        tool_id=INTEGRATION_LIST_TOOLS_TOOL_ID,
+        name="List Integration Tools",
         description=(
-            "Find tools of the user's connected apps that integration_run_tool can run."
+            "List the tools of one connected app that integration_run_tool can run."
         ),
         guide=ToolGuideSpec(
             what=(
-                "Search the tools of the apps the user has connected (Gmail, "
-                "GitHub, ...) that can run under the current permissions. Each "
-                "result gives the tool's slug, toolkit, description, class (read or "
-                "write), input_schema, and every account that can run it with its "
+                "List one toolkit's tools of one class, read or write, that can run "
+                "under the current permissions: by default its most used tools, "
+                "most used first, with other_tool_count, how many more of that class "
+                "it has. Each entry gives the tool's slug, description, class, "
+                "input_schema, and every account that can run it with its "
                 "permission: allow runs without asking, ask asks the user each time. "
                 + _PERMISSIONS_HINT
             ),
             when=(
-                "Use before integration_run_tool when the task needs data from, or "
-                "an action in, a connected app. Search with English keywords such as "
-                '"send email" or "list issues": the tool catalog is in English.'
+                "Before integration_run_tool, when the task needs data from, or an "
+                "action in, a connected app: call it first with only toolkit and "
+                "access, and pick from the list it returns. An entry with "
+                "input_schema_omitted was cut to keep the result short: call again "
+                "with just that slug in slugs for its schema. Only when nothing in "
+                "the list fits, call again with query, English keywords such as "
+                '"archive thread", to search the toolkit\'s other tools of that class.'
             ),
             pitfalls=(
-                "Only tools usable now are returned, so an empty result means no "
-                "usable tool matched: try other English words or another toolkit "
-                "instead of guessing a slug. hidden_by_account_setting counts the "
-                "matching tools an account's setting keeps out, with the remedy to "
-                "tell the user. " + _UNTRUSTED_RULE
+                "Only tools usable now are listed: do not guess a slug that is not "
+                "listed. hidden_by_account_setting counts the tools an account's "
+                "setting keeps out, with the remedy to tell the user. "
+                + _UNTRUSTED_RULE
             ),
         ),
         # Sequential although it only reads the local index: the executing prompt
@@ -76,31 +76,47 @@ INTEGRATION_SEARCH_TOOLS_TOOL = ToolDefinition.from_spec(
         input_spec=InputSpec(
             fields=(
                 field_spec(
-                    name="query",
+                    name="toolkit",
                     schema={"type": "string", "minLength": 1, "pattern": r"\S"},
                     required=True,
-                    description='English keywords for the operation, such as "send email".',
+                    description=(
+                        "A toolkit from the integrations section, such as gmail."
+                    ),
                 ),
                 field_spec(
-                    name="toolkit",
-                    schema={"type": ["string", "null"], "minLength": 1},
-                    description="Search only this toolkit, such as gmail; omit to search all.",
+                    name="access",
+                    schema={"type": "string", "enum": ["read", "write"]},
+                    required=True,
+                    description="read to get data, write to send, create or change.",
                 ),
                 field_spec(
-                    name="limit",
+                    name="query",
                     schema={
-                        "type": ["integer", "null"],
-                        "minimum": 1,
-                        "maximum": SEARCH_LIMIT_MAX,
+                        "type": ["string", "null"],
+                        "minLength": 1,
+                        "pattern": r"\S",
                     },
                     description=(
-                        f"Most results to return; {SEARCH_LIMIT_DEFAULT} when omitted."
+                        "Omit on the first call. English keywords to search the "
+                        "tools outside the list, when nothing in it fits."
+                    ),
+                ),
+                field_spec(
+                    name="slugs",
+                    schema={
+                        "type": ["array", "null"],
+                        "minItems": 1,
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                    description=(
+                        "Exactly these tools of the toolkit and class, each with its "
+                        "input_schema; not with query."
                     ),
                 ),
             ),
-            description="Search the connected apps' tools.",
+            description="List one connected app's tools.",
         ),
-        output_schema=SEARCH_RESULT_SCHEMA,
+        output_schema=LIST_RESULT_SCHEMA,
     )
 )
 
@@ -111,12 +127,12 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
         description="Run one tool of a connected app with one connected account.",
         guide=ToolGuideSpec(
             what=(
-                "Run a tool found with integration_search_tools and return its "
+                "Run a tool listed by integration_list_tools and return its "
                 'result as {"source": toolkit, "untrusted": true, "data": ...}. '
                 + _PERMISSIONS_HINT
             ),
             when=(
-                "Use with a slug from integration_search_tools and arguments that "
+                "Use with a slug from integration_list_tools and arguments that "
                 "match its input_schema. Run a write tool (send, create, change, "
                 "delete) only when the user asked for that write."
             ),
@@ -143,13 +159,13 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
                     name="slug",
                     schema={"type": "string", "minLength": 1, "pattern": r"\S"},
                     required=True,
-                    description="The tool's slug from integration_search_tools.",
+                    description="The tool's slug from integration_list_tools.",
                 ),
                 field_spec(
                     name="account",
                     schema={"type": ["string", "null"], "minLength": 1},
                     description=(
-                        "The account from the search result; omit only when one "
+                        "The account from the list result; omit only when one "
                         "account can run the tool."
                     ),
                 ),
@@ -174,6 +190,6 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
 __all__ = [
     "INTEGRATION_RUN_TOOL_TOOL",
     "INTEGRATION_RUN_TOOL_TOOL_ID",
-    "INTEGRATION_SEARCH_TOOLS_TOOL",
-    "INTEGRATION_SEARCH_TOOLS_TOOL_ID",
+    "INTEGRATION_LIST_TOOLS_TOOL",
+    "INTEGRATION_LIST_TOOLS_TOOL_ID",
 ]

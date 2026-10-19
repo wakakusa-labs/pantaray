@@ -21,6 +21,7 @@ from pantaray_agents.local_runtime.integrations.contracts import (
     IntegrationGateway,
     IntegrationTool,
     ToolClass,
+    ToolkitEntry,
 )
 from pantaray_agents.local_runtime.integrations.registry import (
     get_integration_gateway,
@@ -98,9 +99,7 @@ async def _lines(gateway: IntegrationGateway, *, user_id: str) -> list[str]:
         accounts = await gateway_await(gateway.list_accounts(entry.toolkit))
         tools = index.tools(entry.toolkit)
         for account in sorted(accounts, key=lambda a: (a.label, a.account)):
-            lines += _account_lines(
-                gateway, limits, user_id, entry.display_name, account, tools
-            )
+            lines += _account_lines(gateway, limits, user_id, entry, account, tools)
     return lines
 
 
@@ -108,7 +107,7 @@ def _account_lines(
     gateway: IntegrationGateway,
     limits: GatewayLimits,
     user_id: str,
-    display_name: str,
+    entry: ToolkitEntry,
     account: IntegrationAccount,
     tools: Sequence[IntegrationTool],
 ) -> list[str]:
@@ -145,7 +144,8 @@ def _account_lines(
     }
     effective = _EFFECTIVE["read" in usable, "write" in usable]
     lines = [
-        f"- {_quoted(display_name)}, {_quoted(account.label)}"
+        f"- {_quoted(entry.display_name)} (toolkit {entry.toolkit}),"
+        f" {_quoted(account.label)}"
         f" (account {_quoted(account.account)}): {effective}."
     ]
     narrowed: dict[str, list[str]] = {}

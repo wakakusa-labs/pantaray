@@ -175,6 +175,10 @@ class ComposioGateway:
                 continue
             tools.append(integration_tool(raw, disposition))
             metas[raw.slug] = _ToolMeta(toolkit, disposition, required_scopes(raw))
+        for slug in entry.core_tools:
+            if slug not in metas:
+                # Composio removed, renamed or deprecated it: fix the toolkit's row.
+                logger.warning("Composio core tool missing: %s", slug)
         with self._lock:
             kept = {s: m for s, m in self._tools.items() if m.toolkit != toolkit}
             self._tools = kept | metas

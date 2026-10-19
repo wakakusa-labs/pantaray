@@ -17,7 +17,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 from pantaray_agents.agents.action_agent.tools import (
     CANCEL_SUBAGENT_TOOL_ID,
     DRAFT_FINAL_ANSWER_TOOL_ID,
-    INTEGRATION_SEARCH_TOOLS_TOOL_ID,
+    INTEGRATION_LIST_TOOLS_TOOL_ID,
     REMEMBER_TOOL_ID,
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL_ID,
@@ -72,7 +72,7 @@ from .finalization_boundary import (
     finalize_action_tool_invocation,
     start_action_tool_invocation,
 )
-from .integration_search import run_integration_search_tool
+from .integration_list import run_integration_list_tool
 from .memory_links import (
     run_get_memory_reference_tool,
     run_link_memory_tool,
@@ -308,8 +308,8 @@ async def run_validated_tool_impl(
         result = await run_history_fetch_wrapper(
             agent, resolved_step_id, tool_def, args, state
         )
-    elif tool_def.tool_id == INTEGRATION_SEARCH_TOOLS_TOOL_ID:
-        result = await run_integration_search_tool(
+    elif tool_def.tool_id == INTEGRATION_LIST_TOOLS_TOOL_ID:
+        result = await run_integration_list_tool(
             step_id=resolved_step_id, tool_def=tool_def, args=args, state=state
         )
     elif tool_def.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS:

@@ -50,7 +50,10 @@ def test_bash_tool_contract_explains_shell_scope_and_lifetime() -> None:
     assert (
         "Direct file content edits should normally go through apply_patch" in combined
     )
-    assert "HOME unless use_login_environment is set, are temporary" in combined
+    assert (
+        "HOME unless use_login_environment is set or the command runs outside "
+        "the sandbox, are temporary" in combined
+    )
     assert "user's command network setting" in combined
     assert "finite execution timeout" in combined
     assert "Shell startup files are not loaded" in combined

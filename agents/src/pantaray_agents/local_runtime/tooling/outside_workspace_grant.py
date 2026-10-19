@@ -17,7 +17,10 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .action_session_temp_paths import resolve_local_runtime_storage_base
+from .action_session_temp_paths import (
+    resolve_local_runtime_storage_base,
+    resolve_private_temp_root,
+)
 from .brokering.command_approval_summaries import outside_workspace_folder_paths
 from .repository.manifests import insert_approved_folder_root_in_connection
 from .workspace_manifest_roots import ManifestRoot
@@ -34,11 +37,13 @@ class OutsideWorkspaceGrantError(ValueError):
 
 
 def app_owned_roots(db_path: Path) -> tuple[Path, ...]:
-    """Pantaray's private app storage: the app data folder and the artifact root."""
+    """Pantaray's private app storage: the app data folder, the artifact root
+    and the root of command temp dirs."""
 
     return (
         resolve_local_runtime_storage_base(db_path=db_path),
         read_local_runtime_artifact_root().resolve(),
+        resolve_private_temp_root(db_path=db_path),
     )
 
 

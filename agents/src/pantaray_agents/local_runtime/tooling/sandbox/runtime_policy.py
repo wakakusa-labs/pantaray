@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from ..action_session_temp_paths import resolve_local_runtime_storage_base
+from ..action_session_temp_paths import resolve_private_temp_root
 
 SandboxProfile = Literal[
     "agent_generated_python",
@@ -121,9 +121,9 @@ def resolve_runtime_budget(
 ) -> RuntimeBudgetResolution:
     memory_tier_bytes = resolve_memory_tier_bytes()
     cpu_count = _read_cpu_count()
-    # Command temp dirs live in private app storage (create_private_temp_dir).
+    # The root itself may not exist before the first command.
     free_disk_bytes = _read_free_disk_bytes(
-        resolve_local_runtime_storage_base(db_path=db_path)
+        resolve_private_temp_root(db_path=db_path).parent
     )
     output_budget = _clamp(
         int(memory_tier_bytes * OUTPUT_MEMORY_RATIO),

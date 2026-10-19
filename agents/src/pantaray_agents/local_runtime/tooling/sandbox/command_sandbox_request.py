@@ -103,7 +103,13 @@ def compose_sandbox_request(
         env={
             **env,
             "TMPDIR": str(temp_dir),
-            "HOME": str(Path.home() if use_login_environment else temp_dir),
+            # Outside the sandbox a stand-in HOME only misleads apps: Chrome,
+            # finding no login keychain there, asks the user to create one.
+            "HOME": str(
+                Path.home()
+                if use_login_environment or run_outside_sandbox
+                else temp_dir
+            ),
             "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
         },
         timeout_ms=timeout_ms,

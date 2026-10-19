@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -7,8 +9,12 @@ import pytest
 from pantaray_agents.local_runtime.tooling import action_session_temp_paths
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     ActionSessionTempPathError,
+    create_private_temp_dir,
     resolve_action_storage_paths,
     validate_action_storage_component,
+)
+from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
+    app_owned_roots,
 )
 
 USER_ID = "user-1"
@@ -57,3 +63,19 @@ def test_action_storage_paths_are_derived_from_one_canonical_base(
 def test_action_storage_component_rejects_non_component_identity(value: str) -> None:
     with pytest.raises(ActionSessionTempPathError):
         validate_action_storage_component(field_name="identity", value=value)
+
+
+def test_command_temp_dir_has_no_whitespace_and_stays_private(tmp_path: Path) -> None:
+    # The app's data dir is ~/Library/Application Support/pantaray.
+    db_path = tmp_path / "Application Support" / "pantaray" / "runtime.db"
+    db_path.parent.mkdir(parents=True)
+    temp_dir = create_private_temp_dir(db_path=db_path, prefix="probe-")
+    try:
+        # Unquoted $TMPDIR in a command splits on whitespace.
+        assert not any(character.isspace() for character in str(temp_dir))
+        assert temp_dir == temp_dir.resolve()
+        assert stat.S_IMODE(temp_dir.stat().st_mode) == 0o700
+        # The seatbelt denies private storage to every other command.
+        assert temp_dir.parent in app_owned_roots(db_path)
+    finally:
+        shutil.rmtree(temp_dir)

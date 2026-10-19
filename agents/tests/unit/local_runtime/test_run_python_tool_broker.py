@@ -11,7 +11,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
-    PRIVATE_TEMP_DIRNAME,
+    resolve_private_temp_root,
 )
 from pantaray_agents.local_runtime.tooling.audit_payloads import (
     build_run_python_request_audit_args,
@@ -243,7 +243,7 @@ async def test_run_python_tool_writes_generated_code_to_invocation_temp_dir(
     assert outcome.output["stdout"] == "3\n"
     assert captured_argv[0] == str(context.app_runtime_python)
     script_temp_root = Path(captured_argv[1]).parent.parent
-    assert script_temp_root == db_path.resolve().parent / PRIVATE_TEMP_DIRNAME
+    assert script_temp_root == resolve_private_temp_root(db_path=db_path)
     assert not Path(captured_argv[1]).is_relative_to(context.action_temp_dir)
     assert captured_script_text == ["print(1 + 2)"]
 

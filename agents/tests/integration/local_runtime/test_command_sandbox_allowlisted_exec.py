@@ -116,12 +116,14 @@ async def test_workspace_executable_runs_via_helper(
 async def test_invocation_temp_is_outside_workspace_claims(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     testbed = bootstrap_runtime_testbed(tmp_path=tmp_path, monkeypatch=monkeypatch)
     # Another invocation's temp dir, where Pantaray creates them.
     leaf = create_private_temp_dir(
         db_path=testbed.db_path, prefix=SANDBOX_TEMP_DIR_PREFIX
     )
+    request.addfinalizer(lambda: shutil.rmtree(leaf))
     sibling_path = leaf / "owned"
     sibling_path.write_text("private", encoding="utf-8")
     compile_workspace_binary(

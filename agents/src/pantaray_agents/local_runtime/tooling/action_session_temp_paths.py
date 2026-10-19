@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .sandbox.macos_runtime import user_temp_dir
 from .tool_result_storage import ACTION_TOOL_RESULTS_DIRNAME
 
 LOCAL_RUNTIME_WORKSPACE_DIRNAME = "local_runtime_workspaces"
 SCRATCH_WORKSPACE_DIRNAME = "scratch"
 SCRATCH_SESSION_TEMP_DIRNAME = ".runtime-temp"
-PRIVATE_TEMP_DIRNAME = "temp"
 MANAGED_DIRECTORY_MODE = 0o700
 
 
@@ -34,16 +35,31 @@ def resolve_local_runtime_storage_base(*, db_path: Path) -> Path:
     return db_path.resolve().parent
 
 
+def resolve_private_temp_root(*, db_path: Path) -> Path:
+    """Where this app storage keeps the temp dirs of commands and conversions.
+
+    Commands get their dir as TMPDIR, and the app storage path has a space
+    ("Application Support") that unquoted ``$TMPDIR`` splits on, so the root
+    sits in the per-user temp dir, named after the storage base to keep
+    profiles apart. It is private app storage (``app_owned_roots``).
+    """
+
+    storage_base = resolve_local_runtime_storage_base(db_path=db_path)
+    digest = hashlib.sha256(str(storage_base).encode()).hexdigest()[:16]
+    return Path(user_temp_dir()) / f"pantaray-private-{digest}"
+
+
 def create_private_temp_dir(*, db_path: Path, prefix: str) -> Path:
     """A fresh directory for one command or conversion, inside private app storage.
 
-    Sandboxed commands may read and write the OS temp dirs, so what Pantaray
-    keeps there for one of them would be open to every other command.
+    Sandboxed commands may read and write the OS temp dirs, so the root is
+    private app storage, which the seatbelt denies to every command except for
+    its own dir there.
     """
 
     # Design limit: a crash leaves the dirs of unrecorded commands and office
     # conversions behind; sweep this root at startup if it is seen to grow.
-    root = resolve_local_runtime_storage_base(db_path=db_path) / PRIVATE_TEMP_DIRNAME
+    root = resolve_private_temp_root(db_path=db_path)
     root.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix=prefix, dir=root)).resolve()
 
@@ -125,7 +141,6 @@ __all__ = [
     "ActionStoragePaths",
     "LOCAL_RUNTIME_WORKSPACE_DIRNAME",
     "MANAGED_DIRECTORY_MODE",
-    "PRIVATE_TEMP_DIRNAME",
     "SCRATCH_SESSION_TEMP_DIRNAME",
     "SCRATCH_WORKSPACE_DIRNAME",
     "create_private_temp_dir",
@@ -133,6 +148,7 @@ __all__ = [
     "resolve_action_session_temp_leaf",
     "resolve_action_storage_paths",
     "resolve_local_runtime_storage_base",
+    "resolve_private_temp_root",
     "resolve_managed_action_workspace_root",
     "validate_action_storage_component",
 ]

@@ -1,15 +1,16 @@
 """Decide whether one Action can still open a follow-up turn, and what it replays.
 
-A follow-up turn continues from the Action's newest checkpoint, so it can only
-start while that checkpoint is one this build restores. The runtime refuses any
-other version outright, so a turn accepted without this predicate would fail on
-its first step. A run that ends before writing a checkpoint of its own (the user
-stops it during its first model call) leaves its USER step after that checkpoint
-unanswered; the next run restores the checkpoint and replays every such step, in
-order, before its own message. This module owns both rules: the USER message
-boundary and queued-message adoption enforce the predicate, the conversation read
-model reports it as ``resumable`` once the Action's latest intent is the user's
-Stop, and the runtime and adoption replay the same steps.
+A follow-up turn continues from the Action's newest checkpoint, or starts fresh
+when the Action has none. The runtime refuses any checkpoint version but its own,
+so an Action whose newest checkpoint is another version cannot continue, and a
+turn accepted for it would fail on its first step. A run that ends before writing
+a checkpoint of its own (the user stops it during its first model call) leaves its
+USER step after the newest checkpoint unanswered; the next run restores that
+checkpoint, or starts fresh, and replays every such step, in order, before its own
+message. This module owns both rules: the USER message boundary enforces the
+first, the conversation read model reports it as ``resumable`` once the Action's
+latest intent is the user's Stop, and the runtime and queued-message adoption
+replay the same steps.
 """
 
 from __future__ import annotations
@@ -25,7 +26,19 @@ from pantaray_agents.repositories.action_runtime_resume_contract import (
 )
 
 
-def action_latest_run_has_restorable_checkpoint(
+def action_accepts_followup_turn(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+) -> bool:
+    """Say whether the next run can start: fresh, or on a checkpoint it restores."""
+
+    row = _newest_checkpoint_version(connection, user_id=user_id, action_id=action_id)
+    return row is None or row[0] == RUNTIME_STATE_CHECKPOINT_VERSION
+
+
+def action_has_restorable_checkpoint(
     *,
     connection: sqlite3.Connection,
     user_id: str,
@@ -33,7 +46,14 @@ def action_latest_run_has_restorable_checkpoint(
 ) -> bool:
     """Say whether the Action's newest checkpoint is one this build restores."""
 
-    row = connection.execute(
+    row = _newest_checkpoint_version(connection, user_id=user_id, action_id=action_id)
+    return row is not None and row[0] == RUNTIME_STATE_CHECKPOINT_VERSION
+
+
+def _newest_checkpoint_version(
+    connection: sqlite3.Connection, *, user_id: str, action_id: str
+) -> tuple[object] | None:
+    return connection.execute(
         """
         SELECT runtime_state_checkpoint_version
         FROM agent_action_steps
@@ -44,7 +64,6 @@ def action_latest_run_has_restorable_checkpoint(
         """,
         (user_id, action_id),
     ).fetchone()
-    return row is not None and row[0] == RUNTIME_STATE_CHECKPOINT_VERSION
 
 
 def load_unanswered_user_steps_in_connection(
@@ -54,7 +73,8 @@ def load_unanswered_user_steps_in_connection(
     action_id: str,
     after_step_number: int,
 ) -> tuple[ActionResumeUserStep, ...]:
-    """The adopted USER steps after the checkpoint at ``after_step_number``, oldest first."""
+    """The adopted USER steps after the checkpoint at ``after_step_number`` (0 when
+    the Action has none), oldest first."""
 
     rows = connection.execute(
         """
@@ -80,6 +100,7 @@ def load_unanswered_user_steps_in_connection(
 
 
 __all__ = [
-    "action_latest_run_has_restorable_checkpoint",
+    "action_accepts_followup_turn",
+    "action_has_restorable_checkpoint",
     "load_unanswered_user_steps_in_connection",
 ]

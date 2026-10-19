@@ -1536,6 +1536,33 @@ async def test_a_message_queued_on_a_run_stopped_before_it_checkpoints_runs_next
     ]
 
 
+async def test_a_first_run_stopped_before_any_checkpoint_starts_the_next_run_fresh(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """With no checkpoint at all, the next run starts fresh and replays the first
+    message before its own, as a run after a failed prepare does."""
+
+    client, db_path = runtime_client
+    started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
+    action_id = str(started["action_id"])
+    _claim_and_prepare(db_path, claimed_by="worker:first")
+    _stop(client, action_id)
+    assert _read_state(client, action_id)["action"]["resumable"] is True
+
+    followup = client.post(
+        MESSAGES_PATH, json=_message("message-next", "次の指示", action_id=action_id)
+    )
+    assert followup.status_code == 200, followup.text
+    assert followup.json()["disposition"] == "started"
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:next")
+    assert preparation.context.user_message.content == "次の指示"
+
+    resolved = await _resolve_next_run(db_path, action_id, preparation)
+    assert resolved["status"] == "processing"
+    assert _user_texts(resolved["history_by_scope"]["S"]) == ["最初"]
+    assert resolved["step"] == preparation.context.user_step_number
+
+
 def test_an_early_stop_on_a_checkpoint_this_build_cannot_restore_is_refused(
     runtime_client: tuple[TestClient, Path],
 ) -> None:

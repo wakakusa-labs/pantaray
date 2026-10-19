@@ -58,12 +58,9 @@ from .action_message_replay import (
     _validate_idempotent_replay,
 )
 from .action_message_withdrawal import refuse_withdrawn_message_in_connection
-from .action_prepare_failure_followup import (
-    require_prepare_failure_followup_authority,
-)
 from .action_queue import build_local_action_enqueue_request
 from .action_queued_message_adoption import WaitingMessages
-from .action_resumability import action_latest_run_has_restorable_checkpoint
+from .action_resumability import action_accepts_followup_turn
 from .action_suggestion_adapter import (
     project_suggestion_action_start,
     validate_suggestion_action_start,
@@ -335,7 +332,7 @@ def _resolve_action_target(
 
     row = connection.execute(
         """
-        SELECT actions.suggestion_id, actions.status, actions.error
+        SELECT actions.suggestion_id, actions.status
         FROM agent_actions AS actions
         WHERE actions.user_id = ? AND actions.action_id = ?
         """,
@@ -369,22 +366,14 @@ def _resolve_action_target(
     if (
         process_disposition.disposition in {"idle", "normal_terminal"}
         and action_status in {"success", "error", "canceled"}
-        and not action_latest_run_has_restorable_checkpoint(
+        and not action_accepts_followup_turn(
             connection=connection,
             user_id=command.user_id,
             action_id=target.action_id,
         )
     ):
-        if action_status != "error":
-            raise ActionMessageConflictError(
-                "Action cannot accept a USER message without a resumable checkpoint"
-            )
-        require_prepare_failure_followup_authority(
-            connection=connection,
-            user_id=command.user_id,
-            action_id=target.action_id,
-            suggestion_id=suggestion_id,
-            action_error_json=row["error"],
+        raise ActionMessageConflictError(
+            "Action checkpoint is not one this build restores"
         )
     if process_disposition.disposition in {"idle", "normal_terminal"}:
         connection.execute(

@@ -10,9 +10,10 @@ The run's root is its earliest message, as with that hand-off: the job continues
 from it, and runs are ordered by it (``MIN(accepted_sequence)`` of the USER steps
 a run adopted). So only a message sent after the latest run's root can join; an
 older one would sort the new run before that latest run. Such a message exists
-only when a run left it behind and the next run could not take it (the follow-up
-to an Action that has no checkpoint yet has no state to add it to). It stays not
-executed, and the user can withdraw it.
+only when a run left it behind and the next run could not take it. Nor can a run
+that starts fresh, on an Action with no checkpoint yet, take any: they join a run
+through a checkpoint, and that run has none. They stay not executed, and the user
+can withdraw them.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ from pantaray_agents.tasks.action_user_message import render_action_user_request
 from .action_checkpoint_retention import prune_action_checkpoints_in_connection
 from .action_message_models import _StepPosition
 from .action_resumability import (
-    action_latest_run_has_restorable_checkpoint,
+    action_has_restorable_checkpoint,
     load_unanswered_user_steps_in_connection,
 )
 from .action_user_adoption import (
@@ -65,7 +66,7 @@ def next_run_takes_messages_after_in_connection(
     The conversation labels a waiting message by this same answer.
     """
 
-    if not action_latest_run_has_restorable_checkpoint(
+    if not action_has_restorable_checkpoint(
         connection=connection, user_id=user_id, action_id=action_id
     ):
         return None

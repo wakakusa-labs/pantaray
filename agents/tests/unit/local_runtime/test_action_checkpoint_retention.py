@@ -14,7 +14,7 @@ from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
     ActionLogicalRunLineage,
 )
 from pantaray_agents.local_runtime.runtime.action_resumability import (
-    action_latest_run_has_restorable_checkpoint,
+    action_has_restorable_checkpoint,
 )
 from pantaray_agents.local_runtime.runtime.action_startup_recovery_envelope import (
     _load_anchor,
@@ -143,7 +143,7 @@ async def test_each_checkpoint_supersedes_the_previous_ones(tmp_path: Path) -> N
     assert resume.data.checkpoint_row is not None
     assert resume.data.checkpoint_row["step_id"] == "step-6"
     with sqlite3.connect(db_path) as connection:
-        assert action_latest_run_has_restorable_checkpoint(
+        assert action_has_restorable_checkpoint(
             connection=connection, user_id=USER_ID, action_id=ACTION_ID
         )
 

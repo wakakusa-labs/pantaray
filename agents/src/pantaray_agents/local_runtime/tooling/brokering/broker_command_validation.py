@@ -242,9 +242,7 @@ def build_validated_command_request(
         use_login_environment=use_login_environment,
         full_disk_read=full_disk_read,
     )
-    runtime_budget = resolve_runtime_budget(
-        sandbox_profile="workspace_process_exec", db_path=context.db_path
-    )
+    runtime_budget = resolve_runtime_budget(sandbox_profile="workspace_process_exec")
     sandbox_roots = _resolve_command_sandbox_roots(
         context=context,
         action_temp_dir=resolved_action_temp_dir,
@@ -353,9 +351,7 @@ def build_validated_python_request(
         additional_write_folders=args.additional_write_folders,
     )
     command_cwd = resolved_cwd.path
-    runtime_budget = resolve_runtime_budget(
-        sandbox_profile="agent_generated_python", db_path=context.db_path
-    )
+    runtime_budget = resolve_runtime_budget(sandbox_profile="agent_generated_python")
     full_disk_read = context.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
     sandbox_roots = _resolve_command_sandbox_roots(
         context=context,

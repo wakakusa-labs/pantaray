@@ -92,6 +92,23 @@ def test_login_environment_adds_identity_and_real_home_only(
     assert request.use_login_environment
 
 
+def test_command_outside_the_sandbox_gets_the_real_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Chrome asks to create a login keychain when HOME has none.
+    home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(home))
+    temp_dir = tmp_path / "invocation"
+    request = build_sandbox_request(
+        request=_validated_command_request(network_policy="deny").model_copy(
+            update={"run_outside_sandbox": True}
+        ),
+        temp_dir=temp_dir,
+    )
+    assert request.env["HOME"] == str(home)
+    assert request.env["TMPDIR"] == str(temp_dir)
+
+
 @pytest.mark.parametrize(
     ("executable", "expected"),
     [

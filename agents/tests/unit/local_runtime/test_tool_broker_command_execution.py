@@ -12,7 +12,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
-    PRIVATE_TEMP_DIRNAME,
+    resolve_private_temp_root,
 )
 from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
@@ -239,7 +239,7 @@ async def test_bash_sandbox_request_uses_manifest_roots_without_workspace_id(
     invocation_temp_roots = [
         root
         for root in real_write_roots
-        if root.parent == db_path.resolve().parent / PRIVATE_TEMP_DIRNAME
+        if root.parent == resolve_private_temp_root(db_path=db_path)
     ]
     assert len(invocation_temp_roots) == 1
     assert str(repo_root.resolve()) in captured_payload["real_read_roots"]

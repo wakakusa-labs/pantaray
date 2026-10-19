@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .command_sandbox_protocol import BrokerToSandboxCommandRequest
 from .macos_runtime import toolchain_read_roots
@@ -89,22 +89,36 @@ def _render_private_storage_deny_rules(request: BrokerToSandboxCommandRequest) -
     if storage is not None:
         readable += [storage.workspace_root, storage.published_results_root]
         writable.append(storage.workspace_root)
+    roots = request.private_storage_roots
+    # A deny by path is escaped by renaming a directory above it, so no command
+    # may write a private root's ancestors themselves. A literal matches only
+    # that directory: creating and writing its other children stays allowed.
+    write_denied = _render_clause_block(
+        (
+            *(_render_subpath_clause(root) for root in roots),
+            *(
+                f'    (literal "{_escape_seatbelt_string(str(ancestor))}")'
+                for root in roots
+                for ancestor in PurePosixPath(root).parents
+                # Nothing can rename "/".
+                if str(ancestor) != "/"
+            ),
+        )
+    )
     return "\n".join(
         (
             _render_private_storage_deny(
-                "file-read*", request.private_storage_roots, readable
+                "file-read*", _render_subpath_block(roots), readable
             ),
-            _render_private_storage_deny(
-                "file-write*", request.private_storage_roots, writable
-            ),
+            _render_private_storage_deny("file-write*", write_denied, writable),
         )
     )
 
 
 def _render_private_storage_deny(
-    operation: str, private_roots: Sequence[str], exceptions: Sequence[str]
+    operation: str, denied_clauses: str, exceptions: Sequence[str]
 ) -> str:
-    denied = f"(require-any\n{_render_subpath_block(private_roots)}\n)"
+    denied = f"(require-any\n{denied_clauses}\n)"
     # sandbox-exec rejects an empty (require-any), so no exceptions means none.
     if not exceptions:
         return f"(deny {operation} {denied})"
@@ -174,7 +188,7 @@ def render_ripgrep_seatbelt_profile(
             ),
             _render_private_storage_deny(
                 "file-read*",
-                private_storage_roots,
+                _render_subpath_block(private_storage_roots),
                 (*readable_private_roots, *runtime_roots),
             ),
             "(deny file-write*)",

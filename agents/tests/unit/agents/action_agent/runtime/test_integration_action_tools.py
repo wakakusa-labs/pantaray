@@ -130,11 +130,15 @@ class FakeGateway:
         self.unhealthy: set[str] = set()
         # GMAIL_LIST_LABELS is outside the list, reached only by a query.
         self.core_tools = ("GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL")
+        self.note: str | None = None
 
     def toolkits(self) -> list[ToolkitEntry]:
         return [
             ToolkitEntry(
-                toolkit="gmail", display_name="Gmail", core_tools=self.core_tools
+                toolkit="gmail",
+                display_name="Gmail",
+                core_tools=self.core_tools,
+                note=self.note,
             )
         ]
 
@@ -396,6 +400,14 @@ async def test_the_list_is_the_usable_core_tools_of_one_class_in_order(
         reasons=[ApiDenial(source="connection_method", capability="execute")],
     )
     assert await _list_output(env, "read") == {"tools": [], "other_tool_count": 0}
+
+
+@pytest.mark.asyncio
+async def test_every_list_of_a_toolkit_carries_its_note(env: SimpleNamespace) -> None:
+    env.gateway.note = "Link a message with its account's email."
+    for access in ("read", "write"):
+        output = await _list_output(env, access)
+        assert output["note"] == env.gateway.note
 
 
 @pytest.mark.asyncio

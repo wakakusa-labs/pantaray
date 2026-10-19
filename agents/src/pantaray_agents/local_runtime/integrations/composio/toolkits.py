@@ -29,6 +29,7 @@ def _entry(
     core_tools: tuple[str, ...],
     class_overrides: dict[str, ClassOverride] | None = None,
     probe: tuple[str, dict[str, JSONValue]] | None = None,
+    note: str | None = None,
 ) -> ToolkitEntry:
     return ToolkitEntry(
         toolkit=toolkit,
@@ -37,6 +38,7 @@ def _entry(
         logo_url=f"{_LOGO_BASE}/{toolkit}",
         class_overrides=class_overrides or {},
         core_tools=core_tools,
+        note=note,
         probe=(
             None
             if probe is None
@@ -78,6 +80,18 @@ TOOLKITS: Final[tuple[ToolkitEntry, ...]] = (
             "GMAIL_CREATE_EMAIL_DRAFT",
             "GMAIL_FORWARD_MESSAGE",
             "GMAIL_ADD_LABEL_TO_EMAIL",
+        ),
+        # Composio's display_url is /u/0/, which opens whichever account the
+        # browser signed in to first. An API id in the fragment (#all/<id>)
+        # opens only in a Gmail tab already loaded; a Message-ID search opens
+        # from a cold click too (googleworkspace/cli#858).
+        note=(
+            "To link a message for the user, write "
+            "https://mail.google.com/mail/u/<the account's email>/#search/"
+            "rfc822msgid%3A<its Message-ID header without the angle brackets, "
+            "URL-encoded>, with the account the message was read from. Never "
+            "pass on display_url or a link with an API id or /u/<number>/: it "
+            "opens the wrong account or nothing."
         ),
         class_overrides={
             # The S/MIME private key's password.

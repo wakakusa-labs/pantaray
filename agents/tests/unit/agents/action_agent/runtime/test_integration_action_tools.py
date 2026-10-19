@@ -1,7 +1,7 @@
-"""integration_search_tools / integration_run_tool against a fake gateway.
+"""integration_list_tools / integration_run_tool against a fake gateway.
 
 AC-C1: a write always asks; unusable tools never show and are refused by slug.
-AC-C8: a permission changed after search or approval refuses the call.
+AC-C8: a permission changed after listing or approval refuses the call.
 AC-C10: two accounts of one toolkit with different permissions.
 """
 
@@ -23,8 +23,8 @@ from tests.unit.local_runtime.broker_test_support import (
 )
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    integration_list,
     integration_run,
-    integration_search,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
     ApprovalRequiredToolControl,
@@ -32,8 +32,8 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools import (
+    INTEGRATION_LIST_TOOLS_TOOL,
     INTEGRATION_RUN_TOOL_TOOL,
-    INTEGRATION_SEARCH_TOOLS_TOOL,
     INTEGRATION_TOOL_IDS,
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
     select_supervisor_act_tool_ids,
@@ -45,6 +45,7 @@ from pantaray_agents.local_runtime.integrations.contracts import (
     IntegrationError,
     IntegrationHealth,
     IntegrationTool,
+    ToolClass,
     ToolFailed,
     ToolkitEntry,
     ToolkitSlug,
@@ -56,9 +57,10 @@ from pantaray_agents.local_runtime.integrations.registry import (
     set_integration_gateway,
 )
 from pantaray_agents.local_runtime.integrations.search import (
+    INTEGRATION_LIST_RESULT_CHARACTER_BUDGET,
     RECONNECT_REMEDY,
     integration_tools_available,
-    search_integration_tools,
+    list_integration_tools,
     setting_remedy,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
@@ -76,6 +78,7 @@ from pantaray_agents.local_runtime.tooling.repository.integration_permissions im
     set_integration_tool_blocked,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.tool_result import serialize_json_tool_output
 
 BUSY_TIMEOUT_MS = 1_000
 NOW = "2026-03-23T00:00:02Z"
@@ -125,9 +128,15 @@ class FakeGateway:
         self.executed: list[tuple[str, str, dict[str, JSONValue]]] = []
         self.accounts_error: Exception | None = None
         self.unhealthy: set[str] = set()
+        # GMAIL_LIST_LABELS is outside the list, reached only by a query.
+        self.core_tools = ("GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL")
 
     def toolkits(self) -> list[ToolkitEntry]:
-        return [ToolkitEntry(toolkit="gmail", display_name="Gmail")]
+        return [
+            ToolkitEntry(
+                toolkit="gmail", display_name="Gmail", core_tools=self.core_tools
+            )
+        ]
 
     async def list_accounts(self, toolkit: ToolkitSlug) -> list[IntegrationAccount]:
         if self.accounts_error is not None:
@@ -166,7 +175,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNames
         tmp_path,
         allowed_tool_ids=(*BROKER_ALLOWED_TOOL_IDS, INTEGRATION_RUN_TOOL_TOOL.tool_id),
     )
-    for module in (integration_run, integration_search):
+    for module in (integration_run, integration_list):
         monkeypatch.setattr(
             module, "read_local_runtime_db_config", lambda: (db_path, BUSY_TIMEOUT_MS)
         )
@@ -212,19 +221,21 @@ def _set_access(
     )
 
 
-async def _search_output(env: SimpleNamespace, query: str) -> dict[str, JSONValue]:
-    result = await integration_search.run_integration_search_tool(
+async def _list_output(
+    env: SimpleNamespace, access: ToolClass, **args: JSONValue
+) -> dict[str, JSONValue]:
+    result = await integration_list.run_integration_list_tool(
         step_id="step-0",
-        tool_def=INTEGRATION_SEARCH_TOOLS_TOOL,
-        args={"query": query},
+        tool_def=INTEGRATION_LIST_TOOLS_TOOL,
+        args={"toolkit": "gmail", "access": access, **args},
         state=env.state,
     )
     assert isinstance(result.output, dict)
     return result.output
 
 
-async def _search(env: SimpleNamespace, query: str) -> dict[str, list[str]]:
-    tools = (await _search_output(env, query))["tools"]
+async def _list(env: SimpleNamespace, access: ToolClass) -> dict[str, list[str]]:
+    tools = (await _list_output(env, access))["tools"]
     assert isinstance(tools, list)
     return {
         str(tool["slug"]): [
@@ -340,36 +351,121 @@ async def test_tools_are_offered_only_with_a_connected_account() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_lists_only_usable_tools_with_their_accounts(
+async def test_the_list_is_the_usable_core_tools_of_one_class_in_order(
     env: SimpleNamespace,
 ) -> None:
+    drafts = _tool("GMAIL_LIST_DRAFTS", "read", {"type": "object"})
+    get_integration_tool_index().replace("gmail", [*TOOLS, drafts])
+    # A core slug Composio no longer has is skipped.
+    env.gateway.core_tools = (
+        "GMAIL_LIST_DRAFTS",
+        "GMAIL_REMOVED_TOOL",
+        "GMAIL_SEND_EMAIL",
+        "GMAIL_FETCH_EMAILS",
+    )
+
+    read = await _list_output(env, "read")
+    assert [tool["slug"] for tool in read["tools"]] == [  # type: ignore[index, union-attr]
+        "GMAIL_LIST_DRAFTS",
+        "GMAIL_FETCH_EMAILS",
+    ]
+    assert read["other_tool_count"] == 1  # GMAIL_LIST_LABELS
+    # The read-only account cannot send, so only the work account is offered.
+    assert await _list(env, "write") == {"GMAIL_SEND_EMAIL": ["acct-work:ask"]}
+
     for account in (WORK, HOME):
         set_integration_tool_blocked(
             db_path=env.db_path,
             busy_timeout_ms=BUSY_TIMEOUT_MS,
             user_id="user-1",
             account=account.account,
-            slug="GMAIL_LIST_LABELS",
+            slug="GMAIL_LIST_DRAFTS",
             blocked=True,
             updated_at=NOW,
         )
-
-    assert await _search(env, "email labels") == {
-        "GMAIL_FETCH_EMAILS": ["acct-work:allow", "acct-home:allow"],
-        # The read-only account cannot send, so only the work account is offered.
-        "GMAIL_SEND_EMAIL": ["acct-work:ask"],
+    assert await _list(env, "read") == {
+        "GMAIL_FETCH_EMAILS": ["acct-work:allow", "acct-home:allow"]
     }
-
     env.gateway.denied[(WORK.account, "GMAIL_SEND_EMAIL")] = ApiDenial(
         source="account_grant", capability="tool", detail="gmail.send"
     )
-    assert "GMAIL_SEND_EMAIL" not in await _search(env, "send email")
+    assert await _list(env, "write") == {}
     env.gateway.limits_value = GatewayLimits(
         can_connect=True,
         can_execute=False,
         reasons=[ApiDenial(source="connection_method", capability="execute")],
     )
-    assert await _search(env, "email") == {}
+    assert await _list_output(env, "read") == {"tools": [], "other_tool_count": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_query_searches_only_outside_the_list(env: SimpleNamespace) -> None:
+    found = await _list_output(env, "read", query="fetch gmail emails")
+
+    assert [tool["slug"] for tool in found["tools"]] == ["GMAIL_LIST_LABELS"]  # type: ignore[index, union-attr]
+    assert "other_tool_count" not in found
+
+
+@pytest.mark.asyncio
+async def test_slugs_return_their_schemas_and_wrong_requests_name_the_fix(
+    env: SimpleNamespace,
+) -> None:
+    sent = await _list_output(env, "write", slugs=["GMAIL_SEND_EMAIL"])
+    assert sent["tools"][0]["input_schema"] == TOOLS[1].input_schema  # type: ignore[index]
+
+    for access, args, expected in (
+        ("read", {"slugs": ["GMAIL_SEND_EMAIL"]}, "is not a read tool of gmail"),
+        ("read", {"slugs": ["SLACK_SEND_MESSAGE"]}, "is not a read tool of gmail"),
+        ("read", {"slugs": ["GMAIL_LIST_LABELS"], "query": "labels"}, "not both"),
+    ):
+        error = _error(await _list_output(env, access, **args))  # type: ignore[arg-type]
+        assert error["error_type"] == "invalid_arguments"
+        assert expected in str(error["message"])
+
+    unknown = await integration_list.run_integration_list_tool(
+        step_id="step-0",
+        tool_def=INTEGRATION_LIST_TOOLS_TOOL,
+        args={"toolkit": "gmial", "access": "read"},
+        state=env.state,
+    )
+    assert isinstance(unknown.output, dict)
+    assert _error(unknown.output)["message"] == (
+        "There is no toolkit 'gmial'; the toolkits are gmail."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_long_list_keeps_schemas_only_while_it_fits(
+    env: SimpleNamespace,
+) -> None:
+    def schema(fields: int) -> dict[str, JSONValue]:
+        properties: dict[str, JSONValue] = {
+            f"field_{n}": {"description": "x" * 80} for n in range(fields)
+        }
+        return {"type": "object", "properties": properties}
+
+    # Shaped like Outlook's read list: tools of about 4,000 characters, and one
+    # past the budget on its own.
+    tools = [_tool(f"GMAIL_READ_{n}", "read", schema(30)) for n in range(7)]
+    tools.append(_tool("GMAIL_READ_7", "read", schema(150)))
+    get_integration_tool_index().replace("gmail", tools)
+    env.gateway.core_tools = tuple(tool.slug for tool in tools)
+
+    output = await _list_output(env, "read")
+
+    listed = output["tools"]
+    assert isinstance(listed, list) and len(listed) == 8
+    kept = [tool for tool in listed if "input_schema" in tool]  # type: ignore[operator]
+    assert 1 < len(kept) < 8 and listed[: len(kept)] == kept
+    for tool in listed[len(kept) :]:
+        assert tool["input_schema_omitted"] is True  # type: ignore[index]
+        assert tool["accounts"]  # type: ignore[index]
+    assert (
+        len(serialize_json_tool_output(output))
+        <= INTEGRATION_LIST_RESULT_CHARACTER_BUDGET
+    )
+    last = await _list_output(env, "read", slugs=["GMAIL_READ_7"])
+    assert last["tools"][0]["input_schema"] == tools[7].input_schema  # type: ignore[index]
 
 
 READ_ONLY_REMEDY = setting_remedy("read_only")
@@ -390,20 +486,20 @@ def _hidden(
 
 
 @pytest.mark.asyncio
-async def test_search_counts_tools_only_an_account_setting_hides(
+async def test_the_list_counts_tools_only_an_account_setting_hides(
     env: SimpleNamespace,
 ) -> None:
     assert '"Read and write" (「読み取りと書き込み」)' in READ_WRITE_REMEDY
     assert '"Read only" (「読み取りのみ」)' in READ_ONLY_REMEDY
     assert "Settings → Integrations (設定 → 連携)" in READ_ONLY_REMEDY
     # The work account can send: nothing is hidden.
-    assert _hidden(await _search_output(env, "send email")) is None
+    assert _hidden(await _list_output(env, "write")) is None
 
     _set_access(env, WORK, "read_only")
     _set_access(env, HOME, "off")
-    output = await _search_output(env, "send email")
+    output = await _list_output(env, "write")
 
-    assert "GMAIL_SEND_EMAIL" not in str(output["tools"])
+    assert output["tools"] == []
     assert _hidden(output) == (
         1,
         {"acct-work": READ_WRITE_REMEDY, "acct-home": READ_WRITE_REMEDY},
@@ -429,7 +525,7 @@ async def test_search_counts_tools_only_an_account_setting_hides(
     env.gateway.denied[(WORK.account, "GMAIL_SEND_EMAIL")] = ApiDenial(
         source="account_grant", capability="tool", detail="gmail.send"
     )
-    assert _hidden(await _search_output(env, "send email")) is None
+    assert _hidden(await _list_output(env, "write")) is None
 
 
 @pytest.mark.asyncio
@@ -445,30 +541,31 @@ async def test_a_hidden_read_names_read_only_and_skips_unhealthy_accounts(
         )
     env.gateway.unhealthy.add(WORK.account)
 
-    assert _hidden(await _search_output(env, "fetch emails")) == (
-        1,
+    assert _hidden(await _list_output(env, "read")) == (
+        2,
         {"acct-home": READ_ONLY_REMEDY},
     )
 
 
 @pytest.mark.asyncio
-async def test_suggestion_research_search_names_no_setting_remedy(
+async def test_suggestion_research_names_no_setting_remedy(
     env: SimpleNamespace,
 ) -> None:
     _set_access(env, WORK, "off")
     _set_access(env, HOME, "off")
 
-    output = await search_integration_tools(
+    output = await list_integration_tools(
         db_path=env.db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id="user-1",
-        query="fetch emails",
-        toolkit=None,
-        limit=None,
-        read_only=True,
+        toolkit="gmail",
+        access="read",
+        query=None,
+        slugs=None,
+        offer_remedies=False,
     )
 
-    assert output == {"tools": []}
+    assert output == {"tools": [], "other_tool_count": 0}
 
 
 @pytest.mark.asyncio
@@ -619,10 +716,10 @@ async def test_a_read_without_account_asks_the_model_to_choose(
 
 
 @pytest.mark.asyncio
-async def test_a_permission_changed_after_search_or_approval_is_denied(
+async def test_a_permission_changed_after_listing_or_approval_is_denied(
     env: SimpleNamespace,
 ) -> None:
-    assert "acct-home:allow" in (await _search(env, "fetch"))["GMAIL_FETCH_EMAILS"]
+    assert "acct-home:allow" in (await _list(env, "read"))["GMAIL_FETCH_EMAILS"]
     _set_access(env, HOME, "off")
     fetch = _error(await _run(env, _args("GMAIL_FETCH_EMAILS", HOME.account, {})))
     assert fetch["error_type"] == "permission_denied"
@@ -718,21 +815,21 @@ async def test_gateway_exceptions_never_reach_the_model(
 ) -> None:
     env.gateway.accounts_error = RuntimeError("Bearer synthetic-secret-token")
 
-    search = await integration_search.run_integration_search_tool(
+    listed = await integration_list.run_integration_list_tool(
         step_id="step-0",
-        tool_def=INTEGRATION_SEARCH_TOOLS_TOOL,
-        args={"query": "email"},
+        tool_def=INTEGRATION_LIST_TOOLS_TOOL,
+        args={"toolkit": "gmail", "access": "read"},
         state=env.state,
     )
     args = _args("GMAIL_SEND_EMAIL", WORK.account, SEND_ARGUMENTS)
     preparation = await _preflight(env, args, "send")
     run = await _run(env, args, "send")
 
-    assert search.status == "error"
-    assert isinstance(search.output, dict)
-    assert _error(search.output)["error_type"] == "upstream_failed"
+    assert listed.status == "error"
+    assert isinstance(listed.output, dict)
+    assert _error(listed.output)["error_type"] == "upstream_failed"
     assert _error(run)["error_type"] == "upstream_failed"
-    for payload in (search.output, preparation.result.output, run):
+    for payload in (listed.output, preparation.result.output, run):
         assert "synthetic-secret" not in json.dumps(payload)
     assert "synthetic-secret" not in caplog.text
     assert env.gateway.executed == []

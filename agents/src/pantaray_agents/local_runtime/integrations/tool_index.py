@@ -1,8 +1,8 @@
-"""In-memory index of the connected toolkits' tools, searched without the gateway.
+"""In-memory index of the connected toolkits' tools, read without the gateway.
 
 The backend fetches each connected toolkit's tools once (at startup and on
-connection) and replaces that toolkit's entry wholesale; search never calls the
-gateway, so it costs no external request.
+connection) and replaces that toolkit's entry wholesale; listing and search never
+call the gateway, so they cost no external request.
 """
 
 from __future__ import annotations
@@ -14,9 +14,6 @@ from threading import Lock
 from typing import Final
 
 from .contracts import IntegrationTool, ToolkitSlug
-
-SEARCH_LIMIT_DEFAULT: Final = 5
-SEARCH_LIMIT_MAX: Final = 8
 
 # Letters and digits of any script; '_' separates words in slugs such as GMAIL_SEND_EMAIL.
 _WORD_RE: Final = re.compile(r"[^\W_]+")
@@ -72,19 +69,16 @@ class ToolIndex:
         self,
         query: str,
         *,
-        usable: Callable[[IntegrationTool], bool],
-        toolkit: ToolkitSlug | None = None,
-        limit: int = SEARCH_LIMIT_DEFAULT,
+        include: Callable[[IntegrationTool], bool],
+        toolkit: ToolkitSlug,
     ) -> list[IntegrationTool]:
-        """Rank the usable tools by the query's words found in slug, name and description.
-
-        ``usable`` filters before ranking, so a tool the caller may not use never
-        takes a place in the top ``limit``.
+        """Rank the toolkit's tools that ``include`` keeps by the query's words
+        found in slug, name and description; a tool sharing no word is left out.
 
         Design limit: word overlap only. Switch to the bundled embedding model
         when Action replays show searches missing the tool the task needed.
         """
-        candidates = [entry for entry in self._snapshot(toolkit) if usable(entry.tool)]
+        candidates = [entry for entry in self._snapshot(toolkit) if include(entry.tool)]
         query_terms = _terms(query)
         if not candidates or not query_terms:
             return []
@@ -95,7 +89,7 @@ class ToolIndex:
             if (score := _score(entry, weights)) > 0
         ]
         scored.sort(key=lambda item: (-item[0], item[1].slug))
-        return [tool for _, tool in scored[:limit]]
+        return [tool for _, tool in scored]
 
     def _snapshot(self, toolkit: ToolkitSlug | None) -> Sequence[_Entry]:
         with self._lock:

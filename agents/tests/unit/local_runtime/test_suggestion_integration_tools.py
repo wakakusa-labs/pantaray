@@ -153,11 +153,17 @@ async def test_a_write_tool_is_never_offered_and_never_runs(db_path: Path) -> No
     gateway = _connect(db_path)
     registry = await _lens_run(_research_tools(db_path))
 
-    found = await _call(registry, "integration_search_tools", {"query": "email"})
-    assert found.status == "success" and isinstance(found.output, dict)
-    assert [tool["slug"] for tool in found.output["tools"]] == [  # type: ignore[index, union-attr]
+    listed = await _call(
+        registry, "integration_list_tools", {"toolkit": "gmail", "access": "read"}
+    )
+    assert listed.status == "success" and isinstance(listed.output, dict)
+    assert [tool["slug"] for tool in listed.output["tools"]] == [  # type: ignore[index, union-attr]
         "GMAIL_FETCH_EMAILS"
     ]
+    writes = await _call(
+        registry, "integration_list_tools", {"toolkit": "gmail", "access": "write"}
+    )
+    assert writes.status == "error"
 
     sent = await _run(registry, "GMAIL_SEND_EMAIL")
     assert sent.status == "error" and isinstance(sent.output, dict)

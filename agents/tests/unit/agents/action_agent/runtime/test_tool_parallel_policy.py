@@ -95,7 +95,7 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "draft_final_answer",
             "zanei_query",
             "zanei_timeline",
-            "integration_search_tools",
+            "integration_list_tools",
             "integration_run_tool",
         )
     },

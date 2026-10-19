@@ -72,38 +72,38 @@ def _slugs(tools: list[IntegrationTool]) -> list[str]:
 
 
 def test_the_tool_named_by_the_query_ranks_first(index: ToolIndex) -> None:
-    assert _slugs(index.search("send email", usable=_all))[:2] == [
+    assert _slugs(index.search("send email", include=_all, toolkit="gmail"))[:2] == [
         "GMAIL_SEND_EMAIL",
         "GMAIL_FETCH_EMAILS",
     ]
-    assert _slugs(index.search("fetch emails", usable=_all))[0] == "GMAIL_FETCH_EMAILS"
-    # "github" is in every GitHub tool, so "issue" decides the order.
-    assert _slugs(index.search("create github issue", usable=_all))[0] == (
-        "GITHUB_CREATE_AN_ISSUE"
+    assert _slugs(index.search("fetch emails", include=_all, toolkit="gmail"))[0] == (
+        "GMAIL_FETCH_EMAILS"
     )
+    # "github" is in every GitHub tool, so "issue" decides the order.
+    issues = index.search("create github issue", include=_all, toolkit="github")
+    assert _slugs(issues)[0] == "GITHUB_CREATE_AN_ISSUE"
 
 
 def test_a_word_only_in_the_description_still_finds_the_tool(index: ToolIndex) -> None:
-    assert _slugs(index.search("mailbox", usable=_all)) == ["GMAIL_LIST_LABELS"]
+    assert _slugs(index.search("mailbox", include=_all, toolkit="gmail")) == [
+        "GMAIL_LIST_LABELS"
+    ]
 
 
 def test_no_shared_word_returns_nothing(index: ToolIndex) -> None:
-    assert index.search("calendar event", usable=_all) == []
+    assert index.search("calendar event", include=_all, toolkit="gmail") == []
 
 
-def test_toolkit_filter_and_limit(index: ToolIndex) -> None:
-    assert _slugs(index.search("list", toolkit="github", usable=_all)) == [
-        "GITHUB_LIST_REPOSITORY_ISSUES"
-    ]
-    assert len(index.search("create list issue email", usable=_all, limit=2)) == 2
-
-
-def test_unusable_tools_never_take_a_place(index: ToolIndex) -> None:
+def test_only_the_toolkits_included_tools_take_a_place(index: ToolIndex) -> None:
     def read_only(tool: IntegrationTool) -> bool:
         return tool.tool_class == "read"
 
-    assert _slugs(index.search("send email", usable=read_only, limit=1)) == [
-        "GMAIL_FETCH_EMAILS"
+    assert _slugs(index.search("send email", include=read_only, toolkit="gmail")) == [
+        "GMAIL_FETCH_EMAILS",
+        "GMAIL_GET_CONTACTS",
+    ]
+    assert _slugs(index.search("list", include=_all, toolkit="github")) == [
+        "GITHUB_LIST_REPOSITORY_ISSUES"
     ]
 
 
@@ -115,7 +115,7 @@ def test_refresh_replaces_the_toolkit_wholesale(index: ToolIndex) -> None:
     assert index.get("GITHUB_CREATE_AN_ISSUE") == GITHUB_TOOLS[0]
 
     index.replace("gmail", [])
-    assert index.search("email", usable=_all) == []
+    assert index.search("email", include=_all, toolkit="gmail") == []
 
 
 @pytest.fixture

@@ -56,6 +56,9 @@ class ToolkitEntry(InternalStrictModel):
     logo_url: str | None = None
     class_overrides: dict[str, ClassOverride] = Field(default_factory=dict)
     probe: ChangeProbe | None = None
+    # The slugs integration_list_tools lists before any search, most used first.
+    # Each tool's class is the index's; a slug the index lacks is skipped.
+    core_tools: tuple[str, ...] = ()
 
 
 type IntegrationHealth = Literal[

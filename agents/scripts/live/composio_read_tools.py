@@ -2,8 +2,9 @@
 
 A read tool runs without a confirmation, so each new toolkit row gets this look
 before it ships. Read tools whose slug or output field names mention a secret
-are marked `secret?` (descriptions say "token" too often to help): block each one that returns a secret's value, and
-keep one that returns only names, metadata, public keys or masked values. Also
+are marked `check:` with the words that matched (descriptions say "token" too
+often to help): block each one that returns a secret's value, and keep one that
+returns only names, metadata, public keys or masked values. Also
 checks that each change probe is a read tool whose arguments its input schema
 accepts. Reads COMPOSIO_API_KEY from the environment and never prints it; no
 connected account is needed.
@@ -32,7 +33,7 @@ from pantaray_agents.local_runtime.integrations.composio.mapping import (
 )
 from pantaray_agents.local_runtime.integrations.composio.toolkits import TOOLKITS
 
-_SECRET_WORDS = re.compile(
+_REVIEW_WORDS = re.compile(
     r"secret|api_?key|apikey|service_?role|token|password|(^|_)pass($|_)|"
     r"credential|signing|encryption|private_?key|keypair|pem$|jwt|webhook|"
     r"connection_?string|form_?digest",
@@ -51,14 +52,14 @@ def _field_names(schema: object) -> list[str]:
     return []
 
 
-def _secret_hints(item: dict[str, object]) -> list[str]:
+def _review_words(item: dict[str, object]) -> list[str]:
     words = [str(item.get("slug", "")), *_field_names(item.get("output_parameters"))]
     return sorted(
         {
             match.group(0).lower()
             for word in words
             if not _PAGING.search(word)
-            for match in [_SECRET_WORDS.search(word)]
+            for match in [_REVIEW_WORDS.search(word)]
             if match
         }
     )
@@ -78,10 +79,12 @@ async def main() -> int:
             raw = RawTool.model_validate(item)
             if tool_disposition(raw, entry.class_overrides) == "read":
                 assert isinstance(item, dict)
-                reads.append((raw, _secret_hints(item)))
+                reads.append((raw, _review_words(item)))
         print(f"## {entry.toolkit}: {len(reads)} read of {len(items)} listed")
-        for raw, hints in sorted(reads, key=lambda pair: pair[0].slug):
-            print(f"  {raw.slug}" + (f"  secret? {', '.join(hints)}" if hints else ""))
+        for raw, matched in sorted(reads, key=lambda pair: pair[0].slug):
+            print(
+                f"  {raw.slug}" + (f"  check: {', '.join(matched)}" if matched else "")
+            )
         for slug, override in sorted(entry.class_overrides.items()):
             print(f"  override {slug} -> {override}")
         if entry.probe is None:

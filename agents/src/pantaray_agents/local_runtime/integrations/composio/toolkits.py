@@ -82,13 +82,16 @@ TOOLKITS: Final[tuple[ToolkitEntry, ...]] = (
             "GMAIL_ADD_LABEL_TO_EMAIL",
         ),
         # Composio's display_url is /u/0/, which opens whichever account the
-        # browser signed in to first, not the one the mail belongs to.
+        # browser signed in to first. An API id in the fragment (#all/<id>)
+        # opens only in a Gmail tab already loaded; a Message-ID search opens
+        # from a cold click too (googleworkspace/cli#858).
         note=(
             "To link a message for the user, write "
-            "https://mail.google.com/mail/u/<the account's email>/#all/<threadId>, "
-            "with the account the message was read from. Never pass on "
-            "display_url or any /u/<number>/ link: it opens whichever account "
-            "the browser signed in first."
+            "https://mail.google.com/mail/u/<the account's email>/#search/"
+            "rfc822msgid%3A<its Message-ID header without the angle brackets, "
+            "URL-encoded>, with the account the message was read from. Never "
+            "pass on display_url or a link with an API id or /u/<number>/: it "
+            "opens the wrong account or nothing."
         ),
         class_overrides={
             # The S/MIME private key's password.

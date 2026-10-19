@@ -159,7 +159,9 @@ describe('the Composio key', () => {
       screen.getByText('Create a key under Settings → Project Settings → API Keys.')
     ).toBeInTheDocument();
     expect(screen.getByText(/Session tool execution\.$/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '+ Add a service' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Connect an external service' })
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
@@ -521,8 +523,8 @@ function useFakeClock() {
 
 async function connectSlack() {
   renderSettings();
-  fireEvent.click(await screen.findByRole('button', { name: '+ Add a service' }));
-  const dialog = screen.getByRole('dialog', { name: 'Add a service' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect an external service' }));
+  const dialog = screen.getByRole('dialog', { name: 'Connect an external service' });
   expect(within(dialog).queryByText('Gmail')).not.toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Connect Slack' }));
 }

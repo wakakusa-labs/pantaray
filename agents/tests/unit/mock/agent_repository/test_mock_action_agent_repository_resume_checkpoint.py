@@ -2,10 +2,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from pantaray_agents.repositories.action_runtime_resume_contract import (
-    ActionRuntimeResumeContractError,
-)
-
 from .shared import MockActionAgentRepository, StatusType, StepType
 
 
@@ -93,9 +89,9 @@ async def test_get_runtime_resume_context_matches_user_resume_contract() -> None
     assert result.data is not None
     assert result.data.checkpoint_row is not None
     assert result.data.checkpoint_row["step_id"] == "checkpoint-1"
-    assert result.data.intervening_user_step is not None
-    assert result.data.intervening_user_step.step_id == "user-2"
-    message = result.data.intervening_user_step.message
+    (intervening,) = result.data.intervening_user_steps
+    assert intervening.step_id == "user-2"
+    message = intervening.message
     assert message.suggestion_approval is not None
     assert message.suggestion_approval.model_dump() == {
         "suggestion_id": "suggestion-action-user",
@@ -118,12 +114,16 @@ async def test_get_runtime_resume_context_matches_user_resume_contract() -> None
             "short_step_id": "S-3-USER",
         }
     )
-    with pytest.raises(ActionRuntimeResumeContractError, match="more than one"):
-        await repo.get_runtime_resume_context_for_user_step(
-            user_id="user-1",
-            action_id="action-user",
-            current_user_step_number=4,
-        )
+    several = await repo.get_runtime_resume_context_for_user_step(
+        user_id="user-1",
+        action_id="action-user",
+        current_user_step_number=4,
+    )
+    assert several.data is not None
+    assert [step.step_id for step in several.data.intervening_user_steps] == [
+        "user-2",
+        "user-3",
+    ]
 
     repo.data["action_steps"].append(
         {
@@ -143,7 +143,7 @@ async def test_get_runtime_resume_context_matches_user_resume_contract() -> None
     assert retry_result.data is not None
     assert retry_result.data.checkpoint_row is not None
     assert retry_result.data.checkpoint_row["step_id"] == "checkpoint-current-run"
-    assert retry_result.data.intervening_user_step is None
+    assert retry_result.data.intervening_user_steps == ()
 
 
 @pytest.mark.asyncio

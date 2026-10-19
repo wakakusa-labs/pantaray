@@ -95,7 +95,7 @@ def build_action_runtime_execution_service(
                 input=ActionGraphRuntimeCreateInput(
                     request=kwargs["request"],
                     state_config=kwargs["state_config"],
-                    intervening_user_step=kwargs["intervening_user_step"],
+                    intervening_user_steps=kwargs["intervening_user_steps"],
                 ),
                 emit_action_step=kwargs["emit_action_step"],
                 emit_error=kwargs["emit_error"],

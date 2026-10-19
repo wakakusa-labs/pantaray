@@ -32,7 +32,9 @@ class ActionResumeUserStep:
 @dataclass(frozen=True, slots=True)
 class ActionRuntimeResumeContext:
     checkpoint_row: DBRow | None
-    intervening_user_step: ActionResumeUserStep | None
+    # Every adopted USER step between the checkpoint and the current run, oldest
+    # first: runs that ended before writing a checkpoint never answered them.
+    intervening_user_steps: tuple[ActionResumeUserStep, ...]
 
 
 def select_action_runtime_resume_context(
@@ -49,20 +51,28 @@ def select_action_runtime_resume_context(
         default=None,
     )
     checkpoint_step = _positive_int(checkpoint.get("step_number")) if checkpoint else 0
-    intervening = [
-        row
-        for row in action_rows
-        if row.get("step_type") == "user_request"
-        and row.get("adopted_process_id") is not None
-        and checkpoint_step
-        < _positive_int(row.get("step_number"))
-        < current_user_step_number
-    ]
-    return build_action_runtime_resume_context(
-        checkpoint_row=checkpoint,
-        intervening_rows=intervening,
-        expected_user_id=expected_user_id,
-        expected_action_id=expected_action_id,
+    intervening = sorted(
+        (
+            row
+            for row in action_rows
+            if row.get("step_type") == "user_request"
+            and row.get("adopted_process_id") is not None
+            and checkpoint_step
+            < _positive_int(row.get("step_number"))
+            < current_user_step_number
+        ),
+        key=lambda row: _positive_int(row.get("step_number")),
+    )
+    return ActionRuntimeResumeContext(
+        checkpoint,
+        tuple(
+            parse_action_resume_user_step(
+                row,
+                expected_user_id=expected_user_id,
+                expected_action_id=expected_action_id,
+            )
+            for row in intervening
+        ),
     )
 
 
@@ -73,29 +83,6 @@ def _checkpoint_order_key(row: DBRow) -> tuple[int, bool, str, str, str]:
         str(row.get("completed_at") or ""),
         str(row.get("created_at") or ""),
         str(row.get("step_id") or ""),
-    )
-
-
-def build_action_runtime_resume_context(
-    *,
-    checkpoint_row: DBRow | None,
-    intervening_rows: Sequence[Mapping[str, object]],
-    expected_user_id: str,
-    expected_action_id: str,
-) -> ActionRuntimeResumeContext:
-    if not intervening_rows:
-        return ActionRuntimeResumeContext(checkpoint_row, None)
-    if len(intervening_rows) != 1:
-        raise ActionRuntimeResumeContractError(
-            "Action resume has more than one intervening USER step"
-        )
-    return ActionRuntimeResumeContext(
-        checkpoint_row,
-        parse_action_resume_user_step(
-            intervening_rows[0],
-            expected_user_id=expected_user_id,
-            expected_action_id=expected_action_id,
-        ),
     )
 
 

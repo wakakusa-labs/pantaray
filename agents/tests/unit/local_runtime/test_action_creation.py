@@ -1362,7 +1362,7 @@ def test_submit_action_message_accepts_root_captured_before_terminal_commit(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("has_older_checkpoint", [False, True])
-async def test_submit_action_message_recovers_exact_prepare_failure(
+async def test_submit_action_message_replays_a_turn_that_failed_before_checkpointing(
     creation_db: Path,
     has_older_checkpoint: bool,
 ) -> None:
@@ -1382,7 +1382,8 @@ async def test_submit_action_message_recovers_exact_prepare_failure(
                 ),
             )
         )
-    _fail_action_run(creation_db, failed, stage="prepare")
+    # Not only a prepare failure: any end that left no checkpoint of its own.
+    _fail_action_run(creation_db, failed, stage="execute")
 
     resumed = submit_action_message(_followup_command(failed, message_id="message-3"))
 
@@ -1395,24 +1396,14 @@ async def test_submit_action_message_recovers_exact_prepare_failure(
         current_user_step_number=3 if has_older_checkpoint else 2,
     )
     assert resume_result.data is not None
-    assert resume_result.data.intervening_user_step is not None
-    assert resume_result.data.intervening_user_step.step_id == failed.user_step_id
+    assert [step.step_id for step in resume_result.data.intervening_user_steps] == [
+        failed.user_step_id
+    ]
     assert (resume_result.data.checkpoint_row is not None) is has_older_checkpoint
 
 
-@pytest.mark.parametrize("stage", ["execute", None])
-def test_submit_action_message_rejects_non_prepare_contextless_terminal(
-    creation_db: Path,
-    stage: str | None,
-) -> None:
-    failed = submit_action_message(_text_command())
-    _fail_action_run(creation_db, failed, stage=stage)
-
-    with pytest.raises(ActionMessageConflictError, match="not prepare-stage"):
-        submit_action_message(_followup_command(failed, message_id="message-2"))
-
-
-def test_submit_action_message_rejects_multiple_checkpoint_free_user_turns(
+@pytest.mark.asyncio
+async def test_submit_action_message_replays_every_checkpoint_free_user_turn(
     creation_db: Path,
 ) -> None:
     first = submit_action_message(_text_command())
@@ -1420,8 +1411,20 @@ def test_submit_action_message_rejects_multiple_checkpoint_free_user_turns(
     second = submit_action_message(_followup_command(first, message_id="message-2"))
     _fail_action_run(creation_db, second, stage="prepare")
 
-    with pytest.raises(ActionMessageConflictError, match="unreconstructable"):
-        submit_action_message(_followup_command(second, message_id="message-3"))
+    third = submit_action_message(_followup_command(second, message_id="message-3"))
+
+    assert third.disposition == "started"
+    resume_result = await LocalActionRepository(
+        db_path=creation_db, busy_timeout_ms=1_000
+    ).get_runtime_resume_context_for_user_step(
+        user_id="user-1", action_id=first.action_id, current_user_step_number=3
+    )
+    assert resume_result.data is not None
+    assert resume_result.data.checkpoint_row is None
+    assert [step.step_id for step in resume_result.data.intervening_user_steps] == [
+        first.user_step_id,
+        second.user_step_id,
+    ]
 
 
 def test_submit_action_message_rejects_foreign_or_nonroot_expected_process(

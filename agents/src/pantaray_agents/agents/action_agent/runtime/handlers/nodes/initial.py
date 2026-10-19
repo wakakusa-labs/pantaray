@@ -73,10 +73,10 @@ async def initialize_context(
 
     request = runtime.request
     current_user_message = request.user_message
-    intervening_user_step = runtime.intervening_user_step
+    intervening_user_steps = runtime.intervening_user_steps
     context_user_message = (
-        intervening_user_step.message
-        if intervening_user_step is not None
+        intervening_user_steps[0].message
+        if intervening_user_steps
         else current_user_message
     )
     suggestion_approval = context_user_message.suggestion_approval

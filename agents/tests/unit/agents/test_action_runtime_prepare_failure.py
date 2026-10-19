@@ -288,9 +288,9 @@ async def test_execution_service_uses_approval_resume_checkpoint_lookup(
         )
     )
 
-    checkpoint, intervening_user_step = result
+    checkpoint, intervening_user_steps = result
     assert checkpoint.data is None
-    assert intervening_user_step is None
+    assert intervening_user_steps == ()
     repo.get_runtime_checkpoint_for_approval_resume.assert_awaited_once_with(
         user_id="user-approval-resume",
         action_id="act-approval-resume",

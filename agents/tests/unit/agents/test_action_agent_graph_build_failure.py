@@ -115,15 +115,17 @@ async def test_graph_build_failure_returns_typed_application_error(
     service.load_runtime_checkpoint_for_request = AsyncMock(  # type: ignore[method-assign]
         return_value=(
             MagicMock(data=None, error=None),
-            resume.ActionResumeUserStep(
-                step_id="prior-user",
-                step_number=1,
-                local_step_number=1,
-                short_step_id="S-1-USER",
-                message=ActionUserMessageInput(
-                    message_id="prior-message", content="Prior"
+            (
+                resume.ActionResumeUserStep(
+                    step_id="prior-user",
+                    step_number=1,
+                    local_step_number=1,
+                    short_step_id="S-1-USER",
+                    message=ActionUserMessageInput(
+                        message_id="prior-message", content="Prior"
+                    ),
+                    created_at="2026-03-20T00:00:00Z",
                 ),
-                created_at="2026-03-20T00:00:00Z",
             ),
         )
     )

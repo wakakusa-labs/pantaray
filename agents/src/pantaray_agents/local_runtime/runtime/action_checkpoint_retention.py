@@ -2,7 +2,7 @@
 
 Every checkpoint is a full snapshot of the run, so keeping one per step grows
 the Action's rows quadratically. Readers select either the newest checkpoint
-(resume, startup recovery, resumability, prepare-failure follow-up) or one that
+(resume, startup recovery, resumability, queued-message adoption) or one that
 names a given approval (approval decision, continuation, and its recovery
 anchor). Every other checkpoint is unreachable, so the writer that supersedes
 it clears it in the same transaction.

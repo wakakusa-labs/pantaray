@@ -146,7 +146,7 @@ class ActionGraphRuntime:
     emit_action_step: ActionStepEmitter
     emit_error: Callable[[ActionEventPayload], Awaitable[None]]
     services: RuntimeServices
-    intervening_user_step: ActionResumeUserStep | None = None
+    intervening_user_steps: tuple[ActionResumeUserStep, ...] = ()
     # Raw computer-activity reader session for this run. In-memory only: it never
     # enters Action state, so it stays out of the runtime checkpoint.
     zanei_session: ZaneiTools | None = None

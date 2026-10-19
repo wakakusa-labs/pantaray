@@ -7,7 +7,7 @@ from typing import Literal, NamedTuple, cast
 from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.action_resumability import (
-    action_latest_run_has_restorable_checkpoint,
+    action_accepts_followup_turn,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.action_conversation import ActionConversationSummary
@@ -242,7 +242,7 @@ def _load_action_and_boundary(
             status=row[2],
             latest_run_id=row[3],
             resumable=row[2] == "canceled"
-            and action_latest_run_has_restorable_checkpoint(
+            and action_accepts_followup_turn(
                 connection=connection,
                 user_id=user_id,
                 action_id=action_id,

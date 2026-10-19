@@ -319,7 +319,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     updated = await initialize_context(  # type: ignore[arg-type]
         agent,
         first,
-        _runtime(agent, request=request, intervening_user_step=prior_step),
+        _runtime(agent, request=request, intervening_user_steps=(prior_step,)),
     )
 
     history = updated["history_by_scope"]["S"]
@@ -345,7 +345,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     replay = await initialize_context(  # type: ignore[arg-type]
         agent,
         updated,
-        _runtime(agent, request=request, intervening_user_step=prior_step),
+        _runtime(agent, request=request, intervening_user_steps=(prior_step,)),
     )
     assert [entry["step_id"] for entry in replay["history_by_scope"]["S"]] == [
         "step-1",
@@ -670,7 +670,7 @@ def _runtime(
     agent: ActionAgent,
     *,
     request: ActionAgentRequest | None = None,
-    intervening_user_step: ActionResumeUserStep | None = None,
+    intervening_user_steps: tuple[ActionResumeUserStep, ...] = (),
 ) -> object:
     return SimpleNamespace(
         request=request
@@ -692,7 +692,7 @@ def _runtime(
             "prompt_name": "action/executing",
             "prompt_version": "1.0",
         },
-        intervening_user_step=intervening_user_step,
+        intervening_user_steps=intervening_user_steps,
         services=agent._runtime_services,  # noqa: SLF001
     )
 

@@ -473,6 +473,7 @@ def _store_integration_result(
         tool_id=INTEGRATION_RUN_TOOL_TOOL_ID,
         output={
             "source": "gmail",
+            "account": {"account": "ca_work", "label": "work@example.com"},
             "untrusted": True,
             "data": {"messages": [{"body": body}]},
         },

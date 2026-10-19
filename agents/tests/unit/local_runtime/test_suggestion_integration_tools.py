@@ -173,6 +173,7 @@ async def test_a_write_tool_is_never_offered_and_never_runs(db_path: Path) -> No
     read = await _run(registry, "GMAIL_FETCH_EMAILS")
     assert read.output == {
         "source": "gmail",
+        "account": {"account": WORK.account, "label": WORK.label},
         "untrusted": True,
         "data": {"id": "msg-1"},
     }

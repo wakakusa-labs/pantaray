@@ -128,7 +128,8 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
         guide=ToolGuideSpec(
             what=(
                 "Run a tool listed by integration_list_tools and return its "
-                'result as {"source": toolkit, "untrusted": true, "data": ...}. '
+                'result as {"source": toolkit, "account": {"account", "label"} '
+                'of the account it ran with, "untrusted": true, "data": ...}. '
                 + _PERMISSIONS_HINT
             ),
             when=(

@@ -51,10 +51,18 @@ RUN_RESULT_SCHEMA: dict[str, JSONValue] = {
     "additionalProperties": False,
     "properties": {
         "source": {"type": "string"},
+        # The account whose data this is: an earlier call may have omitted it
+        # while only one account could run the tool.
+        "account": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"account": {"type": "string"}, "label": {"type": "string"}},
+            "required": ["account", "label"],
+        },
         "untrusted": {"type": "boolean", "enum": [True]},
         "data": {},
     },
-    "required": ["source", "untrusted", "data"],
+    "required": ["source", "account", "untrusted", "data"],
 }
 
 # Fixed text per kind: a connection method's own error text never reaches the model.
@@ -145,7 +153,15 @@ async def execute_integration_call(
             message=_MESSAGES[outcome.error.kind],
             untrusted_detail=outcome.untrusted_detail,
         )
-    return {"source": resolved.tool.toolkit, "untrusted": True, "data": outcome.data}
+    return {
+        "source": resolved.tool.toolkit,
+        "account": {
+            "account": resolved.account.account,
+            "label": resolved.account.label,
+        },
+        "untrusted": True,
+        "data": outcome.data,
+    }
 
 
 def refusal_details(refusal: IntegrationRefusal) -> dict[str, JSONValue] | None:

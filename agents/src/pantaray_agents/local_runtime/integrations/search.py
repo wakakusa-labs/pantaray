@@ -123,6 +123,8 @@ LIST_RESULT_SCHEMA: dict[str, JSONValue] = {
         # Only for the core list: the usable tools of the class outside it,
         # which a query reaches.
         "other_tool_count": {"type": "integer", "minimum": 0},
+        # The toolkit's note: what its tools do not say about the service.
+        "note": {"type": "string"},
         # Present only when tools of the request exist that only these
         # accounts' setting ("Off" or "Read only") keeps out of "tools".
         "hidden_by_account_setting": {
@@ -313,6 +315,8 @@ async def list_integration_tools(
         for tool in tools
     ]
     result: dict[str, JSONValue] = {"tools": [*listed], **extra}
+    if (note := entries[toolkit].note) is not None:
+        result["note"] = note
     if hidden_by_slug:
         # One option per account: "Read and write" also covers its hidden reads.
         owners: dict[str, tuple[IntegrationAccount, SettingFix]] = {}

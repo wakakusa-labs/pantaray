@@ -59,7 +59,7 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.setup.createKey':
       'Create a key under Settings → Project Settings → API Keys.',
     'settings.integrations.setup.permissions':
-      'The key needs read and write for Auth configs, Connected accounts, Session management and Session tool execution.',
+      'The key needs Read and write for Auth configs, Connected accounts and Session management, and Write only for Session tool execution.',
     'settings.integrations.loadFailed': "Couldn't load the services.",
     'settings.integrations.reload': 'Load again',
     'settings.integrations.flow.service': '{service}: {status}',
@@ -133,7 +133,7 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.setup.createKey':
       'Settings → Project Settings → API Keys でキーを作ります',
     'settings.integrations.setup.permissions':
-      'キーには Auth configs・Connected accounts・Session management・Session tool execution の読み取りと書き込みが必要です',
+      'キーには Auth configs・Connected accounts・Session management の Read and write と、Session tool execution の Write only が必要です',
     'settings.integrations.loadFailed': 'サービスの一覧を取得できませんでした。',
     'settings.integrations.reload': 'もう一度読み込む',
     'settings.integrations.flow.service': '{service}: {status}',

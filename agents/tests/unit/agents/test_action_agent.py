@@ -1567,15 +1567,17 @@ def test_resolve_initial_state_opens_prior_checkpoint_for_persisted_next_user_tu
                 ),
             }
         ),
-        intervening_user_step=ActionResumeUserStep(
-            step_id="user-step-2",
-            step_number=2,
-            local_step_number=2,
-            short_step_id="S-2-USER",
-            message=ActionUserMessageInput(
-                message_id="message-2", content="Second request"
+        intervening_user_steps=(
+            ActionResumeUserStep(
+                step_id="user-step-2",
+                step_number=2,
+                local_step_number=2,
+                short_step_id="S-2-USER",
+                message=ActionUserMessageInput(
+                    message_id="message-2", content="Second request"
+                ),
+                created_at="2026-03-20T11:00:00Z",
             ),
-            created_at="2026-03-20T11:00:00Z",
         ),
     )
 
@@ -2141,16 +2143,18 @@ def test_prepare_failure_followup_reconstructs_assistant_before_first_user(
         },
         token_budget=99,
         checkpoint_row=RepositoryResult(data=None),
-        intervening_user_step=ActionResumeUserStep(
-            step_id="first-reply",
-            step_number=2,
-            local_step_number=2,
-            short_step_id="S-2-USER",
-            message=ActionUserMessageInput(
-                message_id="reply",
-                content="それについて教えて",
+        intervening_user_steps=(
+            ActionResumeUserStep(
+                step_id="first-reply",
+                step_number=2,
+                local_step_number=2,
+                short_step_id="S-2-USER",
+                message=ActionUserMessageInput(
+                    message_id="reply",
+                    content="それについて教えて",
+                ),
+                created_at="2026-09-09T00:00:01Z",
             ),
-            created_at="2026-09-09T00:00:01Z",
         ),
     )
     assert [

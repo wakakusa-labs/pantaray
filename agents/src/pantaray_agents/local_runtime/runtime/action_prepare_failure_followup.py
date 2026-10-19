@@ -47,7 +47,7 @@ def require_prepare_failure_followup_authority(
     if row is None:
         raise MigrationError("Action prepare failure root USER is missing")
     try:
-        root_user = parse_action_resume_user_step(
+        parse_action_resume_user_step(
             dict(row), expected_user_id=user_id, expected_action_id=action_id
         )
     except ActionRuntimeResumeContractError as exc:
@@ -93,20 +93,23 @@ def require_prepare_failure_followup_authority(
         metadata.get("suggestion_id"),
     ) != (user_id, action_id, suggestion_id):
         raise MigrationError("Action prepare failure identity is inconsistent")
-    intervening_count = connection.execute(
+    # Reached only without a checkpoint this build restores (the predicate in
+    # action_resumability admits every other follow-up), so the next run starts
+    # from nothing and replays this one USER turn.
+    user_count, has_checkpoint = connection.execute(
         """
-        SELECT COUNT(*) FROM agent_action_steps AS users
-        WHERE users.user_id = ? AND users.action_id = ? AND users.step_type = 'user_request'
-          AND users.status = 'success'
-          AND users.step_number > COALESCE((
-              SELECT MAX(checkpoints.step_number) FROM agent_action_steps AS checkpoints
-              WHERE checkpoints.user_id = users.user_id AND checkpoints.action_id = users.action_id
-                AND checkpoints.runtime_state_checkpoint IS NOT NULL AND checkpoints.step_number < ?
-          ), 0) AND users.step_number <= ?
+        SELECT
+            (SELECT COUNT(*) FROM agent_action_steps
+             WHERE user_id = :user_id AND action_id = :action_id
+               AND step_type = 'user_request' AND status = 'success'
+               AND step_number IS NOT NULL),
+            EXISTS (SELECT 1 FROM agent_action_steps
+                    WHERE user_id = :user_id AND action_id = :action_id
+                      AND runtime_state_checkpoint IS NOT NULL)
         """,
-        (user_id, action_id, root_user.step_number, root_user.step_number),
-    ).fetchone()[0]
-    if intervening_count != 1:
+        {"user_id": user_id, "action_id": action_id},
+    ).fetchone()
+    if user_count != 1 or has_checkpoint:
         raise ActionMessageConflictError(
             "Action prepare failure has unreconstructable USER history"
         )

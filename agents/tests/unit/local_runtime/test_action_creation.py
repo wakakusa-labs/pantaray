@@ -1395,8 +1395,9 @@ async def test_submit_action_message_recovers_exact_prepare_failure(
         current_user_step_number=3 if has_older_checkpoint else 2,
     )
     assert resume_result.data is not None
-    assert resume_result.data.intervening_user_step is not None
-    assert resume_result.data.intervening_user_step.step_id == failed.user_step_id
+    assert [step.step_id for step in resume_result.data.intervening_user_steps] == [
+        failed.user_step_id
+    ]
     assert (resume_result.data.checkpoint_row is not None) is has_older_checkpoint
 
 

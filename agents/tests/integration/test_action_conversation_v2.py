@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
@@ -21,9 +22,17 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.assistant_messag
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
     project_persisted_user_request_step,
 )
-from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
+from pantaray_agents.agents.action_agent.runtime.state import (
+    ActionAgentState,
+    create_initial_state,
+)
 from pantaray_agents.app.shared import install_common_exception_handlers
+from pantaray_agents.application.action.resume_service import (
+    ActionResumeService,
+    ResumeDeps,
+)
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.agent_state import LocalActionRepository
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     serialize_memory_draft,
 )
@@ -86,7 +95,12 @@ from pantaray_agents.schema.action_conversation import (
     ActionConversationPage,
     UserEntry,
 )
-from pantaray_agents.schema.agent.action import RuntimeStateCheckpointPayload
+from pantaray_agents.schema.agent.action import (
+    ActionAgentRequest,
+    RuntimeStateCheckpointPayload,
+)
+from pantaray_agents.schema.agent.base import AgentError
+from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_agents.tasks.types import ActionJobRuntimePayload
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
 from pantaray_llm.profiles.subagent_models import SUBAGENT_MODEL_SETTINGS
@@ -1296,19 +1310,9 @@ def _stop_with_a_queued_message(
     started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
     action_id = str(started["action_id"])
     _, preparation = _claim_and_prepare(db_path, claimed_by="worker:first")
-    # The running turn's checkpoint, on its USER step as adoption writes it.
-    with sqlite3.connect(db_path) as connection, connection:
-        connection.execute(
-            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
-               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
-            (
-                json.dumps(
-                    _terminal_checkpoint(preparation, action_id, now_utc_iso(), "")
-                ),
-                RUNTIME_STATE_CHECKPOINT_VERSION,
-                started["step_id"],
-            ),
-        )
+    _checkpoint_the_running_turn(
+        db_path, action_id, str(started["step_id"]), preparation
+    )
     queued = client.post(
         MESSAGES_PATH,
         json=_message(
@@ -1340,3 +1344,213 @@ def _all_unadopted(client: TestClient, action_id: str) -> list[dict[str, object]
         cursor = page["next_cursor"]
         if cursor is None:
             return messages
+
+
+def _checkpoint_the_running_turn(
+    db_path: Path, action_id: str, user_step_id: str, preparation: ActionJobPreparation
+) -> None:
+    """The running turn's checkpoint, on its USER step as adoption writes it."""
+
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """UPDATE agent_action_steps SET runtime_state_checkpoint = ?,
+               runtime_state_checkpoint_version = ? WHERE step_id = ?""",
+            (
+                json.dumps(
+                    _terminal_checkpoint(preparation, action_id, now_utc_iso(), "")
+                ),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                user_step_id,
+            ),
+        )
+
+
+def _stop(client: TestClient, action_id: str) -> None:
+    stopped = client.post(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/cancel",
+        json={"reason": "user_stop"},
+    )
+    assert stopped.status_code == 202, stopped.text
+
+
+def _stop_runs_before_they_checkpoint(
+    client: TestClient, db_path: Path, *, early_stops: int
+) -> tuple[str, list[str]]:
+    """Checkpoint and stop one run, then stop ``early_stops`` runs before they
+    write a checkpoint of their own, as a Stop during the first model call does.
+
+    Returns the Action and the messages those runs took without answering.
+    """
+
+    started = client.post(MESSAGES_PATH, json=_message("message-first", "最初")).json()
+    action_id = str(started["action_id"])
+    _, first = _claim_and_prepare(db_path, claimed_by="worker:first")
+    _checkpoint_the_running_turn(db_path, action_id, str(started["step_id"]), first)
+    _stop(client, action_id)
+    unanswered: list[str] = []
+    for index in range(early_stops):
+        content = f"止めた指示{index}"
+        sent = client.post(
+            MESSAGES_PATH,
+            json=_message(f"message-early-{index}", content, action_id=action_id),
+        )
+        assert sent.status_code == 200, sent.text
+        _claim_and_prepare(db_path, claimed_by=f"worker:early-{index}")
+        _stop(client, action_id)
+        unanswered.append(content)
+        assert _read_state(client, action_id)["action"]["resumable"] is True
+    return action_id, unanswered
+
+
+async def _resolve_next_run(
+    db_path: Path, action_id: str, preparation: ActionJobPreparation
+) -> ActionAgentState:
+    """The state the run ``preparation`` opens starts from, as the runtime loads it."""
+
+    context = preparation.context
+    resume = await LocalActionRepository(
+        db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS
+    ).get_runtime_resume_context_for_user_step(
+        user_id=USER_ID,
+        action_id=action_id,
+        current_user_step_number=context.user_step_number,
+    )
+    assert resume.data is not None
+    return ActionResumeService(
+        ResumeDeps(
+            logger=logging.getLogger(__name__),
+            load_approval_session_by_request=lambda _user_id, _request_id: None,
+            build_agent_error=lambda **values: AgentError(severity="error", **values),
+            now_provider=now_utc_iso,
+        )
+    ).resolve_initial_state(
+        request=ActionAgentRequest(
+            user_id=USER_ID,
+            suggestion_id=context.suggestion_id,
+            action_id=action_id,
+            user_step_id=context.user_step_id,
+            user_step_number=context.user_step_number,
+            user_step_local_step_number=context.user_step_local_step_number,
+            user_step_short_id=context.user_step_short_id,
+            user_step_created_at=context.user_step_created_at,
+            user_message=context.user_message,
+            preceding_assistant_messages=context.preceding_assistant_messages,
+            execution_target=context.execution_target,
+        ),
+        started_at=now_utc_iso(),
+        state_config={
+            "max_steps": 25,
+            "max_tool_steps": 25,
+            "token_budget": None,
+            "prompt_name": "action/executing",
+            "prompt_version": "1.0",
+            "cancel_check_max_consecutive_failures": 3,
+            "cancel_check_failure_grace_seconds": 60,
+        },
+        token_budget=None,
+        checkpoint_row=RepositoryResult(data=resume.data.checkpoint_row),
+        intervening_user_steps=resume.data.intervening_user_steps,
+    )
+
+
+def _user_texts(entries: list[dict[str, object]]) -> list[object]:
+    return [
+        entry.get("user_request_text")
+        for entry in entries
+        if entry["step_type"] == "user_request"
+    ]
+
+
+@pytest.mark.parametrize("early_stops", [1, 2])
+async def test_a_stop_before_the_run_checkpoints_still_takes_the_next_message(
+    runtime_client: tuple[TestClient, Path],
+    early_stops: int,
+) -> None:
+    """A Stop during a run's first model call must not lock the conversation.
+
+    That run wrote no checkpoint, so its message comes after the newest one. The
+    next run restores that checkpoint and replays every such message, in the
+    order sent, before its own.
+    """
+
+    client, db_path = runtime_client
+    action_id, unanswered = _stop_runs_before_they_checkpoint(
+        client, db_path, early_stops=early_stops
+    )
+
+    followup = client.post(
+        MESSAGES_PATH, json=_message("message-next", "次の指示", action_id=action_id)
+    )
+    assert followup.status_code == 200, followup.text
+    assert followup.json()["disposition"] == "started"
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:next")
+    assert preparation.context.user_message.content == "次の指示"
+
+    resolved = await _resolve_next_run(db_path, action_id, preparation)
+    assert resolved["status"] == "processing"
+    assert _user_texts(resolved["history_by_scope"]["S"]) == ["最初", *unanswered]
+    # The run's own message is the next step after them.
+    assert resolved["step"] == preparation.context.user_step_number
+
+
+async def test_a_message_queued_on_a_run_stopped_before_it_checkpoints_runs_next(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """Adoption replays the stopped run's message before the one queued on it."""
+
+    client, db_path = runtime_client
+    action_id, unanswered = _stop_runs_before_they_checkpoint(
+        client, db_path, early_stops=0
+    )
+    sent = client.post(
+        MESSAGES_PATH,
+        json=_message("message-early", "止めた指示", action_id=action_id),
+    ).json()
+    _claim_and_prepare(db_path, claimed_by="worker:early")
+    queued = client.post(
+        MESSAGES_PATH,
+        json=_message(
+            "message-queued",
+            "実行中に送った指示",
+            action_id=action_id,
+            expected_process_id=str(sent["process_id"]),
+        ),
+    ).json()
+    assert queued["disposition"] == "pending"
+    _stop(client, action_id)
+
+    followup = client.post(
+        MESSAGES_PATH, json=_message("message-next", "次の指示", action_id=action_id)
+    )
+    assert followup.status_code == 200, followup.text
+    assert _all_unadopted(client, action_id) == []
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:next")
+    assert preparation.context.user_message.message_id == "message-queued"
+
+    resolved = await _resolve_next_run(db_path, action_id, preparation)
+    assert _user_texts(resolved["history_by_scope"]["S"]) == [
+        "最初",
+        "止めた指示",
+        "実行中に送った指示",
+        "次の指示",
+    ]
+
+
+def test_an_early_stop_on_a_checkpoint_this_build_cannot_restore_is_refused(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    client, db_path = runtime_client
+    action_id, _ = _stop_runs_before_they_checkpoint(client, db_path, early_stops=1)
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            """UPDATE agent_action_steps SET runtime_state_checkpoint_version = ?
+            WHERE action_id = ? AND runtime_state_checkpoint IS NOT NULL""",
+            (RUNTIME_STATE_CHECKPOINT_VERSION - 1, action_id),
+        )
+
+    assert _read_state(client, action_id)["action"]["resumable"] is False
+    refused = client.post(
+        MESSAGES_PATH, json=_message("message-next", "次の指示", action_id=action_id)
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["type"] == "ActionConflict"

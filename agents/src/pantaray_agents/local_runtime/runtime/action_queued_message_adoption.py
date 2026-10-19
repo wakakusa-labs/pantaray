@@ -11,8 +11,8 @@ from it, and runs are ordered by it (``MIN(accepted_sequence)`` of the USER step
 a run adopted). So only a message sent after the latest run's root can join; an
 older one would sort the new run before that latest run. Such a message exists
 only when a run left it behind and the next run could not take it (the follow-up
-to a run that failed before its first checkpoint has no state to add it to). It
-stays not executed, and the user can withdraw it.
+to an Action that has no checkpoint yet has no state to add it to). It stays not
+executed, and the user can withdraw it.
 """
 
 from __future__ import annotations
@@ -36,13 +36,19 @@ from pantaray_agents.agents.action_agent.runtime.user_image_attachments import (
 from pantaray_agents.application.action.new_user_turn import (
     reset_state_for_new_user_turn,
 )
+from pantaray_agents.application.action.resume_service import (
+    project_intervening_user_steps,
+)
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 from pantaray_agents.tasks.action_user_message import render_action_user_request_text
 
 from .action_checkpoint_retention import prune_action_checkpoints_in_connection
 from .action_message_models import _StepPosition
-from .action_resumability import action_latest_run_has_restorable_checkpoint
+from .action_resumability import (
+    action_latest_run_has_restorable_checkpoint,
+    load_unanswered_user_steps_in_connection,
+)
 from .action_user_adoption import (
     PendingActionUserStep,
     adopt_pending_action_user_steps_in_connection,
@@ -133,10 +139,12 @@ class WaitingMessages:
         )
 
     def adopt(self, *, process_id: str, adopted_at: str) -> None:
-        """Adopt them into the run ``process_id`` opens, on the latest checkpoint."""
+        """Adopt them into the run ``process_id`` opens, on the latest checkpoint
+        and the messages stopped runs took after it without answering."""
 
         row = self._connection.execute(
-            """SELECT runtime_state_checkpoint, runtime_state_checkpoint_version
+            """SELECT step_number, runtime_state_checkpoint,
+                      runtime_state_checkpoint_version
             FROM agent_action_steps
             WHERE user_id = ? AND action_id = ? AND runtime_state_checkpoint IS NOT NULL
             ORDER BY step_number DESC, completed_at IS NULL ASC, completed_at DESC,
@@ -144,19 +152,28 @@ class WaitingMessages:
             LIMIT 1""",
             (self._user_id, self._action_id),
         ).fetchone()
-        checkpoint_json, version = row
+        checkpoint_step_number, checkpoint_json, version = row
         if version != RUNTIME_STATE_CHECKPOINT_VERSION:
             raise MigrationError("Action checkpoint cannot take the waiting messages")
         checkpoint = json.loads(checkpoint_json)
         validate_runtime_checkpoint_payload(checkpoint)
-        state = reset_state_for_new_user_turn(
-            restore_runtime_state_checkpoint(
-                checkpoint,
-                expected_action_id=self._action_id,
-                expected_suggestion_id=self._suggestion_id,
-                expected_user_id=self._user_id,
+        state = project_intervening_user_steps(
+            reset_state_for_new_user_turn(
+                restore_runtime_state_checkpoint(
+                    checkpoint,
+                    expected_action_id=self._action_id,
+                    expected_suggestion_id=self._suggestion_id,
+                    expected_user_id=self._user_id,
+                ),
+                started_at=adopted_at,
             ),
-            started_at=adopted_at,
+            load_unanswered_user_steps_in_connection(
+                self._connection,
+                user_id=self._user_id,
+                action_id=self._action_id,
+                after_step_number=checkpoint_step_number,
+            ),
+            user_id=self._user_id,
         )
         self._state = adopt_pending_action_user_steps_in_connection(
             connection=self._connection,

@@ -16,7 +16,6 @@ from pantaray_agents.local_runtime.tooling.repository.tool_invocation_links impo
 from pantaray_agents.repositories.action_runtime_resume_contract import (
     ActionRuntimeResumeContext,
     ActionRuntimeResumeContractError,
-    build_action_runtime_resume_context,
 )
 from pantaray_agents.schema.action_tool_call import ActionToolCallOrigin
 from pantaray_agents.schema.agent.action import (
@@ -39,6 +38,7 @@ from ..runtime.action_checkpoint_retention import (
     load_tool_approval_resume_anchor_in_connection,
     prune_action_checkpoints_in_connection,
 )
+from ..runtime.action_resumability import load_unanswered_user_steps_in_connection
 from .action_llm_turn_commit import (
     ActionLlmTurnCommitError,
     save_action_llm_turn_in_connection,
@@ -471,34 +471,18 @@ class LocalActionRepositoryStepsMixin:
                 raise ActionRuntimeResumeContractError(
                     "Action runtime checkpoint step number is invalid"
                 )
-            intervening_rows = connection.execute(
-                """
-                SELECT step_id, user_id, action_id, accepted_sequence, step_number,
-                       local_step_number, short_step_id, step_type, status,
-                       user_message_id, user_message_json, user_request_text,
-                       adopted_process_id, created_at
-                FROM agent_action_steps
-                WHERE user_id = ? AND action_id = ?
-                  AND step_type = 'user_request' AND status = 'success'
-                  AND adopted_process_id IS NOT NULL
-                  AND step_number > ? AND step_number < ?
-                ORDER BY step_number, accepted_sequence, step_id
-                LIMIT 2
-                """,
-                (
-                    user_id,
-                    action_id,
-                    checkpoint_step_number,
-                    current_user_step_number,
-                ),
-            ).fetchall()
-        return RepositoryResult(
-            data=build_action_runtime_resume_context(
-                checkpoint_row=checkpoint_row,
-                intervening_rows=tuple(dict(row) for row in intervening_rows),
-                expected_user_id=user_id,
-                expected_action_id=action_id,
+            intervening_user_steps = tuple(
+                step
+                for step in load_unanswered_user_steps_in_connection(
+                    connection,
+                    user_id=user_id,
+                    action_id=action_id,
+                    after_step_number=checkpoint_step_number,
+                )
+                if step.step_number < current_user_step_number
             )
+        return RepositoryResult(
+            data=ActionRuntimeResumeContext(checkpoint_row, intervening_user_steps)
         )
 
     async def get_runtime_checkpoint_for_approval_resume(

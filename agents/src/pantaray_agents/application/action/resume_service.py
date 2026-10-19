@@ -83,6 +83,32 @@ class ResumeDeps:
     now_provider: Callable[[], str]
 
 
+def project_intervening_user_steps(
+    state: ActionAgentState,
+    user_steps: tuple[resume.ActionResumeUserStep, ...],
+    *,
+    user_id: str,
+) -> ActionAgentState:
+    """Replay the durable USER steps no run answered, oldest first."""
+
+    for user_step in user_steps:
+        state = project_persisted_user_request_step(
+            state,
+            step_id=user_step.step_id,
+            step_number=user_step.step_number,
+            local_step_number=user_step.local_step_number,
+            short_step_id=user_step.short_step_id,
+            request_text=render_action_user_request_text(user_step.message),
+            occurred_at=user_step.created_at,
+            history_phase="init",
+            attachments=build_user_image_attachments(
+                user_id=user_id,
+                images=user_step.message.images,
+            ),
+        )
+    return state
+
+
 class ActionResumeService:
     def __init__(self, deps: ResumeDeps) -> None:
         self._deps = deps
@@ -95,7 +121,7 @@ class ActionResumeService:
         state_config: ActionAgentStateConfig,
         token_budget: int | None,
         checkpoint_row: RepositoryResult[object],
-        intervening_user_step: resume.ActionResumeUserStep | None = None,
+        intervening_user_steps: tuple[resume.ActionResumeUserStep, ...] = (),
     ) -> ActionAgentState:
         try:
             checkpoint_state = self.load_checkpoint_state_or_none(
@@ -108,9 +134,12 @@ class ActionResumeService:
                     request=request,
                 )
                 if is_new_user_turn:
+                    first_user_step = (
+                        intervening_user_steps[0] if intervening_user_steps else None
+                    )
                     next_user_step_number = (
-                        intervening_user_step.step_number
-                        if intervening_user_step is not None
+                        first_user_step.step_number
+                        if first_user_step is not None
                         else request.user_step_number
                     )
                     project_persisted_assistant_messages(
@@ -122,14 +151,14 @@ class ActionResumeService:
                         checkpoint_state=checkpoint_state,
                         expected_step_number=next_user_step_number,
                         started_at=(
-                            intervening_user_step.created_at
-                            if intervening_user_step is not None
+                            first_user_step.created_at
+                            if first_user_step is not None
                             else request.user_step_created_at
                         ),
                     )
-                    checkpoint_state = self._project_intervening_user_step(
+                    checkpoint_state = project_intervening_user_steps(
                         checkpoint_state,
-                        intervening_user_step,
+                        intervening_user_steps,
                         user_id=str(request.user_id),
                     )
                 elif is_retired_orchestration_checkpoint(checkpoint_state):
@@ -192,15 +221,15 @@ class ActionResumeService:
             max_tool_steps=state_config["max_tool_steps"],
             token_budget=token_budget,
         )
-        if intervening_user_step is not None:
+        if intervening_user_steps:
             project_persisted_assistant_messages(
                 state,
                 request.preceding_assistant_messages,
-                before_step_number=intervening_user_step.step_number,
+                before_step_number=intervening_user_steps[0].step_number,
             )
-        state = self._project_intervening_user_step(
+        state = project_intervening_user_steps(
             state,
-            intervening_user_step,
+            intervening_user_steps,
             user_id=str(request.user_id),
         )
         return self.apply_latest_runtime_state_config(
@@ -253,30 +282,6 @@ class ActionResumeService:
                 message="A legacy Action-wide temp path cannot open a new USER turn.",
             )
         return reset_state_for_new_user_turn(checkpoint_state, started_at=started_at)
-
-    @staticmethod
-    def _project_intervening_user_step(
-        state: ActionAgentState,
-        user_step: resume.ActionResumeUserStep | None,
-        *,
-        user_id: str,
-    ) -> ActionAgentState:
-        if user_step is None:
-            return state
-        return project_persisted_user_request_step(
-            state,
-            step_id=user_step.step_id,
-            step_number=user_step.step_number,
-            local_step_number=user_step.local_step_number,
-            short_step_id=user_step.short_step_id,
-            request_text=render_action_user_request_text(user_step.message),
-            occurred_at=user_step.created_at,
-            history_phase="init",
-            attachments=build_user_image_attachments(
-                user_id=user_id,
-                images=user_step.message.images,
-            ),
-        )
 
     def build_resume_failure_state(
         self,

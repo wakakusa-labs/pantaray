@@ -165,7 +165,7 @@ async def test_follow_up_turn_resumes_from_the_previous_run_checkpoint(
     assert resume.data.checkpoint_row is not None
     assert resume.data.checkpoint_row["step_id"] == "step-3"
     assert resume.data.checkpoint_row["runtime_state_checkpoint"] == {"step": 4}
-    assert resume.data.intervening_user_step is None
+    assert resume.data.intervening_user_steps == ()
 
     await _save_step(repo, step_id="step-5", step_number=5, checkpoint={"step": 6})
     assert _checkpoint_rows(db_path) == {"step-5": {"step": 6}}

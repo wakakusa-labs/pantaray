@@ -668,6 +668,7 @@ async def test_a_write_asks_every_time_and_runs_once_approved(
     assert json.loads(str(summary["arguments"])) == SEND_ARGUMENTS
     assert await _run(env, args, "send") == {
         "source": "gmail",
+        "account": {"account": WORK.account, "label": WORK.label},
         "untrusted": True,
         "data": {"id": "msg-1"},
     }

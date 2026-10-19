@@ -2,13 +2,15 @@
 
 Each Suggestion samples three distinct patterns of help ("lenses") by weight from
 one pool. Every lens gets its own decision run on the shared prompt plus that
-lens; a selector call then picks the single best candidate, or none.
+lens, shown with a few examples drawn from the lens's pool; a selector call then
+picks the single best candidate, or none.
 """
 
 from __future__ import annotations
 
 import asyncio
 import random
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
@@ -47,11 +49,22 @@ LENS_WEIGHTS = {
     "new_approach": 1,
 }
 LENSES_PER_SUGGESTION = 3
+# A lens's text lists its example pool after this line, one "- " item each.
+LENS_EXAMPLES_HEADING = "Examples:"
+# Two cases from different people show the range of a lens without one anchoring it.
+EXAMPLES_PER_LENS_RUN = 2
 # Lens runs share one Suggestion's step numbers: run i records from i * stride, and
 # a number taken twice overwrites a step. A turn records itself, each call that comes
 # back (max_parallel_tool_calls at most) and up to two failed sends per repair.
 LENS_STEP_STRIDE = 10_000
 _KIND_LABELS = {"action_offer": "offer", "message_only": "advice"}
+
+
+@dataclass(frozen=True, slots=True)
+class SampledLens:
+    name: str
+    # Draws this run's examples from the lens's pool.
+    example_seed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,18 +80,30 @@ class LensDecision:
     selected_lens: str | None
 
 
-def sample_lenses(rng: random.Random) -> tuple[str, ...]:
+def sample_lenses(rng: random.Random) -> tuple[SampledLens, ...]:
     remaining = dict(LENS_WEIGHTS)
-    lenses = []
+    names = []
     for _ in range(LENSES_PER_SUGGESTION):
-        (lens,) = rng.choices(tuple(remaining), weights=tuple(remaining.values()))
-        del remaining[lens]
-        lenses.append(lens)
-    return tuple(lenses)
+        (name,) = rng.choices(tuple(remaining), weights=tuple(remaining.values()))
+        del remaining[name]
+        names.append(name)
+    return tuple(SampledLens(name, rng.getrandbits(32)) for name in names)
 
 
-def _lens_section(lens_config: PromptConfig, lens: str) -> str:
-    return lens_config.prompt.format(lens=lens_config.require_role_rule(lens))
+def lens_section(lens_config: PromptConfig, lens: SampledLens) -> str:
+    """The lens's definition with a seeded draw of its examples."""
+    definition, _, pool_text = lens_config.require_role_rule(lens.name).partition(
+        f"\n{LENS_EXAMPLES_HEADING}\n"
+    )
+    # Unwrap each "- " item; its continuation lines are indented.
+    items = re.split(r"^- ", pool_text, flags=re.MULTILINE)[1:]
+    pool = [" ".join(item.split()) for item in items]
+    chosen = random.Random(lens.example_seed).sample(
+        pool, min(EXAMPLES_PER_LENS_RUN, len(pool))
+    )
+    examples = "".join(f"\n- {example}" for example in chosen)
+    text = f"{definition}\n{LENS_EXAMPLES_HEADING}{examples}" if chosen else definition
+    return lens_config.prompt.format(lens=text)
 
 
 def _selector_tool(count: int) -> LlmToolDefinition:
@@ -121,7 +146,7 @@ async def decide_with_lenses(
     current_time: str,
     recent_suggestions: str,
     past: PastSuggestions,
-    lenses: Sequence[str],
+    lenses: Sequence[SampledLens],
     lens_config: PromptConfig,
     selector_config: PromptConfig,
     nudge_config: PromptConfig,
@@ -136,7 +161,7 @@ async def decide_with_lenses(
     stops the other runs.
     """
 
-    async def run_lens(index: int, lens: str) -> SuggestionExtraction:
+    async def run_lens(index: int, lens: SampledLens) -> SuggestionExtraction:
         offset = index * LENS_STEP_STRIDE
 
         async def record(step: ReactLoopStep) -> None:
@@ -146,7 +171,7 @@ async def decide_with_lenses(
             user_id=user_id,
             suggestion_id=suggestion_id,
             context=initial_prompt,
-            lens=_lens_section(lens_config, lens),
+            lens=lens_section(lens_config, lens),
             system_instruction=system_instruction,
             research_tools=research_tools,
             nudge_config=nudge_config,
@@ -169,7 +194,7 @@ async def decide_with_lenses(
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     candidates = tuple(
-        LensCandidate(lens=lens, extraction=result)
+        LensCandidate(lens=lens.name, extraction=result)
         for lens, result in zip(lenses, results, strict=True)
         if result["decided"] is not None
     )
@@ -246,6 +271,8 @@ __all__ = [
     "LensDecision",
     "SUGGESTION_LENS_PROMPT_NAME",
     "SUGGESTION_SELECTOR_PROMPT_NAME",
+    "SampledLens",
     "decide_with_lenses",
+    "lens_section",
     "sample_lenses",
 ]

@@ -158,7 +158,7 @@ describe('the Composio key', () => {
     expect(
       screen.getByText('Create a key under Settings → Project Settings → API Keys.')
     ).toBeInTheDocument();
-    expect(screen.getByText(/Session tool execution\.$/)).toBeInTheDocument();
+    expect(screen.getByText(/Write only for Session tool execution\.$/)).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Connect an external service' })
     ).not.toBeInTheDocument();

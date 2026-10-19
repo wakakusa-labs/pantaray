@@ -20,7 +20,11 @@ export type LlmConnection =
 
 export type WebSearchCredential = { provider: 'tavily'; api_key: string };
 
+/** The external-app integrations' connection method key; Composio is the only method. */
+export type IntegrationCredential = { provider: 'composio'; api_key: string };
+
 export type ConnectionConfiguration = {
   llmConnection: LlmConnection | null;
   webSearchCredential: WebSearchCredential | null;
+  integrationCredential: IntegrationCredential | null;
 };

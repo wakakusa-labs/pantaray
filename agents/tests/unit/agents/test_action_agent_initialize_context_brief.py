@@ -10,6 +10,10 @@ from unittest.mock import patch
 import pytest
 import yaml
 from tests.unit.agents.action_agent.fixtures import build_action_request
+from tests.unit.agents.action_agent.runtime.test_integration_action_tools import (
+    WORK,
+    FakeGateway,
+)
 from tests.unit.local_runtime.action_seed import insert_agent_action
 from tests.unit.local_runtime.test_memory_indexes import _publish_indexes
 
@@ -19,6 +23,9 @@ from pantaray_agents.agents.action_agent.runtime.agents_md import (
     load_pantaray_agents_md,
 )
 from pantaray_agents.agents.action_agent.runtime.graph import ActionGraphRuntime
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.helpers import (
+    _resolve_act_tool_contract,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.initial import (
     initialize_context,
 )
@@ -32,6 +39,8 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     ActionAgentState,
     create_initial_state,
 )
+from pantaray_agents.agents.action_agent.tools import SUPERVISOR_SINGLE_REACT_TOOL_IDS
+from pantaray_agents.local_runtime.integrations.registry import set_integration_gateway
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -154,6 +163,36 @@ async def test_initialize_context_enters_react_without_planning_phase(
     assert updated["phase"] == "executing"
     # executing THINK が必須とする実行モードは init で確定している。
     assert "use_goal_workers" not in updated["context"]
+
+
+@pytest.mark.asyncio
+async def test_a_broken_gateway_still_starts_the_action_with_todays_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = MockActionAgentRepository()
+    agent = _build_agent(repo)
+    await _save_suggestion(repo)
+    execution_context = _bootstrap_execution_context(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    gateway = FakeGateway(accounts=[WORK])
+    gateway.accounts_error = RuntimeError("gateway down")
+    set_integration_gateway(gateway)
+    try:
+        updated = await initialize_context(  # type: ignore[arg-type]
+            agent, _state_with_execution_context(execution_context), _runtime(agent)
+        )
+        _, tool_ids, _ = _resolve_act_tool_contract(updated)
+        assert tool_ids == SUPERVISOR_SINGLE_REACT_TOOL_IDS
+
+        # The choice holds for the whole Action, so the tool schemas never change.
+        gateway.accounts_error = None
+        continued = await initialize_context(agent, updated, _runtime(agent))  # type: ignore[arg-type]
+        assert continued["context"]["integration_tools_exposed"] is False
+    finally:
+        set_integration_gateway(None)
 
 
 @pytest.mark.asyncio
@@ -280,7 +319,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     updated = await initialize_context(  # type: ignore[arg-type]
         agent,
         first,
-        _runtime(agent, request=request, intervening_user_step=prior_step),
+        _runtime(agent, request=request, intervening_user_steps=(prior_step,)),
     )
 
     history = updated["history_by_scope"]["S"]
@@ -306,7 +345,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
     replay = await initialize_context(  # type: ignore[arg-type]
         agent,
         updated,
-        _runtime(agent, request=request, intervening_user_step=prior_step),
+        _runtime(agent, request=request, intervening_user_steps=(prior_step,)),
     )
     assert [entry["step_id"] for entry in replay["history_by_scope"]["S"]] == [
         "step-1",
@@ -631,7 +670,7 @@ def _runtime(
     agent: ActionAgent,
     *,
     request: ActionAgentRequest | None = None,
-    intervening_user_step: ActionResumeUserStep | None = None,
+    intervening_user_steps: tuple[ActionResumeUserStep, ...] = (),
 ) -> object:
     return SimpleNamespace(
         request=request
@@ -653,7 +692,7 @@ def _runtime(
             "prompt_name": "action/executing",
             "prompt_version": "1.0",
         },
-        intervening_user_step=intervening_user_step,
+        intervening_user_steps=intervening_user_steps,
         services=agent._runtime_services,  # noqa: SLF001
     )
 
@@ -920,7 +959,8 @@ async def test_pantaray_default_agents_md_leads_the_head_without_a_user_file(
         tmp_path, monkeypatch, user_agents_md=None
     )
 
-    head = build_executing_turn(_executing_agent(), updated, runtime, tools=()).head  # type: ignore[arg-type]
+    turn = await build_executing_turn(_executing_agent(), updated, runtime, tools=())  # type: ignore[arg-type]
+    head = turn.head
     assert PANTARAY_DEFAULT_AGENTS_MD.startswith(
         "# AGENTS.md instructions (Pantaray default)\n\n"
         "<INSTRUCTIONS>\n# Working principles\n"
@@ -951,11 +991,11 @@ async def test_pantaray_agents_md_rides_in_a_head_that_resume_keeps_identical(
     )
     executing = _executing_agent()
 
-    def head(of: ActionAgentState) -> bytes:
-        turn = build_executing_turn(executing, of, runtime, tools=())  # type: ignore[arg-type]
+    async def head(of: ActionAgentState) -> bytes:
+        turn = await build_executing_turn(executing, of, runtime, tools=())  # type: ignore[arg-type]
         return turn.head.encode("utf-8")
 
-    first = head(updated).decode("utf-8")
+    first = (await head(updated)).decode("utf-8")
     block = (
         "# AGENTS.md instructions for ~/.pantaray\n\n"
         "<INSTRUCTIONS>\nBe brief.\n\n</INSTRUCTIONS>"
@@ -976,10 +1016,10 @@ async def test_pantaray_agents_md_rides_in_a_head_that_resume_keeps_identical(
         expected_suggestion_id="sug-1",
         expected_user_id="user-1",
     )
-    assert head(updated) == head(restored) == first.encode("utf-8")
+    assert await head(updated) == await head(restored) == first.encode("utf-8")
     # A later run reads the edited file: the head stays, the turn appends it.
     restored["context"]["agents_md_instructions"] = load_pantaray_agents_md()
-    turn = build_executing_turn(executing, restored, runtime, tools=())  # type: ignore[arg-type]
+    turn = await build_executing_turn(executing, restored, runtime, tools=())  # type: ignore[arg-type]
     assert turn.head == first
     prepared = turn.prepare(
         restored,

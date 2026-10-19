@@ -45,6 +45,11 @@ def register_action_file_read_memory(
         invocation_id=invocation_id,
         user_id=user_id,
         path=read_memory.path,
+    ) or _is_tool_results_read(
+        connection=connection,
+        invocation_id=invocation_id,
+        user_id=user_id,
+        path=read_memory.path,
     ):
         return None
     revision = register_inline_memory_document(
@@ -146,6 +151,42 @@ def _is_memory_folder_read(
         read_path.is_relative_to(Path(str(row["canonical_real_path"])).resolve())
         for row in rows
     )
+
+
+def _is_tool_results_read(
+    *,
+    connection: sqlite3.Connection,
+    invocation_id: str,
+    user_id: str,
+    path: str,
+) -> bool:
+    # A stored tool result read back is the Action's record of an earlier call,
+    # not a file the user opened: a file read it holds was registered when it
+    # ran, and an integration result in it (the user's mail, messages and files)
+    # must never be. Containment is by directory identity, so a case variant of
+    # the path is caught too.
+    row = connection.execute(
+        """
+        SELECT roots.canonical_real_path
+        FROM tool_invocations AS invocations
+        JOIN workspace_manifest_roots AS roots
+          ON roots.root_id = 'root:' || invocations.action_id || ':tool-results'
+        WHERE invocations.invocation_id = ? AND invocations.user_id = ?
+        """,
+        (invocation_id, user_id),
+    ).fetchone()
+    if row is None:
+        return False
+    root = Path(str(row["canonical_real_path"]))
+    read_path = Path(path).resolve()
+    for candidate in (read_path, *read_path.parents):
+        try:
+            if candidate.samefile(root):
+                return True
+        except OSError:
+            # A missing or unreadable ancestor cannot be the root; keep walking.
+            continue
+    return False
 
 
 def _render_search_document(read: ReadTextPageOutput) -> str:

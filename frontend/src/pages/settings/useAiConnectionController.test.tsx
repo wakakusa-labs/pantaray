@@ -39,6 +39,7 @@ function saved(): Loaded {
       preferences: { method: 'api_key', provider: 'openai', model: 'test-model' },
       hasSavedApiKey: false,
       hasSavedWebSearchKey: false,
+      hasSavedIntegrationKey: false,
       canStoreSecrets: true,
       chatgpt: { status: 'disconnected' },
     },
@@ -261,14 +262,20 @@ it('uses refreshed provider metadata and sends the key only to the selected prov
   expect(document.body.textContent).not.toContain('test-secret');
 });
 
+const METHOD_BUTTON = { name: /^settings\.aiConnection\.methodTitle: / };
+
+function methodItem(method: string) {
+  return screen.getByRole('menuitemradio', {
+    name: `settings.aiConnection.method.${method}.title`,
+  });
+}
+
 it('switches to ChatGPT on a model that backend serves instead of an unusable one', async () => {
   // 持ち越した名前のままだと保存はされるのに経路が立たず、何も送信されない。
   const api = bridge();
   render(<AiConnectionSettingsSection />);
-  const chatgpt = await screen.findByRole('radio', {
-    name: 'settings.aiConnection.method.chatgpt.title',
-  });
-  fireEvent.click(chatgpt);
+  fireEvent.click(await screen.findByRole('button', METHOD_BUTTON));
+  fireEvent.click(methodItem('chatgpt'));
   await waitFor(() =>
     expect(api.update).toHaveBeenCalledWith({
       operation: 'save_preferences',
@@ -397,7 +404,7 @@ it('preserves secret drafts through partial persistence, a read failure and relo
     })
   );
   const reload = await screen.findByText('settings.aiConnection.retry');
-  expect(screen.queryByRole('radiogroup')).toBeNull();
+  expect(screen.queryByRole('button', METHOD_BUTTON)).toBeNull();
   expect(input).toHaveValue('retry-secret');
   expect(reload).toHaveFocus();
   const persisted = saved();
@@ -443,7 +450,7 @@ for (const recovery of [
     expect(screen.getByText('settings.aiConnection.retry')).toHaveFocus();
     api.getState.mockResolvedValue(saved());
     fireEvent.click(repair);
-    await screen.findByRole('radiogroup', { name: 'settings.aiConnection.methodTitle' });
+    await screen.findByRole('button', METHOD_BUTTON);
     expect(api.update).toHaveBeenLastCalledWith(recovery);
     expect(screen.getByRole('region', { name: 'settings.aiConnection.title' })).toHaveFocus();
   });
@@ -471,18 +478,17 @@ it('keeps cloud routing authoritative when editing saved direct settings', async
     });
   const api = bridge(initial);
   render(<AiConnectionSettingsSection />);
-  const cloud = await screen.findByRole('radio', {
-    name: 'settings.aiConnection.method.cloud.title',
-  });
-  expect(cloud).toBeChecked();
-  fireEvent.click(
-    screen.getByRole('radio', { name: 'settings.aiConnection.method.api_key.title' })
-  );
+  fireEvent.click(await screen.findByRole('button', METHOD_BUTTON));
+  expect(methodItem('cloud')).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(methodItem('api_key'));
   await screen.findByLabelText('settings.aiConnection.providerLabel');
-  await waitFor(() => expect(cloud).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', METHOD_BUTTON)).toBeEnabled());
   api.update.mockClear();
-  fireEvent.click(cloud);
-  expect(cloud).toBeChecked();
+  fireEvent.click(screen.getByRole('button', METHOD_BUTTON));
+  fireEvent.click(methodItem('cloud'));
+  expect(screen.getByRole('button', METHOD_BUTTON)).toHaveAccessibleName(
+    'settings.aiConnection.methodTitle: settings.aiConnection.method.cloud.title'
+  );
   expect(api.update).not.toHaveBeenCalled();
 });
 
@@ -501,9 +507,7 @@ it('mounts AI connection settings from its URL and keeps them through an owner c
   const view = render(
     settingsPage({ status: 'ready', message: null, owner: { kind: 'account', id: 'user-1' } })
   );
-  const methods = await screen.findByRole('radiogroup', {
-    name: 'settings.aiConnection.methodTitle',
-  });
+  const methods = await screen.findByRole('button', METHOD_BUTTON);
   expect(screen.getByRole('button', { name: 'settings.aiConnection.title' })).toHaveAttribute(
     'aria-current',
     'page'
@@ -514,7 +518,5 @@ it('mounts AI connection settings from its URL and keeps them through an owner c
   // these controls keep their in-flight login and their drafts.
   view.rerender(settingsPage({ status: 'syncing', message: null, owner: null }));
 
-  expect(screen.getByRole('radiogroup', { name: 'settings.aiConnection.methodTitle' })).toBe(
-    methods
-  );
+  expect(screen.getByRole('button', METHOD_BUTTON)).toBe(methods);
 });

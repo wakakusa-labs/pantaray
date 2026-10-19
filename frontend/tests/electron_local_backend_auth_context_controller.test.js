@@ -5,7 +5,11 @@ const {
   createLocalBackendAuthContextController,
 } = require('../electron/dist/auth/localBackendAuthContextController.js');
 
-const getConnections = async () => ({ llmConnection: null, webSearchCredential: null });
+const getConnections = async () => ({
+  llmConnection: null,
+  webSearchCredential: null,
+  integrationCredential: null,
+});
 const onRuntimeUnavailable = () => {};
 
 function createStubs(overrides = {}) {
@@ -27,6 +31,9 @@ function createStubs(overrides = {}) {
       setWebSearchCredential: async () => {
         calls.push({ method: 'setWebSearchCredential' });
         return 'unconfigured';
+      },
+      setIntegrationCredential: async () => {
+        calls.push({ method: 'setIntegrationCredential' });
       },
       configure: async (cloudSession) => {
         calls.push({ method: 'configure', cloudSession });

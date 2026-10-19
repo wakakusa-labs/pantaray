@@ -76,7 +76,7 @@ class InitialStateResolver(Protocol):
         state_config: ActionAgentStateConfig,
         token_budget: int | None,
         checkpoint_row: object,
-        intervening_user_step: ActionResumeUserStep | None,
+        intervening_user_steps: tuple[ActionResumeUserStep, ...],
     ) -> ActionAgentState: ...
 
 
@@ -88,7 +88,7 @@ class GraphRuntimeFactory(Protocol):
         state_config: ActionAgentStateConfig,
         emit_action_step: ActionStepEmitter,
         emit_error: Callable[[Mapping[str, JSONValue]], Awaitable[None]],
-        intervening_user_step: ActionResumeUserStep | None,
+        intervening_user_steps: tuple[ActionResumeUserStep, ...],
     ) -> ActionGraphRuntime: ...
 
 
@@ -149,14 +149,14 @@ class ActionRuntimeExecutionService:
             state_config["token_budget"] = token_budget
             (
                 checkpoint_row,
-                intervening_user_step,
+                intervening_user_steps,
             ) = await self.load_runtime_checkpoint_for_request(request)
             runtime = self._deps.create_graph_runtime(
                 request=request,
                 state_config=state_config,
                 emit_action_step=emit_action_step,
                 emit_error=emit_error,
-                intervening_user_step=intervening_user_step,
+                intervening_user_steps=intervening_user_steps,
             )
 
             initial_state = self._deps.resolve_initial_state(
@@ -165,7 +165,7 @@ class ActionRuntimeExecutionService:
                 state_config=state_config,
                 token_budget=token_budget,
                 checkpoint_row=checkpoint_row,
-                intervening_user_step=intervening_user_step,
+                intervening_user_steps=intervening_user_steps,
             )
             if initial_state.get("status") == "processing":
                 self.attach_local_execution_context_if_required(
@@ -215,7 +215,7 @@ class ActionRuntimeExecutionService:
     async def load_runtime_checkpoint_for_request(
         self,
         request: ActionAgentRequest,
-    ) -> tuple[RepositoryResult[object], ActionResumeUserStep | None]:
+    ) -> tuple[RepositoryResult[object], tuple[ActionResumeUserStep, ...]]:
         approval_session_id = request.approval_resume_session_id
         tool_request_id = request.approval_resume_tool_request_id
         if approval_session_id is not None and tool_request_id is not None:
@@ -227,7 +227,7 @@ class ActionRuntimeExecutionService:
                     tool_request_id=tool_request_id,
                 )
             )
-            return cast(RepositoryResult[object], checkpoint), None
+            return cast(RepositoryResult[object], checkpoint), ()
         resume = await self._deps.repository.get_runtime_resume_context_for_user_step(
             user_id=str(request.user_id),
             action_id=str(request.action_id),
@@ -235,10 +235,10 @@ class ActionRuntimeExecutionService:
         )
         context = resume.data
         if not isinstance(context, ActionRuntimeResumeContext):
-            return cast(RepositoryResult[object], resume), None
+            return cast(RepositoryResult[object], resume), ()
         return RepositoryResult(
             data=context.checkpoint_row
-        ), context.intervening_user_step
+        ), context.intervening_user_steps
 
     def build_state_config(
         self,

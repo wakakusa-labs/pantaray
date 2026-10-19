@@ -8,6 +8,7 @@ import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
+import { IntegrationSettings } from './settings/components/IntegrationSettings';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
@@ -20,6 +21,7 @@ type SettingsSectionId =
   | 'ai_connection'
   | 'language'
   | 'execution'
+  | 'integrations'
   | 'shortcuts'
   | 'overlay_position'
   | 'screenshots';
@@ -28,6 +30,7 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
   'language',
   'execution',
+  'integrations',
   'shortcuts',
   'overlay_position',
   'screenshots',
@@ -61,6 +64,7 @@ const SettingsPage: React.FC = () => {
     ai_connection: t('settings.aiConnection.title'),
     language: t('settings.language.title'),
     execution: t('settings.approvalMode.title'),
+    integrations: t('settings.integrations.title'),
     shortcuts: t('settings.shortcut.title'),
     overlay_position: t('settings.overlayPosition.title'),
     screenshots: t('settings.screenshotCapture.title'),
@@ -100,6 +104,7 @@ const SettingsPage: React.FC = () => {
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
+        {activeSection === 'integrations' ? <IntegrationSettings t={t} /> : null}
         {activeSection === 'shortcuts' ? <ShortcutSection t={t} /> : null}
         {activeSection === 'overlay_position' ? <OverlayPositionSection t={t} /> : null}
         {/* Editing the filter pauses the recorder, and that pause outlives a section

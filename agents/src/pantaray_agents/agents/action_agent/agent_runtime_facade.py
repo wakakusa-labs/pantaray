@@ -35,7 +35,7 @@ class ActionGraphRuntimeCreateInput(BaseModel):
 
     request: ActionAgentRequest
     state_config: ActionAgentStateConfig
-    intervening_user_step: ActionResumeUserStep | None
+    intervening_user_steps: tuple[ActionResumeUserStep, ...]
 
 
 def load_runtime_approval_session_by_request(
@@ -67,7 +67,7 @@ def create_action_graph_runtime(
         emit_action_step=emit_action_step,
         emit_error=emit_error,
         services=runtime_services,
-        intervening_user_step=input.intervening_user_step,
+        intervening_user_steps=input.intervening_user_steps,
     )
 
 

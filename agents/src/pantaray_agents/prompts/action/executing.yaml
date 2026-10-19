@@ -98,10 +98,10 @@ role_rules:
     - A repository's AGENTS.md files are attached after your tool results the first time a call reaches their directory. Do not read those again.
     - Before changing files in a directory whose AGENTS.md you have not seen yet, such as creating files in a new directory or running commands that change files below the cwd, check that directory and its parents up to the repository root for AGENTS.md first.
 
-# The head shows the workspace, the Pantaray-wide AGENTS.md and the time as they
-# were on the Action's first turn, and is never rewritten. When a later turn reads a different
-# version, its turn context carries the new one under these headings, and
-# nothing when it is unchanged.
+# The head shows the workspace, the Pantaray-wide AGENTS.md, the integration
+# permissions and the time as they were on the Action's first turn, and is never
+# rewritten. When a later turn reads a different version, its turn context
+# carries the new one under these headings, and nothing when it is unchanged.
 world_state_updates:
   workspace: |
     ## Workspace Update
@@ -116,6 +116,12 @@ world_state_updates:
   agents_md_removed: |
     ## AGENTS.md Update
     The earlier ~/.pantaray AGENTS.md instructions no longer apply.
+  integrations: |
+    ## Integrations Update
+    These connected accounts and permissions replace the earlier ones.{integrations_state}
+  integrations_removed: |
+    ## Integrations Update
+    No app account is connected any more.
   current_time: |
     Current time: {current_time}
 
@@ -129,7 +135,7 @@ prompt: |
 
   {workspace_context_prompt}
 
-  {pantaray_default_agents_md}{agents_md_instructions}
+  {pantaray_default_agents_md}{agents_md_instructions}{integrations_state}
 
   ## Suggestion Summary
   {request_summary}

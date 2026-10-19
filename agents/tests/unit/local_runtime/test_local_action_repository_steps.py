@@ -357,12 +357,11 @@ async def test_get_runtime_resume_context_selects_intervening_and_current_run(
     assert result.data is not None
     assert result.data.checkpoint_row is not None
     assert result.data.checkpoint_row["step_id"] == "checkpoint-1"
-    assert result.data.intervening_user_step is not None
-    assert result.data.intervening_user_step.step_id == "user-2"
-    assert result.data.intervening_user_step.message.language == "ja"
+    (intervening,) = result.data.intervening_user_steps
+    assert intervening.step_id == "user-2"
+    assert intervening.message.language == "ja"
     assert tuple(
-        image.model_dump(mode="json")
-        for image in result.data.intervening_user_step.message.images
+        image.model_dump(mode="json") for image in intervening.message.images
     ) == (
         {"kind": "image", "storage_path": "users/user-1/images/generic.png"},
         {"kind": "image", "storage_path": "users/user-1/images/screen.png"},
@@ -384,7 +383,7 @@ async def test_get_runtime_resume_context_selects_intervening_and_current_run(
     assert retry_result.data is not None
     assert retry_result.data.checkpoint_row is not None
     assert retry_result.data.checkpoint_row["step_id"] == "checkpoint-current-run"
-    assert retry_result.data.intervening_user_step is None
+    assert retry_result.data.intervening_user_steps == ()
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 
 import { AiConnectionSection, type AiConnectionActions } from './AiConnectionSection';
@@ -49,14 +49,15 @@ it('hides Pantaray Cloud while keeping ChatGPT and API-key connections', () => {
     />
   );
 
+  fireEvent.click(screen.getByRole('button', { name: /^settings\.aiConnection\.methodTitle: / }));
   expect(
-    screen.queryByRole('radio', { name: 'settings.aiConnection.method.cloud.title' })
+    screen.queryByRole('menuitemradio', { name: 'settings.aiConnection.method.cloud.title' })
   ).toBeNull();
   expect(
-    screen.getByRole('radio', { name: 'settings.aiConnection.method.chatgpt.title' })
+    screen.getByRole('menuitemradio', { name: 'settings.aiConnection.method.chatgpt.title' })
   ).toBeVisible();
   expect(
-    screen.getByRole('radio', { name: 'settings.aiConnection.method.api_key.title' })
+    screen.getByRole('menuitemradio', { name: 'settings.aiConnection.method.api_key.title' })
   ).toBeVisible();
   expect(screen.queryByText('settings.aiConnection.method.cloud.requiresLogin')).toBeNull();
 });

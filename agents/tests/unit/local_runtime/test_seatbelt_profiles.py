@@ -267,11 +267,11 @@ def test_system_temp_roots_open_to_commands_beneath_private_storage_deny() -> No
         assert f'(subpath "{root}")' in write_allow
         assert f'(subpath "{root}")' in read_allow
     # Seatbelt applies the last matching rule, so the denies must follow the allows.
-    private_deny = f'(require-any\n    (subpath "{private_root}")\n)'
-    assert profile.index(f"(deny file-write* (require-all {private_deny}") > (
+    private_deny = f'(require-all (require-any\n    (subpath "{private_root}")\n'
+    assert profile.index(f"(deny file-write* {private_deny}") > (
         profile.index(write_allow)
     )
-    assert profile.index(f"(deny file-read* (require-all {private_deny}") > (
+    assert profile.index(f"(deny file-read* {private_deny}") > (
         profile.index(read_allow)
     )
 

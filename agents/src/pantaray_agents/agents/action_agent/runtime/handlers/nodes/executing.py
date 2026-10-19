@@ -43,9 +43,9 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.action_agent.tools import (
     DRAFT_FINAL_ANSWER_TOOL_ID,
-    SUPERVISOR_SINGLE_REACT_TOOL_IDS,
     TOOL_CONCURRENCY,
     build_native_action_tools,
+    select_supervisor_act_tool_ids,
     select_tool_registry,
     split_step_note,
 )
@@ -281,12 +281,16 @@ async def execution_think_step(  # noqa: C901
     context = ensure_context(state)
     window_rebuilt = False
 
-    allowed_tool_ids: set[str] = set(SUPERVISOR_SINGLE_REACT_TOOL_IDS)
+    allowed_tool_ids: set[str] = set(
+        select_supervisor_act_tool_ids(
+            integrations=context.get("integration_tools_exposed", False)
+        )
+    )
     native_tools = build_native_action_tools(
         select_tool_registry(tuple(sorted(allowed_tool_ids)))
     )
 
-    turn = build_executing_turn(agent, state, runtime, tools=native_tools)
+    turn = await build_executing_turn(agent, state, runtime, tools=native_tools)
     provider_turns = await runtime.open_provider_turn_store(state)
     inference_profile = agent._resolve_inference_profile_id(stage=EXECUTING_STAGE)
 

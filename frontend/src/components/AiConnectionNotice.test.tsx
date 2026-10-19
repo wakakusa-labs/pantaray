@@ -18,6 +18,7 @@ function connection() {
       preferences: { method: 'api_key', provider: 'openai', model: '' },
       hasSavedApiKey: false,
       hasSavedWebSearchKey: false,
+      hasSavedIntegrationKey: false,
       canStoreSecrets: true,
       chatgpt: { status: 'disconnected' },
     },

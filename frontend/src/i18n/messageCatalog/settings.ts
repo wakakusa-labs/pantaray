@@ -6,6 +6,7 @@ export const SETTINGS_MESSAGES = defineMessages({
       'Reset connection method, provider, and model',
     'settings.aiConnection.recovery.remove_api_key': 'Remove unreadable {provider} API key',
     'settings.aiConnection.recovery.remove_web_search_key': 'Remove unreadable Tavily key',
+    'settings.aiConnection.recovery.remove_integration_key': 'Remove unreadable Composio key',
     'settings.aiConnection.recovery.disconnect_chatgpt': 'Remove unreadable ChatGPT sign-in',
     'settings.aiConnection.loadFailed': 'Could not load connection settings.',
     'settings.aiConnection.retry': 'Reload settings',
@@ -40,6 +41,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.completed.remove_api_key': 'API key removed.',
     'settings.aiConnection.completed.save_web_search_key': 'Web search key saved.',
     'settings.aiConnection.completed.remove_web_search_key': 'Web search key removed.',
+    'settings.aiConnection.completed.save_integration_key': 'Composio key saved.',
+    'settings.aiConnection.completed.remove_integration_key': 'Composio key removed.',
     'settings.aiConnection.completed.sign_in_chatgpt': 'Connected to ChatGPT.',
     'settings.aiConnection.completed.cancel_chatgpt_sign_in': 'ChatGPT sign-in cancelled.',
     'settings.aiConnection.completed.disconnect_chatgpt': 'ChatGPT disconnected.',
@@ -69,8 +72,14 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.method.cloud.title': 'Pantaray Cloud',
     'settings.aiConnection.method.cloud.requiresLogin':
       'Sign in to your Pantaray account to use this.',
+    'settings.aiConnection.method.cloud.statusUnknown':
+      "Pantaray can't check your sign-in right now, so this can't be chosen.",
+    'settings.aiConnection.method.cloud.description': 'Uses your Pantaray account',
     'settings.aiConnection.method.chatgpt.title': 'ChatGPT account',
+    'settings.aiConnection.method.chatgpt.description': 'Sign in and use your ChatGPT plan',
     'settings.aiConnection.method.api_key.title': 'API key',
+    'settings.aiConnection.method.api_key.description':
+      'Paste a key from OpenAI, Anthropic or Fireworks AI',
     'settings.aiConnection.chatgpt.account': 'Account',
     'settings.aiConnection.chatgpt.connected': 'Connected',
     'settings.aiConnection.chatgpt.signIn': 'Sign in with ChatGPT',
@@ -273,6 +282,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.recovery.save_preferences': '接続方法・プロバイダー・モデルを初期化',
     'settings.aiConnection.recovery.remove_api_key': '読み取れない{provider}のAPIキーを削除',
     'settings.aiConnection.recovery.remove_web_search_key': '読み取れないTavilyキーを削除',
+    'settings.aiConnection.recovery.remove_integration_key': '読み取れないComposioキーを削除',
     'settings.aiConnection.recovery.disconnect_chatgpt': '読み取れないChatGPTログイン情報を削除',
     'settings.aiConnection.loadFailed': '接続設定を取得できませんでした。',
     'settings.aiConnection.retry': '設定を再取得',
@@ -308,6 +318,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.completed.remove_api_key': 'APIキーを削除しました。',
     'settings.aiConnection.completed.save_web_search_key': 'Web検索キーを保存しました。',
     'settings.aiConnection.completed.remove_web_search_key': 'Web検索キーを削除しました。',
+    'settings.aiConnection.completed.save_integration_key': 'Composioキーを保存しました。',
+    'settings.aiConnection.completed.remove_integration_key': 'Composioキーを削除しました。',
     'settings.aiConnection.completed.sign_in_chatgpt': 'ChatGPTに接続しました。',
     'settings.aiConnection.completed.cancel_chatgpt_sign_in':
       'ChatGPTのログインをキャンセルしました。',
@@ -338,8 +350,14 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.aiConnection.method.cloud.title': 'Pantaray Cloud',
     'settings.aiConnection.method.cloud.requiresLogin':
       'Pantaray アカウントにログインすると選べます。',
+    'settings.aiConnection.method.cloud.statusUnknown':
+      'ログインの状態をいま確認できないため、選べません。',
+    'settings.aiConnection.method.cloud.description': 'Pantaray のアカウントで使います',
     'settings.aiConnection.method.chatgpt.title': 'ChatGPT アカウント',
+    'settings.aiConnection.method.chatgpt.description': 'ChatGPT のプランでサインインして使います',
     'settings.aiConnection.method.api_key.title': 'API キー',
+    'settings.aiConnection.method.api_key.description':
+      'OpenAI・Anthropic・Fireworks AI のキーを貼って使います',
     'settings.aiConnection.chatgpt.account': 'アカウント',
     'settings.aiConnection.chatgpt.connected': '接続済み',
     'settings.aiConnection.chatgpt.signIn': 'ChatGPT でログイン',

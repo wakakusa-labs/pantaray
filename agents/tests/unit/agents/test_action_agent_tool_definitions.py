@@ -36,7 +36,9 @@ def _model_facing_parameters() -> dict[str, dict[str, JSONValue]]:
 
     action = {
         f"action/{tool.name}": tool.parameters
-        for tool in build_native_action_tools(select_supervisor_act_tool_registry())
+        for tool in build_native_action_tools(
+            select_supervisor_act_tool_registry(integrations=True)
+        )
     }
     # Building the child tool set binds these into closures only; nothing runs.
     subagent = {

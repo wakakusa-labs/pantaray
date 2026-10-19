@@ -12,6 +12,8 @@
 | `direct_web_tools_smoke.py` | `invoke_web_tools_wrapper` を実 Tavily へ | `TAVILY_API_KEY` |
 | `direct_action_e2e.py` | 本物の helper プロセス + 制御ソケット + ローカル API / WS で Action を端から端まで | 両方 |
 | `insight_replay.py` | 変更前のリビジョンとこのツリーで short Insight を同じ入力で実行して並べる | `OPENAI_API_KEY` |
+| `composio_read_tools.py` | 15 のツールキットの read に分類されたツールを並べ、変化の見回りの引数を入力スキーマで確かめる（ツールキットを足すときの目視用） | `COMPOSIO_API_KEY` |
+| `composio_gateway_smoke.py` | Composio のゲートウェイを実際の Gmail の接続に当てる（読み取りだけ。無効な接続の確認で一度だけ接続を無効にしてすぐ戻す） | `COMPOSIO_API_KEY`、`COMPOSIO_SMOKE_USER_ID`、`COMPOSIO_SMOKE_ACCOUNT` |
 
 ## 鍵の渡し方
 

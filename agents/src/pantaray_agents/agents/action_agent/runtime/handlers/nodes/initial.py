@@ -32,6 +32,9 @@ from pantaray_agents.agents.action_agent.runtime.state.types import TargetContex
 from pantaray_agents.agents.action_agent.runtime.user_image_attachments import (
     build_user_image_attachments,
 )
+from pantaray_agents.local_runtime.integrations.search import (
+    integration_tools_available,
+)
 from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
     load_memory_heads,
     render_memory_indexes,
@@ -70,10 +73,10 @@ async def initialize_context(
 
     request = runtime.request
     current_user_message = request.user_message
-    intervening_user_step = runtime.intervening_user_step
+    intervening_user_steps = runtime.intervening_user_steps
     context_user_message = (
-        intervening_user_step.message
-        if intervening_user_step is not None
+        intervening_user_steps[0].message
+        if intervening_user_steps
         else current_user_message
     )
     suggestion_approval = context_user_message.suggestion_approval
@@ -124,6 +127,8 @@ async def initialize_context(
         workspace_manifest_catalog.workspace_context
     )
     context["agents_md_instructions"] = load_pantaray_agents_md()
+    if "integration_tools_exposed" not in context:
+        context["integration_tools_exposed"] = await integration_tools_available()
 
     # 親ランタイムは単一 ReAct のみ。mandatory planning phase を経由せず executing に
     # 直行する。

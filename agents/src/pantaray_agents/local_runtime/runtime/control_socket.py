@@ -14,6 +14,7 @@ from typing import Final
 
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 
+from . import integration_credentials as integration
 from .connection_store import (
     LlmConnection,
     WebSearchCredential,
@@ -267,6 +268,7 @@ async def _dispatch_configure(payload: dict[str, object]) -> ConfigureSuccessRes
     # half-configured.
     llm_connection = read_optional_llm_connection(payload)
     web_search_credential = read_optional_web_search_credential(payload)
+    integration_credential = integration.read_optional_integration_credential(payload)
     inputs = read_route_inputs()
 
     def apply() -> str:
@@ -275,6 +277,7 @@ async def _dispatch_configure(payload: dict[str, object]) -> ConfigureSuccessRes
             llm_connection=llm_connection,
             web_search_credential=web_search_credential,
         )
+        integration.apply_integration_credential(integration_credential)
         mark_configured()
         return state
 
@@ -404,6 +407,11 @@ async def dispatch_control_request(*, request: object) -> ControlSuccessResponse
             )
         if operation == CLEAR_WEB_SEARCH_CREDENTIAL_OPERATION:
             return await _dispatch_web_search_credential(None)
+        if operation == integration.SET_OPERATION:
+            credential = integration.read_integration_credential(payload)
+            return integration.apply_integration_credential(credential)
+        if operation == integration.CLEAR_OPERATION:
+            return integration.apply_integration_credential(None)
         if operation == CONFIGURE_OPERATION:
             return await _dispatch_configure(payload)
         if operation == SET_CLOUD_SESSION_OPERATION:

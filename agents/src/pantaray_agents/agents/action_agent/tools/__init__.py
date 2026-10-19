@@ -14,6 +14,12 @@ from .draft_final_answer_tool import (
     DRAFT_FINAL_ANSWER_TOOL_ID,
 )
 from .history_fetch_tool import HISTORY_FETCH_TOOL
+from .integration_tools import (
+    INTEGRATION_LIST_TOOLS_TOOL,
+    INTEGRATION_LIST_TOOLS_TOOL_ID,
+    INTEGRATION_RUN_TOOL_TOOL,
+    INTEGRATION_RUN_TOOL_TOOL_ID,
+)
 from .memory_link_tools import (
     GET_MEMORY_REFERENCE_TOOL,
     LINK_MEMORY_TOOL,
@@ -111,6 +117,11 @@ __all__ = [
     "WEB_EXTRACT_TOOL",
     "WEB_CRAWL_TOOL",
     "HISTORY_FETCH_TOOL",
+    "INTEGRATION_RUN_TOOL_TOOL",
+    "INTEGRATION_RUN_TOOL_TOOL_ID",
+    "INTEGRATION_LIST_TOOLS_TOOL",
+    "INTEGRATION_LIST_TOOLS_TOOL_ID",
+    "INTEGRATION_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS",
     "TOOL_REGISTRY",
@@ -157,6 +168,8 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         SEND_MESSAGE_TO_SUBAGENT_TOOL,
         WAIT_SUBAGENTS_TOOL,
         CANCEL_SUBAGENT_TOOL,
+        INTEGRATION_LIST_TOOLS_TOOL,
+        INTEGRATION_RUN_TOOL_TOOL,
     )
 }
 
@@ -198,19 +211,27 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
 
 SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS: tuple[str, ...] = SUPERVISOR_SINGLE_REACT_TOOL_IDS
 
+# Offered only to an Action that started with an integration connected, so the
+# tool set of a user without one stays exactly SUPERVISOR_SINGLE_REACT_TOOL_IDS.
+INTEGRATION_TOOL_IDS: tuple[str, ...] = (
+    INTEGRATION_LIST_TOOLS_TOOL_ID,
+    INTEGRATION_RUN_TOOL_TOOL_ID,
+)
+
 
 def select_tool_registry(tool_ids: tuple[str, ...]) -> dict[str, ToolDefinition]:
     return {tool_id: TOOL_REGISTRY[tool_id] for tool_id in tool_ids}
 
 
-_SUPERVISOR_SINGLE_REACT_ACT_TOOL_REGISTRY = select_tool_registry(
-    SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS
-)
-
-
-def select_supervisor_act_tool_ids() -> tuple[str, ...]:
+def select_supervisor_act_tool_ids(*, integrations: bool) -> tuple[str, ...]:
+    if integrations:
+        return (*SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS, *INTEGRATION_TOOL_IDS)
     return SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS
 
 
-def select_supervisor_act_tool_registry() -> dict[str, ToolDefinition]:
-    return dict(_SUPERVISOR_SINGLE_REACT_ACT_TOOL_REGISTRY)
+def select_supervisor_act_tool_registry(
+    *, integrations: bool
+) -> dict[str, ToolDefinition]:
+    return select_tool_registry(
+        select_supervisor_act_tool_ids(integrations=integrations)
+    )

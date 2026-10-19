@@ -8,6 +8,7 @@ import pytest
 import pantaray_agents.local_runtime.tooling.suggestion_research.commands as commands
 from pantaray_agents.agents.suggestion_agent.react import (
     SUGGESTION_COMMAND_TOOL_ID,
+    SUGGESTION_INTEGRATION_TOOL_IDS,
     SUGGESTION_TOOL_IDS,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
@@ -145,7 +146,7 @@ def allowed_db(tmp_path: Path) -> Path:
         (None, (), True),
     ],
 )
-def test_commands_are_offered_only_while_they_run_without_asking(
+async def test_commands_are_offered_only_while_they_run_without_asking(
     tmp_path: Path, mode: str | None, capabilities: tuple[str, ...], offered: bool
 ) -> None:
     db_path = _bootstrap_db(tmp_path)
@@ -155,7 +156,7 @@ def test_commands_are_offered_only_while_they_run_without_asking(
     if mode is not None:
         _set_command_approval(db_path, mode=mode, capabilities=capabilities)
 
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=_snapshot(db_path=db_path),
@@ -165,7 +166,9 @@ def test_commands_are_offered_only_while_they_run_without_asking(
     assert tuple(definition.name for definition in definitions) == tuple(
         tool_id
         for tool_id in SUGGESTION_TOOL_IDS
-        if offered or tool_id != SUGGESTION_COMMAND_TOOL_ID
+        # No integration is connected here.
+        if tool_id not in SUGGESTION_INTEGRATION_TOOL_IDS
+        and (offered or tool_id != SUGGESTION_COMMAND_TOOL_ID)
     )
     for definition in definitions:
         if definition.name == SUGGESTION_COMMAND_TOOL_ID:
@@ -322,7 +325,7 @@ async def test_long_output_is_saved_where_the_runs_read_reads_it_on(
             error=ToolError(type="CommandExecutionError", message=stderr),
         ),
     )
-    definitions = LocalSuggestionResearchTools(
+    definitions = await LocalSuggestionResearchTools(
         db_path=allowed_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         snapshot=_snapshot(db_path=allowed_db),

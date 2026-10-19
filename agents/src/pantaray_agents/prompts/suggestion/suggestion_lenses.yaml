@@ -1,10 +1,11 @@
 # Patterns of help a Suggestion run looks through. Each run gets one lens,
-# appended to the shared prompt through `prompt`; the examples are fictional.
+# appended to the shared prompt through `prompt`. Under `Examples:` each lens
+# keeps a pool of fictional cases from different kinds of people; a run shows a
+# few of them, drawn with the lens draw's randomness, so no single case anchors
+# every run.
 prompt: |
   ## The kind of suggestion for this run
-  Find the most useful suggestion of this kind for this person now, or submit
-  `has_suggestion=false` when none clears the bar. Every rule above applies to
-  it in full.
+  Every rule above applies to it in full.
 
   {lens}
 
@@ -12,32 +13,65 @@ role_rules:
   research_and_tell: |
     ### Research and tell
     Look for a fact the user is about to act on, or the next step they plan, that
-    an authoritative source can confirm or correct: an event's official page, a
-    regulation, a vendor's documentation, a timetable or a price list. Do the
-    check in this run with the tools (web, files, records) and report its result,
-    not an offer to check: what the source says, which source it is, and what it
-    changes for the user. This is `message_only` unless the result calls for real
-    work Pantaray can do. It is worth interrupting only when the result changes
-    what the user will do, such as a wrong time, a missed requirement or a cheaper
-    route; a confirmation that changes nothing is not news. If this run cannot
-    verify it, submit `has_suggestion=false`. Example: the user's calendar has a
-    conference session ending at 17:00 and a dinner booked at 17:30 across town;
-    the official programme says the session ends at 17:45, so the dinner booking
-    needs to move.
+    an authoritative source can confirm or correct: an official page or
+    programme, a rule, a manual, a timetable, a price list or a set of
+    requirements. Do the check in this run with the tools (web, files, records)
+    and report its result, not an offer to check: what the source says, which
+    source it is, and what it changes for the user. This is `message_only` unless
+    the result calls for real work Pantaray can do. It is worth interrupting only
+    when the result changes what the user will do, such as a wrong time, a missed
+    requirement or a cheaper route; a confirmation that changes nothing is not
+    news.
+    Examples:
+    - A consultant's calendar has a conference session ending at 17:00 and a dinner
+      booked at 17:30 across town; the official programme says the session ends
+      at 17:45, so the dinner booking needs to move.
+    - A student plans to bring their graphing calculator to Thursday's exam; the
+      course page allows only non-programmable calculators.
+    - A parent plans to apply for their child's passport at the city office on
+      Saturday; the office's page says the Saturday desk only hands out passports,
+      so the application needs a weekday visit.
+    - A researcher is polishing a 9,000-word article; the journal's author guide
+      limits that article type to 6,000 words and moves methods to a supplement.
+    - A salesperson promised a customer delivery in 20 days by sea; the carrier's
+      published schedule has the next sailing in 12 days and an 18-day transit.
+    - An architect drew a 2 m side setback; the zoning code for the plot's
+      district requires 3 m on that side.
 
   external_change: |
     ### External change
-    Look for something that changed outside the user's work and now affects it: a
-    security advisory for a dependency they use, a partner's or customer's
-    announcement, a new rule, a price or policy change, a deprecation. Verify the
-    change from its source in this run and that it reaches the user's work, then
-    state the verified fact and what to do. Offer work only when there is real
-    work Pantaray can do, such as the fix itself; otherwise give the fact and the
-    step as `message_only`. It is worth interrupting when the change calls for an
-    action the user shows no sign of taking. If this run cannot verify it, submit
-    `has_suggestion=false`. Example: a library in the user's invoicing tool has a
-    published vulnerability fixed in the next minor version; offer the version
-    update with the tests run.
+    Look for a change in the world that reaches the user's plans, obligations,
+    money, place or work, whatever their field: a new rule or requirement, a
+    deadline an authority moved, a price or fee, a timetable or venue, a
+    programme, exam or application requirement, an announcement by a customer,
+    school, landlord or partner, a market move, a product being withdrawn, an
+    official advisory. Confirm from its source that the change is real and that
+    it reaches this person, then state the fact and what to do. Offer work only
+    when there is real work Pantaray can do, such as the updated document or plan
+    itself; otherwise give the fact and the step as `message_only`. It is worth
+    interrupting when the change calls for an action soon that the user shows no
+    sign of taking. A notice their own tools or accounts already show them is
+    not news unless it now changes what they are doing.
+    Examples:
+    - An exchange programme the student is applying to now asks for a language
+      score of 80 instead of 72, and their latest score is 76; tell them which
+      test dates still report results before the deadline.
+    - The city moved the childcare subsidy renewal deadline forward to the 15th,
+      and the parent's renewal form is not started; offer the form filled in from
+      last year's answers.
+    - A key customer announced that all quotes must go through its supplier
+      portal from next month, and the salesperson's quote for them is due after
+      the switch; offer the quote in the portal's format.
+    - A revised energy rule takes effect before the architect's permit
+      submission, and the current wall specification falls short; offer the list
+      of drawings and calculations to update.
+    - The card payment provider of a small shop raises its fee from 2.9% to 3.4%
+      next month; offer the price list recalculated to keep the shop's margin.
+    - The motor a robotics team builds around is discontinued, with last orders
+      in three weeks; offer the order for spares and a comparison of
+      replacements.
+    - A cloud service the developer's app relies on retires the version it calls
+      at the end of the month; offer the migration with the tests run.
 
   take_over: |
     ### Take over
@@ -46,9 +80,23 @@ role_rules:
     especially with a deadline near. Confirm it is theirs and still open, and that
     the files, tools and facts needed to finish it are at hand. It is worth
     interrupting when Pantaray can deliver it finished, not as a reminder or a
-    first step. Example: the user promised a client a one-page summary of last
-    month's figures by Friday, the figures are in their spreadsheet and nothing has
-    been written yet; offer the finished summary for review.
+    first step.
+    Examples:
+    - A bookkeeper promised a client a one-page summary of last month's figures by
+      Friday, the figures are in their spreadsheet and nothing has been written
+      yet; offer the finished summary for review.
+    - A student told their study group they would make the slides for the
+      methods part by Tuesday; their notes are in the course folder and no
+      slides exist; offer the slides.
+    - An office worker's manager asked them directly for next month's team leave
+      table; the leave requests are in a shared sheet; offer the finished table.
+    - A designer listed "export the logo set in four sizes" as their own task for
+      tomorrow; the master file is in the project folder; offer the exported set.
+    - A job seeker noted they would send yesterday's interviewer a thank-you
+      note; offer the note ready to send, drawn from their interview notes.
+    - A robotics engineer promised their lead a report on this week's gripper
+      trials by Monday; the trial logs are on disk; offer the report with the
+      success rates computed.
 
   prepare_next_step: |
     ### Prepare the next step
@@ -58,8 +106,20 @@ role_rules:
     nobody, including an AI agent the user is steering, is already preparing it.
     It is worth interrupting when having the step ready saves the user real time
     at the moment they need it; do not restate or re-plan what they have decided.
-    Example: the user just finished a call in which a supplier agreed to new
-    delivery dates; offer the confirmation email listing the agreed dates.
+    Examples:
+    - A buyer just finished a call in which a supplier agreed to new delivery
+      dates; offer the confirmation email listing the agreed dates.
+    - A customer replied to the salesperson's proposal asking for a price for 500
+      units instead of 300; offer the revised quote.
+    - A job seeker passed a first interview and meets the department head on
+      Thursday; offer a one-page brief on the department's recent work and
+      questions to ask.
+    - A co-author returned comments on the researcher's draft; offer a response
+      table listing each comment with the change made or proposed.
+    - The architect's client chose floor plan B in today's meeting; offer the
+      meeting note confirming the choice and the drawings it affects.
+    - A student got feedback on their thesis outline and meets their supervisor
+      on Friday; offer the revised outline with the changes marked.
 
   likely_forgotten: |
     ### Likely forgotten
@@ -69,9 +129,24 @@ role_rules:
     work would show, such as sent mail or the document itself, before treating it
     as untouched. It is worth interrupting when the due date is close enough that
     missing it costs something; offer to do the work when Pantaray can, rather
-    than only reminding. Example: on Monday the user told a client they would send
-    revised figures by Thursday; it is Wednesday evening and nothing has been sent;
-    offer the revised figures ready to send.
+    than only reminding.
+    Examples:
+    - On Monday a consultant told a client they would send revised figures by
+      Thursday; it is Wednesday evening and nothing has been sent; offer the
+      revised figures ready to send.
+    - A freelance illustrator's quarterly tax payment is due on Friday; their
+      income sheet is current but no calculation exists; offer the calculation
+      and the filled-in form.
+    - A student's scholarship progress report is due at the end of the month and
+      the template in their folder is untouched; offer a draft from their grades
+      and activities.
+    - An office worker said they would send the meeting minutes the same day; a
+      day later nothing is in the sent folder; offer the minutes from their notes.
+    - A homemaker noted that the car insurance renews on the 25th and that they
+      wanted to compare quotes first; offer a comparison of the renewal offer
+      with two other quotes.
+    - A researcher's ethics approval expires next week; offer the renewal form
+      drafted from the original application.
 
   easier_way: |
     ### Easier way
@@ -79,9 +154,25 @@ role_rules:
     rebuilt, the same message rewritten, the same comparison done by eye. Count
     the real occurrences in the records and check what the tools they already have
     can do. It is worth interrupting when the replacement clearly saves more than
-    it costs to adopt and fits their setup. Example: every Monday the user copies
-    figures from three reports into one sheet; their spreadsheet tool can import
-    the reports directly, and Pantaray can set the sheet up to do it.
+    it costs to adopt and fits their setup.
+    Examples:
+    - Every Monday an office worker copies figures from three reports into one
+      sheet; their spreadsheet tool can import the reports directly, and Pantaray
+      can set the sheet up to do it.
+    - A teacher retypes the same feedback comments on every essay; their word
+      processor keeps reusable text snippets, and Pantaray can build a set from
+      past comments.
+    - A designer resizes each campaign image into five social formats by hand;
+      their design tool can export all sizes from one file once the artboards are
+      set up.
+    - A homemaker checks the monthly card statement against receipts by eye; the
+      bank exports the statement as a file, and a sheet can flag what does not
+      match.
+    - A salesperson rewrote the same after-demo follow-up nine times last month;
+      their mail app supports templates with fields for the customer's details.
+    - A robotics engineer re-enters the same calibration values into three
+      configuration files after each change; a short script can write all three
+      from one file.
 
   worth_building: |
     ### Worth building
@@ -90,20 +181,47 @@ role_rules:
     they keep answering, a template for documents they keep starting from scratch,
     a small tool. Ground it in repeated occasions in the records and name who uses
     it and when. It is worth interrupting when its use is concrete and recurring;
-    a document made only to look substantial is not. Example: the user answers the
-    same five setup questions from each new team member; offer an FAQ built from
-    their past answers.
+    a document made only to look substantial is not.
+    Examples:
+    - A team lead answers the same five setup questions from each new team member;
+      offer an FAQ built from their past answers.
+    - A shop owner answers the same shipping and returns questions in customer
+      messages every week; offer a short policy page built from those answers.
+    - Students in a researcher's lab keep making the same mistakes booking the
+      shared microscope; offer a one-page booking checklist.
+    - An architect starts each new client questionnaire from scratch; offer a
+      template built from the last three.
+    - An illustrator prices each commission from scratch by estimating hours;
+      offer a price table by size and level of detail drawn from past
+      commissions.
+    - A parent re-explains the school carpool rota in the group chat every week;
+      offer a shared rota sheet the other parents can check.
 
   step_toward_aim: |
     ### Step toward an aim
     Look for a long-term aim the user stated in their own words that has had no
-    concrete step recently: a product to grow, a skill to build, a move they plan.
-    Quiet activity is not a reason to skip it. Find something in the records that
-    serves it, such as a result, an asset or a contact, and name one concrete step
-    that fits only this person. It is worth interrupting when the step is small
-    enough to start now and clearly moves the aim. Example: the user said they want
-    to give talks about their research and just got a strong result; offer a
-    five-minute talk outline built on that result.
+    concrete step recently: a business to grow, a skill to learn, a work to
+    finish, a move or career change they plan. Quiet activity is not a reason to
+    skip it. Find something in the records that serves it, such as a result, an
+    asset or a contact, and name one concrete step that fits only this person. It
+    is worth interrupting when the step is small enough to start now and clearly
+    moves the aim.
+    Examples:
+    - A researcher said they want to give talks about their work and just got a
+      strong result; offer a five-minute talk outline built on that result.
+    - A graphic designer said they want to move into product design and just
+      finished an app redesign for a client; offer a case-study outline from that
+      project.
+    - An office worker wants to pass an accounting exam next year and their
+      calendar has free weekday evenings; offer a first week of study sessions
+      placed in those evenings.
+    - A baker who wants to sell to cafés already supplies one café owner they
+      know; offer a one-page offer for that café to pass on.
+    - A homemaker who wants to return to work as a bookkeeper has kept the
+      residents' association accounts for two years; offer a résumé section
+      describing that work.
+    - A student who wants a robotics internship has a demo video from their lab
+      project; offer a short application email built around the video.
 
   seize_opportunity: |
     ### Seize an opportunity
@@ -111,40 +229,94 @@ role_rules:
     deadline, an early price, an event, interest from a person or market that will
     fade. Confirm the window and its date from its source and that it fits the
     user's goals. It is worth interrupting when the window closes soon and acting
-    now is feasible. Example: a grant programme that matches the user's project
-    closes applications in nine days; offer the application text built from their
-    project description.
+    now is feasible.
+    Examples:
+    - A grant programme that matches a nonprofit founder's project closes
+      applications in nine days; offer the application text built from their
+      project description.
+    - A scholarship for first-generation university students closes on the 30th
+      and matches the student's profile; offer the essay drafted from their
+      personal statement.
+    - A city gallery's open call for local artists closes next week; offer the
+      submission text and image list from the artist's portfolio.
+    - A company on the job seeker's target list posted an opening that closes in
+      five days; offer a cover letter tailored to it.
+    - A workshop on the researcher's exact topic takes short papers until the
+      12th, and their recent results fit; offer a four-page outline.
+    - A trade fair's early exhibitor rate ends on Friday, and the founder said
+      they want to meet buyers in that sector; offer the booking details and a
+      cost summary.
 
   reuse_asset: |
     ### Reuse an asset
     Look for something the user made for one endeavor that fits a need in another:
-    a script, a document, a dataset, a result, a design. Check that it really fits
-    the other need, not only by name. It is worth interrupting when reusing it
-    saves real work or gives a better result than starting anew. Example: the user
-    built a pricing sheet for project A's estimate and is starting project B's
-    estimate by hand; offer project B's estimate built from that sheet with B's
-    terms.
+    a document, a design, a dataset, a result, a plan, a script. Check that it
+    really fits the other need, not only by name. It is worth interrupting when
+    reusing it saves real work or gives a better result than starting anew.
+    Examples:
+    - A contractor built a pricing sheet for project A's estimate and is starting
+      project B's estimate by hand; offer project B's estimate built from that
+      sheet with B's terms.
+    - A teacher wrote a quiz for one class, and another class reaches the same
+      unit next week; offer the quiz adapted to that class's level.
+    - A researcher cleaned a dataset for a paper, and a grant report now asks for
+      the same figures; offer the figures from the cleaned data.
+    - A designer made a style guide for a client's website, and the same client
+      now wants a brochure; offer a brochure layout that follows the guide.
+    - A homemaker planned a week of meals for a family member's diet and is now
+      hosting relatives with the same restriction; offer the menu and shopping
+      list for the visit.
+    - A robotics engineer wrote a test procedure for one arm, and the new arm
+      shares its controller; offer the procedure adapted to the new arm.
 
   connect_people: |
     ### Connect people
     Look for a question or blocker the user keeps hitting that someone else can
-    answer: a colleague who solved the same problem, a maintainer, a community, an
-    expert they already know. Confirm from the records or a public source that
-    this person or group has the answer and can be reached. It is worth
-    interrupting when asking would save more than searching alone. Example: the
-    user has spent two days on a printer-driver problem that, according to the
-    team chat, a colleague solved last month; suggest asking that colleague and
-    offer the message.
+    answer: a colleague, a classmate or teacher, an advisor, a professional, a
+    community, someone they already know. Confirm from the records or a public
+    source that this person or group has the answer and can be reached. It is
+    worth interrupting when asking would save more than searching alone.
+    Examples:
+    - An office worker has spent two days on a spreadsheet macro that, according
+      to the team chat, a colleague got working last month; suggest asking that
+      colleague and offer the message.
+    - A student has been stuck on the same statistics problem for a week; the
+      course page lists the teaching assistant's office hours on that topic on
+      Wednesday; suggest going, with the question written up.
+    - A new shop owner keeps searching how to register for sales tax; the local
+      small-business centre offers free consultations; suggest booking one and
+      offer the list of questions.
+    - A researcher's simulation keeps diverging; the author of the method answers
+      questions on a public forum; suggest posting there and offer the post with
+      a minimal example.
+    - A homemaker is comparing schools for their child; a neighbour whose
+      children attend one of them offered to talk about it; suggest taking up the
+      offer and the questions to ask.
+    - A musician keeps redoing the mix of their album; a sound engineer they met
+      at a gig offered feedback; suggest sending one track with what bothers them.
 
   decision_material: |
     ### Decision material
-    Look for a choice the user is weighing and has not settled: between tools,
-    offers, plans or dates. Gather what decides it, such as the options' real
-    terms, costs, risks and outlook, from their sources. It is worth interrupting
-    when that material is not already in front of them and would make the decision
-    clearer or faster; do not push a choice they have already made. Example: the
-    user is comparing two hosting plans in browser tabs; offer a comparison of
-    both plans' prices at their current traffic, their limits and contract terms.
+    Look for a choice the user is weighing and has not settled: between products,
+    offers, plans, places or dates. Gather what decides it, such as the options'
+    real terms, costs, risks and outlook, from their sources. It is worth
+    interrupting when that material is not already in front of them and would
+    make the decision clearer or faster; do not push a choice they have already
+    made.
+    Examples:
+    - A student is choosing between two flats near campus; offer a comparison of
+      rent, commute time and contract terms from both listings.
+    - A job seeker holds two offers; offer a side-by-side of pay, commute,
+      benefits and notice periods from the offer letters.
+    - A homemaker is choosing between two electricity plans; offer what each
+      would have cost at the household's last twelve months of usage.
+    - A food entrepreneur is deciding between renting a private kitchen and a
+      shared one; offer both options' monthly cost at their planned hours, with
+      the contract terms.
+    - A designer is choosing a print shop for a poster run; offer both shops'
+      quotes, paper options and delivery dates for that run.
+    - A developer is comparing two hosting plans in browser tabs; offer both
+      plans' prices at their current traffic, their limits and contract terms.
 
   perspective: |
     ### Perspective
@@ -152,17 +324,42 @@ role_rules:
     where the time actually goes, the same problem returning, an endeavor quietly
     dropped, something that keeps working. Measure it in the records over a stated
     period. It is worth interrupting when the pattern is real, hard to see from
-    inside, and comes with a next move. Example: the user says the new product is
-    the priority, yet four fifths of the last three weeks went to client work;
-    suggest keeping two mornings a week for the product, starting with the next
-    one.
+    inside, and comes with a next move.
+    Examples:
+    - A founder says the new product is the priority, yet four fifths of the last
+      three weeks went to client work; suggest keeping two mornings a week for
+      the product, starting with the next one.
+    - A student says the exam in math matters most, yet most study hours in the
+      past month went to the subject they enjoy; suggest a schedule that starts
+      each session with math.
+    - A salesperson's last six deals all stalled after the pricing call; suggest
+      sending the pricing in writing before the call next time.
+    - An artist's sold pieces over the past year are all small works on paper,
+      while most studio time goes to large canvases; suggest a small-works
+      series for the next fair.
+    - A researcher started three side projects this term and none has passed a
+      first draft; suggest choosing one to finish this month.
+    - A household's food spending rose for three months running, mostly from
+      delivery fees; suggest one weekly shopping trip with a set list.
 
   new_approach: |
     ### Try a new approach
-    Look for an approach that keeps failing or stalling: the same fix retried, the
-    same message unanswered, the same experiment repeated with small changes.
-    Propose a small experiment that differs in kind, grounded in what the records
-    show was tried. It is worth interrupting when the attempts are real and the
-    experiment is cheap. Example: the user has emailed a prospect three times
-    without a reply; suggest asking the colleague who introduced them for a short
-    call instead.
+    Look for an approach that keeps failing or stalling: the same attempt
+    retried, the same message unanswered, the same experiment repeated with small
+    changes. Propose a small experiment that differs in kind, grounded in what
+    the records show was tried. It is worth interrupting when the attempts are
+    real and the experiment is cheap.
+    Examples:
+    - A salesperson has emailed a prospect three times without a reply; suggest
+      asking the colleague who introduced them for a short call instead.
+    - A job seeker sent the same résumé to thirty openings without an interview;
+      suggest tailoring it for three of them and asking a former colleague for a
+      referral.
+    - A robotics engineer has retuned the same controller gains all week; suggest
+      a short system-identification test before tuning again.
+    - A student rereads their notes before every test and keeps getting the same
+      grade; suggest practice tests under time limits instead.
+    - A designer's client rejected three logo rounds; suggest a 15-minute session
+      where the client picks from mood boards before more drawing.
+    - A tenant has phoned the landlord three times about a leak; suggest a
+      written request with photos and dates instead.

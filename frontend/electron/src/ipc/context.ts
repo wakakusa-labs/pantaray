@@ -63,6 +63,7 @@ import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
 import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
+import type { IntegrationSettingsApi } from '../settings/integrationSettingsFetch';
 import type {
   CreateNotificationIpcHandlers,
   AcceptActionRequest,
@@ -116,6 +117,8 @@ export type MainContext = {
     | 'removeApiKey'
     | 'saveWebSearchKey'
     | 'removeWebSearchKey'
+    | 'saveIntegrationKey'
+    | 'removeIntegrationKey'
     | 'signInToChatgpt'
     | 'cancelChatgptSignIn'
     | 'disconnectChatgpt'
@@ -217,6 +220,8 @@ export type MainContext = {
     /** The same restart the app and tray menus' "Restart to update" makes. */
     restartToUpdate: () => void;
   };
+
+  integrations: IntegrationSettingsApi;
 
   approval: {
     getWorkspaceEditCommandPreference: () => Promise<unknown>;

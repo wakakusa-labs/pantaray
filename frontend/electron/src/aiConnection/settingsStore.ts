@@ -21,6 +21,7 @@ export function createConnectionSettingsStore(params: {
     createEncryptedJsonFile(path.join(params.userDataDir, name), params.safeStorage);
   const preferencesFile = file('ai-connection-preferences.enc.json');
   const webSearchFile = file('tavily-api-key.enc.json');
+  const integrationFile = file('composio-api-key.enc.json');
   const apiFile = (provider: ApiKeyProvider) => file(`llm-${provider}-api-key.enc.json`);
 
   function read<T>(value: unknown, schema: z.ZodType<T>, missing: T): T {
@@ -30,7 +31,7 @@ export function createConnectionSettingsStore(params: {
     return parsed.data;
   }
 
-  function credentialSchema(provider: ApiKeyProvider | 'tavily') {
+  function credentialSchema(provider: ApiKeyProvider | 'tavily' | 'composio') {
     return z.object({ provider: z.literal(provider), api_key: z.string().min(1) }).strict();
   }
 
@@ -41,6 +42,11 @@ export function createConnectionSettingsStore(params: {
 
   function readWebSearchKey(): string | null {
     const stored = read(webSearchFile.read(), credentialSchema('tavily').nullable(), null);
+    return stored?.api_key ?? null;
+  }
+
+  function readIntegrationKey(): string | null {
+    const stored = read(integrationFile.read(), credentialSchema('composio').nullable(), null);
     return stored?.api_key ?? null;
   }
 
@@ -62,6 +68,10 @@ export function createConnectionSettingsStore(params: {
     saveWebSearchKey: (apiKey: string): void =>
       webSearchFile.write({ provider: 'tavily', api_key: apiKey }),
     removeWebSearchKey: (): void => webSearchFile.remove(),
+    readIntegrationKey,
+    saveIntegrationKey: (apiKey: string): void =>
+      integrationFile.write({ provider: 'composio', api_key: apiKey }),
+    removeIntegrationKey: (): void => integrationFile.remove(),
   };
 }
 

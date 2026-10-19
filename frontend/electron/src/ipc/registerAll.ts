@@ -21,6 +21,7 @@ import { registerChatHandlers } from './handlers/chat';
 import { registerClipboardHandlers } from './handlers/clipboard';
 import { registerExternalUrlHandlers } from './handlers/externalUrl';
 import { registerHistoryHandlers } from './handlers/history';
+import { registerIntegrationHandlers } from './handlers/integrations';
 import { registerOverlayHandlers } from './handlers/overlay';
 import { registerPrivacyHandlers } from './handlers/privacy';
 import { registerScreenshotHandlers } from './handlers/screenshot';
@@ -48,6 +49,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerWindowHandlers(ctx, registrar);
   registerAuthHandlers(ctx, registrar);
   registerApprovalHandlers(ctx, registrar);
+  registerIntegrationHandlers(ctx, registrar);
   registerShortcutHandlers(ctx, registrar);
   registerOverlayPlacementHandlers(ctx, registrar);
   registerWorkspaceSettingsHandlers(ctx, registrar);

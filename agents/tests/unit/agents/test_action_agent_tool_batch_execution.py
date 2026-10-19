@@ -345,7 +345,7 @@ async def test_batch_consumes_one_tool_step_per_call(
 def test_call_timeout_comes_from_the_declared_tool_policy() -> None:
     """per-call timeout は既存の ``default_timeout_ms`` をそのまま使う。"""
 
-    tool_def = select_supervisor_act_tool_registry()[SQL_TOOL]
+    tool_def = select_supervisor_act_tool_registry(integrations=False)[SQL_TOOL]
     slot = MagicMock()
     slot.tool_def = tool_def
     assert act.call_timeout_seconds(slot) == (

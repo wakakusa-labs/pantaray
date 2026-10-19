@@ -19,6 +19,14 @@ from .common import (
     _serialize_json,
 )
 
+INTEGRATION_WRITE_SCOPE_PREFIX = "integration_write:"
+# Wider than ApprovalMode: 'never_allow' exists only for integration scopes.
+StoredApprovalMode = Literal["prompt_each_time", "always_allow", "never_allow"]
+
+
+class IntegrationWriteAllowError(ValueError):
+    """An integration write scope was about to be saved as always_allow."""
+
 
 def upsert_approval_preference(
     *,
@@ -40,11 +48,41 @@ def _upsert_approval_preference_in_connection(
     connection: sqlite3.Connection,
     preference: ApprovalPreferenceUpsertInput,
 ) -> None:
-    ensure_user_row(
-        connection,
+    _write_approval_preference_row(
+        connection=connection,
+        preference_id=preference.preference_id,
         user_id=preference.user_id,
-        timestamp=preference.created_at,
+        scope_type=preference.scope_type,
+        scope_ref=preference.scope_ref,
+        approval_mode=preference.approval_mode,
+        applies_to=preference.applies_to,
+        created_at=preference.created_at,
+        updated_at=preference.updated_at,
     )
+
+
+def _write_approval_preference_row(
+    *,
+    connection: sqlite3.Connection,
+    preference_id: str,
+    user_id: str,
+    scope_type: Literal["global"],
+    scope_ref: str | None,
+    approval_mode: StoredApprovalMode,
+    applies_to: tuple[str, ...],
+    created_at: str,
+    updated_at: str,
+) -> None:
+    """Insert or reactivate one global preference row; every writer goes through here."""
+
+    # An integration write asks the user every time; no setting may skip that.
+    if approval_mode == "always_allow" and any(
+        scope.startswith(INTEGRATION_WRITE_SCOPE_PREFIX) for scope in applies_to
+    ):
+        raise IntegrationWriteAllowError(
+            "integration writes cannot be allowed without asking"
+        )
+    ensure_user_row(connection, user_id=user_id, timestamp=created_at)
     connection.execute(
         """
         INSERT INTO approval_preferences(
@@ -67,14 +105,14 @@ def _upsert_approval_preference_in_connection(
             revoked_at = NULL
         """,
         (
-            preference.preference_id,
-            preference.user_id,
-            preference.scope_type,
-            preference.scope_ref,
-            preference.approval_mode,
-            _serialize_json(list(preference.applies_to)),
-            preference.created_at,
-            preference.updated_at,
+            preference_id,
+            user_id,
+            scope_type,
+            scope_ref,
+            approval_mode,
+            _serialize_json(list(applies_to)),
+            created_at,
+            updated_at,
         ),
     )
 

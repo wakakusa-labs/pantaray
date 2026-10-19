@@ -7,7 +7,7 @@ from pantaray_agents.tools.contract import ReactToolDefinition
 
 
 class SuggestionResearchTools(Protocol):
-    def build_tool_definitions(
+    async def build_tool_definitions(
         self,
         *,
         user_id: str,
@@ -19,7 +19,7 @@ class SuggestionResearchTools(Protocol):
 class FixedSuggestionResearchTools:
     definitions: tuple[ReactToolDefinition, ...]
 
-    def build_tool_definitions(
+    async def build_tool_definitions(
         self,
         *,
         user_id: str,

@@ -56,13 +56,17 @@ test('CSP allows the stored-image scheme for images only', () => {
   for (const isDev of [false, true]) {
     const csp = buildContentSecurityPolicy({ isDev, apiOrigin: null });
 
-    assert.ok(csp.includes("img-src 'self' data: blob: pantaray-image:;"));
+    assert.ok(
+      csp.includes("img-src 'self' data: blob: pantaray-image: https://logos.composio.dev;")
+    );
     assert.ok(
       csp.includes(isDev ? "script-src 'self' 'unsafe-inline';" : "script-src 'self';"),
       'script-src must not gain the image scheme'
     );
     assert.ok(!csp.includes("default-src 'self' pantaray-image:"));
     assert.ok(!csp.includes('connect-src') || !csp.match(/connect-src[^;]*pantaray-image/));
+    // The logo origin is for images only: no script, frame or fetch may come from it.
+    assert.equal(csp.match(/logos\.composio\.dev/g).length, 1);
   }
 });
 

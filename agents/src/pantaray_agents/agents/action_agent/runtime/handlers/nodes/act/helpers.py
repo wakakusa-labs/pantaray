@@ -53,9 +53,10 @@ def _resolve_act_tool_contract(
 
     phase = state.get("phase")
     if phase == "executing":
+        integrations = _ensure_context(state).get("integration_tools_exposed", False)
         return (
-            select_supervisor_act_tool_registry(),
-            select_supervisor_act_tool_ids(),
+            select_supervisor_act_tool_registry(integrations=integrations),
+            select_supervisor_act_tool_ids(integrations=integrations),
             "supervisor",
         )
     raise ValueError(

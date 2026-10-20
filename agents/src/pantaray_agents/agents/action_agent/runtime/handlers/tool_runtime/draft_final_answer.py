@@ -10,6 +10,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
     ToolExecutionActor,
     ToolValidationError,
 )
+from pantaray_agents.agents.action_agent.runtime.state.types import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_draft,
@@ -46,25 +47,12 @@ class DraftFinalAnswerPayload(TypedDict):
     draft_revision: str
 
 
-async def run_draft_final_answer_tool(
-    _agent,
-    step_id: str,
-    tool_def: ToolDefinition,
-    args: ToolArgs,
-    state,
-    *,
-    actor: ToolExecutionActor = "supervisor",
-) -> UnprojectedToolExecutionResult:
-    answer = str(args["answer"]).strip()
-    if actor != "supervisor":
-        raise ToolValidationError(
-            "draft_final_answer is only available to the Supervisor.",
-            details={
-                "path": ["tool_id"],
-                "message": "Goal Workers submit propose_goal_completion instead.",
-                "metadata": {"actor": actor},
-            },
-        )
+def store_final_answer_draft(state: ActionAgentState, answer: str) -> str:
+    """Store ``answer`` as the pending final answer and its memory draft.
+
+    Returns the draft revision that link_memory and unlink_memory must name.
+    """
+
     state["supervisor_pending_final_answer"] = answer
     existing = state.get("supervisor_memory_draft")
     if existing is None:
@@ -91,12 +79,32 @@ async def run_draft_final_answer_tool(
             body=answer,
         )
     state["supervisor_memory_draft"] = serialize_memory_draft(draft)
+    return draft.draft_revision
 
+
+async def run_draft_final_answer_tool(
+    _agent: object,
+    step_id: str,
+    tool_def: ToolDefinition,
+    args: ToolArgs,
+    state: ActionAgentState,
+    *,
+    actor: ToolExecutionActor = "supervisor",
+) -> UnprojectedToolExecutionResult:
+    answer = str(args["answer"]).strip()
+    if actor != "supervisor":
+        raise ToolValidationError(
+            "draft_final_answer is only available to the Supervisor.",
+            details={
+                "path": ["tool_id"],
+                "message": "Goal Workers submit propose_goal_completion instead.",
+                "metadata": {"actor": actor},
+            },
+        )
     result_payload: DraftFinalAnswerPayload = {
         "status": "draft_updated",
         "next_step": COMMON_DRAFT_NEXT_STEP,
-        # link_memory and unlink_memory must name the revision they edit.
-        "draft_revision": draft.draft_revision,
+        "draft_revision": store_final_answer_draft(state, answer),
     }
     return UnprojectedToolExecutionResult(
         step_id=step_id,
@@ -111,4 +119,5 @@ async def run_draft_final_answer_tool(
 __all__ = [
     "COMMON_DRAFT_NEXT_STEP",
     "run_draft_final_answer_tool",
+    "store_final_answer_draft",
 ]

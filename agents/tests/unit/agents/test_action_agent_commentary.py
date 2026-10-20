@@ -18,10 +18,6 @@ from tests.unit.agents.test_action_agent_tool_batch_execution import (
 )
 from tests.unit.agents.test_action_agent_tool_batch_resume import _restore
 
-from pantaray_agents.agents.action_agent.runtime.graph import (
-    ActionGraphRuntime,
-    build_action_agent_graph,
-)
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.action_step_emission import (
     emit_visible_action_step,
 )
@@ -42,6 +38,16 @@ from pantaray_agents.local_runtime.action_conversation.sqlite_visibility import 
 from pantaray_agents.local_runtime.agent_state.action_repository import (
     LocalActionRepository,
 )
+from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
+    deserialize_memory_draft,
+)
+from pantaray_agents.local_runtime.runtime.action_subagent_queue import (
+    enqueue_action_subagent_job_in_connection,
+)
+from pantaray_agents.local_runtime.runtime.job_payload_builder import (
+    build_action_subagent_job_payload,
+)
+from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.schema.action_conversation import ActionStepEventPayload
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.utils.trace_context import TraceContextManager
@@ -344,33 +350,6 @@ async def test_failed_turn_save_rolls_back_messages_checkpoint_and_pending_tools
 
 
 @pytest.mark.asyncio
-async def test_commentary_only_turns_continue_and_exhaust_llm_budget(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    agent, runtime, state, request, db_path = await _fixture(monkeypatch, tmp_path)
-    agent._generate_llm_action_turn = AsyncMock(return_value=_commentary_turn())
-    state["max_steps"] = 2
-    for _ in range(2):
-        state = await _think(agent, runtime, state)
-        assert runtime.route_from_think(state) == "think"
-        assert state["next_action"] is None and not state["final_output"]
-        checkpoint = _rows(
-            db_path,
-            "SELECT runtime_state_checkpoint FROM agent_action_steps WHERE step_type='llm_output' ORDER BY step_number DESC",
-        )[0][0]
-        state = _restore(json.loads(checkpoint), request)
-        assert runtime.route_from_think(state) == "think"
-    state = await _think(agent, runtime, state)
-    assert state["status"] == "error" and runtime.route_from_think(state) == "finalize"
-    assert state["llm_steps_taken"] == 2 and state["tool_steps_taken"] == 0
-    assert agent._generate_llm_action_turn.await_count == 2
-    history = state["history_by_scope"]["S"]
-    assert [entry["step_number"] for entry in history] == [1, 2, 3, 4, 5]
-    assert len({entry["short_step_id"] for entry in history}) == 5
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("stop_before_commit", [False, True])
 async def test_pending_response_is_not_published_and_stop_fences_its_adoption(
     monkeypatch: pytest.MonkeyPatch,
@@ -448,58 +427,87 @@ async def test_invalid_call_discards_its_commentary_before_repair(
     )
 
 
+def _trace(request):
+    return TraceContextManager(
+        user_id=request.user_id,
+        action_id=request.action_id,
+        local_job_id="message-job",
+        extra={"process_id": PROCESS_ID},
+    )
+
+
 @pytest.mark.asyncio
-async def test_commentary_only_think_identity_is_not_reused_after_tool_repair(
+async def test_reply_without_calls_ends_the_turn_with_its_text(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    agent, runtime, state, _, db_path = await _fixture(monkeypatch, tmp_path)
-    agent._generate_llm_action_turn = AsyncMock(
-        side_effect=[
-            _turn((SQL_TOOL, {"invalid_field": True})),
-            _commentary_turn(),
-            _turn(SQL_CALL),
-        ]
+    agent, runtime, state, request, db_path = await _fixture(monkeypatch, tmp_path)
+    agent._generate_llm_action_turn = AsyncMock(return_value=_commentary_turn())
+    with _trace(request):
+        result = await _think(agent, runtime, state)
+
+    assert runtime.route_from_think(result) == "finalize"
+    assert result["status"] == "success" and result["final_output"] == MESSAGE
+    # The terminal publishes this draft and requires its body to be the answer.
+    draft = deserialize_memory_draft(result["supervisor_memory_draft"])
+    assert [document.content for document in draft.documents] == [MESSAGE]
+    # The reply stays in the history the next follow-up turn is sent with.
+    assert [
+        entry["assistant_message_text"]
+        for entry in result["history_by_scope"]["S"]
+        if entry["step_type"] == StepType.ASSISTANT_MESSAGE
+    ] == [MESSAGE]
+    checkpoint = _rows(
+        db_path,
+        "SELECT runtime_state_checkpoint FROM agent_action_steps WHERE step_type='llm_output'",
+    )[0][0]
+    assert runtime.route_from_resume(_restore(json.loads(checkpoint), request)) == (
+        "finalize"
     )
-    state = await _think(agent, runtime, state)
-    state = await _act(agent, runtime, state)
-    assert state["context"]["tool_validation_error_streak"] == 1
-    state = await _think(agent, runtime, state)
-    commentary_think = state["history_by_scope"]["S"][-1]
-    state = await _think(agent, runtime, state)
+
+
+@pytest.mark.asyncio
+async def test_reply_while_a_subagent_runs_continues_with_the_remedy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent, runtime, state, request, db_path = await _fixture(monkeypatch, tmp_path)
+    payload = build_action_subagent_job_payload(
+        {
+            "job_id": "child-job",
+            "process_id": "child-process",
+            "user_id": request.user_id,
+            "action_id": request.action_id,
+            "parent_process_id": PROCESS_ID,
+            "inference_profile_id": "action.subagent.luna",
+            "action_context": "# Workspace Paths\nparent context",
+            "task": "inspect the module",
+            "context_refs": [],
+            "resource_claim_ids": [],
+        }
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        with immediate_transaction(connection):
+            enqueue_action_subagent_job_in_connection(
+                connection=connection,
+                payload=payload,
+                scheduled_at=state["started_at"],
+            )
+    agent._generate_llm_action_turn = AsyncMock(
+        side_effect=[_commentary_turn(), _turn(SQL_CALL)]
+    )
+    with _trace(request):
+        state = await _think(agent, runtime, state)
+        reply_think = state["history_by_scope"]["S"][-1]
+        assert runtime.route_from_think(state) == "think"
+        assert state["status"] == "processing" and not state["final_output"]
+        assert "call wait_subagents" in reply_think["result_line"]
+        state = await _think(agent, runtime, state)
+
+    assert state["next_action"] is not None
+    # The reply reserved its own History Ref, so the next THINK cannot reuse it.
     assert (
         state["history_by_scope"]["S"][-1]["short_step_id"]
-        != commentary_think["short_step_id"]
+        != reply_think["short_step_id"]
     )
-    state = await _act(agent, runtime, state)
-    assert state["status"] == "processing" and state["tool_steps_taken"] == 2
-    assert (
-        len(
-            _rows(
-                db_path,
-                "SELECT * FROM agent_action_steps WHERE step_type='assistant_message'",
-            )
-        )
-        == 1
-    )
-
-
-@pytest.mark.asyncio
-async def test_graph_continues_commentary_until_budget_finalization(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    agent, runtime, state, _, _ = await _fixture(monkeypatch, tmp_path)
-    agent._generate_llm_action_turn = AsyncMock(return_value=_commentary_turn())
-    state["max_steps"] = 2
-
-    async def identity(_runtime, current):
-        return current
-
-    monkeypatch.setattr(ActionGraphRuntime, "resume_gate", identity)
-    monkeypatch.setattr(ActionGraphRuntime, "finalize", identity)
-    result = await build_action_agent_graph(runtime)(state)
-    assert result["status"] == "error"
-    assert result["llm_steps_taken"] == 2 and result["tool_steps_taken"] == 0
-    assert not result["final_output"] and result["next_action"] is None
-    assert agent._generate_llm_action_turn.await_count == 2

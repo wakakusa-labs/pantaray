@@ -76,7 +76,14 @@ DRAFT_FINAL_ANSWER_TOOL = ToolDefinition.from_spec(
                     required=True,
                     description=(
                         "Final-answer draft to store for the current execution "
-                        "scope. Calling this again replaces the previous draft."
+                        "scope. Calling this again replaces the previous draft.\n"
+                        "- Link every file you created or changed for the user, "
+                        "and any workspace file they should open, as a Markdown "
+                        "link to `pantaray-file:///` followed by the file's local "
+                        "absolute path under Workspace Roots, for example "
+                        "[notes.md](pantaray-file:///Users/me/project/notes.md). "
+                        "Plain text paths are not clickable. Do not invent paths "
+                        "outside Workspace Roots."
                     ),
                 ),
             ),

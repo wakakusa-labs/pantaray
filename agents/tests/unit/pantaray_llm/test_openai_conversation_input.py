@@ -550,6 +550,22 @@ async def test_the_response_turn_holds_the_items_the_adapter_reported(
 
 
 @pytest.mark.asyncio
+async def test_a_final_answer_turn_replays_with_its_own_phase(monkeypatch) -> None:
+    # The API asks for each assistant message's phase back as it was emitted.
+    final_answer = _response_message().model_copy(update={"phase": "final_answer"})
+    _, result = await _send(
+        monkeypatch,
+        _request([_assistant(calls=[_call_item()]), _tool_result()]),
+        output=[final_answer],
+    )
+
+    assert [message.text for message in result.tool_use.messages] == ["進めます。"]
+    assert [item.get("phase") for item in result.provider_turn.items] == [
+        "final_answer"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_rejected_turn_carries_no_provider_turn(monkeypatch) -> None:
     _, result = await _send(
         monkeypatch,

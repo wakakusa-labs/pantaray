@@ -50,12 +50,25 @@ def test_commentary_requires_explicit_commentary_phase(phase: str | None) -> Non
         LlmCommentary.model_validate(message)
 
 
-@pytest.mark.parametrize(
-    "text", ["", " \n\t", "x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1)]
-)
-def test_commentary_rejects_blank_or_oversized_text(text: str) -> None:
+@pytest.mark.parametrize("text", ["", " \n\t"])
+def test_commentary_rejects_blank_text(text: str) -> None:
     with pytest.raises(ValidationError):
         LlmCommentary(phase="commentary", source_message_id="msg-1", text=text)
+
+
+def test_commentary_limit_applies_only_beside_calls() -> None:
+    long = LlmCommentary(
+        phase="commentary",
+        source_message_id="msg-1",
+        text="x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1),
+    )
+    call = {"call_id": "call-1", "name": "completed", "arguments": {}}
+    # Without calls the text is the reply that ends the turn, however long.
+    assert LlmActionTurnResponse(mode="action_turn", messages=[long], calls=[])
+    with pytest.raises(ValidationError, match="beside tool calls"):
+        LlmActionTurnResponse.model_validate(
+            {"mode": "action_turn", "messages": [long], "calls": [call]}
+        )
 
 
 def test_action_request_requires_explicit_mode_and_disallows_continuation() -> None:

@@ -154,12 +154,19 @@ def extract_openai_native_response(
                 f"(output items: {len(output)}, reasoning items: {reasoning_items}).",
                 error_context,
             )
-        return LlmActionTurnResponse(
-            mode="action_turn",
-            messages=messages,
-            calls=tool_calls,
-            dropped_call_names=[call.name for call in dropped_calls],
-        )
+        try:
+            return LlmActionTurnResponse(
+                mode="action_turn",
+                messages=messages,
+                calls=tool_calls,
+                dropped_call_names=[call.name for call in dropped_calls],
+            )
+        except ValidationError as exc:
+            raise _invalid_action_turn(
+                "OpenAI returned Action commentary beside function calls over "
+                "the commentary character limit.",
+                error_context,
+            ) from exc
     continuation = None
     if tool_use.continuation_mode == "stateless":
         serialized_output = [
@@ -229,16 +236,17 @@ def _extract_action_messages(
             raise _invalid_action_turn(
                 "OpenAI returned an unfinished Action message.", error_context
             )
-        if item.phase == "final_answer":
-            # The model answered in text; every answer here is a tool call.
+        if item.phase not in ("commentary", "final_answer"):
             raise _invalid_action_turn(
-                "The output was a final answer in plain text, outside any tool call.",
+                "OpenAI Action messages must have phase commentary or final_answer.",
                 error_context,
             )
         try:
             message = LlmCommentary.model_validate(
                 {
-                    "phase": item.phase,
+                    # final_answer too (LlmCommentary says why); the provider
+                    # turn still replays the message with its own phase.
+                    "phase": "commentary",
                     "source_message_id": item.id,
                     "text": "".join(
                         content.text
@@ -249,8 +257,7 @@ def _extract_action_messages(
             )
         except ValidationError as exc:
             raise _invalid_action_turn(
-                "OpenAI Action messages must have phase commentary, a source ID, "
-                "and non-blank text within the commentary character limit.",
+                "OpenAI Action messages must have a source ID and non-blank text.",
                 error_context,
             ) from exc
         messages.append(message)

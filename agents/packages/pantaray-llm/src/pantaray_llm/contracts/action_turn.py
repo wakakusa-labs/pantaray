@@ -20,18 +20,24 @@ from pantaray_llm.contracts.tool_use import (
     validate_tool_names,
 )
 
-# Progress messages stay short; longer deliverables belong in the final answer.
+# Progress messages beside tool calls stay short; longer deliverables belong in
+# the final answer. A turn without calls is that answer, so the limit skips it.
 ACTION_COMMENTARY_MAX_CHARACTERS = 4_000
 
 
 class LlmCommentary(BaseModel):
+    """What the model said in an Action turn.
+
+    The phase stays ``commentary`` whatever a provider labelled the text: the
+    caller reads a turn without calls as the reply that ends it and a turn with
+    calls as progress, so the provider's own label decides nothing here.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     phase: Literal["commentary"]
     source_message_id: str = Field(min_length=1)
-    text: str = Field(
-        min_length=1, max_length=ACTION_COMMENTARY_MAX_CHARACTERS, pattern=r"\S"
-    )
+    text: str = Field(min_length=1, pattern=r"\S")
 
 
 class LlmActionTurnRequest(BaseModel):
@@ -78,7 +84,15 @@ class LlmActionTurnResponse(BaseModel):
     dropped_call_names: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_nonempty_turn(self) -> LlmActionTurnResponse:
+    def validate_turn_contents(self) -> LlmActionTurnResponse:
         if not self.messages and not self.calls:
             raise ValueError("an Action turn must contain commentary or tool calls")
+        if self.calls and any(
+            len(message.text) > ACTION_COMMENTARY_MAX_CHARACTERS
+            for message in self.messages
+        ):
+            raise ValueError(
+                "commentary beside tool calls must stay within "
+                f"{ACTION_COMMENTARY_MAX_CHARACTERS} characters"
+            )
         return self

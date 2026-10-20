@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 
+from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.request import LlmProxyRequest
 from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import ProviderError
@@ -657,6 +658,23 @@ async def test_overlong_action_commentary_is_repairable(
 
     assert response.meta.outcome == "model_output_rejected"
     assert response.model_error.violation_reason == "invalid_response"
+
+
+@pytest.mark.asyncio
+async def test_an_overlong_reply_without_tool_calls_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reply without calls is the final answer, which the limit does not cover.
+    content = [{"type": "text", "text": "x" * 4001}]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="end_turn")))
+
+    response = await _execute(
+        _request(tool_use={"mode": "action_turn", "tools": [_TOOL]})
+    )
+
+    assert isinstance(response.tool_use, LlmActionTurnResponse)
+    assert [message.text for message in response.tool_use.messages] == ["x" * 4001]
+    assert response.tool_use.calls == []
 
 
 @pytest.mark.asyncio

@@ -158,7 +158,6 @@ async def test_action_turn_preserves_message_and_call_order_without_reasoning(
         [],
         [ResponseReasoningItem(id="reasoning-1", summary=[], type="reasoning")],
         [_message().model_copy(update={"phase": None}), _call()],
-        [_message().model_copy(update={"phase": "final_answer"}), _call()],
         [_message().model_copy(update={"phase": "unknown"}), _call()],
         [_message(" \n\t"), _call()],
         [_message("x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1)), _call()],
@@ -192,10 +191,47 @@ async def test_action_turn_rejects_invalid_messages_without_usable_output(
     assert result.usage.total_tokens == 132
 
 
+def _final_answer(text: str = "まず対象を確認します。") -> ResponseOutputMessage:
+    return _message(text).model_copy(update={"phase": "final_answer"})
+
+
 @pytest.mark.asyncio
-async def test_an_answer_in_plain_text_is_refused_as_such(monkeypatch) -> None:
-    # The repair has to say what was wrong: the model answered outside a call.
-    output = [_message().model_copy(update={"phase": "final_answer"})]
+@pytest.mark.parametrize(
+    "output",
+    [
+        # A reply without calls, over the commentary limit as answers can be.
+        [_final_answer("x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1))],
+        [_message("x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1))],
+        # Beside a call the call runs and the text is commentary.
+        [_final_answer(), _call()],
+    ],
+)
+async def test_action_turn_accepts_final_answer_text_as_the_turns_message(
+    monkeypatch, output
+) -> None:
+    _install(monkeypatch, _FakeResponses(output_text="", output=output))
+
+    result = await execute_openai_request(
+        transport=_TRANSPORT,
+        request=_request().to_request(),
+        profile=get_llm_profile(ACTION_EXECUTING_PROFILE_ID),
+        uploaded_blobs={},
+    )
+
+    assert result.model_error is None
+    turn = result.tool_use
+    assert isinstance(turn, LlmActionTurnResponse)
+    assert [(message.phase, message.text) for message in turn.messages] == [
+        ("commentary", output[0].content[0].text)
+    ]
+    assert len(turn.calls) == len(output) - 1
+
+
+@pytest.mark.asyncio
+async def test_final_answer_beside_a_call_keeps_the_commentary_limit(
+    monkeypatch,
+) -> None:
+    output = [_final_answer("x" * (ACTION_COMMENTARY_MAX_CHARACTERS + 1)), _call()]
     _install(monkeypatch, _FakeResponses(output_text="", output=output))
 
     result = await execute_openai_request(
@@ -207,7 +243,7 @@ async def test_an_answer_in_plain_text_is_refused_as_such(monkeypatch) -> None:
 
     assert result.model_error is not None
     assert result.model_error.recovery == "repair_next_turn"
-    assert "final answer in plain text" in result.model_error.message
+    assert "commentary character limit" in result.model_error.message
 
 
 @pytest.mark.asyncio

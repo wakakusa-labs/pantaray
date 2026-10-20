@@ -20,11 +20,39 @@ export function foldsCommentary(lines: readonly ActionConversationRunLine[]): bo
   return lines.some((line) => line.kind === 'final_output');
 }
 
+/**
+ * Keys of the commentary a reply without tool calls became the final answer from; the answer
+ * already shows that text. The reply is the run's last commentary, its messages joined by a
+ * blank line.
+ */
+function commentaryRepeatingAnswer(lines: readonly ActionConversationRunLine[]): Set<string> {
+  const answerIndex = lines.findIndex((line) => line.kind === 'final_output');
+  const answer = lines[answerIndex];
+  if (answer?.kind !== 'final_output') return new Set();
+  const reply: ActionConversationAssistantItem[] = [];
+  for (const line of lines.slice(0, answerIndex).reverse()) {
+    if (line.kind !== 'assistant') break;
+    reply.unshift(line);
+  }
+  for (; reply.length > 0; reply.shift()) {
+    if (
+      reply
+        .map((line) => line.text)
+        .join('\n\n')
+        .trim() === answer.text.trim()
+    ) {
+      return new Set(reply.map((line) => line.key));
+    }
+  }
+  return new Set();
+}
+
 /** Group only adjacent work; user messages and final answers always remain boundaries. */
 export function groupAgentWork(
   lines: readonly ActionConversationRunLine[]
 ): (ActionConversationRunLine | AgentWorkSection)[] {
   const foldCommentary = foldsCommentary(lines);
+  const repeatsAnswer = commentaryRepeatingAnswer(lines);
   const sections: (ActionConversationRunLine | AgentWorkSection)[] = [];
   // A message-only Suggestion precedes the initial USER and remains conversation context.
   const initialUserIndex = lines.findIndex(
@@ -32,6 +60,7 @@ export function groupAgentWork(
       line.kind === 'user' && line.source === 'canonical' && line.entry.accepted_sequence === 1
   );
   for (const [index, line] of lines.entries()) {
+    if (line.kind === 'assistant' && repeatsAnswer.has(line.key)) continue;
     if (
       line.kind === 'tool' ||
       (foldCommentary && line.kind === 'assistant' && index > initialUserIndex)

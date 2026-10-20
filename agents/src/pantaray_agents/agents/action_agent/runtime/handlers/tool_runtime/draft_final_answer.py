@@ -51,9 +51,10 @@ def store_final_answer_draft(state: ActionAgentState, answer: str) -> str:
     """Store ``answer`` as the pending final answer and its memory draft.
 
     Returns the draft revision that link_memory and unlink_memory must name.
+    Raises ``MemoryLinkValidationError`` for text the draft cannot hold, and
+    then leaves the pending answer and its draft as they were.
     """
 
-    state["supervisor_pending_final_answer"] = answer
     existing = state.get("supervisor_memory_draft")
     if existing is None:
         db_path, busy_timeout_ms = read_local_runtime_db_config()
@@ -78,6 +79,7 @@ def store_final_answer_draft(state: ActionAgentState, answer: str) -> str:
             draft=deserialize_memory_draft(existing),
             body=answer,
         )
+    state["supervisor_pending_final_answer"] = answer
     state["supervisor_memory_draft"] = serialize_memory_draft(draft)
     return draft.draft_revision
 

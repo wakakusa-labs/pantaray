@@ -40,7 +40,10 @@ from pantaray_agents.local_runtime.agent_state.action_repository import (
 )
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_draft,
+    serialize_memory_draft,
 )
+from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
+from pantaray_agents.local_runtime.memory_catalog.models import MemoryDocument
 from pantaray_agents.local_runtime.runtime.action_subagent_queue import (
     enqueue_action_subagent_job_in_connection,
 )
@@ -511,3 +514,38 @@ async def test_reply_while_a_subagent_runs_continues_with_the_remedy(
         state["history_by_scope"]["S"][-1]["short_step_id"]
         != reply_think["short_step_id"]
     )
+
+
+@pytest.mark.asyncio
+async def test_reply_the_draft_cannot_hold_continues_and_keeps_the_draft(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent, runtime, state, request, _ = await _fixture(monkeypatch, tmp_path)
+    earlier = serialize_memory_draft(
+        create_memory_draft(
+            user_id=request.user_id,
+            owner_node_id="memory-message-action",
+            base_revision_id=None,
+            documents=(MemoryDocument("body.md", "Earlier draft"),),
+        )
+    )
+    state["supervisor_pending_final_answer"] = "Earlier draft"
+    state["supervisor_memory_draft"] = earlier
+    reply = _commentary_turn()
+    reply.response.messages = [
+        LlmCommentary(
+            phase="commentary",
+            source_message_id="msg-ref",
+            text="See the note. [[ref:ref_1]]",
+        )
+    ]
+    agent._generate_llm_action_turn = AsyncMock(return_value=reply)
+    with _trace(request):
+        state = await _think(agent, runtime, state)
+
+    assert runtime.route_from_think(state) == "think"
+    assert state["status"] == "processing" and not state["final_output"]
+    assert "use link_memory" in state["history_by_scope"]["S"][-1]["result_line"]
+    assert state["supervisor_pending_final_answer"] == "Earlier draft"
+    assert state["supervisor_memory_draft"] == earlier

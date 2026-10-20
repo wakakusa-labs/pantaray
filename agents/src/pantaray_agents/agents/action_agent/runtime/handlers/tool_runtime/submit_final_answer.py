@@ -19,6 +19,9 @@ from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_draft,
 )
+from pantaray_agents.local_runtime.memory_catalog.errors import (
+    MemoryLinkValidationError,
+)
 from pantaray_agents.local_runtime.runtime.action_final_gate import (
     ActionFinalizationBlockers,
     ActionFinalizationRequest,
@@ -225,10 +228,10 @@ def end_turn_with_reply(state: ActionAgentState, answer: str) -> str | None:
     Returns why the turn could not end, for the model to settle first.
     """
 
-    store_final_answer_draft(state, answer.strip())
     try:
+        store_final_answer_draft(state, answer.strip())
         submit_pending_final_answer(state)
-    except ToolValidationError as exc:
+    except (MemoryLinkValidationError, ToolValidationError) as exc:
         return f"This reply did not end the turn: {exc}"
     return None
 

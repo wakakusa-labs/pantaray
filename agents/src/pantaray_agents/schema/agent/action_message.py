@@ -364,6 +364,9 @@ class ActionUserMessageInput(BaseModel):
     project_refs: tuple[ActionProjectRef, ...] = ()
     supplement_project_refs: tuple[ActionProjectRef, ...] = ()
     files: tuple[FileAttachmentInput, ...] = ()
+    # Workspace paths of the files a Suggestion made, copied there when this
+    # message created the Action from it. Only the submit boundary sets them.
+    suggestion_files: tuple[str, ...] = ()
     chat_handoff: ChatHandoffInput | None = None
     # After the project lists: a task or suggestion never shares a project's span.
     work_refs: tuple[ActionWorkRef, ...] = ()

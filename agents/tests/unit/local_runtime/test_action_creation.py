@@ -98,6 +98,7 @@ def _create_schema(db_path: Path) -> None:
                 answer TEXT,
                 suggestion_summary TEXT,
                 target_context_json TEXT,
+                artifacts_json TEXT NOT NULL DEFAULT '[]',
                 action_request_payload TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,

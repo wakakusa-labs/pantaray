@@ -10,6 +10,8 @@ own temp dir, with the network off.
 
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -117,6 +119,36 @@ def _react_result(
 
 
 @dataclass(frozen=True, slots=True)
+class PinnedFolder:
+    """A real directory, known by its identity from the moment it was pinned.
+
+    A command runs in it only while that same directory is still at ``path``:
+    a later call is never led elsewhere by whatever the path became.
+    """
+
+    path: Path
+    device: int
+    inode: int
+
+    @classmethod
+    def pin(cls, path: Path) -> PinnedFolder:
+        info = os.lstat(path)
+        if not stat.S_ISDIR(info.st_mode):  # lstat: a symlink is no directory
+            raise NotADirectoryError(f"not a real directory: {path}")
+        return cls(path, info.st_dev, info.st_ino)
+
+    def unchanged(self) -> bool:
+        try:
+            info = os.lstat(self.path)
+        except FileNotFoundError:
+            return False
+        return stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == (
+            self.device,
+            self.inode,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SuggestionCommandSession:
     db_path: Path
     busy_timeout_ms: int
@@ -126,8 +158,8 @@ class SuggestionCommandSession:
     # The run's folder for output too long to show inline, created when the
     # tools are built at the start of the run.
     spill_root: Path
-    # The make stage's canonical artifact folder: the only place it writes.
-    artifact_folder: Path | None = None
+    # The make stage's artifact folder: the only place it writes.
+    artifact_folder: PinnedFolder | None = None
 
     def _description(self) -> str:
         if self.artifact_folder is None:
@@ -142,7 +174,7 @@ class SuggestionCommandSession:
             purpose = (
                 "Run one non-interactive shell command to make or check the "
                 "Suggestion's files. Files can be written only in its artifact "
-                f"folder, `{self.artifact_folder}`, where a null cwd starts; "
+                f"folder, `{self.artifact_folder.path}`, where a null cwd starts; "
                 "workspace folders are read-only and the network is off."
             )
         return (
@@ -218,7 +250,7 @@ class SuggestionCommandSession:
 
         if raw_cwd is None:
             folder = self.artifact_folder
-            return None if folder is None else (folder, folder)
+            return None if folder is None else (folder.path, folder.path)
         if not isinstance(raw_cwd, str) or not Path(raw_cwd).is_absolute():
             raise ValueError("cwd must be an absolute path or null")
         cwd = Path(raw_cwd).resolve(strict=True)
@@ -230,7 +262,7 @@ class SuggestionCommandSession:
         raise ValueError(f"cwd is outside the listed workspace folders: {raw_cwd}")
 
     def _artifact_roots(self) -> tuple[Path, ...]:
-        return () if self.artifact_folder is None else (self.artifact_folder,)
+        return () if self.artifact_folder is None else (self.artifact_folder.path,)
 
     async def run(self, call: ReactToolCall, _step_number: int) -> ReactToolResult:
         args = call.tool_args
@@ -249,6 +281,12 @@ class SuggestionCommandSession:
                 tool_name=call.tool_name,
                 error_code="COMMANDS_NOT_ALLOWED",
                 message="Commands now need the user's approval, so none can run.",
+            )
+        if self.artifact_folder is not None and not self.artifact_folder.unchanged():
+            return tool_error_response(
+                tool_name=call.tool_name,
+                error_code="ARTIFACT_FOLDER_REPLACED",
+                message="The artifact folder was replaced, so no command can run.",
             )
         try:
             resolved_cwd = self._resolve_cwd(args.get("cwd"))
@@ -281,14 +319,14 @@ class SuggestionCommandSession:
                 ],
                 real_write_roots=[]
                 if self.artifact_folder is None
-                else [str(self.artifact_folder), str(temp_dir)],
+                else [str(self.artifact_folder.path), str(temp_dir)],
                 private_storage_roots=private_storage_roots,
                 # The artifact folder sits in private storage, whose deny it lifts.
                 action_storage=None
                 if self.artifact_folder is None
                 else ActionSandboxStorage(
-                    workspace_root=str(self.artifact_folder),
-                    published_results_root=str(self.artifact_folder),
+                    workspace_root=str(self.artifact_folder.path),
+                    published_results_root=str(self.artifact_folder.path),
                 ),
                 app_runtime_python=app_runtime_python,
                 cwd=str(cwd),
@@ -324,4 +362,4 @@ class SuggestionCommandSession:
         )
 
 
-__all__ = ["SuggestionCommandSession", "commands_run_without_asking"]
+__all__ = ["PinnedFolder", "SuggestionCommandSession", "commands_run_without_asking"]

@@ -12,6 +12,7 @@ from .tool_result_storage import ACTION_TOOL_RESULTS_DIRNAME
 LOCAL_RUNTIME_WORKSPACE_DIRNAME = "local_runtime_workspaces"
 SCRATCH_WORKSPACE_DIRNAME = "scratch"
 SCRATCH_SESSION_TEMP_DIRNAME = ".runtime-temp"
+SUGGESTION_ARTIFACTS_DIRNAME = "suggestion_artifacts"
 MANAGED_DIRECTORY_MODE = 0o700
 
 
@@ -96,6 +97,33 @@ def resolve_managed_action_workspace_root(*, db_path: Path) -> Path:
     )
 
 
+def resolve_suggestion_artifacts_user_root(*, db_path: Path, user_id: str) -> Path:
+    """Every Suggestion folder of one user, removed whole when the user is erased."""
+
+    validate_action_storage_component(field_name="user_id", value=user_id)
+    return (
+        resolve_local_runtime_storage_base(db_path=db_path)
+        / SUGGESTION_ARTIFACTS_DIRNAME
+        / user_id
+    )
+
+
+def resolve_suggestion_artifacts_root(
+    *, db_path: Path, user_id: str, suggestion_id: str
+) -> Path:
+    """The folder that holds the files one Suggestion made.
+
+    It sits outside the Action workspace root, which startup recovery scans as
+    `<user>/<action>`, and inside the private storage base.
+    """
+
+    validate_action_storage_component(field_name="suggestion_id", value=suggestion_id)
+    return (
+        resolve_suggestion_artifacts_user_root(db_path=db_path, user_id=user_id)
+        / suggestion_id
+    )
+
+
 def resolve_action_storage_paths(
     *, db_path: Path, user_id: str, action_id: str
 ) -> ActionStoragePaths:
@@ -175,5 +203,7 @@ __all__ = [
     "resolve_local_runtime_storage_base",
     "resolve_private_temp_root",
     "resolve_managed_action_workspace_root",
+    "resolve_suggestion_artifacts_root",
+    "resolve_suggestion_artifacts_user_root",
     "validate_action_storage_component",
 ]

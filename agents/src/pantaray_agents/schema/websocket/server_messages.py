@@ -201,6 +201,12 @@ class ProcessCompletedMessage(BaseModel):
     interaction_contract: SuggestionInteractionContract | None = Field(
         default=None, description="提案の操作契約（suggestion 完了時のみ）"
     )
+    artifacts: list[str] = Field(
+        description=(
+            "Files the Suggestion made, relative to its artifact folder; empty "
+            "unless it succeeded with files"
+        ),
+    )
     status: str = Field(description="Suggestion 処理ステータス")
 
 

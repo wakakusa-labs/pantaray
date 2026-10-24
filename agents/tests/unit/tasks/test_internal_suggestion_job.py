@@ -58,6 +58,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
 )
@@ -548,6 +551,67 @@ async def test_run_suggestion_job_persists_success_terminal_row(
     assert kwargs["request_images_count"] == 1
     assert kwargs["used_images_count"] == 1
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deliverable", [True, False])
+async def test_a_run_starts_without_earlier_files_and_a_discard_removes_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    deliverable: bool,
+) -> None:
+    """A requeued run must not offer files an earlier attempt made, and a
+    Suggestion that is dropped must not leave its files behind."""
+    db_path = tmp_path / "runtime.db"
+    artifacts_root = resolve_suggestion_artifacts_root(
+        db_path=db_path, user_id="user-1", suggestion_id="suggestion-1"
+    )
+    artifacts_root.mkdir(parents=True)
+    (artifacts_root / "earlier-attempt.md").write_text("stale", encoding="utf-8")
+    repository = SimpleNamespace(
+        get_suggestion=AsyncMock(
+            return_value=RepositoryResult(data={"status": "processing"})
+        ),
+        save_suggestion=AsyncMock(return_value=SimpleNamespace(error=None)),
+        discard_suggestion_if_processing=AsyncMock(
+            return_value=SimpleNamespace(error=None)
+        ),
+    )
+
+    async def _process(_request: object) -> SimpleNamespace:
+        assert not artifacts_root.exists()
+        artifacts_root.mkdir(parents=True)
+        (artifacts_root / "draft.md").write_text("made now", encoding="utf-8")
+        return SimpleNamespace(status="success")
+
+    agent = SimpleNamespace(
+        build_persistence_payload=lambda _response: {
+            "prompt_name": "suggestion",
+            "prompt_version": "1.0",
+            "prompt_text": "",
+            "response_text": "",
+            "request_images_count": 0,
+            "used_images_count": 0,
+        },
+        process=_process,
+    )
+    job = "pantaray_agents.tasks.internal_jobs.suggestion"
+    for name, replacement in (
+        ("read_local_runtime_db_config", lambda: (db_path, 1_000)),
+        ("deps.get_suggestion_repository", AsyncMock(return_value=repository)),
+        ("deps.get_suggestion_agent", AsyncMock(return_value=agent)),
+        ("owner_has_deliverable_session", lambda _owner_id: deliverable),
+    ):
+        monkeypatch.setattr(f"{job}.{name}", replacement)
+
+    await _run_suggestion_job(_payload())
+
+    if deliverable:
+        repository.save_suggestion.assert_awaited_once()
+        assert [path.name for path in artifacts_root.iterdir()] == ["draft.md"]
+    else:
+        repository.discard_suggestion_if_processing.assert_awaited_once()
+        assert not artifacts_root.exists()
 
 
 @pytest.mark.asyncio

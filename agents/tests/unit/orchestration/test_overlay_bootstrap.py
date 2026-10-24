@@ -29,7 +29,8 @@ class _SuggestionRepo:
             or str(row.get("suggestion_id")) != suggestion_id
         ):
             return RepositoryResult(data=None)
-        return RepositoryResult(data=dict(row))
+        # The real repository always decodes the column, an empty list by default.
+        return RepositoryResult(data={"artifacts_json": [], **row})
 
     async def get_process_events_for_detail(self, *, user_id: str, suggestion_id: str):
         rows = self._event_rows or []

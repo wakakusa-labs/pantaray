@@ -69,6 +69,10 @@ function isActionErrorMeta(meta: unknown): meta is ActionErrorMeta {
   );
 }
 
+function isArtifactList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((path) => typeof path === 'string');
+}
+
 function getEventSequence(event: OrchestrationServerEvent): number {
   return typeof event.sequence === 'number' && Number.isFinite(event.sequence) ? event.sequence : 0;
 }
@@ -91,6 +95,7 @@ export function createOverlaySnapshot(
     reactionState: null,
     reactionTimestamp: null,
     dismissReason: null,
+    artifacts: [],
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,
@@ -270,6 +275,9 @@ export function applyOverlayServerEvent(
             event.data.interaction_contract === 'message_only'
               ? event.data.interaction_contract
               : current.interactionContract,
+          artifacts: isArtifactList(event.data.artifacts)
+            ? event.data.artifacts
+            : current.artifacts,
           updatedAt: nextUpdatedAt,
           lastSequence: nextSequence,
           isLive: false,

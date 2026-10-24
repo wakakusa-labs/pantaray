@@ -1369,6 +1369,8 @@ function persistedSnapshot(overrides = {}) {
     suggestionText: 'Draft the reply',
     reactionState: null,
     reactionTimestamp: null,
+    dismissReason: null,
+    artifacts: [],
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,
@@ -1415,6 +1417,37 @@ test('the main window hears each suggestion record change, and the dismissal bef
   assert.equal(dismissed.dismissReason, 'Sent it myself');
   assert.equal(dismissed.suggestionText, 'Draft the reply');
   assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+});
+
+test('a finished suggestion carries its files to the main window and the panel', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  const completed = (suggestionId, artifacts) => ({
+    event: 'process_completed',
+    data: {
+      kind: 'suggestion',
+      process_id: `proc-${suggestionId}`,
+      suggestion_id: suggestionId,
+      status: 'success',
+      interaction_contract: 'message_only',
+      ...(artifacts === undefined ? {} : { artifacts }),
+    },
+    meta: { kind: 'suggestion', process_id: `proc-${suggestionId}`, suggestion_id: suggestionId },
+  });
+
+  harness.getWsHooks().forwardEventToRenderers(completed('sug-1', ['drafts/reply.md', 'a.csv']));
+  // An event persisted before Suggestions made files has no list at all.
+  harness.getWsHooks().forwardEventToRenderers(completed('sug-2', undefined));
+
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1').artifacts, [
+    'drafts/reply.md',
+    'a.csv',
+  ]);
+  assert.deepEqual(harness.overlayPayloads.get('sug-1').snapshot.artifacts, [
+    'drafts/reply.md',
+    'a.csv',
+  ]);
+  assert.deepEqual(harness.manager.getOverlaySnapshot('sug-2').artifacts, []);
 });
 
 test('a persisted suggestion read never replaces newer live state or a pending command', async () => {
@@ -1481,10 +1514,13 @@ test('a same-sequence read fills the body of a suggestion accepted in a History 
     meta: { suggestion_id: 'sug-1', kind: 'action', command_id: accepted.commandId },
   });
 
-  const read = harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ lastSequence: 5 }));
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ lastSequence: 5, artifacts: ['drafts/reply.md'] })
+  );
 
   assert.equal(read.suggestionText, 'Draft the reply');
   assert.equal(read.interactionContract, 'action_offer');
+  assert.deepEqual(read.artifacts, ['drafts/reply.md']);
   assert.equal(read.reactionState, 'accepted');
   assert.equal(read.actionPhase, 'accepted_pending_start');
   assert.equal(read.commandId, accepted.commandId);

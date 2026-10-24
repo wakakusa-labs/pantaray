@@ -24,6 +24,9 @@ from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
     reserve_suggestion_start,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     build_workspace_context_prompt,
 )
@@ -34,6 +37,9 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
     InsightActivityStart,
     build_suggestion_research_snapshot,
     discard_suggestion_tool_results,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    discard_run_tool_results,
 )
 from pantaray_agents.orchestration.ws.deliverable_sessions import (
     owner_has_deliverable_session,
@@ -72,6 +78,17 @@ async def _finalize_suggestion_start_error(
         raise RuntimeError(result.error)
 
 
+def _discard_suggestion_artifacts(payload: SuggestionJobRuntimePayload) -> None:
+    db_path, _ = read_local_runtime_db_config()
+    discard_run_tool_results(
+        resolve_suggestion_artifacts_root(
+            db_path=db_path,
+            user_id=payload["user_id"],
+            suggestion_id=payload["suggestion_id"],
+        )
+    )
+
+
 async def _discard_suggestion(*, repository, payload, reason: str) -> None:
     """End the row and delete whatever the run recorded; nothing is published.
 
@@ -84,6 +101,7 @@ async def _discard_suggestion(*, repository, payload, reason: str) -> None:
     )
     if result.error:
         raise RuntimeError(result.error)
+    _discard_suggestion_artifacts(payload)
 
 
 async def _drop_if_capture_paused(
@@ -333,6 +351,9 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
                 busy_timeout_ms=timeout_ms,
                 scheduled_at=format_utc_iso(decision),
             )
+        # A requeued job runs the agent again from the start, so files an
+        # earlier attempt made are not this run's.
+        _discard_suggestion_artifacts(payload)
         try:
             response = await _process_while_readable(
                 agent=agent, request=request, activity_start=activity_start

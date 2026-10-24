@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final, NamedTuple
 
@@ -347,6 +348,7 @@ class SuggestionRelayMixin(
             status=status_val,
             has_suggestion=has_suggestion,
             interaction_contract=interaction_contract,
+            artifacts=row.get("artifacts_json", ()),
         )
 
     async def _complete_relayed_suggestion(
@@ -357,6 +359,7 @@ class SuggestionRelayMixin(
         status: str,
         has_suggestion: bool | None = None,
         interaction_contract: str | None = None,
+        artifacts: Sequence[str] = (),
     ) -> None:
         self._release_suggestion_process(process_id)
         await self._emit_process_completed(
@@ -366,6 +369,7 @@ class SuggestionRelayMixin(
             has_suggestion=has_suggestion,
             kind="suggestion",
             interaction_contract=interaction_contract,
+            artifacts=artifacts,
         )
 
 

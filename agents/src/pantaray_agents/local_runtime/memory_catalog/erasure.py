@@ -17,6 +17,7 @@ from pantaray_agents.local_runtime.storage.memory_update_lock import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_managed_action_workspace_root,
+    resolve_suggestion_artifacts_user_root,
 )
 
 from .artifact_paths import (
@@ -192,7 +193,7 @@ def _resume_job(
                 "quarantined",
             )
         if current.state in {"quarantined", "database_detached"}:
-            _remove_user_scratch_root(db_path=db_path, user_id=current.user_id)
+            _remove_user_storage_roots(db_path=db_path, user_id=current.user_id)
         if current.state == "quarantined":
             _detach_tenant_database(
                 db_path=db_path, busy_timeout_ms=busy_timeout_ms, job=current
@@ -219,15 +220,20 @@ def _resume_job(
         os.close(root_descriptor)
 
 
-def _remove_user_scratch_root(*, db_path: Path, user_id: str) -> None:
+def _remove_user_storage_roots(*, db_path: Path, user_id: str) -> None:
+    """Remove the user's Action workspaces and Suggestion files."""
     storage_base = db_path.resolve().parent
-    scratch_user_root = resolve_managed_action_workspace_root(db_path=db_path) / user_id
+    user_roots = (
+        resolve_managed_action_workspace_root(db_path=db_path) / user_id,
+        resolve_suggestion_artifacts_user_root(db_path=db_path, user_id=user_id),
+    )
     root_descriptor = open_user_erasure_root_descriptor(root_path=storage_base)
     try:
-        remove_user_erasure_directory(
-            root_descriptor=root_descriptor,
-            relative_path=scratch_user_root.relative_to(storage_base).as_posix(),
-        )
+        for user_root in user_roots:
+            remove_user_erasure_directory(
+                root_descriptor=root_descriptor,
+                relative_path=user_root.relative_to(storage_base).as_posix(),
+            )
     finally:
         os.close(root_descriptor)
 

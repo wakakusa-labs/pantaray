@@ -48,6 +48,8 @@ export type OverlaySnapshot = {
   reactionTimestamp: string | null;
   /** What the user wrote when they dismissed it. */
   dismissReason: string | null;
+  /** Files the Suggestion made, relative to its artifact folder, in display order. */
+  artifacts: string[];
   actionPhase: OverlayActionPhase;
   actionStatus: OverlayActionStatus | null;
   actionErrorCode: string | null;

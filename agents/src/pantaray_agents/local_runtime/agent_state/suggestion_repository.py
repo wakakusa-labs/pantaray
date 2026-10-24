@@ -127,6 +127,7 @@ class LocalSuggestionRepository(
                         thinking = ?,
                         suggestion_summary = ?,
                         target_context_json = ?,
+                        artifacts_json = ?,
                         error = ?,
                         prompt_text = ?,
                         response_text = ?,
@@ -149,6 +150,7 @@ class LocalSuggestionRepository(
                             if suggestion.target_context is not None
                             else None
                         ),
+                        encode_json_column(suggestion.artifacts),
                         encode_json_column(error_payload),
                         prompt_text,
                         response_text,

@@ -36,6 +36,10 @@ function recordedBefore(userDataDir: string): boolean {
 /**
  * First-run setup state for this device, written only by main.
  *
+ * Read when the store is created, which main does before recording can be restored or
+ * started: the first recording leaves the same preference an existing user has, so a
+ * later first read would take a new user's own recording for an earlier one.
+ *
  * A file that cannot be read restarts setup rather than stopping the app: every step
  * reads what is already configured, so a user who had finished passes through quickly.
  */
@@ -56,9 +60,8 @@ export function createOnboardingStateStore(params: {
         params.report('unreadable_file');
         return FIRST_STEP;
       }
-      // Decided once and stored: recording started during setup leaves the same
-      // preference an existing user has, so deciding again on the next launch would
-      // skip the rest of setup.
+      // Stored, so the next launch does not decide again from a preference that
+      // recording during setup left behind.
       const decided: OnboardingState = recordedBefore(params.userDataDir)
         ? { status: 'completed' }
         : FIRST_STEP;
@@ -84,9 +87,9 @@ export function createOnboardingStateStore(params: {
     return parsed.data;
   };
 
-  let current: OnboardingState | null = null;
+  let current = read();
   return {
-    get: () => (current ??= read()),
+    get: () => current,
     set: (state) => {
       write(state);
       current = state;

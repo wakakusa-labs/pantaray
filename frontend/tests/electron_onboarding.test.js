@@ -45,6 +45,13 @@ test('a new device starts setup at the AI step and keeps that decision', (t) => 
   assert.deepEqual(createStore(dir).store.get(), { status: 'in_progress', step: 'ai' });
 });
 
+test('the state is decided when the store is created, not on the first read', (t) => {
+  const dir = tempDir(t);
+  const { store } = createStore(dir);
+  recordedFor(dir, '__logged_out__');
+  assert.deepEqual(store.get(), { status: 'in_progress', step: 'ai' });
+});
+
 test('a device where any user already recorded skips setup', (t) => {
   const dir = tempDir(t);
   fs.mkdirSync(path.join(dir, 'settings', '__logged_out__'), { recursive: true });
@@ -89,8 +96,10 @@ test('an unreadable state restarts setup, is reported, and is replaced by the ne
 function loadFeatures(t, dir) {
   const calls = [];
   const posted = [];
-  const recorder = { on: false, params: null };
+  const shown = [];
+  const recorder = { params: null };
   let context;
+  let ws;
   const load = Module._load;
   Module._load = function (request, parent, isMain) {
     if (request === 'electron') {
@@ -123,7 +132,7 @@ function loadFeatures(t, dir) {
       return {
         createScreenshotSyncManager: (params) => {
           recorder.params = params;
-          return { getStatus: () => recorder.on };
+          return { getStatus: () => false, pause: async () => {} };
         },
       };
     }
@@ -155,8 +164,13 @@ function loadFeatures(t, dir) {
       setActionLiveSnapshotGetter: () => {},
       sendResetToAllOverlays: () => {},
       clearActionAssociations: () => {},
+      clearForOwnerChange: () => {},
+      showNotification: (id) => shown.push(id),
     },
-    createOrchestrationWS: () => ({ connect: () => {}, disconnect: () => {} }),
+    createOrchestrationWS: (wsParams) => {
+      ws = wsParams;
+      return { connect: () => {}, disconnect: () => {} };
+    },
     authCoordinator: {},
     localBackendAuthContextController: {},
     supabaseWiring: {
@@ -180,33 +194,65 @@ function loadFeatures(t, dir) {
     logger: null,
   });
   feature.registerMainIpc();
-  return { context, recorder, posted, calls };
+  feature.ensureOrchestrationConnected();
+  // What the live session calls when a Suggestion arrives with content.
+  const suggestionArrives = (id) => ws.showNotification(id);
+  return { feature, context, recorder, posted, shown, calls, suggestionArrives };
 }
 
-test('recording started during setup greets only once setup is finished', async (t) => {
-  const { context, recorder, posted } = loadFeatures(t, tempDir(t));
+test('the first recording does not count as an earlier user', (t) => {
+  const dir = tempDir(t);
+  const { context, recorder } = loadFeatures(t, dir);
+  // Recording starts before the window reads the state: it saves its preference first,
+  // then reports the start.
+  recordedFor(dir, '__logged_out__');
   recorder.params.onRecordingStarted('owner-a');
-  recorder.on = true;
-  context.onboarding.setState({ status: 'in_progress', step: 'apps' });
-  await Promise.resolve();
-  assert.deepEqual(posted, []);
-
-  context.onboarding.setState({ status: 'completed' });
-  await Promise.resolve();
-  assert.deepEqual(posted, ['owner-a']);
-
-  // Finished setup greets on the recording start itself, and only a finish greets.
-  context.onboarding.setState({ status: 'completed' });
-  recorder.params.onRecordingStarted('owner-b');
-  await Promise.resolve();
-  assert.deepEqual(posted, ['owner-a', 'owner-b']);
+  assert.deepEqual(context.onboarding.getState(), { status: 'in_progress', step: 'ai' });
 });
 
-test('finishing setup with recording off greets nobody', async (t) => {
-  const { context, posted } = loadFeatures(t, tempDir(t));
-  context.onboarding.setState({ status: 'completed' });
+test('setup resumes after the reopen a Screen Recording wait asks for', (t) => {
+  const dir = tempDir(t);
+  loadFeatures(t, dir).context.onboarding.setState({ status: 'in_progress', step: 'recording' });
+  // A start waiting on Screen Recording stores the "on" so the reopened app resumes it.
+  recordedFor(dir, '__logged_out__');
+  const reopened = loadFeatures(t, dir);
+  assert.deepEqual(reopened.context.onboarding.getState(), {
+    status: 'in_progress',
+    step: 'recording',
+  });
+});
+
+test('recording during setup asks for the welcome right away', async (t) => {
+  const { recorder, posted } = loadFeatures(t, tempDir(t));
+  // The runtime greets only an owner with nothing recorded yet, so waiting for setup to
+  // finish would let the first Insight suppress the greeting.
+  recorder.params.onRecordingStarted('owner-a');
   await Promise.resolve();
-  assert.deepEqual(posted, []);
+  assert.deepEqual(posted, ['owner-a']);
+});
+
+test('Suggestion panels wait for setup to finish, then open in arrival order', (t) => {
+  const { context, shown, suggestionArrives } = loadFeatures(t, tempDir(t));
+  suggestionArrives('welcome');
+  context.onboarding.setState({ status: 'in_progress', step: 'apps' });
+  suggestionArrives('insight-1');
+  assert.deepEqual(shown, []);
+
+  context.onboarding.setState({ status: 'completed' });
+  assert.deepEqual(shown, ['welcome', 'insight-1']);
+
+  // Released once; later Suggestions open as they arrive.
+  context.onboarding.setState({ status: 'completed' });
+  suggestionArrives('insight-2');
+  assert.deepEqual(shown, ['welcome', 'insight-1', 'insight-2']);
+});
+
+test('a Suggestion held for one owner is not opened for the next', async (t) => {
+  const { feature, context, shown, suggestionArrives } = loadFeatures(t, tempDir(t));
+  suggestionArrives('welcome');
+  await feature.prepareOwnerChange();
+  context.onboarding.setState({ status: 'completed' });
+  assert.deepEqual(shown, []);
 });
 
 test('relaunching schedules the new instance before quitting', (t) => {

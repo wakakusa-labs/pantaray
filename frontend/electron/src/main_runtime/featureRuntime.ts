@@ -145,6 +145,24 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         createMainWindow: params.createMainWindow,
       }),
   });
+  // A Suggestion's panel opening during first-run setup would land over it, so its panel
+  // waits until setup is finished; History and the main window still receive it.
+  const heldSuggestionIds = new Set<string>();
+  const showSuggestion = (suggestionId: string): void => {
+    if (onboarding.get().status === 'completed') {
+      params.notificationWindow.showNotification(suggestionId);
+    } else heldSuggestionIds.add(suggestionId);
+  };
+  const releaseHeldSuggestions = (): void => {
+    for (const suggestionId of heldSuggestionIds) {
+      try {
+        params.notificationWindow.showNotification(suggestionId);
+      } catch (error) {
+        params.logger?.error?.('HELD_SUGGESTION_SHOW_ERR', { err: error });
+      }
+    }
+    heldSuggestionIds.clear();
+  };
   const shortcutController = createGlobalShortcutController({
     registry: globalShortcut,
     store: createGlobalShortcutStore(app.getPath('userData')),
@@ -170,7 +188,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   );
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
-    notificationWindow: params.notificationWindow,
+    notificationWindow: { ...params.notificationWindow, showNotification: showSuggestion },
     createOrchestrationWS: params.createOrchestrationWS,
     getMainWindow: params.getMainWindow,
     getLocalApiToken: params.getLocalApiToken,
@@ -293,25 +311,21 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
-    // Recording turned on during setup greets once setup finishes instead (`setOnboardingState`).
+    // The runtime greets only an owner who has no data yet, so every start may ask. A start
+    // during setup asks too: the runtime decides before anything is recorded, and the
+    // greeting's panel waits for setup like any other Suggestion.
     onRecordingStarted: (userId) => {
-      if (onboarding.get().status === 'completed') greet(userId);
+      const { accelerator, failure } = shortcutController.getState();
+      // A failure means the accelerator is configured but not registered: it would not work.
+      const answer = getWelcomeSuggestionText(params.getUiLanguage(), failure ? null : accelerator);
+      postWelcomeSuggestion({ requestJson, userId, answer }).catch((error: unknown) => {
+        params.logger?.error?.('WELCOME_SUGGESTION_ERR', { err: error });
+      });
     },
   });
-  // The runtime greets only an owner who has no data yet, so every start may ask.
-  const greet = (userId: string): void => {
-    const { accelerator, failure } = shortcutController.getState();
-    // A failure means the accelerator is configured but not registered: it would not work.
-    const answer = getWelcomeSuggestionText(params.getUiLanguage(), failure ? null : accelerator);
-    postWelcomeSuggestion({ requestJson, userId, answer }).catch((error: unknown) => {
-      params.logger?.error?.('WELCOME_SUGGESTION_ERR', { err: error });
-    });
-  };
   const setOnboardingState = (state: OnboardingState): OnboardingState => {
-    const finishing = state.status === 'completed' && onboarding.get().status !== 'completed';
     const saved = onboarding.set(state);
-    const userId = getUserId();
-    if (finishing && userId !== null && screenshotSync.getStatus()) greet(userId);
+    if (saved.status === 'completed') releaseHeldSuggestions();
     return saved;
   };
   const rebuildMenus = () =>
@@ -501,6 +515,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     applyLocalOwner,
     prepareOwnerChange: () => {
       params.notificationWindow.clearForOwnerChange();
+      heldSuggestionIds.clear();
       conversationOverlay.onOwnerChanged(null);
       latestActionPageReader.clear();
       orchestration.resetActionLive();

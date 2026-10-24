@@ -88,15 +88,26 @@
   font-size: 11px;
 }
 
+/* The step scrolls; the action bar stays at the pane's bottom edge on every step. */
 .onb-detail {
+  gap: 0;
+  overflow: hidden;
+  padding-bottom: 0;
   padding-top: 64px;
 }
 
+/* Scrolls across the whole pane, so the wheel works beside the step too; the step keeps its width. */
 .onb-content {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+
+.onb-content > * {
   max-width: 680px;
-  min-height: 100%;
 }
 
 .onb-title {
@@ -156,11 +167,12 @@
 
 .onb-footer {
   align-items: center;
+  border-top: 1px solid var(--border-color);
   display: flex;
+  flex: none;
   gap: 12px;
   justify-content: space-between;
-  margin-top: auto;
-  padding: 24px 0 8px;
+  padding: 16px 0 20px;
 }
 
 .onb-footer-end {
@@ -179,7 +191,13 @@
     border-radius: 0;
   }
 
+  /* The page scrolls as one here, so the bar follows the step. */
   .onb-detail {
+    overflow: visible;
     padding-top: 24px;
+  }
+
+  .onb-content {
+    overflow: visible;
   }
 }

@@ -1,10 +1,6 @@
-"""The make stage: the selected lens run continues to make what it suggests.
-
-Only the candidate the selector chose goes on, in its own conversation, so its
-research stays in context. Its ``submit_suggestion`` is answered with the make
-instruction, and the run gets tools that write only into the Suggestion's
-artifact folder. It ends with ``finish_suggestion``: the decision as it stands
-after making (or not making) the files, which may also drop the Suggestion.
+"""The make stage: the selected lens run, its research still in context, makes
+what it suggests with tools that write only into the Suggestion's artifact
+folder, and ends with ``finish_suggestion``: the decision as it now stands.
 """
 
 from __future__ import annotations
@@ -18,9 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pantaray_agents.conversation.loop import Continue, Finish, IdleTurn
 from pantaray_agents.conversation.window import ConversationEntry
-from pantaray_agents.local_runtime.tooling.tool_result_storage import (
-    discard_run_tool_results,
-)
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
 )
@@ -117,17 +110,6 @@ def _finish_tool() -> LlmToolDefinition:
     )
 
 
-def _require_files(folder: Path, paths: list[str]) -> None:
-    for path in paths:
-        try:
-            descriptor = open_workspace_file_descriptor(
-                root_path=folder, relative_path=path
-            )
-        except (WorkspacePathMissingError, BrokerPolicyError) as exc:
-            raise ValueError(f"{path} is not a file in the artifact folder") from exc
-        os.close(descriptor)
-
-
 def _parse_made(arguments: Mapping[str, object], folder: Path) -> _Made:
     output = _MadeOutput.model_validate(arguments)
     key_point = output.key_point.strip()
@@ -143,7 +125,13 @@ def _parse_made(arguments: Mapping[str, object], folder: Path) -> _Made:
         raise ValueError(
             "key_point and interaction_contract are required when has_suggestion=true"
         )
-    _require_files(folder, output.artifacts)
+    for path in output.artifacts:
+        try:
+            os.close(
+                open_workspace_file_descriptor(root_path=folder, relative_path=path)
+            )
+        except (WorkspacePathMissingError, BrokerPolicyError) as exc:
+            raise ValueError(f"{path} is not a file in the artifact folder") from exc
     return _Made(
         {"interaction_contract": contract, "key_point": key_point}, output.artifacts
     )
@@ -162,8 +150,8 @@ async def make_suggestion_artifacts(
     """Continue the selected run to make its files; None when it drops the
     Suggestion.
 
-    The folder is removed whenever the stage ends without files to show,
-    including when it fails.
+    The Suggestion job owns the folder: it removes it unless a successful
+    Suggestion listing these files is saved.
     """
 
     submitted = conversation.ending_call
@@ -197,33 +185,27 @@ async def make_suggestion_artifacts(
             )
         return Finish(made)
 
-    try:
-        made = await conversation.converse(
-            tools=resolve_react_tool_definitions(
-                definitions=make_tools.definitions,
-                tool_ids=offered_tool_ids(make_tools.definitions, MAKE_STAGE_TOOL_IDS),
+    made = await conversation.converse(
+        tools=resolve_react_tool_definitions(
+            definitions=make_tools.definitions,
+            tool_ids=offered_tool_ids(make_tools.definitions, MAKE_STAGE_TOOL_IDS),
+        ),
+        ending_tool=_finish_tool(),
+        opening=(
+            ConversationEntry(
+                LlmTurnToolResultItem(
+                    type="tool_result",
+                    call_id=submitted.call_id,
+                    name=submitted.name,
+                    output={"status": "selected", "instruction": instruction},
+                )
             ),
-            ending_tool=_finish_tool(),
-            opening=(
-                ConversationEntry(
-                    LlmTurnToolResultItem(
-                        type="tool_result",
-                        call_id=submitted.call_id,
-                        name=submitted.name,
-                        output={"status": "selected", "instruction": instruction},
-                    )
-                ),
-            ),
-            steps=SuggestionRunSteps(
-                run_id=suggestion_id, record=record_step, prompt=instruction
-            ),
-            decide=decide,
-        )
-    except BaseException:
-        discard_run_tool_results(folder)
-        raise
-    if not made.artifacts:
-        discard_run_tool_results(folder)
+        ),
+        steps=SuggestionRunSteps(
+            run_id=suggestion_id, record=record_step, prompt=instruction
+        ),
+        decide=decide,
+    )
     if made.decided is None:
         return None
     return {

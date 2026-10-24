@@ -3,7 +3,6 @@
 import asyncio
 import itertools
 import random
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,14 +33,9 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
 from pantaray_agents.agents.suggestion_agent.make import FINISH_SUGGESTION_TOOL_NAME
 from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_LLM_TURNS
-from pantaray_agents.agents.suggestion_agent.research import (
-    FixedSuggestionResearchTools,
-    SuggestionMakeTools,
-)
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationRequest
 from pantaray_agents.mock.suggestion_research import (
-    _mock_definition,
     build_mock_suggestion_research_tools,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig, PromptLoader
@@ -193,12 +187,6 @@ def test_a_lens_run_shows_a_seeded_draw_from_the_lens_examples() -> None:
     assert len(draws) > 1
 
 
-def make_tools(tmp_path: Path) -> FixedSuggestionResearchTools:
-    tools = build_mock_suggestion_research_tools()
-    made = (*tools.definitions, _mock_definition("apply_patch"))
-    return replace(tools, make_tools=SuggestionMakeTools(made, tmp_path / "made"))
-
-
 @pytest.mark.asyncio
 async def test_the_selector_choice_maps_to_that_candidate(tmp_path: Path) -> None:
     generate, selector_prompts = _model(
@@ -210,7 +198,9 @@ async def test_the_selector_choice_maps_to_that_candidate(tmp_path: Path) -> Non
     )
     steps: list[ReactLoopStep] = []
 
-    decision = await _decide(generate, steps, make_tools(tmp_path))
+    decision = await _decide(
+        generate, steps, build_mock_suggestion_research_tools(tmp_path / "made")
+    )
 
     assert decision.selected_lens == "perspective"
     assert decision.extraction["decided"]["key_point"] == "third idea"

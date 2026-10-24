@@ -44,9 +44,22 @@ def load_test_prompt_config(prompt_name: str) -> PromptConfig:
         "suggestion/suggestion_lenses",
         "suggestion/suggestion_selector",
         "suggestion/suggestion_nudges",
+        "suggestion/suggestion_make",
     ):
         return PromptLoader().load_config(prompt_name)
     raise AssertionError(f"Unexpected prompt requested in E2E test: {prompt_name}")
+
+
+def keep_decision(contract: str, key_point: str) -> dict[str, object]:
+    return {
+        "tool_id": "finish_suggestion",
+        "args": {
+            "has_suggestion": True,
+            "interaction_contract": contract,
+            "key_point": key_point,
+            "artifacts": [],
+        },
+    }
 
 
 class LocalWsSuggestionRepository(MockSuggestionAgentRepository):

@@ -90,8 +90,6 @@ class _Model:
         lens = CHOSEN if f"### {CHOSEN}" in str(request.conversation[0]) else OTHER
         key = (lens, FINISH_SUGGESTION_TOOL_NAME in {t.name for t in request.tools})
         self.requests.setdefault(key, []).append(request)
-        if not self.turns[key]:
-            raise RuntimeError("model unavailable")
         name, arguments = self.turns[key].pop(0)
         call = LlmToolCall(call_id=f"c{next(self.ids)}", name=name, arguments=arguments)
         self.calls.append(call)
@@ -193,7 +191,7 @@ async def test_the_selected_run_continues_its_research_to_make_a_file(
         ([("apply_patch", WRITE), _finish(None, ())], None),
     ],
 )
-async def test_without_files_to_show_no_folder_is_left(
+async def test_without_files_the_decision_stands_or_is_dropped(
     tmp_path: Path, make: list, kept: str | None
 ) -> None:
     decision = await _decide(_Model(research=[], make=make), tmp_path / "made", [])
@@ -201,17 +199,6 @@ async def test_without_files_to_show_no_folder_is_left(
     decided = decision.extraction["decided"]
     assert (decided and decided["key_point"]) == kept
     assert decision.extraction["artifacts"] == []
-    assert not (tmp_path / "made").exists()
-
-
-@pytest.mark.asyncio
-async def test_a_failed_make_stage_leaves_no_folder(tmp_path: Path) -> None:
-    model = _Model(research=[], make=[("apply_patch", WRITE)])
-
-    with pytest.raises(RuntimeError, match="model unavailable"):
-        await _decide(model, tmp_path / "made", [])
-
-    assert not (tmp_path / "made").exists()
 
 
 @pytest.mark.asyncio

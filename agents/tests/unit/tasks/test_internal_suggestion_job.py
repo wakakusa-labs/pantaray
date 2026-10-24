@@ -96,6 +96,11 @@ _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
 )
 
 
+_MADE = SimpleNamespace(status="success", has_suggestion=True, artifacts=["draft.md"])
+# A saved Suggestion with nothing to show.
+_SAVED = SimpleNamespace(status="success", has_suggestion=False, artifacts=[])
+
+
 def _payload() -> SuggestionJobPayload:
     return {
         "job_id": "job-1",
@@ -348,7 +353,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
             "request_images_count": 0,
             "used_images_count": 0,
         },
-        process=AsyncMock(return_value=SimpleNamespace(status="success")),
+        process=AsyncMock(return_value=_SAVED),
     )
     get_agent = AsyncMock(return_value=agent)
     monkeypatch.setattr(
@@ -390,7 +395,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
     # the Suggestion generated after the toggle out of the store.
     async def _turn_recording_off(_request: object) -> SimpleNamespace:
         _persist_source(db_path, capture_paused=True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     agent.process = _turn_recording_off
     await _run_suggestion_job(_payload())
@@ -522,7 +527,7 @@ async def test_run_suggestion_job_persists_success_terminal_row(
             return_value=SimpleNamespace(error=None)
         ),
     )
-    response = SimpleNamespace(status="success")
+    response = _SAVED
     agent = SimpleNamespace(
         build_persistence_payload=lambda _response: {
             "prompt_name": "suggestion",
@@ -554,14 +559,34 @@ async def test_run_suggestion_job_persists_success_terminal_row(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("deliverable", [True, False])
-async def test_a_run_starts_without_earlier_files_and_a_discard_removes_its_own(
+@pytest.mark.parametrize(
+    ("deliverable", "response", "kept"),
+    [
+        (True, _MADE, True),
+        # The writer timed out after the make stage: an error row, no files.
+        (
+            True,
+            SimpleNamespace(status="error", has_suggestion=False, artifacts=[]),
+            False,
+        ),
+        # Saved as a Suggestion that does not list the files.
+        (
+            True,
+            SimpleNamespace(status="success", has_suggestion=True, artifacts=[]),
+            False,
+        ),
+        (False, _MADE, False),
+    ],
+)
+async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     deliverable: bool,
+    response: SimpleNamespace,
+    kept: bool,
 ) -> None:
-    """A requeued run must not offer files an earlier attempt made, and a
-    Suggestion that is dropped must not leave its files behind."""
+    """A requeued run must not offer files an earlier attempt made, and files no
+    saved Suggestion shows must not stay behind."""
     db_path = tmp_path / "runtime.db"
     artifacts_root = resolve_suggestion_artifacts_root(
         db_path=db_path, user_id="user-1", suggestion_id="suggestion-1"
@@ -582,7 +607,7 @@ async def test_a_run_starts_without_earlier_files_and_a_discard_removes_its_own(
         assert not artifacts_root.exists()
         artifacts_root.mkdir(parents=True)
         (artifacts_root / "draft.md").write_text("made now", encoding="utf-8")
-        return SimpleNamespace(status="success")
+        return response
 
     agent = SimpleNamespace(
         build_persistence_payload=lambda _response: {
@@ -606,11 +631,10 @@ async def test_a_run_starts_without_earlier_files_and_a_discard_removes_its_own(
 
     await _run_suggestion_job(_payload())
 
-    if deliverable:
-        repository.save_suggestion.assert_awaited_once()
+    assert repository.save_suggestion.await_count == int(deliverable)
+    if kept:
         assert [path.name for path in artifacts_root.iterdir()] == ["draft.md"]
     else:
-        repository.discard_suggestion_if_processing.assert_awaited_once()
         assert not artifacts_root.exists()
 
 
@@ -1242,7 +1266,8 @@ async def test_the_run_reads_activity_from_the_cursor_its_insight_committed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository, get_agent, gate = _readable_insight_job(
-        monkeypatch, process=AsyncMock(return_value=SimpleNamespace(status="success"))
+        monkeypatch,
+        process=AsyncMock(return_value=_SAVED),
     )
 
     await _run_suggestion_job(_payload())
@@ -1267,7 +1292,7 @@ async def test_a_revoked_activity_permit_publishes_nothing(
             # The next model call or step write is where the revocation lands.
             await asyncio.sleep(1)
         finished.append(True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     get_agent.return_value.process = _process
 
@@ -1291,7 +1316,7 @@ async def test_a_model_request_started_after_revocation_is_refused(
         # Before the cancel reaches this task, the next model send must not start.
         async with source_http_request("user-1"):
             sent.append(True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     get_agent.return_value.process = _process
 

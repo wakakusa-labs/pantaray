@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
 from pantaray_agents.orchestration.ws.deliverable_sessions import (
     owner_has_deliverable_session,
 )
+from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
 from pantaray_agents.schema.repository_errors import repository_data_or_raise
 from pantaray_agents.tasks.job_retry import (
@@ -250,7 +252,29 @@ async def _resolve_ui_language(user_id: str) -> str | None:
     )
 
 
+@dataclass(slots=True)
+class _ArtifactFolder:
+    """The job owns the artifact folder from its agent run's start to the
+    terminal save, and keeps it only with a saved Suggestion listing its files."""
+
+    owned: bool = False
+    kept: bool = False
+
+
 async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
+    folder = _ArtifactFolder()
+    try:
+        await _run_and_publish(payload, folder)
+    finally:
+        # An error, a timeout, a dropped or empty Suggestion, a requeue: no
+        # saved row will ever show these files, and nothing else removes them.
+        if folder.owned and not folder.kept:
+            _discard_suggestion_artifacts(payload)
+
+
+async def _run_and_publish(
+    payload: SuggestionJobRuntimePayload, folder: _ArtifactFolder
+) -> None:
     repository = await deps.get_suggestion_repository()
     db_path, timeout_ms = read_local_runtime_db_config()
     try:
@@ -354,6 +378,7 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
         # A requeued job runs the agent again from the start, so files an
         # earlier attempt made are not this run's.
         _discard_suggestion_artifacts(payload)
+        folder.owned = True
         try:
             response = await _process_while_readable(
                 agent=agent, request=request, activity_start=activity_start
@@ -440,6 +465,11 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
             response=response,
             activity_start=activity_start,
         ):
+            folder.kept = (
+                response.status == StatusType.SUCCESS
+                and response.has_suggestion
+                and bool(response.artifacts)
+            )
             return
         await _discard_suggestion(
             repository=repository,

@@ -160,51 +160,51 @@ export function OnboardingScreen({
                 {step === 'done' && connection !== null ? (
                   <DoneStep t={t} connection={connection} isRecording={configured.recording} />
                 ) : null}
+              </div>
 
-                <div className="onb-footer">
-                  {index > 0 && step !== 'done' ? (
+              <div className="onb-footer">
+                {index > 0 && step !== 'done' ? (
+                  <button
+                    type="button"
+                    className="settings-action-button"
+                    onClick={() => progress.goTo(STEPS[index - 1].id)}
+                  >
+                    {t('onboarding.back')}
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="onb-footer-end">
+                  {blockedHint ? <span className="ai-note">{blockedHint}</span> : null}
+                  {progress.finishing === 'failed' ? (
+                    <span className="settings-section-error" role="alert">
+                      {t('onboarding.finishFailed')}
+                    </span>
+                  ) : null}
+                  {!current.required && step !== 'done' && !configured[step] ? (
+                    <button type="button" className="settings-action-button" onClick={next}>
+                      {t('onboarding.skip')}
+                    </button>
+                  ) : null}
+                  {step === 'done' ? (
                     <button
                       type="button"
-                      className="settings-action-button"
-                      onClick={() => progress.goTo(STEPS[index - 1].id)}
+                      className="recording-intro-primary"
+                      disabled={progress.finishing === 'saving'}
+                      onClick={() => void progress.finish()}
                     >
-                      {t('onboarding.back')}
+                      {t('onboarding.start')}
                     </button>
                   ) : (
-                    <span />
+                    <button
+                      type="button"
+                      className="recording-intro-primary"
+                      disabled={!configured[step]}
+                      onClick={next}
+                    >
+                      {t('onboarding.next')}
+                    </button>
                   )}
-                  <div className="onb-footer-end">
-                    {blockedHint ? <span className="ai-note">{blockedHint}</span> : null}
-                    {progress.finishing === 'failed' ? (
-                      <span className="settings-section-error" role="alert">
-                        {t('onboarding.finishFailed')}
-                      </span>
-                    ) : null}
-                    {!current.required && step !== 'done' && !configured[step] ? (
-                      <button type="button" className="settings-action-button" onClick={next}>
-                        {t('onboarding.skip')}
-                      </button>
-                    ) : null}
-                    {step === 'done' ? (
-                      <button
-                        type="button"
-                        className="recording-intro-primary"
-                        disabled={progress.finishing === 'saving'}
-                        onClick={() => void progress.finish()}
-                      >
-                        {t('onboarding.start')}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="recording-intro-primary"
-                        disabled={!configured[step]}
-                        onClick={next}
-                      >
-                        {t('onboarding.next')}
-                      </button>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>

@@ -3,8 +3,9 @@
 The short Insight runs once per 15-minute window while the user records and is
 the only Suggestion trigger, so calling each account's probe tool once here
 bounds the external calls by construction. The arguments come from the start
-of the period to look at alone, so no read position is stored; a window whose
-run is skipped is never probed.
+of the period to look at alone, which the caller derives from the last Insight
+that ran, so no read position is stored here; a window whose run is skipped is
+never probed, and the next run that proceeds reaches back over it.
 """
 
 from __future__ import annotations
@@ -173,8 +174,9 @@ def substitute_window(
 ) -> dict[str, JSONValue]:
     """Fill the probe's placeholders with `since`, the start of the period to look at.
 
-    The names keep `window_start`, but the caller passes the start of the
-    previous window, so consecutive runs overlap instead of leaving a gap. A string that is exactly one placeholder becomes the value itself, so an
+    The names keep `window_start`, but the caller passes a start that overlaps
+    the previous run's window, so consecutive runs leave no gap. A string that
+    is exactly one placeholder becomes the value itself, so an
     epoch argument stays a number; inside a longer string (a search query such
     as 'after:{window_start_epoch}') it is spliced in as text.
     """

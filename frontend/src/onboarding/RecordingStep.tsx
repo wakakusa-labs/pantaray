@@ -75,114 +75,116 @@ export function RecordingStep({
         <p>{t('recordingIntro.excluded')}</p>
       </details>
 
-      <section className="dashboard-section ai-connection onb-section">
-        <h3 className="ai-group">{t('onboarding.recording.permissionsTitle')}</h3>
-        <p className="ai-note ai-group-note">{t('onboarding.recording.permissionsNote')}</p>
-        {PERMISSIONS.map((permission) => {
-          const label = t(permission.label);
-          return (
-            <Row key={permission.id} label={label}>
-              {granted[permission.id] ? (
-                <div className="ai-inline">
-                  <span className="onb-granted">
-                    <Check size={14} strokeWidth={2.2} aria-hidden="true" />
-                    {t('onboarding.recording.granted')}
-                  </span>
-                </div>
-              ) : requested.has(permission.id) ? (
-                <>
-                  <div className="ai-inline">
-                    <span className="onb-waiting" role="status">
-                      {t('onboarding.recording.waiting')}
-                    </span>
-                    {/* macOS applies a Screen Recording grant only to a reopened app, so it
-                        keeps reading as missing until then. */}
-                    {permission.id === 'screen_recording' ? (
+      <ol className="onb-guide onb-rec-stages">
+        <li>
+          <h3 className="onb-guide-title">{t('onboarding.recording.permissionsTitle')}</h3>
+          <span className="ai-note">{t('onboarding.recording.permissionsNote')}</span>
+          <div className="ai-connection onb-rec-rows">
+            {PERMISSIONS.map((permission) => {
+              const label = t(permission.label);
+              return (
+                <Row key={permission.id} label={label}>
+                  {granted[permission.id] ? (
+                    <div className="ai-inline">
+                      <span className="onb-granted">
+                        <Check size={14} strokeWidth={2.2} aria-hidden="true" />
+                        {t('onboarding.recording.granted')}
+                      </span>
+                    </div>
+                  ) : requested.has(permission.id) ? (
+                    <>
+                      <div className="ai-inline">
+                        <span className="onb-waiting" role="status">
+                          {t('onboarding.recording.waiting')}
+                        </span>
+                        {/* macOS applies a Screen Recording grant only to a reopened app, so it
+                            keeps reading as missing until then. */}
+                        {permission.id === 'screen_recording' ? (
+                          <button
+                            type="button"
+                            className="settings-action-button"
+                            disabled={relaunching}
+                            onClick={() => void relaunch()}
+                          >
+                            {t('onboarding.recording.relaunch')}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="settings-text-button"
+                          aria-label={`${label}: ${t('recordingIntro.openSettings')}`}
+                          onClick={() => void openPane(permission.id)}
+                        >
+                          {t('recordingIntro.openSettings')}
+                        </button>
+                      </div>
+                      <p className="ai-note ai-note--control">
+                        {t('onboarding.recording.privacyPane')} <span aria-hidden="true">›</span>{' '}
+                        {t(permission.pane)}
+                      </p>
+                      {permission.id === 'screen_recording' ? (
+                        <p className="ai-note ai-note--control">
+                          {t('onboarding.recording.relaunchNote')}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="ai-inline">
                       <button
                         type="button"
                         className="settings-action-button"
-                        disabled={relaunching}
-                        onClick={() => void relaunch()}
+                        aria-label={`${label}: ${t('onboarding.recording.allow')}`}
+                        onClick={() => {
+                          setRequested((current) => new Set(current).add(permission.id));
+                          void openPane(permission.id);
+                        }}
                       >
-                        {t('onboarding.recording.relaunch')}
+                        {t('onboarding.recording.allow')}
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="settings-text-button"
-                      aria-label={`${label}: ${t('recordingIntro.openSettings')}`}
-                      onClick={() => void openPane(permission.id)}
-                    >
-                      {t('recordingIntro.openSettings')}
-                    </button>
-                  </div>
-                  <p className="ai-note ai-note--control">
-                    {t('onboarding.recording.privacyPane')} <span aria-hidden="true">›</span>{' '}
-                    {t(permission.pane)}
-                  </p>
-                  {permission.id === 'screen_recording' ? (
-                    <p className="ai-note ai-note--control">
-                      {t('onboarding.recording.relaunchNote')}
-                    </p>
-                  ) : null}
-                </>
-              ) : (
-                <div className="ai-inline">
-                  <button
-                    type="button"
-                    className="settings-action-button"
-                    aria-label={`${label}: ${t('onboarding.recording.allow')}`}
-                    onClick={() => {
-                      setRequested((current) => new Set(current).add(permission.id));
-                      void openPane(permission.id);
-                    }}
-                  >
-                    {t('onboarding.recording.allow')}
-                  </button>
-                </div>
-              )}
-            </Row>
-          );
-        })}
-
-        <div className="ai-rule" />
-
-        <div className="settings-section-header">
-          <div className="settings-section-heading">
-            <h3 className="ai-group onb-switch-title">{t('settings.screenshotCapture.title')}</h3>
-            <div
-              className="settings-section-status"
-              role={captureStatusUnavailable ? 'alert' : undefined}
-            >
-              {captureStatusUnavailable
-                ? t('settings.screenshotCapture.unavailable')
-                : isRecording === null
-                  ? t('settings.loadingStatus')
-                  : isRecording
-                    ? t('common.active')
-                    : bothGranted
-                      ? t('onboarding.recording.switchReady')
-                      : t('onboarding.recording.switchBlocked')}
-            </div>
+                    </div>
+                  )}
+                </Row>
+              );
+            })}
           </div>
-          <RecordingSwitch
-            isCapturing={isRecording}
-            canStart={bothGranted && capture.isScreenshotCaptureAvailable}
-            isProcessing={capture.isProcessing}
-            onChange={changeRecording}
-          />
-        </div>
-        {startOutcome !== null ? (
-          <p className="ai-note onb-start-problem" role="alert">
-            {t(
-              startOutcome === 'permission_pending'
-                ? 'onboarding.recording.permissionPending'
-                : 'recordingIntro.startFailed'
-            )}
-          </p>
-        ) : null}
-        <p className="ai-note">{t('recordingIntro.settingsNote')}</p>
-      </section>
+        </li>
+        <li>
+          <h3 className="onb-guide-title">{t('onboarding.recording.switchTitle')}</h3>
+          <span className="ai-note" role={captureStatusUnavailable ? 'alert' : undefined}>
+            {captureStatusUnavailable
+              ? t('settings.screenshotCapture.unavailable')
+              : isRecording === null
+                ? t('settings.loadingStatus')
+                : isRecording
+                  ? t('onboarding.recording.recordingOn')
+                  : bothGranted
+                    ? t('onboarding.recording.switchReady')
+                    : t('onboarding.recording.switchBlocked')}
+          </span>
+          <div className="ai-connection onb-rec-rows">
+            <Row label={t('onboarding.recording.switchLabel')}>
+              <div className="ai-inline">
+                <RecordingSwitch
+                  isCapturing={isRecording}
+                  canStart={bothGranted && capture.isScreenshotCaptureAvailable}
+                  isProcessing={capture.isProcessing}
+                  onChange={changeRecording}
+                />
+              </div>
+            </Row>
+          </div>
+          {startOutcome !== null ? (
+            <p className="ai-note onb-start-problem" role="alert">
+              {t(
+                startOutcome === 'permission_pending'
+                  ? 'onboarding.recording.permissionPending'
+                  : 'recordingIntro.startFailed'
+              )}
+            </p>
+          ) : null}
+          <span className="ai-note">{t('recordingIntro.settingsNote')}</span>
+        </li>
+      </ol>
     </>
   );
 }

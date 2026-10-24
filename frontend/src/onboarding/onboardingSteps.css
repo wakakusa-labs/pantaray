@@ -29,14 +29,8 @@
   margin-bottom: 2px;
 }
 
-.onb-section,
 .onb-apps .integration-settings {
   border-bottom: 0;
-}
-
-.onb-switch-title {
-  color: var(--text-primary);
-  margin: 0 0 2px;
 }
 
 .onb-waiting,
@@ -127,4 +121,18 @@
   color: var(--fog-text);
   font-weight: var(--weight-semibold);
   margin: 0;
+}
+
+/* The recording step's two stages, numbered like the key guide. */
+.onb-rec-stages {
+  gap: 26px;
+  margin-top: 28px;
+}
+
+.onb-rec-stages .onb-guide-title {
+  margin: 0;
+}
+
+.onb-rec-rows {
+  margin-top: 8px;
 }

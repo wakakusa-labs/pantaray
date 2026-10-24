@@ -85,7 +85,7 @@ describe('RecordingStep', () => {
     const bridge = stubBridge();
     const toggle = await renderStep();
     expect(toggle).toBeDisabled();
-    expect(screen.getByText('2 つの許可が済むとオンにできます')).toBeInTheDocument();
+    expect(screen.getByText('2 つの許可が済むとオンにできます。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: 許可する' }));
     expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
@@ -108,7 +108,7 @@ describe('RecordingStep', () => {
     await returnFromSystemSettings();
     await waitFor(() => expect(screen.getAllByText('許可済み')).toHaveLength(2));
     expect(toggle).toBeEnabled();
-    expect(screen.getByText('オンにすると記録を始めます')).toBeInTheDocument();
+    expect(screen.getByText('オンにすると記録を始めます。')).toBeInTheDocument();
   });
 
   it('offers to reopen only after Screen Recording was asked for, and never shows it granted before', async () => {

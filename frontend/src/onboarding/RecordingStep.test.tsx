@@ -120,7 +120,7 @@ describe('RecordingStep', () => {
 
     fireEvent.click(toggle);
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'アクセシビリティや画面収録などの権限が必要です。'
+      'ほかにも許可が必要です。システム設定で許可したら、もう一度スイッチをオンにしてください。'
     );
     expect(start).toHaveBeenCalledTimes(1);
 

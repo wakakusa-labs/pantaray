@@ -194,7 +194,7 @@ export function RecordingStep({
           <p className="ai-note onb-start-problem" role="alert">
             {t(
               startOutcome === 'permission_pending'
-                ? 'recordingIntro.permissionPending'
+                ? 'onboarding.recording.permissionPending'
                 : 'recordingIntro.startFailed'
             )}
           </p>

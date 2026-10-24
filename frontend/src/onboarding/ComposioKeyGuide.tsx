@@ -14,7 +14,7 @@ const KEY_SCOPES = [
   ['Session tool execution', 'Write only'],
 ] as const;
 
-/** How to get a Composio project API key, shown under the key field until one is saved. */
+/** How to get a Composio project API key, shown above the key field until one is saved. */
 export function ComposioKeyGuide({ t }: { t: Translate }) {
   return (
     <ol className="onb-guide">

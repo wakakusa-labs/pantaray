@@ -6,7 +6,7 @@ import './onboardingSteps.css';
 
 /**
  * Setup's apps step: the Settings integrations section with setup's own lead, and the key
- * guide in place of the key field's hint. The section shows the guide only until a key is
+ * guide above the key field. The section shows the guide only until a key is
  * saved, then the services. `hasSavedKey` is the parent's read of the same connection
  * state, which it also uses to tell whether the step is done.
  */

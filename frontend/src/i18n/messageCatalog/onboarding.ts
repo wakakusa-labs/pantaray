@@ -19,6 +19,8 @@ export const ONBOARDING_MESSAGES = defineMessages({
       'Once it is on, reopen Pantaray to use it. Setup continues from this step.',
     'onboarding.recording.switchReady': 'Turn it on to start recording',
     'onboarding.recording.switchBlocked': 'You can turn it on once both are allowed',
+    'onboarding.recording.permissionPending':
+      'More permissions are needed. Allow them in System Settings, then turn the switch on again.',
     'onboarding.apps.lead':
       'Let Pantaray use the services you use every day, such as Gmail and your calendar, for its work. Connecting them takes a Composio API key.',
     'onboarding.apps.leadWithKey':
@@ -32,7 +34,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.createKeyNote':
       'Create a new key under Settings → API Keys, with these permissions.',
     'onboarding.apps.guide.paste': 'Paste the key',
-    'onboarding.apps.guide.pasteNote': 'Paste the key that starts with ak_ above and save it.',
+    'onboarding.apps.guide.pasteNote': 'Paste the key that starts with ak_ below and save it.',
   },
   ja: {
     'onboarding.recording.lead': 'この Mac での操作を記録して、提案や作業に使います。',
@@ -52,6 +54,8 @@ export const ONBOARDING_MESSAGES = defineMessages({
       'オンにしたら、開き直すと使えるようになります。この画面の続きから再開します。',
     'onboarding.recording.switchReady': 'オンにすると記録を始めます',
     'onboarding.recording.switchBlocked': '2 つの許可が済むとオンにできます',
+    'onboarding.recording.permissionPending':
+      'ほかにも許可が必要です。システム設定で許可したら、もう一度スイッチをオンにしてください。',
     'onboarding.apps.lead':
       'Gmail やカレンダーなど、ふだん使うサービスを Pantaray の作業に使えるようにします。つなぐには Composio の API キーが要ります。',
     'onboarding.apps.leadWithKey': 'つなぐサービスを選んでください。あとから設定で増やせます。',
@@ -64,6 +68,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.createKeyNote':
       'Settings → API Keys で新しいキーを作ります。権限は次のように選んでください。',
     'onboarding.apps.guide.paste': 'キーを貼り付ける',
-    'onboarding.apps.guide.pasteNote': 'ak_ で始まるキーを、上の欄に貼り付けて保存します。',
+    'onboarding.apps.guide.pasteNote': 'ak_ で始まるキーを、下の欄に貼り付けて保存します。',
   },
 });

@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 
 import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
+import { useI18n } from '@/context/useI18n';
 import SettingsPage from '../../SettingsPage';
+import { IntegrationSettings } from './IntegrationSettings';
 import type {
   IntegrationAccessUpdateResult,
   IntegrationAccountStatus,
@@ -184,6 +186,60 @@ describe('the Composio key', () => {
     expect(await screen.findByRole('link', { name: 'Open Composio' })).toBeInTheDocument();
     expect(aiConnection.update).toHaveBeenLastCalledWith({ operation: 'remove_integration_key' });
     expect(screen.queryByRole('button', { name: /^Gmail/ })).not.toBeInTheDocument();
+  });
+
+  it('refuses an account key while it is typed, and takes a project key', async () => {
+    keySaved = false;
+    renderSettings();
+
+    const input = await screen.findByLabelText('Composio API key');
+    const save = screen.getByRole('button', { name: 'Composio API key: Save' });
+    fireEvent.change(input, { target: { value: ' ck_account ' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This is an account key. Open a project and create an API key that starts with ak_.'
+    );
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(aiConnection.update).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: 'ak_project' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(aiConnection.update).toHaveBeenCalledWith({
+        operation: 'save_integration_key',
+        apiKey: 'ak_project',
+      })
+    );
+  });
+
+  it('puts onboarding copy in place of the heading and the key hint', async () => {
+    keySaved = false;
+    function Onboarding() {
+      const { t } = useI18n();
+      return (
+        <IntegrationSettings
+          t={t}
+          onboarding={{ lead: <p>Lead copy</p>, keyGuide: <p>Key guide copy</p> }}
+        />
+      );
+    }
+    render(
+      <AuthContext.Provider value={auth}>
+        <UiLanguageProvider initialLanguage="en">
+          <Onboarding />
+        </UiLanguageProvider>
+      </AuthContext.Provider>
+    );
+
+    expect(await screen.findByText('Lead copy')).toBeInTheDocument();
+    expect(screen.getByText('Key guide copy')).toBeInTheDocument();
+    expect(screen.getByLabelText('Composio API key')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Integrations' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Let Pantaray use the services you connect for its work.')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open Composio' })).not.toBeInTheDocument();
   });
 
   it('asks for a new key when the key is refused, and offers a reload only for a failed read', async () => {

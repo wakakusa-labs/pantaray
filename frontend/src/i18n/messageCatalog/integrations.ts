@@ -54,6 +54,8 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.key.label': 'Composio API key',
     'settings.integrations.key.placeholder': 'ak_…',
     'settings.integrations.key.rejected': "This key doesn't work. Replace it with a new key.",
+    'settings.integrations.key.accountKey':
+      'This is an account key. Open a project and create an API key that starts with ak_.',
     'settings.integrations.setup.open': 'Open Composio',
     'settings.integrations.setup.createKey':
       'Create a key under Settings → Project Settings → API Keys.',
@@ -127,6 +129,8 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.key.label': 'Composio API キー',
     'settings.integrations.key.placeholder': 'ak_…',
     'settings.integrations.key.rejected': 'このキーは使えません。新しいキーに変更してください。',
+    'settings.integrations.key.accountKey':
+      'これはアカウントのキーです。プロジェクトを開いて、ak_ で始まる API キーを作ってください。',
     'settings.integrations.setup.open': 'Composio を開く',
     'settings.integrations.setup.createKey':
       'Settings → Project Settings → API Keys でキーを作ります',

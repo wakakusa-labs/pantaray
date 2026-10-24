@@ -149,6 +149,22 @@ it('releases a cancelled login before its old response and preserves a newer log
   expect(result.current.outcome?.result).toEqual({ ok: true });
 });
 
+it('shows the web search part a failed read with its retry, and the key row once it reads', async () => {
+  const api = bridge();
+  api.getState.mockResolvedValueOnce({ ok: false, error: 'runtime_unavailable' });
+  render(<AiConnectionSettingsSection part="web_search" />);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'settings.aiConnection.error.runtime_unavailable'
+  );
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByText('settings.aiConnection.retry'));
+  expect(
+    await screen.findByLabelText('settings.aiConnection.webSearch.keyLabel')
+  ).toBeInTheDocument();
+  expect(screen.queryByLabelText('settings.aiConnection.key.label')).not.toBeInTheDocument();
+});
+
 it('reports cancellation failure while keeping the login cancellable', async () => {
   const initial = saved();
   initial.settings.preferences.method = 'chatgpt';
@@ -157,7 +173,7 @@ it('reports cancellation failure while keeping the login cancellable', async () 
   api.update
     .mockReturnValueOnce(login.promise)
     .mockResolvedValueOnce({ ok: false, error: 'runtime_unavailable' });
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   fireEvent.click(await screen.findByText('settings.aiConnection.chatgpt.signIn'));
   fireEvent.click(await screen.findByText('settings.aiConnection.chatgpt.cancel'));
   await screen.findByText(/settings.aiConnection.error.runtime_unavailable/);
@@ -226,7 +242,7 @@ it('cancels its own pending login when the settings page unmounts', async () => 
 
 it('uses refreshed provider metadata and sends the key only to the selected provider', async () => {
   const api = bridge();
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   const provider = await screen.findByLabelText('settings.aiConnection.providerLabel');
   const updated = saved();
   updated.settings.preferences.provider = 'anthropic';
@@ -273,7 +289,7 @@ function methodItem(method: string) {
 it('switches to ChatGPT on a model that backend serves instead of an unusable one', async () => {
   // 持ち越した名前のままだと保存はされるのに経路が立たず、何も送信されない。
   const api = bridge();
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   fireEvent.click(await screen.findByRole('button', METHOD_BUTTON));
   fireEvent.click(methodItem('chatgpt'));
   await waitFor(() =>
@@ -289,7 +305,7 @@ it('saves each model choice as it is made and settles on the last one', async ()
   chatgpt.settings.preferences = { method: 'chatgpt', provider: 'openai', model: 'gpt-6-luna' };
   chatgpt.settings.chatgpt = { status: 'connected' };
   const api = bridge(chatgpt);
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   const picker = await screen.findByRole('combobox', {
     name: 'settings.aiConnection.modelLabel',
   });
@@ -326,7 +342,7 @@ it('saves each model choice as it is made and settles on the last one', async ()
 
 it('keeps an API key unsaved until its Save button is pressed', async () => {
   const api = bridge();
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   const key = await screen.findByLabelText('settings.aiConnection.key.label');
   fireEvent.change(key, { target: { value: 'typed-secret' } });
   fireEvent.blur(key);
@@ -348,7 +364,7 @@ it('keeps an API key unsaved until its Save button is pressed', async () => {
 
 it('keeps provider-bound controls locked until the newest post-save read is committed', async () => {
   const api = bridge();
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   const provider = await screen.findByLabelText('settings.aiConnection.providerLabel');
   const postSave = deferred<ConnectionStateResult>();
   const notification = deferred<ConnectionStateResult>();
@@ -393,7 +409,7 @@ it('keeps provider-bound controls locked until the newest post-save read is comm
 
 it('preserves secret drafts through partial persistence, a read failure and reload', async () => {
   const api = bridge();
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   const input = await screen.findByLabelText('settings.aiConnection.key.label');
   fireEvent.change(input, { target: { value: 'retry-secret' } });
   api.update.mockResolvedValueOnce({ ok: false, error: 'runtime_unavailable' });
@@ -436,7 +452,7 @@ for (const recovery of [
   it(`offers only ${recovery.operation} for the unreadable store and reloads after repair`, async () => {
     const api = bridge();
     api.getState.mockResolvedValue({ ok: false, error: 'invalid_data', recovery });
-    render(<AiConnectionSettingsSection />);
+    render(<AiConnectionSettingsSection part="all" />);
     const repair = await screen.findByRole('button', {
       name: `settings.aiConnection.recovery.${recovery.operation}`,
     });
@@ -459,7 +475,7 @@ for (const recovery of [
 it('does not suggest deletion for unavailable encryption or expose native errors', async () => {
   const api = bridge();
   api.getState.mockResolvedValue({ ok: false, error: 'encryption_unavailable' });
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   await screen.findByText('settings.aiConnection.retry');
   expect(screen.getAllByRole('button')).toHaveLength(1);
   api.getState.mockRejectedValue(new Error('native secret-value'));
@@ -477,7 +493,7 @@ it('keeps cloud routing authoritative when editing saved direct settings', async
       cloudSessionState: 'present',
     });
   const api = bridge(initial);
-  render(<AiConnectionSettingsSection />);
+  render(<AiConnectionSettingsSection part="all" />);
   fireEvent.click(await screen.findByRole('button', METHOD_BUTTON));
   expect(methodItem('cloud')).toHaveAttribute('aria-checked', 'true');
   fireEvent.click(methodItem('api_key'));

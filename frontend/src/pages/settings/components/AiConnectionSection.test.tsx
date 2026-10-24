@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { AiConnectionSection, type AiConnectionActions } from './AiConnectionSection';
+import {
+  AiConnectionSection,
+  type AiConnectionActions,
+  type AiConnectionPart,
+} from './AiConnectionSection';
 import type { AiConnectionState } from '../aiConnectionModel';
 import type { Translate } from '../types';
 
@@ -41,7 +45,10 @@ const UNCONFIGURED: AiConnectionState = {
   canStoreSecrets: true,
 };
 
-function renderSection(state: Partial<AiConnectionState> = {}): AiConnectionActions {
+function renderSection(
+  state: Partial<AiConnectionState> = {},
+  part: AiConnectionPart = 'all'
+): AiConnectionActions {
   const actions: AiConnectionActions = {
     selectMethod: vi.fn(),
     selectProvider: vi.fn(),
@@ -56,6 +63,7 @@ function renderSection(state: Partial<AiConnectionState> = {}): AiConnectionActi
   };
   render(
     <AiConnectionSection
+      part={part}
       pendingOperation={null}
       feedback={null}
       state={{ ...UNCONFIGURED, ...state }}
@@ -275,6 +283,40 @@ it('links the Tavily key site as a new-window link, which main opens in the defa
   expect(link).toHaveAttribute('target', '_blank');
 });
 
+it('shows inference and web search together in Settings, and each alone in its own part', () => {
+  const methodButton = () =>
+    screen.queryByRole('button', { name: /^settings\.aiConnection\.methodTitle: / });
+  const searchKey = () => screen.queryByLabelText('settings.aiConnection.webSearch.keyLabel');
+  const heading = () => screen.queryByRole('heading', { name: 'settings.aiConnection.title' });
+
+  renderSection();
+  expect(heading()).toBeInTheDocument();
+  expect(methodButton()).toBeInTheDocument();
+  expect(screen.getByLabelText('settings.aiConnection.key.label')).toBeInTheDocument();
+  expect(searchKey()).toBeInTheDocument();
+
+  cleanup();
+  renderSection({}, 'inference');
+  expect(methodButton()).toBeInTheDocument();
+  expect(screen.getByLabelText('settings.aiConnection.key.label')).toBeInTheDocument();
+  expect(searchKey()).not.toBeInTheDocument();
+  expect(screen.queryByText('settings.aiConnection.webSearch.title')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+
+  cleanup();
+  const actions = renderSection({}, 'web_search');
+  expect(methodButton()).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('settings.aiConnection.key.label')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  fireEvent.change(searchKey()!, { target: { value: 'tvly-key' } });
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: 'settings.aiConnection.webSearch.keyLabel: settings.aiConnection.key.save',
+    })
+  );
+  expect(actions.saveWebSearchKey).toHaveBeenCalledWith('tvly-key');
+});
+
 it('does not carry a typed key across a provider change', () => {
   const actions: AiConnectionActions = {
     selectMethod: vi.fn(),
@@ -290,6 +332,7 @@ it('does not carry a typed key across a provider change', () => {
   };
   const { rerender } = render(
     <AiConnectionSection
+      part="all"
       pendingOperation={null}
       feedback={null}
       state={UNCONFIGURED}
@@ -303,6 +346,7 @@ it('does not carry a typed key across a provider change', () => {
 
   rerender(
     <AiConnectionSection
+      part="all"
       pendingOperation={null}
       feedback={null}
       state={{ ...UNCONFIGURED, apiKey: { ...UNCONFIGURED.apiKey, provider: 'anthropic' } }}
@@ -435,6 +479,7 @@ for (const credential of ['api', 'search'] as const) {
       };
       return (
         <AiConnectionSection
+          part="all"
           pendingOperation={null}
           feedback={null}
           state={{
@@ -492,6 +537,7 @@ it('focuses Replace after a newly saved key hides the input', async () => {
     };
     return (
       <AiConnectionSection
+        part="all"
         pendingOperation={null}
         feedback={null}
         state={{ ...UNCONFIGURED, apiKey: { provider: 'openai', hasSavedKey: saved } }}
@@ -564,6 +610,7 @@ it('locks settings while authorizing but keeps cancellation available', () => {
   cleanup();
   const { rerender } = render(
     <AiConnectionSection
+      part="all"
       state={{ ...UNCONFIGURED, method: 'chatgpt' }}
       actions={actions}
       t={translate}
@@ -584,6 +631,7 @@ it('locks settings while authorizing but keeps cancellation available', () => {
   expect(actions.cancelChatgptSignIn).toHaveBeenCalled();
   rerender(
     <AiConnectionSection
+      part="all"
       state={{ ...UNCONFIGURED, method: 'chatgpt' }}
       actions={actions}
       t={translate}
@@ -594,6 +642,7 @@ it('locks settings while authorizing but keeps cancellation available', () => {
   expect(screen.getByText('settings.aiConnection.chatgpt.signIn')).toBeDisabled();
   rerender(
     <AiConnectionSection
+      part="all"
       state={{ ...UNCONFIGURED, method: 'chatgpt' }}
       actions={actions}
       t={translate}
@@ -619,6 +668,7 @@ it('can reapply the same model after persistence succeeds but runtime synchroniz
     };
     return (
       <AiConnectionSection
+        part="all"
         state={{ ...UNCONFIGURED, model }}
         actions={{ ...baseActions, saveModel }}
         t={translate}
@@ -655,6 +705,7 @@ for (const credential of ['api', 'search'] as const) {
       };
       return (
         <AiConnectionSection
+          part="all"
           pendingOperation={null}
           feedback={null}
           t={translate}
@@ -703,6 +754,7 @@ it('restores account focus only after a disconnect operation finishes', () => {
   const state: AiConnectionState = { ...UNCONFIGURED, method: 'chatgpt' };
   const { rerender } = render(
     <AiConnectionSection
+      part="all"
       state={state}
       actions={actions}
       t={translate}
@@ -713,6 +765,7 @@ it('restores account focus only after a disconnect operation finishes', () => {
   expect(screen.getByText('settings.aiConnection.chatgpt.signIn')).toBeDisabled();
   rerender(
     <AiConnectionSection
+      part="all"
       state={state}
       actions={actions}
       t={translate}

@@ -37,16 +37,6 @@ export function createConversationOverlayOwner(params: {
   const ownedOverlayIds = new Set<string>();
   let boundSubject: string | null = null;
   let pendingRequest: PendingOverlayRequest | null = null;
-  // "Later" is answered once per app run, not once per window: the recording screen
-  // lives in the main window, which the user may close and reopen at will, and
-  // reopening it must not ask again. Nothing is stored, so a relaunch asks again.
-  let introDismissed = false;
-
-  // Both belong to the subject that answered the screen and deferred the request.
-  const forgetIntroState = (): void => {
-    pendingRequest = null;
-    introDismissed = false;
-  };
 
   // A conversation window is destroyed when the user closes it, so its id would
   // otherwise stay owned for the rest of the session.
@@ -61,7 +51,7 @@ export function createConversationOverlayOwner(params: {
     for (const overlayId of ownedOverlayIds) params.destroyOverlay(overlayId);
     ownedOverlayIds.clear();
     boundSubject = null;
-    forgetIntroState();
+    pendingRequest = null;
   };
 
   /**
@@ -82,9 +72,9 @@ export function createConversationOverlayOwner(params: {
 
   const onOwnerChanged = (nextSubject: string | null): void => {
     if (boundSubject === nextSubject) return;
-    // The deferred request and the answered screen outlive every window: the gate
-    // opens no window at all, so destroying the owned ones would not clear them.
-    forgetIntroState();
+    // The deferred request outlives every window: the gate opens no window at all, so
+    // destroying the owned ones would not clear it.
+    pendingRequest = null;
     if (ownedOverlayIds.size > 0) destroyOwnedOverlays();
   };
 
@@ -176,17 +166,15 @@ export function createConversationOverlayOwner(params: {
   const readGateState = (): CaptureGateState => {
     const permissions = params.readCapturePermissions();
     if (bothGranted(permissions)) openPendingRequest();
-    return { permissions, introRequested: pendingRequest !== null, introDismissed };
+    return { permissions, introRequested: pendingRequest !== null };
   };
 
   /**
-   * The user answered the recording screen with "later": the deferred conversation
-   * is dropped, and the screen stops opening on its own until the app is relaunched
-   * or another conversation asks for it.
+   * The user answered the recording screen with "later": the deferred conversation is
+   * dropped, so a later grant or recording start does not open it unasked.
    */
   const dismissIntro = (): CaptureGateState => {
     pendingRequest = null;
-    introDismissed = true;
     return readGateState();
   };
 

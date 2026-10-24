@@ -38,7 +38,6 @@ function stubBridge(start = vi.fn(async () => 'started')) {
       getGateState: vi.fn(async () => ({
         permissions: { ...permissions },
         introRequested: false,
-        introDismissed: false,
       })),
       openPermissionSettings,
     },

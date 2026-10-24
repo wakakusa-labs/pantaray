@@ -215,25 +215,21 @@ test('only the owner the recording screen was shown to can answer it with "later
   // outlive the owner it was shown to. Main holds one gate for the whole app run, so an
   // answer carried by that late reply must not drop what the current owner is waiting on.
   let dismissed = 0;
-  const gate = { osPermissionsGranted: false, introRequested: true, introDismissed: false };
+  const gate = { permissions: { accessibility: false, screenRecording: false }, introRequested: true };
   const { context } = createMainContextForAuthTests({
     getRuntimeState: () => ({ status: 'ready', message: null, owner: { id: 'account-b', kind: 'account' } }),
     readCaptureGateState: () => ({ ...gate }),
     dismissRecordingIntro: () => {
       dismissed += 1;
-      Object.assign(gate, { introRequested: false, introDismissed: true });
+      Object.assign(gate, { introRequested: false });
       return { ...gate };
     },
   });
 
-  assert.deepEqual(context.screenshot.dismissIntro('account-a'), {
-    osPermissionsGranted: false, introRequested: true, introDismissed: false,
-  });
+  assert.equal(context.screenshot.dismissIntro('account-a').introRequested, true);
   assert.equal(dismissed, 0);
 
-  assert.deepEqual(context.screenshot.dismissIntro('account-b'), {
-    osPermissionsGranted: false, introRequested: false, introDismissed: true,
-  });
+  assert.equal(context.screenshot.dismissIntro('account-b').introRequested, false);
   assert.equal(dismissed, 1);
 });
 

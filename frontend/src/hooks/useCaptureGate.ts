@@ -10,7 +10,6 @@ export type CaptureGate = CaptureGateState | null;
 const OPEN_GATE: CaptureGateState = {
   permissions: { accessibility: true, screenRecording: true },
   introRequested: false,
-  introDismissed: false,
 };
 
 /**
@@ -58,12 +57,9 @@ export function useCaptureGate(): {
   }, []);
 
   const dismissIntro = useCallback(async () => {
-    // Answering the screen also drops the conversation main deferred for it. Main
-    // holds the answer for the rest of this app run; this only avoids waiting a
-    // round trip to act on it.
-    setGate((current) =>
-      current ? { ...current, introRequested: false, introDismissed: true } : current
-    );
+    // Answering the screen drops the conversation main deferred for it; this only
+    // avoids waiting a round trip to close the screen.
+    setGate((current) => (current ? { ...current, introRequested: false } : current));
     try {
       // The answer names the owner this screen was shown to: a start can wait on macOS
       // permission long enough for the owner to change, and main takes the answer only

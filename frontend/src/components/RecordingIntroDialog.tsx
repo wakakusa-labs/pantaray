@@ -29,12 +29,10 @@ const BODY_KEYS = [
  * The screen that asks macOS for the permissions the recorder needs.
  *
  * Until they are granted the app can read nothing, so no conversation window opens
- * at all: this screen is what a request that was stopped by that gate turns into.
- * It also opens on its own while the permissions are missing, because turning
- * recording on is what asks macOS for them — this is that toggle, with the words
- * that explain it. "Later" is answered in main and holds for the rest of the app
- * run, so reopening this window does not ask again; the gate itself is the live
- * OS permission, and nothing about either is stored.
+ * at all: this screen is what a request that was stopped by that gate turns into,
+ * and it opens only then — first-run setup is where recording is turned on otherwise.
+ * Turning recording on is what asks macOS for the permissions, so this is that toggle,
+ * with the words that explain it. "Later" drops the waiting conversation in main.
  */
 export function RecordingIntroDialog() {
   const { t } = useI18n();
@@ -45,10 +43,10 @@ export function RecordingIntroDialog() {
   const [startOutcome, setStartOutcome] = useState<RecordingStartResult | null>(null);
   // Granted permissions close the screen — including one left open while they were
   // granted for a start made from the tray or the settings page, which the re-read
-  // on focus reports. A conversation waiting on them reopens an answered screen.
-  // The first permission still missing is the pane its settings button opens.
+  // on focus reports. The first permission still missing is the pane its settings
+  // button opens.
   const missingPermission =
-    gate === null || (gate.introDismissed && !gate.introRequested)
+    gate === null || !gate.introRequested
       ? null
       : !gate.permissions.accessibility
         ? 'accessibility'
@@ -57,8 +55,8 @@ export function RecordingIntroDialog() {
           : null;
   const isOpen = missingPermission !== null;
 
-  // Answering the screen closes it whether it opened on its own or on request, and
-  // tells main to drop the conversation the gate deferred.
+  // Answering the screen closes it and tells main to drop the conversation the gate
+  // deferred.
   const answer = async (): Promise<void> => {
     await dismissIntro();
   };

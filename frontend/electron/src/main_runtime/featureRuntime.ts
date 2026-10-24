@@ -30,6 +30,7 @@ import { createHistoryFetcher } from '../history/historyFetch';
 import { createHistoryItemDeleter } from '../history/historyItemDelete';
 import { createHistoryItemReader } from '../history/historyItemRead';
 import type { MainContext } from '../ipc/context';
+import type { OnboardingState } from '../ipc/schemas/onboarding';
 import { createOverlayBootstrapFetcher } from '../history/overlayBootstrapFetch';
 import { startMainIpcRuntime, type MainIpcRuntime } from './ipcBootstrap';
 import { createLocalBackendClient } from '../localBackend/client';
@@ -47,9 +48,9 @@ import {
   type RecordingStartResult,
 } from '../screenshot/screenshotSync';
 import {
-  holdsCaptureOsPermissions,
   holdsScreenRecording,
   openCapturePermissionSettings,
+  readCapturePermissions,
   requestCapturePermissions,
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
@@ -58,6 +59,7 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
@@ -118,6 +120,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     reportInvalid: (reason) => params.logger?.warn?.('OVERLAY_PLACEMENT_INVALID', { reason }),
   });
   params.notificationWindow.setOverlayPlacementGetter(overlayPlacement.get);
+  const onboarding = createOnboardingStateStore({
+    userDataDir: app.getPath('userData'),
+    report: (reason) => params.logger?.warn?.('ONBOARDING_STATE_INVALID', { reason }),
+  });
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -129,7 +135,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     refreshAndResumeConversation: (actionId) =>
       orchestration.refreshAndResumeActionConversation(actionId),
     revealOverlay: params.notificationWindow.revealOverlayWindow,
-    holdsCaptureOsPermissions,
+    readCapturePermissions,
     // The main window is where the recording screen lives, and it reads the pending
     // request set just above — so a window the user closed is created rather than
     // sent to, and one already in front is told to re-read it.
@@ -287,16 +293,27 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
-    // The runtime greets only an owner who has no data yet, so every start may ask.
+    // Recording turned on during setup greets once setup finishes instead (`setOnboardingState`).
     onRecordingStarted: (userId) => {
-      const { accelerator, failure } = shortcutController.getState();
-      // A failure means the accelerator is configured but not registered: it would not work.
-      const answer = getWelcomeSuggestionText(params.getUiLanguage(), failure ? null : accelerator);
-      postWelcomeSuggestion({ requestJson, userId, answer }).catch((error: unknown) => {
-        params.logger?.error?.('WELCOME_SUGGESTION_ERR', { err: error });
-      });
+      if (onboarding.get().status === 'completed') greet(userId);
     },
   });
+  // The runtime greets only an owner who has no data yet, so every start may ask.
+  const greet = (userId: string): void => {
+    const { accelerator, failure } = shortcutController.getState();
+    // A failure means the accelerator is configured but not registered: it would not work.
+    const answer = getWelcomeSuggestionText(params.getUiLanguage(), failure ? null : accelerator);
+    postWelcomeSuggestion({ requestJson, userId, answer }).catch((error: unknown) => {
+      params.logger?.error?.('WELCOME_SUGGESTION_ERR', { err: error });
+    });
+  };
+  const setOnboardingState = (state: OnboardingState): OnboardingState => {
+    const finishing = state.status === 'completed' && onboarding.get().status !== 'completed';
+    const saved = onboarding.set(state);
+    const userId = getUserId();
+    if (finishing && userId !== null && screenshotSync.getStatus()) greet(userId);
+    return saved;
+  };
   const rebuildMenus = () =>
     safely(() => {
       params.updateUi.rebuildTrayMenu();
@@ -451,6 +468,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         openCapturePermissionSettings,
+        onboarding: { getState: onboarding.get, setState: setOnboardingState },
+        app,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
         onCaptureSettingsChanged: () => void params.updateUi.refreshCaptureStatus(),

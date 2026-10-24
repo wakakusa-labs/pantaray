@@ -15,6 +15,11 @@ const {
   createGlobalShortcutStore,
 } = require('../electron/dist/main_runtime/globalShortcutController.js');
 
+// The gate holds only with both permissions; either one missing closes it.
+const GRANTED = { accessibility: true, screenRecording: true };
+const NO_SCREEN_RECORDING = { accessibility: true, screenRecording: false };
+const NO_ACCESSIBILITY = { accessibility: false, screenRecording: true };
+
 function createOverlayOwnerHarness() {
   const state = {
     runtimeState: { status: 'unknown', message: null, owner: null },
@@ -27,7 +32,7 @@ function createOverlayOwnerHarness() {
     associations: new Map(),
     openWindows: new Set(),
     openResult: 'created',
-    holdsCaptureOsPermissions: true,
+    permissions: GRANTED,
     introPresentedCount: 0,
   };
   let overlayIdSeq = 0;
@@ -61,7 +66,7 @@ function createOverlayOwnerHarness() {
       return state.refreshOutcome;
     },
     revealOverlay: (overlayId) => state.revealed.push(overlayId),
-    holdsCaptureOsPermissions: () => state.holdsCaptureOsPermissions,
+    readCapturePermissions: () => state.permissions,
     presentRecordingIntro: () => state.introPresentedCount++,
   });
   return { owner, state, closeOverlayWindow };
@@ -194,13 +199,13 @@ test('a standalone Overlay that already holds the Action is reused instead of du
 test('a conversation without the macOS capture permissions opens the recording screen instead', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
-  state.holdsCaptureOsPermissions = false;
+  state.permissions = NO_SCREEN_RECORDING;
 
   // Without the permissions the recorder needs, the app can read nothing, so no
   // window is created at all: the main window is brought forward and what was
   // requested is remembered, which is what the recording screen reads back.
   assert.deepEqual(owner.readGateState(), {
-    osPermissionsGranted: false,
+    permissions: NO_SCREEN_RECORDING,
     introRequested: false,
     introDismissed: false,
   });
@@ -214,7 +219,7 @@ test('a conversation without the macOS capture permissions opens the recording s
 
   // Granted permissions are the only thing this gate asks for: recording being off
   // is not one of its inputs, so a conversation the user starts opens either way.
-  state.holdsCaptureOsPermissions = true;
+  state.permissions = GRANTED;
   assert.equal(owner.openNewConversationOverlay(), 'created');
   assert.deepEqual(state.openCalls, [['standalone:overlay-1', null]]);
 
@@ -233,16 +238,16 @@ test('a conversation without the macOS capture permissions opens the recording s
 test('a deferred conversation opens as soon as the gate is read granted', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
-  state.holdsCaptureOsPermissions = false;
+  state.permissions = NO_SCREEN_RECORDING;
 
   assert.equal(owner.openActionConversationOverlay('action-1'), 'recording_intro');
 
   // The permission is granted in System Settings, outside the app, so this read is
   // where the app learns it arrived — and the recording screen closes on the same
   // read. A request left waiting for a start made from that screen would never open.
-  state.holdsCaptureOsPermissions = true;
+  state.permissions = GRANTED;
   assert.deepEqual(owner.readGateState(), {
-    osPermissionsGranted: true,
+    permissions: GRANTED,
     introRequested: false,
     introDismissed: false,
   });
@@ -259,7 +264,7 @@ test('a replay that finds the gate closed defers the conversation again', () => 
   // macOS anything, so a start is never on its own proof that the gate is open.
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
-  state.holdsCaptureOsPermissions = false;
+  state.permissions = NO_SCREEN_RECORDING;
 
   assert.equal(owner.openActionConversationOverlay('action-1'), 'recording_intro');
   owner.openPendingRequest();
@@ -267,7 +272,7 @@ test('a replay that finds the gate closed defers the conversation again', () => 
   assert.equal(state.introPresentedCount, 2);
 
   // Still deferred, so it opens once the permissions are actually there.
-  state.holdsCaptureOsPermissions = true;
+  state.permissions = GRANTED;
   owner.openPendingRequest();
   assert.deepEqual(state.openCalls, [['conversation:action-1', 'action-1']]);
 });
@@ -275,17 +280,17 @@ test('a replay that finds the gate closed defers the conversation again', () => 
 test('answering "later" drops the deferred conversation and is remembered for the app run', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
-  state.holdsCaptureOsPermissions = false;
+  state.permissions = NO_ACCESSIBILITY;
 
   assert.equal(owner.openNewConversationOverlay(), 'recording_intro');
   // The answer outlives the window that gave it: the recording screen lives in the
   // main window, and reopening that window must not ask again.
   assert.deepEqual(owner.dismissIntro(), {
-    osPermissionsGranted: false,
+    permissions: NO_ACCESSIBILITY,
     introRequested: false,
     introDismissed: true,
   });
-  state.holdsCaptureOsPermissions = true;
+  state.permissions = GRANTED;
   owner.openPendingRequest();
   assert.deepEqual(state.openCalls, []);
 });
@@ -293,7 +298,7 @@ test('answering "later" drops the deferred conversation and is remembered for th
 test('a deferred conversation and an answered recording screen are dropped by a subject change', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
-  state.holdsCaptureOsPermissions = false;
+  state.permissions = NO_SCREEN_RECORDING;
 
   assert.equal(owner.openActionConversationOverlay('action-1'), 'recording_intro');
   owner.dismissIntro();
@@ -301,12 +306,12 @@ test('a deferred conversation and an answered recording screen are dropped by a 
   // The next subject never answered this screen, so it is asked again — and never
   // inherits the request the previous one made.
   assert.deepEqual(owner.readGateState(), {
-    osPermissionsGranted: false,
+    permissions: NO_SCREEN_RECORDING,
     introRequested: false,
     introDismissed: false,
   });
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-b', kind: 'account' } };
-  state.holdsCaptureOsPermissions = true;
+  state.permissions = GRANTED;
   owner.openPendingRequest();
   assert.deepEqual(state.openCalls, []);
 });
@@ -546,11 +551,11 @@ for (const kind of ['new', 'action']) {
     const { owner, state } = createOverlayOwnerHarness();
     const ready = { status: 'ready', message: null, owner: { id: 'alice', kind: 'account' } };
     state.runtimeState = ready;
-    state.holdsCaptureOsPermissions = false;
+    state.permissions = NO_SCREEN_RECORDING;
     assert.equal(kind === 'new' ? owner.openNewConversationOverlay()
       : owner.openActionConversationOverlay('action-1'), 'recording_intro');
     state.runtimeState = { status: 'syncing', message: null, owner: null };
-    state.holdsCaptureOsPermissions = true;
+    state.permissions = GRANTED;
     assert.equal(owner.readGateState().introRequested, true);
     owner.openPendingRequest();
     assert.deepEqual(state.openCalls, []);

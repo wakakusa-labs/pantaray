@@ -1,4 +1,5 @@
 import type { CaptureEditingRequest } from '../screenshot/captureEditing';
+import type { CapturePermissions } from '../windows/macosPermissions';
 /**
  * MainContext for IPC handlers.
  *
@@ -11,6 +12,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { CapturePermissionPane, OnboardingState } from './schemas/onboarding';
 import type { OverlayOpenTaskRequest } from './schemas/overlay';
 import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
@@ -86,13 +88,13 @@ export type AuthState = {
 };
 
 /**
- * What the recording screen reads: whether macOS lets the recorder run at all,
- * whether a conversation is waiting on that, and whether the screen was already
- * answered with "later". Nothing here is stored — the gate is the live OS
- * permission, and the answer is held in main for this app run only.
+ * What the recording screen reads: which of the permissions the recorder needs macOS
+ * grants (the gate holds only with both), whether a conversation is waiting on them,
+ * and whether the screen was already answered with "later". Nothing here is stored —
+ * the permissions are read live, and the answer is held in main for this app run only.
  */
 export type CaptureGateState = {
-  osPermissionsGranted: boolean;
+  permissions: CapturePermissions;
   introRequested: boolean;
   introDismissed: boolean;
 };
@@ -279,7 +281,17 @@ export type MainContext = {
      * the same read the current owner's own screen makes.
      */
     dismissIntro: (ownerId: string) => CaptureGateState;
-    openPermissionSettings: () => Promise<void>;
+    openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;
+  };
+
+  onboarding: {
+    getState: () => OnboardingState;
+    setState: (state: OnboardingState) => OnboardingState;
+  };
+
+  app: {
+    /** Quits and reopens the app, which is when macOS applies a Screen Recording grant. */
+    relaunch: () => void;
   };
 
   privacy: {

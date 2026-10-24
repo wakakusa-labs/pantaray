@@ -2,6 +2,7 @@ import { app, shell, systemPreferences } from 'electron';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { CapturePermission } from '../context/zaneiProcess';
+import type { CapturePermissionPane } from '../ipc/schemas/onboarding';
 
 const run = promisify(execFile);
 
@@ -47,32 +48,30 @@ export function holdsScreenRecording(): boolean {
   return systemPreferences.getMediaAccessStatus('screen') === 'granted';
 }
 
+export type CapturePermissions = { accessibility: boolean; screenRecording: boolean };
+
 /**
- * Whether macOS lets this app record at all.
- *
- * Everything the assistant knows comes from the recorder, and the recorder needs
- * Accessibility to read a single window and Screen Recording for windows that
- * Accessibility leaves blank — the two of its permissions macOS reports to this
- * process. So this is the gate the whole product stands behind, read live because
+ * The two permissions the recorder needs that macOS reports to this process:
+ * Accessibility to read a single window, and Screen Recording for windows that
+ * Accessibility leaves blank. Everything the assistant knows comes from the recorder,
+ * so both together are the gate the whole product stands behind. Read live because
  * the user grants them in System Settings, outside the app. Input Monitoring and
  * browser Automation are asked for by the recorder's own start check and surface
  * through the capture status instead.
  */
-export function holdsCaptureOsPermissions(): boolean {
-  if (assumesPermissions()) return true;
-  return (
-    process.platform === 'darwin' &&
-    systemPreferences.isTrustedAccessibilityClient(false) &&
-    holdsScreenRecording()
-  );
+export function readCapturePermissions(): CapturePermissions {
+  if (assumesPermissions()) return { accessibility: true, screenRecording: true };
+  if (process.platform !== 'darwin') return { accessibility: false, screenRecording: false };
+  return {
+    accessibility: systemPreferences.isTrustedAccessibilityClient(false),
+    screenRecording: holdsScreenRecording(),
+  };
 }
 
-/** Opens the pane of the gate's permission the user still has to grant. */
-export function openCapturePermissionSettings(): Promise<void> {
+/** Opens the System Settings pane where the user grants this permission. */
+export function openCapturePermissionSettings(permission: CapturePermissionPane): Promise<void> {
   return openSecurityPane(
-    systemPreferences.isTrustedAccessibilityClient(false) && !holdsScreenRecording()
-      ? 'Privacy_ScreenCapture'
-      : 'Privacy_Accessibility'
+    permission === 'screen_recording' ? 'Privacy_ScreenCapture' : 'Privacy_Accessibility'
   );
 }
 

@@ -147,6 +147,10 @@ export const validInvokeChannels = [
   'recording:getGateState',
   'recording:dismissIntro',
   'recording:openPermissionSettings',
+  // Main window only: first-run setup progress, and the reopen that applies Screen Recording
+  'onboarding:getState',
+  'onboarding:setState',
+  'app:relaunch',
   'ws:getStatus',
   // UI language (SSOT)
   'ui:getLanguage',

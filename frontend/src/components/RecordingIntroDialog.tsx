@@ -46,8 +46,16 @@ export function RecordingIntroDialog() {
   // Granted permissions close the screen — including one left open while they were
   // granted for a start made from the tray or the settings page, which the re-read
   // on focus reports. A conversation waiting on them reopens an answered screen.
-  const isOpen =
-    gate !== null && !gate.osPermissionsGranted && (gate.introRequested || !gate.introDismissed);
+  // The first permission still missing is the pane its settings button opens.
+  const missingPermission =
+    gate === null || (gate.introDismissed && !gate.introRequested)
+      ? null
+      : !gate.permissions.accessibility
+        ? 'accessibility'
+        : !gate.permissions.screenRecording
+          ? 'screen_recording'
+          : null;
+  const isOpen = missingPermission !== null;
 
   // Answering the screen closes it whether it opened on its own or on request, and
   // tells main to drop the conversation the gate deferred.
@@ -68,7 +76,7 @@ export function RecordingIntroDialog() {
     if (dialog && !dialog.open) dialog.showModal();
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (missingPermission === null) return null;
 
   /**
    * Turning recording on is what makes macOS ask for its permissions, so this button
@@ -146,7 +154,9 @@ export function RecordingIntroDialog() {
         <button
           type="button"
           className="recording-intro-settings"
-          onClick={() => void window.electron?.screenshot?.openPermissionSettings?.()}
+          onClick={() =>
+            void window.electron?.screenshot?.openPermissionSettings?.(missingPermission)
+          }
         >
           {t('recordingIntro.openSettings')}
         </button>

@@ -6,7 +6,7 @@
  * - IPC handler 側は `MainContext` のみに依存し、main の巨大化/密結合を抑える。
  */
 
-import type { BrowserWindow } from 'electron';
+import type { App, BrowserWindow } from 'electron';
 
 import type { AuthState, CaptureGateState, MainContext, UiLanguage } from './context';
 import type { ResumeProcessRequest } from '../orchestration/contracts';
@@ -102,6 +102,8 @@ export function buildMainContext(params: {
   /** Answers the recording screen with "later" and drops what it deferred. */
   dismissRecordingIntro: () => CaptureGateState;
   openCapturePermissionSettings: MainContext['screenshot']['openPermissionSettings'];
+  onboarding: MainContext['onboarding'];
+  app: Pick<App, 'relaunch' | 'quit'>;
   onCaptureSettingsChanged?: () => void;
 
   // external
@@ -365,7 +367,17 @@ export function buildMainContext(params: {
       // the read the current owner's own screen makes (it can open their waiting conversation).
       dismissIntro: (ownerId) =>
         requireOwner() === ownerId ? params.dismissRecordingIntro() : params.readCaptureGateState(),
-      openPermissionSettings: () => params.openCapturePermissionSettings(),
+      openPermissionSettings: (permission) => params.openCapturePermissionSettings(permission),
+    },
+
+    onboarding: params.onboarding,
+
+    app: {
+      // Quitting runs the usual shutdown; the relaunch Electron scheduled starts after it.
+      relaunch: () => {
+        params.app.relaunch();
+        params.app.quit();
+      },
     },
 
     privacy: {

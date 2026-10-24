@@ -17,12 +17,19 @@ test('desktop features bind guest and expired-account requests, preferences, rea
     if (previousPermissions === undefined) delete process.env.PANTARAY_E2E_ASSUME_CAPTURE_PERMISSIONS;
     else process.env.PANTARAY_E2E_ASSUME_CAPTURE_PERMISSIONS = previousPermissions;
   });
+  // Electron adds `process.getSystemVersion`; plain Node, which runs these tests, has none.
+  const previousGetSystemVersion = process.getSystemVersion;
+  process.getSystemVersion = () => '15.0.0';
+  t.after(() => { process.getSystemVersion = previousGetSystemVersion; });
   const windows = new Set();
   let context;
   const fakeElectron = {
     app: { getPath: () => dir, getLocale: () => 'en' },
     BrowserWindow: { getAllWindows: () => [] },
-    systemPreferences: { isTrustedAccessibilityClient: () => false },
+    systemPreferences: {
+      isTrustedAccessibilityClient: () => false,
+      getMediaAccessStatus: () => 'denied',
+    },
     dialog: {}, globalShortcut: {}, ipcMain: {}, nativeImage: {}, shell: {},
   };
   const load = Module._load;

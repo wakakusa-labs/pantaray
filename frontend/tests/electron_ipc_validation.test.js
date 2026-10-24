@@ -782,3 +782,45 @@ test('history:openOverlay passes a valid request on and moves nothing for a malf
   }
   assert.equal(openOverlay.calls.length, 1);
 });
+
+test('onboarding:setState takes only a known state and stores nothing else', async () => {
+  const setState = spy((state) => state);
+  const { ipcMain } = buildCtx({ onboarding: { getState: spy(null), setState } });
+  const invoke = getInvoke(ipcMain, 'onboarding:setState');
+  for (const invalid of [
+    undefined,
+    { status: 'in_progress' },
+    { status: 'in_progress', step: 'welcome' },
+    { status: 'completed', step: 'done' },
+    { status: 'skipped' },
+  ]) {
+    await assert.rejects(invoke(invalid), rejectsValidation('onboarding:setState'));
+  }
+  assert.equal(setState.calls.length, 0);
+  await invoke({ status: 'in_progress', step: 'web_search' });
+  await invoke({ status: 'completed' });
+  assert.deepEqual(
+    setState.calls.map((call) => call[0]),
+    [{ status: 'in_progress', step: 'web_search' }, { status: 'completed' }]
+  );
+});
+
+test('recording:openPermissionSettings requires the pane to open', async () => {
+  const openPermissionSettings = asyncSpy(undefined);
+  const { ipcMain } = buildCtx({
+    screenshot: {
+      getStatus: () => false,
+      start: () => true,
+      stop: () => true,
+      openPermissionSettings,
+    },
+  });
+  const invoke = getInvoke(ipcMain, 'recording:openPermissionSettings');
+  for (const invalid of [undefined, 'input_monitoring', 'Privacy_ScreenCapture', 1]) {
+    await assert.rejects(invoke(invalid), rejectsValidation('recording:openPermissionSettings'));
+  }
+  assert.equal(openPermissionSettings.calls.length, 0);
+  await invoke('screen_recording');
+  await invoke('accessibility');
+  assert.deepEqual(openPermissionSettings.calls, [['screen_recording'], ['accessibility']]);
+});

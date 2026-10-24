@@ -23,6 +23,7 @@ function suggestion(overrides: Partial<OverlaySnapshot> = {}): OverlaySnapshot {
     reactionState: null,
     reactionTimestamp: null,
     dismissReason: null,
+    artifacts: [],
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,

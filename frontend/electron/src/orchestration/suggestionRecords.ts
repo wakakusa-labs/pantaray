@@ -10,7 +10,8 @@ export type SuggestionRecord = {
 };
 
 // A record that never streamed its suggestion (accepted from a panel that read its bootstrap
-// itself) has no body or contract; a persisted read supplies them without touching its state.
+// itself) has no body, contract or files; a persisted read supplies them without touching its
+// state.
 // A reply's Action never streams through the suggestion's events either, so only a read may
 // bring it to a suggestion that was not accepted.
 function fillFromPersisted(live: OverlaySnapshot, persisted: OverlaySnapshot): OverlaySnapshot {
@@ -25,6 +26,7 @@ function fillFromPersisted(live: OverlaySnapshot, persisted: OverlaySnapshot): O
     ...live,
     suggestionText: live.suggestionText || persisted.suggestionText,
     interactionContract: live.interactionContract ?? persisted.interactionContract,
+    artifacts: persisted.artifacts,
     actionId,
   };
 }

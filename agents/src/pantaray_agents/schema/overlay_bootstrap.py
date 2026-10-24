@@ -36,6 +36,9 @@ class OverlaySnapshotModel(BaseModel):
     dismissReason: str | None = Field(
         default=None, description="The user's reason recorded with the dismissal"
     )
+    artifacts: list[str] = Field(
+        description="Files the Suggestion made, relative to its artifact folder"
+    )
     actionPhase: OverlayActionPhase = Field(description="Overlay action phase")
     actionStatus: str | None = Field(default=None, description="Durable action status")
     actionFailureCode: str | None = Field(

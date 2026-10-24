@@ -32,6 +32,8 @@ type Props = {
   integrationKey: IntegrationKeyState;
   /** Null until the backend reports a configured connection method. */
   toolkits: IntegrationToolkitStatus[] | null;
+  /** The saved key is refused: changing it is the fix, not loading again. */
+  keyRejected: boolean;
   loadFailed: boolean;
   onReload: () => void;
   rows: Record<string, IntegrationAccountRowState>;
@@ -52,6 +54,7 @@ export function IntegrationSettingsSection({
   t,
   integrationKey,
   toolkits,
+  keyRejected,
   loadFailed,
   onReload,
   rows,
@@ -134,6 +137,7 @@ export function IntegrationSettingsSection({
           placeholder={t('settings.integrations.key.placeholder')}
           onSave={integrationKey.onSave}
           onClear={integrationKey.onClear}
+          problem={keyRejected ? t('settings.integrations.key.rejected') : undefined}
           hint={
             integrationKey.hasSavedKey ? undefined : (
               <>

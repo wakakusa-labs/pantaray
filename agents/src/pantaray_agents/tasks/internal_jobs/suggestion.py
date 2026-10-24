@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -137,10 +138,7 @@ async def _drop_if_capture_paused(
 
 
 async def _persist_terminal_response(
-    *,
-    repository,
-    agent,
-    response,
+    *, repository, agent, response, on_committed: Callable[[], None]
 ) -> None:
     payload = agent.build_persistence_payload(response)
     result = await repository.save_suggestion(
@@ -151,6 +149,7 @@ async def _persist_terminal_response(
         response_text=payload["response_text"],
         request_images_count=payload["request_images_count"],
         used_images_count=payload["used_images_count"],
+        on_committed=on_committed,
     )
     if result.error:
         raise RuntimeError(result.error)
@@ -210,19 +209,15 @@ async def _process_while_readable(
 
 
 async def _publish_while_readable(
-    *, repository, agent, response, activity_start: InsightActivityStart | None
+    *, activity_start: InsightActivityStart | None, **save
 ) -> bool:
     """Persist the response; False when the permit the run read under is gone."""
     if activity_start is None:
-        await _persist_terminal_response(
-            repository=repository, agent=agent, response=response
-        )
+        await _persist_terminal_response(**save)
         return True
     try:
         async with context_source_control.gate.guard(activity_start.source):
-            await _persist_terminal_response(
-                repository=repository, agent=agent, response=response
-            )
+            await _persist_terminal_response(**save)
     except SourceInvalidated:
         return False
     return True
@@ -255,7 +250,7 @@ async def _resolve_ui_language(user_id: str) -> str | None:
 @dataclass(slots=True)
 class _ArtifactFolder:
     """The job owns the artifact folder from its agent run's start to the
-    terminal save, and keeps it only with a saved Suggestion listing its files."""
+    terminal save, and keeps it once a Suggestion listing its files commits."""
 
     owned: bool = False
     kept: bool = False
@@ -459,17 +454,22 @@ async def _run_and_publish(
                 reason="no session can deliver it",
             )
             return
-        if await _publish_while_readable(
-            repository=repository,
-            agent=agent,
-            response=response,
-            activity_start=activity_start,
-        ):
+
+        def keep_files() -> None:
+            # Decided by the commit: a later read-back failure leaves the files.
             folder.kept = (
                 response.status == StatusType.SUCCESS
                 and response.has_suggestion
                 and bool(response.artifacts)
             )
+
+        if await _publish_while_readable(
+            repository=repository,
+            agent=agent,
+            response=response,
+            activity_start=activity_start,
+            on_committed=keep_files,
+        ):
             return
         await _discard_suggestion(
             repository=repository,

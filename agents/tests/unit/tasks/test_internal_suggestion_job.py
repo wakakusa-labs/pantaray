@@ -560,22 +560,21 @@ async def test_run_suggestion_job_persists_success_terminal_row(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("deliverable", "response", "kept"),
+    ("deliverable", "response", "read_back_fails", "kept"),
     [
-        (True, _MADE, True),
+        (True, _MADE, False, True),
+        # Committed, then the read-back hit a lock: the row lists the files.
+        (True, _MADE, True, True),
         # The writer timed out after the make stage: an error row, no files.
-        (
-            True,
-            SimpleNamespace(status="error", has_suggestion=False, artifacts=[]),
-            False,
-        ),
+        (True, SimpleNamespace(status="error", has_suggestion=False), False, False),
         # Saved as a Suggestion that does not list the files.
         (
             True,
             SimpleNamespace(status="success", has_suggestion=True, artifacts=[]),
             False,
+            False,
         ),
-        (False, _MADE, False),
+        (False, _MADE, False, False),
     ],
 )
 async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
@@ -583,6 +582,7 @@ async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
     tmp_path: Path,
     deliverable: bool,
     response: SimpleNamespace,
+    read_back_fails: bool,
     kept: bool,
 ) -> None:
     """A requeued run must not offer files an earlier attempt made, and files no
@@ -597,11 +597,18 @@ async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
         get_suggestion=AsyncMock(
             return_value=RepositoryResult(data={"status": "processing"})
         ),
-        save_suggestion=AsyncMock(return_value=SimpleNamespace(error=None)),
         discard_suggestion_if_processing=AsyncMock(
             return_value=SimpleNamespace(error=None)
         ),
     )
+
+    async def _save(*_args: object, on_committed, **_kwargs: object):
+        on_committed()
+        if read_back_fails:
+            raise sqlite3.OperationalError("database is locked")
+        return SimpleNamespace(error=None)
+
+    repository.save_suggestion = AsyncMock(side_effect=_save)
 
     async def _process(_request: object) -> SimpleNamespace:
         assert not artifacts_root.exists()
@@ -626,9 +633,20 @@ async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
         ("deps.get_suggestion_repository", AsyncMock(return_value=repository)),
         ("deps.get_suggestion_agent", AsyncMock(return_value=agent)),
         ("owner_has_deliverable_session", lambda _owner_id: deliverable),
+        (
+            "defer_local_job_if_retryable",
+            AsyncMock(side_effect=DeferredLocalJob("job-1", "later")),
+        ),
     ):
         monkeypatch.setattr(f"{job}.{name}", replacement)
 
+    if read_back_fails:
+        with pytest.raises(DeferredLocalJob):
+            await _run_suggestion_job(_payload())
+        # The requeued job finds the committed row and leaves it alone.
+        repository.get_suggestion.return_value = RepositoryResult(
+            data={"status": "success"}
+        )
     await _run_suggestion_job(_payload())
 
     assert repository.save_suggestion.await_count == int(deliverable)

@@ -20,7 +20,7 @@ const COMPOSIO_DASHBOARD_URL = 'https://dashboard.composio.dev';
 /** Composio's account-level keys; the backend needs a project API key (`ak_`). */
 const ACCOUNT_KEY_PREFIX = 'ck_';
 
-/** Onboarding's own lead and key guide, in place of the heading and the key row's hint. */
+/** Onboarding's own lead and key guide: the guide leads into the key row in place of its hint. */
 export type IntegrationOnboardingCopy = { lead: React.ReactNode; keyGuide: React.ReactNode };
 
 /** The connection method's key. Only whether one is saved reaches the renderer. */
@@ -142,6 +142,7 @@ export function IntegrationSettingsSection({
       {integrationKey.canStoreSecrets ? null : (
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       )}
+      {onboarding && !integrationKey.hasSavedKey ? onboarding.keyGuide : null}
       <div className="integration-key">
         <SecretRow
           label={t('settings.integrations.key.label')}
@@ -158,9 +159,7 @@ export function IntegrationSettingsSection({
               : undefined
           }
           hint={
-            integrationKey.hasSavedKey ? undefined : onboarding ? (
-              onboarding.keyGuide
-            ) : (
+            integrationKey.hasSavedKey || onboarding ? undefined : (
               <>
                 <a
                   className="settings-inline-link"

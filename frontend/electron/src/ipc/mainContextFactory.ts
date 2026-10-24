@@ -122,6 +122,7 @@ export function buildMainContext(params: {
   setActionApprovalMode: MainContext['overlay']['setActionApprovalMode'];
   createNotificationIpcHandlers?: MainContext['overlay']['createNotificationIpcHandlers'];
 }): MainContext {
+  let relaunchScheduled = false;
   const normalizeOptionalString = (value: unknown): string | null =>
     typeof value === 'string' && value.trim().length > 0 ? value : null;
   const buildAuthState = (
@@ -374,8 +375,12 @@ export function buildMainContext(params: {
 
     app: {
       // Quitting runs the usual shutdown; the relaunch Electron scheduled starts after it.
+      // Electron starts one instance per relaunch() call, so only the first is scheduled.
       relaunch: () => {
-        params.app.relaunch();
+        if (!relaunchScheduled) {
+          relaunchScheduled = true;
+          params.app.relaunch();
+        }
         params.app.quit();
       },
     },

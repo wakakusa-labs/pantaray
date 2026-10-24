@@ -233,8 +233,13 @@ describe('the Composio key', () => {
     );
 
     expect(await screen.findByText('Lead copy')).toBeInTheDocument();
-    expect(screen.getByText('Key guide copy')).toBeInTheDocument();
-    expect(screen.getByLabelText('Composio API key')).toBeInTheDocument();
+    // The guide's last step points down to the key field, so the guide comes first.
+    expect(
+      screen
+        .getByText('Key guide copy')
+        .compareDocumentPosition(screen.getByLabelText('Composio API key')) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Integrations' })).not.toBeInTheDocument();
     expect(
       screen.queryByText('Let Pantaray use the services you connect for its work.')

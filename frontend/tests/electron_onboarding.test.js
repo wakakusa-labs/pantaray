@@ -227,3 +227,10 @@ test('relaunching schedules the new instance before quitting', (t) => {
   // Electron starts the scheduled instance only when the quit it follows completes.
   assert.deepEqual(calls, ['relaunch', 'quit']);
 });
+
+test('relaunching again while quitting schedules no second instance', (t) => {
+  const { context, calls } = loadFeatures(t, tempDir(t));
+  context.app.relaunch();
+  context.app.relaunch();
+  assert.deepEqual(calls, ['relaunch', 'quit', 'quit']);
+});

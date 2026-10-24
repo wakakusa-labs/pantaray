@@ -98,7 +98,6 @@ export function IntegrationServiceDetail({
       >
         {t('settings.integrations.addAccount')}
       </button>
-      <p className="ai-note integration-consent">{t('settings.integrations.consent')}</p>
       {confirming ? (
         <IntegrationDisconnectDialog
           t={t}

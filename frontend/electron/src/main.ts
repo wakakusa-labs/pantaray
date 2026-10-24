@@ -541,6 +541,7 @@ installDesktopApplicationLifecycle({
     registerActionFileProtocol(protocol, {
       readConversationPage: featureRuntime.readActionConversationPage,
       readSuggestionBootstrap: featureRuntime.resolveOverlayBootstrap,
+      getCurrentSubjectId: featureRuntime.getCurrentSubjectId,
     });
   },
   createMainWindow: createWindow,

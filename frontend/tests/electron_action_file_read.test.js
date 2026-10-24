@@ -57,14 +57,18 @@ function harness({
   runFile = async () => '<p>converted</p>',
   chooseApp = async () => null,
   suggestion = null,
+  owner = { subjectId: 'user-1' },
+  onBootstrapRead = () => {},
 } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-action-files-')));
   const reads = [];
   // The backend answers only for the signed-in user's own Suggestion; requestJson throws otherwise.
   const readSuggestionBootstrap = async (suggestionId) => {
     if (suggestion === null || suggestionId !== 'sug-1') throw new Error('Suggestion not found');
+    onBootstrapRead();
     return { artifactsRoot: suggestion.root, snapshot: { artifacts: suggestion.artifacts } };
   };
+  const getCurrentSubjectId = () => owner.subjectId;
   const readConversationPage = async (request) => {
     reads.push(request);
     if (request.actionId !== 'act-1') throw new Error('Action not found');
@@ -82,7 +86,7 @@ function harness({
   registerActionFileHandlers(
     {
       windows: { getMainWindow: () => mainWindow },
-      actions: { readConversationPage },
+      actions: { readConversationPage, getCurrentSubjectId },
       overlay: { resolveOverlayBootstrap: readSuggestionBootstrap },
       actionFiles: {
         open: ({ path: revealedPath }) => revealed.push(revealedPath),
@@ -99,6 +103,7 @@ function harness({
   const protocol = createActionFileProtocolHandler({
     readConversationPage,
     readSuggestionBootstrap,
+    getCurrentSubjectId,
   });
   const request = (file, id, kind = 'action') => ({ target: { kind, id }, path: file });
   return {
@@ -129,6 +134,8 @@ function harness({
       handlers.get('actionFile:read')({}, request(file, suggestionId, 'suggestion')),
     openSuggestionFileInApp: (file, suggestionId = 'sug-1') =>
       handlers.get('actionFile:openInApp')({}, request(file, suggestionId, 'suggestion')),
+    openSuggestionFileWithApp: (file) =>
+      handlers.get('actionFile:openWithApp')({}, request(file, 'sug-1', 'suggestion')),
     fetchSuggestionFile: (file, suggestionId = 'sug-1') =>
       protocol({ url: buildActionFileUrl({ kind: 'suggestion', id: suggestionId }, file) }),
   };
@@ -608,4 +615,46 @@ test('the protocol streams a PDF a Suggestion lists, and no other file', async (
   assert.equal(await response.text(), '%PDF-1.7\nsummary');
   assert.equal((await app.fetchSuggestionFile('other.pdf')).status, 404);
   assert.equal((await app.fetchSuggestionFile('summary.pdf', 'sug-2')).status, 404);
+});
+
+test('a Suggestion answer that arrives after the owner changed or signed out authorizes nothing', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'reply.md'), '# Reply');
+  fs.writeFileSync(path.join(root, 'summary.pdf'), '%PDF-1.7\nsummary');
+  const owner = { subjectId: 'user-1' };
+  let nextOwner = 'user-2';
+  const app = harness({
+    suggestion: { root, artifacts: ['reply.md', 'summary.pdf'] },
+    owner,
+    // The owner changes while the backend read is in flight.
+    onBootstrapRead: () => (owner.subjectId = nextOwner),
+  });
+
+  assert.deepEqual(await app.readSuggestionFile('reply.md'), NOT_FOUND);
+  owner.subjectId = 'user-1';
+  assert.equal((await app.fetchSuggestionFile('summary.pdf')).status, 404);
+  owner.subjectId = 'user-1';
+  nextOwner = null;
+  assert.deepEqual(await app.openSuggestionFileInApp('reply.md'), NOT_FOUND);
+  assert.deepEqual(await app.readSuggestionFile('reply.md'), NOT_FOUND);
+  assert.deepEqual(app.opened, []);
+});
+
+test('an owner change while the app picker is open opens nothing', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'reply.md'), '# Reply');
+  const owner = { subjectId: 'user-1' };
+  const runs = [];
+  const app = harness({
+    suggestion: { root, artifacts: ['reply.md'] },
+    owner,
+    chooseApp: async () => {
+      owner.subjectId = 'user-2';
+      return '/Applications/TextEdit.app';
+    },
+    runFile: async (...args) => runs.push(args),
+  });
+
+  assert.deepEqual(await app.openSuggestionFileWithApp('reply.md'), { kind: 'cancelled' });
+  assert.deepEqual(runs, []);
 });

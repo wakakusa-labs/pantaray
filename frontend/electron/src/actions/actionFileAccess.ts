@@ -85,6 +85,8 @@ export type ReadSuggestionBootstrap = (
 export type TaskFileSources = Readonly<{
   readConversationPage: ReadActionConversationPage;
   readSuggestionBootstrap: ReadSuggestionBootstrap;
+  /** The signed-in local owner, as `suggestion:read` checks it; null when signed out. */
+  getCurrentSubjectId: () => string | null;
 }>;
 
 /**
@@ -155,15 +157,26 @@ export async function resolveSuggestionFile(
   return wanted.startsWith(root + path.sep) ? wanted : null;
 }
 
-/** The real path of the requested file when its owner names it, or null. */
-export function resolveTaskFile(
+/**
+ * The real path of the requested file when its owner names it, or null. The backend answered for
+ * the owner signed in when the request arrived, so an answer that comes back after the owner
+ * changed or signed out authorizes nothing.
+ */
+export async function resolveTaskFile(
   sources: TaskFileSources,
   request: TaskFileRequest
 ): Promise<string | null> {
+  const subjectId = sources.getCurrentSubjectId();
+  if (subjectId === null) return null;
   const { target } = request;
-  return target.kind === 'action'
-    ? resolveActionFile(sources.readConversationPage, { actionId: target.id, path: request.path })
-    : resolveSuggestionFile(sources.readSuggestionBootstrap, target.id, request.path);
+  const realPath =
+    target.kind === 'action'
+      ? await resolveActionFile(sources.readConversationPage, {
+          actionId: target.id,
+          path: request.path,
+        })
+      : await resolveSuggestionFile(sources.readSuggestionBootstrap, target.id, request.path);
+  return sources.getCurrentSubjectId() === subjectId ? realPath : null;
 }
 
 /**

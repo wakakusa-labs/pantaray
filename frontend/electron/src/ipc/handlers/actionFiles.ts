@@ -30,6 +30,7 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
       {
         readConversationPage: ctx.actions.readConversationPage,
         readSuggestionBootstrap: ctx.overlay.resolveOverlayBootstrap,
+        getCurrentSubjectId: ctx.actions.getCurrentSubjectId,
       },
       request
     );
@@ -55,13 +56,15 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
   });
   registrar.handle('actionFile:openWithApp', async (_event, params) => {
     const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:openWithApp', params);
+    const subjectId = ctx.actions.getCurrentSubjectId();
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
-    return await openActionFileWithApp(
-      realPath,
-      ctx.actionFiles.chooseApp,
-      ctx.actionFiles.runFile
-    );
+    // The picker waits on the user; an owner who changed meanwhile opens nothing.
+    const chooseApp = async () => {
+      const appPath = await ctx.actionFiles.chooseApp();
+      return ctx.actions.getCurrentSubjectId() === subjectId ? appPath : null;
+    };
+    return await openActionFileWithApp(realPath, chooseApp, ctx.actionFiles.runFile);
   });
   registrar.handle('actionFile:reveal', async (_event, params) => {
     const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:reveal', params);

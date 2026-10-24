@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { BrandWordmark } from '@/components/BrandWordmark';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
+import { useAuth } from '@/hooks/useAuth';
 import { useAiConnectionController } from '../pages/settings/useAiConnectionController';
 import { AiStep } from './AiStep';
 import { AppsStep } from './AppsStep';
@@ -27,15 +28,19 @@ const STEPS: readonly { id: OnboardingStep; required: boolean }[] = [
 
 type Outcome = 'pending' | 'done' | 'skipped';
 
+type ScreenProps = { step: OnboardingStep; progress: OnboardingProgress };
+
 /** First-run setup in a full window. Only the owner's steps wait for an owner: the AI
  *  connection is the device's, and it is what repairs a runtime that cannot start one. */
-export function OnboardingScreen({
-  step,
-  progress,
-}: {
-  step: OnboardingStep;
-  progress: OnboardingProgress;
-}) {
+export function OnboardingScreen(props: ScreenProps) {
+  const { runtimeState } = useAuth();
+  const ownerId = runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null;
+  // Recording is the owner's and is read once per mount, so the screen starts again for each
+  // owner, the first included: before the owner is published that read can only fail.
+  return <OnboardingSteps key={ownerId ?? 'no-owner'} {...props} />;
+}
+
+function OnboardingSteps({ step, progress }: ScreenProps) {
   const { t } = useI18n();
   // Its own read of the connection the steps' Settings sections change; main announces each change.
   const connection = useAiConnectionController().state;

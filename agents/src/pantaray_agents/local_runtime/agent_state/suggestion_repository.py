@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from datetime import timedelta
 
 from pydantic import ValidationError
@@ -118,7 +119,9 @@ class LocalSuggestionRepository(
         response_text: str | None = None,
         request_images_count: int = 0,
         used_images_count: int = 0,
+        on_committed: Callable[[], None] | None = None,
     ) -> RepositoryResult[DBRow]:
+        """``on_committed`` runs once the row is committed, before it is read back."""
         error_payload = (
             suggestion.error.model_dump() if suggestion.error is not None else None
         )
@@ -132,7 +135,7 @@ class LocalSuggestionRepository(
             return RepositoryResult(error="artifacts must be valid artifact paths")
         with self._connect() as connection:
             with immediate_transaction(connection):
-                connection.execute(
+                updated = connection.execute(
                     """
                     UPDATE agent_suggestions
                     SET status = ?,
@@ -186,6 +189,8 @@ class LocalSuggestionRepository(
                         source_record_id=str(suggestion.suggestion_id),
                         content=suggestion.answer,
                     )
+        if updated.rowcount == 1 and on_committed is not None:
+            on_committed()
         return await self.get_suggestion(
             user_id=str(suggestion.user_id),
             suggestion_id=str(suggestion.suggestion_id),

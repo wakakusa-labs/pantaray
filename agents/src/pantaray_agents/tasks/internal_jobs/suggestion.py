@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,6 +46,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
 from pantaray_agents.orchestration.ws.deliverable_sessions import (
     owner_has_deliverable_session,
 )
+from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest
 from pantaray_agents.schema.repository_errors import repository_data_or_raise
 from pantaray_agents.tasks.job_retry import (
@@ -135,10 +138,7 @@ async def _drop_if_capture_paused(
 
 
 async def _persist_terminal_response(
-    *,
-    repository,
-    agent,
-    response,
+    *, repository, agent, response, on_committed: Callable[[], None]
 ) -> None:
     payload = agent.build_persistence_payload(response)
     result = await repository.save_suggestion(
@@ -149,6 +149,7 @@ async def _persist_terminal_response(
         response_text=payload["response_text"],
         request_images_count=payload["request_images_count"],
         used_images_count=payload["used_images_count"],
+        on_committed=on_committed,
     )
     if result.error:
         raise RuntimeError(result.error)
@@ -208,19 +209,15 @@ async def _process_while_readable(
 
 
 async def _publish_while_readable(
-    *, repository, agent, response, activity_start: InsightActivityStart | None
+    *, activity_start: InsightActivityStart | None, **save
 ) -> bool:
     """Persist the response; False when the permit the run read under is gone."""
     if activity_start is None:
-        await _persist_terminal_response(
-            repository=repository, agent=agent, response=response
-        )
+        await _persist_terminal_response(**save)
         return True
     try:
         async with context_source_control.gate.guard(activity_start.source):
-            await _persist_terminal_response(
-                repository=repository, agent=agent, response=response
-            )
+            await _persist_terminal_response(**save)
     except SourceInvalidated:
         return False
     return True
@@ -250,7 +247,29 @@ async def _resolve_ui_language(user_id: str) -> str | None:
     )
 
 
+@dataclass(slots=True)
+class _ArtifactFolder:
+    """The job owns the artifact folder from its agent run's start to the
+    terminal save, and keeps it once a Suggestion listing its files commits."""
+
+    owned: bool = False
+    kept: bool = False
+
+
 async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
+    folder = _ArtifactFolder()
+    try:
+        await _run_and_publish(payload, folder)
+    finally:
+        # An error, a timeout, a dropped or empty Suggestion, a requeue: no
+        # saved row will ever show these files, and nothing else removes them.
+        if folder.owned and not folder.kept:
+            _discard_suggestion_artifacts(payload)
+
+
+async def _run_and_publish(
+    payload: SuggestionJobRuntimePayload, folder: _ArtifactFolder
+) -> None:
     repository = await deps.get_suggestion_repository()
     db_path, timeout_ms = read_local_runtime_db_config()
     try:
@@ -354,6 +373,7 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
         # A requeued job runs the agent again from the start, so files an
         # earlier attempt made are not this run's.
         _discard_suggestion_artifacts(payload)
+        folder.owned = True
         try:
             response = await _process_while_readable(
                 agent=agent, request=request, activity_start=activity_start
@@ -434,11 +454,21 @@ async def _run_suggestion_job(payload: SuggestionJobRuntimePayload) -> None:
                 reason="no session can deliver it",
             )
             return
+
+        def keep_files() -> None:
+            # Decided by the commit: a later read-back failure leaves the files.
+            folder.kept = (
+                response.status == StatusType.SUCCESS
+                and response.has_suggestion
+                and bool(response.artifacts)
+            )
+
         if await _publish_while_readable(
             repository=repository,
             agent=agent,
             response=response,
             activity_start=activity_start,
+            on_committed=keep_files,
         ):
             return
         await _discard_suggestion(

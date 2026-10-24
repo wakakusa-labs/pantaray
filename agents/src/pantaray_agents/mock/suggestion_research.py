@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from pantaray_agents.agents.suggestion_agent.make import MAKE_STAGE_TOOL_IDS
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_TOOL_IDS
 from pantaray_agents.agents.suggestion_agent.research import (
     FixedSuggestionResearchTools,
+    SuggestionMakeTools,
 )
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -41,11 +45,23 @@ def _mock_definition(tool_id: str) -> ReactToolDefinition:
     )
 
 
-def build_mock_suggestion_research_tools() -> FixedSuggestionResearchTools:
-    """Provide the complete fail-closed Suggestion tool contract in mock mode."""
+def build_mock_suggestion_research_tools(
+    make_folder: Path | None = None,
+) -> FixedSuggestionResearchTools:
+    """Provide the complete fail-closed Suggestion tool contract in mock mode.
+
+    With ``make_folder``, a selected candidate's make stage runs too, with every
+    tool refusing; mock mode itself never selects one.
+    """
 
     return FixedSuggestionResearchTools(
-        definitions=tuple(_mock_definition(tool_id) for tool_id in SUGGESTION_TOOL_IDS)
+        definitions=tuple(_mock_definition(tool_id) for tool_id in SUGGESTION_TOOL_IDS),
+        make_tools=None
+        if make_folder is None
+        else SuggestionMakeTools(
+            tuple(_mock_definition(tool_id) for tool_id in MAKE_STAGE_TOOL_IDS),
+            make_folder,
+        ),
     )
 
 

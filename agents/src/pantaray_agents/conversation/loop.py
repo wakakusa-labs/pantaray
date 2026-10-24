@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -191,6 +191,22 @@ class ConversationRun[T]:
     model: str | None = None
     """A model the connection offers to use instead of its own; ``None`` keeps
     the connection's."""
+    images: Mapping[str, ToolImage] = field(default_factory=dict)
+    """The images ``history`` shows by ref, as ``Ended.images`` gave them."""
+
+
+@dataclass(frozen=True, slots=True)
+class Ended[T]:
+    """An accepted end, and the conversation behind it to continue with.
+
+    ``history`` ends with the accepted ending call, which nothing has answered;
+    a later run behind the same head answers it in its own ``history``.
+    """
+
+    value: T
+    history: tuple[ConversationEntry, ...]
+    images: Mapping[str, ToolImage]
+    window: WindowState
 
 
 class ConversationOutputInvalid(RuntimeError):
@@ -215,6 +231,12 @@ async def run_conversation[T](run: ConversationRun[T]) -> T:
     Every exception ``send``, a hook or a tool raises propagates as it was,
     apart from a refused output, which is repaired.
     """
+
+    return (await run_conversation_to_end(run)).value
+
+
+async def run_conversation_to_end[T](run: ConversationRun[T]) -> Ended[T]:
+    """``run_conversation``, keeping the conversation to continue."""
 
     return await _Run(run).run()
 
@@ -270,12 +292,13 @@ class _Run[T]:
         }
         self.tool_calls = 0
         self.turn = _Turn(calls=())
-        self.images: dict[str, ToolImage] = {}  # by ref, as tools returned them
+        # By ref, as tools returned them.
+        self.images: dict[str, ToolImage] = dict(run.images)
         self.sent = 0
         self.turns_allowed = run.max_turns
         self.extra_last_turn = True
 
-    async def run(self) -> T:
+    async def run(self) -> Ended[T]:
         while self.sent < self.turns_allowed:
             final = (
                 self.sent == self.turns_allowed - 1
@@ -317,7 +340,9 @@ class _Run[T]:
                 await _to_the_end(self._settle(failure))
                 raise
             if finished is not None:
-                return finished.value
+                return Ended(
+                    finished.value, tuple(self.history), dict(self.images), self.window
+                )
         raise ConversationTurnsExhausted("the run has no turn to send")
 
     async def _send(self, *, final: bool) -> tuple[TurnReply, ConversationRequest]:

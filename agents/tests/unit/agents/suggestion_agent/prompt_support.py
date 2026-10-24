@@ -7,6 +7,7 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     SUGGESTION_LENS_PROMPT_NAME,
     SUGGESTION_SELECTOR_PROMPT_NAME,
 )
+from pantaray_agents.agents.suggestion_agent.make import SUGGESTION_MAKE_PROMPT_NAME
 from pantaray_agents.agents.suggestion_agent.nudges import (
     SUGGESTION_NUDGES_PROMPT_NAME,
 )
@@ -23,6 +24,7 @@ SELECTOR_CONFIG = PromptConfig(
 )
 
 NUDGE_CONFIG = PromptLoader().load_config(SUGGESTION_NUDGES_PROMPT_NAME)
+MAKE_CONFIG = PromptLoader().load_config(SUGGESTION_MAKE_PROMPT_NAME)
 
 
 def prompt_configs(
@@ -34,6 +36,7 @@ def prompt_configs(
         SUGGESTION_LENS_PROMPT_NAME: LENS_CONFIG,
         SUGGESTION_SELECTOR_PROMPT_NAME: SELECTOR_CONFIG,
         SUGGESTION_NUDGES_PROMPT_NAME: NUDGE_CONFIG,
+        SUGGESTION_MAKE_PROMPT_NAME: MAKE_CONFIG,
         **(extra or {}),
     }
     return lambda name: configs.get(
@@ -56,12 +59,26 @@ SELECT_FIRST = {
 
 def serve_lens_runs(client: MockLLMClient, first: object) -> None:
     """The first lens run submits `first`, the other two find nothing, and the
-    selector picks the first candidate when there is one."""
+    selector picks the first candidate when there is one, which then finishes
+    its make stage with the same decision and no files."""
 
     client.set_next_response(first)
     suggested = isinstance(first, dict) and first.get("has_suggestion") is True
+    kept = (
+        {
+            "tool_id": "finish_suggestion",
+            "args": {
+                "has_suggestion": True,
+                "interaction_contract": first["interaction_contract"],
+                "key_point": first["key_point"],
+                "artifacts": [],
+            },
+        }
+        if suggested
+        else None
+    )
     client.queued_responses = [
         NO_SUGGESTION,
         NO_SUGGESTION,
-        *([SELECT_FIRST] if suggested else []),
+        *([SELECT_FIRST, kept] if suggested else []),
     ]

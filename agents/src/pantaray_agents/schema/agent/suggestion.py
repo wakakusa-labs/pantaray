@@ -162,6 +162,8 @@ class SuggestionExtraction(TypedDict):
     - decided: 判断が決めた伝える中身（提案なしの場合は None）。
     - has_suggestion: 提案有無（True: 提案あり, False: 提案なし）。
     - interaction_contract: 提案の操作契約（提案なしの場合は None）。
+    - artifacts: the files the make stage made, relative to the Suggestion's
+      artifact folder (empty when it made none).
     """
 
     thinking: str | None
@@ -173,6 +175,7 @@ class SuggestionExtraction(TypedDict):
     response_text: str
     has_suggestion: bool
     interaction_contract: SuggestionInteractionContract | None
+    artifacts: list[str]
 
 
 class SuggestionCandidate(BaseModel):

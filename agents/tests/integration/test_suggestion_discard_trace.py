@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from tests.integration.local_runtime_ws_test_fakes import load_test_prompt_config
+from tests.integration.local_runtime_ws_test_fakes import (
+    keep_decision,
+    load_test_prompt_config,
+)
 
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.context_types import (
@@ -108,7 +111,7 @@ def _prepare_job(
     agent = SuggestionAgent(
         config={"mode": "local_runtime", "llm_client": llm},
         repository=repository,
-        research_tools=build_mock_suggestion_research_tools(),
+        research_tools=build_mock_suggestion_research_tools(tmp_path / "made"),
         stable_memory=_STABLE_MEMORY,
     )
     agent.client = llm
@@ -176,6 +179,7 @@ def _prepare_job(
             nothing,
             nothing,
             {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
+            keep_decision("message_only", answer),
         ]
         llm.responses["default"] = answer  # what the writer call returns
         await repository.create_processing_suggestion_row(

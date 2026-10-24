@@ -5,14 +5,15 @@ lens runs of one Suggestion share its cache prefix; the run's lens is its first
 message. The run researches with its tools and ends with a single
 ``submit_suggestion`` call, which ``decide`` accepts or answers with why it was
 rejected. A Suggestion is never resumed -- a retried job starts over -- so the
-history stays in memory. Each turn and each answered call is a run step.
+history stays in memory, where the selected run's make stage continues it.
+Each turn and each answered call is a run step.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
@@ -28,7 +29,7 @@ from pantaray_agents.conversation.loop import (
     IdleTurn,
     RecordedTurn,
     TurnReply,
-    run_conversation,
+    run_conversation_to_end,
 )
 from pantaray_agents.conversation.provider_turns import ProviderTurnStore
 from pantaray_agents.conversation.window import ConversationEntry, WindowState
@@ -41,8 +42,10 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionStructuredOutput,
 )
 from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
     ReactToolResult,
     ToolCallEnvelope,
+    ToolImage,
     resolve_react_tool_definitions,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig
@@ -238,6 +241,131 @@ def _terminal_tool() -> LlmToolDefinition:
     )
 
 
+def offered_tool_ids(
+    definitions: Sequence[ReactToolDefinition], tool_ids: Sequence[str]
+) -> tuple[str, ...]:
+    """``tool_ids`` without the offered-only tools ``definitions`` lacks."""
+
+    offered = {definition.name for definition in definitions}
+    return tuple(
+        tool_id
+        for tool_id in tool_ids
+        if tool_id not in _OFFERED_ONLY_TOOL_IDS or tool_id in offered
+    )
+
+
+@dataclass(slots=True)
+class SuggestionConversation:
+    """One lens run's conversation, which the make stage continues.
+
+    Every stage is sent behind the same head, counted on the same sink and
+    judged against the same past Suggestions; a condition the run was sent
+    back for is not sent again in a later stage.
+    """
+
+    context: str
+    system_instruction: str
+    send_turn: SuggestionTurnSender
+    past: PastSuggestions
+    nudge_config: PromptConfig
+    sink: CountingSink = field(default_factory=CountingSink)
+    provider_turns: ProviderTurnStore = field(
+        default_factory=lambda: ProviderTurnStore(identity=None)
+    )
+    sent: set[str] = field(default_factory=set)
+    history: tuple[ConversationEntry, ...] = ()
+    images: Mapping[str, ToolImage] = field(default_factory=dict)
+    window: WindowState | None = None
+    # The accepted ending call of the last stage, which the next one answers.
+    ending_call: LlmToolCall | None = None
+
+    def repeat_notice(self, key_point: str) -> str | None:
+        """The notice for a key point close to a shown one, once per run."""
+
+        if REPEATED_SUGGESTION in self.sent:
+            return None
+        earlier = self.past.repeated(key_point)
+        if not earlier:
+            return None
+        self.sent.add(REPEATED_SUGGESTION)
+        return nudge_text(
+            self.nudge_config, REPEATED_SUGGESTION, earlier=self.past.describe(earlier)
+        )
+
+    async def converse[T](
+        self,
+        *,
+        tools: tuple[ReactToolDefinition, ...],
+        ending_tool: LlmToolDefinition,
+        opening: Sequence[ConversationEntry],
+        steps: SuggestionRunSteps,
+        decide: Callable[[IdleTurn], Finish[T] | Continue],
+    ) -> T:
+        """Carry the conversation on after ``opening`` until ``decide`` finishes."""
+
+        async def send(request: ConversationRequest) -> TurnReply:
+            try:
+                return await self.send_turn(request, self.sink)
+            except LlmProxyExecutionError as exc:
+                await steps.failed_send(exc)
+                raise
+
+        ending: list[LlmToolCall] = []
+
+        def judge(turn: IdleTurn) -> Finish[T] | Continue:
+            decision = decide(turn)
+            if isinstance(decision, Finish) and turn.ending_call is not None:
+                ending.append(turn.ending_call)
+            return decision
+
+        # Suggestion runs on the models an Action does, under the same input cap.
+        tunables = load_local_runtime_tunables().action_agent
+        ended = await run_conversation_to_end(
+            ConversationRun(
+                prompt=self.context,
+                system_instruction=self.system_instruction,
+                tools=tools,
+                ending_tools=(ending_tool,),
+                history=(*self.history, *opening),
+                images=self.images,
+                provider_turns=self.provider_turns,
+                inference_profile=SUGGESTION_PROFILE_ID,
+                max_turns=SUGGESTION_MAX_LLM_TURNS,
+                max_tool_calls=SUGGESTION_MAX_RESEARCH_TOOL_CALLS,
+                max_parallel_tool_calls=tunables.max_parallel_tool_calls,
+                window=self.window
+                or WindowState(
+                    budget=ContextBudget(
+                        window_tokens=tunables.context_window_tokens,
+                        baseline=None,
+                        reset_pending=False,
+                    ),
+                    omit_before=0,
+                ),
+                usage=lambda: self.sink.delta,
+                send=send,
+                before_send=_nothing_arrived,
+                on_turn=steps.on_turn,
+                on_result=steps.on_result,
+                on_notice=_keep_out_of_steps,
+                decide=judge,
+            )
+        )
+        self.history, self.images, self.window = (
+            ended.history,
+            ended.images,
+            ended.window,
+        )
+        self.ending_call = ending[-1]
+        return ended.value
+
+
+@dataclass(frozen=True, slots=True)
+class LensRunResult:
+    extraction: SuggestionExtraction
+    conversation: SuggestionConversation
+
+
 async def run_suggestion_react(
     *,
     user_id: str,
@@ -251,7 +379,7 @@ async def run_suggestion_react(
     parse_output: SuggestionOutputParser,
     record_step: SuggestionStepRecorder,
     past: PastSuggestions,
-) -> SuggestionExtraction:
+) -> LensRunResult:
     """Research behind ``context`` for ``lens`` until a submission is accepted.
 
     A submission that shows a known misjudgment, judged against ``past``, is
@@ -262,41 +390,19 @@ async def run_suggestion_react(
         user_id=user_id,
         run_id=suggestion_id,
     )
-    offered = {definition.name for definition in definitions}
     tool_definitions = resolve_react_tool_definitions(
         definitions=definitions,
-        tool_ids=tuple(
-            tool_id
-            for tool_id in SUGGESTION_TOOL_IDS
-            if tool_id not in _OFFERED_ONLY_TOOL_IDS or tool_id in offered
-        ),
+        tool_ids=offered_tool_ids(definitions, SUGGESTION_TOOL_IDS),
     )
     # What the run is asked, as one text: its first step and its extraction keep it.
     prompt_text = f"{context.rstrip()}\n\n{lens}"
-    sink = CountingSink()
-    steps = _RunSteps(run_id=suggestion_id, record=record_step, prompt=prompt_text)
-    sent: set[str] = set()  # the conditions this run was already sent back for
-
-    async def send(request: ConversationRequest) -> TurnReply:
-        try:
-            return await send_turn(request, sink)
-        except LlmProxyExecutionError as exc:
-            await steps.failed_send(exc)
-            raise
-
-    def _due_notices(extraction: SuggestionExtraction) -> list[str]:
-        decided = extraction["decided"]
-        if decided is None or REPEATED_SUGGESTION in sent:
-            return []
-        earlier = past.repeated(decided["key_point"])
-        if not earlier:
-            return []
-        sent.add(REPEATED_SUGGESTION)
-        return [
-            nudge_text(
-                nudge_config, REPEATED_SUGGESTION, earlier=past.describe(earlier)
-            )
-        ]
+    conversation = SuggestionConversation(
+        context=context,
+        system_instruction=system_instruction,
+        send_turn=send_turn,
+        past=past,
+        nudge_config=nudge_config,
+    )
 
     def decide(turn: IdleTurn) -> Finish[SuggestionExtraction] | Continue:
         if turn.ending_call is None:
@@ -310,52 +416,36 @@ async def run_suggestion_react(
             return Continue(
                 f"{SUBMIT_SUGGESTION_TOOL_NAME} was rejected: {str(exc)[:1200]}"
             )
+        decided = extraction["decided"]
         # A last turn's Continue fails the run, so no notice goes to one.
-        notices = [] if turn.final else _due_notices(extraction)
-        if notices:
+        notice = (
+            None
+            if turn.final or decided is None
+            else conversation.repeat_notice(decided["key_point"])
+        )
+        if notice is not None:
             return Continue(
-                render_nudge(nudge_config, SUBMIT_SUGGESTION_TOOL_NAME, *notices)
+                render_nudge(nudge_config, SUBMIT_SUGGESTION_TOOL_NAME, notice)
             )
         extraction["thinking"] = None
         extraction["prompt_text"] = prompt_text
         extraction["response_text"] = raw_text
         return Finish(extraction)
 
-    # Suggestion runs on the models an Action does, under the same input cap.
-    tunables = load_local_runtime_tunables().action_agent
-    return await run_conversation(
-        ConversationRun(
-            prompt=context,
-            system_instruction=system_instruction,
-            tools=tool_definitions,
-            ending_tools=(_terminal_tool(),),
-            history=(ConversationEntry(_user_text(lens)),),
-            provider_turns=ProviderTurnStore(identity=None),
-            inference_profile=SUGGESTION_PROFILE_ID,
-            max_turns=SUGGESTION_MAX_LLM_TURNS,
-            max_tool_calls=SUGGESTION_MAX_RESEARCH_TOOL_CALLS,
-            max_parallel_tool_calls=tunables.max_parallel_tool_calls,
-            window=WindowState(
-                budget=ContextBudget(
-                    window_tokens=tunables.context_window_tokens,
-                    baseline=None,
-                    reset_pending=False,
-                ),
-                omit_before=0,
-            ),
-            usage=lambda: sink.delta,
-            send=send,
-            before_send=_nothing_arrived,
-            on_turn=steps.on_turn,
-            on_result=steps.on_result,
-            on_notice=_keep_out_of_steps,
-            decide=decide,
-        )
+    extraction = await conversation.converse(
+        tools=tool_definitions,
+        ending_tool=_terminal_tool(),
+        opening=(ConversationEntry(_user_text(lens)),),
+        steps=SuggestionRunSteps(
+            run_id=suggestion_id, record=record_step, prompt=prompt_text
+        ),
+        decide=decide,
     )
+    return LensRunResult(extraction, conversation)
 
 
 @dataclass(slots=True)
-class _RunSteps:
+class SuggestionRunSteps:
     """Records the run's steps in order: each turn, answered call and failed send."""
 
     run_id: str
@@ -447,6 +537,9 @@ def _user_text(text: str) -> LlmTurnUserItem:
 __all__ = [
     "ACTIVITY_TOOL_IDS",
     "SUBMIT_SUGGESTION_TOOL_NAME",
+    "LensRunResult",
+    "SuggestionConversation",
+    "SuggestionRunSteps",
     "SuggestionStepRecorder",
     "SuggestionTurnSender",
     "SUGGESTION_COMMAND_TOOL_ID",
@@ -454,5 +547,6 @@ __all__ = [
     "SUGGESTION_TOOL_IDS",
     "SUGGESTION_MAX_LLM_TURNS",
     "SUGGESTION_MAX_RESEARCH_TOOL_CALLS",
+    "offered_tool_ids",
     "run_suggestion_react",
 ]

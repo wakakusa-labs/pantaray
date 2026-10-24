@@ -78,6 +78,7 @@ def parse_suggestion_output(
             "response_text": raw_text,
             "has_suggestion": True,
             "interaction_contract": parsed.interaction_contract,
+            "artifacts": [],
         }
 
     if key_point:
@@ -98,4 +99,5 @@ def parse_suggestion_output(
         "response_text": raw_text,
         "has_suggestion": False,
         "interaction_contract": None,
+        "artifacts": [],
     }

@@ -56,9 +56,19 @@ function harness({
   openPathResult = '',
   runFile = async () => '<p>converted</p>',
   chooseApp = async () => null,
+  suggestion = null,
+  owner = { subjectId: 'user-1' },
+  onBootstrapRead = () => {},
 } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-action-files-')));
   const reads = [];
+  // The backend answers only for the signed-in user's own Suggestion; requestJson throws otherwise.
+  const readSuggestionBootstrap = async (suggestionId) => {
+    if (suggestion === null || suggestionId !== 'sug-1') throw new Error('Suggestion not found');
+    onBootstrapRead();
+    return { artifactsRoot: suggestion.root, snapshot: { artifacts: suggestion.artifacts } };
+  };
+  const getCurrentSubjectId = () => owner.subjectId;
   const readConversationPage = async (request) => {
     reads.push(request);
     if (request.actionId !== 'act-1') throw new Error('Action not found');
@@ -76,7 +86,8 @@ function harness({
   registerActionFileHandlers(
     {
       windows: { getMainWindow: () => mainWindow },
-      actions: { readConversationPage },
+      actions: { readConversationPage, getCurrentSubjectId },
+      overlay: { resolveOverlayBootstrap: readSuggestionBootstrap },
       actionFiles: {
         open: ({ path: revealedPath }) => revealed.push(revealedPath),
         openInApp: async (realPath) => {
@@ -89,7 +100,12 @@ function harness({
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
   );
-  const protocol = createActionFileProtocolHandler({ readConversationPage });
+  const protocol = createActionFileProtocolHandler({
+    readConversationPage,
+    readSuggestionBootstrap,
+    getCurrentSubjectId,
+  });
+  const request = (file, id, kind = 'action') => ({ target: { kind, id }, path: file });
   return {
     dir,
     reads,
@@ -103,16 +119,25 @@ function harness({
       return file;
     },
     read: (file, actionId = 'act-1') =>
-      handlers.get('actionFile:read')({}, { actionId, path: file }),
+      handlers.get('actionFile:read')({}, request(file, actionId)),
     openInApp: (file, actionId = 'act-1') =>
-      handlers.get('actionFile:openInApp')({}, { actionId, path: file }),
+      handlers.get('actionFile:openInApp')({}, request(file, actionId)),
     openWithApp: (file, actionId = 'act-1') =>
-      handlers.get('actionFile:openWithApp')({}, { actionId, path: file }),
+      handlers.get('actionFile:openWithApp')({}, request(file, actionId)),
     reveal: (file, actionId = 'act-1') =>
-      handlers.get('actionFile:reveal')({}, { actionId, path: file }),
+      handlers.get('actionFile:reveal')({}, request(file, actionId)),
     quickLook: (file, actionId = 'act-1') =>
-      handlers.get('actionFile:quickLook')({}, { actionId, path: file }),
-    fetch: (file, actionId = 'act-1') => protocol({ url: buildActionFileUrl(actionId, file) }),
+      handlers.get('actionFile:quickLook')({}, request(file, actionId)),
+    fetch: (file, actionId = 'act-1') =>
+      protocol({ url: buildActionFileUrl({ kind: 'action', id: actionId }, file) }),
+    readSuggestionFile: (file, suggestionId = 'sug-1') =>
+      handlers.get('actionFile:read')({}, request(file, suggestionId, 'suggestion')),
+    openSuggestionFileInApp: (file, suggestionId = 'sug-1') =>
+      handlers.get('actionFile:openInApp')({}, request(file, suggestionId, 'suggestion')),
+    openSuggestionFileWithApp: (file) =>
+      handlers.get('actionFile:openWithApp')({}, request(file, 'sug-1', 'suggestion')),
+    fetchSuggestionFile: (file, suggestionId = 'sug-1') =>
+      protocol({ url: buildActionFileUrl({ kind: 'suggestion', id: suggestionId }, file) }),
   };
 }
 
@@ -257,7 +282,7 @@ test('the protocol streams a named PDF and nothing else', async () => {
   assert.equal(
     (
       await createActionFileProtocolHandler({ readConversationPage: async () => {} })({
-        url: 'pantaray-action-file://other/?action=act-1&path=/etc/hosts',
+        url: 'pantaray-action-file://other/?kind=action&id=act-1&path=/etc/hosts',
       })
     ).status,
     404
@@ -531,4 +556,105 @@ test('reveal selects a named file in Finder by its real path, and nothing else',
   assert.deepEqual(await app.reveal(other), NOT_FOUND);
   await assert.rejects(app.reveal(deck, 'act-2'));
   assert.deepEqual(app.revealed, [deck]);
+});
+
+/** A Suggestion folder inside a scratch directory, with a file outside it to escape to. */
+function suggestionFolder() {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-suggestion-')));
+  const root = path.join(base, 'suggestion_artifacts', 'user-1', 'sug-1');
+  fs.mkdirSync(path.join(root, 'drafts'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'private'));
+  fs.writeFileSync(path.join(base, 'private', 'secret.txt'), 'secret');
+  fs.writeFileSync(path.join(base, 'private', 'secret.pdf'), '%PDF-secret');
+  return { base, root };
+}
+
+test('a Suggestion file reads and opens only when its stored list names it', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'drafts', 'reply.md'), '# Reply');
+  fs.writeFileSync(path.join(root, 'unlisted.md'), 'not listed');
+  const app = harness({ suggestion: { root, artifacts: ['drafts/reply.md'] } });
+
+  assert.deepEqual(await app.readSuggestionFile('drafts/reply.md'), {
+    kind: 'text',
+    text: '# Reply',
+    truncated: false,
+  });
+  assert.deepEqual(await app.readSuggestionFile('unlisted.md'), NOT_FOUND);
+  assert.deepEqual(await app.readSuggestionFile(path.join(root, 'drafts', 'reply.md')), NOT_FOUND);
+  assert.deepEqual(await app.openSuggestionFileInApp('drafts/reply.md'), { kind: 'opened' });
+  assert.deepEqual(app.opened, [path.join(root, 'drafts', 'reply.md')]);
+  await assert.rejects(app.readSuggestionFile('drafts/reply.md', 'sug-2'));
+});
+
+test('a Suggestion path that leaves its folder is refused, by spelling or by symlink', async () => {
+  const { base, root } = suggestionFolder();
+  fs.symlinkSync(path.join(base, 'private', 'secret.txt'), path.join(root, 'notes.txt'));
+  fs.symlinkSync(path.join(base, 'private'), path.join(root, 'shared'));
+  fs.symlinkSync(path.join(base, 'private', 'secret.pdf'), path.join(root, 'report.pdf'));
+  const listed = ['notes.txt', 'shared/secret.txt', 'report.pdf', '../private/secret.txt'];
+  const app = harness({ suggestion: { root, artifacts: listed } });
+
+  for (const file of listed) {
+    assert.deepEqual(await app.readSuggestionFile(file), NOT_FOUND, file);
+    assert.deepEqual(await app.openSuggestionFileInApp(file), NOT_FOUND, file);
+  }
+  assert.equal((await app.fetchSuggestionFile('report.pdf')).status, 404);
+  assert.deepEqual(app.opened, []);
+});
+
+test('the protocol streams a PDF a Suggestion lists, and no other file', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'summary.pdf'), '%PDF-1.7\nsummary');
+  fs.writeFileSync(path.join(root, 'other.pdf'), '%PDF-1.7\nother');
+  const app = harness({ suggestion: { root, artifacts: ['summary.pdf'] } });
+
+  const response = await app.fetchSuggestionFile('summary.pdf');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/pdf');
+  assert.equal(await response.text(), '%PDF-1.7\nsummary');
+  assert.equal((await app.fetchSuggestionFile('other.pdf')).status, 404);
+  assert.equal((await app.fetchSuggestionFile('summary.pdf', 'sug-2')).status, 404);
+});
+
+test('a Suggestion answer that arrives after the owner changed or signed out authorizes nothing', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'reply.md'), '# Reply');
+  fs.writeFileSync(path.join(root, 'summary.pdf'), '%PDF-1.7\nsummary');
+  const owner = { subjectId: 'user-1' };
+  let nextOwner = 'user-2';
+  const app = harness({
+    suggestion: { root, artifacts: ['reply.md', 'summary.pdf'] },
+    owner,
+    // The owner changes while the backend read is in flight.
+    onBootstrapRead: () => (owner.subjectId = nextOwner),
+  });
+
+  assert.deepEqual(await app.readSuggestionFile('reply.md'), NOT_FOUND);
+  owner.subjectId = 'user-1';
+  assert.equal((await app.fetchSuggestionFile('summary.pdf')).status, 404);
+  owner.subjectId = 'user-1';
+  nextOwner = null;
+  assert.deepEqual(await app.openSuggestionFileInApp('reply.md'), NOT_FOUND);
+  assert.deepEqual(await app.readSuggestionFile('reply.md'), NOT_FOUND);
+  assert.deepEqual(app.opened, []);
+});
+
+test('an owner change while the app picker is open opens nothing', async () => {
+  const { root } = suggestionFolder();
+  fs.writeFileSync(path.join(root, 'reply.md'), '# Reply');
+  const owner = { subjectId: 'user-1' };
+  const runs = [];
+  const app = harness({
+    suggestion: { root, artifacts: ['reply.md'] },
+    owner,
+    chooseApp: async () => {
+      owner.subjectId = 'user-2';
+      return '/Applications/TextEdit.app';
+    },
+    runFile: async (...args) => runs.push(args),
+  });
+
+  assert.deepEqual(await app.openSuggestionFileWithApp('reply.md'), { kind: 'cancelled' });
+  assert.deepEqual(runs, []);
 });

@@ -71,6 +71,9 @@ class OverlayBootstrapResponse(BaseModel):
     """Backend-owned overlay bootstrap response."""
 
     suggestion_id: str = Field(description="Suggestion ID")
+    artifacts_root: str = Field(
+        description="Absolute folder that snapshot.artifacts are relative to"
+    )
     snapshot: OverlaySnapshotModel = Field(description="Replay-derived snapshot")
     last_sequence: int = Field(description="Last durable public event sequence")
     live_resume: OverlayLiveResumeModel = Field(description="Live resume hint")

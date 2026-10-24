@@ -16,6 +16,7 @@ import {
   historyItemSelection,
   historySelectionSearch,
   parseHistorySelection,
+  parseRequestedFile,
   splitWorkKey,
   type HistorySelection,
 } from '@/history/historySelection';
@@ -116,6 +117,13 @@ const SuggestionHistoryPage = () => {
   useEffect(() => {
     if (projectRequested) navigate({ search: '' }, { replace: true });
   }, [projectRequested, navigate]);
+  // A file an Overlay chip asked for is handed to the pane, then dropped from the address, so the
+  // same chip pressed again asks once more.
+  const requestedFile = parseRequestedFile(location.search);
+  useEffect(() => {
+    if (requestedFile !== null)
+      navigate({ search: historySelectionSearch(selection) }, { replace: true });
+  }, [requestedFile, selection, navigate]);
 
   const renderDetail = () => {
     if (selection === 'chat')
@@ -147,6 +155,7 @@ const SuggestionHistoryPage = () => {
         key={id}
         suggestionId={id}
         title={title}
+        requestedFile={requestedFile}
         onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
         onAddProject={addProject}
       />

@@ -87,12 +87,13 @@ const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
 const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
 
-async function renderPane(suggestionId = 'sug-1') {
+async function renderPane(suggestionId = 'sug-1', requestedFile: string | null = null) {
   const rendered = render(
     <UiLanguageProvider initialLanguage="en">
       <SuggestionTaskPane
         suggestionId={suggestionId}
         title="Invoice draft"
+        requestedFile={requestedFile}
         onStarted={onStarted}
         onAddProject={() => undefined}
       />
@@ -672,5 +673,55 @@ describe('SuggestionTaskPane', () => {
     expect(acceptButton()).toBeEnabled();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(onStarted).not.toHaveBeenCalled();
+  });
+  describe('files the suggestion made', () => {
+    const readFile = vi.fn<NonNullable<ElectronBridge['actionFiles']>['read']>();
+    const filesGroup = () => screen.queryByRole('group', { name: "This suggestion's files" });
+
+    beforeEach(() => {
+      readFile.mockReset().mockResolvedValue({ kind: 'text', text: '# Reply', truncated: false });
+      Object.assign(window.electron ?? {}, { actionFiles: { read: readFile } });
+    });
+
+    it('shows no chips for a suggestion without files', async () => {
+      await renderPane();
+
+      expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
+      expect(filesGroup()).toBeNull();
+    });
+
+    it('previews a file its chip opens, read by the suggestion and the listed path', async () => {
+      read.mockResolvedValue(suggestion({ artifacts: ['drafts/reply.md', 'sheet.csv'] }));
+      await renderPane();
+
+      const chips = within(filesGroup()!);
+      expect(chips.getAllByRole('button').map((chip) => chip.textContent)).toEqual([
+        'MDreply.md',
+        'CSVsheet.csv',
+      ]);
+      fireEvent.click(chips.getByRole('button', { name: /reply\.md/ }));
+
+      expect(await screen.findByRole('heading', { name: 'reply.md' })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: 'Reply' })).toBeInTheDocument();
+      expect(readFile).toHaveBeenCalledWith({
+        target: { kind: 'suggestion', id: 'sug-1' },
+        path: 'drafts/reply.md',
+      });
+      expect(chips.getByRole('button', { name: /reply\.md/ })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+    });
+
+    it('opens the preview of the file an Overlay chip asked for', async () => {
+      read.mockResolvedValue(suggestion({ artifacts: ['drafts/reply.md'] }));
+      await renderPane('sug-1', 'drafts/reply.md');
+
+      expect(await screen.findByRole('heading', { name: 'reply.md' })).toBeInTheDocument();
+      expect(readFile).toHaveBeenCalledWith({
+        target: { kind: 'suggestion', id: 'sug-1' },
+        path: 'drafts/reply.md',
+      });
+    });
   });
 });

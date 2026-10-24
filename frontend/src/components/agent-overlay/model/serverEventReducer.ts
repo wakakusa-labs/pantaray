@@ -23,6 +23,7 @@ export function applySuggestionId(
     currentCommandId: null,
     interactionContract: null,
     dismissReason: null,
+    artifacts: [],
     historyExpandOverride: null,
     knownProcessIds: new Set<string>(),
     knownActionIds: new Set<string>(),

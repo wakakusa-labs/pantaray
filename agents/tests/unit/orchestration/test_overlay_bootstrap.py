@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pantaray_agents.orchestration.overlay.bootstrap import (
@@ -74,7 +76,7 @@ def _event(
 
 
 def _overlay_service(repo: _SuggestionRepo) -> OverlayBootstrapService:
-    return OverlayBootstrapService(repo)
+    return OverlayBootstrapService(repo, db_path=Path("/storage/runtime.sqlite3"))
 
 
 async def test_overlay_bootstrap_uses_history_row_as_initial_snapshot() -> None:

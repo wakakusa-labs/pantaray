@@ -505,6 +505,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
     readActionConversationPage: actions.readConversationPage,
+    resolveOverlayBootstrap,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,
     startScreenshots,

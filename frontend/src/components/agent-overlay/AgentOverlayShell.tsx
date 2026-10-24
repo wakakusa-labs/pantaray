@@ -7,6 +7,7 @@ import type { WorkKey } from '@/components/chat/chatTimeline';
 import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import type { WorkRefKind } from '@/history/workRefLink';
+import type { OverlayOpenTaskRequest } from '../../../electron/src/ipc/schemas/overlay';
 import { PopupContainer } from './OverlayBackground';
 import HeaderRow, { HeaderButtonGroup } from './HeaderBar';
 import { ApprovalPanel as ApprovalPanelView } from './ApprovalPanel';
@@ -22,6 +23,7 @@ import {
 } from './ContentLayout';
 import { MarkdownBlock } from './MarkdownRenderer';
 import { DismissalReason } from './DismissalReason';
+import { SuggestionArtifactChips } from './SuggestionArtifactChips';
 import { HeaderIconButton } from './IconButton';
 import {
   Check,
@@ -106,6 +108,8 @@ type AgentOverlayShellProps = {
   isSuggestionAccepted?: boolean;
   /** A dismissed offer, with the reason the user gave, if any. */
   dismissal?: { reason: string | null } | null;
+  /** The suggestion's files, until an Action takes the suggestion over. */
+  artifacts?: readonly string[];
   actionText: string;
   conversationContent?: ReactNode;
   /** パネル下端に固定する入力欄。会話履歴と一緒にはスクロールしない。 */
@@ -129,7 +133,7 @@ type AgentOverlayShellProps = {
    * Moves the Action, or the suggestion until an Action takes it up, to the main window, which
    * then closes this panel.
    */
-  onOpenInMainWindow?: (work: { kind: WorkRefKind; id: string }) => void;
+  onOpenInMainWindow?: (work: OverlayOpenTaskRequest) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed?: boolean;
   fadeDurationMs?: number;
@@ -186,6 +190,7 @@ const AgentOverlayShell = ({
   isSuggestionStreamFinished,
   isSuggestionAccepted = false,
   dismissal = null,
+  artifacts = [],
   actionText,
   conversationContent = null,
   composer = null,
@@ -382,6 +387,13 @@ const AgentOverlayShell = ({
                     text={suggestionText}
                     isStreamFinished={isSuggestionStreamFinished}
                   />
+                  {suggestionId !== null && onOpenInMainWindow && artifacts.length > 0 ? (
+                    <SuggestionArtifactChips
+                      suggestionId={suggestionId}
+                      artifacts={artifacts}
+                      onOpenInMainWindow={onOpenInMainWindow}
+                    />
+                  ) : null}
                   {isSuggestionAccepted ? (
                     <SuggestionDecisionStatus>
                       <Check size={14} aria-hidden="true" />

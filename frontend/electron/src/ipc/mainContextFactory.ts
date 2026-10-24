@@ -212,9 +212,10 @@ export function buildMainContext(params: {
           // no-op
         }
       },
-      showTask: async ({ kind, id }) => {
-        // The same `?item=` the renderer writes (historySelectionSearch).
-        const route = `/history?item=${kind}:${encodeURIComponent(id)}`;
+      showTask: async ({ kind, id, file }) => {
+        // The same `?item=` and `&file=` the renderer reads (historySelection).
+        const fileQuery = file === undefined ? '' : `&file=${encodeURIComponent(file)}`;
+        const route = `/history?item=${kind}:${encodeURIComponent(id)}${fileQuery}`;
         const mainWindow = params.getMainWindow();
         if (mainWindow && !mainWindow.isDestroyed()) {
           // A loaded page selects it in place: a load would drop its chat and task drafts. A page
@@ -225,7 +226,10 @@ export function buildMainContext(params: {
             restoreAndFocusWindow(mainWindow);
             await loaded;
           } else {
-            mainWindow.webContents.send('history:showItem', { item: `${kind}:${id}` });
+            mainWindow.webContents.send('history:showItem', {
+              item: `${kind}:${id}`,
+              ...(file === undefined ? {} : { file }),
+            });
             restoreAndFocusWindow(mainWindow);
           }
           return;

@@ -13,15 +13,16 @@ export function useShowHistoryItem(): void {
     const onShowItem = window.electron?.history?.onShowItem;
     if (!onShowItem) return;
     return onShowItem((payload) => {
-      const item =
-        typeof payload === 'object' && payload !== null && 'item' in payload
-          ? parseWorkKey(payload.item)
-          : null;
+      const request = typeof payload === 'object' && payload !== null ? payload : null;
+      const item = request && 'item' in request ? parseWorkKey(request.item) : null;
       if (item === null) {
         console.error('Ignored a malformed request to show a History item.');
         return;
       }
-      navigate({ pathname: '/history', search: historySelectionSearch(item) });
+      // A Suggestion file whose Overlay chip was pressed opens in the work's preview.
+      const file =
+        request && 'file' in request && typeof request.file === 'string' ? request.file : null;
+      navigate({ pathname: '/history', search: historySelectionSearch(item, file) });
     });
   }, [navigate]);
 }

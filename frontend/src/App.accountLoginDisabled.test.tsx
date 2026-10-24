@@ -30,7 +30,10 @@ afterEach(() => {
 it.each(['/login', '/signup', '/forgot-password', '/reset-password'])(
   'keeps disabled desktop account page %s inaccessible',
   async (path) => {
-    Object.defineProperty(window, 'electron', { configurable: true, value: { auth: {} } });
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { auth: {}, onboarding: { getState: async () => ({ status: 'completed' }) } },
+    });
     window.history.replaceState(null, '', `/#${path}`);
     render(
       <AuthContext.Provider value={auth}>

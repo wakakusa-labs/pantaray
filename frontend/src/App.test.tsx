@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
 import { AuthContext, type AuthContextType } from './context/AuthContextDef';
 import { UiLanguageProvider } from './context/UiLanguageContext';
+import type { OnboardingState } from '../electron/src/ipc/schemas/onboarding';
 
 vi.mock('../electron/src/auth/accountLoginFeature', () => ({
   PANTARAY_ACCOUNT_LOGIN_ENABLED: true,
@@ -29,6 +30,7 @@ const startBrowserLogin = vi.fn(async () => ({
   code_challenge: 'test-challenge',
 }));
 const send = vi.fn();
+const getState = vi.fn(async (): Promise<OnboardingState> => ({ status: 'completed' }));
 
 function subject() {
   return (
@@ -54,7 +56,7 @@ beforeEach(() => {
   };
   Object.defineProperty(window, 'electron', {
     configurable: true,
-    value: { ipcRenderer: { send }, auth: { startBrowserLogin } },
+    value: { ipcRenderer: { send }, auth: { startBrowserLogin }, onboarding: { getState } },
   });
   vi.stubEnv('VITE_WEB_APP_URL', 'https://app.example.com');
   window.history.replaceState(null, '', '/');
@@ -82,6 +84,15 @@ it.each([
     })
   ).toHaveLength(2);
   expect(startBrowserLogin).not.toHaveBeenCalled();
+});
+
+it('opens first-run setup instead of the app, without the rail, until it is completed', async () => {
+  getState.mockResolvedValueOnce({ status: 'in_progress', step: 'ai' });
+  window.history.replaceState(null, '', '/#/history');
+  render(subject());
+  expect(await screen.findByRole('heading', { name: /AI をつなぐ/ })).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Local history' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'ホーム' })).not.toBeInTheDocument();
 });
 
 it('reopens what History last showed from Home, and leaves it as it is on History', async () => {

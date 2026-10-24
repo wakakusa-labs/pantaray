@@ -3,7 +3,8 @@
 Each Suggestion samples three distinct patterns of help ("lenses") by weight from
 one pool. Every lens gets its own decision run on the shared prompt plus that
 lens, shown with a few examples drawn from the lens's pool; a selector call then
-picks the single best candidate, or none.
+picks the single best candidate, or none, and only the chosen run goes on to
+make what it suggests.
 """
 
 from __future__ import annotations
@@ -19,9 +20,12 @@ from pantaray_agents.schema.agent.suggestion import SuggestionExtraction
 from pantaray_agents.utils.prompt_loader import PromptConfig
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
+from .make import make_suggestion_artifacts
 from .nudges import PastSuggestions
 from .output import parse_suggestion_output
 from .react import (
+    LensRunResult,
+    SuggestionConversation,
     SuggestionStepRecorder,
     SuggestionToolCallGenerator,
     SuggestionTurnSender,
@@ -71,6 +75,7 @@ class SampledLens:
 class LensCandidate:
     lens: str
     extraction: SuggestionExtraction
+    conversation: SuggestionConversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +155,7 @@ async def decide_with_lenses(
     lens_config: PromptConfig,
     selector_config: PromptConfig,
     nudge_config: PromptConfig,
+    make_config: PromptConfig,
     research_tools: SuggestionResearchTools,
     send_turn: SuggestionTurnSender,
     generate_tool_call: SuggestionToolCallGenerator,
@@ -161,7 +167,7 @@ async def decide_with_lenses(
     stops the other runs.
     """
 
-    async def run_lens(index: int, lens: SampledLens) -> SuggestionExtraction:
+    async def run_lens(index: int, lens: SampledLens) -> LensRunResult:
         offset = index * LENS_STEP_STRIDE
 
         async def record(step: ReactLoopStep) -> None:
@@ -194,12 +200,12 @@ async def decide_with_lenses(
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     candidates = tuple(
-        LensCandidate(lens=lens.name, extraction=result)
+        LensCandidate(lens.name, result.extraction, result.conversation)
         for lens, result in zip(lenses, results, strict=True)
-        if result["decided"] is not None
+        if result.extraction["decided"] is not None
     )
     if not candidates:
-        return LensDecision(results[0], (), None)
+        return LensDecision(results[0].extraction, (), None)
 
     if selector_config.system_instruction is None:
         raise ValueError("The Suggestion selector prompt has no system_instruction")
@@ -250,7 +256,24 @@ async def decide_with_lenses(
     if chosen is None:
         declined = _declined(candidates[0].extraction)
         return LensDecision(declined, candidates, None)
-    return LensDecision(chosen.extraction, candidates, selected_lens)
+
+    async def record_make(step: ReactLoopStep) -> None:
+        # Its llm steps carry no tool_output, so the selector's record above
+        # stays the one the recent-Suggestion history reads the lens from.
+        await record_step(replace(step, step_number=step.step_number + step_number))
+
+    made = await make_suggestion_artifacts(
+        user_id=user_id,
+        suggestion_id=suggestion_id,
+        extraction=chosen.extraction,
+        conversation=chosen.conversation,
+        research_tools=research_tools,
+        make_config=make_config,
+        record_step=record_make,
+    )
+    if made is None:
+        return LensDecision(_declined(chosen.extraction), candidates, None)
+    return LensDecision(made, candidates, selected_lens)
 
 
 def _declined(extraction: SuggestionExtraction) -> SuggestionExtraction:

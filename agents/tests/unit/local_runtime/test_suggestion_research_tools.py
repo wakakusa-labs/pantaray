@@ -1332,7 +1332,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         if step.step_kind == "tool" and step.status == "success":
             tool_outputs.append(step.tool_output)
 
-    result = await run_suggestion_react(
+    run = await run_suggestion_react(
         user_id="user-1",
         suggestion_id="suggestion-1",
         context="context",
@@ -1351,7 +1351,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
     )
 
-    assert result["has_suggestion"] is False
+    assert run.extraction["has_suggestion"] is False
 
     listing, page = tool_outputs[:2]
     assert listing["storage"] == "action_file"

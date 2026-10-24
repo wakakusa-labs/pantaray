@@ -55,6 +55,7 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     decide_with_lenses,
     sample_lenses,
 )
+from pantaray_agents.agents.suggestion_agent.make import SUGGESTION_MAKE_PROMPT_NAME
 from pantaray_agents.agents.suggestion_agent.nudges import (
     SUGGESTION_NUDGES_PROMPT_NAME,
     Embed,
@@ -176,6 +177,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         self._nudge_prompt_config = self._load_prompt_config(
             SUGGESTION_NUDGES_PROMPT_NAME
         )
+        self._make_prompt_config = self._load_prompt_config(SUGGESTION_MAKE_PROMPT_NAME)
         self._lens_rng = random.Random()
         self._last_step_number = 0  # the run's latest recorded step
         self._action_agent_capabilities_prompt_text = ACTION_AGENT_CAPABILITY_ENVELOPE
@@ -415,6 +417,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             lens_config=self._lens_prompt_config,
             selector_config=self._selector_prompt_config,
             nudge_config=self._nudge_prompt_config,
+            make_config=self._make_prompt_config,
             research_tools=self.research_tools,
             send_turn=self._send_research_turn,
             generate_tool_call=generate_tool_call,
@@ -502,6 +505,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             created_at=now_utc_iso(),
             has_suggestion=extracted_data["has_suggestion"],
             interaction_contract=extracted_data["interaction_contract"],
+            artifacts=extracted_data["artifacts"],
             user_id=suggestion_request.user_id,
             status=StatusType.SUCCESS,
             error=None,

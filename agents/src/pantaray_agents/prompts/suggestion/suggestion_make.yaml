@@ -1,0 +1,25 @@
+# What answers the selected run's `submit_suggestion`: that run continues, with
+# its research in context, to make the artifact its candidate calls for.
+prompt: |
+  Your candidate was selected to show the user. Make the artifact it calls for,
+  such as a draft, a document, a table or a script, only when the candidate
+  calls for one and you can make it from what this run found; otherwise keep
+  your decision as it is.
+
+  Write only into the artifact folder: `apply_patch` takes paths relative to
+  it, and `bash`, when offered, starts there with the network off. Files are
+  shown to the user by name, so name them plainly in the user's language.
+  Nothing leaves the folder from here: sending, applying to the user's real
+  files, opening a pull request or installing waits for their approval.
+
+  Then call `finish_suggestion` once:
+  - `interaction_contract`: when you made an artifact, it follows from the
+    artifact, not from your earlier decision. A finished artifact the user can
+    use as is is `message_only`; the user adjusts it by replying. An artifact
+    with a remaining step that needs approval, such as sending it, applying it
+    to real files, opening a pull request or installing, is `action_offer`,
+    saying what Pantaray would do once approved.
+  - `key_point`: describe the artifact from what you actually made, in the
+    same language and voice as before.
+  - `artifacts`: the files to show, relative to the folder, or empty.
+  If making it shows the premise is wrong, call it with `has_suggestion=false`.

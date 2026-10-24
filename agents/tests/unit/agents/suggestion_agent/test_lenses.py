@@ -3,10 +3,13 @@
 import asyncio
 import itertools
 import random
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from tests.unit.agents.suggestion_agent.prompt_support import (
+    MAKE_CONFIG,
     NO_SUGGESTION,
     NUDGE_CONFIG,
 )
@@ -28,11 +31,17 @@ from pantaray_agents.agents.suggestion_agent.lenses import (
     lens_section,
     sample_lenses,
 )
+from pantaray_agents.agents.suggestion_agent.make import FINISH_SUGGESTION_TOOL_NAME
 from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_MAX_LLM_TURNS
+from pantaray_agents.agents.suggestion_agent.research import (
+    FixedSuggestionResearchTools,
+    SuggestionMakeTools,
+)
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.loop import REPAIR_MAX_ATTEMPTS, ConversationRequest
 from pantaray_agents.mock.suggestion_research import (
+    _mock_definition,
     build_mock_suggestion_research_tools,
 )
 from pantaray_agents.utils.prompt_loader import PromptConfig, PromptLoader
@@ -64,6 +73,15 @@ def _lens_of(request: ConversationRequest) -> str:
     return block.text
 
 
+def _kept(submission: dict[str, object]) -> dict[str, object]:
+    return {
+        "has_suggestion": True,
+        "interaction_contract": submission["interaction_contract"],
+        "key_point": submission["key_point"],
+        "artifacts": [],
+    }
+
+
 def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
     selector_prompts: list[str] = []
     call_ids = itertools.count()
@@ -72,10 +90,13 @@ def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
         lens = next(
             lens for lens in LENSES if f"### {lens.title()}" in _lens_of(request)
         )
+        making = FINISH_SUGGESTION_TOOL_NAME in {tool.name for tool in request.tools}
         call = LlmToolCall(
             call_id=f"c{next(call_ids)}",
-            name="submit_suggestion",
-            arguments=submissions.get(lens, NO_SUGGESTION),
+            name=FINISH_SUGGESTION_TOOL_NAME if making else "submit_suggestion",
+            arguments=_kept(submissions[lens])
+            if making
+            else submissions.get(lens, NO_SUGGESTION),
         )
         return ActionTurnReply(
             response=LlmActionTurnResponse(
@@ -97,7 +118,7 @@ def _model(choice: int | None, submissions: dict[str, dict[str, object]]):
     return (send, generate), selector_prompts
 
 
-async def _decide(model, steps: list[ReactLoopStep]):
+async def _decide(model, steps: list[ReactLoopStep], research_tools=None):
     send, generate = model
     loader = PromptLoader()
     lens_config = loader.load_config(SUGGESTION_LENS_PROMPT_NAME)
@@ -119,7 +140,8 @@ async def _decide(model, steps: list[ReactLoopStep]):
         lens_config=lens_config,
         selector_config=loader.load_config(SUGGESTION_SELECTOR_PROMPT_NAME),
         nudge_config=NUDGE_CONFIG,
-        research_tools=build_mock_suggestion_research_tools(),
+        make_config=MAKE_CONFIG,
+        research_tools=research_tools or build_mock_suggestion_research_tools(),
         send_turn=send,
         generate_tool_call=generate,
         record_step=record,
@@ -171,8 +193,14 @@ def test_a_lens_run_shows_a_seeded_draw_from_the_lens_examples() -> None:
     assert len(draws) > 1
 
 
+def make_tools(tmp_path: Path) -> FixedSuggestionResearchTools:
+    tools = build_mock_suggestion_research_tools()
+    made = (*tools.definitions, _mock_definition("apply_patch"))
+    return replace(tools, make_tools=SuggestionMakeTools(made, tmp_path / "made"))
+
+
 @pytest.mark.asyncio
-async def test_the_selector_choice_maps_to_that_candidate() -> None:
+async def test_the_selector_choice_maps_to_that_candidate(tmp_path: Path) -> None:
     generate, selector_prompts = _model(
         2,
         {
@@ -182,7 +210,7 @@ async def test_the_selector_choice_maps_to_that_candidate() -> None:
     )
     steps: list[ReactLoopStep] = []
 
-    decision = await _decide(generate, steps)
+    decision = await _decide(generate, steps, make_tools(tmp_path))
 
     assert decision.selected_lens == "perspective"
     assert decision.extraction["decided"]["key_point"] == "third idea"
@@ -192,10 +220,12 @@ async def test_the_selector_choice_maps_to_that_candidate() -> None:
     # It sees what the user was already shown.
     assert "earlier ideas" in selector_prompts[0]
     assert "take_over" not in selector_prompts[0].lower().replace(" ", "_")
-    # Each run records in its own step range; the selector after all of them.
-    assert {1, 10_001, 20_001, 30_001} <= {step.step_number for step in steps}
+    # Each run records in its own step range; the selector after all of them,
+    # and the chosen run's make stage after the selector.
+    numbers = {step.step_number: step for step in steps}
+    assert {1, 10_001, 20_001, 30_001, 30_002} <= set(numbers)
     # The selector's record keeps the lens of the Suggestion it chose.
-    assert steps[-1].tool_output == {"selected_lens": "perspective"}
+    assert numbers[30_001].tool_output == {"selected_lens": "perspective"}
 
 
 def test_a_lens_run_cannot_record_into_the_next_runs_step_range() -> None:

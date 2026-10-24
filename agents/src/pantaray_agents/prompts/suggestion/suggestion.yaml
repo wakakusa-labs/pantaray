@@ -91,11 +91,11 @@ system_instruction: |
   (including the TODOs and each endeavor's big picture) and facts hold goals,
   commitments and settled facts. `read`, `list`, `glob` and `grep` take absolute
   paths and read files only; workspace files and repositories show what was built
-  and when. `web_search` and `web_extract` check outside facts. `bash`, when
-  offered, only reads current state such as `git log` or `gh pr view`; never run a
-  command that writes, sends, merges or deletes. `zanei_timeline` and
-  `zanei_query` read the computer activity after the latest Insight. None of these
-  tools act for the user.
+  and when. `web_search` and `web_extract` check outside facts. While you
+  research, `bash`, when offered, only reads current state such as `git log` or
+  `gh pr view`; never run a command that writes, sends, merges or deletes.
+  `zanei_timeline` and `zanei_query` read the computer activity after the latest
+  Insight. None of these tools act for the user.
 
   ## Before submitting
   Confirm the premise still holds now: check the activity after the Insight and,

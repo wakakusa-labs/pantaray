@@ -12,6 +12,7 @@ import { IntegrationSettings } from './settings/components/IntegrationSettings';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
+import { RecordingSwitch } from './settings/components/RecordingSwitch';
 import { ShortcutSection } from './settings/components/ShortcutSection';
 import type { Translate } from './settings/types';
 import { useSettingsPageController } from './settings/useSettingsPageController';
@@ -100,7 +101,7 @@ const SettingsPage: React.FC = () => {
 
       <div className="app-split-detail settings-page-content">
         <AiConnectionNotice />
-        {activeSection === 'ai_connection' ? <AiConnectionSettingsSection /> : null}
+        {activeSection === 'ai_connection' ? <AiConnectionSettingsSection part="all" /> : null}
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
@@ -212,9 +213,6 @@ function ScreenshotCaptureSection(props: {
   setScreenshotsEnabled: (enabled: boolean) => Promise<boolean>;
   t: Translate;
 }) {
-  const disabled =
-    props.isProcessing || (!props.isCapturingScreenshots && !props.isScreenshotCaptureAvailable);
-
   return (
     <div className="dashboard-section">
       <div className="settings-section-header">
@@ -224,25 +222,12 @@ function ScreenshotCaptureSection(props: {
             {props.isCapturingScreenshots ? props.t('common.active') : props.t('common.paused')}
           </div>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={props.isCapturingScreenshots}
-          aria-label={props.t('settings.screenshotCapture.screenshotsLabel')}
-          className={[
-            'settings-toggle',
-            props.isCapturingScreenshots ? 'settings-toggle--on' : null,
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          disabled={disabled}
-          onClick={() => void props.setScreenshotsEnabled(!props.isCapturingScreenshots)}
-        >
-          <span className="settings-toggle-thumb" />
-          <span className="settings-toggle-label">
-            {props.isCapturingScreenshots ? props.t('common.on') : props.t('common.off')}
-          </span>
-        </button>
+        <RecordingSwitch
+          isCapturing={props.isCapturingScreenshots}
+          canStart={props.isScreenshotCaptureAvailable}
+          isProcessing={props.isProcessing}
+          onChange={props.setScreenshotsEnabled}
+        />
       </div>
       <p className="dashboard-section-description">
         {props.t('settings.screenshotCapture.description')}

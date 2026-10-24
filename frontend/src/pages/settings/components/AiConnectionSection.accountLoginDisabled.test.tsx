@@ -41,6 +41,7 @@ it('hides Pantaray Cloud while keeping ChatGPT and API-key connections', () => {
   };
   render(
     <AiConnectionSection
+      part="all"
       state={state}
       actions={actions}
       t={((key: string) => key) as Translate}

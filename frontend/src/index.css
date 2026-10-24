@@ -39,6 +39,11 @@
   --border-color-hover: rgba(255, 255, 255, 0.15);
   --surface-bg: rgba(255, 255, 255, 0.05);
   --surface-bg-hover: rgba(255, 255, 255, 0.08);
+  /* A filled face, as macOS draws a push button: a bare outline reads as framed text. */
+  --button-fill: rgba(255, 255, 255, 0.11);
+  --button-fill-hover: rgba(255, 255, 255, 0.16);
+  --button-fill-active: rgba(255, 255, 255, 0.2);
+  --button-face-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   /* エラー文言の色（バッジの danger と同じ色相に揃える） */
   --danger-color: #fecaca;
   /* 注意（再接続が必要・API が許さない理由など）。エラーではないが目を留めてほしいもの */
@@ -49,7 +54,6 @@
   /* ---- Controls (menus, bordered lists, logo tiles) ---- */
   --accent-rgb: 125, 171, 220;
   --control-border: rgba(255, 255, 255, 0.16);
-  --control-border-hover: rgba(255, 255, 255, 0.28);
   --radius-control: 8px;
   --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.45);
   /* Service logos are drawn for light backgrounds. */
@@ -313,12 +317,13 @@ body.overlay-window #root {
   text-align: center !important;
   text-decoration: none !important;
   padding: 0.75rem 1rem !important;
-  background: transparent !important;
-  color: var(--text-secondary) !important;
+  background: var(--button-fill) !important;
+  box-shadow: var(--button-face-highlight);
+  color: var(--text-primary) !important;
   border-radius: 10px !important;
   font-weight: 500 !important;
   transition: all 0.2s !important;
-  border: 1px solid var(--border-color) !important;
+  border: 1px solid transparent !important;
   cursor: pointer !important;
   font-size: 14px !important;
   box-sizing: border-box !important;
@@ -328,9 +333,11 @@ body.overlay-window #root {
 }
 
 .auth-button:hover:not(:disabled) {
-  background: var(--surface-bg-hover) !important;
-  color: var(--text-primary) !important;
-  border-color: var(--border-color-hover) !important;
+  background: var(--button-fill-hover) !important;
+}
+
+.auth-button:active:not(:disabled) {
+  background: var(--button-fill-active) !important;
 }
 
 .auth-button:focus-visible {
@@ -616,9 +623,10 @@ body.overlay-window #root {
   height: 34px;
   justify-content: center;
   padding: var(--space-xs) var(--space-md);
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
+  color: var(--text-primary);
+  border: 1px solid transparent;
   border-radius: 8px;
   font-size: var(--text-meta-size);
   font-weight: 500;
@@ -634,9 +642,11 @@ body.overlay-window #root {
 }
 
 .history-filter-button:hover:not(:disabled) {
-  background: var(--surface-bg-hover);
-  color: var(--text-primary);
-  border-color: var(--border-color-hover);
+  background: var(--button-fill-hover);
+}
+
+.history-filter-button:active:not(:disabled) {
+  background: var(--button-fill-active);
 }
 
 .history-filter-button:disabled {

@@ -153,12 +153,21 @@
   gap: 5px;
   height: 28px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--surface-bg-hover);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
   color: var(--fog-text);
   font-size: 12px;
   cursor: pointer;
+}
+
+.task-file-preview__open:hover {
+  background: var(--button-fill-hover);
+}
+
+.task-file-preview__open:active {
+  background: var(--button-fill-active);
 }
 
 .task-file-preview__close {
@@ -175,7 +184,6 @@
   cursor: pointer;
 }
 
-.task-file-preview__open:hover,
 .task-file-preview__close:hover {
   background: var(--fog-mist-strong);
 }

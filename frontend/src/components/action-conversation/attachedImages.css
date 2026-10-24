@@ -83,12 +83,21 @@
 
 .action-conversation__lightbox-actions button {
   padding: var(--space-xs) var(--space-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid transparent;
   border-radius: 8px;
   color: var(--text-primary);
-  background: var(--surface-bg);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
   font: inherit;
   cursor: pointer;
+}
+
+.action-conversation__lightbox-actions button:hover {
+  background: var(--button-fill-hover);
+}
+
+.action-conversation__lightbox-actions button:active {
+  background: var(--button-fill-active);
 }
 
 .action-conversation__lightbox-actions button:focus-visible {

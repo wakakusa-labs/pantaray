@@ -4,8 +4,6 @@ export const INTEGRATION_MESSAGES = defineMessages({
   en: {
     'settings.integrations.title': 'Integrations',
     'settings.integrations.description': 'Let Pantaray use the services you connect for its work.',
-    'settings.integrations.consent':
-      'The “Recorded apps and websites” setting does not apply to connected services. What each one can do is set here.',
     'settings.integrations.accountCount': '{count} accounts',
     'settings.integrations.needsReconnection': 'Needs reconnecting',
     'settings.integrations.backLabel': 'Back to Integrations',
@@ -80,8 +78,6 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.title': '連携',
     'settings.integrations.description':
       'つないだサービスを、Pantaray が作業に使えるようにします。',
-    'settings.integrations.consent':
-      '「記録するアプリとウェブサイト」の設定は、連携したサービスには効きません。サービスごとにできることは、ここで決めます。',
     'settings.integrations.accountCount': '{count} アカウント',
     'settings.integrations.needsReconnection': '再接続が必要',
     'settings.integrations.backLabel': '連携に戻る',

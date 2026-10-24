@@ -25,11 +25,15 @@ function wrap(children: ReactNode) {
 function stubBridge(start = vi.fn(async () => 'started')) {
   // The gate lives in main: "later" is answered there and held for the app run, so
   // the stub answers it the same way rather than in the window that asked.
-  const gate = { osPermissionsGranted: false, introRequested: false, introDismissed: false };
+  const gate = {
+    permissions: { accessibility: false, screenRecording: false },
+    introRequested: false,
+    introDismissed: false,
+  };
   const dismissIntro = vi.fn(async (_ownerId: string) =>
     Object.assign(gate, { introRequested: false, introDismissed: true })
   );
-  const openPermissionSettings = vi.fn(async () => undefined);
+  const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
   let askForReread: () => void = () => undefined;
   window.electron = {
     screenshot: {
@@ -37,7 +41,7 @@ function stubBridge(start = vi.fn(async () => 'started')) {
       onStatusChanged: vi.fn(() => () => undefined),
       start,
       stop: vi.fn(async () => true),
-      getGateState: vi.fn(async () => ({ ...gate })),
+      getGateState: vi.fn(async () => ({ ...gate, permissions: { ...gate.permissions } })),
       dismissIntro,
       openPermissionSettings,
       onGateStateChanged: vi.fn((callback: () => void) => {
@@ -58,9 +62,15 @@ function stubBridge(start = vi.fn(async () => 'started')) {
     // The permissions arriving, which main learns from this very read: a conversation
     // it was holding opens there and then, so the read reports it no longer waiting.
     grantPermissions: () =>
-      Object.assign(gate, { osPermissionsGranted: true, introRequested: false }),
+      Object.assign(gate, {
+        permissions: { accessibility: true, screenRecording: true },
+        introRequested: false,
+      }),
+    // Accessibility granted while Screen Recording still waits on a reopen.
+    grantAccessibility: () => Object.assign(gate.permissions, { accessibility: true }),
     // The user taking the permissions away again in System Settings.
-    revokePermissions: () => Object.assign(gate, { osPermissionsGranted: false }),
+    revokePermissions: () =>
+      Object.assign(gate, { permissions: { accessibility: false, screenRecording: false } }),
     // Main asking this window to read the gate again, with no focus to react to.
     askForReread: async () => {
       await act(async () => {
@@ -152,9 +162,8 @@ describe('RecordingIntroDialog', () => {
 
   it('keeps the screen open with what to grant while macOS permission is missing', async () => {
     // The collector is up but recording nothing, so the screen has no permit to record.
-    const { dismissIntro, start, openPermissionSettings } = stubBridge(
-      vi.fn(async () => 'permission_pending')
-    );
+    const { dismissIntro, start, openPermissionSettings, grantAccessibility, askForReread } =
+      stubBridge(vi.fn(async () => 'permission_pending'));
     render(wrap(<RecordingIntroDialog />));
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
@@ -167,9 +176,13 @@ describe('RecordingIntroDialog', () => {
     expect(screen.getByRole('button', { name: '記録を始める' })).toBeEnabled();
 
     // The permission is granted outside the app, so the screen offers the pane it
-    // is granted in rather than leaving the user to find it.
+    // is granted in rather than leaving the user to find it: the first one missing.
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(openPermissionSettings).toHaveBeenCalledTimes(1);
+    expect(openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
+    grantAccessibility();
+    await askForReread();
+    fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
+    expect(openPermissionSettings).toHaveBeenLastCalledWith('screen_recording');
   });
 
   it('cannot be answered while a start it cannot cancel is still running', async () => {

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { CaptureGateState } from '../ipc/context';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
+import type { CapturePermissions } from './macosPermissions';
 
 type WindowOpenResult = 'created' | 'loading' | 'focused';
 
@@ -12,6 +13,10 @@ export type ConversationOverlayOpenResult = WindowOpenResult | 'initializing' | 
 type PendingOverlayRequest = { kind: 'new' } | { kind: 'action'; actionId: string };
 
 export class ConversationOverlayStateError extends Error {}
+
+/** The gate holds only with both: either one missing leaves the recorder unable to read. */
+const bothGranted = ({ accessibility, screenRecording }: CapturePermissions): boolean =>
+  accessibility && screenRecording;
 
 export function createConversationOverlayOwner(params: {
   getRuntimeState: () => LocalRuntimeState;
@@ -23,8 +28,8 @@ export function createConversationOverlayOwner(params: {
   refreshAndResumeConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   /** Shows a window that waits for its conversation to be laid out. */
   revealOverlay: (overlayId: string) => void;
-  /** Whether macOS grants this app the permissions the recorder needs. */
-  holdsCaptureOsPermissions: () => boolean;
+  /** Which of the permissions the recorder needs macOS grants this app. */
+  readCapturePermissions: () => CapturePermissions;
   /** Brings the main window forward, where the recording screen is shown. */
   presentRecordingIntro: () => void;
   createOverlayId?: () => string;
@@ -69,7 +74,7 @@ export function createConversationOverlayOwner(params: {
    * may always start a conversation of their own.
    */
   const passesOsPermissionGate = (request: PendingOverlayRequest): boolean => {
-    if (params.holdsCaptureOsPermissions()) return true;
+    if (bothGranted(params.readCapturePermissions())) return true;
     pendingRequest = request;
     params.presentRecordingIntro();
     return false;
@@ -169,9 +174,9 @@ export function createConversationOverlayOwner(params: {
    * all, then surprise the user in front of an unrelated start later.
    */
   const readGateState = (): CaptureGateState => {
-    const osPermissionsGranted = params.holdsCaptureOsPermissions();
-    if (osPermissionsGranted) openPendingRequest();
-    return { osPermissionsGranted, introRequested: pendingRequest !== null, introDismissed };
+    const permissions = params.readCapturePermissions();
+    if (bothGranted(permissions)) openPendingRequest();
+    return { permissions, introRequested: pendingRequest !== null, introDismissed };
   };
 
   /**

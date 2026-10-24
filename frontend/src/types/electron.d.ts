@@ -7,7 +7,15 @@ import type {
   CapturePrivacySettingsInput,
   IdeFileRulesInput,
 } from '../../electron/src/ipc/schemas/privacy';
-import type { AuthState, UpdateReadyNotice } from '../../electron/src/ipc/context';
+import type {
+  AuthState,
+  CaptureGateState,
+  UpdateReadyNotice,
+} from '../../electron/src/ipc/context';
+import type {
+  CapturePermissionPane,
+  OnboardingState,
+} from '../../electron/src/ipc/schemas/onboarding';
 import type {
   ConnectionCommand,
   ConnectionStateResult,
@@ -75,15 +83,6 @@ import type {
 import type { CommandNetworkSettings } from '../../electron/src/settings/workspaceSettingsFetch';
 
 export {};
-
-type ElectronCaptureGateState = {
-  /** 記録に必要な macOS の権限が付与されているか（毎回 OS に問い合わせる） */
-  osPermissionsGranted: boolean;
-  /** 権限がないまま要求された会話が main で待っているか */
-  introRequested: boolean;
-  /** 記録画面を「あとで」で閉じたか（main がアプリ起動中だけ保持する） */
-  introDismissed: boolean;
-};
 
 type ElectronInstalledApp = {
   name: string;
@@ -167,12 +166,12 @@ declare global {
         on: (channel: string, func: (...args: unknown[]) => void) => () => void;
       };
       screenshot?: {
-        /** OS 権限の付与状況と、それを待っている会話の有無 */
-        getGateState: () => Promise<ElectronCaptureGateState>;
+        /** OS 権限（アクセシビリティと画面収録）それぞれの付与状況と、それを待っている会話の有無 */
+        getGateState: () => Promise<CaptureGateState>;
         /** 記録画面を「あとで」で閉じる。main は表示されていた owner の答えだけを受ける */
-        dismissIntro: (ownerId: string) => Promise<ElectronCaptureGateState>;
-        /** システム設定のプライバシーとセキュリティで、まだ足りない権限（アクセシビリティか画面収録）を開く */
-        openPermissionSettings: () => Promise<void>;
+        dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
+        /** システム設定のプライバシーとセキュリティで、指定した権限の画面を開く */
+        openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;
         getStatus: () => Promise<boolean>;
@@ -343,6 +342,15 @@ declare global {
         getState: () => Promise<ConnectionStateResult>;
         update: (command: ConnectionCommand) => Promise<ConnectionUpdateResult>;
         onChanged: (callback: () => void) => () => void;
+      };
+      /** 初回設定の進み具合（端末ごと、main ウィンドウからだけ） */
+      onboarding?: {
+        getState: () => Promise<OnboardingState>;
+        setState: (state: OnboardingState) => Promise<OnboardingState>;
+      };
+      app?: {
+        /** アプリを終了して開き直す（画面収録の許可は開き直したときに効く） */
+        relaunch: () => Promise<void>;
       };
       shortcut?: {
         getState: () => Promise<ElectronGlobalShortcutState>;

@@ -22,6 +22,7 @@ import { registerClipboardHandlers } from './handlers/clipboard';
 import { registerExternalUrlHandlers } from './handlers/externalUrl';
 import { registerHistoryHandlers } from './handlers/history';
 import { registerIntegrationHandlers } from './handlers/integrations';
+import { registerOnboardingHandlers } from './handlers/onboarding';
 import { registerOverlayHandlers } from './handlers/overlay';
 import { registerPrivacyHandlers } from './handlers/privacy';
 import { registerScreenshotHandlers } from './handlers/screenshot';
@@ -65,6 +66,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerUiLanguageHandlers(ctx, registrar);
   registerUpdateHandlers(ctx, registrar);
   registerScreenshotHandlers(ctx, registrar);
+  registerOnboardingHandlers(ctx, registrar);
   registerPrivacyHandlers(ctx, registrar);
 
   // send handlers

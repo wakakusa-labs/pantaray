@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useLocalOwner } from '@/context/localOwnerContext';
+import type { CaptureGateState } from '../../electron/src/ipc/context';
 
 /** `null` while the gate has not been read yet. */
-export type CaptureGate = {
-  /** Whether macOS grants this app the permissions the recorder needs. */
-  osPermissionsGranted: boolean;
-  /** A conversation was asked for without those permissions and is waiting on them. */
-  introRequested: boolean;
-  /** The recording screen was already answered with "later" during this app run. */
-  introDismissed: boolean;
-} | null;
+export type CaptureGate = CaptureGateState | null;
+
+/** Nothing gated: outside the desktop app there is no recorder to wait on. */
+const OPEN_GATE: CaptureGateState = {
+  permissions: { accessibility: true, screenRecording: true },
+  introRequested: false,
+  introDismissed: false,
+};
 
 /**
  * Whether macOS lets this app record at all.
@@ -31,21 +32,14 @@ export function useCaptureGate(): {
 
   useEffect(() => {
     const read = async () => {
-      // Outside the desktop app there is no recorder, so nothing is gated on it.
-      const getGateState =
-        window.electron?.screenshot?.getGateState ??
-        (async () => ({
-          osPermissionsGranted: true,
-          introRequested: false,
-          introDismissed: false,
-        }));
+      const getGateState = window.electron?.screenshot?.getGateState ?? (async () => OPEN_GATE);
       try {
         setGate(await getGateState());
       } catch (error) {
         console.error('Failed to read the capture gate state:', error);
         // Main enforces the gate on every window it opens, so a transient read
         // failure here must not put an unanswerable screen in front of the user.
-        setGate({ osPermissionsGranted: true, introRequested: false, introDismissed: false });
+        setGate(OPEN_GATE);
       }
     };
     void read();

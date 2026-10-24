@@ -47,9 +47,9 @@ import {
   type RecordingStartResult,
 } from '../screenshot/screenshotSync';
 import {
-  holdsCaptureOsPermissions,
   holdsScreenRecording,
   openCapturePermissionSettings,
+  readCapturePermissions,
   requestCapturePermissions,
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
@@ -58,6 +58,7 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
@@ -118,6 +119,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     reportInvalid: (reason) => params.logger?.warn?.('OVERLAY_PLACEMENT_INVALID', { reason }),
   });
   params.notificationWindow.setOverlayPlacementGetter(overlayPlacement.get);
+  const onboarding = createOnboardingStateStore({
+    userDataDir: app.getPath('userData'),
+    report: (reason) => params.logger?.warn?.('ONBOARDING_STATE_INVALID', { reason }),
+  });
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -129,7 +134,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     refreshAndResumeConversation: (actionId) =>
       orchestration.refreshAndResumeActionConversation(actionId),
     revealOverlay: params.notificationWindow.revealOverlayWindow,
-    holdsCaptureOsPermissions,
+    readCapturePermissions,
     // The main window is where the recording screen lives, and it reads the pending
     // request set just above — so a window the user closed is created rather than
     // sent to, and one already in front is told to re-read it.
@@ -287,7 +292,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
-    // The runtime greets only an owner who has no data yet, so every start may ask.
+    // The runtime greets only an owner who has no data yet, so every start may ask — during
+    // setup too, so the runtime decides before anything is recorded.
     onRecordingStarted: (userId) => {
       const { accelerator, failure } = shortcutController.getState();
       // A failure means the accelerator is configured but not registered: it would not work.
@@ -451,6 +457,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         openCapturePermissionSettings,
+        onboarding: { getState: onboarding.get, setState: onboarding.set },
+        app,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
         onCaptureSettingsChanged: () => void params.updateUi.refreshCaptureStatus(),

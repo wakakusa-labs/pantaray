@@ -31,7 +31,7 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
   try {
     const module = require(target);
     return { request: module.requestCapturePermissions,
-      holds: module.holdsCaptureOsPermissions,
+      read: module.readCapturePermissions,
       openSettings: module.openCapturePermissionSettings, calls };
   }
   finally { Module._load = load; delete require.cache[target]; }
@@ -40,11 +40,12 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
 const loadPermissionRequester = error => loadPermissions({ error });
 
 /** The gate reads a macOS API, so the tests run on Linux CI must claim that platform. */
-function onDarwin(body) {
+function onPlatform(platform, body) {
   const original = Object.getOwnPropertyDescriptor(process, 'platform');
-  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   try { return body(); } finally { Object.defineProperty(process, 'platform', original); }
 }
+const onDarwin = body => onPlatform('darwin', body);
 
 test('manual permission helper opens AX settings and requests only the required browser AppleEvent', async () => {
   const f = loadPermissionRequester();
@@ -67,58 +68,58 @@ test('Automation denial still opens permission settings; unrelated command error
   await assert.rejects(bad.request(['automate_browser']), /command unavailable/);
 });
 
-test('the capture gate reads the live macOS Accessibility grant', () => {
+test('the capture gate reads each permission live, without prompting', () => {
   const denied = loadPermissions({ accessibilityTrusted: false });
-  assert.equal(onDarwin(denied.holds), false);
+  assert.deepEqual(onDarwin(denied.read), { accessibility: false, screenRecording: true });
   // `false` never prompts: the gate is read on every conversation request, and a
   // system prompt on each of them would be its own denial-of-service.
-  assert.deepEqual(denied.calls, [{ ax: false }]);
+  assert.deepEqual(denied.calls, [{ ax: false }, { media: 'screen' }]);
 
   const granted = loadPermissions({ accessibilityTrusted: true });
-  assert.equal(onDarwin(granted.holds), true);
+  assert.deepEqual(onDarwin(granted.read), { accessibility: true, screenRecording: true });
+
+  // Elsewhere there is no recorder, so nothing reads as granted.
+  assert.deepEqual(onPlatform('linux', granted.read), { accessibility: false, screenRecording: false });
 });
 
 test('the E2E override stands in for TCC only in an unpackaged build', () => {
   process.env.PANTARAY_E2E_ASSUME_CAPTURE_PERMISSIONS = '1';
   try {
-    const dev = loadPermissions({ accessibilityTrusted: false });
-    assert.equal(dev.holds(), true);
+    const dev = loadPermissions({ accessibilityTrusted: false, screenRecording: 'denied' });
+    assert.deepEqual(dev.read(), { accessibility: true, screenRecording: true });
     // The real permission is never consulted, so a CI runner needs no grant.
     assert.deepEqual(dev.calls, []);
 
     // A shipped app reads macOS whatever its environment claims.
-    const packaged = loadPermissions({ isPackaged: true, accessibilityTrusted: false });
-    assert.equal(onDarwin(packaged.holds), false);
-    assert.deepEqual(packaged.calls, [{ ax: false }]);
+    const packaged = loadPermissions({ isPackaged: true, accessibilityTrusted: false,
+      screenRecording: 'denied' });
+    assert.deepEqual(onDarwin(packaged.read), { accessibility: false, screenRecording: false });
   } finally {
     delete process.env.PANTARAY_E2E_ASSUME_CAPTURE_PERMISSIONS;
   }
 });
 
-test('the recording screen opens the pane of the gate permission still missing', async () => {
+test('each gate permission opens its own System Settings pane', async () => {
   const f = loadPermissions();
-  await f.openSettings();
-  assert.match(f.calls.at(-1), /Privacy_Accessibility$/);
-
-  const screen = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied' });
-  await screen.openSettings();
-  assert.match(screen.calls.at(-1), /Privacy_ScreenCapture$/);
+  await f.openSettings('accessibility');
+  await f.openSettings('screen_recording');
+  assert.deepEqual(f.calls, [
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  ]);
 });
 
-test('the capture gate also requires Screen Recording where macOS can grant it', () => {
-  const denied = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied' });
-  assert.equal(onDarwin(denied.holds), false);
-  const undecided = loadPermissions({ accessibilityTrusted: true, screenRecording: 'not-determined' });
-  assert.equal(onDarwin(undecided.holds), false);
-  const granted = loadPermissions({ accessibilityTrusted: true, screenRecording: 'granted' });
-  assert.equal(onDarwin(granted.holds), true);
-  assert.deepEqual(granted.calls, [{ ax: false }, { media: 'screen' }]);
+test('Screen Recording reads as granted only when macOS says so, or cannot grant it', () => {
+  for (const [status, expected] of [['denied', false], ['not-determined', false], ['granted', true]]) {
+    const f = loadPermissions({ accessibilityTrusted: true, screenRecording: status });
+    assert.equal(onDarwin(f.read).screenRecording, expected, status);
+  }
 
   // Below macOS 14 the recorder cannot use it, so there is nothing to grant and
   // recording must not wait on it.
   const older = loadPermissions({ accessibilityTrusted: true, screenRecording: 'denied',
     macosVersion: '13.6.1' });
-  assert.equal(onDarwin(older.holds), true);
+  assert.deepEqual(onDarwin(older.read), { accessibility: true, screenRecording: true });
   assert.deepEqual(older.calls, [{ ax: false }]);
 });
 

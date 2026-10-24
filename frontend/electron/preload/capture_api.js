@@ -6,7 +6,8 @@ function createCaptureApi({ ipcRenderer }) {
       stop: () => ipcRenderer.invoke('screenshot:stop'),
       getGateState: () => ipcRenderer.invoke('recording:getGateState'),
       dismissIntro: (ownerId) => ipcRenderer.invoke('recording:dismissIntro', ownerId),
-      openPermissionSettings: () => ipcRenderer.invoke('recording:openPermissionSettings'),
+      openPermissionSettings: (permission) =>
+        ipcRenderer.invoke('recording:openPermissionSettings', permission),
       onStatusChanged: (callback) => {
         const listener = (_event, isEnabled) => callback(isEnabled);
         ipcRenderer.on('screenshot:statusChanged', listener);

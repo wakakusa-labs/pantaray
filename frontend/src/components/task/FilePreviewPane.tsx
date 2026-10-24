@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Check, Copy, X } from 'lucide-react';
 
+import type { TaskFileTarget } from '../../../electron/src/actions/actionFileAccess';
 import { buildActionFileUrl } from '../../../electron/src/protocol/actionFileUrl';
 import { ToolDiffView } from '@/components/action-conversation/ToolDiffView';
 import { parseMultiFileDiff } from '@/components/action-conversation/toolDiff';
@@ -79,8 +80,8 @@ function htmlPreviewDocument(html: string): string {
 }
 
 /** A new revision changes the URL, so the frame loads the PDF again instead of keeping it. */
-function pdfUrl(actionId: string, filePath: string, revision: string | null): string {
-  const url = new URL(buildActionFileUrl(actionId, filePath));
+function pdfUrl(target: TaskFileTarget, filePath: string, revision: string | null): string {
+  const url = new URL(buildActionFileUrl(target, filePath));
   if (revision !== null) url.searchParams.set('revision', revision);
   return url.toString();
 }
@@ -105,16 +106,17 @@ const READ_KINDS = new Set<TaskFile['kind']>([
  * Reads the file, and again for each new revision; the old content stays until the new one
  * arrives. The workspace keys this pane by path, so another file remounts it.
  */
-function useFileContent(actionId: string, file: TaskFile, revision: string | null): Content {
+function useFileContent(target: TaskFileTarget, file: TaskFile, revision: string | null): Content {
   const read = READ_KINDS.has(file.kind) ? window.electron?.actionFiles?.read : undefined;
   const [content, setContent] = useState<Content>(() =>
     read ? { kind: 'loading' } : { kind: 'unavailable' }
   );
+  const { kind, id } = target;
   useEffect(() => {
     if (!read) return;
     let active = true;
     let imageUrl: string | null = null;
-    read({ actionId, path: file.path }).then(
+    read({ target: { kind, id }, path: file.path }).then(
       (result) => {
         if (!active) return;
         if (result.kind === 'text') {
@@ -129,7 +131,7 @@ function useFileContent(actionId: string, file: TaskFile, revision: string | nul
         }
       },
       (error: unknown) => {
-        console.error('Failed to read an Action file for preview', error);
+        console.error('Failed to read a file for preview', error);
         if (active) setContent({ kind: 'unavailable' });
       }
     );
@@ -138,24 +140,25 @@ function useFileContent(actionId: string, file: TaskFile, revision: string | nul
       if (imageUrl) URL.revokeObjectURL(imageUrl);
     };
     // revision is not read inside: it only says the file may have changed since.
-  }, [actionId, file.path, read, revision]);
+  }, [kind, id, file.path, read, revision]);
   return content;
 }
 
 type FilePreviewPaneProps = {
-  actionId: string;
+  /** The Action or Suggestion whose file this is; main checks the file against it. */
+  target: TaskFileTarget;
   file: TaskFile;
   /** The conversation's latest finished run; a new one may have rewritten the file. */
   revision: string | null;
   onClose: () => void;
 };
 
-/** One file an Action produced, shown read-only beside its conversation. */
-export function FilePreviewPane({ actionId, file, revision, onClose }: FilePreviewPaneProps) {
+/** One file an Action or a Suggestion produced, shown read-only beside it. */
+export function FilePreviewPane({ target, file, revision, onClose }: FilePreviewPaneProps) {
   const { language } = useI18n();
   const copy = COPY[language];
   const nameId = useId();
-  const content = useFileContent(actionId, file, revision);
+  const content = useFileContent(target, file, revision);
   // Text that does not read as a diff stays plain text rather than becoming unreadable.
   const diffs = useMemo(
     () =>
@@ -168,11 +171,11 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
   const run = async (way: OpenWay) => {
     setOpenFailed(false);
     try {
-      const result = await window.electron?.actionFiles?.[way]({ actionId, path: file.path });
+      const result = await window.electron?.actionFiles?.[way]({ target, path: file.path });
       // A cancelled app picker is no failure.
       if (result === undefined || result.kind === 'unavailable') setOpenFailed(true);
     } catch (error) {
-      console.error('Failed to open an Action file', error);
+      console.error('Failed to open a file', error);
       setOpenFailed(true);
     }
   };
@@ -241,11 +244,11 @@ export function FilePreviewPane({ actionId, file, revision, onClose }: FilePrevi
       <div className="task-file-preview__body">
         {file.kind === 'pdf' ? (
           // Not sandboxed: a sandboxed frame turns plugins off, and the PDF viewer is one. The
-          // scheme serves only a PDF the Action names, from an origin of its own.
+          // scheme serves only a PDF its owner names, from an origin of its own.
           <iframe
             className="task-file-preview__frame"
             title={file.name}
-            src={pdfUrl(actionId, file.path, revision)}
+            src={pdfUrl(target, file.path, revision)}
           />
         ) : content.kind === 'loading' ? (
           <p className="task-file-preview__status" role="status">

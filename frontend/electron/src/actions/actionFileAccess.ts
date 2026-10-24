@@ -1,10 +1,11 @@
 /**
- * Files an Action names, read or opened for the main window's preview.
+ * Files an Action names or a Suggestion made, read or opened for the main window's preview.
  *
- * The renderer asks for a file by Action and absolute path. Main serves it only when one of
- * that Action's final answers links the path with `pantaray-file:///`. A compromised renderer
- * therefore reaches only what an Action of the signed-in user already put in front of them,
- * never an arbitrary file.
+ * The renderer asks for a file by its owner and path. Main serves an Action's file only when one
+ * of that Action's final answers links the absolute path with `pantaray-file:///`, and a
+ * Suggestion's file only when the backend's stored list for that Suggestion holds the relative
+ * path and it resolves inside the Suggestion's folder. A compromised renderer therefore reaches
+ * only what the signed-in user's own work already put in front of them, never an arbitrary file.
  */
 
 import fs from 'fs';
@@ -13,6 +14,7 @@ import path from 'path';
 import type { RunFile } from './actionDocumentHtml';
 import type { ActionConversationPageRequest } from './actionFetch';
 import type { ActionConversationPage } from './actionContracts';
+import type { OverlayBootstrapResponse } from '../orchestration/contracts';
 import { pantarayFilePaths } from './pantarayFileLinks';
 import { sniffImageMimeType, type ActionImageMimeType } from '../protocol/imageStoragePath';
 import { ACTION_CONVERSATION_MAX_PAGE_SIZE } from '../ipc/schemas/actions';
@@ -45,6 +47,10 @@ const OPEN_WITH_LIMITS = { timeout: 30_000, maxBuffer: 64 * 1024 } as const;
 
 export type ActionFileRequest = Readonly<{ actionId: string; path: string }>;
 
+/** Whose file the preview shows: an Action's, by absolute path, or a Suggestion's, by relative path. */
+export type TaskFileTarget = Readonly<{ kind: 'action' | 'suggestion'; id: string }>;
+export type TaskFileRequest = Readonly<{ target: TaskFileTarget; path: string }>;
+
 export type ActionFileReadResult =
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
   | Readonly<{ kind: 'image'; bytes: Uint8Array<ArrayBuffer>; mime: ActionImageMimeType }>
@@ -70,6 +76,16 @@ export type ActionFileOpenWithResult =
 export type ReadActionConversationPage = (
   request: ActionConversationPageRequest
 ) => Promise<ActionConversationPage>;
+
+/** The backend's record of a Suggestion, owned by the signed-in user; null for no id. */
+export type ReadSuggestionBootstrap = (
+  suggestionId: string
+) => Promise<OverlayBootstrapResponse | null>;
+
+export type TaskFileSources = Readonly<{
+  readConversationPage: ReadActionConversationPage;
+  readSuggestionBootstrap: ReadSuggestionBootstrap;
+}>;
 
 /**
  * The paths one conversation page names: the `pantaray-file:///` links in its final answers,
@@ -122,6 +138,35 @@ export async function resolveActionFile(
 }
 
 /**
+ * The real path of a file a Suggestion made, or null. The relative path must be one the backend
+ * stored for that Suggestion, and its real path must stay inside the Suggestion's real folder, so
+ * a symlink the make stage left cannot lead out of it.
+ */
+export async function resolveSuggestionFile(
+  readBootstrap: ReadSuggestionBootstrap,
+  suggestionId: string,
+  relativePath: string
+): Promise<string | null> {
+  const bootstrap = await readBootstrap(suggestionId);
+  if (bootstrap === null || !bootstrap.snapshot.artifacts.includes(relativePath)) return null;
+  const root = realpathOrNull(bootstrap.artifactsRoot);
+  const wanted = realpathOrNull(path.join(bootstrap.artifactsRoot, relativePath));
+  if (root === null || wanted === null) return null;
+  return wanted.startsWith(root + path.sep) ? wanted : null;
+}
+
+/** The real path of the requested file when its owner names it, or null. */
+export function resolveTaskFile(
+  sources: TaskFileSources,
+  request: TaskFileRequest
+): Promise<string | null> {
+  const { target } = request;
+  return target.kind === 'action'
+    ? resolveActionFile(sources.readConversationPage, { actionId: target.id, path: request.path })
+    : resolveSuggestionFile(sources.readSuggestionBootstrap, target.id, request.path);
+}
+
+/**
  * The open regular file at a resolved real path, or null. O_NONBLOCK keeps a FIFO with no
  * writer from blocking the main process in open(); fstat then turns it, a socket or a device
  * away before anything is read.
@@ -157,7 +202,7 @@ function readAt(fd: number, length: number): Buffer {
   return buffer.subarray(0, filled);
 }
 
-/** Reads the real path `resolveActionFile` returned. */
+/** Reads the real path `resolveTaskFile` returned. */
 export function readActionFile(realPath: string): ActionFileReadResult {
   const file = openRegularFile(realPath);
   if (file === null) return { kind: 'unavailable', reason: 'not_found' };
@@ -197,7 +242,7 @@ function isExecutable(realPath: string, stats: fs.Stats): boolean {
   return (stats.mode & EXECUTABLE_MODE_BITS) !== 0;
 }
 
-/** Why the real path `resolveActionFile` returned must not go to an app, or null when it may. */
+/** Why the real path `resolveTaskFile` returned must not go to an app, or null when it may. */
 function refuseToOpen(realPath: string): ActionFileUnavailable | null {
   let stats: fs.Stats;
   try {
@@ -211,7 +256,7 @@ function refuseToOpen(realPath: string): ActionFileUnavailable | null {
   return null;
 }
 
-/** Opens the real path `resolveActionFile` returned in its default app. */
+/** Opens the real path `resolveTaskFile` returned in its default app. */
 export async function openActionFileInApp(
   realPath: string,
   openPath: (realPath: string) => Promise<string>
@@ -236,7 +281,7 @@ function isAppBundle(appPath: string): boolean {
 }
 
 /**
- * Opens the real path `resolveActionFile` returned in an app the user picks. The file is
+ * Opens the real path `resolveTaskFile` returned in an app the user picks. The file is
  * vetted before the user is asked, and the app must be an existing `.app` bundle: `open -a`
  * would otherwise search for an app by that name.
  */

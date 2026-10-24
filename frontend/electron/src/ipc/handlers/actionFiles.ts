@@ -5,13 +5,13 @@ import {
   openActionFileInApp,
   openActionFileWithApp,
   readActionFile,
-  resolveActionFile,
-  type ActionFileRequest,
+  resolveTaskFile,
+  type TaskFileRequest,
 } from '../../actions/actionFileAccess';
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import { parseInput } from '../schemas/error';
-import { ActionFileOpenInputSchema, ActionFileRequestInputSchema } from '../schemas/actionFiles';
+import { ActionFileOpenInputSchema, TaskFileRequestInputSchema } from '../schemas/actionFiles';
 
 const NOT_FOUND = { kind: 'unavailable', reason: 'not_found' } as const;
 
@@ -25,15 +25,21 @@ function isRegularFile(realPath: string): boolean {
 
 export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   // Every use goes through the real path this returns, never the requested one.
-  const resolve = (request: ActionFileRequest) =>
-    resolveActionFile(ctx.actions.readConversationPage, request);
+  const resolve = (request: TaskFileRequest) =>
+    resolveTaskFile(
+      {
+        readConversationPage: ctx.actions.readConversationPage,
+        readSuggestionBootstrap: ctx.overlay.resolveOverlayBootstrap,
+      },
+      request
+    );
 
   registrar.handle('actionFile:open', async (_event, params) => {
     const parsed = parseInput(ActionFileOpenInputSchema, 'actionFile:open', params);
     ctx.actionFiles.open(parsed);
   });
   registrar.handle('actionFile:read', async (_event, params) => {
-    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:read', params);
+    const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:read', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
     const format = documentHtmlFormat(realPath);
@@ -42,13 +48,13 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
       : await readDocumentAsHtml(realPath, format, ctx.actionFiles.runFile);
   });
   registrar.handle('actionFile:openInApp', async (_event, params) => {
-    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:openInApp', params);
+    const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:openInApp', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
     return await openActionFileInApp(realPath, ctx.actionFiles.openInApp);
   });
   registrar.handle('actionFile:openWithApp', async (_event, params) => {
-    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:openWithApp', params);
+    const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:openWithApp', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
     return await openActionFileWithApp(
@@ -58,7 +64,7 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
     );
   });
   registrar.handle('actionFile:reveal', async (_event, params) => {
-    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:reveal', params);
+    const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:reveal', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
     // Finder selects the file; it never opens or runs it.
@@ -66,7 +72,7 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
     return { kind: 'revealed' } as const;
   });
   registrar.handle('actionFile:quickLook', async (_event, params) => {
-    const parsed = parseInput(ActionFileRequestInputSchema, 'actionFile:quickLook', params);
+    const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:quickLook', params);
     const realPath = await resolve(parsed);
     const mainWindow = ctx.windows.getMainWindow();
     // A regular file only: Quick Look of a FIFO or a device could stall the main process.

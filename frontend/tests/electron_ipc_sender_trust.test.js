@@ -110,6 +110,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:attachFile',
     'action:discardAttachment',
     'actionImage:reveal',
+    'actionFile:openInApp',
   ]) {
     assert.equal(security.authorize(channel, mainEvent), 'main', channel);
     assert.equal(security.authorize(channel, overlayEvent), 'overlay', channel);
@@ -119,7 +120,6 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'suggestion:read',
     // Reads and opens workspace files: the main window's preview only.
     'actionFile:read',
-    'actionFile:openInApp',
     'actionFile:openWithApp',
     'actionFile:reveal',
     'actionFile:quickLook',

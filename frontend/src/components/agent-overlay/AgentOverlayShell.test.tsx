@@ -424,4 +424,54 @@ describe('AgentOverlayShell', () => {
 
     expect(onOpenInMainWindow).toHaveBeenCalledExactlyOnceWith({ kind: 'action', id: 'action-2' });
   });
+  it("shows a suggestion's files as chips that open its preview or its app", async () => {
+    const onOpenInMainWindow = vi.fn();
+    const openInApp = vi.fn(async () => ({ kind: 'opened' }) as const);
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: { actionFiles: { openInApp } },
+    });
+    const renderNotice = (artifacts: string[]) => (
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlayShell
+          isVisible={true}
+          isContentVisible={true}
+          isExpanded={true}
+          content={null}
+          suggestionText="I drafted a reply."
+          isSuggestionStreamFinished={true}
+          artifacts={artifacts}
+          actionText=""
+          isActionStreamFinished={false}
+          approvalUiState="hidden"
+          showBusyIndicator={false}
+          suggestionId="sug-1"
+          onOpenInMainWindow={onOpenInMainWindow}
+        />
+      </UiLanguageProvider>
+    );
+    const { rerender } = render(renderNotice([]));
+    expect(screen.queryByRole('group', { name: "This suggestion's files" })).toBeNull();
+
+    rerender(renderNotice(['drafts/reply.md', 'budget.xlsx']));
+    const chips = within(screen.getByRole('group', { name: "This suggestion's files" }));
+    // Plain buttons: the preview opens in the main window, not beside these chips.
+    expect(chips.getByRole('button', { name: /^MD\s*reply\.md$/ })).not.toHaveAttribute(
+      'aria-pressed'
+    );
+    fireEvent.click(chips.getByRole('button', { name: /^XLSX\s*budget\.xlsx$/ }));
+    expect(onOpenInMainWindow).toHaveBeenCalledWith({
+      kind: 'suggestion',
+      id: 'sug-1',
+      file: 'budget.xlsx',
+    });
+    fireEvent.click(chips.getByRole('button', { name: 'Open in default app: reply.md' }));
+    await waitFor(() =>
+      expect(openInApp).toHaveBeenCalledWith({
+        target: { kind: 'suggestion', id: 'sug-1' },
+        path: 'drafts/reply.md',
+      })
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });

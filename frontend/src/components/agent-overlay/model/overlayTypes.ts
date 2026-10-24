@@ -67,6 +67,8 @@ export type OverlaySnapshot = {
   reactionState: 'accepted' | 'rejected' | null;
   reactionTimestamp: string | null;
   dismissReason: string | null;
+  /** Files the Suggestion made, relative to its folder. */
+  artifacts: string[];
   actionPhase: 'idle' | 'requesting' | 'accepted_pending_start' | 'processing' | 'terminal';
   actionStatus: 'idle' | 'processing' | 'success' | 'error' | 'canceled' | 'timeout' | null;
   actionErrorCode: string | null;
@@ -108,6 +110,8 @@ export type AgentOverlayState = {
   reactionTimestamp: string | null;
   /** What the user wrote when they dismissed it. */
   dismissReason: string | null;
+  /** Files the Suggestion made, relative to its folder; main's record supplies them. */
+  artifacts: readonly string[];
   actionStatusState: OverlayActionStatusState | null;
   actionErrorCode: string | null;
   actionFailureStage: string | null;

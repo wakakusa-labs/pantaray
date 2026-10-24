@@ -160,9 +160,9 @@ async def test_the_list_survives_save_relay_and_bootstrap(
     sent = [call.args[0] for call in websocket.send_json.call_args_list]
     completed = [m for m in sent if m.get("event") == "process_completed"]
     assert [m["data"]["artifacts"] for m in completed] == [artifacts]
-    bootstrap = await OverlayBootstrapService(repository).build_for_suggestion(
-        user_id=USER_ID, suggestion_id=SUGGESTION_ID
-    )
+    bootstrap = await OverlayBootstrapService(
+        repository, db_path=db_path
+    ).build_for_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
     assert bootstrap.snapshot.artifacts == artifacts
     assert json.loads(bootstrap.model_dump_json())["snapshot"]["artifacts"] == artifacts
 

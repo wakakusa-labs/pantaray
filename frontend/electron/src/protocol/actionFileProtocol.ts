@@ -1,11 +1,10 @@
 /**
- * `pantaray-action-file://local/?action={id}&path={absolute path}` — a PDF an Action names, for
- * Chromium's PDF viewer in the main window's preview frame.
+ * `pantaray-action-file://local/?kind={action|suggestion}&id={id}&path={path}` — a PDF an Action
+ * names or a Suggestion made, for Chromium's PDF viewer in the main window's preview frame.
  *
- * Every request passes the same check as `actionFile:read`: the Action's own conversation must
- * name the path. Only a file whose bytes start as a PDF is served, as `application/pdf`, so an
- * HTML or script file can never be loaded into a frame through this scheme. Any failure is a
- * bare 404.
+ * Every request passes the same check as `actionFile:read` (`resolveTaskFile`). Only a file whose
+ * bytes start as a PDF is served, as `application/pdf`, so an HTML or script file can never be
+ * loaded into a frame through this scheme. Any failure is a bare 404.
  */
 
 import fs from 'fs';
@@ -14,15 +13,15 @@ import { Readable } from 'stream';
 
 import {
   openRegularFile,
-  resolveActionFile,
-  type ActionFileRequest,
-  type ReadActionConversationPage,
+  resolveTaskFile,
+  type TaskFileRequest,
+  type TaskFileSources,
 } from '../actions/actionFileAccess';
 import { ACTION_FILE_SCHEME, ACTION_FILE_URL_HOST } from './actionFileUrl';
 
 const PDF_SIGNATURE = Buffer.from('%PDF-');
 
-export function parseActionFileUrl(requestUrl: string): ActionFileRequest | null {
+export function parseActionFileUrl(requestUrl: string): TaskFileRequest | null {
   let url: URL;
   try {
     url = new URL(requestUrl);
@@ -30,24 +29,26 @@ export function parseActionFileUrl(requestUrl: string): ActionFileRequest | null
     return null;
   }
   if (url.protocol !== `${ACTION_FILE_SCHEME}:` || url.host !== ACTION_FILE_URL_HOST) return null;
-  const actionId = url.searchParams.get('action');
+  const kind = url.searchParams.get('kind');
+  const id = url.searchParams.get('id');
   const filePath = url.searchParams.get('path');
-  if (!actionId || !filePath || !path.isAbsolute(filePath)) return null;
-  return { actionId, path: filePath };
+  if ((kind !== 'action' && kind !== 'suggestion') || !id || !filePath) return null;
+  if (kind === 'action' && !path.isAbsolute(filePath)) return null;
+  return { target: { kind, id }, path: filePath };
 }
 
-export function createActionFileProtocolHandler(deps: {
-  readConversationPage: ReadActionConversationPage;
-}): (request: { url: string }) => Promise<Response> {
+export function createActionFileProtocolHandler(
+  deps: TaskFileSources
+): (request: { url: string }) => Promise<Response> {
   const notFound = () => new Response(null, { status: 404 });
   return async (request) => {
     const fileRequest = parseActionFileUrl(request.url);
     if (fileRequest === null) return notFound();
     let realPath: string | null;
     try {
-      realPath = await resolveActionFile(deps.readConversationPage, fileRequest);
+      realPath = await resolveTaskFile(deps, fileRequest);
     } catch (error) {
-      console.error('Failed to read the Action for a file request', error);
+      console.error('Failed to read the owner of a file request', error);
       return notFound();
     }
     if (realPath === null) return notFound();
@@ -94,7 +95,7 @@ export const ACTION_FILE_PRIVILEGED_SCHEME = {
 /** Must run after `app.whenReady()`. */
 export function registerActionFileProtocol(
   registrar: ProtocolHandlerRegistrar,
-  deps: { readConversationPage: ReadActionConversationPage }
+  deps: TaskFileSources
 ): void {
   registrar.handle(ACTION_FILE_SCHEME, createActionFileProtocolHandler(deps));
 }

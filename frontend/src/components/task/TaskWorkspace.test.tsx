@@ -137,7 +137,10 @@ describe('TaskWorkspace', () => {
 
     fireEvent.click(chip('quote_v3.html'));
     const preview = await screen.findByRole('region', { name: 'quote_v3.html' });
-    expect(read).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/quote_v3.html' });
+    expect(read).toHaveBeenCalledWith({
+      target: { kind: 'action', id: 'act-1' },
+      path: '/work/quote/quote_v3.html',
+    });
     expect(chip('quote_v3.html').getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('.action-task--split')).not.toBeNull();
 
@@ -202,7 +205,7 @@ describe('TaskWorkspace', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:chart');
     const frame = screen.getByTitle('summary.pdf');
     expect(frame.getAttribute('src')).toMatch(
-      /^pantaray-action-file:\/\/local\/\?action=act-1&path=%2Fwork%2Fquote%2Fsummary\.pdf&revision=run-1/
+      /^pantaray-action-file:\/\/local\/\?kind=action&id=act-1&path=%2Fwork%2Fquote%2Fsummary\.pdf&revision=run-1/
     );
     // A sandboxed frame turns the PDF viewer off.
     expect(frame.hasAttribute('sandbox')).toBe(false);
@@ -228,7 +231,7 @@ describe('TaskWorkspace', () => {
       'アプリを選んで開く…',
     ]);
 
-    const request = { actionId: 'act-1', path: '/work/quote/rates.xlsx' };
+    const request = { target: { kind: 'action', id: 'act-1' }, path: '/work/quote/rates.xlsx' };
     const calls = [
       ['Finder で表示', reveal],
       ['Quick Look で見る', quickLook],
@@ -291,7 +294,10 @@ describe('TaskWorkspace', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'mail.md' }));
     expect(await screen.findByRole('region', { name: 'mail.md' })).toBeTruthy();
-    expect(read).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/mail.md' });
+    expect(read).toHaveBeenCalledWith({
+      target: { kind: 'action', id: 'act-1' },
+      path: '/work/quote/mail.md',
+    });
     expect(chip('mail.md').getAttribute('aria-pressed')).toBe('true');
     // Not Finder: the link stays in the app.
     expect(revealLink).not.toHaveBeenCalled();
@@ -317,7 +323,10 @@ describe('TaskWorkspace', () => {
     emitPage(followUpPage(), 2);
     expect(await screen.findByRole('heading', { name: '見積書 v2' })).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(2);
-    expect(read).toHaveBeenLastCalledWith({ actionId: 'act-1', path: '/work/quote/mail.md' });
+    expect(read).toHaveBeenLastCalledWith({
+      target: { kind: 'action', id: 'act-1' },
+      path: '/work/quote/mail.md',
+    });
 
     // The PDF frame's URL changes with the run, so it loads the file again.
     fireEvent.click(chip('summary.pdf'));
@@ -332,7 +341,10 @@ describe('TaskWorkspace', () => {
     await renderFinishedTask();
     fireEvent.click(chip('memo.docx'));
     const frame = await waitFor(() => screen.getByTitle('memo.docx'));
-    expect(read).toHaveBeenCalledWith({ actionId: 'act-1', path: '/work/quote/memo.docx' });
+    expect(read).toHaveBeenCalledWith({
+      target: { kind: 'action', id: 'act-1' },
+      path: '/work/quote/memo.docx',
+    });
     expect(frame.getAttribute('sandbox')).toBe('');
     expect(frame.getAttribute('srcdoc')).toMatch(
       /^<meta http-equiv="Content-Security-Policy" content="default-src 'none';.*<p>御見積書<\/p>/

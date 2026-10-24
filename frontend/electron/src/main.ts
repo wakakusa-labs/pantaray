@@ -540,6 +540,7 @@ installDesktopApplicationLifecycle({
     });
     registerActionFileProtocol(protocol, {
       readConversationPage: featureRuntime.readActionConversationPage,
+      readSuggestionBootstrap: featureRuntime.resolveOverlayBootstrap,
     });
   },
   createMainWindow: createWindow,

@@ -7,6 +7,8 @@ export type HistorySelection = 'chat' | 'new' | WorkKey;
 const NEW_TASK = 'new';
 
 const SELECTION_PARAM = 'item';
+/** A Suggestion file an Overlay chip asked the detail pane to preview; main writes it too. */
+const FILE_PARAM = 'file';
 const WORK_KEY = /^(action|suggestion):(.+)$/;
 
 /** The work a value names, or null when it is not a well-formed key. */
@@ -24,11 +26,20 @@ export function parseHistorySelection(search: string): HistorySelection {
   return parseWorkKey(value) ?? 'chat';
 }
 
-export function historySelectionSearch(selection: HistorySelection): string {
+/** The file a `&file=` value asks the selected work to preview, or null. */
+export function parseRequestedFile(search: string): string | null {
+  return new URLSearchParams(search).get(FILE_PARAM) || null;
+}
+
+export function historySelectionSearch(
+  selection: HistorySelection,
+  file: string | null = null
+): string {
   if (selection === 'chat' || selection === NEW_TASK) return `?${SELECTION_PARAM}=${selection}`;
   // A query may hold `:` as is, so the kind's separator stays readable; the id is encoded.
   const { kind, id } = splitWorkKey(selection);
-  return `?${SELECTION_PARAM}=${kind}:${encodeURIComponent(id)}`;
+  const fileQuery = file === null ? '' : `&${FILE_PARAM}=${encodeURIComponent(file)}`;
+  return `?${SELECTION_PARAM}=${kind}:${encodeURIComponent(id)}${fileQuery}`;
 }
 
 /** The kind and id a work's key names. */

@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.runtime.runtime_env import (
+    read_local_runtime_db_config,
+)
 from pantaray_agents.local_runtime.suggestion_state.repository import (
     LocalSuggestionStateRepository,
 )
@@ -34,7 +37,8 @@ async def overlay_bootstrap(
     user_id: str = Depends(get_current_user_id_from_token),
     repository: LocalSuggestionStateRepository = Depends(_get_overlay_repository),
 ) -> OverlayBootstrapResponse:
-    service = OverlayBootstrapService(repository)
+    db_path, _ = read_local_runtime_db_config()
+    service = OverlayBootstrapService(repository, db_path=db_path)
     try:
         return await service.build_for_suggestion(
             user_id=str(user_id),

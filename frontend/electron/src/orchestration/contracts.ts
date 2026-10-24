@@ -81,6 +81,8 @@ export type OverlayLiveResume = {
 
 export type OverlayBootstrapResponse = {
   suggestionId: string;
+  /** The absolute folder `snapshot.artifacts` are relative to. */
+  artifactsRoot: string;
   snapshot: OverlaySnapshot;
   lastSequence: number;
   liveResume: OverlayLiveResume;

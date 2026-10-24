@@ -49,12 +49,13 @@ import type {
 } from '../../electron/src/chat/chatContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
+import type { OverlayOpenTaskRequest } from '../../electron/src/ipc/schemas/overlay';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
 import type {
   ActionFileOpenResult,
   ActionFileOpenWithResult,
   ActionFileReadResult,
-  ActionFileRequest,
+  TaskFileRequest,
 } from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
@@ -252,19 +253,19 @@ declare global {
       actionFiles?: {
         /** Selects the file in Finder. */
         open: (params: { path: string }) => Promise<void>;
-        /** Main window only: a file the Action's conversation names, as text or an image. */
-        read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
-        /** Main window only: opens a file the Action names in its default app. */
-        openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
+        /** Main window only: a file its Action names or its Suggestion made, as text or an image. */
+        read: (request: TaskFileRequest) => Promise<ActionFileReadResult>;
+        /** Opens a file its Action names or its Suggestion made in its default app. */
+        openInApp: (request: TaskFileRequest) => Promise<ActionFileOpenResult>;
         /** Main window only: asks for an app in /Applications and opens the file in it. */
-        openWithApp: (request: ActionFileRequest) => Promise<ActionFileOpenWithResult>;
-        /** Main window only: selects a file the Action names in Finder. */
+        openWithApp: (request: TaskFileRequest) => Promise<ActionFileOpenWithResult>;
+        /** Main window only: selects the file in Finder. */
         reveal: (
-          request: ActionFileRequest
+          request: TaskFileRequest
         ) => Promise<{ kind: 'revealed' } | { kind: 'unavailable'; reason: 'not_found' }>;
         /** Main window only: shows the file in macOS Quick Look over the main window. */
         quickLook: (
-          request: ActionFileRequest
+          request: TaskFileRequest
         ) => Promise<{ kind: 'shown' } | { kind: 'unavailable'; reason: 'not_found' }>;
       };
       clipboard?: {
@@ -445,7 +446,7 @@ declare global {
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
         /** Closes this panel and brings the main window forward with its work selected. */
-        openTask?: (request: { kind: 'action' | 'suggestion'; id: string }) => Promise<void>;
+        openTask?: (request: OverlayOpenTaskRequest) => Promise<void>;
         acceptAction: (data: unknown) => void;
         hide: () => void;
       };

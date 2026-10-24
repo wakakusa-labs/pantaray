@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 
 from pantaray_agents.action_status import (
@@ -18,6 +19,9 @@ from pantaray_agents.action_status import (
 from pantaray_agents.local_runtime.suggestion_state.public_projection import (
     FoldedSuggestionState,
     fold_suggestion_state_from_events,
+)
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
 )
 from pantaray_agents.orchestration.common.normalization import (
     normalize_lower_string,
@@ -200,11 +204,9 @@ def _build_snapshot(
 class OverlayBootstrapService:
     """Build an overlay snapshot from durable current state and UI read model."""
 
-    def __init__(
-        self,
-        repository: SuggestionRepositoryPort,
-    ) -> None:
+    def __init__(self, repository: SuggestionRepositoryPort, *, db_path: Path) -> None:
         self._repository = repository
+        self._db_path = db_path
 
     async def build_for_suggestion(
         self,
@@ -267,6 +269,13 @@ class OverlayBootstrapService:
         )
         return OverlayBootstrapResponse(
             suggestion_id=str(suggestion_id),
+            artifacts_root=str(
+                resolve_suggestion_artifacts_root(
+                    db_path=self._db_path,
+                    user_id=str(user_id),
+                    suggestion_id=str(suggestion_id),
+                )
+            ),
             snapshot=snapshot,
             last_sequence=snapshot.lastSequence,
             live_resume=live_resume,

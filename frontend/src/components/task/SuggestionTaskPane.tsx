@@ -12,6 +12,9 @@ import {
 } from '@/components/agent-overlay/OverlayComposer';
 import { useI18n } from '@/context/useI18n';
 
+import { FileChips } from './FileChips';
+import { FilePreviewPane } from './FilePreviewPane';
+import { taskFileAt, type TaskFile } from './taskFiles';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
 import './actionTaskPane.css';
 import './suggestionTaskPane.css';
@@ -45,6 +48,8 @@ type SuggestionTaskPaneProps = {
   suggestionId: string;
   /** The history row's title for this suggestion. */
   title: string;
+  /** One of its files to preview, asked for by an Overlay chip; each new request opens it. */
+  requestedFile: string | null;
   /** Called once an Action exists for the suggestion: accepted, or replied to. */
   onStarted: (actionId: string) => void;
   /** Opens the chat, as the task pane's header button does. */
@@ -61,6 +66,7 @@ type SuggestionTaskPaneProps = {
 export function SuggestionTaskPane({
   suggestionId,
   title,
+  requestedFile,
   onStarted,
   onAddProject,
 }: SuggestionTaskPaneProps) {
@@ -77,6 +83,15 @@ export function SuggestionTaskPane({
   const suggestionText = snapshot?.suggestionText ?? '';
   const { composer: draft, setComposer } = composer;
   const [openSmallFailed, setOpenSmallFailed] = useState(false);
+  const [previewFile, setPreviewFile] = useState<TaskFile | null>(() =>
+    requestedFile === null ? null : taskFileAt(requestedFile)
+  );
+  const [takenRequest, setTakenRequest] = useState(requestedFile);
+  if (requestedFile !== takenRequest) {
+    setTakenRequest(requestedFile);
+    if (requestedFile !== null) setPreviewFile(taskFileAt(requestedFile));
+  }
+  const files = (snapshot?.artifacts ?? []).map(taskFileAt);
   // The small window shows it with its decision, as when it arrived; this pane stays.
   const openSmall = () => {
     setOpenSmallFailed(false);
@@ -112,7 +127,10 @@ export function SuggestionTaskPane({
           (current.stage === 'start_failed' ? t('common.unexpectedError') : copy.notStarted));
 
   return (
-    <section className="suggestion-task" aria-labelledby={titleId}>
+    <section
+      className={previewFile ? 'suggestion-task suggestion-task--split' : 'suggestion-task'}
+      aria-labelledby={titleId}
+    >
       <header className="suggestion-task__header">
         <h1 id={titleId}>{title}</h1>
         <div className="action-task__header-actions">
@@ -163,6 +181,15 @@ export function SuggestionTaskPane({
           ) : null}
         </div>
       </header>
+      {previewFile ? (
+        <FilePreviewPane
+          key={previewFile.path}
+          target={{ kind: 'suggestion', id: suggestionId }}
+          file={previewFile}
+          revision={null}
+          onClose={() => setPreviewFile(null)}
+        />
+      ) : null}
       <div className="suggestion-task__scroll">
         <div className="suggestion-task__column" ref={columnRef}>
           {phase === 'loading' ? (
@@ -181,6 +208,12 @@ export function SuggestionTaskPane({
               isStreamFinished={snapshot.interactionContract !== null}
             />
           ) : null}
+          <FileChips
+            owner="suggestion"
+            files={files}
+            selectedPath={previewFile?.path ?? null}
+            onOpen={(file) => setPreviewFile(file.path === previewFile?.path ? null : file)}
+          />
           {phase === 'starting' ? (
             <p className="suggestion-task__status" role="status">
               {copy.starting}

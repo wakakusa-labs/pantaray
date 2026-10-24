@@ -14,7 +14,7 @@ function renderPreview(path: string, text: string) {
   render(
     <UiLanguageProvider initialLanguage="en">
       <FilePreviewPane
-        actionId="act-1"
+        target={{ kind: 'action', id: 'act-1' }}
         file={taskFileAt(path)}
         revision={null}
         onClose={() => {}}

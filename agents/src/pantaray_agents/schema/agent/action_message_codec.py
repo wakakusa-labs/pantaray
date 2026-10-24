@@ -24,6 +24,13 @@ _ATTACHED_FILES_PREAMBLE = (
     "formats are readable: do not tell the user they are unsupported, and do "
     "not ask them to paste the contents."
 )
+_SUGGESTION_FILES_PREAMBLE = (
+    "Files from the suggestion:\n"
+    "You made these files for the suggestion this task continues; the user did "
+    "not attach them. Each is copied to the path shown, relative to your "
+    "workspace cwd, and that copy is the one to work on. Open one with the "
+    "`read` tool at that path."
+)
 _BYTES_PER_KILOBYTE = 1024
 # What the chat wrote when it handed work over is Pantaray's, so the task is told
 # whose words are whose. The text itself stays first: titles and search read it.
@@ -97,6 +104,13 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
     if approval is not None:
         metadata_lines = _render_suggestion_metadata(approval)
         sections.append("Suggestion metadata:\n" + "\n".join(metadata_lines))
+    if message.suggestion_files:
+        sections.append(
+            "\n".join(
+                [_SUGGESTION_FILES_PREAMBLE]
+                + [f"- {path}" for path in message.suggestion_files]
+            )
+        )
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
         sections.append(render_project_refs(project_refs))

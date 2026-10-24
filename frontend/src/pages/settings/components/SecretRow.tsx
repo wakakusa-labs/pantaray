@@ -1,3 +1,4 @@
+import { CircleAlert } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
 import type { Translate } from '../types';
@@ -13,6 +14,7 @@ export function SecretRow({
   disabled,
   onSave,
   onClear,
+  problem,
   hint,
   t,
 }: {
@@ -23,6 +25,8 @@ export function SecretRow({
   disabled: boolean;
   onSave: (value: string) => Promise<void> | void;
   onClear: () => Promise<void> | void;
+  /** Why the saved key does not work; shown in place of "saved". */
+  problem?: string;
   hint?: React.ReactNode;
   t: Translate;
 }): React.JSX.Element {
@@ -118,7 +122,14 @@ export function SecretRow({
       <Row label={label}>
         <div className="ai-inline">
           <span className="ai-secret-mask">••••••••••••</span>
-          <span className="ai-note">{t('settings.aiConnection.key.saved')}</span>
+          {problem ? (
+            <span role="alert" className="ai-check ai-check--failed ai-secret-problem">
+              <CircleAlert size={15} strokeWidth={1.8} aria-hidden />
+              {problem}
+            </span>
+          ) : (
+            <span className="ai-note">{t('settings.aiConnection.key.saved')}</span>
+          )}
           <button
             type="button"
             className="settings-text-button"

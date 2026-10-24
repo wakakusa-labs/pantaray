@@ -36,6 +36,7 @@ from pantaray_agents.local_runtime.integrations.registry import (
 from pantaray_agents.local_runtime.integrations.settings import (
     AccountStatus,
     IntegrationAccessNotAllowedError,
+    IntegrationsKeyRejected,
     IntegrationsStatus,
     IntegrationToolSetting,
     PermissionStore,
@@ -105,11 +106,18 @@ async def get_integrations_status(
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> IntegrationsStatus:
     store = _store(user_id, resolved_user_id)
-    return await load_integrations_status(
-        gateway=get_integration_gateway(),
-        tool_index=get_integration_tool_index(),
-        store=store,
-    )
+    try:
+        return await load_integrations_status(
+            gateway=get_integration_gateway(),
+            tool_index=get_integration_tool_index(),
+            store=store,
+        )
+    except ComposioRequestError as exc:
+        # 401: the key was deleted or regenerated, or is not a project key. The
+        # user can fix only this failure, so only this one is told apart.
+        if exc.response.status != status.HTTP_401_UNAUTHORIZED:
+            raise
+        return IntegrationsKeyRejected()
 
 
 @router.put(f"{_ACCOUNT_PATH}/access", response_model=AccountStatus)

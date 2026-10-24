@@ -185,6 +185,32 @@ describe('the Composio key', () => {
     expect(aiConnection.update).toHaveBeenLastCalledWith({ operation: 'remove_integration_key' });
     expect(screen.queryByRole('button', { name: /^Gmail/ })).not.toBeInTheDocument();
   });
+
+  it('asks for a new key when the key is refused, and offers a reload only for a failed read', async () => {
+    const rejected = "This key doesn't work. Replace it with a new key.";
+    api.getStatus.mockResolvedValueOnce({ state: 'key_rejected' });
+    renderSettings();
+
+    expect(await screen.findByText(rejected)).toHaveAttribute('role', 'alert');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Load again' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved on this Mac')).not.toBeInTheDocument();
+
+    // The read after the new key fails: nothing is known about the new key yet.
+    api.getStatus.mockRejectedValueOnce(new Error('Local backend request failed.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Composio API key: Replace' }));
+    fireEvent.change(screen.getByLabelText('Composio API key'), { target: { value: 'ak_new' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Composio API key: Save' }));
+    expect(await screen.findByText(/^Couldn't load the services\./)).toHaveAttribute(
+      'role',
+      'alert'
+    );
+    expect(screen.queryByText(rejected)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load again' }));
+    expect(await screen.findByRole('button', { name: /^Gmail/ })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
 
 describe('integration settings', () => {

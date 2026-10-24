@@ -112,6 +112,16 @@
   color: var(--danger-color);
 }
 
+.ai-secret-problem {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-xs);
+}
+
+.ai-secret-problem > svg {
+  flex: none;
+}
+
 /* 幅の狭いウィンドウではラベルを上に積む。 */
 @media (max-width: 720px) {
   .ai-row {

@@ -70,6 +70,7 @@ export function IntegrationSettings({ t }: { t: Translate }) {
         onClear: () => saveKey({ operation: 'remove_integration_key' }),
       }}
       toolkits={integrations.toolkits}
+      keyRejected={integrations.keyRejected}
       loadFailed={integrations.loadFailed}
       onReload={() => void integrations.reload()}
       rows={integrations.rows}

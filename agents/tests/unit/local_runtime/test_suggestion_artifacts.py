@@ -165,3 +165,27 @@ async def test_the_list_survives_save_relay_and_bootstrap(
     )
     assert bootstrap.snapshot.artifacts == artifacts
     assert json.loads(bootstrap.model_dump_json())["snapshot"]["artifacts"] == artifacts
+
+
+async def test_a_list_made_invalid_after_validation_does_not_update_the_row(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    apply_migrations(db_path, BUSY_TIMEOUT_MS, load_default_migrations())
+    _insert_user(db_path)
+    repository = _repository(db_path)
+    await repository.create_processing_suggestion_row(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, created_at=TIMESTAMP
+    )
+    response = _response(["draft.md"])
+    response.artifacts.append("../escape.md")
+
+    saved = await repository.save_suggestion(
+        response, prompt_name="suggestion", prompt_version="test"
+    )
+
+    assert saved.error is not None
+    row = await repository.get_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
+    assert row.data is not None
+    assert row.data["status"] == "processing"
+    assert row.data["artifacts_json"] == []

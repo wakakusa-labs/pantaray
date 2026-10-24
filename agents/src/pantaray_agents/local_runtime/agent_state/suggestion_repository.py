@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 
+from pydantic import ValidationError
+
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_domain_memory,
 )
@@ -24,7 +26,10 @@ from pantaray_agents.repositories.runtime_ports import (
     SuggestionRepositoryPort,
 )
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
+from pantaray_agents.schema.agent.suggestion import (
+    SUGGESTION_ARTIFACTS_ADAPTER,
+    SuggestionAgentResponse,
+)
 from pantaray_agents.schema.repositories.repository import DBRow, RepositoryResult
 from pantaray_agents.suggestion_reactions import (
     normalize_public_suggestion_reaction_for_write,
@@ -117,6 +122,14 @@ class LocalSuggestionRepository(
         error_payload = (
             suggestion.error.model_dump() if suggestion.error is not None else None
         )
+        # The model does not revalidate on mutation, and a stored invalid list
+        # would make every later read of the row fail.
+        try:
+            artifacts = SUGGESTION_ARTIFACTS_ADAPTER.validate_python(
+                suggestion.artifacts
+            )
+        except ValidationError:
+            return RepositoryResult(error="artifacts must be valid artifact paths")
         with self._connect() as connection:
             with immediate_transaction(connection):
                 connection.execute(
@@ -150,7 +163,7 @@ class LocalSuggestionRepository(
                             if suggestion.target_context is not None
                             else None
                         ),
-                        encode_json_column(suggestion.artifacts),
+                        encode_json_column(artifacts),
                         encode_json_column(error_payload),
                         prompt_text,
                         response_text,

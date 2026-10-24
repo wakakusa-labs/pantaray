@@ -4,8 +4,13 @@ import type { RecordingStartResult } from '../../../electron/src/screenshot/scre
 
 type CaptureStatus = 'active' | 'paused' | 'unavailable';
 
-/** Recording filters select inputs; they are not a prerequisite for starting capture. */
-export function useScreenshotCaptureStatus() {
+/**
+ * Recording filters select inputs; they are not a prerequisite for starting capture.
+ *
+ * The status is the owner's. Below `LocalOwnerBoundary` the hook lives as long as one owner;
+ * a caller outside it passes the published owner id so the read runs again once it exists.
+ */
+export function useScreenshotCaptureStatus(ownerId?: string | null) {
   const pending = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<CaptureStatus | null>(null);
@@ -16,6 +21,7 @@ export function useScreenshotCaptureStatus() {
   useEffect(() => {
     let active = true;
     let receivedNotification = false;
+    setStatus(null);
     const bridge = window.electron?.screenshot;
     const unsubscribe = bridge?.onStatusChanged?.((enabled) => {
       if (!active) return;
@@ -39,7 +45,7 @@ export function useScreenshotCaptureStatus() {
       active = false;
       unsubscribe?.();
     };
-  }, []);
+  }, [ownerId]);
 
   // Both IPC writes share the synchronous duplicate-dispatch guard.
   const runCaptureOperation = useCallback(

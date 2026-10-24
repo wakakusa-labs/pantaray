@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { useAuth } from '@/hooks/useAuth';
+
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import { useScreenshotCaptureStatus } from '../pages/settings/useScreenshotCaptureStatus';
 
@@ -14,7 +16,11 @@ import { useScreenshotCaptureStatus } from '../pages/settings/useScreenshotCaptu
  * finish with nothing recorded.
  */
 export function useRecordingStep() {
-  const capture = useScreenshotCaptureStatus();
+  const { runtimeState } = useAuth();
+  // Setup draws outside the owner boundary, so the status is read again once an owner exists.
+  const capture = useScreenshotCaptureStatus(
+    runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
+  );
   const [startOutcome, setStartOutcome] = useState<Exclude<RecordingStartResult, 'started'> | null>(
     null
   );

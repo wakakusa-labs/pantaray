@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pantaray_agents.agents.suggestion_agent.research import SuggestionMakeTools
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.integrations.search import (
@@ -19,12 +20,15 @@ from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.tools.web.session import WebResearchToolSession
 
 from ..action_session_temp_paths import (
+    MANAGED_DIRECTORY_MODE,
     resolve_local_runtime_storage_base,
+    resolve_suggestion_artifacts_root,
     validate_action_storage_component,
 )
 from ..outside_workspace_grant import app_owned_roots
 from ..tool_result_storage import discard_run_tool_results
-from .commands import SuggestionCommandSession
+from .artifact_patch import SuggestionArtifactPatch
+from .commands import PinnedFolder, SuggestionCommandSession
 from .integrations import IntegrationRunBudget, SuggestionIntegrationSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
@@ -78,6 +82,39 @@ class LocalSuggestionResearchTools:
         user_id: str,
         run_id: str,
     ) -> tuple[ReactToolDefinition, ...]:
+        return await self._definitions(
+            user_id=user_id, run_id=run_id, artifact_folder=None
+        )
+
+    async def build_make_tools(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+    ) -> SuggestionMakeTools:
+        """The research tools, with commands and apply_patch writing only into
+        the Suggestion's artifact folder."""
+
+        folder = resolve_suggestion_artifacts_root(
+            db_path=self.db_path, user_id=user_id, suggestion_id=run_id
+        )
+        folder.mkdir(mode=MANAGED_DIRECTORY_MODE, parents=True, exist_ok=True)
+        # Pinned once: no later call resolves the folder from its path again.
+        pinned = PinnedFolder.pin(folder.resolve(strict=True))
+        definitions = await self._definitions(
+            user_id=user_id, run_id=run_id, artifact_folder=pinned
+        )
+        return SuggestionMakeTools(
+            definitions=(
+                *definitions,
+                SuggestionArtifactPatch(pinned.path).definition(),
+            ),
+            folder=pinned.path,
+        )
+
+    async def _definitions(
+        self, *, user_id: str, run_id: str, artifact_folder: PinnedFolder | None
+    ) -> tuple[ReactToolDefinition, ...]:
         memory_context = MemoryContextSession(user_id=user_id, run_id=run_id)
         spill_root = suggestion_tool_results_root(db_path=self.db_path, run_id=run_id)
         memory_tools = MemoryRetrievalSession(
@@ -115,6 +152,7 @@ class LocalSuggestionResearchTools:
                 app_storage_roots=app_owned_roots(self.db_path),
                 spill_root=spill_root,
                 memory_folders=self.snapshot.memory_folders,
+                own_folder=None if artifact_folder is None else artifact_folder.path,
             ),
             *WebResearchToolSession(
                 user_id=user_id,
@@ -133,6 +171,7 @@ class LocalSuggestionResearchTools:
                     workspace_roots=self.snapshot.folders,
                     read_access_scope=self.snapshot.read_access_scope,
                     spill_root=spill_root,
+                    artifact_folder=artifact_folder,
                 ).definitions()
                 if self.snapshot.commands_allowed
                 else ()

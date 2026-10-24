@@ -36,8 +36,11 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.lead':
       'Pantaray records what you do on this Mac and uses it for suggestions and tasks.',
     'onboarding.recording.details': 'What is recorded',
-    'onboarding.recording.permissionsTitle': 'Allow',
-    'onboarding.recording.permissionsNote': 'System Settings opens. Turn Pantaray on there.',
+    'onboarding.recording.permissionsTitle': 'macOS permissions',
+    'onboarding.recording.permissionsNote': 'Allow opens System Settings. Turn Pantaray on there.',
+    'onboarding.recording.switchTitle': 'Turn recording on',
+    'onboarding.recording.switchLabel': 'Recording',
+    'onboarding.recording.recordingOn': 'Recording is on.',
     'onboarding.recording.accessibility': 'Accessibility',
     'onboarding.recording.screenRecording': 'Screen Recording',
     'onboarding.recording.privacyPane': 'Privacy & Security',
@@ -48,8 +51,8 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.relaunch': 'Reopen Pantaray',
     'onboarding.recording.relaunchNote':
       'Once it is on, reopen Pantaray to use it. Setup continues from this step.',
-    'onboarding.recording.switchReady': 'Turn it on to start recording',
-    'onboarding.recording.switchBlocked': 'You can turn it on once both are allowed',
+    'onboarding.recording.switchReady': 'Turn it on to start recording.',
+    'onboarding.recording.switchBlocked': 'You can turn it on once both are allowed.',
     'onboarding.recording.permissionPending':
       'More permissions are needed. Allow them in System Settings, then turn the switch on again.',
     'onboarding.apps.lead':
@@ -63,7 +66,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.dashboardLink': 'Open the dashboard',
     'onboarding.apps.guide.createKey': 'Create an API key',
     'onboarding.apps.guide.createKeyNote':
-      'Create a new key under Settings → API Keys, with these permissions.',
+      'Create a key under Settings → API Keys. These four permissions are all it needs.',
     'onboarding.apps.guide.paste': 'Paste the key',
     'onboarding.apps.guide.pasteNote': 'Paste the key that starts with ak_ below and save it.',
   },
@@ -101,9 +104,12 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.finishFailed': '保存できませんでした。もう一度お試しください。',
     'onboarding.recording.lead': 'この Mac での操作を記録して、提案や作業に使います。',
     'onboarding.recording.details': '記録する内容',
-    'onboarding.recording.permissionsTitle': '許可する',
+    'onboarding.recording.permissionsTitle': 'macOS の許可',
     'onboarding.recording.permissionsNote':
-      'システム設定が開くので、Pantaray をオンにしてください。',
+      '「許可する」を押すとシステム設定が開くので、Pantaray をオンにしてください。',
+    'onboarding.recording.switchTitle': '記録をオンにする',
+    'onboarding.recording.switchLabel': '記録',
+    'onboarding.recording.recordingOn': '記録しています。',
     'onboarding.recording.accessibility': 'アクセシビリティ',
     'onboarding.recording.screenRecording': '画面収録',
     'onboarding.recording.privacyPane': 'プライバシーとセキュリティ',
@@ -114,8 +120,8 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.relaunch': 'Pantaray を開き直す',
     'onboarding.recording.relaunchNote':
       'オンにしたら、開き直すと使えるようになります。この画面の続きから再開します。',
-    'onboarding.recording.switchReady': 'オンにすると記録を始めます',
-    'onboarding.recording.switchBlocked': '2 つの許可が済むとオンにできます',
+    'onboarding.recording.switchReady': 'オンにすると記録を始めます。',
+    'onboarding.recording.switchBlocked': '2 つの許可が済むとオンにできます。',
     'onboarding.recording.permissionPending':
       'ほかにも許可が必要です。システム設定で許可したら、もう一度スイッチをオンにしてください。',
     'onboarding.apps.lead':
@@ -128,7 +134,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.dashboardLink': 'ダッシュボードを開く',
     'onboarding.apps.guide.createKey': 'API キーを作る',
     'onboarding.apps.guide.createKeyNote':
-      'Settings → API Keys で新しいキーを作ります。権限は次のように選んでください。',
+      'Settings → API Keys でキーを作ります。権限は次の 4 つがあれば足ります。',
     'onboarding.apps.guide.paste': 'キーを貼り付ける',
     'onboarding.apps.guide.pasteNote': 'ak_ で始まるキーを、下の欄に貼り付けて保存します。',
   },

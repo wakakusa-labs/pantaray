@@ -168,12 +168,21 @@
 .action-conversation__retry {
   justify-self: end;
   padding: var(--space-xs) var(--space-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid transparent;
   border-radius: 8px;
   color: var(--text-primary);
-  background: var(--surface-bg);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
   font: inherit;
   cursor: pointer;
+}
+
+.action-conversation__retry:hover:not([aria-disabled='true']) {
+  background: var(--button-fill-hover);
+}
+
+.action-conversation__retry:active:not([aria-disabled='true']) {
+  background: var(--button-fill-active);
 }
 
 .action-conversation__composer button:disabled {

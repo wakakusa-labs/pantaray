@@ -66,7 +66,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.dashboardLink': 'Open the dashboard',
     'onboarding.apps.guide.createKey': 'Create an API key',
     'onboarding.apps.guide.createKeyNote':
-      'Create a key under Settings → API Keys. These four permissions are all it needs.',
+      'Create a key under Settings → API Keys with these permissions.',
     'onboarding.apps.guide.paste': 'Paste the key',
     'onboarding.apps.guide.pasteNote': 'Paste the key that starts with ak_ below and save it.',
   },
@@ -133,8 +133,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.guide.projectNote': 'ダッシュボードで、使うプロジェクトを開きます。',
     'onboarding.apps.guide.dashboardLink': 'ダッシュボードを開く',
     'onboarding.apps.guide.createKey': 'API キーを作る',
-    'onboarding.apps.guide.createKeyNote':
-      'Settings → API Keys でキーを作ります。権限は次の 4 つがあれば足ります。',
+    'onboarding.apps.guide.createKeyNote': 'Settings → API Keys でキーを作り、次の権限を付けます。',
     'onboarding.apps.guide.paste': 'キーを貼り付ける',
     'onboarding.apps.guide.pasteNote': 'ak_ で始まるキーを、下の欄に貼り付けて保存します。',
   },

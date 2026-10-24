@@ -58,6 +58,7 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import type { OnboardingState } from '../ipc/schemas/onboarding';
 import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
@@ -123,6 +124,26 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     userDataDir: app.getPath('userData'),
     report: (reason) => params.logger?.warn?.('ONBOARDING_STATE_INVALID', { reason }),
   });
+  // Suggestion panels that would open over first-run setup wait for it to finish; History
+  // and the main window still receive them. They belong to the owner they arrived for.
+  const heldPanels: string[] = [];
+  const showNotification = (suggestionId: string): void => {
+    if (onboarding.get().status === 'in_progress') heldPanels.push(suggestionId);
+    else params.notificationWindow.showNotification(suggestionId);
+  };
+  const setOnboardingState = (state: OnboardingState): OnboardingState => {
+    const saved = onboarding.set(state);
+    if (saved.status !== 'completed') return saved;
+    for (const suggestionId of heldPanels.splice(0)) {
+      try {
+        params.notificationWindow.showNotification(suggestionId);
+      } catch (error) {
+        // Setup is already saved as finished; the Suggestion stays in History.
+        params.logger?.error?.('HELD_SUGGESTION_PANEL_ERR', { err: error });
+      }
+    }
+    return saved;
+  };
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -169,7 +190,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   );
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
-    notificationWindow: params.notificationWindow,
+    notificationWindow: { ...params.notificationWindow, showNotification },
     createOrchestrationWS: params.createOrchestrationWS,
     getMainWindow: params.getMainWindow,
     getLocalApiToken: params.getLocalApiToken,
@@ -457,7 +478,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         openCapturePermissionSettings,
-        onboarding: { getState: onboarding.get, setState: onboarding.set },
+        onboarding: { getState: onboarding.get, setState: setOnboardingState },
         app,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
@@ -490,6 +511,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     applyLocalOwner,
     prepareOwnerChange: () => {
       params.notificationWindow.clearForOwnerChange();
+      heldPanels.length = 0;
       conversationOverlay.onOwnerChanged(null);
       latestActionPageReader.clear();
       orchestration.resetActionLive();

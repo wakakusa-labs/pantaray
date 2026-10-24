@@ -1,0 +1,206 @@
+import { Check, Minus } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+
+import { BrandWordmark } from '@/components/BrandWordmark';
+import { useI18n } from '@/context/useI18n';
+import { useAiConnectionController } from '../pages/settings/useAiConnectionController';
+import { AiStep } from './AiStep';
+import { AppsStep } from './AppsStep';
+import { DoneStep } from './DoneStep';
+import { RecordingStep } from './RecordingStep';
+import type { OnboardingProgress, OnboardingStep } from './useOnboardingProgress';
+import { useRecordingStep } from './useRecordingStep';
+import { WebSearchStep } from './WebSearchStep';
+import '../components/Layout.css';
+import '../components/recordingIntro.css';
+import '../pages/settings/settingsPage.css';
+import './onboarding.css';
+
+const STEPS: readonly { id: OnboardingStep; required: boolean }[] = [
+  { id: 'ai', required: true },
+  { id: 'recording', required: true },
+  { id: 'web_search', required: false },
+  { id: 'apps', required: false },
+  { id: 'done', required: false },
+];
+
+type Outcome = 'pending' | 'done' | 'skipped';
+
+/** First-run setup: the steps on the left, the current one on the right, in a full window. */
+export function OnboardingScreen({
+  step,
+  progress,
+}: {
+  step: OnboardingStep;
+  progress: OnboardingProgress;
+}) {
+  const { t } = useI18n();
+  // Its own read of the connection the steps' Settings sections change; main announces each change.
+  const connection = useAiConnectionController().state;
+  const recording = useRecordingStep();
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const shownStep = useRef(step);
+
+  // A step change moves focus to the new step's heading, as a page change would.
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    titleRef.current?.focus();
+  }, [step]);
+
+  const configured: Record<OnboardingStep, boolean> = {
+    ai:
+      connection !== null &&
+      connection.runtime.ok &&
+      connection.runtime.status.llmRoute !== 'unconfigured',
+    recording: recording.isRecording === true,
+    web_search: connection?.settings.hasSavedWebSearchKey ?? false,
+    apps: connection?.settings.hasSavedIntegrationKey ?? false,
+    done: false,
+  };
+  const index = STEPS.findIndex((s) => s.id === step);
+  const current = STEPS[index];
+  // An optional step the user went past without setting it up was skipped; nothing stores it.
+  const outcome = (id: OnboardingStep, i: number): Outcome =>
+    configured[id] ? 'done' : i < index && id !== 'done' ? 'skipped' : 'pending';
+  const requiredDoneBefore = (i: number) =>
+    STEPS.slice(0, i).every((s) => !s.required || configured[s.id]);
+  const next = () => progress.goTo(STEPS[index + 1].id);
+  const blockedHint =
+    current.required && !configured[step]
+      ? t(step === 'ai' ? 'onboarding.ai.blocked' : 'onboarding.recording.blocked')
+      : null;
+
+  return (
+    <div className="app-shell onb-shell">
+      <div className="app-titlebar" aria-hidden="true" />
+      <main className="app-main">
+        <div className="app-surface app-surface--split">
+          <div className="app-split">
+            <nav
+              className="app-split-master settings-page-nav onb-nav"
+              aria-label={t('onboarding.title')}
+            >
+              <BrandWordmark className="onb-wordmark" />
+              <h2 className="app-split-title settings-page-nav-title onb-nav-title">
+                {t('onboarding.title')}
+              </h2>
+              <p className="onb-progress">
+                {index + 1} / {STEPS.length}
+              </p>
+              <ol className="onb-steps">
+                {STEPS.map((s, i) => {
+                  const state = outcome(s.id, i);
+                  const isCurrent = s.id === step;
+                  const meta =
+                    s.id === 'done'
+                      ? null
+                      : state === 'done'
+                        ? t('onboarding.stepDone')
+                        : state === 'skipped'
+                          ? t('onboarding.stepSkipped')
+                          : t(s.required ? 'onboarding.required' : 'onboarding.optional');
+                  return (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className={`settings-page-nav-item onb-step-item${isCurrent ? ' settings-page-nav-item--active' : ''}`}
+                        aria-current={isCurrent ? 'step' : undefined}
+                        disabled={!requiredDoneBefore(i)}
+                        onClick={() => progress.goTo(s.id)}
+                      >
+                        <span
+                          className={`onb-marker onb-marker--${state}${isCurrent ? ' onb-marker--current' : ''}`}
+                          aria-hidden="true"
+                        >
+                          {state === 'done' ? (
+                            <Check size={12} strokeWidth={2.6} />
+                          ) : state === 'skipped' ? (
+                            <Minus size={12} strokeWidth={2.6} />
+                          ) : (
+                            i + 1
+                          )}
+                        </span>
+                        <span className="onb-step-copy">
+                          <span>{t(`onboarding.step.${s.id}`)}</span>
+                          {meta ? <span className="onb-step-meta">{meta}</span> : null}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
+
+            <div className="app-split-detail onb-detail">
+              <div className="onb-content">
+                <h2 className="onb-title" ref={titleRef} tabIndex={-1}>
+                  {step === 'done' ? t('onboarding.done.title') : t(`onboarding.step.${step}`)}
+                  {step !== 'done' ? (
+                    <span className="onb-tag">
+                      {t(current.required ? 'onboarding.required' : 'onboarding.optional')}
+                    </span>
+                  ) : null}
+                </h2>
+
+                {step === 'ai' ? <AiStep t={t} /> : null}
+                {step === 'recording' ? <RecordingStep t={t} recording={recording} /> : null}
+                {step === 'web_search' ? <WebSearchStep t={t} /> : null}
+                {step === 'apps' ? <AppsStep t={t} hasSavedKey={configured.apps} /> : null}
+                {step === 'done' && connection !== null ? (
+                  <DoneStep t={t} connection={connection} isRecording={configured.recording} />
+                ) : null}
+
+                <div className="onb-footer">
+                  {index > 0 && step !== 'done' ? (
+                    <button
+                      type="button"
+                      className="settings-action-button"
+                      onClick={() => progress.goTo(STEPS[index - 1].id)}
+                    >
+                      {t('onboarding.back')}
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="onb-footer-end">
+                    {blockedHint ? <span className="ai-note">{blockedHint}</span> : null}
+                    {progress.finishing === 'failed' ? (
+                      <span className="settings-section-error" role="alert">
+                        {t('onboarding.finishFailed')}
+                      </span>
+                    ) : null}
+                    {!current.required && step !== 'done' && !configured[step] ? (
+                      <button type="button" className="settings-action-button" onClick={next}>
+                        {t('onboarding.skip')}
+                      </button>
+                    ) : null}
+                    {step === 'done' ? (
+                      <button
+                        type="button"
+                        className="recording-intro-primary"
+                        disabled={progress.finishing === 'saving'}
+                        onClick={() => void progress.finish()}
+                      >
+                        {t('onboarding.start')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="recording-intro-primary"
+                        disabled={!configured[step]}
+                        onClick={next}
+                      >
+                        {t('onboarding.next')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

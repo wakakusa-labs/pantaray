@@ -21,6 +21,7 @@ import EmailVerificationPage from './pages/EmailVerificationPage';
 import { getSupabase } from './lib/supabase';
 import Layout from './components/Layout';
 import { LocalOwnerBoundary } from './components/LocalOwnerBoundary';
+import { OnboardingGate } from './onboarding/OnboardingGate';
 import SuggestionHistoryPage from './pages/SuggestionHistoryPage';
 import { ChatSessionProvider } from './components/chat/ChatSessionProvider';
 import DesktopAppOnlyPage from './pages/DesktopAppOnlyPage';
@@ -229,7 +230,13 @@ const MainAppRoutes: React.FC = () => {
 
         {/* Layoutを適用したルート */}
         {isElectron ? (
-          <Route element={<Layout />}>
+          <Route
+            element={
+              <OnboardingGate>
+                <Layout />
+              </OnboardingGate>
+            }
+          >
             {/* Settings also holds installation-wide sections, and scopes its own. */}
             <Route path="/settings" element={<SettingsPage />} />
             <Route

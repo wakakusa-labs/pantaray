@@ -168,7 +168,7 @@ declare global {
       screenshot?: {
         /** OS 権限（アクセシビリティと画面収録）それぞれの付与状況と、それを待っている会話の有無 */
         getGateState: () => Promise<CaptureGateState>;
-        /** 記録画面を「あとで」で閉じる。main は表示されていた owner の答えだけを受ける */
+        /** 記録画面を「あとで」で閉じ、待っている会話を取り下げる。main は表示されていた owner の答えだけを受ける */
         dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
         /** システム設定のプライバシーとセキュリティで、指定した権限の画面を開く */
         openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;

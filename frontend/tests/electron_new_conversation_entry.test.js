@@ -207,7 +207,6 @@ test('a conversation without the macOS capture permissions opens the recording s
   assert.deepEqual(owner.readGateState(), {
     permissions: NO_SCREEN_RECORDING,
     introRequested: false,
-    introDismissed: false,
   });
   assert.equal(owner.openNewConversationOverlay(), 'recording_intro');
   assert.equal(owner.openActionConversationOverlay('action-1'), 'recording_intro');
@@ -249,7 +248,6 @@ test('a deferred conversation opens as soon as the gate is read granted', () => 
   assert.deepEqual(owner.readGateState(), {
     permissions: GRANTED,
     introRequested: false,
-    introDismissed: false,
   });
   assert.deepEqual(state.openCalls, [['conversation:action-1', 'action-1']]);
 
@@ -277,38 +275,33 @@ test('a replay that finds the gate closed defers the conversation again', () => 
   assert.deepEqual(state.openCalls, [['conversation:action-1', 'action-1']]);
 });
 
-test('answering "later" drops the deferred conversation and is remembered for the app run', () => {
+test('answering "later" drops the deferred conversation', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
   state.permissions = NO_ACCESSIBILITY;
 
   assert.equal(owner.openNewConversationOverlay(), 'recording_intro');
-  // The answer outlives the window that gave it: the recording screen lives in the
-  // main window, and reopening that window must not ask again.
+  // A later grant or recording start must not open the conversation the user put off.
   assert.deepEqual(owner.dismissIntro(), {
     permissions: NO_ACCESSIBILITY,
     introRequested: false,
-    introDismissed: true,
   });
   state.permissions = GRANTED;
   owner.openPendingRequest();
   assert.deepEqual(state.openCalls, []);
 });
 
-test('a deferred conversation and an answered recording screen are dropped by a subject change', () => {
+test('a deferred conversation is dropped by a subject change', () => {
   const { owner, state } = createOverlayOwnerHarness();
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-a', kind: 'account' } };
   state.permissions = NO_SCREEN_RECORDING;
 
   assert.equal(owner.openActionConversationOverlay('action-1'), 'recording_intro');
-  owner.dismissIntro();
   owner.onOwnerChanged('user-b');
-  // The next subject never answered this screen, so it is asked again — and never
-  // inherits the request the previous one made.
+  // The next subject never inherits the request the previous one made.
   assert.deepEqual(owner.readGateState(), {
     permissions: NO_SCREEN_RECORDING,
     introRequested: false,
-    introDismissed: false,
   });
   state.runtimeState = { status: 'ready', message: null, owner: { id: 'user-b', kind: 'account' } };
   state.permissions = GRANTED;

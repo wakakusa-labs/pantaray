@@ -89,14 +89,12 @@ export type AuthState = {
 
 /**
  * What the recording screen reads: which of the permissions the recorder needs macOS
- * grants (the gate holds only with both), whether a conversation is waiting on them,
- * and whether the screen was already answered with "later". Nothing here is stored —
- * the permissions are read live, and the answer is held in main for this app run only.
+ * grants (the gate holds only with both), and whether a conversation is waiting on them,
+ * which is what opens the screen. Nothing here is stored: the permissions are read live.
  */
 export type CaptureGateState = {
   permissions: CapturePermissions;
   introRequested: boolean;
-  introDismissed: boolean;
 };
 
 /**
@@ -275,10 +273,10 @@ export type MainContext = {
     stop: () => Promise<boolean>;
     getGateState: () => CaptureGateState;
     /**
-     * Answers the recording screen with "later" for the rest of this app run, in the
-     * name of the owner it was shown to. One gate is held for the whole app run, so an
-     * answer that no longer names the current owner is not taken: it only reads the gate,
-     * the same read the current owner's own screen makes.
+     * Answers the recording screen with "later", dropping the conversation waiting on it,
+     * in the name of the owner it was shown to. One gate is held for the whole app run, so
+     * an answer that no longer names the current owner is not taken: it only reads the
+     * gate, the same read the current owner's own screen makes.
      */
     dismissIntro: (ownerId: string) => CaptureGateState;
     openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;

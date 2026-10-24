@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
@@ -47,8 +47,6 @@ const SuggestionDecisionStatus = styled.span`
   color: var(--text-secondary);
   font-size: var(--text-meta-size);
 `;
-
-const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
 
 const VisuallyHidden = styled.span`
   position: absolute;
@@ -236,7 +234,6 @@ const AgentOverlayShell = ({
   const copyConversationFailed =
     conversationCopy?.status === 'failed' ? t('overlay.copyConversationFailed') : null;
   const suppressNextCloseClickRef = useRef(false);
-  const scrollIndicatorHideTimeoutRef = useRef<number | null>(null);
   const handleCloseMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (!onClose) return;
     suppressNextCloseClickRef.current = true;
@@ -256,28 +253,6 @@ const AgentOverlayShell = ({
       return;
     }
     onClose();
-  };
-
-  useEffect(() => {
-    return () => {
-      if (scrollIndicatorHideTimeoutRef.current !== null) {
-        window.clearTimeout(scrollIndicatorHideTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleScrollableContentScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    target.dataset.scrolling = 'true';
-
-    if (scrollIndicatorHideTimeoutRef.current !== null) {
-      window.clearTimeout(scrollIndicatorHideTimeoutRef.current);
-    }
-
-    scrollIndicatorHideTimeoutRef.current = window.setTimeout(() => {
-      delete target.dataset.scrolling;
-      scrollIndicatorHideTimeoutRef.current = null;
-    }, SCROLL_INDICATOR_HIDE_DELAY_MS);
   };
 
   return (
@@ -363,7 +338,6 @@ const AgentOverlayShell = ({
         <ScrollableContent
           ref={resolvedScrollableRef}
           $collapsed={!isExpanded}
-          onScroll={handleScrollableContentScroll}
           data-overlay-scroll="true"
         >
           <ContentInner ref={contentInnerRef}>

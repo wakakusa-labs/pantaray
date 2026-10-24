@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { useI18n } from '@/context/useI18n';
@@ -54,11 +55,15 @@ function stubBridge(start = vi.fn(async () => 'started')) {
 
 async function renderStep() {
   render(
-    <LocalOwnerContext.Provider value={OWNER}>
-      <UiLanguageProvider initialLanguage="ja">
-        <Step />
-      </UiLanguageProvider>
-    </LocalOwnerContext.Provider>
+    <AuthContext.Provider
+      value={{ runtimeState: { status: 'ready', owner: OWNER } } as unknown as AuthContextType}
+    >
+      <LocalOwnerContext.Provider value={OWNER}>
+        <UiLanguageProvider initialLanguage="ja">
+          <Step />
+        </UiLanguageProvider>
+      </LocalOwnerContext.Provider>
+    </AuthContext.Provider>
   );
   return screen.findByRole('switch', { name: 'コンピューター操作の記録' });
 }

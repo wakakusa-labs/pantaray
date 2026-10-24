@@ -154,6 +154,35 @@ describe('OnboardingGate', () => {
     ]);
   });
 
+  it('reads recording again once the owner is published, since the read before it fails', async () => {
+    stubBridge(async () => ({ status: 'in_progress', step: 'recording' }), {
+      llmRoute: 'direct',
+      recording: true,
+    });
+    let ownerReady = false;
+    window.electron!.screenshot!.getStatus = async () => {
+      if (!ownerReady) throw new Error('Local owner is unavailable.');
+      return true;
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const tree = (runtimeState: Partial<AuthContextType['runtimeState']>) => (
+      <AuthContext.Provider value={{ runtimeState } as AuthContextType}>
+        <UiLanguageProvider initialLanguage="ja">
+          <OnboardingGate>
+            <h1>App</h1>
+          </OnboardingGate>
+        </UiLanguageProvider>
+      </AuthContext.Provider>
+    );
+    const { rerender } = render(tree({ status: 'unknown', owner: null }));
+    await screen.findByRole('heading', { name: /記録を始める/ });
+
+    ownerReady = true;
+    rerender(tree(READY));
+    await waitFor(() => expect(next()).toBeEnabled());
+    expect(steps().getByRole('button', { name: /記録を始める/ })).toHaveTextContent('済み');
+  });
+
   it('keeps the AI step usable when the runtime has no owner, since it is what repairs one', async () => {
     stubBridge(async () => ({ status: 'in_progress', step: 'ai' }), {
       llmRoute: 'unconfigured',

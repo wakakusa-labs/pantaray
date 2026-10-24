@@ -96,10 +96,8 @@ test('an unreadable state restarts setup, is reported, and is replaced by the ne
 function loadFeatures(t, dir) {
   const calls = [];
   const posted = [];
-  const shown = [];
   const recorder = { params: null };
   let context;
-  let ws;
   const load = Module._load;
   Module._load = function (request, parent, isMain) {
     if (request === 'electron') {
@@ -132,7 +130,7 @@ function loadFeatures(t, dir) {
       return {
         createScreenshotSyncManager: (params) => {
           recorder.params = params;
-          return { getStatus: () => false, pause: async () => {} };
+          return { getStatus: () => false };
         },
       };
     }
@@ -164,13 +162,8 @@ function loadFeatures(t, dir) {
       setActionLiveSnapshotGetter: () => {},
       sendResetToAllOverlays: () => {},
       clearActionAssociations: () => {},
-      clearForOwnerChange: () => {},
-      showNotification: (id) => shown.push(id),
     },
-    createOrchestrationWS: (wsParams) => {
-      ws = wsParams;
-      return { connect: () => {}, disconnect: () => {} };
-    },
+    createOrchestrationWS: () => ({ connect: () => {}, disconnect: () => {} }),
     authCoordinator: {},
     localBackendAuthContextController: {},
     supabaseWiring: {
@@ -194,10 +187,7 @@ function loadFeatures(t, dir) {
     logger: null,
   });
   feature.registerMainIpc();
-  feature.ensureOrchestrationConnected();
-  // What the live session calls when a Suggestion arrives with content.
-  const suggestionArrives = (id) => ws.showNotification(id);
-  return { feature, context, recorder, posted, shown, calls, suggestionArrives };
+  return { context, recorder, posted, calls };
 }
 
 test('the first recording does not count as an earlier user', (t) => {
@@ -229,30 +219,6 @@ test('recording during setup asks for the welcome right away', async (t) => {
   recorder.params.onRecordingStarted('owner-a');
   await Promise.resolve();
   assert.deepEqual(posted, ['owner-a']);
-});
-
-test('Suggestion panels wait for setup to finish, then open in arrival order', (t) => {
-  const { context, shown, suggestionArrives } = loadFeatures(t, tempDir(t));
-  suggestionArrives('welcome');
-  context.onboarding.setState({ status: 'in_progress', step: 'apps' });
-  suggestionArrives('insight-1');
-  assert.deepEqual(shown, []);
-
-  context.onboarding.setState({ status: 'completed' });
-  assert.deepEqual(shown, ['welcome', 'insight-1']);
-
-  // Released once; later Suggestions open as they arrive.
-  context.onboarding.setState({ status: 'completed' });
-  suggestionArrives('insight-2');
-  assert.deepEqual(shown, ['welcome', 'insight-1', 'insight-2']);
-});
-
-test('a Suggestion held for one owner is not opened for the next', async (t) => {
-  const { feature, context, shown, suggestionArrives } = loadFeatures(t, tempDir(t));
-  suggestionArrives('welcome');
-  await feature.prepareOwnerChange();
-  context.onboarding.setState({ status: 'completed' });
-  assert.deepEqual(shown, []);
 });
 
 test('relaunching schedules the new instance before quitting', (t) => {

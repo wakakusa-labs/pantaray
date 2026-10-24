@@ -30,7 +30,6 @@ import { createHistoryFetcher } from '../history/historyFetch';
 import { createHistoryItemDeleter } from '../history/historyItemDelete';
 import { createHistoryItemReader } from '../history/historyItemRead';
 import type { MainContext } from '../ipc/context';
-import type { OnboardingState } from '../ipc/schemas/onboarding';
 import { createOverlayBootstrapFetcher } from '../history/overlayBootstrapFetch';
 import { startMainIpcRuntime, type MainIpcRuntime } from './ipcBootstrap';
 import { createLocalBackendClient } from '../localBackend/client';
@@ -145,24 +144,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         createMainWindow: params.createMainWindow,
       }),
   });
-  // A Suggestion's panel opening during first-run setup would land over it, so its panel
-  // waits until setup is finished; History and the main window still receive it.
-  const heldSuggestionIds = new Set<string>();
-  const showSuggestion = (suggestionId: string): void => {
-    if (onboarding.get().status === 'completed') {
-      params.notificationWindow.showNotification(suggestionId);
-    } else heldSuggestionIds.add(suggestionId);
-  };
-  const releaseHeldSuggestions = (): void => {
-    for (const suggestionId of heldSuggestionIds) {
-      try {
-        params.notificationWindow.showNotification(suggestionId);
-      } catch (error) {
-        params.logger?.error?.('HELD_SUGGESTION_SHOW_ERR', { err: error });
-      }
-    }
-    heldSuggestionIds.clear();
-  };
   const shortcutController = createGlobalShortcutController({
     registry: globalShortcut,
     store: createGlobalShortcutStore(app.getPath('userData')),
@@ -188,7 +169,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   );
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
-    notificationWindow: { ...params.notificationWindow, showNotification: showSuggestion },
+    notificationWindow: params.notificationWindow,
     createOrchestrationWS: params.createOrchestrationWS,
     getMainWindow: params.getMainWindow,
     getLocalApiToken: params.getLocalApiToken,
@@ -311,9 +292,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
-    // The runtime greets only an owner who has no data yet, so every start may ask. A start
-    // during setup asks too: the runtime decides before anything is recorded, and the
-    // greeting's panel waits for setup like any other Suggestion.
+    // The runtime greets only an owner who has no data yet, so every start may ask — during
+    // setup too, so the runtime decides before anything is recorded.
     onRecordingStarted: (userId) => {
       const { accelerator, failure } = shortcutController.getState();
       // A failure means the accelerator is configured but not registered: it would not work.
@@ -323,11 +303,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       });
     },
   });
-  const setOnboardingState = (state: OnboardingState): OnboardingState => {
-    const saved = onboarding.set(state);
-    if (saved.status === 'completed') releaseHeldSuggestions();
-    return saved;
-  };
   const rebuildMenus = () =>
     safely(() => {
       params.updateUi.rebuildTrayMenu();
@@ -482,7 +457,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         openCapturePermissionSettings,
-        onboarding: { getState: onboarding.get, setState: setOnboardingState },
+        onboarding: { getState: onboarding.get, setState: onboarding.set },
         app,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
@@ -515,7 +490,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     applyLocalOwner,
     prepareOwnerChange: () => {
       params.notificationWindow.clearForOwnerChange();
-      heldSuggestionIds.clear();
       conversationOverlay.onOwnerChanged(null);
       latestActionPageReader.clear();
       orchestration.resetActionLive();

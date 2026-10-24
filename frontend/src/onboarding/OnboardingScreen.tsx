@@ -2,6 +2,7 @@ import { Check, Minus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { BrandWordmark } from '@/components/BrandWordmark';
+import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
 import { useAiConnectionController } from '../pages/settings/useAiConnectionController';
 import { AiStep } from './AiStep';
@@ -26,7 +27,8 @@ const STEPS: readonly { id: OnboardingStep; required: boolean }[] = [
 
 type Outcome = 'pending' | 'done' | 'skipped';
 
-/** First-run setup: the steps on the left, the current one on the right, in a full window. */
+/** First-run setup in a full window. Only the owner's steps wait for an owner: the AI
+ *  connection is the device's, and it is what repairs a runtime that cannot start one. */
 export function OnboardingScreen({
   step,
   progress,
@@ -106,7 +108,7 @@ export function OnboardingScreen({
                         type="button"
                         className={`settings-page-nav-item onb-step-item${isCurrent ? ' settings-page-nav-item--active' : ''}`}
                         aria-current={isCurrent ? 'step' : undefined}
-                        disabled={!requiredDoneBefore(i)}
+                        disabled={!requiredDoneBefore(i) || progress.finishing === 'saving'}
                         onClick={() => progress.goTo(s.id)}
                       >
                         <span
@@ -144,9 +146,17 @@ export function OnboardingScreen({
                 </h2>
 
                 {step === 'ai' ? <AiStep t={t} /> : null}
-                {step === 'recording' ? <RecordingStep t={t} recording={recording} /> : null}
+                {step === 'recording' ? (
+                  <LocalOwnerBoundary>
+                    <RecordingStep t={t} recording={recording} />
+                  </LocalOwnerBoundary>
+                ) : null}
                 {step === 'web_search' ? <WebSearchStep t={t} /> : null}
-                {step === 'apps' ? <AppsStep t={t} hasSavedKey={configured.apps} /> : null}
+                {step === 'apps' ? (
+                  <LocalOwnerBoundary>
+                    <AppsStep t={t} hasSavedKey={configured.apps} />
+                  </LocalOwnerBoundary>
+                ) : null}
                 {step === 'done' && connection !== null ? (
                   <DoneStep t={t} connection={connection} isRecording={configured.recording} />
                 ) : null}

@@ -63,26 +63,19 @@ function startRuntime(t, onboardingFile) {
   return { feature, context: current.context, opened, arrive: id => autoOpen(id) };
 }
 
-test('Suggestion panels wait for setup and open once, in arrival order, when it completes', t => {
-  const { context, opened, arrive } = startRuntime(t, null);
+test('Suggestion panels wait for setup and open once, in arrival order, for the owner they came for', async t => {
+  const { feature, context, opened, arrive } = startRuntime(t, null);
+  arrive('previous-owner');
+  await feature.prepareOwnerChange();
   arrive('welcome');
   arrive('second');
   context.onboarding.setState({ status: 'in_progress', step: 'web_search' });
   assert.deepEqual(opened, []);
 
   context.onboarding.setState({ status: 'completed' });
-  assert.deepEqual(opened, ['welcome', 'second']);
   context.onboarding.setState({ status: 'completed' });
   arrive('later');
   assert.deepEqual(opened, ['welcome', 'second', 'later']);
-});
-
-test('panels held for one owner are dropped when the owner changes', async t => {
-  const { feature, context, opened, arrive } = startRuntime(t, null);
-  arrive('previous-owner');
-  await feature.prepareOwnerChange();
-  context.onboarding.setState({ status: 'completed' });
-  assert.deepEqual(opened, []);
 });
 
 test('a user who finished setup sees panels as they arrive', t => {

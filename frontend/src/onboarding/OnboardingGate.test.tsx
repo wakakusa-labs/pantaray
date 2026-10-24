@@ -3,58 +3,39 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import type { ConnectionStateResult } from '../../electron/src/ipc/schemas/aiConnection';
 import type { OnboardingState } from '../../electron/src/ipc/schemas/onboarding';
 import { OnboardingGate } from './OnboardingGate';
 
-const auth = {
-  runtimeState: { status: 'ready', message: null, owner: { kind: 'guest', id: 'guest' } },
-} as AuthContextType;
+const READY = { status: 'ready', owner: { kind: 'guest', id: 'guest' } } as const;
 
 type Setup = { llmRoute: 'unconfigured' | 'direct'; recording: boolean };
 
 function stubBridge(getState: () => Promise<OnboardingState>, setup: Setup) {
   const listeners = new Set<() => void>();
-  const connection = (): ConnectionStateResult => ({
+  // Only what the steps read; the rest of the connection state does not change what they show.
+  const connection = () => ({
     ok: true,
     settings: {
       preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-6.1-sol' },
-      hasSavedApiKey: false,
-      hasSavedWebSearchKey: false,
-      hasSavedIntegrationKey: false,
       canStoreSecrets: true,
       chatgpt: { status: setup.llmRoute === 'direct' ? 'connected' : 'disconnected' },
     },
-    runtime: {
-      ok: true,
-      status: {
-        helperInstanceId: 'helper',
-        activeOwnerId: 'guest',
-        configured: true,
-        cloudSessionState: 'absent',
-        llmRoute: setup.llmRoute,
-        webSearchRoute: 'unconfigured',
-      },
-    },
+    runtime: { ok: true, status: { llmRoute: setup.llmRoute, webSearchRoute: 'unconfigured' } },
   });
   const setState = vi.fn(async (state: OnboardingState) => state);
   window.electron = {
     onboarding: { getState: vi.fn(getState), setState },
     aiConnection: {
-      getState: vi.fn(async () => connection()),
-      update: vi.fn(async () => ({ ok: true })),
+      getState: async () => connection(),
       onChanged: vi.fn((listener: () => void) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       }),
     },
     screenshot: {
-      getStatus: vi.fn(async () => setup.recording),
-      onStatusChanged: vi.fn(() => () => undefined),
-      getGateState: vi.fn(async () => ({
-        permissions: { accessibility: false, screenRecording: false },
-        introRequested: false,
-      })),
+      getStatus: async () => setup.recording,
+      onStatusChanged: () => () => undefined,
+      getGateState: async () => ({ permissions: { accessibility: false, screenRecording: false } }),
     },
     integrations: { getStatus: vi.fn(async () => ({ state: 'not_configured' })) },
   } as unknown as Window['electron'];
@@ -68,9 +49,9 @@ function stubBridge(getState: () => Promise<OnboardingState>, setup: Setup) {
   };
 }
 
-function renderGate() {
+function renderGate(runtimeState: Partial<AuthContextType['runtimeState']> = READY) {
   render(
-    <AuthContext.Provider value={auth}>
+    <AuthContext.Provider value={{ runtimeState } as AuthContextType}>
       <UiLanguageProvider initialLanguage="ja">
         <OnboardingGate>
           <h1>App</h1>
@@ -156,8 +137,30 @@ describe('OnboardingGate', () => {
     expect(screen.queryByRole('heading', { name: 'App' })).not.toBeInTheDocument();
     expect(start).toBeEnabled();
 
+    let saved: () => void = () => undefined;
+    bridge.setState.mockImplementationOnce(
+      (state) => new Promise((resolve) => (saved = () => resolve(state)))
+    );
     fireEvent.click(start);
+    // No step write may follow the completed one.
+    const aiStep = steps().getByRole('button', { name: /AI をつなぐ/ });
+    expect(aiStep).toBeDisabled();
+    fireEvent.click(aiStep);
+    await act(async () => saved());
     expect(await screen.findByRole('heading', { name: 'App' })).toBeInTheDocument();
-    expect(bridge.setState).toHaveBeenLastCalledWith({ status: 'completed' });
+    expect(bridge.setState.mock.calls).toEqual([
+      [{ status: 'completed' }],
+      [{ status: 'completed' }],
+    ]);
+  });
+
+  it('keeps the AI step usable when the runtime has no owner, since it is what repairs one', async () => {
+    stubBridge(async () => ({ status: 'in_progress', step: 'ai' }), {
+      llmRoute: 'unconfigured',
+      recording: false,
+    });
+    renderGate({ status: 'degraded', owner: null });
+    expect(await screen.findByRole('button', { name: 'ChatGPT でログイン' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '次へ' })).toBeDisabled();
   });
 });

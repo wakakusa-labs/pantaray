@@ -1,6 +1,7 @@
 import { Check, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import type { ConnectionStateResult } from '../../electron/src/ipc/schemas/aiConnection';
 import type { IntegrationToolkitStatus } from '../../electron/src/settings/integrationSettingsFetch';
 import { AiConnectionRow as Row } from '../pages/settings/components/AiConnectionRow';
@@ -19,27 +20,33 @@ function aiLabel(t: Translate, { settings, runtime }: ConnectionState): string {
     : t('onboarding.done.apiKey', { provider: t(`settings.aiConnection.provider.${provider}`) });
 }
 
-/** The services with an account connected, read once; none when the read fails. */
-function useConnectedServices(hasSavedKey: boolean): IntegrationToolkitStatus[] {
+/** The owner's connected services; until (or unless) the read finds one, the saved key. */
+function ConnectedServices({ t }: { t: Translate }) {
   const [services, setServices] = useState<IntegrationToolkitStatus[]>([]);
   useEffect(() => {
-    const integrations = window.electron?.integrations;
-    if (!hasSavedKey || !integrations) return;
     let active = true;
-    integrations
-      .getStatus()
+    (async () => window.electron!.integrations!.getStatus())()
       .then((status) => {
         if (active && status.state === 'configured') {
           setServices(status.toolkits.filter((toolkit) => toolkit.accounts.length > 0));
         }
       })
-      // The summary still says the key is saved, which is true.
       .catch((error: unknown) => console.error('Failed to read the connected services:', error));
     return () => {
       active = false;
     };
-  }, [hasSavedKey]);
-  return services;
+  }, []);
+  if (services.length === 0) return <Done>{t('onboarding.done.keySaved')}</Done>;
+  return (
+    <Done>
+      {services.map((toolkit) => (
+        <span key={toolkit.toolkit} className="onb-summary-app">
+          <IntegrationLogo toolkit={toolkit} small />
+          {toolkit.display_name}
+        </span>
+      ))}
+    </Done>
+  );
 }
 
 /** What setup left configured; anything skipped can be done later in Settings. */
@@ -53,7 +60,6 @@ export function DoneStep({
   isRecording: boolean;
 }) {
   const { hasSavedWebSearchKey, hasSavedIntegrationKey } = connection.settings;
-  const services = useConnectedServices(hasSavedIntegrationKey);
 
   return (
     <>
@@ -73,17 +79,10 @@ export function DoneStep({
           )}
         </Row>
         <Row label={t('onboarding.done.apps')}>
-          {services.length > 0 ? (
-            <Done>
-              {services.map((toolkit) => (
-                <span key={toolkit.toolkit} className="onb-summary-app">
-                  <IntegrationLogo toolkit={toolkit} small />
-                  {toolkit.display_name}
-                </span>
-              ))}
-            </Done>
-          ) : hasSavedIntegrationKey ? (
-            <Done>{t('onboarding.done.keySaved')}</Done>
+          {hasSavedIntegrationKey ? (
+            <LocalOwnerBoundary fallback={<Done>{t('onboarding.done.keySaved')}</Done>}>
+              <ConnectedServices t={t} />
+            </LocalOwnerBoundary>
           ) : (
             <Unset>{t('onboarding.stepSkipped')}</Unset>
           )}

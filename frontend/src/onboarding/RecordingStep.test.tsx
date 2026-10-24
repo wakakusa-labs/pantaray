@@ -4,25 +4,35 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { useI18n } from '@/context/useI18n';
-import { useScreenshotCaptureStatus } from '@/pages/settings/useScreenshotCaptureStatus';
 import { RecordingStep } from './RecordingStep';
+import { useRecordingStep } from './useRecordingStep';
 
 const OWNER = { kind: 'account', id: 'user-1' } as const;
 
-// The parent owns the capture status, as setup's screen does.
+// The parent owns the recording state and reads from it whether the step is done.
 function Step() {
   const { t } = useI18n();
-  return <RecordingStep t={t} capture={useScreenshotCaptureStatus()} />;
+  const recording = useRecordingStep();
+  return (
+    <>
+      <RecordingStep t={t} recording={recording} />
+      <span data-testid="done">{String(recording.isRecording)}</span>
+    </>
+  );
 }
 
 function stubBridge(start = vi.fn(async () => 'started')) {
   const permissions = { accessibility: false, screenRecording: false };
   const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
   const relaunch = vi.fn(async () => undefined);
+  let statusChanged: (enabled: boolean) => void = () => undefined;
   window.electron = {
     screenshot: {
       getStatus: vi.fn(async () => false),
-      onStatusChanged: vi.fn(() => () => undefined),
+      onStatusChanged: vi.fn((callback: (enabled: boolean) => void) => {
+        statusChanged = callback;
+        return () => undefined;
+      }),
       start,
       stop: vi.fn(async () => true),
       getGateState: vi.fn(async () => ({
@@ -34,7 +44,13 @@ function stubBridge(start = vi.fn(async () => 'started')) {
     },
     app: { relaunch },
   } as unknown as Window['electron'];
-  return { permissions, openPermissionSettings, relaunch, start };
+  return {
+    permissions,
+    openPermissionSettings,
+    relaunch,
+    start,
+    reportStatus: (enabled: boolean) => statusChanged(enabled),
+  };
 }
 
 async function renderStep() {
@@ -129,5 +145,30 @@ describe('RecordingStep', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '記録を開始できませんでした。もう一度お試しください。'
     );
+  });
+
+  it('is not done while a start waits on more permissions, even though the status reads on', async () => {
+    const bridge = stubBridge();
+    // The recorder is up but not activated: main reports it on and answers the start as pending.
+    bridge.start.mockImplementationOnce(async () => {
+      bridge.reportStatus(true);
+      return 'permission_pending';
+    });
+    Object.assign(bridge.permissions, { accessibility: true, screenRecording: true });
+    const toggle = await renderStep();
+    await waitFor(() => expect(toggle).toBeEnabled());
+
+    fireEvent.click(toggle);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'もう一度スイッチをオンにしてください'
+    );
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('done')).toHaveTextContent('false');
+
+    // Turning it on again once the permission is granted finds the recorder activated.
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId('done')).toHaveTextContent('true'));
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

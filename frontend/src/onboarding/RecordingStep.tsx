@@ -3,14 +3,13 @@ import { useState } from 'react';
 
 import { useCaptureGate } from '@/hooks/useCaptureGate';
 import type { CapturePermissionPane } from '../../electron/src/ipc/schemas/onboarding';
-import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import { AiConnectionRow as Row } from '../pages/settings/components/AiConnectionRow';
 import { RecordingSwitch } from '../pages/settings/components/RecordingSwitch';
 import type { Translate } from '../pages/settings/types';
-import type { useScreenshotCaptureStatus } from '../pages/settings/useScreenshotCaptureStatus';
 import '../pages/settings/settingsPage.css';
 import '../pages/settings/components/aiConnection.css';
 import './onboardingSteps.css';
+import type { useRecordingStep } from './useRecordingStep';
 
 const PERMISSIONS = [
   {
@@ -25,32 +24,26 @@ const PERMISSIONS = [
   },
 ] as const;
 
-/**
- * Setup's recording step: what recording takes, the two macOS permissions it needs, and the
- * switch. The parent owns `capture`, so recording being on (the step being done) is read
- * there from `capture.isCapturingScreenshots`.
- */
+/** Setup's recording step: what recording takes, the two macOS permissions it needs, and the switch. */
 export function RecordingStep({
   t,
-  capture,
+  recording,
 }: {
   t: Translate;
-  capture: ReturnType<typeof useScreenshotCaptureStatus>;
+  recording: ReturnType<typeof useRecordingStep>;
 }) {
   const { gate } = useCaptureGate();
   // Which panes were opened from here: macOS reports nothing until the user acts there.
   const [requested, setRequested] = useState<ReadonlySet<CapturePermissionPane>>(new Set());
   const [relaunching, setRelaunching] = useState(false);
-  const [startOutcome, setStartOutcome] = useState<Exclude<RecordingStartResult, 'started'> | null>(
-    null
-  );
+  const { capture, startOutcome, isRecording, changeRecording } = recording;
 
   const granted: Record<CapturePermissionPane, boolean> = {
     accessibility: gate?.permissions.accessibility ?? false,
     screen_recording: gate?.permissions.screenRecording ?? false,
   };
   const bothGranted = granted.accessibility && granted.screen_recording;
-  const { isCapturingScreenshots, captureStatusUnavailable } = capture;
+  const { captureStatusUnavailable } = capture;
 
   const openPane = async (permission: CapturePermissionPane) => {
     try {
@@ -70,16 +63,6 @@ export function RecordingStep({
       console.error('Failed to reopen Pantaray:', error);
       setRelaunching(false);
     }
-  };
-
-  const changeRecording = async (enabled: boolean) => {
-    setStartOutcome(null);
-    if (!enabled) {
-      await capture.setScreenshotsEnabled(false);
-      return;
-    }
-    const result = await capture.startRecording();
-    if (result !== 'started') setStartOutcome(result);
   };
 
   return (
@@ -173,9 +156,9 @@ export function RecordingStep({
             >
               {captureStatusUnavailable
                 ? t('settings.screenshotCapture.unavailable')
-                : isCapturingScreenshots === null
+                : isRecording === null
                   ? t('settings.loadingStatus')
-                  : isCapturingScreenshots
+                  : isRecording
                     ? t('common.active')
                     : bothGranted
                       ? t('onboarding.recording.switchReady')
@@ -183,14 +166,13 @@ export function RecordingStep({
             </div>
           </div>
           <RecordingSwitch
-            isCapturing={isCapturingScreenshots}
+            isCapturing={isRecording}
             canStart={bothGranted && capture.isScreenshotCaptureAvailable}
             isProcessing={capture.isProcessing}
             onChange={changeRecording}
           />
         </div>
-        {/* A start that waited on macOS can still begin later; then its notice is stale. */}
-        {startOutcome !== null && !isCapturingScreenshots ? (
+        {startOutcome !== null ? (
           <p className="ai-note onb-start-problem" role="alert">
             {t(
               startOutcome === 'permission_pending'

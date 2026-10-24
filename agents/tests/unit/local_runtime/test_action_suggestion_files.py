@@ -203,12 +203,17 @@ async def test_accepting_copies_the_listed_files_and_names_them(
 async def test_replying_copies_the_listed_files_and_names_them(
     db_path: Path,
 ) -> None:
-    await _save_suggestion(db_path, contract="message_only", artifacts=LISTED)
+    folder = await _save_suggestion(db_path, contract="message_only", artifacts=LISTED)
 
     result = submit_action_message(_reply_command())
 
     _assert_continues_from_files(db_path, result.action_id)
     assert submit_action_message(_reply_command()).action_id == result.action_id
+    # The Action edits its copy in place; the Suggestion's file stays as made.
+    copy = _workspace(db_path, result.action_id) / "suggestion/report.md"
+    with copy.open("r+b") as file:
+        file.write(b"# Edited")
+    assert (folder / "report.md").read_text() == "# Report"
 
 
 @pytest.mark.asyncio

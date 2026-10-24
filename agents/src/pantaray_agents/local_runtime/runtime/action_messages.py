@@ -123,7 +123,7 @@ def submit_action_message(
                     created_at=created_at,
                 )
             )
-            command = suggestion_files.link(command, action_id, connection)
+            command = suggestion_files.copy(command, action_id, connection)
             user_message_json = serialize_action_user_message(command.message)
             starts_run = process_disposition is None or (
                 process_disposition.disposition in {"idle", "normal_terminal"}

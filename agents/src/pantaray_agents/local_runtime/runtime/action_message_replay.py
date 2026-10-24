@@ -198,7 +198,7 @@ def _validate_idempotent_replay(
         )
     stored = parse_action_user_message(existing.user_message_json)
     sent = parse_action_user_message(user_message_json)
-    # The Suggestion files are the ones this boundary linked, not what was sent.
+    # The Suggestion files are the ones this boundary copied, not what was sent.
     if stored.model_copy(update={"suggestion_files": ()}) != sent:
         raise MessageIdentityConflictError(
             "message_id already belongs to different USER message content"

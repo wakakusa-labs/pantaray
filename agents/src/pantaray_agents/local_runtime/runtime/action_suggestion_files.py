@@ -1,16 +1,20 @@
 """Give an Action created from a Suggestion its own copy of the Suggestion's files.
 
 Accepting an offer and replying to a notice both create the Action in one
-submit transaction. Inside it, each file the Suggestion lists is hard-linked
-from the Suggestion's folder into ``suggestion/{path}`` in the Action's scratch
-workspace, and the first USER message names the linked paths. From then on the
-Action's copy is the one that counts: the Suggestion's folder may be removed.
+submit transaction. Inside it, the bytes of each file the Suggestion lists are
+copied from the Suggestion's folder into a new file at ``suggestion/{path}`` in
+the Action's scratch workspace, and the first USER message names the copied
+paths. A copy, not a hard link: the Action edits its files in place, and that
+must change neither the Suggestion's file nor another Action's copy of it. From
+then on the Action's copy is the one that counts: the Suggestion's folder may
+be removed.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 from types import TracebackType
@@ -34,20 +38,17 @@ from pantaray_agents.local_runtime.tooling.resources.action_session_temp_cleanup
 )
 from pantaray_agents.schema.agent.suggestion import SUGGESTION_ARTIFACTS_ADAPTER
 
-from .action_message_models import (
-    ActionMessageConflictError,
-    NewActionTarget,
-    SubmitActionMessageCommand,
-)
+from .action_message_models import NewActionTarget, SubmitActionMessageCommand
 
 logger = logging.getLogger(__name__)
 
-# The workspace directory a Suggestion's files are linked into.
+# The workspace directory a Suggestion's files are copied into.
 SUGGESTION_FILES_DIRNAME = "suggestion"
+_COPIED_FILE_MODE = 0o600
 
 
 class ActionSuggestionFiles:
-    """The Suggestion files one submit transaction links into a new Action.
+    """The Suggestion files one submit transaction copies into a new Action.
 
     Enter it outside that transaction: when the transaction does not commit,
     the directory it created is removed on the way out.
@@ -71,21 +72,18 @@ class ActionSuggestionFiles:
                 parent_path=self._workspace, child_name=SUGGESTION_FILES_DIRNAME
             )
 
-    def link(
+    def copy(
         self,
         command: SubmitActionMessageCommand,
         action_id: str,
         connection: sqlite3.Connection,
     ) -> SubmitActionMessageCommand:
-        """Link the files of the Suggestion this new Action starts from.
+        """Copy the files of the Suggestion this new Action starts from.
 
-        Returns the command whose message names the linked paths, or the
+        Returns the command whose message names the copied paths, or the
         command unchanged when it does not start from a Suggestion with files.
         A listed path that is not a regular file inside the Suggestion's folder,
         such as a symlink, is left out.
-
-        Raises:
-            ActionMessageConflictError: a file changed while it was linked.
         """
 
         target = command.target
@@ -105,7 +103,7 @@ class ActionSuggestionFiles:
         artifacts = SUGGESTION_ARTIFACTS_ADAPTER.validate_json(row["artifacts_json"])
         if not artifacts:
             return command
-        linked = self._link_files(
+        linked = self._copy_files(
             user_id=command.user_id,
             action_id=action_id,
             suggestion_id=suggestion_id,
@@ -123,7 +121,7 @@ class ActionSuggestionFiles:
         message = command.message.model_copy(update={"suggestion_files": linked})
         return command.model_copy(update={"message": message})
 
-    def _link_files(
+    def _copy_files(
         self,
         *,
         user_id: str,
@@ -151,7 +149,7 @@ class ActionSuggestionFiles:
                 return tuple(
                     f"{SUGGESTION_FILES_DIRNAME}/{path}"
                     for path in artifacts
-                    if _link_file(source_fd=source_fd, target_fd=target_fd, path=path)
+                    if _copy_file(source_fd=source_fd, target_fd=target_fd, path=path)
                 )
             finally:
                 os.close(target_fd)
@@ -182,7 +180,7 @@ def _create_suggestion_directory(*, storage_base: Path, workspace: Path) -> int:
         os.close(descriptor)
 
 
-def _link_file(*, source_fd: int, target_fd: int, path: str) -> bool:
+def _copy_file(*, source_fd: int, target_fd: int, path: str) -> bool:
     *parents, name = path.split("/")
     try:
         source_parent = open_directory_at_descriptor(
@@ -197,10 +195,9 @@ def _link_file(*, source_fd: int, target_fd: int, path: str) -> bool:
             )
         except DescriptorPathError:
             return False
-        try:
-            source = os.fstat(file_fd)
-        finally:
-            os.close(file_fd)
+    finally:
+        os.close(source_parent)
+    try:
         target_parent = os.dup(target_fd)
         try:
             for directory in parents:
@@ -209,26 +206,26 @@ def _link_file(*, source_fd: int, target_fd: int, path: str) -> bool:
                 )
                 os.close(target_parent)
                 target_parent = child
-            # The storage base holds both folders, so a link never crosses devices.
-            os.link(
+            copy_fd = os.open(
                 name,
-                name,
-                src_dir_fd=source_parent,
-                dst_dir_fd=target_parent,
-                follow_symlinks=False,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                _COPIED_FILE_MODE,
+                dir_fd=target_parent,
             )
-            linked = os.stat(name, dir_fd=target_parent, follow_symlinks=False)
-            # The name could have been swapped after it was checked, and a
-            # symlink linked here would reach past the workspace.
-            if (linked.st_dev, linked.st_ino) != (source.st_dev, source.st_ino):
-                raise ActionMessageConflictError(
-                    "Suggestion file changed while it was linked"
-                )
+            # Bytes are read from the descriptor that passed the checks, so a
+            # name swapped since then cannot bring in anything else.
+            with (
+                os.fdopen(file_fd, "rb", closefd=False) as source,
+                os.fdopen(copy_fd, "wb") as copy,
+            ):
+                shutil.copyfileobj(source, copy)
+                copy.flush()
+                os.fsync(copy.fileno())
             os.fsync(target_parent)
         finally:
             os.close(target_parent)
     finally:
-        os.close(source_parent)
+        os.close(file_fd)
     return True
 
 

@@ -1,11 +1,42 @@
-import { app, desktopCapturer, shell, systemPreferences } from 'electron';
+import { app, shell, systemPreferences } from 'electron';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { CapturePermission } from '../context/zaneiProcess';
 
-type SecurityPane =
-  | 'Privacy_Accessibility'
-  | 'Privacy_ListenEvent'
-  | 'Privacy_ScreenCapture'
-  | 'Privacy_Automation';
+const run = promisify(execFile);
+
+/**
+ * Electron makes neither request, so a JXA call to the macOS function makes it. osascript runs
+ * as this app's child, so macOS attributes the request to this app and lists it.
+ */
+const ASK_SCRIPTS = {
+  // 1 is kIOHIDRequestTypeListenEvent.
+  observe_input: 'ObjC.import("IOKit"); $.IOHIDRequestAccess(1)',
+  // CoreGraphics is not in the JXA bridge metadata, so the function is bound by hand.
+  capture_screen:
+    'ObjC.import("CoreGraphics"); ObjC.bindFunction("CGRequestScreenCaptureAccess", ["bool", []]); $.CGRequestScreenCaptureAccess()',
+} as const;
+
+const ASK_TIMEOUT_MS = 10_000;
+
+async function askWithScript(script: string): Promise<void> {
+  try {
+    await run('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], {
+      timeout: ASK_TIMEOUT_MS,
+    });
+  } catch (error) {
+    // Only logged: the user can still open the pane from the waiting row.
+    console.error('Permission request failed:', error);
+  }
+}
+
+const SETTINGS_PANES = {
+  read_accessibility_tree: 'Privacy_Accessibility',
+  observe_input: 'Privacy_ListenEvent',
+  capture_screen: 'Privacy_ScreenCapture',
+  automate_browser: 'Privacy_Automation',
+  automate_safari: 'Privacy_Automation',
+} as const satisfies Record<CapturePermission, string>;
 
 /**
  * Lets the E2E harness stand in for macOS: a CI runner grants no app Accessibility,
@@ -22,10 +53,6 @@ const assumesPermissions = () => !app.isPackaged && process.env[ASSUME_PERMISSIO
  * there is nothing to grant, so the permission cannot hold recording back.
  */
 const SCREEN_RECORDING_MIN_MACOS_MAJOR = 14;
-
-function openSecurityPane(pane: SecurityPane): Promise<void> {
-  return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
-}
 
 /**
  * Whether this app holds Screen Recording, which the recorder uses to read the text of
@@ -63,36 +90,31 @@ export function readCapturePermissions(): CapturePermissions {
   };
 }
 
+/** Opens the System Settings pane where the user grants this permission. */
+export function openCapturePermissionSettings(permission: CapturePermission): Promise<void> {
+  return shell.openExternal(
+    `x-apple.systempreferences:com.apple.preference.security?${SETTINGS_PANES[permission]}`
+  );
+}
+
 /**
- * Asks macOS for this permission where it can, then opens the System Settings pane where the
- * user grants it. The panes list only apps that have asked, so without the ask Pantaray is
- * not there.
+ * Asks macOS for this permission. macOS shows its own popup, lists the app in the pane around
+ * it, and offers to open that pane, so opening the pane here as well would show the user a
+ * second, still empty list first.
  */
 export async function askForCapturePermission(permission: CapturePermission): Promise<void> {
   switch (permission) {
     case 'read_accessibility_tree':
       // `true` adds the app to the list and shows the system prompt.
       systemPreferences.isTrustedAccessibilityClient(true);
-      return openSecurityPane('Privacy_Accessibility');
+      return;
     case 'observe_input':
-      // Neither Electron nor Node can make the Input Monitoring request (IOHIDRequestAccess).
-      return openSecurityPane('Privacy_ListenEvent');
+      return askWithScript(ASK_SCRIPTS.observe_input);
     case 'capture_screen':
-      // macOS takes a capture attempt as the ask; a 1x1 thumbnail keeps the capture trivial.
-      try {
-        await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: { width: 1, height: 1 },
-        });
-      } catch (error) {
-        // Without the grant the capture itself may fail after the ask is made; the pane still
-        // has to open for the user to grant it.
-        console.error('Screen capture request failed:', error);
-      }
-      return openSecurityPane('Privacy_ScreenCapture');
+      return askWithScript(ASK_SCRIPTS.capture_screen);
     case 'automate_browser':
     case 'automate_safari':
       // Asked for only once denied, when macOS no longer asks and only the pane can undo it.
-      return openSecurityPane('Privacy_Automation');
+      return openCapturePermissionSettings(permission);
   }
 }

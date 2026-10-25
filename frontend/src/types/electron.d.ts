@@ -173,8 +173,10 @@ declare global {
         dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
         /** 記録の開始が待つ権限の一覧（今の owner、開始と同じ読み方） */
         getPermissions: () => Promise<CapturePermissionCheck[]>;
-        /** macOS に指定した権限を求める（できるものはシステム設定の一覧に載る） */
+        /** macOS に指定した権限を求める（macOS 自身の案内がシステム設定へ誘導する） */
         askForPermission: (permission: CapturePermission) => Promise<void>;
+        /** 指定した権限のシステム設定のパネルを開く（macOS の案内が出ないとき用） */
+        openPermissionSettings: (permission: CapturePermission) => Promise<void>;
         /** 権限が足りず記録できない状態か（記録係の状態を今読み直す。メインウィンドウ用） */
         getPermissionRequired?: () => Promise<boolean>;
         onPermissionRequiredChanged?: (callback: (isRequired: boolean) => void) => () => void;

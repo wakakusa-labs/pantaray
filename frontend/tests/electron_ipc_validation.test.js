@@ -805,22 +805,29 @@ test('onboarding:setState takes only a known state and stores nothing else', asy
   );
 });
 
-test('recording:askForPermission requires the pane to open', async () => {
+test('recording:askForPermission and recording:openPermissionSettings require a permission', async () => {
   const askForPermission = asyncSpy(undefined);
+  const openPermissionSettings = asyncSpy(undefined);
   const { ipcMain } = buildCtx({
     screenshot: {
       getStatus: () => false,
       start: () => true,
       stop: () => true,
       askForPermission,
+      openPermissionSettings,
     },
   });
-  const invoke = getInvoke(ipcMain, 'recording:askForPermission');
-  for (const invalid of [undefined, 'accessibility', 'Privacy_ScreenCapture', 1]) {
-    await assert.rejects(invoke(invalid), rejectsValidation('recording:askForPermission'));
+  for (const [channel, spy] of [
+    ['recording:askForPermission', askForPermission],
+    ['recording:openPermissionSettings', openPermissionSettings],
+  ]) {
+    const invoke = getInvoke(ipcMain, channel);
+    for (const invalid of [undefined, 'accessibility', 'Privacy_ScreenCapture', 1]) {
+      await assert.rejects(invoke(invalid), rejectsValidation(channel));
+    }
+    assert.equal(spy.calls.length, 0);
+    await invoke('capture_screen');
+    await invoke('observe_input');
+    assert.deepEqual(spy.calls, [['capture_screen'], ['observe_input']]);
   }
-  assert.equal(askForPermission.calls.length, 0);
-  await invoke('capture_screen');
-  await invoke('observe_input');
-  assert.deepEqual(askForPermission.calls, [['capture_screen'], ['observe_input']]);
 });

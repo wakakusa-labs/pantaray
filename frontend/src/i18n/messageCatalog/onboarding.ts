@@ -38,8 +38,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.accessibilityTitle': 'Allow Accessibility',
     'onboarding.recording.accessibilityWaiting': 'Turn Pantaray on in System Settings',
     'onboarding.recording.inputMonitoringTitle': 'Allow Input Monitoring',
-    'onboarding.recording.inputMonitoringWaiting':
-      'Turn Pantaray on in System Settings (add it with + if it is not listed)',
+    'onboarding.recording.inputMonitoringWaiting': 'Turn Pantaray on in System Settings',
     'onboarding.recording.screenRecordingTitle': 'Allow Screen Recording',
     'onboarding.recording.screenRecordingWaiting':
       'Turn Pantaray on in System Settings, then reopen it when asked',
@@ -104,8 +103,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.accessibilityTitle': 'アクセシビリティを許可',
     'onboarding.recording.accessibilityWaiting': 'システム設定で Pantaray をオンにします',
     'onboarding.recording.inputMonitoringTitle': '入力監視を許可',
-    'onboarding.recording.inputMonitoringWaiting':
-      'システム設定で Pantaray をオンにします（一覧にないときは + で追加します）',
+    'onboarding.recording.inputMonitoringWaiting': 'システム設定で Pantaray をオンにします',
     'onboarding.recording.screenRecordingTitle': '画面収録を許可',
     'onboarding.recording.screenRecordingWaiting':
       'システム設定で Pantaray をオンにして、表示に従って開き直します',

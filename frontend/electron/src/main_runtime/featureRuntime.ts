@@ -49,6 +49,7 @@ import {
 import {
   askForCapturePermission,
   holdsScreenRecording,
+  openCapturePermissionSettings,
   readCapturePermissions,
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
@@ -478,6 +479,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         askForCapturePermission,
+        openCapturePermissionSettings,
         readCapturePermissionRequired: params.updateUi.readPermissionRequired,
         onboarding: { getState: onboarding.get, setState: setOnboardingState },
         capturePrivacy,

@@ -282,8 +282,10 @@ export type MainContext = {
     dismissIntro: (ownerId: string) => CaptureGateState;
     /** What a recording start would wait on for the current owner. */
     getPermissions: () => Promise<CapturePermissionCheck[]>;
-    /** Asks macOS for the permission where it can, which lists the app in its pane. */
+    /** Asks macOS for the permission; macOS's own popup lists the app and offers its pane. */
     askForPermission: (permission: CapturePermission) => Promise<void>;
+    /** Opens the permission's System Settings pane, for when macOS shows no popup. */
+    openPermissionSettings: (permission: CapturePermission) => Promise<void>;
     /** Whether the recorder cannot run until macOS grants it a permission, read again now. */
     getPermissionRequired: () => Promise<boolean>;
   };

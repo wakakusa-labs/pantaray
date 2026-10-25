@@ -150,6 +150,7 @@ export const validInvokeChannels = [
   'recording:dismissIntro',
   'recording:getPermissions',
   'recording:askForPermission',
+  'recording:openPermissionSettings',
   'recording:getPermissionRequired',
   // Main window only: first-run setup progress
   'onboarding:getState',

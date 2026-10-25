@@ -46,4 +46,10 @@ export function registerScreenshotHandlers(ctx: MainContext, registrar: IpcRegis
       parseInput(CapturePermissionSchema, 'recording:askForPermission', permission)
     )
   );
+
+  registrar.handle('recording:openPermissionSettings', (_evt, permission) =>
+    ctx.screenshot.openPermissionSettings(
+      parseInput(CapturePermissionSchema, 'recording:openPermissionSettings', permission)
+    )
+  );
 }

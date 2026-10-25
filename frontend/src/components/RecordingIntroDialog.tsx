@@ -152,7 +152,10 @@ export function RecordingIntroDialog() {
         <button
           type="button"
           className="recording-intro-settings"
-          onClick={() => void window.electron?.screenshot?.askForPermission?.(missingPermission)}
+          // The start already asked macOS for it, so only the pane is left to open.
+          onClick={() =>
+            void window.electron?.screenshot?.openPermissionSettings?.(missingPermission)
+          }
         >
           {t('recordingIntro.openSettings')}
         </button>

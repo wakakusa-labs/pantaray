@@ -7,18 +7,20 @@ let systemVersion = '15.0.0';
 process.getSystemVersion = () => systemVersion;
 
 function loadPermissions({ isPackaged = false, accessibilityTrusted = false,
-  screenRecording = 'granted', macosVersion = '15.0.0', captureError = null } = {}) {
+  screenRecording = 'granted', macosVersion = '15.0.0', askError = null } = {}) {
   const calls = [];
   systemVersion = macosVersion;
   const target = require.resolve('../electron/dist/windows/macosPermissions');
   delete require.cache[target];
   const load = Module._load;
   Module._load = function(request, parent, isMain) {
+    if (request === 'node:child_process') return {
+      execFile: (command, args, options, callback) => {
+        calls.push({ osascript: args.at(-1) }); callback(askError, '', '');
+      },
+    };
     if (request === 'electron') return {
       app: { isPackaged },
-      desktopCapturer: { getSources: async options => {
-        calls.push({ capture: options }); if (captureError) throw captureError; return [];
-      } },
       shell: { openExternal: async url => { calls.push(url); } },
       systemPreferences: { isTrustedAccessibilityClient: prompt => {
         calls.push({ ax: prompt }); return accessibilityTrusted;
@@ -29,7 +31,7 @@ function loadPermissions({ isPackaged = false, accessibilityTrusted = false,
   try {
     const module = require(target);
     return { read: module.readCapturePermissions,
-      ask: module.askForCapturePermission, calls };
+      ask: module.askForCapturePermission, open: module.openCapturePermissionSettings, calls };
   }
   finally { Module._load = load; delete require.cache[target]; }
 }
@@ -73,42 +75,53 @@ test('the E2E override stands in for TCC only in an unpackaged build', () => {
   }
 });
 
-// System Settings lists only apps that asked, so each pane opens after its own ask.
-test('each permission a start waits on asks macOS where it can, then opens its own pane', async () => {
+const PANE = 'x-apple.systempreferences:com.apple.preference.security?';
+
+// macOS's own popup lists the app and offers the pane; a pane opened here would show it unlisted.
+test('asking macOS for a permission it can still ask for opens no pane', async () => {
   const accessibility = loadPermissions();
   await accessibility.ask('read_accessibility_tree');
-  assert.deepEqual(accessibility.calls, [
-    { ax: true },
-    'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
-  ]);
+  assert.deepEqual(accessibility.calls, [{ ax: true }]);
 
-  // Nothing Electron or Node can call asks for Input Monitoring, so its pane just opens.
   const input = loadPermissions();
   await input.ask('observe_input');
-  assert.deepEqual(input.calls, [
-    'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent',
-  ]);
-
-  // Denied Automation: macOS no longer asks, so the pane is all there is.
-  const chrome = loadPermissions();
-  await chrome.ask('automate_browser');
-  assert.deepEqual(chrome.calls, [
-    'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation',
-  ]);
+  assert.equal(input.calls.length, 1);
+  assert.match(input.calls[0].osascript, /IOHIDRequestAccess\(1\)/);
 
   const screen = loadPermissions();
   await screen.ask('capture_screen');
-  assert.deepEqual(screen.calls, [
-    { capture: { types: ['screen'], thumbnailSize: { width: 1, height: 1 } } },
-    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
-  ]);
+  assert.equal(screen.calls.length, 1);
+  assert.match(screen.calls[0].osascript, /CGRequestScreenCaptureAccess\(\)$/);
 });
 
-test('a capture refused for want of the grant still opens the Screen Recording pane', async (t) => {
-  t.mock.method(console, 'error', () => {});
-  const f = loadPermissions({ captureError: new Error('Failed to get sources.') });
+test('denied Automation is asked for through its pane, since macOS no longer asks', async () => {
+  for (const permission of ['automate_browser', 'automate_safari']) {
+    const f = loadPermissions();
+    await f.ask(permission);
+    assert.deepEqual(f.calls, [`${PANE}Privacy_Automation`], permission);
+  }
+});
+
+test('opening a permission\'s settings opens only its own pane', async () => {
+  for (const [permission, pane] of [
+    ['read_accessibility_tree', 'Privacy_Accessibility'],
+    ['observe_input', 'Privacy_ListenEvent'],
+    ['capture_screen', 'Privacy_ScreenCapture'],
+    ['automate_browser', 'Privacy_Automation'],
+    ['automate_safari', 'Privacy_Automation'],
+  ]) {
+    const f = loadPermissions();
+    await f.open(permission);
+    assert.deepEqual(f.calls, [`${PANE}${pane}`], permission);
+  }
+});
+
+// A recording start makes the same ask, and a failed ask must not fail the start.
+test('a failed request is logged, not thrown', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const f = loadPermissions({ askError: new Error('osascript failed') });
   await f.ask('capture_screen');
-  assert.match(f.calls.at(-1), /Privacy_ScreenCapture$/);
+  assert.equal(logged.mock.callCount(), 1);
 });
 
 test('Screen Recording reads as granted only when macOS says so, or cannot grant it', () => {

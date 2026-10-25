@@ -122,10 +122,9 @@ describe('RecordingStep', () => {
     expect(row(ACCESSIBILITY).getByText('システム設定で Pantaray をオンにします')).toBeVisible();
     // The same button now opens System Settings, so focus is not lost.
     expect(allowAccessibility).toHaveAccessibleName(`システム設定を開く ${ACCESSIBILITY}`);
-    expect(row(INPUT_MONITORING).getByRole('button')).toHaveTextContent('許可する');
+    // Accessibility usually covers Input Monitoring, so its row waits for Accessibility.
+    expect(row(INPUT_MONITORING).getByRole('button', { name: /^許可する/ })).toBeDisabled();
 
-    fireEvent.click(row(INPUT_MONITORING).getByRole('button', { name: /^許可する/ }));
-    expect(bridge.askForPermission).toHaveBeenLastCalledWith('observe_input');
     fireEvent.click(row(SCREEN_RECORDING).getByRole('button', { name: /^許可する/ }));
     expect(bridge.askForPermission).toHaveBeenLastCalledWith('capture_screen');
     expect(
@@ -140,6 +139,9 @@ describe('RecordingStep', () => {
     expect(row(SCREEN_RECORDING).getByText('許可済み')).toBeVisible();
     expect(row(ACCESSIBILITY).queryByRole('button')).not.toBeInTheDocument();
     expect(start).toBeDisabled();
+
+    fireEvent.click(row(INPUT_MONITORING).getByRole('button', { name: /^許可する/ }));
+    expect(bridge.askForPermission).toHaveBeenLastCalledWith('observe_input');
 
     bridge.granted.observe_input = true;
     await returnFromSystemSettings();

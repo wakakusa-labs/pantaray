@@ -100,10 +100,17 @@ export function RecordingChecklist({
     }
   };
 
+  // macOS lets an app trusted for Accessibility observe input, so Input Monitoring usually
+  // completes with it; asking first would send the user to a pane they do not need.
+  const accessibilityMissing = checks.some(
+    (check) => check.permission === 'read_accessibility_tree' && !check.granted
+  );
+
   return (
     <ul className="recording-checklist">
       {checks.map(({ permission, granted }) => {
         const waiting = requested.has(permission);
+        const blocked = permission === 'observe_input' && accessibilityMissing;
         const buttonId = `${allowId}-${permission}`;
         return (
           <CheckItem
@@ -121,6 +128,7 @@ export function RecordingChecklist({
                   id={buttonId}
                   className={waiting ? 'settings-text-button' : 'settings-action-button'}
                   aria-labelledby={`${buttonId} ${titleId}`}
+                  disabled={blocked}
                   onClick={() => void (waiting ? openSettings(permission) : askFor(permission))}
                 >
                   {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}

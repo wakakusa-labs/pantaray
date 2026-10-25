@@ -805,22 +805,22 @@ test('onboarding:setState takes only a known state and stores nothing else', asy
   );
 });
 
-test('recording:openPermissionSettings requires the pane to open', async () => {
-  const openPermissionSettings = asyncSpy(undefined);
+test('recording:askForPermission requires the pane to open', async () => {
+  const askForPermission = asyncSpy(undefined);
   const { ipcMain } = buildCtx({
     screenshot: {
       getStatus: () => false,
       start: () => true,
       stop: () => true,
-      openPermissionSettings,
+      askForPermission,
     },
   });
-  const invoke = getInvoke(ipcMain, 'recording:openPermissionSettings');
+  const invoke = getInvoke(ipcMain, 'recording:askForPermission');
   for (const invalid of [undefined, 'input_monitoring', 'Privacy_ScreenCapture', 1]) {
-    await assert.rejects(invoke(invalid), rejectsValidation('recording:openPermissionSettings'));
+    await assert.rejects(invoke(invalid), rejectsValidation('recording:askForPermission'));
   }
-  assert.equal(openPermissionSettings.calls.length, 0);
+  assert.equal(askForPermission.calls.length, 0);
   await invoke('screen_recording');
   await invoke('accessibility');
-  assert.deepEqual(openPermissionSettings.calls, [['screen_recording'], ['accessibility']]);
+  assert.deepEqual(askForPermission.calls, [['screen_recording'], ['accessibility']]);
 });

@@ -279,17 +279,13 @@ export type MainContext = {
      * gate, the same read the current owner's own screen makes.
      */
     dismissIntro: (ownerId: string) => CaptureGateState;
-    openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;
+    /** Asks macOS for the permission, which lists the app in its pane, then opens that pane. */
+    askForPermission: (permission: CapturePermissionPane) => Promise<void>;
   };
 
   onboarding: {
     getState: () => OnboardingState;
     setState: (state: OnboardingState) => OnboardingState;
-  };
-
-  app: {
-    /** Quits and reopens the app, which is when macOS applies a Screen Recording grant. */
-    relaunch: () => void;
   };
 
   privacy: {

@@ -13,9 +13,6 @@ function createSettingsApi({ ipcRenderer }) {
       getState: () => ipcRenderer.invoke('onboarding:getState'),
       setState: (state) => ipcRenderer.invoke('onboarding:setState', state),
     },
-    app: {
-      relaunch: () => ipcRenderer.invoke('app:relaunch'),
-    },
     approval: {
       getWorkspaceEditCommandPreference: () =>
         ipcRenderer.invoke('approval:getWorkspaceEditCommandPreference'),

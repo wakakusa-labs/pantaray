@@ -1,30 +1,68 @@
 import { Check } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 
 import { useCaptureGate } from '@/hooks/useCaptureGate';
 import type { CapturePermissionPane } from '../../electron/src/ipc/schemas/onboarding';
-import { AiConnectionRow as Row } from '../pages/settings/components/AiConnectionRow';
-import { RecordingSwitch } from '../pages/settings/components/RecordingSwitch';
 import type { Translate } from '../pages/settings/types';
+import '../components/recordingIntro.css';
 import '../pages/settings/settingsPage.css';
-import '../pages/settings/components/aiConnection.css';
 import './onboardingSteps.css';
 import type { useRecordingStep } from './useRecordingStep';
 
 const PERMISSIONS = [
   {
     id: 'accessibility',
-    label: 'onboarding.recording.accessibility',
-    pane: 'onboarding.recording.accessibility',
+    title: 'onboarding.recording.accessibilityTitle',
+    waiting: 'onboarding.recording.accessibilityWaiting',
   },
   {
     id: 'screen_recording',
-    label: 'onboarding.recording.screenRecording',
-    pane: 'onboarding.recording.screenRecordingPane',
+    title: 'onboarding.recording.screenRecordingTitle',
+    waiting: 'onboarding.recording.screenRecordingWaiting',
   },
 ] as const;
 
-/** Setup's recording step: what recording takes, the two macOS permissions it needs, and the switch. */
+/** One checklist row: its mark, its title with at most one note, and its one action. */
+function CheckItem({
+  title,
+  note,
+  problem = false,
+  done,
+  action,
+}: {
+  title: string;
+  note: string | null;
+  /** The note says why the row is stuck, so it is drawn as a warning and announced. */
+  problem?: boolean;
+  done: boolean;
+  action: (titleId: string) => ReactNode;
+}) {
+  const titleId = useId();
+  return (
+    <li className={done ? 'onb-check onb-check--done' : 'onb-check'}>
+      <span className="onb-check-mark" aria-hidden="true">
+        {done ? <Check size={13} strokeWidth={2.4} /> : null}
+      </span>
+      <span className="onb-check-text">
+        <span className="onb-check-title" id={titleId}>
+          {title}
+        </span>
+        {note ? (
+          <span
+            className={problem ? 'onb-check-note onb-check-note--problem' : 'onb-check-note'}
+            role={problem ? 'alert' : undefined}
+          >
+            {note}
+          </span>
+        ) : null}
+      </span>
+      <span className="onb-check-action">{action(titleId)}</span>
+    </li>
+  );
+}
+
+/** Setup's recording step: what recording takes, as one checklist of the two macOS
+ *  permissions and the start. */
 export function RecordingStep({
   t,
   recording,
@@ -33,37 +71,34 @@ export function RecordingStep({
   recording: ReturnType<typeof useRecordingStep>;
 }) {
   const { gate } = useCaptureGate();
-  // Which panes were opened from here: macOS reports nothing until the user acts there.
+  // Which permissions were asked for here: macOS reports nothing until the user acts there.
   const [requested, setRequested] = useState<ReadonlySet<CapturePermissionPane>>(new Set());
-  const [relaunching, setRelaunching] = useState(false);
-  const { capture, startOutcome, isRecording, changeRecording } = recording;
+  const allowId = useId();
+  const { capture, startOutcome, isRecording, start } = recording;
 
   const granted: Record<CapturePermissionPane, boolean> = {
     accessibility: gate?.permissions.accessibility ?? false,
     screen_recording: gate?.permissions.screenRecording ?? false,
   };
   const bothGranted = granted.accessibility && granted.screen_recording;
-  const { captureStatusUnavailable } = capture;
 
-  const openPane = async (permission: CapturePermissionPane) => {
+  const askFor = async (permission: CapturePermissionPane) => {
+    setRequested((current) => new Set(current).add(permission));
     try {
-      await window.electron?.screenshot?.openPermissionSettings(permission);
+      await window.electron?.screenshot?.askForPermission(permission);
     } catch (error) {
-      // The waiting row still names the pane, so the user can open it by hand.
-      console.error('Failed to open System Settings:', error);
+      // The row stays waiting with System Settings one press away.
+      console.error('Failed to ask for the permission:', error);
     }
   };
 
-  const relaunch = async () => {
-    // Every app.relaunch() call starts another instance after this one quits.
-    setRelaunching(true);
-    try {
-      await window.electron?.app?.relaunch();
-    } catch (error) {
-      console.error('Failed to reopen Pantaray:', error);
-      setRelaunching(false);
-    }
-  };
+  const startProblem = capture.captureStatusUnavailable
+    ? t('settings.screenshotCapture.unavailable')
+    : startOutcome === 'permission_pending'
+      ? t('onboarding.recording.permissionPending')
+      : startOutcome === 'failed'
+        ? t('recordingIntro.startFailed')
+        : null;
 
   return (
     <>
@@ -75,116 +110,61 @@ export function RecordingStep({
         <p>{t('recordingIntro.excluded')}</p>
       </details>
 
-      <ol className="onb-guide onb-rec-stages">
-        <li>
-          <h3 className="onb-guide-title">{t('onboarding.recording.permissionsTitle')}</h3>
-          <span className="ai-note">{t('onboarding.recording.permissionsNote')}</span>
-          <div className="ai-connection onb-rec-rows">
-            {PERMISSIONS.map((permission) => {
-              const label = t(permission.label);
-              return (
-                <Row key={permission.id} label={label}>
-                  {granted[permission.id] ? (
-                    <div className="ai-inline">
-                      <span className="onb-granted">
-                        <Check size={14} strokeWidth={2.2} aria-hidden="true" />
-                        {t('onboarding.recording.granted')}
-                      </span>
-                    </div>
-                  ) : requested.has(permission.id) ? (
-                    <>
-                      <div className="ai-inline">
-                        <span className="onb-waiting" role="status">
-                          {t('onboarding.recording.waiting')}
-                        </span>
-                        {/* macOS applies a Screen Recording grant only to a reopened app, so it
-                            keeps reading as missing until then. */}
-                        {permission.id === 'screen_recording' ? (
-                          <button
-                            type="button"
-                            className="settings-action-button"
-                            disabled={relaunching}
-                            onClick={() => void relaunch()}
-                          >
-                            {t('onboarding.recording.relaunch')}
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="settings-text-button"
-                          aria-label={`${label}: ${t('recordingIntro.openSettings')}`}
-                          onClick={() => void openPane(permission.id)}
-                        >
-                          {t('recordingIntro.openSettings')}
-                        </button>
-                      </div>
-                      <p className="ai-note ai-note--control">
-                        {t('onboarding.recording.privacyPane')} <span aria-hidden="true">›</span>{' '}
-                        {t(permission.pane)}
-                      </p>
-                      {permission.id === 'screen_recording' ? (
-                        <p className="ai-note ai-note--control">
-                          {t('onboarding.recording.relaunchNote')}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className="ai-inline">
-                      <button
-                        type="button"
-                        className="settings-action-button"
-                        aria-label={`${label}: ${t('onboarding.recording.allow')}`}
-                        onClick={() => {
-                          setRequested((current) => new Set(current).add(permission.id));
-                          void openPane(permission.id);
-                        }}
-                      >
-                        {t('onboarding.recording.allow')}
-                      </button>
-                    </div>
-                  )}
-                </Row>
-              );
-            })}
-          </div>
-        </li>
-        <li>
-          <h3 className="onb-guide-title">{t('onboarding.recording.switchTitle')}</h3>
-          <span className="ai-note" role={captureStatusUnavailable ? 'alert' : undefined}>
-            {captureStatusUnavailable
-              ? t('settings.screenshotCapture.unavailable')
-              : isRecording === null
-                ? t('settings.loadingStatus')
-                : isRecording
-                  ? t('onboarding.recording.recordingOn')
-                  : bothGranted
-                    ? t('onboarding.recording.switchReady')
-                    : t('onboarding.recording.switchBlocked')}
-          </span>
-          <div className="ai-connection onb-rec-rows">
-            <Row label={t('onboarding.recording.switchLabel')}>
-              <div className="ai-inline">
-                <RecordingSwitch
-                  isCapturing={isRecording}
-                  canStart={bothGranted && capture.isScreenshotCaptureAvailable}
-                  isProcessing={capture.isProcessing}
-                  onChange={changeRecording}
-                />
-              </div>
-            </Row>
-          </div>
-          {startOutcome !== null ? (
-            <p className="ai-note onb-start-problem" role="alert">
-              {t(
-                startOutcome === 'permission_pending'
-                  ? 'onboarding.recording.permissionPending'
-                  : 'recordingIntro.startFailed'
-              )}
-            </p>
-          ) : null}
-          <span className="ai-note">{t('recordingIntro.settingsNote')}</span>
-        </li>
-      </ol>
+      <ul className="onb-checklist">
+        {PERMISSIONS.map((permission) => {
+          const waiting = requested.has(permission.id);
+          const buttonId = `${allowId}-${permission.id}`;
+          return (
+            <CheckItem
+              key={permission.id}
+              title={t(permission.title)}
+              note={!granted[permission.id] && waiting ? t(permission.waiting) : null}
+              done={granted[permission.id]}
+              action={(titleId) =>
+                granted[permission.id] ? (
+                  <span className="onb-check-state">{t('onboarding.recording.granted')}</span>
+                ) : (
+                  // One button in both states, so focus stays on it after the first press.
+                  <button
+                    type="button"
+                    id={buttonId}
+                    className={waiting ? 'settings-text-button' : 'settings-action-button'}
+                    aria-labelledby={`${buttonId} ${titleId}`}
+                    onClick={() => void askFor(permission.id)}
+                  >
+                    {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}
+                  </button>
+                )
+              }
+            />
+          );
+        })}
+        <CheckItem
+          title={t('onboarding.recording.startTitle')}
+          note={startProblem ?? t('onboarding.recording.startNote')}
+          problem={startProblem !== null}
+          done={isRecording === true}
+          action={() =>
+            isRecording ? (
+              <span className="onb-check-state">{t('onboarding.recording.recording')}</span>
+            ) : (
+              <button
+                type="button"
+                className="recording-intro-primary"
+                disabled={
+                  !bothGranted ||
+                  isRecording === null ||
+                  !capture.isScreenshotCaptureAvailable ||
+                  capture.isProcessing
+                }
+                onClick={() => void start()}
+              >
+                {t('onboarding.recording.start')}
+              </button>
+            )
+          }
+        />
+      </ul>
     </>
   );
 }

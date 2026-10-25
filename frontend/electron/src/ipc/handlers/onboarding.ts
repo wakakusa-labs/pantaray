@@ -8,6 +8,4 @@ export function registerOnboardingHandlers(ctx: MainContext, registrar: IpcRegis
   registrar.handle('onboarding:setState', (_event, state) =>
     ctx.onboarding.setState(parseInput(OnboardingStateSchema, 'onboarding:setState', state))
   );
-  // Setup offers it once Screen Recording is granted, which macOS applies only on a reopen.
-  registrar.handle('app:relaunch', () => ctx.app.relaunch());
 }

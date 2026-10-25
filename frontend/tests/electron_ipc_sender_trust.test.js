@@ -48,12 +48,12 @@ test('IPC sender guard allows overlay capabilities but rejects privacy operation
   );
 });
 
-test('Only the main window reads or changes first-run setup, or relaunches the app', () => {
+test('Only the main window reads or changes first-run setup', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
   security.registerWindow('overlay', overlayEvent.sender);
 
-  for (const channel of ['onboarding:getState', 'onboarding:setState', 'app:relaunch']) {
+  for (const channel of ['onboarding:getState', 'onboarding:setState']) {
     assert.equal(security.authorize(channel, mainEvent), 'main');
     assert.throws(
       () => security.authorize(channel, overlayEvent),

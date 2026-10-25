@@ -6,7 +6,7 @@
  * - IPC handler 側は `MainContext` のみに依存し、main の巨大化/密結合を抑える。
  */
 
-import type { App, BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 
 import type { AuthState, CaptureGateState, MainContext, UiLanguage } from './context';
 import type { ResumeProcessRequest } from '../orchestration/contracts';
@@ -101,9 +101,8 @@ export function buildMainContext(params: {
   readCaptureGateState: MainContext['screenshot']['getGateState'];
   /** Answers the recording screen with "later" and drops what it deferred. */
   dismissRecordingIntro: () => CaptureGateState;
-  openCapturePermissionSettings: MainContext['screenshot']['openPermissionSettings'];
+  askForCapturePermission: MainContext['screenshot']['askForPermission'];
   onboarding: MainContext['onboarding'];
-  app: Pick<App, 'relaunch' | 'quit'>;
   onCaptureSettingsChanged?: () => void;
 
   // external
@@ -122,7 +121,6 @@ export function buildMainContext(params: {
   setActionApprovalMode: MainContext['overlay']['setActionApprovalMode'];
   createNotificationIpcHandlers?: MainContext['overlay']['createNotificationIpcHandlers'];
 }): MainContext {
-  let relaunchScheduled = false;
   const normalizeOptionalString = (value: unknown): string | null =>
     typeof value === 'string' && value.trim().length > 0 ? value : null;
   const buildAuthState = (
@@ -368,22 +366,10 @@ export function buildMainContext(params: {
       // the read the current owner's own screen makes (it can open their waiting conversation).
       dismissIntro: (ownerId) =>
         requireOwner() === ownerId ? params.dismissRecordingIntro() : params.readCaptureGateState(),
-      openPermissionSettings: (permission) => params.openCapturePermissionSettings(permission),
+      askForPermission: (permission) => params.askForCapturePermission(permission),
     },
 
     onboarding: params.onboarding,
-
-    app: {
-      // Quitting runs the usual shutdown; the relaunch Electron scheduled starts after it.
-      // Electron starts one instance per relaunch() call, so only the first is scheduled.
-      relaunch: () => {
-        if (!relaunchScheduled) {
-          relaunchScheduled = true;
-          params.app.relaunch();
-        }
-        params.app.quit();
-      },
-    },
 
     privacy: {
       getCaptureSettings: () => {

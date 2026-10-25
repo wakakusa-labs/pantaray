@@ -37,9 +37,9 @@ export function registerScreenshotHandlers(ctx: MainContext, registrar: IpcRegis
     ctx.screenshot.dismissIntro(parseInput(IdSchema, 'recording:dismissIntro', ownerId))
   );
 
-  registrar.handle('recording:openPermissionSettings', (_evt, permission) =>
-    ctx.screenshot.openPermissionSettings(
-      parseInput(CapturePermissionPaneSchema, 'recording:openPermissionSettings', permission)
+  registrar.handle('recording:askForPermission', (_evt, permission) =>
+    ctx.screenshot.askForPermission(
+      parseInput(CapturePermissionPaneSchema, 'recording:askForPermission', permission)
     )
   );
 }

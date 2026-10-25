@@ -33,7 +33,7 @@ function stubBridge(start = vi.fn(async () => 'started'), waiting = true) {
   const dismissIntro = vi.fn(async (_ownerId: string) =>
     Object.assign(gate, { introRequested: false })
   );
-  const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
+  const askForPermission = vi.fn(async (_permission: string) => undefined);
   let askForReread: () => void = () => undefined;
   window.electron = {
     screenshot: {
@@ -43,7 +43,7 @@ function stubBridge(start = vi.fn(async () => 'started'), waiting = true) {
       stop: vi.fn(async () => true),
       getGateState: vi.fn(async () => ({ ...gate, permissions: { ...gate.permissions } })),
       dismissIntro,
-      openPermissionSettings,
+      askForPermission,
       onGateStateChanged: vi.fn((callback: () => void) => {
         askForReread = callback;
         return () => {
@@ -54,7 +54,7 @@ function stubBridge(start = vi.fn(async () => 'started'), waiting = true) {
   } as unknown as Window['electron'];
   return {
     dismissIntro,
-    openPermissionSettings,
+    askForPermission,
     start,
     // A conversation asked for without the macOS permissions opens no window: main
     // holds the request and brings this window forward, which re-reads the gate.
@@ -173,8 +173,9 @@ describe('RecordingIntroDialog', () => {
 
   it('keeps the screen open with what to grant while macOS permission is missing', async () => {
     // The collector is up but recording nothing, so the screen has no permit to record.
-    const { dismissIntro, start, openPermissionSettings, grantAccessibility, askForReread } =
-      stubBridge(vi.fn(async () => 'permission_pending'));
+    const { dismissIntro, start, askForPermission, grantAccessibility, askForReread } = stubBridge(
+      vi.fn(async () => 'permission_pending')
+    );
     render(wrap(<RecordingIntroDialog />));
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
@@ -189,11 +190,11 @@ describe('RecordingIntroDialog', () => {
     // The permission is granted outside the app, so the screen offers the pane it
     // is granted in rather than leaving the user to find it: the first one missing.
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
+    expect(askForPermission).toHaveBeenLastCalledWith('accessibility');
     grantAccessibility();
     await askForReread();
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(openPermissionSettings).toHaveBeenLastCalledWith('screen_recording');
+    expect(askForPermission).toHaveBeenLastCalledWith('screen_recording');
   });
 
   it('cannot be answered while a start it cannot cancel is still running', async () => {

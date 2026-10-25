@@ -156,26 +156,6 @@ test('the permissions a start waits on are listed in grant order, each with its 
   ]);
 });
 
-// macOS lets an app trusted for Accessibility observe input, so Input Monitoring is no step of
-// its own until Accessibility is granted, and none once it reads available.
-test('Input Monitoring is listed only when still missing after Accessibility is granted', async t => {
-  const before = fixture(t, { missing: {
-    read_accessibility_tree: { required: true, state: 'action_required' },
-    observe_input: { required: true, state: 'action_required' } } });
-  assert.deepEqual(await before.manager.readPermissions(), [
-    { permission: 'read_accessibility_tree', granted: false },
-    { permission: 'capture_screen', granted: true },
-  ]);
-
-  const covered = fixture(t, { missing: {
-    read_accessibility_tree: { required: true, state: 'available' },
-    observe_input: { required: true, state: 'available' } } });
-  assert.deepEqual(await covered.manager.readPermissions(), [
-    { permission: 'read_accessibility_tree', granted: true },
-    { permission: 'capture_screen', granted: true },
-  ]);
-});
-
 test('pause and resume address the subject store, and a stale pause never outlives its recorder', async t => {
   const f = fixture(t, { report: { paused: true } });
   await f.manager.start('[capture]\n');

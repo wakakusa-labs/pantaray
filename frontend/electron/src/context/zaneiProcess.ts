@@ -116,15 +116,9 @@ export function createZaneiProcess(params: {
         ? [{ permission, granted: false }]
         : [];
     };
-    const accessibility = fromDoctor('read_accessibility_tree');
-    // macOS lets an app trusted for Accessibility observe input, so Input Monitoring is a step
-    // of its own only when it is still missing once Accessibility is granted.
-    const input = accessibility.every((check) => check.granted)
-      ? fromDoctor('observe_input').filter((check) => !check.granted)
-      : [];
     return [
-      ...accessibility,
-      ...input,
+      ...fromDoctor('read_accessibility_tree'),
+      ...fromDoctor('observe_input'),
       { permission: 'capture_screen', granted: params.holdsScreenRecording() },
       ...deniedBrowser('automate_browser'),
       ...deniedBrowser('automate_safari'),

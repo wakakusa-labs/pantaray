@@ -195,6 +195,21 @@ test('Only the main window uses the chat, and only the Overlay asks to show it',
   }
 });
 
+test('Only the main window asks macOS for recording permissions or opens their panes', () => {
+  const { mainEvent, security } = createSecurityHarness();
+  const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
+  security.registerWindow('overlay', overlayEvent.sender);
+
+  for (const channel of ['recording:askForPermission', 'recording:openPermissionSettings']) {
+    assert.equal(security.authorize(channel, mainEvent), 'main');
+    assert.throws(
+      () => security.authorize(channel, overlayEvent),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
+    );
+  }
+});
+
 test('Only the main window reads and acts on the update ready notice', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);

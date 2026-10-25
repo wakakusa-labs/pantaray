@@ -80,6 +80,7 @@ export function RecordingChecklist({
   const [requested, setRequested] = useState<ReadonlySet<CapturePermission>>(new Set());
   const allowId = useId();
 
+  // macOS's own popup guides the user to System Settings after an ask.
   const askFor = async (permission: CapturePermission) => {
     setRequested((current) => new Set(current).add(permission));
     try {
@@ -87,6 +88,15 @@ export function RecordingChecklist({
     } catch (error) {
       // The row stays waiting with System Settings one press away.
       console.error('Failed to ask for the permission:', error);
+    }
+  };
+
+  // For when macOS shows no popup, as after an earlier denial.
+  const openSettings = async (permission: CapturePermission) => {
+    try {
+      await window.electron?.screenshot?.openPermissionSettings(permission);
+    } catch (error) {
+      console.error('Failed to open System Settings:', error);
     }
   };
 
@@ -111,7 +121,7 @@ export function RecordingChecklist({
                   id={buttonId}
                   className={waiting ? 'settings-text-button' : 'settings-action-button'}
                   aria-labelledby={`${buttonId} ${titleId}`}
-                  onClick={() => void askFor(permission)}
+                  onClick={() => void (waiting ? openSettings(permission) : askFor(permission))}
                 >
                   {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}
                 </button>

@@ -102,6 +102,7 @@ export function buildMainContext(params: {
   /** Answers the recording screen with "later" and drops what it deferred. */
   dismissRecordingIntro: () => CaptureGateState;
   askForCapturePermission: MainContext['screenshot']['askForPermission'];
+  openCapturePermissionSettings: MainContext['screenshot']['openPermissionSettings'];
   readCapturePermissionRequired: MainContext['screenshot']['getPermissionRequired'];
   onboarding: MainContext['onboarding'];
   onCaptureSettingsChanged?: () => void;
@@ -372,6 +373,7 @@ export function buildMainContext(params: {
         return params.screenshotSync.readPermissions();
       },
       askForPermission: (permission) => params.askForCapturePermission(permission),
+      openPermissionSettings: (permission) => params.openCapturePermissionSettings(permission),
       getPermissionRequired: () => params.readCapturePermissionRequired(),
     },
 

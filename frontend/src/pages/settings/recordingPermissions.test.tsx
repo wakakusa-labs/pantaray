@@ -15,6 +15,7 @@ function stubBridge(checks: CapturePermissionCheck[], permissionRequired = false
   const bridge = {
     getPermissions: vi.fn(async () => checks),
     askForPermission: vi.fn(async () => undefined),
+    openPermissionSettings: vi.fn(async () => undefined),
     getPermissionRequired: vi.fn(async () => permissionRequired),
   };
   window.electron = {
@@ -102,8 +103,12 @@ describe('Settings recording permissions', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '許可する 入力監視' }));
     expect(bridge.askForPermission).toHaveBeenLastCalledWith('observe_input');
-    expect(row('入力監視').getByText(/^システム設定で Pantaray をオンにします/)).toBeVisible();
-    expect(row('入力監視').getByRole('button')).toHaveAccessibleName('システム設定を開く 入力監視');
+    expect(bridge.openPermissionSettings).not.toHaveBeenCalled();
+    expect(row('入力監視').getByText('システム設定で Pantaray をオンにします')).toBeVisible();
+    // macOS's own popup leads to System Settings; the row's button is for when it does not show.
+    fireEvent.click(row('入力監視').getByRole('button', { name: 'システム設定を開く 入力監視' }));
+    expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('observe_input');
+    expect(bridge.askForPermission).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '許可する Chrome の操作' }));
     expect(bridge.askForPermission).toHaveBeenLastCalledWith('automate_browser');

@@ -120,7 +120,7 @@ describe('RecordingStep', () => {
     fireEvent.click(allowAccessibility);
     expect(bridge.askForPermission).toHaveBeenLastCalledWith('read_accessibility_tree');
     expect(row(ACCESSIBILITY).getByText('システム設定で Pantaray をオンにします')).toBeVisible();
-    // The same button now opens System Settings again, so focus is not lost.
+    // The same button now opens System Settings, so focus is not lost.
     expect(allowAccessibility).toHaveAccessibleName(`システム設定を開く ${ACCESSIBILITY}`);
     expect(row(INPUT_MONITORING).getByRole('button')).toHaveTextContent('許可する');
 

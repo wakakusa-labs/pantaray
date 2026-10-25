@@ -9,6 +9,8 @@ function createCaptureApi({ ipcRenderer }) {
       getPermissions: () => ipcRenderer.invoke('recording:getPermissions'),
       askForPermission: (permission) =>
         ipcRenderer.invoke('recording:askForPermission', permission),
+      openPermissionSettings: (permission) =>
+        ipcRenderer.invoke('recording:openPermissionSettings', permission),
       getPermissionRequired: () => ipcRenderer.invoke('recording:getPermissionRequired'),
       onPermissionRequiredChanged: (callback) => {
         const listener = (_event, isRequired) => callback(isRequired);

@@ -15,16 +15,19 @@ export type ZaneiStatus = {
   last_event_ts: string | null;
   degraded: { [component: string]: string };
 };
+/** The permissions a start can wait on: the ones the user turns on in System Settings. */
 export type CapturePermission =
   | 'read_accessibility_tree'
   | 'observe_input'
+  | 'capture_screen'
   | 'automate_browser'
-  | 'automate_safari'
-  | 'capture_screen';
+  | 'automate_safari';
+/** A permission that holds a recording start back, and whether it is granted now. */
+export type CapturePermissionCheck = { permission: CapturePermission; granted: boolean };
 export class ZaneiPermissionRequired extends Error {
   constructor(readonly missing: CapturePermission[]) {
     super(
-      'Grant Pantaray Accessibility, Input Monitoring, Screen Recording and required browser Automation permissions, then start recording again.'
+      'Grant Pantaray Accessibility, Input Monitoring, Screen Recording and any denied browser Automation, then start recording again.'
     );
   }
 }
@@ -92,6 +95,36 @@ export function createZaneiProcess(params: {
     return { ...report, permissions_ok: report.permissions_ok && params.holdsScreenRecording() };
   }
   /**
+   * Every permission the start below waits on, in the order the user grants them: those of
+   * the recorder's doctor it requires, and Screen Recording. Browser Automation waits only
+   * once denied (`action_required`): before that macOS asks in its own dialog the first time
+   * the recorder sends the browser an AppleEvent, and the recorder does not wait on it.
+   */
+  async function readPermissions(): Promise<CapturePermissionCheck[]> {
+    const doctor = JSON.parse(await command(['doctor', '--json'])) as {
+      capabilities: Partial<Record<CapturePermission, { required: boolean; state: string }>>;
+    };
+    const fromDoctor = (permission: CapturePermission): CapturePermissionCheck[] => {
+      const capability = doctor.capabilities[permission];
+      return capability?.required
+        ? [{ permission, granted: capability.state === 'available' }]
+        : [];
+    };
+    const deniedBrowser = (permission: CapturePermission): CapturePermissionCheck[] => {
+      const capability = doctor.capabilities[permission];
+      return capability?.required && capability.state === 'action_required'
+        ? [{ permission, granted: false }]
+        : [];
+    };
+    return [
+      ...fromDoctor('read_accessibility_tree'),
+      ...fromDoctor('observe_input'),
+      { permission: 'capture_screen', granted: params.holdsScreenRecording() },
+      ...deniedBrowser('automate_browser'),
+      ...deniedBrowser('automate_safari'),
+    ];
+  }
+  /**
    * Recording turned off: capture stops while the recorder keeps running, so what
    * it already stored stays readable. The recorder polls the request every second.
    */
@@ -137,21 +170,9 @@ export function createZaneiProcess(params: {
     fs.mkdirSync(paths.directory, { recursive: true, mode: 0o700 });
     fs.writeFileSync(`${paths.config}.tmp`, config, { mode: 0o600 });
     fs.renameSync(`${paths.config}.tmp`, paths.config);
-    const doctor = JSON.parse(await command(['doctor', '--json'])) as {
-      capabilities: Partial<Record<CapturePermission, { required: boolean; state: string }>>;
-    };
-    const missing: CapturePermission[] = (
-      ['read_accessibility_tree', 'observe_input', 'automate_browser', 'automate_safari'] as const
-    ).filter(
-      (key) =>
-        doctor.capabilities[key]?.required &&
-        doctor.capabilities[key]?.state !== 'available' &&
-        !(
-          (key === 'automate_browser' || key === 'automate_safari') &&
-          doctor.capabilities[key]?.state === 'deferred'
-        )
-    );
-    if (!params.holdsScreenRecording()) missing.push('capture_screen');
+    const missing = (await readPermissions())
+      .filter((check) => !check.granted)
+      .map((check) => check.permission);
     if (missing.length) {
       if (!manual) throw new ZaneiPermissionRequired([...missing]);
       await params.requestPermissions([...missing]);
@@ -232,5 +253,5 @@ export function createZaneiProcess(params: {
       throw error;
     }
   }
-  return { start, stop, status, pause, resume };
+  return { start, stop, status, pause, resume, readPermissions };
 }

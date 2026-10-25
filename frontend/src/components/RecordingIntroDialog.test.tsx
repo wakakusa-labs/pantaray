@@ -182,7 +182,7 @@ describe('RecordingIntroDialog', () => {
 
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     await screen.findByText(
-      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+      'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
     expect(dismissIntro).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '記録を始める' })).toBeEnabled();
@@ -190,11 +190,11 @@ describe('RecordingIntroDialog', () => {
     // The permission is granted outside the app, so the screen offers the pane it
     // is granted in rather than leaving the user to find it: the first one missing.
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(askForPermission).toHaveBeenLastCalledWith('accessibility');
+    expect(askForPermission).toHaveBeenLastCalledWith('read_accessibility_tree');
     grantAccessibility();
     await askForReread();
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(askForPermission).toHaveBeenLastCalledWith('screen_recording');
+    expect(askForPermission).toHaveBeenLastCalledWith('capture_screen');
   });
 
   it('cannot be answered while a start it cannot cancel is still running', async () => {
@@ -328,7 +328,7 @@ describe('RecordingIntroDialog', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
     await screen.findByText(
-      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+      'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
 
     grantPermissions();
@@ -340,7 +340,7 @@ describe('RecordingIntroDialog', () => {
     expect(await screen.findByText('記録を始める', { selector: 'h2' })).toBeInTheDocument();
     expect(
       screen.queryByText(
-        'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+        'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
       )
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'システム設定を開く' })).toBeNull();

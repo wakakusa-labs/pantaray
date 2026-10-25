@@ -1,5 +1,6 @@
 import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { CapturePermissions } from '../windows/macosPermissions';
+import type { CapturePermission, CapturePermissionCheck } from '../context/zaneiProcess';
 /**
  * MainContext for IPC handlers.
  *
@@ -12,7 +13,7 @@ import type { CapturePermissions } from '../windows/macosPermissions';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
-import type { CapturePermissionPane, OnboardingState } from './schemas/onboarding';
+import type { OnboardingState } from './schemas/onboarding';
 import type { OverlayOpenTaskRequest } from './schemas/overlay';
 import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
@@ -279,8 +280,10 @@ export type MainContext = {
      * gate, the same read the current owner's own screen makes.
      */
     dismissIntro: (ownerId: string) => CaptureGateState;
-    /** Asks macOS for the permission, which lists the app in its pane, then opens that pane. */
-    askForPermission: (permission: CapturePermissionPane) => Promise<void>;
+    /** What a recording start would wait on for the current owner. */
+    getPermissions: () => Promise<CapturePermissionCheck[]>;
+    /** Asks macOS for the permission where it can, which lists the app in its pane. */
+    askForPermission: (permission: CapturePermission) => Promise<void>;
   };
 
   onboarding: {

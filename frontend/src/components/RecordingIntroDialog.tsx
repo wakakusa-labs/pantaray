@@ -49,9 +49,9 @@ export function RecordingIntroDialog() {
     gate === null || !gate.introRequested
       ? null
       : !gate.permissions.accessibility
-        ? 'accessibility'
+        ? 'read_accessibility_tree'
         : !gate.permissions.screenRecording
-          ? 'screen_recording'
+          ? 'capture_screen'
           : null;
   const isOpen = missingPermission !== null;
 

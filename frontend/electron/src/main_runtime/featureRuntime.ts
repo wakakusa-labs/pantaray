@@ -50,7 +50,6 @@ import {
   askForCapturePermission,
   holdsScreenRecording,
   readCapturePermissions,
-  requestCapturePermissions,
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
 import { presentRecordingIntro } from '../windows/recordingIntroWindow';
@@ -292,7 +291,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getMainWindow: params.getMainWindow,
     isBackendRuntimeReady: () => params.supabaseWiring.getLocalOwnerId() !== null,
     getManifestPath: params.desktopRuntime.getAppRuntimeManifestPath,
-    requestPermissions: requestCapturePermissions,
+    // A start asks for the first permission it is missing, as the setup checklist does.
+    requestPermissions: (missing) => askForCapturePermission(missing[0]),
     holdsScreenRecording,
     readSource: (userId) =>
       requestJson({

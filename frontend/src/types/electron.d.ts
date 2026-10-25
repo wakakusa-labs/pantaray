@@ -13,9 +13,10 @@ import type {
   UpdateReadyNotice,
 } from '../../electron/src/ipc/context';
 import type {
-  CapturePermissionPane,
-  OnboardingState,
-} from '../../electron/src/ipc/schemas/onboarding';
+  CapturePermission,
+  CapturePermissionCheck,
+} from '../../electron/src/context/zaneiProcess';
+import type { OnboardingState } from '../../electron/src/ipc/schemas/onboarding';
 import type {
   ConnectionCommand,
   ConnectionStateResult,
@@ -170,8 +171,10 @@ declare global {
         getGateState: () => Promise<CaptureGateState>;
         /** 記録画面を「あとで」で閉じ、待っている会話を取り下げる。main は表示されていた owner の答えだけを受ける */
         dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
-        /** macOS に指定した権限を求めて（システム設定の一覧に載る）、その権限の画面を開く */
-        askForPermission: (permission: CapturePermissionPane) => Promise<void>;
+        /** 記録の開始が待つ権限の一覧（今の owner、開始と同じ読み方） */
+        getPermissions: () => Promise<CapturePermissionCheck[]>;
+        /** macOS に指定した権限を求める（できるものはシステム設定の一覧に載る） */
+        askForPermission: (permission: CapturePermission) => Promise<void>;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;
         getStatus: () => Promise<boolean>;

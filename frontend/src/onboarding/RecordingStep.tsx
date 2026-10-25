@@ -1,26 +1,69 @@
 import { Check } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 
-import { useCaptureGate } from '@/hooks/useCaptureGate';
-import type { CapturePermissionPane } from '../../electron/src/ipc/schemas/onboarding';
+import type {
+  CapturePermission,
+  CapturePermissionCheck,
+} from '../../electron/src/context/zaneiProcess';
 import type { Translate } from '../pages/settings/types';
 import '../components/recordingIntro.css';
 import '../pages/settings/settingsPage.css';
 import './onboardingSteps.css';
 import type { useRecordingStep } from './useRecordingStep';
 
-const PERMISSIONS = [
-  {
-    id: 'accessibility',
+const ROW_COPY = {
+  read_accessibility_tree: {
     title: 'onboarding.recording.accessibilityTitle',
     waiting: 'onboarding.recording.accessibilityWaiting',
   },
-  {
-    id: 'screen_recording',
+  observe_input: {
+    title: 'onboarding.recording.inputMonitoringTitle',
+    waiting: 'onboarding.recording.inputMonitoringWaiting',
+  },
+  capture_screen: {
     title: 'onboarding.recording.screenRecordingTitle',
     waiting: 'onboarding.recording.screenRecordingWaiting',
   },
-] as const;
+  automate_browser: {
+    title: 'onboarding.recording.chromeTitle',
+    waiting: 'onboarding.recording.chromeWaiting',
+  },
+  automate_safari: {
+    title: 'onboarding.recording.safariTitle',
+    waiting: 'onboarding.recording.safariWaiting',
+  },
+} as const satisfies Record<CapturePermission, { title: string; waiting: string }>;
+
+/**
+ * What a start would wait on, as main reads it for that start. Read again whenever the
+ * window regains focus, which is how the user comes back from System Settings.
+ */
+function useStartPermissions(): CapturePermissionCheck[] | 'unavailable' | null {
+  const [checks, setChecks] = useState<CapturePermissionCheck[] | 'unavailable' | null>(null);
+  useEffect(() => {
+    let active = true;
+    let latest = 0;
+    const read = () => {
+      const call = ++latest;
+      window.electron?.screenshot?.getPermissions().then(
+        (next) => {
+          if (active && call === latest) setChecks(next);
+        },
+        (error: unknown) => {
+          console.error('Failed to read the recording permissions:', error);
+          if (active && call === latest) setChecks('unavailable');
+        }
+      );
+    };
+    read();
+    window.addEventListener('focus', read);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', read);
+    };
+  }, []);
+  return checks;
+}
 
 /** One checklist row: its mark, its title with at most one note, and its one action. */
 function CheckItem({
@@ -61,8 +104,8 @@ function CheckItem({
   );
 }
 
-/** Setup's recording step: what recording takes, as one checklist of the two macOS
- *  permissions and the start. */
+/** Setup's recording step: what recording takes, as one checklist of the macOS permissions
+ *  a start waits on, and the start. */
 export function RecordingStep({
   t,
   recording,
@@ -70,19 +113,14 @@ export function RecordingStep({
   t: Translate;
   recording: ReturnType<typeof useRecordingStep>;
 }) {
-  const { gate } = useCaptureGate();
+  const checks = useStartPermissions();
   // Which permissions were asked for here: macOS reports nothing until the user acts there.
-  const [requested, setRequested] = useState<ReadonlySet<CapturePermissionPane>>(new Set());
+  const [requested, setRequested] = useState<ReadonlySet<CapturePermission>>(new Set());
   const allowId = useId();
   const { capture, startOutcome, isRecording, start } = recording;
+  const allGranted = Array.isArray(checks) && checks.every((check) => check.granted);
 
-  const granted: Record<CapturePermissionPane, boolean> = {
-    accessibility: gate?.permissions.accessibility ?? false,
-    screen_recording: gate?.permissions.screenRecording ?? false,
-  };
-  const bothGranted = granted.accessibility && granted.screen_recording;
-
-  const askFor = async (permission: CapturePermissionPane) => {
+  const askFor = async (permission: CapturePermission) => {
     setRequested((current) => new Set(current).add(permission));
     try {
       await window.electron?.screenshot?.askForPermission(permission);
@@ -92,11 +130,14 @@ export function RecordingStep({
     }
   };
 
-  const startProblem = capture.captureStatusUnavailable
-    ? t('settings.screenshotCapture.unavailable')
-    : startOutcome !== null
-      ? t('recordingIntro.startFailed')
-      : null;
+  // Every permission a start waits on is a row above, so a start that did not finish is
+  // unexpected whatever main answered.
+  const startProblem =
+    capture.captureStatusUnavailable || checks === 'unavailable'
+      ? t('settings.screenshotCapture.unavailable')
+      : startOutcome !== null
+        ? t('recordingIntro.startFailed')
+        : null;
 
   return (
     <>
@@ -109,17 +150,17 @@ export function RecordingStep({
       </details>
 
       <ul className="onb-checklist">
-        {PERMISSIONS.map((permission) => {
-          const waiting = requested.has(permission.id);
-          const buttonId = `${allowId}-${permission.id}`;
+        {(Array.isArray(checks) ? checks : []).map(({ permission, granted }) => {
+          const waiting = requested.has(permission);
+          const buttonId = `${allowId}-${permission}`;
           return (
             <CheckItem
-              key={permission.id}
-              title={t(permission.title)}
-              note={!granted[permission.id] && waiting ? t(permission.waiting) : null}
-              done={granted[permission.id]}
+              key={permission}
+              title={t(ROW_COPY[permission].title)}
+              note={!granted && waiting ? t(ROW_COPY[permission].waiting) : null}
+              done={granted}
               action={(titleId) =>
-                granted[permission.id] ? (
+                granted ? (
                   <span className="onb-check-state">{t('onboarding.recording.granted')}</span>
                 ) : (
                   // One button in both states, so focus stays on it after the first press.
@@ -128,7 +169,7 @@ export function RecordingStep({
                     id={buttonId}
                     className={waiting ? 'settings-text-button' : 'settings-action-button'}
                     aria-labelledby={`${buttonId} ${titleId}`}
-                    onClick={() => void askFor(permission.id)}
+                    onClick={() => void askFor(permission)}
                   >
                     {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}
                   </button>
@@ -150,7 +191,7 @@ export function RecordingStep({
                 type="button"
                 className="recording-intro-primary"
                 disabled={
-                  !bothGranted ||
+                  !allGranted ||
                   isRecording === null ||
                   !capture.isScreenshotCaptureAvailable ||
                   capture.isProcessing

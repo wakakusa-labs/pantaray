@@ -10,6 +10,7 @@ import {
   createZaneiProcess,
   ZaneiPermissionRequired,
   type CapturePermission,
+  type CapturePermissionCheck,
   type ZaneiStatus,
 } from '../context/zaneiProcess';
 import { readZaneiManifest, zaneiConfig, policyRevision } from '../context/zaneiConfig';
@@ -453,6 +454,18 @@ export function createScreenshotSyncManager(params: {
         return true;
       }),
     getStatus: recordingOn,
+    /** What a start for the current owner would wait on, read the way that start reads it. */
+    readPermissions: (): Promise<CapturePermissionCheck[]> => {
+      if (!owner) throw new Error('Local owner is unavailable.');
+      // Only read from, never started, so it has no exit to report.
+      return (params.createProcess ?? createZaneiProcess)({
+        manifest: readZaneiManifest(params.getManifestPath()),
+        userId: owner.id,
+        requestPermissions: params.requestPermissions,
+        holdsScreenRecording: params.holdsScreenRecording,
+        onExit: () => undefined,
+      }).readPermissions();
+    },
     start: (): Promise<RecordingStartResult> =>
       enqueue(async () => {
         const startedFor = owner;

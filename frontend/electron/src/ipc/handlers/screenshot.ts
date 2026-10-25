@@ -9,7 +9,7 @@
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import { parseInput } from '../schemas/error';
-import { CapturePermissionPaneSchema } from '../schemas/onboarding';
+import { CapturePermissionSchema } from '../schemas/onboarding';
 import { IdSchema } from '../schemas/workspaceSettings';
 import { runAuditedMutation } from './auditedMutation';
 
@@ -37,9 +37,11 @@ export function registerScreenshotHandlers(ctx: MainContext, registrar: IpcRegis
     ctx.screenshot.dismissIntro(parseInput(IdSchema, 'recording:dismissIntro', ownerId))
   );
 
+  registrar.handle('recording:getPermissions', () => ctx.screenshot.getPermissions());
+
   registrar.handle('recording:askForPermission', (_evt, permission) =>
     ctx.screenshot.askForPermission(
-      parseInput(CapturePermissionPaneSchema, 'recording:askForPermission', permission)
+      parseInput(CapturePermissionSchema, 'recording:askForPermission', permission)
     )
   );
 }

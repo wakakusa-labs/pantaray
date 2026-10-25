@@ -146,6 +146,7 @@ export const validInvokeChannels = [
   // conversation waiting on them.
   'recording:getGateState',
   'recording:dismissIntro',
+  'recording:getPermissions',
   'recording:askForPermission',
   // Main window only: first-run setup progress
   'onboarding:getState',

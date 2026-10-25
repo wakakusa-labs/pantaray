@@ -6,7 +6,7 @@ const { test } = require('node:test');
 let systemVersion = '15.0.0';
 process.getSystemVersion = () => systemVersion;
 
-function loadPermissions({ error = null, isPackaged = false, accessibilityTrusted = false,
+function loadPermissions({ isPackaged = false, accessibilityTrusted = false,
   screenRecording = 'granted', macosVersion = '15.0.0', captureError = null } = {}) {
   const calls = [];
   systemVersion = macosVersion;
@@ -24,23 +24,15 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
         calls.push({ ax: prompt }); return accessibilityTrusted;
       }, getMediaAccessStatus: media => { calls.push({ media }); return screenRecording; } },
     };
-    if (request === 'node:child_process') return {
-      execFile: (binary, args, options, callback) => {
-        calls.push({ binary, args }); callback(error, 'name', '');
-      },
-    };
     return load.call(this, request, parent, isMain);
   };
   try {
     const module = require(target);
-    return { request: module.requestCapturePermissions,
-      read: module.readCapturePermissions,
+    return { read: module.readCapturePermissions,
       ask: module.askForCapturePermission, calls };
   }
   finally { Module._load = load; delete require.cache[target]; }
 }
-
-const loadPermissionRequester = error => loadPermissions({ error });
 
 /** The gate reads a macOS API, so the tests run on Linux CI must claim that platform. */
 function onPlatform(platform, body) {
@@ -49,27 +41,6 @@ function onPlatform(platform, body) {
   try { return body(); } finally { Object.defineProperty(process, 'platform', original); }
 }
 const onDarwin = body => onPlatform('darwin', body);
-
-test('manual permission helper opens AX settings and requests only the required browser AppleEvent', async () => {
-  const f = loadPermissionRequester();
-  await f.request(['read_accessibility_tree', 'automate_safari']);
-  assert.deepEqual(f.calls[0], { binary: '/usr/bin/osascript', args: ['-e', 'tell application id "com.apple.Safari" to get name'] });
-  assert.match(f.calls[1], /Privacy_Accessibility$/);
-  assert.ok(!JSON.stringify(f.calls).includes('Chrome'));
-});
-
-test('Input Monitoring guide opens the native pane without requesting browser access', async () => {
-  const f = loadPermissionRequester(); await f.request(['observe_input']);
-  assert.deepEqual(f.calls, ['x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent']);
-});
-
-test('Automation denial still opens permission settings; unrelated command errors propagate', async () => {
-  const denied = Object.assign(new Error('denied'), { stderr: 'Not authorized (-1743)' });
-  const f = loadPermissionRequester(denied); await f.request(['automate_browser']);
-  assert.match(f.calls.at(-1), /Privacy_Automation$/);
-  const bad = loadPermissionRequester(new Error('command unavailable'));
-  await assert.rejects(bad.request(['automate_browser']), /command unavailable/);
-});
 
 test('the capture gate reads each permission live, without prompting', () => {
   const denied = loadPermissions({ accessibilityTrusted: false });
@@ -103,16 +74,30 @@ test('the E2E override stands in for TCC only in an unpackaged build', () => {
 });
 
 // System Settings lists only apps that asked, so each pane opens after its own ask.
-test('each gate permission asks macOS for itself, then opens its own pane', async () => {
+test('each permission a start waits on asks macOS where it can, then opens its own pane', async () => {
   const accessibility = loadPermissions();
-  await accessibility.ask('accessibility');
+  await accessibility.ask('read_accessibility_tree');
   assert.deepEqual(accessibility.calls, [
     { ax: true },
     'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
   ]);
 
+  // Nothing Electron or Node can call asks for Input Monitoring, so its pane just opens.
+  const input = loadPermissions();
+  await input.ask('observe_input');
+  assert.deepEqual(input.calls, [
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent',
+  ]);
+
+  // Denied Automation: macOS no longer asks, so the pane is all there is.
+  const chrome = loadPermissions();
+  await chrome.ask('automate_browser');
+  assert.deepEqual(chrome.calls, [
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation',
+  ]);
+
   const screen = loadPermissions();
-  await screen.ask('screen_recording');
+  await screen.ask('capture_screen');
   assert.deepEqual(screen.calls, [
     { capture: { types: ['screen'], thumbnailSize: { width: 1, height: 1 } } },
     'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
@@ -122,7 +107,7 @@ test('each gate permission asks macOS for itself, then opens its own pane', asyn
 test('a capture refused for want of the grant still opens the Screen Recording pane', async (t) => {
   t.mock.method(console, 'error', () => {});
   const f = loadPermissions({ captureError: new Error('Failed to get sources.') });
-  await f.ask('screen_recording');
+  await f.ask('capture_screen');
   assert.match(f.calls.at(-1), /Privacy_ScreenCapture$/);
 });
 
@@ -138,13 +123,4 @@ test('Screen Recording reads as granted only when macOS says so, or cannot grant
     macosVersion: '13.6.1' });
   assert.deepEqual(onDarwin(older.read), { accessibility: true, screenRecording: true });
   assert.deepEqual(older.calls, [{ ax: false }]);
-});
-
-test('a start missing Screen Recording opens its pane only after the required ones', async () => {
-  const f = loadPermissionRequester();
-  await f.request(['capture_screen']);
-  assert.deepEqual(f.calls, ['x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture']);
-  const both = loadPermissionRequester();
-  await both.request(['observe_input', 'capture_screen']);
-  assert.match(both.calls.at(-1), /Privacy_ListenEvent$/);
 });

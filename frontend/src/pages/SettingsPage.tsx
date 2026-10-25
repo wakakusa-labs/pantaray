@@ -32,14 +32,15 @@ type SettingsSectionId =
   | 'overlay_position'
   | 'screenshots';
 
+// Setup's order first (AI, recording, apps), then what is changed less often.
 const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
-  'language',
-  'execution',
-  'integrations',
-  'shortcuts',
-  'overlay_position',
   'screenshots',
+  'integrations',
+  'execution',
+  'overlay_position',
+  'shortcuts',
+  'language',
 ];
 
 /**
@@ -60,7 +61,7 @@ const PERMISSION_TITLES = {
 function getSectionFromSearch(value: string | null): SettingsSectionId {
   return SETTINGS_SECTIONS.includes(value as SettingsSectionId)
     ? (value as SettingsSectionId)
-    : 'language';
+    : SETTINGS_SECTIONS[0];
 }
 
 const SettingsPage: React.FC = () => {

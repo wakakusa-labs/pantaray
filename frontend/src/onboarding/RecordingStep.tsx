@@ -94,11 +94,9 @@ export function RecordingStep({
 
   const startProblem = capture.captureStatusUnavailable
     ? t('settings.screenshotCapture.unavailable')
-    : startOutcome === 'permission_pending'
-      ? t('onboarding.recording.permissionPending')
-      : startOutcome === 'failed'
-        ? t('recordingIntro.startFailed')
-        : null;
+    : startOutcome !== null
+      ? t('recordingIntro.startFailed')
+      : null;
 
   return (
     <>

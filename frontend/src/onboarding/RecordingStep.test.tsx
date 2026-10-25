@@ -130,18 +130,9 @@ describe('RecordingStep', () => {
 
     fireEvent.click(button);
     expect(await row(START).findByRole('alert')).toHaveTextContent(
-      'ほかにも許可が必要です。システム設定で許可してから、もう一度始めます。'
+      '記録を開始できませんでした。もう一度お試しください。'
     );
     expect(row(START).queryByText('除外するアプリやサイトは、あとで設定で選べます')).toBeNull();
-    expect(screen.getByTestId('done')).toHaveTextContent('false');
-
-    start.mockResolvedValueOnce('failed');
-    fireEvent.click(button);
-    await waitFor(() =>
-      expect(row(START).getByRole('alert')).toHaveTextContent(
-        '記録を開始できませんでした。もう一度お試しください。'
-      )
-    );
     expect(screen.getByTestId('done')).toHaveTextContent('false');
   });
 
@@ -157,7 +148,7 @@ describe('RecordingStep', () => {
     await waitFor(() => expect(button).toBeEnabled());
 
     fireEvent.click(button);
-    expect(await row(START).findByRole('alert')).toHaveTextContent('もう一度始めます');
+    expect(await row(START).findByRole('alert')).toHaveTextContent('記録を開始できませんでした');
     expect(row(START).queryByText('記録中')).not.toBeInTheDocument();
     expect(screen.getByTestId('done')).toHaveTextContent('false');
 

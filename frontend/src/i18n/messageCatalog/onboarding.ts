@@ -46,8 +46,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.startNote': 'You can choose apps and sites to exclude later in Settings',
     'onboarding.recording.start': 'Start',
     'onboarding.recording.recording': 'Recording',
-    'onboarding.recording.permissionPending':
-      'More permissions are needed. Allow them in System Settings, then start again.',
     'onboarding.apps.lead':
       'Let Pantaray use the services you use every day, such as Gmail and your calendar, for its work. Connecting them takes a Composio API key.',
     'onboarding.apps.leadWithKey':
@@ -107,8 +105,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.startNote': '除外するアプリやサイトは、あとで設定で選べます',
     'onboarding.recording.start': '始める',
     'onboarding.recording.recording': '記録中',
-    'onboarding.recording.permissionPending':
-      'ほかにも許可が必要です。システム設定で許可してから、もう一度始めます。',
     'onboarding.apps.lead':
       'Gmail やカレンダーなど、ふだん使うサービスを Pantaray の作業に使えるようにします。つなぐには Composio の API キーが要ります。',
     'onboarding.apps.leadWithKey': 'つなぐサービスを選んでください。あとから設定で増やせます。',

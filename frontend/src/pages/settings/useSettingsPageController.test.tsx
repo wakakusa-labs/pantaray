@@ -64,6 +64,7 @@ function stubPrivacyBridge(privacy: Partial<PrivacyBridge>) {
       onStatusChanged: vi.fn(() => () => undefined),
       start: vi.fn(async () => 'started' as const),
       stop: vi.fn(async () => true),
+      getPermissions: vi.fn(async () => []),
     },
   } as unknown as Window['electron'];
 }

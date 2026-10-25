@@ -1,0 +1,61 @@
+/* The recording permissions as one checklist, the same grid in every row. */
+.recording-checklist {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+}
+
+.recording-check {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 22px 1fr auto;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.recording-check + .recording-check {
+  border-top: 1px solid var(--border-color);
+}
+
+.recording-check-mark {
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  display: grid;
+  height: 20px;
+  place-items: center;
+  width: 20px;
+}
+
+.recording-check--done .recording-check-mark {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  color: #cfe0f3;
+}
+
+.recording-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recording-check-title {
+  color: var(--fog-text);
+  font-size: 14px;
+}
+
+.recording-check-note {
+  color: var(--fog-text-2);
+  font-size: 12px;
+}
+
+.recording-check-note--problem {
+  color: var(--warning-color);
+}
+
+.recording-check-state {
+  color: var(--fog-text-2);
+  font-size: 13px;
+}

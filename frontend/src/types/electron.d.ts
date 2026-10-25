@@ -175,6 +175,9 @@ declare global {
         getPermissions: () => Promise<CapturePermissionCheck[]>;
         /** macOS に指定した権限を求める（できるものはシステム設定の一覧に載る） */
         askForPermission: (permission: CapturePermission) => Promise<void>;
+        /** 権限が足りず記録できない状態か（記録係の状態を今読み直す。メインウィンドウ用） */
+        getPermissionRequired?: () => Promise<boolean>;
+        onPermissionRequiredChanged?: (callback: (isRequired: boolean) => void) => () => void;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;
         getStatus: () => Promise<boolean>;

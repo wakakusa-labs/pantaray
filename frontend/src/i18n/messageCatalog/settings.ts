@@ -206,6 +206,12 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.screenshotCapture.unavailable':
       'Computer activity recording is currently unavailable.',
     'settings.screenshotCapture.pausedSuggestions': 'Suggestions are paused too',
+    'settings.screenshotCapture.permissionRequired': 'Permission needed',
+    'settings.screenshotCapture.permission.accessibility': 'Accessibility',
+    'settings.screenshotCapture.permission.inputMonitoring': 'Input Monitoring',
+    'settings.screenshotCapture.permission.screenRecording': 'Screen Recording',
+    'settings.screenshotCapture.permission.chrome': 'Control of Chrome',
+    'settings.screenshotCapture.permission.safari': 'Control of Safari',
     'recordingIntro.title': 'Start recording',
     'recordingIntro.purpose':
       'Pantaray records what you do on this Mac and uses it for suggestions and tasks.',
@@ -483,6 +489,12 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.screenshotCapture.screenshotsLabel': 'コンピューター操作の記録',
     'settings.screenshotCapture.unavailable': '現在はコンピューター操作の記録を有効にできません。',
     'settings.screenshotCapture.pausedSuggestions': '提案も止まっています',
+    'settings.screenshotCapture.permissionRequired': '許可が必要です',
+    'settings.screenshotCapture.permission.accessibility': 'アクセシビリティ',
+    'settings.screenshotCapture.permission.inputMonitoring': '入力監視',
+    'settings.screenshotCapture.permission.screenRecording': '画面収録',
+    'settings.screenshotCapture.permission.chrome': 'Chrome の操作',
+    'settings.screenshotCapture.permission.safari': 'Safari の操作',
     'recordingIntro.title': '記録を始める',
     'recordingIntro.purpose':
       'Pantaray はこの Mac での操作を記録し、それをもとに提案や作業をします。',

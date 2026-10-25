@@ -478,6 +478,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
         askForCapturePermission,
+        readCapturePermissionRequired: params.updateUi.readPermissionRequired,
         onboarding: { getState: onboarding.get, setState: setOnboardingState },
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,

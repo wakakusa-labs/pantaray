@@ -284,6 +284,8 @@ export type MainContext = {
     getPermissions: () => Promise<CapturePermissionCheck[]>;
     /** Asks macOS for the permission where it can, which lists the app in its pane. */
     askForPermission: (permission: CapturePermission) => Promise<void>;
+    /** Whether the recorder cannot run until macOS grants it a permission, read again now. */
+    getPermissionRequired: () => Promise<boolean>;
   };
 
   onboarding: {

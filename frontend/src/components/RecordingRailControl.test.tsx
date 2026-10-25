@@ -133,4 +133,42 @@ describe('RecordingRailControl', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(link).toHaveFocus();
   });
+
+  it('marks the light and opens the recording settings only while recording waits on a permission', async () => {
+    localStorage.setItem('pantaray_ui_language', 'ja');
+    let reportPermissionRequired: (isRequired: boolean) => void = () => undefined;
+    window.electron = {
+      screenshot: {
+        start: vi.fn(async () => 'started'),
+        stop: vi.fn(async () => true),
+        getStatus: vi.fn(async () => true),
+        onStatusChanged: vi.fn(() => () => undefined),
+        getPermissionRequired: vi.fn(async () => false),
+        onPermissionRequiredChanged: vi.fn((callback: (isRequired: boolean) => void) => {
+          reportPermissionRequired = callback;
+          return () => undefined;
+        }),
+      },
+    } as unknown as Window['electron'];
+
+    renderControl('ja');
+    const button = await screen.findByRole('button', { name: 'コンピューター操作の記録：オン' });
+    expect(button.querySelector('.app-recording-alert')).toBeNull();
+
+    act(() => reportPermissionRequired(true));
+    expect(button).toHaveAccessibleName('コンピューター操作の記録：許可が必要です');
+    expect(button.querySelector('.app-recording-alert')).not.toBeNull();
+    expect(button).not.toHaveAttribute('aria-haspopup');
+
+    fireEvent.click(button);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent(
+      '/settings?section=screenshots'
+    );
+
+    act(() => reportPermissionRequired(false));
+    expect(button.querySelector('.app-recording-alert')).toBeNull();
+    fireEvent.click(button);
+    expect(screen.getByRole('dialog', { name: 'コンピューター操作の記録' })).toBeVisible();
+  });
 });

@@ -228,6 +228,9 @@ function ScreenshotCaptureSection(props: {
 }) {
   const checks = useStartPermissions();
   const permissionRequired = useCapturePermissionRequired();
+  // The switch shows whether recording runs. A missing permission keeps it off and the rows
+  // below are the way forward; the saved "on" stays, so recording comes back once granted.
+  const isRunning = props.isCapturingScreenshots && !permissionRequired;
   const unavailable =
     (!props.isScreenshotCaptureAvailable && !props.isCapturingScreenshots) ||
     checks === 'unavailable';
@@ -247,8 +250,8 @@ function ScreenshotCaptureSection(props: {
           </div>
         </div>
         <RecordingSwitch
-          isCapturing={props.isCapturingScreenshots}
-          canStart={props.isScreenshotCaptureAvailable}
+          isCapturing={isRunning}
+          canStart={props.isScreenshotCaptureAvailable && !permissionRequired}
           isProcessing={props.isProcessing}
           onChange={props.setScreenshotsEnabled}
         />

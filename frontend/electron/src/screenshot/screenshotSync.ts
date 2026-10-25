@@ -399,6 +399,18 @@ export function createScreenshotSyncManager(params: {
     stopPreferenceWriteFailed = false;
     if (!enabledPreference()) writeEnabled(true);
   }
+  /** What a start for the current owner would wait on, read the way that start reads it. */
+  function readPermissions(): Promise<CapturePermissionCheck[]> {
+    if (!owner) throw new Error('Local owner is unavailable.');
+    // Only read from, never started, so it has no exit to report.
+    return (params.createProcess ?? createZaneiProcess)({
+      manifest: readZaneiManifest(params.getManifestPath()),
+      userId: owner.id,
+      requestPermissions: params.requestPermissions,
+      holdsScreenRecording: params.holdsScreenRecording,
+      onExit: () => undefined,
+    }).readPermissions();
+  }
   /** The latest report, or null when no recorder is up or it cannot answer. */
   async function readReport(): Promise<ZaneiStatus | null> {
     if (!collector) return null;
@@ -455,17 +467,7 @@ export function createScreenshotSyncManager(params: {
       }),
     getStatus: recordingOn,
     /** What a start for the current owner would wait on, read the way that start reads it. */
-    readPermissions: (): Promise<CapturePermissionCheck[]> => {
-      if (!owner) throw new Error('Local owner is unavailable.');
-      // Only read from, never started, so it has no exit to report.
-      return (params.createProcess ?? createZaneiProcess)({
-        manifest: readZaneiManifest(params.getManifestPath()),
-        userId: owner.id,
-        requestPermissions: params.requestPermissions,
-        holdsScreenRecording: params.holdsScreenRecording,
-        onExit: () => undefined,
-      }).readPermissions();
-    },
+    readPermissions,
     start: (): Promise<RecordingStartResult> =>
       enqueue(async () => {
         const startedFor = owner;
@@ -545,6 +547,18 @@ export function createScreenshotSyncManager(params: {
       }),
     getCaptureStatusSnapshot: (): Promise<CaptureStatusSnapshot> =>
       enqueue(async () => {
+        // A restore that found a macOS permission missing left no recorder behind, and
+        // nothing else brings it back. Once every permission is granted, the same restore
+        // brings back what the user's preference calls for, an "off" included. Reading
+        // the permissions first keeps a still-missing one from cycling the recorder on
+        // every status read.
+        if (
+          permissionRequired &&
+          !collector &&
+          owner &&
+          (await readPermissions()).every((check) => check.granted)
+        )
+          await restoreFromPreference();
         const report = await readReport();
         const running = captureReady(report);
         // A recorder restored for a user who has recording turned off is paused on

@@ -109,14 +109,21 @@ describe('Settings recording permissions', () => {
     expect(bridge.askForPermission).toHaveBeenLastCalledWith('automate_browser');
   });
 
-  it('says recording needs a permission while the recorder reports it', async () => {
+  it('shows recording off and locked while it waits on a permission, then on again', async () => {
+    // Recording is on (the saved preference), but the recorder reports a missing permission.
     const bridge = stubBridge([{ permission: 'capture_screen', granted: false }], true);
     renderRecordingSection();
 
     expect(await screen.findByText('許可が必要です')).toBeVisible();
+    const toggle = screen.getByRole('switch', { name: 'コンピューター操作の記録' });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeDisabled();
     expect(screen.queryByText('有効')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '許可する 画面収録' })).toBeEnabled();
 
     act(() => bridge.reportPermissionRequired(false));
     expect(screen.getByText('有効')).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
   });
 });

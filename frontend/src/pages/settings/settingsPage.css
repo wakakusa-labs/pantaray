@@ -140,6 +140,13 @@
   padding-top: 0;
 }
 
+/* The recording filter follows the recording section, whose bottom border already divides them. */
+.dashboard-section + .dashboard-subsection {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: var(--space-xl);
+}
+
 .settings-page-content > .allowed-apps-section {
   border-top: 0;
 }

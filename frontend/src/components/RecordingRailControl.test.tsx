@@ -155,9 +155,14 @@ describe('RecordingRailControl', () => {
     const button = await screen.findByRole('button', { name: 'コンピューター操作の記録：オン' });
     expect(button.querySelector('.app-recording-alert')).toBeNull();
 
+    const light = button.querySelector('.app-recording-light');
+    expect(light).toHaveClass('app-recording-light--on');
+
     act(() => reportPermissionRequired(true));
     expect(button).toHaveAccessibleName('コンピューター操作の記録：許可が必要です');
     expect(button.querySelector('.app-recording-alert')).not.toBeNull();
+    // Recording is on, but it does not run: only the warning shows.
+    expect(light).not.toHaveClass('app-recording-light--on');
     expect(button).not.toHaveAttribute('aria-haspopup');
 
     fireEvent.click(button);
@@ -168,6 +173,7 @@ describe('RecordingRailControl', () => {
 
     act(() => reportPermissionRequired(false));
     expect(button.querySelector('.app-recording-alert')).toBeNull();
+    expect(light).toHaveClass('app-recording-light--on');
     fireEvent.click(button);
     expect(screen.getByRole('dialog', { name: 'コンピューター操作の記録' })).toBeVisible();
   });

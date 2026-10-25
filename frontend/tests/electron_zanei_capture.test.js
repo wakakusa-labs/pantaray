@@ -5,6 +5,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { test } = require('node:test');
 const { createScreenshotSyncManager } = require('../electron/dist/screenshot/screenshotSync');
+const { ZaneiPermissionRequired } = require('../electron/dist/context/zaneiProcess');
 const { createCapturePrivacyManager } = require('../electron/dist/privacy/capturePrivacy');
 const { zaneiConfig, zaneiSubjectPaths } = require('../electron/dist/context/zaneiConfig');
 const {
@@ -441,6 +442,54 @@ test('a restored recorder still waiting for macOS permission never reads as reco
   assert.equal(f.source().capture_paused, true);
   assert.equal(f.enabled(), false);
   assert.equal(f.manager.getStatus(), false);
+});
+
+test('a restore that found a permission missing comes back by itself once it is granted', async t => {
+  const f = fixture(t);
+  f.setStored(true);
+  let granted = false;
+  const start = f.process.start;
+  f.process.start = async (...args) => {
+    if (!granted) throw new ZaneiPermissionRequired(['observe_input']);
+    return start(...args);
+  };
+  f.process.readPermissions = async () => [{ permission: 'observe_input', granted }];
+
+  await assert.rejects(f.manager.restoreRecorder(), ZaneiPermissionRequired);
+  // Still missing: every status read stays blocked without bringing a recorder up.
+  assert.equal((await f.manager.getCaptureStatusSnapshot()).kind, 'permission_required');
+  assert.equal((await f.manager.getCaptureStatusSnapshot()).kind, 'permission_required');
+  assert.equal(f.calls.includes('start'), false);
+  assert.equal(f.manager.getStatus(), false);
+  assert.equal(f.enabled(), true);
+
+  granted = true;
+  assert.equal((await f.manager.getCaptureStatusSnapshot()).kind, 'capturing');
+  assert.equal(f.manager.getStatus(), true);
+  assert.equal(f.enabled(), true);
+});
+
+test('a user who turned recording off stays off when a missing permission is granted', async t => {
+  const f = fixture(t);
+  f.setStored(false);
+  let granted = false;
+  const start = f.process.start;
+  f.process.start = async (...args) => {
+    if (!granted) throw new ZaneiPermissionRequired(['observe_input']);
+    return start(...args);
+  };
+  f.process.readPermissions = async () => [{ permission: 'observe_input', granted }];
+
+  await assert.rejects(f.manager.restoreRecorder(), ZaneiPermissionRequired);
+  assert.equal((await f.manager.getCaptureStatusSnapshot()).kind, 'permission_required');
+
+  granted = true;
+  f.setReport({ running: true, permissions_ok: true, paused: true,
+    heartbeat_freshness: 'fresh', store_write_state: 'healthy', degraded: {} });
+  assert.equal((await f.manager.getCaptureStatusSnapshot()).kind, 'paused');
+  assert.deepEqual(f.starts, [true]);
+  assert.equal(f.manager.getStatus(), false);
+  assert.equal(f.enabled(), false);
 });
 
 test('subject pause blocks a queued manual start without changing saved preference', async t => {

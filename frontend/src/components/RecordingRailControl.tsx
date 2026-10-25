@@ -56,7 +56,9 @@ export function RecordingRailControl() {
         <span
           className={[
             'app-recording-light',
-            capture.isCapturingScreenshots ? 'app-recording-light--on' : null,
+            capture.isCapturingScreenshots && !permissionRequired
+              ? 'app-recording-light--on'
+              : null,
           ]
             .filter(Boolean)
             .join(' ')}

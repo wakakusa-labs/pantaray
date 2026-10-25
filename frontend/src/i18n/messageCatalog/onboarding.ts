@@ -19,7 +19,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
       'Pantaray carries out what you ask, and suggests things before you ask. First, connect the AI it uses for that.',
     'onboarding.ai.sub': 'Sign in with your ChatGPT account, or paste an API key.',
     'onboarding.ai.blocked': 'Connect an AI to continue',
-    'onboarding.recording.blocked': 'Turn recording on to continue',
     'onboarding.webSearch.lead':
       'Lets Pantaray search the web for work that needs research. Paste a Tavily API key.',
     'onboarding.done.title': 'You are all set',
@@ -36,25 +35,17 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.lead':
       'Pantaray records what you do on this Mac and uses it for suggestions and tasks.',
     'onboarding.recording.details': 'What is recorded',
-    'onboarding.recording.permissionsTitle': 'macOS permissions',
-    'onboarding.recording.permissionsNote': 'Allow opens System Settings. Turn Pantaray on there.',
-    'onboarding.recording.switchTitle': 'Turn recording on',
-    'onboarding.recording.switchLabel': 'Recording',
-    'onboarding.recording.recordingOn': 'Recording is on.',
-    'onboarding.recording.accessibility': 'Accessibility',
-    'onboarding.recording.screenRecording': 'Screen Recording',
-    'onboarding.recording.privacyPane': 'Privacy & Security',
-    'onboarding.recording.screenRecordingPane': 'Screen & System Audio Recording',
+    'onboarding.recording.accessibilityTitle': 'Allow Accessibility',
+    'onboarding.recording.accessibilityWaiting': 'Turn Pantaray on in System Settings',
+    'onboarding.recording.screenRecordingTitle': 'Allow Screen Recording',
+    'onboarding.recording.screenRecordingWaiting':
+      'Turn Pantaray on in System Settings, then reopen it when asked',
     'onboarding.recording.allow': 'Allow',
-    'onboarding.recording.waiting': 'Turn Pantaray on in System Settings',
     'onboarding.recording.granted': 'Allowed',
-    'onboarding.recording.relaunch': 'Reopen Pantaray',
-    'onboarding.recording.relaunchNote':
-      'Once it is on, reopen Pantaray to use it. Setup continues from this step.',
-    'onboarding.recording.switchReady': 'Turn it on to start recording.',
-    'onboarding.recording.switchBlocked': 'You can turn it on once both are allowed.',
-    'onboarding.recording.permissionPending':
-      'More permissions are needed. Allow them in System Settings, then turn the switch on again.',
+    'onboarding.recording.startTitle': 'Start recording',
+    'onboarding.recording.startNote': 'You can choose apps and sites to exclude later in Settings',
+    'onboarding.recording.start': 'Start',
+    'onboarding.recording.recording': 'Recording',
     'onboarding.apps.lead':
       'Let Pantaray use the services you use every day, such as Gmail and your calendar, for its work. Connecting them takes a Composio API key.',
     'onboarding.apps.leadWithKey':
@@ -88,7 +79,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
       'Pantaray は、頼んだことを進め、頼む前に提案もします。まず、そのときに使う AI をつなぎます。',
     'onboarding.ai.sub': 'ChatGPT のアカウントでログインするか、API キーを貼り付けてください。',
     'onboarding.ai.blocked': 'AI をつなぐと次へ進めます',
-    'onboarding.recording.blocked': '記録をオンにすると次へ進めます',
     'onboarding.webSearch.lead':
       '調べものが要る作業で、Pantaray が Web を検索できるようになります。Tavily の API キーを貼り付けてください。',
     'onboarding.done.title': '準備ができました',
@@ -104,26 +94,17 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.finishFailed': '保存できませんでした。もう一度お試しください。',
     'onboarding.recording.lead': 'この Mac での操作を記録して、提案や作業に使います。',
     'onboarding.recording.details': '記録する内容',
-    'onboarding.recording.permissionsTitle': 'macOS の許可',
-    'onboarding.recording.permissionsNote':
-      '「許可する」を押すとシステム設定が開くので、Pantaray をオンにしてください。',
-    'onboarding.recording.switchTitle': '記録をオンにする',
-    'onboarding.recording.switchLabel': '記録',
-    'onboarding.recording.recordingOn': '記録しています。',
-    'onboarding.recording.accessibility': 'アクセシビリティ',
-    'onboarding.recording.screenRecording': '画面収録',
-    'onboarding.recording.privacyPane': 'プライバシーとセキュリティ',
-    'onboarding.recording.screenRecordingPane': '画面収録とシステムオーディオ録音',
+    'onboarding.recording.accessibilityTitle': 'アクセシビリティを許可',
+    'onboarding.recording.accessibilityWaiting': 'システム設定で Pantaray をオンにします',
+    'onboarding.recording.screenRecordingTitle': '画面収録を許可',
+    'onboarding.recording.screenRecordingWaiting':
+      'システム設定で Pantaray をオンにして、表示に従って開き直します',
     'onboarding.recording.allow': '許可する',
-    'onboarding.recording.waiting': 'システム設定で Pantaray をオンにしてください',
     'onboarding.recording.granted': '許可済み',
-    'onboarding.recording.relaunch': 'Pantaray を開き直す',
-    'onboarding.recording.relaunchNote':
-      'オンにしたら、開き直すと使えるようになります。この画面の続きから再開します。',
-    'onboarding.recording.switchReady': 'オンにすると記録を始めます。',
-    'onboarding.recording.switchBlocked': '2 つの許可が済むとオンにできます。',
-    'onboarding.recording.permissionPending':
-      'ほかにも許可が必要です。システム設定で許可したら、もう一度スイッチをオンにしてください。',
+    'onboarding.recording.startTitle': '記録を始める',
+    'onboarding.recording.startNote': '除外するアプリやサイトは、あとで設定で選べます',
+    'onboarding.recording.start': '始める',
+    'onboarding.recording.recording': '記録中',
     'onboarding.apps.lead':
       'Gmail やカレンダーなど、ふだん使うサービスを Pantaray の作業に使えるようにします。つなぐには Composio の API キーが要ります。',
     'onboarding.apps.leadWithKey': 'つなぐサービスを選んでください。あとから設定で増やせます。',

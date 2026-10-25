@@ -47,8 +47,8 @@ import {
   type RecordingStartResult,
 } from '../screenshot/screenshotSync';
 import {
+  askForCapturePermission,
   holdsScreenRecording,
-  openCapturePermissionSettings,
   readCapturePermissions,
   requestCapturePermissions,
 } from '../windows/macosPermissions';
@@ -477,9 +477,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         startScreenshots,
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
-        openCapturePermissionSettings,
+        askForCapturePermission,
         onboarding: { getState: onboarding.get, setState: setOnboardingState },
-        app,
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
         onCaptureSettingsChanged: () => void params.updateUi.refreshCaptureStatus(),

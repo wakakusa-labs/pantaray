@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
@@ -24,8 +24,7 @@ function Step() {
 
 function stubBridge(start = vi.fn(async () => 'started')) {
   const permissions = { accessibility: false, screenRecording: false };
-  const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
-  const relaunch = vi.fn(async () => undefined);
+  const askForPermission = vi.fn(async (_permission: string) => undefined);
   let statusChanged: (enabled: boolean) => void = () => undefined;
   window.electron = {
     screenshot: {
@@ -40,14 +39,12 @@ function stubBridge(start = vi.fn(async () => 'started')) {
         permissions: { ...permissions },
         introRequested: false,
       })),
-      openPermissionSettings,
+      askForPermission,
     },
-    app: { relaunch },
   } as unknown as Window['electron'];
   return {
     permissions,
-    openPermissionSettings,
-    relaunch,
+    askForPermission,
     start,
     reportStatus: (enabled: boolean) => statusChanged(enabled),
   };
@@ -65,8 +62,14 @@ async function renderStep() {
       </LocalOwnerContext.Provider>
     </AuthContext.Provider>
   );
-  return screen.findByRole('switch', { name: 'コンピューター操作の記録' });
+  return screen.findByRole('button', { name: '始める' });
 }
+
+/** The checklist row with this title. */
+const row = (title: string) => within(screen.getByText(title).closest('li')!);
+const ACCESSIBILITY = 'アクセシビリティを許可';
+const SCREEN_RECORDING = '画面収録を許可';
+const START = '記録を始める';
 
 // Coming back from System Settings focuses the window, which re-reads the permissions.
 async function returnFromSystemSettings() {
@@ -81,74 +84,56 @@ afterEach(() => {
 });
 
 describe('RecordingStep', () => {
-  it('opens each permission its own pane and keeps the switch off until both are granted', async () => {
+  it('asks for each permission from its own row and keeps start disabled until both are granted', async () => {
     const bridge = stubBridge();
-    const toggle = await renderStep();
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText('2 つの許可が済むとオンにできます。')).toBeInTheDocument();
+    const start = await renderStep();
+    expect(start).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: 許可する' }));
-    expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'システム設定で Pantaray をオンにしてください'
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: システム設定を開く' }));
-    expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
+    const allowAccessibility = row(ACCESSIBILITY).getByRole('button', { name: /^許可する/ });
+    fireEvent.click(allowAccessibility);
+    expect(bridge.askForPermission).toHaveBeenLastCalledWith('accessibility');
+    expect(row(ACCESSIBILITY).getByText('システム設定で Pantaray をオンにします')).toBeVisible();
+    // The same button now opens System Settings again, so focus is not lost.
+    expect(allowAccessibility).toHaveAccessibleName(`システム設定を開く ${ACCESSIBILITY}`);
+    fireEvent.click(allowAccessibility);
+    expect(bridge.askForPermission).toHaveBeenLastCalledWith('accessibility');
+    expect(row(SCREEN_RECORDING).getByRole('button')).toHaveTextContent('許可する');
 
     bridge.permissions.accessibility = true;
     await returnFromSystemSettings();
-    expect(await screen.findByText('許可済み')).toBeInTheDocument();
-    expect(toggle).toBeDisabled();
+    expect(await row(ACCESSIBILITY).findByText('許可済み')).toBeVisible();
+    expect(row(ACCESSIBILITY).queryByRole('button')).not.toBeInTheDocument();
+    expect(start).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: '画面収録: 許可する' }));
-    expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('screen_recording');
-    expect(toggle).toBeDisabled();
+    fireEvent.click(row(SCREEN_RECORDING).getByRole('button', { name: /^許可する/ }));
+    expect(bridge.askForPermission).toHaveBeenLastCalledWith('screen_recording');
+    expect(
+      row(SCREEN_RECORDING).getByText(
+        'システム設定で Pantaray をオンにして、表示に従って開き直します'
+      )
+    ).toBeVisible();
+    expect(start).toBeDisabled();
 
     bridge.permissions.screenRecording = true;
     await returnFromSystemSettings();
-    await waitFor(() => expect(screen.getAllByText('許可済み')).toHaveLength(2));
-    expect(toggle).toBeEnabled();
-    expect(screen.getByText('オンにすると記録を始めます。')).toBeInTheDocument();
+    expect(await row(SCREEN_RECORDING).findByText('許可済み')).toBeVisible();
+    expect(start).toBeEnabled();
+    expect(row(START).getByText('除外するアプリやサイトは、あとで設定で選べます')).toBeVisible();
   });
 
-  it('offers to reopen only after Screen Recording was asked for, and never shows it granted before', async () => {
-    const bridge = stubBridge();
-    await renderStep();
-    const reopen = () => screen.queryByRole('button', { name: 'Pantaray を開き直す' });
-    expect(reopen()).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: 許可する' }));
-    expect(reopen()).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '画面収録: 許可する' }));
-    // The grant made in System Settings reads as missing until the app reopens.
-    await returnFromSystemSettings();
-    expect(screen.queryByText('許可済み')).not.toBeInTheDocument();
-
-    fireEvent.click(reopen()!);
-    expect(bridge.relaunch).toHaveBeenCalledTimes(1);
-    // Each relaunch call would start one more instance after this one quits.
-    expect(reopen()).toBeDisabled();
-  });
-
-  it('starts recording from the switch and says why a start did not finish', async () => {
+  it('shows a start that did not finish on the start row, in place of its note', async () => {
     const start = vi.fn(async () => 'permission_pending');
     const bridge = stubBridge(start);
     Object.assign(bridge.permissions, { accessibility: true, screenRecording: true });
-    const toggle = await renderStep();
-    await waitFor(() => expect(toggle).toBeEnabled());
+    const button = await renderStep();
+    await waitFor(() => expect(button).toBeEnabled());
 
-    fireEvent.click(toggle);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'ほかにも許可が必要です。システム設定で許可したら、もう一度スイッチをオンにしてください。'
-    );
-    expect(start).toHaveBeenCalledTimes(1);
-
-    start.mockResolvedValueOnce('failed');
-    fireEvent.click(toggle);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    fireEvent.click(button);
+    expect(await row(START).findByRole('alert')).toHaveTextContent(
       '記録を開始できませんでした。もう一度お試しください。'
     );
+    expect(row(START).queryByText('除外するアプリやサイトは、あとで設定で選べます')).toBeNull();
+    expect(screen.getByTestId('done')).toHaveTextContent('false');
   });
 
   it('is not done while a start waits on more permissions, even though the status reads on', async () => {
@@ -159,20 +144,19 @@ describe('RecordingStep', () => {
       return 'permission_pending';
     });
     Object.assign(bridge.permissions, { accessibility: true, screenRecording: true });
-    const toggle = await renderStep();
-    await waitFor(() => expect(toggle).toBeEnabled());
+    const button = await renderStep();
+    await waitFor(() => expect(button).toBeEnabled());
 
-    fireEvent.click(toggle);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'もう一度スイッチをオンにしてください'
-    );
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(button);
+    expect(await row(START).findByRole('alert')).toHaveTextContent('記録を開始できませんでした');
+    expect(row(START).queryByText('記録中')).not.toBeInTheDocument();
     expect(screen.getByTestId('done')).toHaveTextContent('false');
 
-    // Turning it on again once the permission is granted finds the recorder activated.
-    fireEvent.click(toggle);
+    // Starting again once the permission is granted finds the recorder activated.
+    fireEvent.click(row(START).getByRole('button', { name: '始める' }));
     await waitFor(() => expect(screen.getByTestId('done')).toHaveTextContent('true'));
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(row(START).getByText('記録中')).toBeVisible();
+    expect(row(START).queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

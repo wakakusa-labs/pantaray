@@ -170,8 +170,8 @@ declare global {
         getGateState: () => Promise<CaptureGateState>;
         /** 記録画面を「あとで」で閉じ、待っている会話を取り下げる。main は表示されていた owner の答えだけを受ける */
         dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
-        /** システム設定のプライバシーとセキュリティで、指定した権限の画面を開く */
-        openPermissionSettings: (permission: CapturePermissionPane) => Promise<void>;
+        /** macOS に指定した権限を求めて（システム設定の一覧に載る）、その権限の画面を開く */
+        askForPermission: (permission: CapturePermissionPane) => Promise<void>;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;
         getStatus: () => Promise<boolean>;
@@ -347,10 +347,6 @@ declare global {
       onboarding?: {
         getState: () => Promise<OnboardingState>;
         setState: (state: OnboardingState) => Promise<OnboardingState>;
-      };
-      app?: {
-        /** アプリを終了して開き直す（画面収録の許可は開き直したときに効く） */
-        relaunch: () => Promise<void>;
       };
       shortcut?: {
         getState: () => Promise<ElectronGlobalShortcutState>;

@@ -1,4 +1,4 @@
-import { app, shell, systemPreferences } from 'electron';
+import { app, desktopCapturer, shell, systemPreferences } from 'electron';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { CapturePermission } from '../context/zaneiProcess';
@@ -68,11 +68,25 @@ export function readCapturePermissions(): CapturePermissions {
   };
 }
 
-/** Opens the System Settings pane where the user grants this permission. */
-export function openCapturePermissionSettings(permission: CapturePermissionPane): Promise<void> {
-  return openSecurityPane(
-    permission === 'screen_recording' ? 'Privacy_ScreenCapture' : 'Privacy_Accessibility'
-  );
+/**
+ * Asks macOS for this permission, then opens the System Settings pane where the user grants
+ * it. The pane lists only apps that have asked, so without the ask Pantaray is not there.
+ */
+export async function askForCapturePermission(permission: CapturePermissionPane): Promise<void> {
+  if (permission === 'accessibility') {
+    // `true` adds the app to the list and shows the system prompt.
+    systemPreferences.isTrustedAccessibilityClient(true);
+    return openSecurityPane('Privacy_Accessibility');
+  }
+  // macOS takes a capture attempt as the ask; a 1x1 thumbnail keeps the capture trivial.
+  try {
+    await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+  } catch (error) {
+    // Without the grant the capture itself may fail after the ask is made; the pane still
+    // has to open for the user to grant it.
+    console.error('Screen capture request failed:', error);
+  }
+  return openSecurityPane('Privacy_ScreenCapture');
 }
 
 /** Called only by an explicit recording start. */

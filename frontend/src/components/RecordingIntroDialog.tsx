@@ -152,9 +152,7 @@ export function RecordingIntroDialog() {
         <button
           type="button"
           className="recording-intro-settings"
-          onClick={() =>
-            void window.electron?.screenshot?.openPermissionSettings?.(missingPermission)
-          }
+          onClick={() => void window.electron?.screenshot?.askForPermission?.(missingPermission)}
         >
           {t('recordingIntro.openSettings')}
         </button>

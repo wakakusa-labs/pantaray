@@ -101,7 +101,6 @@ describe('OnboardingGate', () => {
     expect(screen.getByRole('heading', { name: /記録を始める/ })).toHaveFocus();
     expect(steps().getByRole('button', { name: /AI をつなぐ/ })).toHaveTextContent('済み');
     expect(next()).toBeDisabled();
-    expect(screen.getByText('記録をオンにすると次へ進めます')).toBeInTheDocument();
   });
 
   it('resumes at the saved step and reads the optional steps it went past as skipped', async () => {

@@ -94,7 +94,6 @@ test('an unreadable state restarts setup, is reported, and is replaced by the ne
 
 /** The desktop features with Electron, the recorder and the welcome request replaced. */
 function loadFeatures(t, dir) {
-  const calls = [];
   const posted = [];
   const recorder = { params: null };
   let context;
@@ -105,8 +104,6 @@ function loadFeatures(t, dir) {
         app: {
           getPath: () => dir,
           getLocale: () => 'en',
-          relaunch: () => calls.push('relaunch'),
-          quit: () => calls.push('quit'),
         },
         BrowserWindow: { getAllWindows: () => [] },
         systemPreferences: {},
@@ -187,7 +184,7 @@ function loadFeatures(t, dir) {
     logger: null,
   });
   feature.registerMainIpc();
-  return { context, recorder, posted, calls };
+  return { context, recorder, posted };
 }
 
 test('the first recording does not count as an earlier user', (t) => {
@@ -219,18 +216,4 @@ test('recording during setup asks for the welcome right away', async (t) => {
   recorder.params.onRecordingStarted('owner-a');
   await Promise.resolve();
   assert.deepEqual(posted, ['owner-a']);
-});
-
-test('relaunching schedules the new instance before quitting', (t) => {
-  const { context, calls } = loadFeatures(t, tempDir(t));
-  context.app.relaunch();
-  // Electron starts the scheduled instance only when the quit it follows completes.
-  assert.deepEqual(calls, ['relaunch', 'quit']);
-});
-
-test('relaunching again while quitting schedules no second instance', (t) => {
-  const { context, calls } = loadFeatures(t, tempDir(t));
-  context.app.relaunch();
-  context.app.relaunch();
-  assert.deepEqual(calls, ['relaunch', 'quit', 'quit']);
 });

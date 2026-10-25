@@ -7,7 +7,7 @@ let systemVersion = '15.0.0';
 process.getSystemVersion = () => systemVersion;
 
 function loadPermissions({ error = null, isPackaged = false, accessibilityTrusted = false,
-  screenRecording = 'granted', macosVersion = '15.0.0' } = {}) {
+  screenRecording = 'granted', macosVersion = '15.0.0', captureError = null } = {}) {
   const calls = [];
   systemVersion = macosVersion;
   const target = require.resolve('../electron/dist/windows/macosPermissions');
@@ -16,6 +16,9 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
   Module._load = function(request, parent, isMain) {
     if (request === 'electron') return {
       app: { isPackaged },
+      desktopCapturer: { getSources: async options => {
+        calls.push({ capture: options }); if (captureError) throw captureError; return [];
+      } },
       shell: { openExternal: async url => { calls.push(url); } },
       systemPreferences: { isTrustedAccessibilityClient: prompt => {
         calls.push({ ax: prompt }); return accessibilityTrusted;
@@ -32,7 +35,7 @@ function loadPermissions({ error = null, isPackaged = false, accessibilityTruste
     const module = require(target);
     return { request: module.requestCapturePermissions,
       read: module.readCapturePermissions,
-      openSettings: module.openCapturePermissionSettings, calls };
+      ask: module.askForCapturePermission, calls };
   }
   finally { Module._load = load; delete require.cache[target]; }
 }
@@ -99,14 +102,28 @@ test('the E2E override stands in for TCC only in an unpackaged build', () => {
   }
 });
 
-test('each gate permission opens its own System Settings pane', async () => {
-  const f = loadPermissions();
-  await f.openSettings('accessibility');
-  await f.openSettings('screen_recording');
-  assert.deepEqual(f.calls, [
+// System Settings lists only apps that asked, so each pane opens after its own ask.
+test('each gate permission asks macOS for itself, then opens its own pane', async () => {
+  const accessibility = loadPermissions();
+  await accessibility.ask('accessibility');
+  assert.deepEqual(accessibility.calls, [
+    { ax: true },
     'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+  ]);
+
+  const screen = loadPermissions();
+  await screen.ask('screen_recording');
+  assert.deepEqual(screen.calls, [
+    { capture: { types: ['screen'], thumbnailSize: { width: 1, height: 1 } } },
     'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
   ]);
+});
+
+test('a capture refused for want of the grant still opens the Screen Recording pane', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const f = loadPermissions({ captureError: new Error('Failed to get sources.') });
+  await f.ask('screen_recording');
+  assert.match(f.calls.at(-1), /Privacy_ScreenCapture$/);
 });
 
 test('Screen Recording reads as granted only when macOS says so, or cannot grant it', () => {

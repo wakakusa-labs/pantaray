@@ -68,10 +68,8 @@ export function OnboardingScreen({
   const requiredDoneBefore = (i: number) =>
     STEPS.slice(0, i).every((s) => !s.required || configured[s.id]);
   const next = () => progress.goTo(STEPS[index + 1].id);
-  const blockedHint =
-    current.required && !configured[step]
-      ? t(step === 'ai' ? 'onboarding.ai.blocked' : 'onboarding.recording.blocked')
-      : null;
+  // The recording step's checklist already shows what is missing.
+  const blockedHint = step === 'ai' && !configured.ai ? t('onboarding.ai.blocked') : null;
 
   return (
     <div className="app-shell onb-shell">

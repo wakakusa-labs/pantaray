@@ -25,12 +25,8 @@ export function useRecordingStep() {
     null
   );
 
-  const changeRecording = async (enabled: boolean) => {
+  const start = async () => {
     setStartOutcome(null);
-    if (!enabled) {
-      await capture.setScreenshotsEnabled(false);
-      return;
-    }
     const result = await capture.startRecording();
     if (result !== 'started') setStartOutcome(result);
   };
@@ -39,5 +35,5 @@ export function useRecordingStep() {
     capture.isCapturingScreenshots === null
       ? null
       : capture.isCapturingScreenshots && startOutcome !== 'permission_pending';
-  return { capture, startOutcome, isRecording, changeRecording };
+  return { capture, startOutcome, isRecording, start };
 }

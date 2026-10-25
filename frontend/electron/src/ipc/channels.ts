@@ -47,6 +47,8 @@ export const validReceiveChannels = [
   'privacy:captureSettingsUpdated',
   // Capture gate: re-read it now (main brought this window forward)
   'recording:gateStateChanged',
+  // Main window only: whether the recorder waits on a macOS permission
+  'recording:permissionRequiredChanged',
   // UI language change
   'ui:languageChanged',
   // A downloaded update became ready: re-read the notice
@@ -148,6 +150,7 @@ export const validInvokeChannels = [
   'recording:dismissIntro',
   'recording:getPermissions',
   'recording:askForPermission',
+  'recording:getPermissionRequired',
   // Main window only: first-run setup progress
   'onboarding:getState',
   'onboarding:setState',

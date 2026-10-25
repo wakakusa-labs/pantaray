@@ -816,11 +816,11 @@ test('recording:askForPermission requires the pane to open', async () => {
     },
   });
   const invoke = getInvoke(ipcMain, 'recording:askForPermission');
-  for (const invalid of [undefined, 'input_monitoring', 'Privacy_ScreenCapture', 1]) {
+  for (const invalid of [undefined, 'accessibility', 'Privacy_ScreenCapture', 1]) {
     await assert.rejects(invoke(invalid), rejectsValidation('recording:askForPermission'));
   }
   assert.equal(askForPermission.calls.length, 0);
-  await invoke('screen_recording');
-  await invoke('accessibility');
-  assert.deepEqual(askForPermission.calls, [['screen_recording'], ['accessibility']]);
+  await invoke('capture_screen');
+  await invoke('observe_input');
+  assert.deepEqual(askForPermission.calls, [['capture_screen'], ['observe_input']]);
 });

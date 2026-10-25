@@ -1,10 +1,5 @@
 import { app, desktopCapturer, shell, systemPreferences } from 'electron';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { CapturePermission } from '../context/zaneiProcess';
-import type { CapturePermissionPane } from '../ipc/schemas/onboarding';
-
-const run = promisify(execFile);
 
 type SecurityPane =
   | 'Privacy_Accessibility'
@@ -69,54 +64,35 @@ export function readCapturePermissions(): CapturePermissions {
 }
 
 /**
- * Asks macOS for this permission, then opens the System Settings pane where the user grants
- * it. The pane lists only apps that have asked, so without the ask Pantaray is not there.
+ * Asks macOS for this permission where it can, then opens the System Settings pane where the
+ * user grants it. The panes list only apps that have asked, so without the ask Pantaray is
+ * not there.
  */
-export async function askForCapturePermission(permission: CapturePermissionPane): Promise<void> {
-  if (permission === 'accessibility') {
-    // `true` adds the app to the list and shows the system prompt.
-    systemPreferences.isTrustedAccessibilityClient(true);
-    return openSecurityPane('Privacy_Accessibility');
-  }
-  // macOS takes a capture attempt as the ask; a 1x1 thumbnail keeps the capture trivial.
-  try {
-    await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
-  } catch (error) {
-    // Without the grant the capture itself may fail after the ask is made; the pane still
-    // has to open for the user to grant it.
-    console.error('Screen capture request failed:', error);
-  }
-  return openSecurityPane('Privacy_ScreenCapture');
-}
-
-/** Called only by an explicit recording start. */
-export async function requestCapturePermissions(missing: CapturePermission[]): Promise<void> {
-  for (const [capability, bundleId] of [
-    ['automate_browser', 'com.google.Chrome'],
-    ['automate_safari', 'com.apple.Safari'],
-  ] as const) {
-    if (!missing.includes(capability)) continue;
-    try {
-      // Sending a harmless AppleEvent makes this browser appear in Pantaray's Automation list.
-      await run('/usr/bin/osascript', ['-e', `tell application id "${bundleId}" to get name`], {
-        timeout: 10_000,
-      });
-    } catch (error) {
-      // User denial is the expected permission-required result; other failures remain visible.
-      if (
-        !(error instanceof Error && 'stderr' in error && String(error.stderr).includes('-1743'))
-      ) {
-        throw error;
+export async function askForCapturePermission(permission: CapturePermission): Promise<void> {
+  switch (permission) {
+    case 'read_accessibility_tree':
+      // `true` adds the app to the list and shows the system prompt.
+      systemPreferences.isTrustedAccessibilityClient(true);
+      return openSecurityPane('Privacy_Accessibility');
+    case 'observe_input':
+      // Neither Electron nor Node can make the Input Monitoring request (IOHIDRequestAccess).
+      return openSecurityPane('Privacy_ListenEvent');
+    case 'capture_screen':
+      // macOS takes a capture attempt as the ask; a 1x1 thumbnail keeps the capture trivial.
+      try {
+        await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: { width: 1, height: 1 },
+        });
+      } catch (error) {
+        // Without the grant the capture itself may fail after the ask is made; the pane still
+        // has to open for the user to grant it.
+        console.error('Screen capture request failed:', error);
       }
-    }
+      return openSecurityPane('Privacy_ScreenCapture');
+    case 'automate_browser':
+    case 'automate_safari':
+      // Asked for only once denied, when macOS no longer asks and only the pane can undo it.
+      return openSecurityPane('Privacy_Automation');
   }
-  await openSecurityPane(
-    missing.includes('read_accessibility_tree')
-      ? 'Privacy_Accessibility'
-      : missing.includes('observe_input')
-        ? 'Privacy_ListenEvent'
-        : missing.includes('capture_screen')
-          ? 'Privacy_ScreenCapture'
-          : 'Privacy_Automation'
-  );
 }

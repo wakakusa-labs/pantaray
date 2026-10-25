@@ -366,6 +366,10 @@ export function buildMainContext(params: {
       // the read the current owner's own screen makes (it can open their waiting conversation).
       dismissIntro: (ownerId) =>
         requireOwner() === ownerId ? params.dismissRecordingIntro() : params.readCaptureGateState(),
+      getPermissions: () => {
+        requireOwner();
+        return params.screenshotSync.readPermissions();
+      },
       askForPermission: (permission) => params.askForCapturePermission(permission),
     },
 

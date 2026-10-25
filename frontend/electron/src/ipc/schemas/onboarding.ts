@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { CapturePermission } from '../../context/zaneiProcess';
+
 export const ONBOARDING_STEPS = ['ai', 'recording', 'web_search', 'apps', 'done'] as const;
 
 /** Where first-run setup stands on this device; `completed` shows the app as usual. */
@@ -10,7 +12,11 @@ export const OnboardingStateSchema = z.discriminatedUnion('status', [
 
 export type OnboardingState = z.infer<typeof OnboardingStateSchema>;
 
-/** The two macOS permissions the capture gate requires, each granted in its own pane. */
-export const CapturePermissionPaneSchema = z.enum(['accessibility', 'screen_recording']);
-
-export type CapturePermissionPane = z.infer<typeof CapturePermissionPaneSchema>;
+/** A macOS permission a recording start can wait on, which the renderer can ask for. */
+export const CapturePermissionSchema = z.enum([
+  'read_accessibility_tree',
+  'observe_input',
+  'capture_screen',
+  'automate_browser',
+  'automate_safari',
+] as const satisfies readonly CapturePermission[]);

@@ -120,11 +120,40 @@ test('healthy recorder awaiting human permission is retained rather than timed o
   const stopped = f.manager.stop(); f.child.emit('close', 0); await stopped;
 });
 
-test('deferred browser permission follows native readiness and does not launch an idle browser', async t => {
-  const f = fixture(t, { missing: { automate_safari: { required: true, state: 'deferred' } } });
+test('browser Automation not asked yet holds no start back: macOS asks in its own dialog', async t => {
+  const f = fixture(t, { missing: { read_accessibility_tree: { required: true, state: 'available' },
+    observe_input: { required: true, state: 'available' },
+    automate_browser: { required: true, state: 'deferred' },
+    automate_safari: { required: true, state: 'deferred' } } });
   await f.manager.start('[capture]\n');
   assert.ok(!f.calls.some(call => call.permissionRequest));
   f.child.emit('close', 0);
+});
+
+// Setup's checklist shows this list, and a start waits on exactly its missing entries.
+test('the permissions a start waits on are listed in grant order, each with its state', async t => {
+  const f = fixture(t, { screenRecording: false, missing: {
+    read_accessibility_tree: { required: true, state: 'available' },
+    observe_input: { required: true, state: 'action_required' },
+    // Denied, so macOS no longer asks: only its pane can undo it, and the recorder waits on it.
+    automate_browser: { required: true, state: 'action_required' },
+    automate_safari: { required: true, state: 'deferred' } } });
+  assert.deepEqual(await f.manager.readPermissions(), [
+    { permission: 'read_accessibility_tree', granted: true },
+    { permission: 'observe_input', granted: false },
+    { permission: 'capture_screen', granted: false },
+    { permission: 'automate_browser', granted: false },
+  ]);
+  const failure = await f.manager.start('[capture]\n').catch(error => error);
+  assert.deepEqual(failure.missing, ['observe_input', 'capture_screen', 'automate_browser']);
+
+  // A permission the recorder does not require is no row and holds nothing back.
+  const optional = fixture(t, { missing: { read_accessibility_tree: { required: true, state: 'available' },
+    observe_input: { required: false, state: 'action_required' } } });
+  assert.deepEqual(await optional.manager.readPermissions(), [
+    { permission: 'read_accessibility_tree', granted: true },
+    { permission: 'capture_screen', granted: true },
+  ]);
 });
 
 test('pause and resume address the subject store, and a stale pause never outlives its recorder', async t => {

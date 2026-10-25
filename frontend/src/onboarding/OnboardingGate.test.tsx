@@ -35,7 +35,7 @@ function stubBridge(getState: () => Promise<OnboardingState>, setup: Setup) {
     screenshot: {
       getStatus: async () => setup.recording,
       onStatusChanged: () => () => undefined,
-      getGateState: async () => ({ permissions: { accessibility: false, screenRecording: false } }),
+      getPermissions: async () => [{ permission: 'read_accessibility_tree', granted: false }],
     },
     integrations: { getStatus: vi.fn(async () => ({ state: 'not_configured' })) },
   } as unknown as Window['electron'];

@@ -37,9 +37,16 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.details': 'What is recorded',
     'onboarding.recording.accessibilityTitle': 'Allow Accessibility',
     'onboarding.recording.accessibilityWaiting': 'Turn Pantaray on in System Settings',
+    'onboarding.recording.inputMonitoringTitle': 'Allow Input Monitoring',
+    'onboarding.recording.inputMonitoringWaiting':
+      'Turn Pantaray on in System Settings (add it with + if it is not listed)',
     'onboarding.recording.screenRecordingTitle': 'Allow Screen Recording',
     'onboarding.recording.screenRecordingWaiting':
       'Turn Pantaray on in System Settings, then reopen it when asked',
+    'onboarding.recording.chromeTitle': 'Allow control of Chrome',
+    'onboarding.recording.chromeWaiting': 'Turn on Google Chrome under Pantaray in System Settings',
+    'onboarding.recording.safariTitle': 'Allow control of Safari',
+    'onboarding.recording.safariWaiting': 'Turn on Safari under Pantaray in System Settings',
     'onboarding.recording.allow': 'Allow',
     'onboarding.recording.granted': 'Allowed',
     'onboarding.recording.startTitle': 'Start recording',
@@ -96,9 +103,17 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.details': '記録する内容',
     'onboarding.recording.accessibilityTitle': 'アクセシビリティを許可',
     'onboarding.recording.accessibilityWaiting': 'システム設定で Pantaray をオンにします',
+    'onboarding.recording.inputMonitoringTitle': '入力監視を許可',
+    'onboarding.recording.inputMonitoringWaiting':
+      'システム設定で Pantaray をオンにします（一覧にないときは + で追加します）',
     'onboarding.recording.screenRecordingTitle': '画面収録を許可',
     'onboarding.recording.screenRecordingWaiting':
       'システム設定で Pantaray をオンにして、表示に従って開き直します',
+    'onboarding.recording.chromeTitle': 'Chrome の操作を許可',
+    'onboarding.recording.chromeWaiting':
+      'システム設定で Pantaray の「Google Chrome」をオンにします',
+    'onboarding.recording.safariTitle': 'Safari の操作を許可',
+    'onboarding.recording.safariWaiting': 'システム設定で Pantaray の「Safari」をオンにします',
     'onboarding.recording.allow': '許可する',
     'onboarding.recording.granted': '許可済み',
     'onboarding.recording.startTitle': '記録を始める',

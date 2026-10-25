@@ -15,12 +15,10 @@ const PERMISSIONS = [
   {
     id: 'accessibility',
     label: 'onboarding.recording.accessibility',
-    pane: 'onboarding.recording.accessibility',
   },
   {
     id: 'screen_recording',
     label: 'onboarding.recording.screenRecording',
-    pane: 'onboarding.recording.screenRecordingPane',
   },
 ] as const;
 
@@ -92,14 +90,14 @@ export function RecordingStep({
                       </span>
                     </div>
                   ) : requested.has(permission.id) ? (
-                    <>
-                      <div className="ai-inline">
-                        <span className="onb-waiting" role="status">
-                          {t('onboarding.recording.waiting')}
-                        </span>
-                        {/* macOS applies a Screen Recording grant only to a reopened app, so it
-                            keeps reading as missing until then. */}
-                        {permission.id === 'screen_recording' ? (
+                    <div className="ai-inline">
+                      {/* macOS applies a Screen Recording grant only to a reopened app, so it
+                          keeps reading as missing until then. */}
+                      {permission.id === 'screen_recording' ? (
+                        <>
+                          <span className="onb-waiting" role="status">
+                            {t('onboarding.recording.relaunchNote')}
+                          </span>
                           <button
                             type="button"
                             className="settings-action-button"
@@ -108,26 +106,17 @@ export function RecordingStep({
                           >
                             {t('onboarding.recording.relaunch')}
                           </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="settings-text-button"
-                          aria-label={`${label}: ${t('recordingIntro.openSettings')}`}
-                          onClick={() => void openPane(permission.id)}
-                        >
-                          {t('recordingIntro.openSettings')}
-                        </button>
-                      </div>
-                      <p className="ai-note ai-note--control">
-                        {t('onboarding.recording.privacyPane')} <span aria-hidden="true">›</span>{' '}
-                        {t(permission.pane)}
-                      </p>
-                      {permission.id === 'screen_recording' ? (
-                        <p className="ai-note ai-note--control">
-                          {t('onboarding.recording.relaunchNote')}
-                        </p>
+                        </>
                       ) : null}
-                    </>
+                      <button
+                        type="button"
+                        className="settings-text-button"
+                        aria-label={`${label}: ${t('recordingIntro.openSettings')}`}
+                        onClick={() => void openPane(permission.id)}
+                      >
+                        {t('recordingIntro.openSettings')}
+                      </button>
+                    </div>
                   ) : (
                     <div className="ai-inline">
                       <button

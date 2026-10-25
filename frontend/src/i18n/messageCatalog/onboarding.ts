@@ -43,14 +43,10 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.recordingOn': 'Recording is on.',
     'onboarding.recording.accessibility': 'Accessibility',
     'onboarding.recording.screenRecording': 'Screen Recording',
-    'onboarding.recording.privacyPane': 'Privacy & Security',
-    'onboarding.recording.screenRecordingPane': 'Screen & System Audio Recording',
     'onboarding.recording.allow': 'Allow',
-    'onboarding.recording.waiting': 'Turn Pantaray on in System Settings',
     'onboarding.recording.granted': 'Allowed',
     'onboarding.recording.relaunch': 'Reopen Pantaray',
-    'onboarding.recording.relaunchNote':
-      'Once it is on, reopen Pantaray to use it. Setup continues from this step.',
+    'onboarding.recording.relaunchNote': 'Once it is on, reopen Pantaray.',
     'onboarding.recording.switchReady': 'Turn it on to start recording.',
     'onboarding.recording.switchBlocked': 'You can turn it on once both are allowed.',
     'onboarding.recording.permissionPending':
@@ -112,14 +108,10 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.recordingOn': '記録しています。',
     'onboarding.recording.accessibility': 'アクセシビリティ',
     'onboarding.recording.screenRecording': '画面収録',
-    'onboarding.recording.privacyPane': 'プライバシーとセキュリティ',
-    'onboarding.recording.screenRecordingPane': '画面収録とシステムオーディオ録音',
     'onboarding.recording.allow': '許可する',
-    'onboarding.recording.waiting': 'システム設定で Pantaray をオンにしてください',
     'onboarding.recording.granted': '許可済み',
     'onboarding.recording.relaunch': 'Pantaray を開き直す',
-    'onboarding.recording.relaunchNote':
-      'オンにしたら、開き直すと使えるようになります。この画面の続きから再開します。',
+    'onboarding.recording.relaunchNote': 'オンにしたら、開き直してください。',
     'onboarding.recording.switchReady': 'オンにすると記録を始めます。',
     'onboarding.recording.switchBlocked': '2 つの許可が済むとオンにできます。',
     'onboarding.recording.permissionPending':

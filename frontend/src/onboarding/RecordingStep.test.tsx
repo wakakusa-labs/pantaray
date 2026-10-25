@@ -89,9 +89,6 @@ describe('RecordingStep', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: 許可する' }));
     expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'システム設定で Pantaray をオンにしてください'
-    );
     fireEvent.click(screen.getByRole('button', { name: 'アクセシビリティ: システム設定を開く' }));
     expect(bridge.openPermissionSettings).toHaveBeenLastCalledWith('accessibility');
 

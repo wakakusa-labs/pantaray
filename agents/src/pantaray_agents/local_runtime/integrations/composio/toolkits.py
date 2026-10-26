@@ -64,6 +64,17 @@ TOOLKITS: Final[tuple[ToolkitEntry, ...]] = (
             "SLACK_ADD_REACTION_TO_AN_ITEM",
             "SLACK_SCHEDULE_MESSAGE",
         ),
+        # An Action took a coworker's ID for the user's and a file permalink's
+        # ID for the uploader's (2026-10-26).
+        note=(
+            'Slack names people only by user ID ("user": "U…", <@U…> mentions). '
+            "A run result's account.user_id, when present, is the connected "
+            "user's own ID; every other ID is someone else's. Before saying who "
+            "wrote, shared or was mentioned in something, resolve the ID with "
+            "SLACK_FIND_USERS (the ID as query). The ID in a file permalink "
+            "(/files/U…/) is the viewer's, not the uploader's; a message's user "
+            "is who posted it."
+        ),
     ),
     _entry(
         "gmail",

@@ -106,6 +106,9 @@ class IntegrationError(InternalStrictModel):
 class ToolSucceeded(InternalStrictModel):
     outcome: Literal["succeeded"] = "succeeded"
     data: JSONValue
+    # The connected account's own ID in a service that names people only by ID,
+    # such as Slack's U…; without it the model cannot tell the user from others.
+    account_user_id: str | None = None
 
 
 class ToolFailed(InternalStrictModel):

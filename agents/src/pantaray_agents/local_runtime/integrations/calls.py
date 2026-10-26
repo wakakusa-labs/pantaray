@@ -56,7 +56,11 @@ RUN_RESULT_SCHEMA: dict[str, JSONValue] = {
         "account": {
             "type": "object",
             "additionalProperties": False,
-            "properties": {"account": {"type": "string"}, "label": {"type": "string"}},
+            "properties": {
+                "account": {"type": "string"},
+                "label": {"type": "string"},
+                "user_id": {"type": "string"},
+            },
             "required": ["account", "label"],
         },
         "untrusted": {"type": "boolean", "enum": [True]},
@@ -153,12 +157,15 @@ async def execute_integration_call(
             message=_MESSAGES[outcome.error.kind],
             untrusted_detail=outcome.untrusted_detail,
         )
+    account: dict[str, JSONValue] = {
+        "account": resolved.account.account,
+        "label": resolved.account.label,
+    }
+    if outcome.account_user_id is not None:
+        account["user_id"] = outcome.account_user_id
     return {
         "source": resolved.tool.toolkit,
-        "account": {
-            "account": resolved.account.account,
-            "label": resolved.account.label,
-        },
+        "account": account,
         "untrusted": True,
         "data": outcome.data,
     }

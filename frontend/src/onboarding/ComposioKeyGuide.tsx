@@ -51,7 +51,7 @@ function ExternalLink({ href, text }: { href: string; text: string }) {
   return (
     <a className="settings-inline-link" href={href} target="_blank" rel="noopener noreferrer">
       {text}
-      <span aria-hidden="true"> ↗</span>
+      <span aria-hidden="true">↗</span>
     </a>
   );
 }

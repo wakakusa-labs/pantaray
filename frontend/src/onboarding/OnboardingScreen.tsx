@@ -1,11 +1,14 @@
 import { Check, Minus } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { BrandWordmark } from '@/components/BrandWordmark';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
 import { useAuth } from '@/hooks/useAuth';
-import { useIntegrationSettingsController } from '../pages/settings/components/IntegrationSettingsController';
+import {
+  connectedToolkits,
+  useIntegrationSettingsController,
+} from '../pages/settings/components/IntegrationSettingsController';
 import { ConnectionLoadFailure } from '../pages/settings/components/ConnectionLoadFailure';
 import {
   useAiConnectionController,
@@ -51,13 +54,33 @@ export function OnboardingScreen({
   const integrations = useIntegrationSettingsController(
     runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
   );
-  const services =
-    (state?.settings.hasSavedIntegrationKey ? integrations.toolkits : null)?.filter(
-      (toolkit) => toolkit.accounts.length > 0
-    ) ?? [];
+  const keySaved = state?.settings.hasSavedIntegrationKey ?? false;
+  const services = connectedToolkits((keySaved ? integrations.toolkits : null) ?? []);
+  const [servicesRead, setServicesRead] = useState<'reading' | 'read'>('reading');
+  const listReads = useRef(0);
+  const { reload: reloadServices } = integrations;
   const recording = useRecordingStep();
   const titleRef = useRef<HTMLHeadingElement>(null);
   const shownStep = useRef(step);
+
+  const readServices = useCallback(() => {
+    const read = ++listReads.current;
+    void reloadServices().then(() => {
+      if (read === listReads.current) setServicesRead('read');
+    });
+  }, [reloadServices]);
+  useEffect(readServices, [readServices]);
+  // Apps and Done show the services as they are now: a connect can finish after the apps step
+  // was left, which ended its polling.
+  const goTo = (target: OnboardingStep) => {
+    if (target === 'apps' || target === 'done') {
+      setServicesRead('reading');
+      readServices();
+    }
+    progress.goTo(target);
+  };
+  // Until that read lands, no service is known to be missing.
+  const servicesKnown = !keySaved ? 'read' : integrations.loadFailed ? 'failed' : servicesRead;
 
   // A step change moves focus to the new step's heading, as a page change would.
   useEffect(() => {
@@ -77,10 +100,14 @@ export function OnboardingScreen({
   const current = STEPS[index];
   // An optional step the user went past without setting it up was skipped; nothing stores it.
   const outcome = (id: OnboardingStep, i: number): Outcome =>
-    configured[id] ? 'done' : i < index && id !== 'done' ? 'skipped' : 'pending';
+    configured[id]
+      ? 'done'
+      : i < index && id !== 'done' && (id !== 'apps' || servicesKnown === 'read')
+        ? 'skipped'
+        : 'pending';
   const requiredDoneBefore = (i: number) =>
     STEPS.slice(0, i).every((s) => !s.required || configured[s.id]);
-  const next = () => progress.goTo(STEPS[index + 1].id);
+  const next = () => goTo(STEPS[index + 1].id);
   // The connection steps need the connection read first.
   const withConnection = (render: (read: ConnectionState) => ReactNode) =>
     connection.loadError ? (
@@ -127,7 +154,7 @@ export function OnboardingScreen({
                         className={`settings-page-nav-item onb-step-item${isCurrent ? ' settings-page-nav-item--active' : ''}`}
                         aria-current={isCurrent ? 'step' : undefined}
                         disabled={!requiredDoneBefore(i) || progress.finishing === 'saving'}
-                        onClick={() => progress.goTo(s.id)}
+                        onClick={() => goTo(s.id)}
                       >
                         <span
                           className={`onb-marker onb-marker--${state}${isCurrent ? ' onb-marker--current' : ''}`}
@@ -203,6 +230,8 @@ export function OnboardingScreen({
                     isRecording={configured.recording}
                     webSearchDone={configured.web_search}
                     services={services}
+                    servicesRead={servicesKnown}
+                    onReloadServices={() => void reloadServices()}
                   />
                 ) : null}
               </div>
@@ -212,7 +241,7 @@ export function OnboardingScreen({
                   <button
                     type="button"
                     className="settings-action-button"
-                    onClick={() => progress.goTo(STEPS[index - 1].id)}
+                    onClick={() => goTo(STEPS[index - 1].id)}
                   >
                     {t('onboarding.back')}
                   </button>

@@ -13,6 +13,8 @@ export function DoneStep({
   isRecording,
   webSearchDone,
   services,
+  servicesRead,
+  onReloadServices,
 }: {
   t: Translate;
   state: ConnectionState;
@@ -21,8 +23,12 @@ export function DoneStep({
   webSearchDone: boolean;
   /** The connected services; none means the apps step was skipped. */
   services: IntegrationToolkitStatus[];
+  /** Whether `services` is the current list; until it is, apps are neither done nor skipped. */
+  servicesRead: 'reading' | 'read' | 'failed';
+  onReloadServices: () => void;
 }) {
   const appsDone = services.length > 0;
+  const appsSkipped = !appsDone && servicesRead === 'read';
   const skipped = t('onboarding.stepSkipped');
   const shows = (text: string) => <span className="check-item-state">{text}</span>;
 
@@ -36,9 +42,11 @@ export function DoneStep({
           note={aiConnectionLabel(t, state.settings)}
           action={() =>
             shows(
-              aiConnected
-                ? t('settings.aiConnection.chatgpt.connected')
-                : t('onboarding.done.notConnected')
+              t(
+                aiConnected
+                  ? 'settings.aiConnection.chatgpt.connected'
+                  : 'onboarding.done.notConnected'
+              )
             )
           }
         />
@@ -55,12 +63,27 @@ export function DoneStep({
         />
         <CheckItem
           title={t('onboarding.done.apps')}
-          status={appsDone ? 'done' : 'skipped'}
+          status={appsDone ? 'done' : appsSkipped ? 'skipped' : 'pending'}
+          problem={
+            !appsDone && servicesRead === 'failed' ? t('settings.integrations.loadFailed') : null
+          }
           note={appsDone ? <ServiceList toolkits={services} /> : null}
-          action={() => shows(appsDone ? t('settings.aiConnection.chatgpt.connected') : skipped)}
+          action={() =>
+            appsDone ? (
+              shows(t('settings.aiConnection.chatgpt.connected'))
+            ) : appsSkipped ? (
+              shows(skipped)
+            ) : servicesRead === 'failed' ? (
+              <button type="button" className="settings-text-button" onClick={onReloadServices}>
+                {t('settings.integrations.reload')}
+              </button>
+            ) : (
+              shows(t('settings.loadingStatus'))
+            )
+          }
         />
       </ul>
-      {!webSearchDone || !appsDone ? (
+      {!webSearchDone || appsSkipped ? (
         <p className="onb-after">{t('onboarding.done.skippedNote')}</p>
       ) : null}
     </>

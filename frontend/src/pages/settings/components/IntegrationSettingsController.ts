@@ -82,6 +82,10 @@ export function denialText(t: Translate, reason: ApiDenial, service: string): st
 /** Composio's account-level keys start so; the backend needs a project API key (`ak_`). */
 export const isAccountKey = (key: string) => key.startsWith('ck_');
 
+/** Services with an account that works; one that needs reconnecting does not count. */
+export const connectedToolkits = (toolkits: IntegrationToolkitStatus[]) =>
+  toolkits.filter((toolkit) => toolkit.accounts.some((account) => account.health === 'ok'));
+
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 

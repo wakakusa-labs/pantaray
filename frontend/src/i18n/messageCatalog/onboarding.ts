@@ -40,13 +40,14 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.keyTitle': 'Composio API key',
     'onboarding.apps.servicesTitle': 'Connect services',
     'onboarding.apps.add': 'Add',
+    'onboarding.apps.reconnect':
+      'Your connected services need reconnecting. You can do it in Settings.',
     'onboarding.apps.guide.summary': 'How to create a key',
     'onboarding.apps.guide.signUp': 'Sign up for Composio.',
     'onboarding.apps.guide.signUpLink': 'composio.dev',
     'onboarding.apps.guide.project': 'In the dashboard, open the project you want to use.',
     'onboarding.apps.guide.dashboardLink': 'Dashboard',
-    'onboarding.apps.guide.createKey':
-      'Under Settings → API Keys, create a key with these permissions.',
+    'onboarding.apps.guide.createKey': 'In Settings → API Keys, create a key with these scopes.',
     'onboarding.start': 'Start using Pantaray',
     'onboarding.finishFailed': 'Could not save. Please try again.',
     'onboarding.recording.lead':
@@ -110,6 +111,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.apps.keyTitle': 'Composio の API キー',
     'onboarding.apps.servicesTitle': 'サービスをつなぐ',
     'onboarding.apps.add': '追加',
+    'onboarding.apps.reconnect': 'つないだサービスに、つなぎ直しが要ります。設定でつなぎ直せます。',
     'onboarding.apps.guide.summary': 'キーの作り方',
     'onboarding.apps.guide.signUp': 'Composio に登録します。',
     'onboarding.apps.guide.signUpLink': 'composio.dev',

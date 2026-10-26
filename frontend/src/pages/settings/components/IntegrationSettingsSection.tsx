@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type React from 'react';
 
 import type { IntegrationToolkitStatus } from '../../../../electron/src/settings/integrationSettingsFetch';
 import type { Translate } from '../types';
@@ -7,16 +8,20 @@ import type { IntegrationFlow, IntegrationFlowActions } from './IntegrationConne
 import { IntegrationFlowStatus } from './IntegrationFlowStatus';
 import { IntegrationLogo } from './IntegrationLogo';
 import { IntegrationServiceDetail } from './IntegrationServiceDetail';
-import {
-  isAccountKey,
-  type IntegrationAccountRowState,
-  type IntegrationSettingsActions,
+import type {
+  IntegrationAccountRowState,
+  IntegrationSettingsActions,
 } from './IntegrationSettingsController';
 import { SecretRow } from './SecretRow';
 import './aiConnection.css';
 import './integrationSettings.css';
 
 const COMPOSIO_DASHBOARD_URL = 'https://dashboard.composio.dev';
+/** Composio's account-level keys; the backend needs a project API key (`ak_`). */
+const ACCOUNT_KEY_PREFIX = 'ck_';
+
+/** Onboarding's own lead and key guide: the guide leads into the key row in place of its hint. */
+export type IntegrationOnboardingCopy = { lead: React.ReactNode; keyGuide: React.ReactNode };
 
 /** The connection method's key. Only whether one is saved reaches the renderer. */
 type IntegrationKeyState = {
@@ -43,6 +48,7 @@ type Props = {
   flowActions: IntegrationFlowActions;
   /** The service whose detail view shows first, for rendering it from fixtures. */
   initialToolkit?: string;
+  onboarding?: IntegrationOnboardingCopy;
 };
 
 const NEEDS_RECONNECTION = new Set(['not_connected', 'reauthorization_required']);
@@ -63,6 +69,7 @@ export function IntegrationSettingsSection({
   flow,
   flowActions,
   initialToolkit,
+  onboarding,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -124,11 +131,18 @@ export function IntegrationSettingsSection({
 
   return (
     <div ref={rootRef} className="dashboard-section integration-settings">
-      <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
-      <p className="dashboard-section-description">{t('settings.integrations.description')}</p>
+      {onboarding ? (
+        onboarding.lead
+      ) : (
+        <>
+          <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
+          <p className="dashboard-section-description">{t('settings.integrations.description')}</p>
+        </>
+      )}
       {integrationKey.canStoreSecrets ? null : (
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
       )}
+      {onboarding && !integrationKey.hasSavedKey ? onboarding.keyGuide : null}
       <div className="integration-key">
         <SecretRow
           label={t('settings.integrations.key.label')}
@@ -140,10 +154,12 @@ export function IntegrationSettingsSection({
           onClear={integrationKey.onClear}
           problem={keyRejected ? t('settings.integrations.key.rejected') : undefined}
           draftProblem={(draft) =>
-            isAccountKey(draft) ? t('settings.integrations.key.accountKey') : undefined
+            draft.startsWith(ACCOUNT_KEY_PREFIX)
+              ? t('settings.integrations.key.accountKey')
+              : undefined
           }
           hint={
-            integrationKey.hasSavedKey ? undefined : (
+            integrationKey.hasSavedKey || onboarding ? undefined : (
               <>
                 <a
                   className="settings-inline-link"

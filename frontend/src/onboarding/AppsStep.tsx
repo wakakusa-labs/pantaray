@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { IntegrationAddServiceDialog } from '../pages/settings/components/IntegrationAddServiceDialog';
 import { useIntegrationConnectFlow } from '../pages/settings/components/IntegrationConnectFlow';
 import {
+  connectedToolkits,
   denialText,
   isAccountKey,
   type IntegrationSettingsController,
@@ -46,7 +47,10 @@ export function AppsStep({
   const { outcome } = connection;
   const keySaved = state.settings.hasSavedIntegrationKey;
   const services = keySaved ? integrations.toolkits : null;
-  const connected = services?.filter((toolkit) => toolkit.accounts.length > 0) ?? [];
+  const connected = connectedToolkits(services ?? []);
+  // Only accounts that need reconnecting, which Settings does.
+  const needsReconnecting =
+    connected.length === 0 && (services ?? []).some((toolkit) => toolkit.accounts.length > 0);
   const keyTitle = t('onboarding.apps.keyTitle');
   const keyProblem = accountKeyTyped
     ? t('settings.integrations.key.accountKey')
@@ -119,7 +123,11 @@ export function AppsStep({
           title={t('onboarding.apps.servicesTitle')}
           status={connected.length > 0 ? 'done' : 'pending'}
           disabled={services === null}
-          problem={running ? null : flowText}
+          problem={
+            running
+              ? null
+              : (flowText ?? (needsReconnecting ? t('onboarding.apps.reconnect') : null))
+          }
           note={
             running ? flowText : connected.length > 0 ? <ServiceList toolkits={connected} /> : null
           }

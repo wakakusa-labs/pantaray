@@ -11,7 +11,6 @@ import type { OnboardingState } from '../../electron/src/ipc/schemas/onboarding'
 import type {
   IntegrationAccountStatus,
   IntegrationsStatus,
-  IntegrationToolkitStatus,
 } from '../../electron/src/settings/integrationSettingsFetch';
 import { OnboardingGate } from './OnboardingGate';
 
@@ -22,24 +21,22 @@ const ACCOUNT: IntegrationAccountStatus = {
   label: 'you@example.com',
   health: 'ok',
   access: 'read_only',
-  options: [
-    { value: 'off', allowed: true, reason: null },
-    { value: 'read_only', allowed: true, reason: null },
-    { value: 'read_write', allowed: true, reason: null },
-  ],
+  // The setup steps do not offer access choices.
+  options: [],
 };
 
-function services(connected: boolean): IntegrationsStatus {
-  const toolkit = (slug: string, name: string, accounts: IntegrationAccountStatus[]) =>
-    ({ toolkit: slug, display_name: name, logo_url: null, accounts }) as IntegrationToolkitStatus;
-  return {
-    state: 'configured',
-    toolkits: [
-      toolkit('slack', 'Slack', connected ? [ACCOUNT] : []),
-      toolkit('gmail', 'Gmail', []),
-    ],
-  };
-}
+const services = (connected: boolean, health = ACCOUNT.health): IntegrationsStatus => ({
+  state: 'configured',
+  toolkits: [
+    {
+      toolkit: 'slack',
+      display_name: 'Slack',
+      logo_url: null,
+      accounts: connected ? [{ ...ACCOUNT, health }] : [],
+    },
+    { toolkit: 'gmail', display_name: 'Gmail', logo_url: null, accounts: [] },
+  ],
+});
 
 /** Main's stores as far as the apps and done steps read and change them. */
 function stubBridge(
@@ -98,7 +95,7 @@ function stubBridge(
   };
 }
 
-function renderSetup() {
+async function renderSetup() {
   render(
     <AuthContext.Provider
       value={{ runtimeState: { status: 'ready', message: null, owner: OWNER } } as AuthContextType}
@@ -110,6 +107,8 @@ function renderSetup() {
       </UiLanguageProvider>
     </AuthContext.Provider>
   );
+  // The step draws once the connection is read.
+  await waitFor(() => expect(document.querySelector('ul.checklist')).not.toBeNull());
 }
 
 // The step's checklist, not the steps panel that shares its titles.
@@ -130,7 +129,7 @@ afterEach(() => {
 describe('AppsStep', () => {
   it('refuses an account key, and opens the services once a saved key lists them', async () => {
     const bridge = stubBridge('apps');
-    renderSetup();
+    await renderSetup();
     const key = await screen.findByLabelText('Composio の API キー');
     expect(row('Composio の API キー').getByText('キーの作り方')).toBeInTheDocument();
     expect(add()).toBeDisabled();
@@ -157,8 +156,7 @@ describe('AppsStep', () => {
 
   it('keeps a saved key that the backend refuses unfinished, with the reason', async () => {
     stubBridge('apps', { keySaved: true, status: { state: 'key_rejected' } });
-    renderSetup();
-    await screen.findByLabelText('Composio の API キー: 変更');
+    await renderSetup();
 
     expect(await row('Composio の API キー').findByRole('alert')).toHaveTextContent(
       'このキーは使えません'
@@ -172,7 +170,7 @@ describe('AppsStep', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
     vi.spyOn(window, 'open').mockReturnValue(null);
     const bridge = stubBridge('apps', { keySaved: true });
-    renderSetup();
+    await renderSetup();
     await waitFor(() => expect(add()).toBeEnabled());
 
     fireEvent.click(add());
@@ -195,7 +193,7 @@ describe('AppsStep', () => {
   it('shows a connect that could not start on the services row', async () => {
     const bridge = stubBridge('apps', { keySaved: true });
     bridge.integrations.connect.mockRejectedValueOnce(new Error('offline'));
-    renderSetup();
+    await renderSetup();
     await waitFor(() => expect(add()).toBeEnabled());
 
     fireEvent.click(add());
@@ -209,13 +207,76 @@ describe('AppsStep', () => {
     expect(isChecked('サービスをつなぐ')).toBe(false);
     expect(add()).toBeEnabled();
   });
+  it('reads the services again when the step is shown, so a connect finished meanwhile counts', async () => {
+    const bridge = stubBridge('apps', { keySaved: true });
+    await renderSetup();
+    await waitFor(() => expect(add()).toBeEnabled());
+    expect(next()).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '戻る' }));
+    await screen.findByRole('heading', { name: /Web 検索/ });
+    // The browser step finished after the apps step stopped following it.
+    bridge.setStatus(services(true));
+    fireEvent.click(screen.getByRole('button', { name: 'スキップ' }));
+
+    await waitFor(() => expect(next()).toBeEnabled());
+    expect(isChecked('サービスをつなぐ')).toBe(true);
+  });
+
+  it('does not count an account that needs reconnecting, and says so', async () => {
+    stubBridge('apps', { keySaved: true, status: services(true, 'reauthorization_required') });
+    await renderSetup();
+
+    expect(await row('サービスをつなぐ').findByRole('alert')).toHaveTextContent(
+      'つなぎ直しが要ります'
+    );
+    expect(isChecked('サービスをつなぐ')).toBe(false);
+    expect(row('サービスをつなぐ').queryByText('Slack')).not.toBeInTheDocument();
+    expect(next()).toBeDisabled();
+  });
 });
 
 describe('DoneStep', () => {
+  it('shows apps as neither done nor skipped until the services are read', async () => {
+    const bridge = stubBridge('done', { keySaved: true, status: services(true) });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const read = bridge.integrations.getStatus.getMockImplementation()!;
+    bridge.integrations.getStatus.mockImplementation(() => gate.then(read));
+    await renderSetup();
+
+    expect(await row('アプリ').findByText('状態を取得中…')).toBeVisible();
+    expect(item('アプリ').classList.contains('check-item--skipped')).toBe(false);
+    const appsStep = within(screen.getByRole('navigation')).getByRole('button', {
+      name: /アプリをつなぐ/,
+    });
+    expect(appsStep).not.toHaveTextContent('スキップ');
+
+    await act(async () => release());
+    await waitFor(() => expect(isChecked('アプリ')).toBe(true));
+    expect(appsStep).toHaveTextContent('済み');
+  });
+
+  it('says the services could not be read, and reads them again on request', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const bridge = stubBridge('done', { keySaved: true, status: services(true) });
+    const read = bridge.integrations.getStatus.getMockImplementation()!;
+    bridge.integrations.getStatus.mockRejectedValue(new Error('offline'));
+    await renderSetup();
+
+    expect(await row('アプリ').findByRole('alert')).toHaveTextContent(
+      'サービスの一覧を取得できませんでした。'
+    );
+    expect(item('アプリ').classList.contains('check-item--skipped')).toBe(false);
+
+    bridge.integrations.getStatus.mockImplementation(read);
+    fireEvent.click(row('アプリ').getByRole('button', { name: 'もう一度読み込む' }));
+    await waitFor(() => expect(isChecked('アプリ')).toBe(true));
+  });
+
   it('marks what was set up and what was skipped, and says skipped items can wait', async () => {
     stubBridge('done', { keySaved: true, status: services(true) });
-    renderSetup();
-    await waitFor(() => expect(isChecked('アプリ')).toBe(true));
+    await renderSetup();
 
     expect(await row('アプリ').findByText('Slack')).toBeVisible();
     expect(isChecked('アプリ')).toBe(true);

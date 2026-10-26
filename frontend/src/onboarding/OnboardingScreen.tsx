@@ -1,10 +1,14 @@
 import { Check, Minus } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 import { BrandWordmark } from '@/components/BrandWordmark';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
-import { useAiConnectionController } from '../pages/settings/useAiConnectionController';
+import { ConnectionLoadFailure } from '../pages/settings/components/ConnectionLoadFailure';
+import {
+  useAiConnectionController,
+  type ConnectionState,
+} from '../pages/settings/useAiConnectionController';
 import { AiStep } from './AiStep';
 import { AppsStep } from './AppsStep';
 import { DoneStep } from './DoneStep';
@@ -37,8 +41,10 @@ export function OnboardingScreen({
   progress: OnboardingProgress;
 }) {
   const { t } = useI18n();
-  // Its own read of the connection the steps' Settings sections change; main announces each change.
-  const connection = useAiConnectionController().state;
+  // The web search step changes the connection through this controller; the other steps'
+  // Settings sections have their own, and main announces each change to all of them.
+  const connection = useAiConnectionController();
+  const { state } = connection;
   const recording = useRecordingStep();
   const titleRef = useRef<HTMLHeadingElement>(null);
   const shownStep = useRef(step);
@@ -51,13 +57,10 @@ export function OnboardingScreen({
   }, [step]);
 
   const configured: Record<OnboardingStep, boolean> = {
-    ai:
-      connection !== null &&
-      connection.runtime.ok &&
-      connection.runtime.status.llmRoute !== 'unconfigured',
+    ai: state !== null && state.runtime.ok && state.runtime.status.llmRoute !== 'unconfigured',
     recording: recording.isRecording === true,
-    web_search: connection?.settings.hasSavedWebSearchKey ?? false,
-    apps: connection?.settings.hasSavedIntegrationKey ?? false,
+    web_search: state?.settings.hasSavedWebSearchKey ?? false,
+    apps: state?.settings.hasSavedIntegrationKey ?? false,
     done: false,
   };
   const index = STEPS.findIndex((s) => s.id === step);
@@ -70,6 +73,15 @@ export function OnboardingScreen({
   const next = () => progress.goTo(STEPS[index + 1].id);
   // The recording step's checklist already shows what is missing.
   const blockedHint = step === 'ai' && !configured.ai ? t('onboarding.ai.blocked') : null;
+  // The connection steps need the connection read first.
+  const withConnection = (render: (read: ConnectionState) => ReactNode) =>
+    connection.loadError ? (
+      <ConnectionLoadFailure t={t} connection={connection} error={connection.loadError} />
+    ) : state === null ? (
+      <p role="status">{t('settings.loadingStatus')}</p>
+    ) : (
+      render(state)
+    );
 
   return (
     <div className="app-shell onb-shell">
@@ -149,14 +161,18 @@ export function OnboardingScreen({
                     <RecordingStep t={t} recording={recording} />
                   </LocalOwnerBoundary>
                 ) : null}
-                {step === 'web_search' ? <WebSearchStep t={t} /> : null}
+                {step === 'web_search'
+                  ? withConnection((read) => (
+                      <WebSearchStep t={t} connection={connection} state={read} />
+                    ))
+                  : null}
                 {step === 'apps' ? (
                   <LocalOwnerBoundary>
                     <AppsStep t={t} hasSavedKey={configured.apps} />
                   </LocalOwnerBoundary>
                 ) : null}
-                {step === 'done' && connection !== null ? (
-                  <DoneStep t={t} connection={connection} isRecording={configured.recording} />
+                {step === 'done' && state !== null ? (
+                  <DoneStep t={t} connection={state} isRecording={configured.recording} />
                 ) : null}
               </div>
 

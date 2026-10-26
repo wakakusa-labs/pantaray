@@ -1,4 +1,3 @@
-import { Check } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 
 import type {
@@ -8,7 +7,7 @@ import type {
 import type { MessageKey } from '../i18n/types';
 import type { Translate } from '../pages/settings/types';
 import '../pages/settings/settingsPage.css';
-import './recordingChecklist.css';
+import { CheckItem } from './Checklist';
 
 const WAITING_COPY = {
   read_accessibility_tree: 'onboarding.recording.accessibilityWaiting',
@@ -17,49 +16,6 @@ const WAITING_COPY = {
   automate_browser: 'onboarding.recording.chromeWaiting',
   automate_safari: 'onboarding.recording.safariWaiting',
 } as const satisfies Record<CapturePermission, MessageKey>;
-
-/** One checklist row: its mark, its title with at most one note, and its one action. */
-export function CheckItem({
-  title,
-  note,
-  problem = false,
-  done,
-  action,
-}: {
-  title: string;
-  note: string | null;
-  /** The note says why the row is stuck, so it is drawn as a warning and announced. */
-  problem?: boolean;
-  done: boolean;
-  action: (titleId: string) => ReactNode;
-}) {
-  const titleId = useId();
-  return (
-    <li className={done ? 'recording-check recording-check--done' : 'recording-check'}>
-      <span className="recording-check-mark" aria-hidden="true">
-        {done ? <Check size={13} strokeWidth={2.4} /> : null}
-      </span>
-      <span className="recording-check-text">
-        <span className="recording-check-title" id={titleId}>
-          {title}
-        </span>
-        {note ? (
-          <span
-            className={
-              problem
-                ? 'recording-check-note recording-check-note--problem'
-                : 'recording-check-note'
-            }
-            role={problem ? 'alert' : undefined}
-          >
-            {note}
-          </span>
-        ) : null}
-      </span>
-      <span className="recording-check-action">{action(titleId)}</span>
-    </li>
-  );
-}
 
 /**
  * The macOS permissions a recording start waits on, one row each with a way to grant it,
@@ -107,7 +63,7 @@ export function RecordingChecklist({
   );
 
   return (
-    <ul className="recording-checklist">
+    <ul className="checklist">
       {checks.map(({ permission, granted }) => {
         const waiting = requested.has(permission);
         const blocked = permission === 'observe_input' && accessibilityMissing;
@@ -117,10 +73,10 @@ export function RecordingChecklist({
             key={permission}
             title={t(titles[permission])}
             note={!granted && waiting ? t(WAITING_COPY[permission]) : null}
-            done={granted}
+            status={granted ? 'done' : 'pending'}
             action={(titleId) =>
               granted ? (
-                <span className="recording-check-state">{t('onboarding.recording.granted')}</span>
+                <span className="check-item-state">{t('onboarding.recording.granted')}</span>
               ) : (
                 // One button in both states, so focus stays on it after the first press.
                 <button

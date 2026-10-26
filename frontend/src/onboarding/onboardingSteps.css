@@ -1,4 +1,4 @@
-/* The recording and apps steps' own pieces. Every control inside keeps its Settings style. */
+/* The steps' own pieces. Every control inside keeps its Settings style. */
 
 .onb-lead {
   color: var(--fog-text);
@@ -100,4 +100,14 @@
   color: var(--fog-text);
   font-weight: var(--weight-semibold);
   margin: 0;
+}
+
+.onb-key-form {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.onb-key-input {
+  width: 200px;
 }

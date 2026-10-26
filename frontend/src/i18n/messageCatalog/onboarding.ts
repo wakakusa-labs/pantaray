@@ -15,12 +15,14 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.back': 'Back',
     'onboarding.skip': 'Skip',
     'onboarding.next': 'Next',
+    'onboarding.keySaved': 'Saved',
     'onboarding.ai.lead':
       'Pantaray carries out what you ask, and suggests things before you ask. First, connect the AI it uses for that.',
     'onboarding.ai.sub': 'Sign in with your ChatGPT account, or paste an API key.',
     'onboarding.ai.blocked': 'Connect an AI to continue',
-    'onboarding.webSearch.lead':
-      'Lets Pantaray search the web for work that needs research. Paste a Tavily API key.',
+    'onboarding.webSearch.lead': 'Lets Pantaray search the web for work that needs research.',
+    'onboarding.webSearch.keyTitle': 'Tavily API key',
+    'onboarding.webSearch.getKey': 'Create a key at Tavily',
     'onboarding.done.title': 'You are all set',
     'onboarding.done.lead':
       'Talk to Pantaray whenever you want something done. It may also suggest things before you ask.',
@@ -81,12 +83,15 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.back': '戻る',
     'onboarding.skip': 'スキップ',
     'onboarding.next': '次へ',
+    'onboarding.keySaved': '保存済み',
     'onboarding.ai.lead':
       'Pantaray は、頼んだことを進め、頼む前に提案もします。まず、そのときに使う AI をつなぎます。',
     'onboarding.ai.sub': 'ChatGPT のアカウントでログインするか、API キーを貼り付けてください。',
     'onboarding.ai.blocked': 'AI をつなぐと次へ進めます',
     'onboarding.webSearch.lead':
-      '調べものが要る作業で、Pantaray が Web を検索できるようになります。Tavily の API キーを貼り付けてください。',
+      '調べものが要る作業で、Pantaray が Web を検索できるようになります。',
+    'onboarding.webSearch.keyTitle': 'Tavily の API キー',
+    'onboarding.webSearch.getKey': 'Tavily でキーを作る',
     'onboarding.done.title': '準備ができました',
     'onboarding.done.lead':
       '頼みたいことは、いつでも話しかけてください。頼まれる前に、Pantaray から提案することもあります。',

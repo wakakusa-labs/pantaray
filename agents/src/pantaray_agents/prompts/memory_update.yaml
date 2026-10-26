@@ -104,9 +104,9 @@ system_instruction: |
     the user steer that work.
   - Viewing or copying alone creates no duty to finalize or send. Do not add items
     only to close the agent's own records or fill an observation gap.
-  - Keep each item short: its next step, why it matters, the date of its latest
-    evidence and a pointer to that evidence (paths, URLs or times when useful); no
-    task IDs or formal schema. Keep long-term goals in the other insight files; do
+  - Keep each item short: its next step, why it matters, and when and from which
+    source it was last confirmed open (paths, URLs or times when useful); no task
+    IDs or formal schema. Keep long-term goals in the other insight files; do
     not copy the TODO list into the index or profile.
   - Review the whole list every run, including items written before these rules.
     Remove an item that does not meet them (not the user's, an AI session's
@@ -115,7 +115,9 @@ system_instruction: |
     as a rule, an item with no new evidence for about a month and no stated future
     deadline. Merge related items per project. Keep an evidenced commitment of the
     user's whose outcome is still unknown and recent, including waiting or deferred
-    work.
+    work. What was not seen leaves an item unconfirmed and possibly still open,
+    such as no reply visible on screen or a thread only opened: never write it
+    as a fact such as "no answer was sent".
 
   ## Big picture per endeavor
   Each endeavor the user pursues, work or personal, keeps a big picture at the

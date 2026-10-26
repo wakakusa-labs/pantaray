@@ -47,7 +47,7 @@ from ..tool_result_spill import accepting_spilled_texts
 from ..tool_result_storage import store_run_tool_result
 
 # Across all lens runs of one Suggestion.
-SUGGESTION_INTEGRATION_RUN_LIMIT = 4
+SUGGESTION_INTEGRATION_RUN_LIMIT = 20
 INTEGRATION_CALL_LIMIT_REACHED = "INTEGRATION_CALL_LIMIT_REACHED"
 _SPILL_ROOT_MODE = 0o700
 _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}

@@ -1,6 +1,7 @@
 """Suggestion research's read-only integration tools against a fake gateway.
 
-AC-C4: one Suggestion's integration_run_tool reaches the gateway at most four times.
+AC-C4: one Suggestion's integration_run_tool reaches the gateway at most
+SUGGESTION_INTEGRATION_RUN_LIMIT times.
 AC-C6: without a connected account the research tool set is today's.
 """
 
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from itertools import cycle, islice
 from pathlib import Path
 
 import pytest
@@ -180,7 +182,7 @@ async def test_a_write_tool_is_never_offered_and_never_runs(db_path: Path) -> No
     assert gateway.executed == [("GMAIL_FETCH_EMAILS", WORK.account, {})]
 
 
-async def test_only_gateway_executions_count_and_the_fifth_never_runs(
+async def test_only_gateway_executions_count_and_one_past_the_limit_never_runs(
     db_path: Path,
 ) -> None:
     gateway = _connect(db_path)
@@ -208,11 +210,14 @@ async def test_only_gateway_executions_count_and_the_fifth_never_runs(
         assert refused.output["error_code"] == kind
     assert gateway.executed == []
 
-    for registry, slug, account in (
+    calls = (
         (lenses[0], "GMAIL_FETCH_EMAILS", WORK.account),
         (lenses[1], "GMAIL_LIST_LABELS", WORK.account),
         (lenses[2], "GMAIL_FETCH_EMAILS", HOME.account),
         (lenses[2], "GMAIL_LIST_LABELS", HOME.account),
+    )
+    for registry, slug, account in islice(
+        cycle(calls), SUGGESTION_INTEGRATION_RUN_LIMIT
     ):
         assert (await _run(registry, slug, account)).status == "success"
     assert len(gateway.executed) == SUGGESTION_INTEGRATION_RUN_LIMIT

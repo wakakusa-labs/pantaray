@@ -102,7 +102,9 @@ TOOLKITS: Final[tuple[ToolkitEntry, ...]] = (
         probe=(
             "GMAIL_FETCH_EMAILS",
             {
-                "query": "in:inbox after:{window_start_epoch}",
+                # The user's own sent replies are the usual sign that an item is done;
+                # named explicitly so drafts and spam stay out.
+                "query": "after:{window_start_epoch} (in:inbox OR in:sent)",
                 "max_results": _PROBE_ITEMS,
                 "include_payload": False,
                 "verbose": False,

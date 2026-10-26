@@ -583,19 +583,58 @@ async def test_a_slack_accounts_own_id_is_asked_once_and_carried_by_each_result(
     assert "SLACK_FIND_USERS" in slack.core_tools
 
 
-async def test_a_failed_identity_lookup_leaves_the_call_succeeded_without_the_id(
+async def test_a_failed_identity_lookup_is_asked_again_by_a_later_call(
     composio: FakeComposio, gateway: ComposioGateway
 ) -> None:
     composio.accounts.append(_account(SLACK_ACCOUNT, toolkit="slack", scope=None))
     await _ready(gateway)
     composio.execute_replies += [
         _completed({"messages": ["first"]}),
-        _error(500, 0),
+        _error(503, 0),
+        _completed({"messages": ["second"]}),
+        _completed({"ok": True, "user_id": "U0SELF"}),
     ]
 
-    outcome = await _run_slack(gateway)
+    first = await _run_slack(gateway)
+    second = await _run_slack(gateway)
 
-    assert outcome == ToolSucceeded(data={"messages": ["first"]})
+    assert first == ToolSucceeded(data={"messages": ["first"]})
+    assert second == ToolSucceeded(
+        data={"messages": ["second"]}, account_user_id="U0SELF"
+    )
+    assert _sent_slugs(composio).count("SLACK_TEST_AUTH") == 2
+
+
+async def test_a_cancelled_identity_lookup_does_not_block_the_next_one(
+    composio: FakeComposio,
+) -> None:
+    composio.accounts.append(_account(SLACK_ACCOUNT, toolkit="slack", scope=None))
+    lookup_seen = asyncio.Event()
+
+    def hold_first_lookup(request: httpx2.Request) -> Awaitable[object] | None:
+        if b"SLACK_TEST_AUTH" not in request.content or lookup_seen.is_set():
+            return None
+        lookup_seen.set()
+        return asyncio.Event().wait()
+
+    held = _held(composio, hold_first_lookup)
+    await _ready(held)
+    composio.execute_replies += [
+        _completed({"messages": ["first"]}),
+        _completed({"messages": ["second"]}),
+        _completed({"ok": True, "user_id": "U0SELF"}),
+    ]
+    call = asyncio.create_task(_run_slack(held))
+    await lookup_seen.wait()
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+    outcome = await _run_slack(held)
+
+    assert outcome == ToolSucceeded(
+        data={"messages": ["second"]}, account_user_id="U0SELF"
+    )
 
 
 async def test_an_account_missing_a_scope_group_is_denied_the_tool(

@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import Final
 
 import httpx2
@@ -53,6 +54,7 @@ from .client import (
     ComposioResponse,
 )
 from .connect import ComposioConnections
+from .identity import AccountIdentities
 from .limits import UNPROBED_LIMITS, probe_limits, warn_composio_failure
 from .mapping import (
     CODE_KEY_PERMISSION_DENIED,
@@ -84,9 +86,6 @@ ACCOUNTS_TTL_SECONDS: Final = 60.0
 ACCOUNTS_FETCH_SECONDS: Final = 4.0
 # Refused before the tool ran, so asking once more cannot run a write twice.
 _RENEW_SESSION_CODES: Final = (CODE_TOOLKIT_NOT_IN_SESSION, CODE_SESSION_NOT_FOUND)
-# Per toolkit whose results name people only by ID: the no-input read tool that
-# returns the connected user's own ID (Slack's auth.test, which needs no scope).
-_IDENTITY_TOOLS: Final[dict[ToolkitSlug, str]] = {"slack": "SLACK_TEST_AUTH"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +128,7 @@ class ComposioGateway:
         # Toolkits whose tools this gateway has put in the tool index.
         self._indexed: frozenset[ToolkitSlug] = frozenset()
         self._session: _Session | None = None
-        # Each account's own ID, looked up at most once per gateway (None when
-        # the lookup failed); reconnecting makes a new account, so none goes stale.
-        self._user_ids: dict[str, str | None] = {}
+        self._identities = AccountIdentities()
         # The one account read in flight, shared by callers on every thread.
         self._accounts_fetch: concurrent.futures.Future[_Accounts | None] | None = None
         # asyncio keeps only weak references to tasks.
@@ -252,57 +249,16 @@ class ComposioGateway:
                 "Composio tool failed", extra={"slug": slug, "kind": outcome.error.kind}
             )
             return outcome
-        toolkit = accounts.by_id[account].account.toolkit
-        user_id = await self._account_user_id(account, toolkit, accounts.toolkits)
+        user_id = await self._identities.user_id(
+            account=account,
+            toolkit=accounts.by_id[account].account.toolkit,
+            send=partial(
+                self._send, toolkits=accounts.toolkits, is_write=False, renew=False
+            ),
+        )
         if user_id is None:
             return outcome
         return ToolSucceeded(data=outcome.data, account_user_id=user_id)
-
-    async def _account_user_id(
-        self, account: str, toolkit: ToolkitSlug, toolkits: frozenset[ToolkitSlug]
-    ) -> str | None:
-        """The account's own ID, asked once after its first successful call, when
-        the session already holds the toolkit; the call's own outcome never
-        depends on it."""
-
-        slug = _IDENTITY_TOOLS.get(toolkit)
-        if slug is None:
-            return None
-        with self._lock:
-            if account in self._user_ids:
-                return self._user_ids[account]
-            # Claimed before sending, so concurrent first calls ask only once.
-            self._user_ids[account] = None
-        body: JSONValue = {"tool_slug": slug, "arguments": {}, "account": account}
-        try:
-            reply = await self._send(body, toolkits, is_write=False, renew=False)
-        except ComposioClientClosedError:
-            # The key went away after the call itself had run.
-            return None
-        outcome: ToolOutcome | ComposioResponse = reply
-        if isinstance(reply, ComposioResponse) and reply.status == 200:
-            outcome = execute_outcome(reply.body, is_write=False)
-        user_id: JSONValue = None
-        if isinstance(outcome, ToolSucceeded) and isinstance(outcome.data, dict):
-            user_id = outcome.data.get("user_id")
-        if not isinstance(user_id, str) or not user_id:
-            # Never the reply itself: it carries the user's name and workspace.
-            logger.warning(
-                "Composio account identity unavailable",
-                extra={
-                    "slug": slug,
-                    "status": reply.status
-                    if isinstance(reply, ComposioResponse)
-                    else None,
-                    "kind": outcome.error.kind
-                    if isinstance(outcome, ToolFailed)
-                    else None,
-                },
-            )
-            return None
-        with self._lock:
-            self._user_ids[account] = user_id
-        return user_id
 
     def invalidate_accounts(self) -> None:
         """Make the next account read ask Composio (a connection was added or changed).

@@ -3,6 +3,14 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.6.2
+
+- Pantaray starts again after updating to 0.6.1 with a large history; it no longer stays on loading.
+
+---
+
+- 0.6.1 に更新したあと、記録の多い環境で読み込み中のまま始まらなくなっていたのを直しました。
+
 ## 0.6.1
 
 - On first launch, a setup screen walks you through connecting AI, turning on recording, adding web

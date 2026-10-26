@@ -35,7 +35,9 @@ function stubBridge(initial: { chatgptConnected?: boolean } = {}) {
   const refusals = new Map<ConnectionCommand['operation'], ConnectionUpdateResult>();
 
   const update = vi.fn(async (command: ConnectionCommand): Promise<ConnectionUpdateResult> => {
+    // A refusal answers the next such command only.
     const refused = refusals.get(command.operation);
+    refusals.delete(command.operation);
     if (refused) return refused;
     switch (command.operation) {
       case 'sign_in_chatgpt':
@@ -219,6 +221,27 @@ describe('AiStep', () => {
     expect(key).toHaveValue('sk-1');
     expect(bridge.operations()).toEqual(['save_api_key']);
     expect(next()).toBeDisabled();
+  });
+
+  it('keeps a saved key whose method was not saved unconnected, and finishes without it', async () => {
+    const bridge = stubBridge();
+    bridge.refuse('save_preferences', { ok: false, error: 'write_failed' });
+    renderSetup();
+    fireEvent.click(await screen.findByRole('button', { name: 'API キーを使う' }));
+    fireEvent.change(screen.getByLabelText('OpenAI の API キー'), { target: { value: 'sk-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    // main now reports the OpenAI key as saved, but there is no route.
+    expect(await row('AI をつなぐ').findByRole('alert')).toBeVisible();
+    expect(row('AI をつなぐ').queryByText('接続済み')).not.toBeInTheDocument();
+    expect(row('AI をつなぐ').getByText('保存済み')).toBeVisible();
+    expect(next()).toBeDisabled();
+
+    fireEvent.click(row('AI をつなぐ').getByRole('button', { name: 'つなぐ' }));
+    expect(await row('AI をつなぐ').findByText('接続済み')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(bridge.operations()).toEqual(['save_api_key', 'save_preferences', 'save_preferences']);
+    expect(next()).toBeEnabled();
   });
 
   it('opens the choices again on Change without disconnecting', async () => {

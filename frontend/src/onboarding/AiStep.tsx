@@ -44,12 +44,18 @@ export function AiStep({
 }) {
   const { settings } = state;
   const preferences = settings.preferences;
+  // The saved method has its credential; only a route (`configured`) makes the connection.
   const linked =
     preferences.method === 'chatgpt'
       ? settings.chatgpt.status === 'connected'
       : settings.hasSavedApiKey;
-  const [method, setMethod] = useState<Method>('chatgpt');
+  const [method, setMethod] = useState<Method>(linked ? preferences.method : 'chatgpt');
   const [provider, setProvider] = useState<ApiKeyProvider>(preferences.provider);
+  // A key saved here whose provider could not be saved after it; main reports a saved key only
+  // for the saved provider.
+  const [keyProvider, setKeyProvider] = useState<ApiKeyProvider | null>(null);
+  const keySaved =
+    provider === keyProvider || (provider === preferences.provider && settings.hasSavedApiKey);
   // Changing keeps the current connection until another one is made.
   const [changing, setChanging] = useState(false);
   // Which row saved last, since a saved preference can come from either.
@@ -58,7 +64,7 @@ export function AiStep({
   const busy = pendingOperation !== null;
   const signingIn =
     pendingOperation === 'sign_in_chatgpt' || pendingOperation === 'cancel_chatgpt_sign_in';
-  const choosing = !linked || changing;
+  const choosing = !configured || changing;
 
   const failure =
     outcome && !outcome.result.ok && outcome.result.error !== 'cancelled'
@@ -99,11 +105,17 @@ export function AiStep({
 
   const saveApiKey = async (apiKey: string) => {
     setLastRow('connect');
-    const saved =
-      (await connection.run({ operation: 'save_api_key', provider, apiKey })) &&
-      (await savePreferences('api_key', provider));
-    if (!saved) throw new Error('AI_CONNECTION_UPDATE_FAILED');
-    setChanging(false);
+    if (!(await connection.run({ operation: 'save_api_key', provider, apiKey }))) {
+      throw new Error('AI_CONNECTION_UPDATE_FAILED');
+    }
+    setKeyProvider(provider);
+    if (await savePreferences('api_key', provider)) setChanging(false);
+  };
+
+  // With the key saved, finishing the connection takes only the method and provider.
+  const connectWithSavedKey = async () => {
+    setLastRow('connect');
+    if (await savePreferences('api_key', provider)) setChanging(false);
   };
 
   const saveModel = (model: string) => {
@@ -137,6 +149,7 @@ export function AiStep({
     <CheckItem
       title={connectTitle}
       status="done"
+      problem={failedRow === 'connect' ? failure : null}
       note={aiConnectionLabel(t, settings)}
       action={() => (
         <>
@@ -196,33 +209,41 @@ export function AiStep({
       note={switchMethod('chatgpt')}
       action={() => (
         <>
+          <select
+            className="history-filter-select onb-provider-select"
+            aria-label={t('settings.aiConnection.providerLabel')}
+            value={provider}
+            disabled={busy}
+            onChange={(event) => setProvider(event.target.value as ApiKeyProvider)}
+          >
+            {API_KEY_PROVIDERS.map((option) => (
+              <option key={option} value={option}>
+                {t(`settings.aiConnection.provider.${option}`)}
+              </option>
+            ))}
+          </select>
           <KeyField
             // A key typed for one provider is not sent to another.
             key={provider}
             label={t('onboarding.aiMethod.apiKey', {
               provider: t(`settings.aiConnection.provider.${provider}`),
             })}
-            saved={false}
+            saved={keySaved}
             placeholder={t('settings.aiConnection.key.label')}
             disabled={busy}
-            before={
-              <select
-                className="history-filter-select onb-provider-select"
-                aria-label={t('settings.aiConnection.providerLabel')}
-                value={provider}
-                disabled={busy}
-                onChange={(event) => setProvider(event.target.value as ApiKeyProvider)}
-              >
-                {API_KEY_PROVIDERS.map((option) => (
-                  <option key={option} value={option}>
-                    {t(`settings.aiConnection.provider.${option}`)}
-                  </option>
-                ))}
-              </select>
-            }
             onSave={saveApiKey}
             t={t}
           />
+          {keySaved ? (
+            <button
+              type="button"
+              className="recording-intro-primary"
+              disabled={busy}
+              onClick={() => void connectWithSavedKey()}
+            >
+              {t('onboarding.ai.connect')}
+            </button>
+          ) : null}
           {cancelChange}
         </>
       )}

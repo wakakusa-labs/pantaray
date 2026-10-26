@@ -22,6 +22,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.ai.useApiKey': 'Use an API key',
     'onboarding.ai.useChatgpt': 'Use a ChatGPT account',
     'onboarding.ai.signingIn': 'Sign in in your browser',
+    'onboarding.ai.connect': 'Connect',
     'onboarding.webSearch.lead': 'Lets Pantaray search the web for work that needs research.',
     'onboarding.webSearch.keyTitle': 'Tavily API key',
     'onboarding.webSearch.getKey': 'Create a key at Tavily',
@@ -91,6 +92,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.ai.useApiKey': 'API キーを使う',
     'onboarding.ai.useChatgpt': 'ChatGPT アカウントを使う',
     'onboarding.ai.signingIn': 'ブラウザでログインしてください',
+    'onboarding.ai.connect': 'つなぐ',
     'onboarding.webSearch.lead':
       '調べものが要る作業で、Pantaray が Web を検索できるようになります。',
     'onboarding.webSearch.keyTitle': 'Tavily の API キー',

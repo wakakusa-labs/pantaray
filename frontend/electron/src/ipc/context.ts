@@ -1,4 +1,6 @@
 import type { CaptureEditingRequest } from '../screenshot/captureEditing';
+import type { CapturePermissions } from '../windows/macosPermissions';
+import type { CapturePermission, CapturePermissionCheck } from '../context/zaneiProcess';
 /**
  * MainContext for IPC handlers.
  *
@@ -11,6 +13,7 @@ import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { LocalConnectionRuntime } from '../aiConnection/localConnectionRuntime';
 import type { BrowserWindow } from 'electron';
 
+import type { OnboardingState } from './schemas/onboarding';
 import type { OverlayOpenTaskRequest } from './schemas/overlay';
 import type { OverlayPlacements, OverlayPlacementUpdate } from './schemas/overlayPlacement';
 import type { GlobalShortcutChangeResult, GlobalShortcutState } from './schemas/shortcut';
@@ -86,15 +89,13 @@ export type AuthState = {
 };
 
 /**
- * What the recording screen reads: whether macOS lets the recorder run at all,
- * whether a conversation is waiting on that, and whether the screen was already
- * answered with "later". Nothing here is stored — the gate is the live OS
- * permission, and the answer is held in main for this app run only.
+ * What the recording screen reads: which of the permissions the recorder needs macOS
+ * grants (the gate holds only with both), and whether a conversation is waiting on them,
+ * which is what opens the screen. Nothing here is stored: the permissions are read live.
  */
 export type CaptureGateState = {
-  osPermissionsGranted: boolean;
+  permissions: CapturePermissions;
   introRequested: boolean;
-  introDismissed: boolean;
 };
 
 /**
@@ -273,13 +274,25 @@ export type MainContext = {
     stop: () => Promise<boolean>;
     getGateState: () => CaptureGateState;
     /**
-     * Answers the recording screen with "later" for the rest of this app run, in the
-     * name of the owner it was shown to. One gate is held for the whole app run, so an
-     * answer that no longer names the current owner is not taken: it only reads the gate,
-     * the same read the current owner's own screen makes.
+     * Answers the recording screen with "later", dropping the conversation waiting on it,
+     * in the name of the owner it was shown to. One gate is held for the whole app run, so
+     * an answer that no longer names the current owner is not taken: it only reads the
+     * gate, the same read the current owner's own screen makes.
      */
     dismissIntro: (ownerId: string) => CaptureGateState;
-    openPermissionSettings: () => Promise<void>;
+    /** What a recording start would wait on for the current owner. */
+    getPermissions: () => Promise<CapturePermissionCheck[]>;
+    /** Asks macOS for the permission; macOS's own popup lists the app and offers its pane. */
+    askForPermission: (permission: CapturePermission) => Promise<void>;
+    /** Opens the permission's System Settings pane, for when macOS shows no popup. */
+    openPermissionSettings: (permission: CapturePermission) => Promise<void>;
+    /** Whether the recorder cannot run until macOS grants it a permission, read again now. */
+    getPermissionRequired: () => Promise<boolean>;
+  };
+
+  onboarding: {
+    getState: () => OnboardingState;
+    setState: (state: OnboardingState) => OnboardingState;
   };
 
   privacy: {

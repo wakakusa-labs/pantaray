@@ -782,3 +782,52 @@ test('history:openOverlay passes a valid request on and moves nothing for a malf
   }
   assert.equal(openOverlay.calls.length, 1);
 });
+
+test('onboarding:setState takes only a known state and stores nothing else', async () => {
+  const setState = spy((state) => state);
+  const { ipcMain } = buildCtx({ onboarding: { getState: spy(null), setState } });
+  const invoke = getInvoke(ipcMain, 'onboarding:setState');
+  for (const invalid of [
+    undefined,
+    { status: 'in_progress' },
+    { status: 'in_progress', step: 'welcome' },
+    { status: 'completed', step: 'done' },
+    { status: 'skipped' },
+  ]) {
+    await assert.rejects(invoke(invalid), rejectsValidation('onboarding:setState'));
+  }
+  assert.equal(setState.calls.length, 0);
+  await invoke({ status: 'in_progress', step: 'web_search' });
+  await invoke({ status: 'completed' });
+  assert.deepEqual(
+    setState.calls.map((call) => call[0]),
+    [{ status: 'in_progress', step: 'web_search' }, { status: 'completed' }]
+  );
+});
+
+test('recording:askForPermission and recording:openPermissionSettings require a permission', async () => {
+  const askForPermission = asyncSpy(undefined);
+  const openPermissionSettings = asyncSpy(undefined);
+  const { ipcMain } = buildCtx({
+    screenshot: {
+      getStatus: () => false,
+      start: () => true,
+      stop: () => true,
+      askForPermission,
+      openPermissionSettings,
+    },
+  });
+  for (const [channel, spy] of [
+    ['recording:askForPermission', askForPermission],
+    ['recording:openPermissionSettings', openPermissionSettings],
+  ]) {
+    const invoke = getInvoke(ipcMain, channel);
+    for (const invalid of [undefined, 'accessibility', 'Privacy_ScreenCapture', 1]) {
+      await assert.rejects(invoke(invalid), rejectsValidation(channel));
+    }
+    assert.equal(spy.calls.length, 0);
+    await invoke('capture_screen');
+    await invoke('observe_input');
+    assert.deepEqual(spy.calls, [['capture_screen'], ['observe_input']]);
+  }
+});

@@ -146,6 +146,8 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0128_memory_dismissal_cursors.sql",
         "0129_memory_manifest_roots.sql",
         "0130_integration_permissions.sql",
+        "0131_suggestion_artifacts.sql",
+        "0132_memory_search_indexes.sql",
     )
     return tuple(
         MigrationSpec(

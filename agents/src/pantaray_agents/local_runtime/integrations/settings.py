@@ -74,8 +74,15 @@ class IntegrationsConfigured(InternalStrictModel):
     toolkits: list[ToolkitStatus]
 
 
+class IntegrationsKeyRejected(InternalStrictModel):
+    """The connection method refused the saved key; only a new key fixes it."""
+
+    state: Literal["key_rejected"] = "key_rejected"
+
+
 type IntegrationsStatus = Annotated[
-    IntegrationsNotConfigured | IntegrationsConfigured, Field(discriminator="state")
+    IntegrationsNotConfigured | IntegrationsConfigured | IntegrationsKeyRejected,
+    Field(discriminator="state"),
 ]
 
 

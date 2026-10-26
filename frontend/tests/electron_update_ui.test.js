@@ -298,3 +298,48 @@ test('macOS tray starts recording with no filter prerequisite', async () => {
     assert.equal(startCalls, 1);
   });
 });
+
+test('the main window hears whether recording waits on a permission, from the recorder status', async () => {
+  const sent = [];
+  let nextKind = 'permission_required';
+  const updateUi = createUpdateUiManager({
+    app: { name: 'Electron', getVersion: () => '0.0.0', quit: () => {} },
+    dialog: { showMessageBox: async () => ({ response: 0 }) },
+    menu: { buildFromTemplate: (template) => ({ template }), setApplicationMenu: () => {} },
+    getUiLanguage: () => 'en',
+    getDesktopUpdater: () => null,
+    canCheckForUpdatesNow: () => false,
+    markManualUpdateCheckPending: () => {},
+    consumeManualUpdateCheckPending: () => false,
+    getTray: () => null,
+    getMainWindow: () => ({
+      isDestroyed: () => false,
+      webContents: { send: (channel, payload) => sent.push([channel, payload]) },
+    }),
+    getGlobalShortcutAccelerator: () => null,
+    getCaptureStatusSnapshot: async () => ({
+      kind: nextKind,
+      screenshotsEnabled: true,
+      activeWindow: null,
+      browserUrl: null,
+      lastCaptureAt: null,
+      lastCaptureResult: null,
+      reasonLabel: `zanei_${nextKind}`,
+    }),
+    startScreenshots: () => true,
+    stopScreenshots: () => true,
+    setTrayStatusVisual: () => {},
+    onQuitRequested: () => {},
+  });
+
+  assert.equal(await updateUi.readPermissionRequired(), true);
+  // Any other reason recording is not capturing is not a missing permission.
+  nextKind = 'unavailable';
+  await updateUi.refreshCaptureStatus();
+  assert.equal(await updateUi.readPermissionRequired(), false);
+  assert.deepStrictEqual(sent, [
+    ['recording:permissionRequiredChanged', true],
+    ['recording:permissionRequiredChanged', false],
+    ['recording:permissionRequiredChanged', false],
+  ]);
+});

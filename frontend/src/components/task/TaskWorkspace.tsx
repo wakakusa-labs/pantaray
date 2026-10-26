@@ -30,7 +30,7 @@ export function TaskWorkspace({ actionId, title, onAddProject }: TaskWorkspacePr
         previewFile ? (
           <FilePreviewPane
             key={previewFile.path}
-            actionId={actionId}
+            target={{ kind: 'action', id: actionId }}
             file={previewFile}
             revision={view ? latestCompletion(view) : null}
             onClose={() => setPreviewFile(null)}
@@ -39,9 +39,10 @@ export function TaskWorkspace({ actionId, title, onAddProject }: TaskWorkspacePr
       }
       renderFileChips={(view) => (
         <FileChips
+          owner="action"
           files={deriveTaskFiles(view)}
           selectedPath={previewFile?.path ?? null}
-          onToggle={(file) => setPreviewFile(file.path === previewFile?.path ? null : file)}
+          onOpen={(file) => setPreviewFile(file.path === previewFile?.path ? null : file)}
         />
       )}
     />

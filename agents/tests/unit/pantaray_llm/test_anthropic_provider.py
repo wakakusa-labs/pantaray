@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 
+from pantaray_llm.contracts.action_turn import LlmActionTurnResponse
 from pantaray_llm.contracts.request import LlmProxyRequest
 from pantaray_llm.contracts.uploaded_blob import UploadedBlob
 from pantaray_llm.errors import ProviderError
@@ -644,6 +645,40 @@ async def test_tool_contract_violations_are_returned_as_rejected_output(
     assert response.output == []
 
 
+@pytest.mark.parametrize(
+    ("tool_input", "expected_message"),
+    [
+        ({}, "The lookup call is missing required argument(s): id."),
+        (
+            {"id": "a", "private-key-name": "private value"},
+            "The lookup call has unexpected argument(s): private-key-name.",
+        ),
+        (
+            {"id": ["private value"]},
+            "The lookup call has arguments that do not match the declared schema "
+            "at id (type).",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_schema_mismatch_names_the_tool_and_argument_without_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_input: dict[str, object],
+    expected_message: str,
+) -> None:
+    content = [_tool_block(input=tool_input)]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="tool_use")))
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "disabled"})
+    )
+
+    assert response.model_error.violation_reason == "arguments_schema_mismatch"
+    # The model reads this message on the repair turn; it must say what to fix
+    # and must not echo argument values.
+    assert response.model_error.message == expected_message
+
+
 @pytest.mark.asyncio
 async def test_overlong_action_commentary_is_repairable(
     monkeypatch: pytest.MonkeyPatch,
@@ -657,6 +692,23 @@ async def test_overlong_action_commentary_is_repairable(
 
     assert response.meta.outcome == "model_output_rejected"
     assert response.model_error.violation_reason == "invalid_response"
+
+
+@pytest.mark.asyncio
+async def test_an_overlong_reply_without_tool_calls_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reply without calls is the final answer, which the limit does not cover.
+    content = [{"type": "text", "text": "x" * 4001}]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="end_turn")))
+
+    response = await _execute(
+        _request(tool_use={"mode": "action_turn", "tools": [_TOOL]})
+    )
+
+    assert isinstance(response.tool_use, LlmActionTurnResponse)
+    assert [message.text for message in response.tool_use.messages] == ["x" * 4001]
+    assert response.tool_use.calls == []
 
 
 @pytest.mark.asyncio

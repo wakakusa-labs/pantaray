@@ -18,6 +18,7 @@ class SuggestionTerminalRow(TypedDict, total=False):
     answer: str | None
     error: JSONValue | None
     interaction_contract: str | None
+    artifacts_json: list[str]
 
 
 SUGGESTION_DB_DEPENDENCY = "suggestion_repository"
@@ -96,5 +97,9 @@ def coerce_suggestion_terminal_row(raw: object) -> SuggestionTerminalRow | None:
     interaction_contract = raw.get("interaction_contract")
     if interaction_contract is None or isinstance(interaction_contract, str):
         row["interaction_contract"] = interaction_contract
+
+    artifacts = raw.get("artifacts_json")
+    if isinstance(artifacts, list) and all(isinstance(path, str) for path in artifacts):
+        row["artifacts_json"] = artifacts
 
     return row

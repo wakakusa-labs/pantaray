@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useLocalOwner } from '@/context/localOwnerContext';
+import type { CaptureGateState } from '../../electron/src/ipc/context';
 
 /** `null` while the gate has not been read yet. */
-export type CaptureGate = {
-  /** Whether macOS grants this app the permissions the recorder needs. */
-  osPermissionsGranted: boolean;
-  /** A conversation was asked for without those permissions and is waiting on them. */
-  introRequested: boolean;
-  /** The recording screen was already answered with "later" during this app run. */
-  introDismissed: boolean;
-} | null;
+export type CaptureGate = CaptureGateState | null;
+
+/** Nothing gated: outside the desktop app there is no recorder to wait on. */
+const OPEN_GATE: CaptureGateState = {
+  permissions: { accessibility: true, screenRecording: true },
+  introRequested: false,
+};
 
 /**
  * Whether macOS lets this app record at all.
@@ -31,21 +31,14 @@ export function useCaptureGate(): {
 
   useEffect(() => {
     const read = async () => {
-      // Outside the desktop app there is no recorder, so nothing is gated on it.
-      const getGateState =
-        window.electron?.screenshot?.getGateState ??
-        (async () => ({
-          osPermissionsGranted: true,
-          introRequested: false,
-          introDismissed: false,
-        }));
+      const getGateState = window.electron?.screenshot?.getGateState ?? (async () => OPEN_GATE);
       try {
         setGate(await getGateState());
       } catch (error) {
         console.error('Failed to read the capture gate state:', error);
         // Main enforces the gate on every window it opens, so a transient read
         // failure here must not put an unanswerable screen in front of the user.
-        setGate({ osPermissionsGranted: true, introRequested: false, introDismissed: false });
+        setGate(OPEN_GATE);
       }
     };
     void read();
@@ -64,12 +57,9 @@ export function useCaptureGate(): {
   }, []);
 
   const dismissIntro = useCallback(async () => {
-    // Answering the screen also drops the conversation main deferred for it. Main
-    // holds the answer for the rest of this app run; this only avoids waiting a
-    // round trip to act on it.
-    setGate((current) =>
-      current ? { ...current, introRequested: false, introDismissed: true } : current
-    );
+    // Answering the screen drops the conversation main deferred for it; this only
+    // avoids waiting a round trip to close the screen.
+    setGate((current) => (current ? { ...current, introRequested: false } : current));
     try {
       // The answer names the owner this screen was shown to: a start can wait on macOS
       // permission long enough for the owner to change, and main takes the answer only

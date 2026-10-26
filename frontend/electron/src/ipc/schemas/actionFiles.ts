@@ -16,10 +16,22 @@ export const ActionFileOpenInputSchema = z.object({ path: AbsolutePathSchema }).
 
 export type ActionFileOpenInput = z.infer<typeof ActionFileOpenInputSchema>;
 
-/** A file one Action names; main checks the Action's conversation before touching it. */
-export const ActionFileRequestInputSchema = z
+/**
+ * A file an Action names (absolute path) or a Suggestion made (path relative to its folder); main
+ * checks it against its owner before touching it.
+ */
+export const TaskFileRequestInputSchema = z
   .object({
-    actionId: z.string().min(1).max(MAX_ID_LENGTH),
-    path: AbsolutePathSchema,
+    target: z
+      .object({
+        kind: z.enum(['action', 'suggestion']),
+        id: z.string().min(1).max(MAX_ID_LENGTH),
+      })
+      .strict(),
+    path: z.string().min(1).max(MAX_PATH_LENGTH),
   })
-  .strict();
+  .strict()
+  .refine(
+    (request) => request.target.kind === 'suggestion' || path.isAbsolute(request.path),
+    'an Action file path must be absolute'
+  );

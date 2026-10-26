@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal, Protocol
 
 from pantaray_agents.repositories.action_runtime_resume_contract import (
@@ -207,6 +208,7 @@ class SuggestionRepositoryPort(Protocol):
         response_text: str | None = None,
         request_images_count: int = 0,
         used_images_count: int = 0,
+        on_committed: Callable[[], None] | None = None,
     ) -> RepositoryResult[DBRow]: ...
 
     async def save_suggestion_run_step(

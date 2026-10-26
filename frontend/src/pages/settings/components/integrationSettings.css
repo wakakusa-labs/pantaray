@@ -218,9 +218,6 @@
   text-decoration: none;
 }
 
-.integration-consent {
-  margin-top: var(--space-lg);
-}
 
 .integration-dialog {
   background: var(--fog-popover);

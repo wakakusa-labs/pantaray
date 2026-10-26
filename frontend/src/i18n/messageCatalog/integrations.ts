@@ -4,8 +4,6 @@ export const INTEGRATION_MESSAGES = defineMessages({
   en: {
     'settings.integrations.title': 'Integrations',
     'settings.integrations.description': 'Let Pantaray use the services you connect for its work.',
-    'settings.integrations.consent':
-      'The “Recorded apps and websites” setting does not apply to connected services. What each one can do is set here.',
     'settings.integrations.accountCount': '{count} accounts',
     'settings.integrations.needsReconnection': 'Needs reconnecting',
     'settings.integrations.backLabel': 'Back to Integrations',
@@ -55,11 +53,14 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.tools.use': 'Use {tool}',
     'settings.integrations.key.label': 'Composio API key',
     'settings.integrations.key.placeholder': 'ak_…',
+    'settings.integrations.key.rejected': "This key doesn't work. Replace it with a new key.",
+    'settings.integrations.key.accountKey':
+      'This is an account key. Open a project and create an API key that starts with ak_.',
     'settings.integrations.setup.open': 'Open Composio',
     'settings.integrations.setup.createKey':
       'Create a key under Settings → Project Settings → API Keys.',
     'settings.integrations.setup.permissions':
-      'The key needs read and write for Auth configs, Connected accounts, Session management and Session tool execution.',
+      'The key needs Read and write for Auth configs, Connected accounts and Session management, and Write only for Session tool execution.',
     'settings.integrations.loadFailed': "Couldn't load the services.",
     'settings.integrations.reload': 'Load again',
     'settings.integrations.flow.service': '{service}: {status}',
@@ -80,8 +81,6 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.title': '連携',
     'settings.integrations.description':
       'つないだサービスを、Pantaray が作業に使えるようにします。',
-    'settings.integrations.consent':
-      '「記録するアプリとウェブサイト」の設定は、連携したサービスには効きません。サービスごとにできることは、ここで決めます。',
     'settings.integrations.accountCount': '{count} アカウント',
     'settings.integrations.needsReconnection': '再接続が必要',
     'settings.integrations.backLabel': '連携に戻る',
@@ -129,11 +128,14 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.tools.use': '{tool} を使う',
     'settings.integrations.key.label': 'Composio API キー',
     'settings.integrations.key.placeholder': 'ak_…',
+    'settings.integrations.key.rejected': 'このキーは使えません。新しいキーに変更してください。',
+    'settings.integrations.key.accountKey':
+      'これはアカウントのキーです。プロジェクトを開いて、ak_ で始まる API キーを作ってください。',
     'settings.integrations.setup.open': 'Composio を開く',
     'settings.integrations.setup.createKey':
       'Settings → Project Settings → API Keys でキーを作ります',
     'settings.integrations.setup.permissions':
-      'キーには Auth configs・Connected accounts・Session management・Session tool execution の読み取りと書き込みが必要です',
+      'キーには Auth configs・Connected accounts・Session management の Read and write と、Session tool execution の Write only が必要です',
     'settings.integrations.loadFailed': 'サービスの一覧を取得できませんでした。',
     'settings.integrations.reload': 'もう一度読み込む',
     'settings.integrations.flow.service': '{service}: {status}',

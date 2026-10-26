@@ -50,5 +50,6 @@ async def test_ws_suggestion_completion_emits_only_process_completed() -> None:
         "has_suggestion": True,
         "suggestion_id": "sug-1",
         "interaction_contract": "action_offer",
+        "artifacts": [],
         "status": "success",
     }

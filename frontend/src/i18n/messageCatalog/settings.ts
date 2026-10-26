@@ -206,6 +206,12 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.screenshotCapture.unavailable':
       'Computer activity recording is currently unavailable.',
     'settings.screenshotCapture.pausedSuggestions': 'Suggestions are paused too',
+    'settings.screenshotCapture.permissionRequired': 'Permission needed',
+    'settings.screenshotCapture.permission.accessibility': 'Accessibility',
+    'settings.screenshotCapture.permission.inputMonitoring': 'Input Monitoring',
+    'settings.screenshotCapture.permission.screenRecording': 'Screen Recording',
+    'settings.screenshotCapture.permission.chrome': 'Control of Chrome',
+    'settings.screenshotCapture.permission.safari': 'Control of Safari',
     'recordingIntro.title': 'Start recording',
     'recordingIntro.purpose':
       'Pantaray records what you do on this Mac and uses it for suggestions and tasks.',
@@ -220,7 +226,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'recordingIntro.settingsNote': 'You can exclude apps and sites in Settings.',
     'recordingIntro.startFailed': 'Recording could not be started. Please try again.',
     'recordingIntro.permissionPending':
-      'Accessibility, Screen Recording, and related permissions are required. Allow them in System Settings, then press "Start recording" again. After allowing Screen Recording, quit and reopen Pantaray.',
+      'Accessibility, Input Monitoring, and Screen Recording are required. Allow them in System Settings, then press "Start recording" again. After allowing Screen Recording, quit and reopen Pantaray.',
     'settings.recordingFilter.title': 'Recorded apps and websites',
     'settings.recordingFilter.description':
       'Choose which apps and websites are recorded. Everything else on this device is recorded as usual.',
@@ -483,6 +489,12 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.screenshotCapture.screenshotsLabel': 'コンピューター操作の記録',
     'settings.screenshotCapture.unavailable': '現在はコンピューター操作の記録を有効にできません。',
     'settings.screenshotCapture.pausedSuggestions': '提案も止まっています',
+    'settings.screenshotCapture.permissionRequired': '許可が必要です',
+    'settings.screenshotCapture.permission.accessibility': 'アクセシビリティ',
+    'settings.screenshotCapture.permission.inputMonitoring': '入力監視',
+    'settings.screenshotCapture.permission.screenRecording': '画面収録',
+    'settings.screenshotCapture.permission.chrome': 'Chrome の操作',
+    'settings.screenshotCapture.permission.safari': 'Safari の操作',
     'recordingIntro.title': '記録を始める',
     'recordingIntro.purpose':
       'Pantaray はこの Mac での操作を記録し、それをもとに提案や作業をします。',
@@ -497,7 +509,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'recordingIntro.settingsNote': '除外するアプリやサイトは設定で変えられます',
     'recordingIntro.startFailed': '記録を開始できませんでした。もう一度お試しください。',
     'recordingIntro.permissionPending':
-      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。',
+      'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。',
     'settings.recordingFilter.title': '記録するアプリとウェブサイト',
     'settings.recordingFilter.description':
       '記録するアプリとウェブサイトを選びます。ここで指定しないものは通常どおり記録されます。',

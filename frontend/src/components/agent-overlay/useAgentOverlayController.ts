@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { MIN_HEIGHT, getMaxHeight } from './Styled';
 import type { AgentOverlayState, OverlaySnapshotPayload } from './model/overlayTypes';
 import { createInitialAgentOverlayState, reduceAgentOverlayState } from './model/reducer';
-import type { WorkRefKind } from '@/history/workRefLink';
+import type { OverlayOpenTaskRequest } from '../../../electron/src/ipc/schemas/overlay';
 import type { AcceptActionRequest } from '@/types/websocket';
 type SuggestionAcceptance = Omit<AcceptActionRequest, 'suggestionId' | 'commandId'>;
 import { getCollapsedPreviewHeightPx, shouldExpandScrollableContent } from './layoutMetrics';
@@ -30,7 +30,7 @@ export type AgentOverlayController = {
   /** 見送る, with the composer's words as the reason, or null when there are none. */
   onReject: (reason: string | null) => void;
   /** Shows this panel's Action or suggestion in the main window, which then closes the panel. */
-  openTask: (work: { kind: WorkRefKind; id: string }) => void;
+  openTask: (work: OverlayOpenTaskRequest) => void;
   /** The main window could not be shown with this panel's task. */
   openTaskFailed: boolean;
   /**
@@ -388,7 +388,7 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   }, []);
 
   // Main closes the panel once the main window shows the task; a failure keeps it, saying so.
-  const openTask = useCallback((work: { kind: WorkRefKind; id: string }) => {
+  const openTask = useCallback((work: OverlayOpenTaskRequest) => {
     const suggestionId = suggestionIdRef.current;
     void window.electron?.agentOverlay?.openTask?.(work).then(
       () => setOpenTaskFailedFor(null),

@@ -7,7 +7,16 @@ import type {
   CapturePrivacySettingsInput,
   IdeFileRulesInput,
 } from '../../electron/src/ipc/schemas/privacy';
-import type { AuthState, UpdateReadyNotice } from '../../electron/src/ipc/context';
+import type {
+  AuthState,
+  CaptureGateState,
+  UpdateReadyNotice,
+} from '../../electron/src/ipc/context';
+import type {
+  CapturePermission,
+  CapturePermissionCheck,
+} from '../../electron/src/context/zaneiProcess';
+import type { OnboardingState } from '../../electron/src/ipc/schemas/onboarding';
 import type {
   ConnectionCommand,
   ConnectionStateResult,
@@ -49,12 +58,13 @@ import type {
 } from '../../electron/src/chat/chatContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
+import type { OverlayOpenTaskRequest } from '../../electron/src/ipc/schemas/overlay';
 import type { ActionImageMimeType } from '../../electron/src/protocol/imageStoragePath';
 import type {
   ActionFileOpenResult,
   ActionFileOpenWithResult,
   ActionFileReadResult,
-  ActionFileRequest,
+  TaskFileRequest,
 } from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
@@ -74,15 +84,6 @@ import type {
 import type { CommandNetworkSettings } from '../../electron/src/settings/workspaceSettingsFetch';
 
 export {};
-
-type ElectronCaptureGateState = {
-  /** 記録に必要な macOS の権限が付与されているか（毎回 OS に問い合わせる） */
-  osPermissionsGranted: boolean;
-  /** 権限がないまま要求された会話が main で待っているか */
-  introRequested: boolean;
-  /** 記録画面を「あとで」で閉じたか（main がアプリ起動中だけ保持する） */
-  introDismissed: boolean;
-};
 
 type ElectronInstalledApp = {
   name: string;
@@ -166,12 +167,19 @@ declare global {
         on: (channel: string, func: (...args: unknown[]) => void) => () => void;
       };
       screenshot?: {
-        /** OS 権限の付与状況と、それを待っている会話の有無 */
-        getGateState: () => Promise<ElectronCaptureGateState>;
-        /** 記録画面を「あとで」で閉じる。main は表示されていた owner の答えだけを受ける */
-        dismissIntro: (ownerId: string) => Promise<ElectronCaptureGateState>;
-        /** システム設定のプライバシーとセキュリティで、まだ足りない権限（アクセシビリティか画面収録）を開く */
-        openPermissionSettings: () => Promise<void>;
+        /** OS 権限（アクセシビリティと画面収録）それぞれの付与状況と、それを待っている会話の有無 */
+        getGateState: () => Promise<CaptureGateState>;
+        /** 記録画面を「あとで」で閉じ、待っている会話を取り下げる。main は表示されていた owner の答えだけを受ける */
+        dismissIntro: (ownerId: string) => Promise<CaptureGateState>;
+        /** 記録の開始が待つ権限の一覧（今の owner、開始と同じ読み方） */
+        getPermissions: () => Promise<CapturePermissionCheck[]>;
+        /** macOS に指定した権限を求める（macOS 自身の案内がシステム設定へ誘導する） */
+        askForPermission: (permission: CapturePermission) => Promise<void>;
+        /** 指定した権限のシステム設定のパネルを開く（macOS の案内が出ないとき用） */
+        openPermissionSettings: (permission: CapturePermission) => Promise<void>;
+        /** 権限が足りず記録できない状態か（記録係の状態を今読み直す。メインウィンドウ用） */
+        getPermissionRequired?: () => Promise<boolean>;
+        onPermissionRequiredChanged?: (callback: (isRequired: boolean) => void) => () => void;
         start: () => Promise<RecordingStartResult>;
         stop: () => Promise<boolean>;
         getStatus: () => Promise<boolean>;
@@ -252,19 +260,19 @@ declare global {
       actionFiles?: {
         /** Selects the file in Finder. */
         open: (params: { path: string }) => Promise<void>;
-        /** Main window only: a file the Action's conversation names, as text or an image. */
-        read: (request: ActionFileRequest) => Promise<ActionFileReadResult>;
-        /** Main window only: opens a file the Action names in its default app. */
-        openInApp: (request: ActionFileRequest) => Promise<ActionFileOpenResult>;
+        /** Main window only: a file its Action names or its Suggestion made, as text or an image. */
+        read: (request: TaskFileRequest) => Promise<ActionFileReadResult>;
+        /** Opens a file its Action names or its Suggestion made in its default app. */
+        openInApp: (request: TaskFileRequest) => Promise<ActionFileOpenResult>;
         /** Main window only: asks for an app in /Applications and opens the file in it. */
-        openWithApp: (request: ActionFileRequest) => Promise<ActionFileOpenWithResult>;
-        /** Main window only: selects a file the Action names in Finder. */
+        openWithApp: (request: TaskFileRequest) => Promise<ActionFileOpenWithResult>;
+        /** Main window only: selects the file in Finder. */
         reveal: (
-          request: ActionFileRequest
+          request: TaskFileRequest
         ) => Promise<{ kind: 'revealed' } | { kind: 'unavailable'; reason: 'not_found' }>;
         /** Main window only: shows the file in macOS Quick Look over the main window. */
         quickLook: (
-          request: ActionFileRequest
+          request: TaskFileRequest
         ) => Promise<{ kind: 'shown' } | { kind: 'unavailable'; reason: 'not_found' }>;
       };
       clipboard?: {
@@ -342,6 +350,11 @@ declare global {
         getState: () => Promise<ConnectionStateResult>;
         update: (command: ConnectionCommand) => Promise<ConnectionUpdateResult>;
         onChanged: (callback: () => void) => () => void;
+      };
+      /** 初回設定の進み具合（端末ごと、main ウィンドウからだけ） */
+      onboarding?: {
+        getState: () => Promise<OnboardingState>;
+        setState: (state: OnboardingState) => Promise<OnboardingState>;
       };
       shortcut?: {
         getState: () => Promise<ElectronGlobalShortcutState>;
@@ -445,7 +458,7 @@ declare global {
         /** Brings the main window forward on the workspace settings page. */
         openWorkspaceSettings?: () => void;
         /** Closes this panel and brings the main window forward with its work selected. */
-        openTask?: (request: { kind: 'action' | 'suggestion'; id: string }) => Promise<void>;
+        openTask?: (request: OverlayOpenTaskRequest) => Promise<void>;
         acceptAction: (data: unknown) => void;
         hide: () => void;
       };

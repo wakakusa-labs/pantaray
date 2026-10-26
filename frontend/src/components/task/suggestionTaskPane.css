@@ -6,6 +6,37 @@
   flex-direction: column;
 }
 
+/* A file's preview on the left; the suggestion narrows to a column on the right, as a task does. */
+.suggestion-task--split {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+.suggestion-task--split .suggestion-task__header {
+  grid-column: 1 / -1;
+}
+
+.suggestion-task--split
+  > :not(.suggestion-task__header, .suggestion-task__scroll, .suggestion-task__dock) {
+  grid-row: 2 / 4;
+  grid-column: 1;
+}
+
+.suggestion-task--split .suggestion-task__scroll,
+.suggestion-task--split .suggestion-task__dock {
+  grid-column: 2;
+  border-left: 1px solid var(--fog-line);
+}
+
+.suggestion-task--split .suggestion-task__column {
+  padding: 20px 16px;
+}
+
+.suggestion-task--split .suggestion-task__dock {
+  padding: 0 16px 16px;
+}
+
 .suggestion-task__header {
   flex: none;
   height: var(--app-pane-header-height);

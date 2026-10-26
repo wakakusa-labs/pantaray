@@ -18,6 +18,7 @@ from starlette.testclient import TestClient
 from tests.integration.local_artifact_test_support import build_test_llm_client
 from tests.integration.local_runtime_ws_test_fakes import (
     LocalWsSuggestionRepository,
+    keep_decision,
     load_test_prompt_config,
 )
 
@@ -228,6 +229,7 @@ def local_runtime_ws_harness(
         nothing,
         nothing,
         {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
+        keep_decision("action_offer", "The local runtime verification is half done."),
     ]
     # The writer's call is the next plain-text call on this client.
     suggestion_llm.responses["default"] = (
@@ -256,7 +258,9 @@ def local_runtime_ws_harness(
     suggestion_agent = SuggestionAgent(
         config={"mode": "local_runtime", "llm_client": suggestion_llm},
         repository=suggestion_repository,
-        research_tools=build_mock_suggestion_research_tools(),
+        research_tools=build_mock_suggestion_research_tools(
+            short_runtime_root / "suggestion_made"
+        ),
         stable_memory=SuggestionStableMemoryContext(
             prompt="No stable memory roots are available.",
             has_facts=False,

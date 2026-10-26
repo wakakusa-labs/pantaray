@@ -22,14 +22,18 @@ function wrap(children: ReactNode) {
   );
 }
 
-function stubBridge(start = vi.fn(async () => 'started')) {
-  // The gate lives in main: "later" is answered there and held for the app run, so
-  // the stub answers it the same way rather than in the window that asked.
-  const gate = { osPermissionsGranted: false, introRequested: false, introDismissed: false };
+/** `waiting`: a conversation was asked for without the permissions, which opens the screen. */
+function stubBridge(start = vi.fn(async () => 'started'), waiting = true) {
+  // The gate lives in main: "later" drops the waiting conversation there, so the stub
+  // answers it the same way rather than in the window that asked.
+  const gate = {
+    permissions: { accessibility: false, screenRecording: false },
+    introRequested: waiting,
+  };
   const dismissIntro = vi.fn(async (_ownerId: string) =>
-    Object.assign(gate, { introRequested: false, introDismissed: true })
+    Object.assign(gate, { introRequested: false })
   );
-  const openPermissionSettings = vi.fn(async () => undefined);
+  const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
   let askForReread: () => void = () => undefined;
   window.electron = {
     screenshot: {
@@ -37,7 +41,7 @@ function stubBridge(start = vi.fn(async () => 'started')) {
       onStatusChanged: vi.fn(() => () => undefined),
       start,
       stop: vi.fn(async () => true),
-      getGateState: vi.fn(async () => ({ ...gate })),
+      getGateState: vi.fn(async () => ({ ...gate, permissions: { ...gate.permissions } })),
       dismissIntro,
       openPermissionSettings,
       onGateStateChanged: vi.fn((callback: () => void) => {
@@ -58,9 +62,15 @@ function stubBridge(start = vi.fn(async () => 'started')) {
     // The permissions arriving, which main learns from this very read: a conversation
     // it was holding opens there and then, so the read reports it no longer waiting.
     grantPermissions: () =>
-      Object.assign(gate, { osPermissionsGranted: true, introRequested: false }),
+      Object.assign(gate, {
+        permissions: { accessibility: true, screenRecording: true },
+        introRequested: false,
+      }),
+    // Accessibility granted while Screen Recording still waits on a reopen.
+    grantAccessibility: () => Object.assign(gate.permissions, { accessibility: true }),
     // The user taking the permissions away again in System Settings.
-    revokePermissions: () => Object.assign(gate, { osPermissionsGranted: false }),
+    revokePermissions: () =>
+      Object.assign(gate, { permissions: { accessibility: false, screenRecording: false } }),
     // Main asking this window to read the gate again, with no focus to react to.
     askForReread: async () => {
       await act(async () => {
@@ -98,7 +108,18 @@ describe('RecordingIntroDialog', () => {
     }
   });
 
-  it('shows the screen while macOS has not granted the permissions, and closes it on a start', async () => {
+  it('does not open on its own while nothing waits on the permissions', async () => {
+    // First-run setup is where recording is turned on; this screen is only what a
+    // conversation stopped by the missing permissions turns into.
+    stubBridge(undefined, false);
+    render(wrap(<RecordingIntroDialog />));
+
+    await waitFor(() => expect(window.electron?.screenshot?.getGateState).toHaveBeenCalled());
+    expect(showModal).not.toHaveBeenCalled();
+    expect(screen.queryByText('記録を始める', { selector: 'h2' })).not.toBeInTheDocument();
+  });
+
+  it('shows the screen for a waiting conversation, and closes it on a start', async () => {
     const { dismissIntro, start } = stubBridge();
     render(wrap(<RecordingIntroDialog />));
 
@@ -152,24 +173,27 @@ describe('RecordingIntroDialog', () => {
 
   it('keeps the screen open with what to grant while macOS permission is missing', async () => {
     // The collector is up but recording nothing, so the screen has no permit to record.
-    const { dismissIntro, start, openPermissionSettings } = stubBridge(
-      vi.fn(async () => 'permission_pending')
-    );
+    const { dismissIntro, start, openPermissionSettings, grantAccessibility, askForReread } =
+      stubBridge(vi.fn(async () => 'permission_pending'));
     render(wrap(<RecordingIntroDialog />));
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
 
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     await screen.findByText(
-      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+      'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
     expect(dismissIntro).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '記録を始める' })).toBeEnabled();
 
     // The permission is granted outside the app, so the screen offers the pane it
-    // is granted in rather than leaving the user to find it.
+    // is granted in rather than leaving the user to find it: the first one missing.
     fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
-    expect(openPermissionSettings).toHaveBeenCalledTimes(1);
+    expect(openPermissionSettings).toHaveBeenLastCalledWith('read_accessibility_tree');
+    grantAccessibility();
+    await askForReread();
+    fireEvent.click(screen.getByRole('button', { name: 'システム設定を開く' }));
+    expect(openPermissionSettings).toHaveBeenLastCalledWith('capture_screen');
   });
 
   it('cannot be answered while a start it cannot cancel is still running', async () => {
@@ -210,7 +234,7 @@ describe('RecordingIntroDialog', () => {
     expect(screen.getByRole('button', { name: '記録を始める' })).toBeEnabled();
   });
 
-  it('marks the screen answered without starting recording when the user chooses later', async () => {
+  it('drops the waiting conversation without starting recording when the user chooses later', async () => {
     const { dismissIntro, start } = stubBridge();
     render(wrap(<RecordingIntroDialog />));
 
@@ -223,33 +247,12 @@ describe('RecordingIntroDialog', () => {
     );
   });
 
-  it('stays answered when the window that answered it is reopened', async () => {
-    // "Later" is answered for the app run, not for this window: the screen lives in
-    // the main window, which the user may close and reopen while the permissions are
-    // still missing, and reopening it must not ask again.
-    const { dismissIntro } = stubBridge();
-    const { unmount } = render(wrap(<RecordingIntroDialog />));
-
-    fireEvent.click(await screen.findByRole('button', { name: 'あとで' }));
-    await waitFor(() => expect(dismissIntro).toHaveBeenCalledTimes(1));
-    unmount();
-
-    render(wrap(<RecordingIntroDialog />));
-    await waitFor(() => expect(window.electron?.screenshot?.getGateState).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText('記録を始める', { selector: 'h2' })).not.toBeInTheDocument();
-  });
-
-  it('opens for a waiting conversation even after the user answered it with "later"', async () => {
+  it('opens when a conversation starts waiting, and "later" drops it for good', async () => {
     // A conversation asked for without the macOS permissions opens no window: main
     // holds the request and brings this window forward, and the gate says so.
-    const { dismissIntro, deferConversation } = stubBridge();
+    const { dismissIntro, deferConversation } = stubBridge(undefined, false);
     render(wrap(<RecordingIntroDialog />));
-
-    fireEvent.click(await screen.findByRole('button', { name: 'あとで' }));
-    await waitFor(() => expect(dismissIntro).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(screen.queryByText('記録を始める', { selector: 'h2' })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(window.electron?.screenshot?.getGateState).toHaveBeenCalled());
 
     deferConversation();
     await focusWindow();
@@ -258,7 +261,7 @@ describe('RecordingIntroDialog', () => {
     // "Later" drops the waiting conversation in main, so the screen stops being asked
     // for and does not come back on the next focus.
     fireEvent.click(screen.getByRole('button', { name: 'あとで' }));
-    await waitFor(() => expect(dismissIntro).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dismissIntro).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(screen.queryByText('記録を始める', { selector: 'h2' })).not.toBeInTheDocument()
     );
@@ -269,11 +272,10 @@ describe('RecordingIntroDialog', () => {
   it('opens for a waiting conversation when this window was already in front', async () => {
     // `focus()` on the frontmost window fires no focus event, so main asks for the
     // re-read itself — the gate it reads back stays the source of truth.
-    const { deferConversation, askForReread, dismissIntro } = stubBridge();
+    const { deferConversation, askForReread } = stubBridge(undefined, false);
     render(wrap(<RecordingIntroDialog />));
+    await waitFor(() => expect(window.electron?.screenshot?.getGateState).toHaveBeenCalled());
 
-    fireEvent.click(await screen.findByRole('button', { name: 'あとで' }));
-    await waitFor(() => expect(dismissIntro).toHaveBeenCalledTimes(1));
     deferConversation();
     await askForReread();
 
@@ -281,10 +283,8 @@ describe('RecordingIntroDialog', () => {
   });
 
   it('closes a screen it no longer has anything to ask once the permissions are granted', async () => {
-    const { deferConversation, grantPermissions } = stubBridge();
+    const { grantPermissions } = stubBridge();
     render(wrap(<RecordingIntroDialog />));
-    deferConversation();
-    await focusWindow();
     expect(await screen.findByText('記録を始める', { selector: 'h2' })).toBeInTheDocument();
 
     // Recording started from the tray while this screen was open: macOS granted the
@@ -318,27 +318,28 @@ describe('RecordingIntroDialog', () => {
 
   it('reopens without the notice of an attempt made before the permissions were granted', async () => {
     // Granting the permissions closes the screen without it being answered, so the
-    // notice of the attempt that asked for them is still there when taking them
-    // away again puts the screen back in front.
-    const { grantPermissions, revokePermissions } = stubBridge(
+    // notice of the attempt that asked for them is still there when taking them away
+    // again and asking for another conversation puts the screen back in front.
+    const { grantPermissions, revokePermissions, deferConversation } = stubBridge(
       vi.fn(async () => 'permission_pending')
     );
     render(wrap(<RecordingIntroDialog />));
 
     fireEvent.click(await screen.findByRole('button', { name: '記録を始める' }));
     await screen.findByText(
-      'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+      'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
     );
 
     grantPermissions();
     await focusWindow();
     revokePermissions();
+    deferConversation();
     await focusWindow();
 
     expect(await screen.findByText('記録を始める', { selector: 'h2' })).toBeInTheDocument();
     expect(
       screen.queryByText(
-        'アクセシビリティや画面収録などの権限が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
+        'アクセシビリティ、入力監視、画面収録の許可が必要です。システム設定で許可してから、もう一度「記録を始める」を押してください。画面収録を許可したら、Pantaray を終了して開き直してください。'
       )
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'システム設定を開く' })).toBeNull();

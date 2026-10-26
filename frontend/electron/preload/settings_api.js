@@ -9,6 +9,10 @@ function createSettingsApi({ ipcRenderer }) {
         return () => ipcRenderer.removeListener('aiConnection:changed', listener);
       },
     },
+    onboarding: {
+      getState: () => ipcRenderer.invoke('onboarding:getState'),
+      setState: (state) => ipcRenderer.invoke('onboarding:setState', state),
+    },
     approval: {
       getWorkspaceEditCommandPreference: () =>
         ipcRenderer.invoke('approval:getWorkspaceEditCommandPreference'),

@@ -58,6 +58,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
 )
@@ -91,6 +94,11 @@ _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
     commands_allowed=False,
     read_access_scope="workspace",
 )
+
+
+_MADE = SimpleNamespace(status="success", has_suggestion=True, artifacts=["draft.md"])
+# A saved Suggestion with nothing to show.
+_SAVED = SimpleNamespace(status="success", has_suggestion=False, artifacts=[])
 
 
 def _payload() -> SuggestionJobPayload:
@@ -345,7 +353,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
             "request_images_count": 0,
             "used_images_count": 0,
         },
-        process=AsyncMock(return_value=SimpleNamespace(status="success")),
+        process=AsyncMock(return_value=_SAVED),
     )
     get_agent = AsyncMock(return_value=agent)
     monkeypatch.setattr(
@@ -387,7 +395,7 @@ async def test_run_suggestion_job_drops_a_suggestion_recording_was_turned_off_fo
     # the Suggestion generated after the toggle out of the store.
     async def _turn_recording_off(_request: object) -> SimpleNamespace:
         _persist_source(db_path, capture_paused=True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     agent.process = _turn_recording_off
     await _run_suggestion_job(_payload())
@@ -519,7 +527,7 @@ async def test_run_suggestion_job_persists_success_terminal_row(
             return_value=SimpleNamespace(error=None)
         ),
     )
-    response = SimpleNamespace(status="success")
+    response = _SAVED
     agent = SimpleNamespace(
         build_persistence_payload=lambda _response: {
             "prompt_name": "suggestion",
@@ -548,6 +556,104 @@ async def test_run_suggestion_job_persists_success_terminal_row(
     assert kwargs["request_images_count"] == 1
     assert kwargs["used_images_count"] == 1
     repository.finalize_suggestion_start_error_if_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("deliverable", "response", "read_back_fails", "kept"),
+    [
+        (True, _MADE, False, True),
+        # Committed, then the read-back hit a lock: the row lists the files.
+        (True, _MADE, True, True),
+        # The writer timed out after the make stage: an error row, no files.
+        (True, SimpleNamespace(status="error", has_suggestion=False), False, False),
+        # Saved as a Suggestion that does not list the files.
+        (
+            True,
+            SimpleNamespace(status="success", has_suggestion=True, artifacts=[]),
+            False,
+            False,
+        ),
+        (False, _MADE, False, False),
+    ],
+)
+async def test_the_files_stay_only_with_a_saved_suggestion_that_lists_them(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    deliverable: bool,
+    response: SimpleNamespace,
+    read_back_fails: bool,
+    kept: bool,
+) -> None:
+    """A requeued run must not offer files an earlier attempt made, and files no
+    saved Suggestion shows must not stay behind."""
+    db_path = tmp_path / "runtime.db"
+    artifacts_root = resolve_suggestion_artifacts_root(
+        db_path=db_path, user_id="user-1", suggestion_id="suggestion-1"
+    )
+    artifacts_root.mkdir(parents=True)
+    (artifacts_root / "earlier-attempt.md").write_text("stale", encoding="utf-8")
+    repository = SimpleNamespace(
+        get_suggestion=AsyncMock(
+            return_value=RepositoryResult(data={"status": "processing"})
+        ),
+        discard_suggestion_if_processing=AsyncMock(
+            return_value=SimpleNamespace(error=None)
+        ),
+    )
+
+    async def _save(*_args: object, on_committed, **_kwargs: object):
+        on_committed()
+        if read_back_fails:
+            raise sqlite3.OperationalError("database is locked")
+        return SimpleNamespace(error=None)
+
+    repository.save_suggestion = AsyncMock(side_effect=_save)
+
+    async def _process(_request: object) -> SimpleNamespace:
+        assert not artifacts_root.exists()
+        artifacts_root.mkdir(parents=True)
+        (artifacts_root / "draft.md").write_text("made now", encoding="utf-8")
+        return response
+
+    agent = SimpleNamespace(
+        build_persistence_payload=lambda _response: {
+            "prompt_name": "suggestion",
+            "prompt_version": "1.0",
+            "prompt_text": "",
+            "response_text": "",
+            "request_images_count": 0,
+            "used_images_count": 0,
+        },
+        process=_process,
+    )
+    job = "pantaray_agents.tasks.internal_jobs.suggestion"
+    for name, replacement in (
+        ("read_local_runtime_db_config", lambda: (db_path, 1_000)),
+        ("deps.get_suggestion_repository", AsyncMock(return_value=repository)),
+        ("deps.get_suggestion_agent", AsyncMock(return_value=agent)),
+        ("owner_has_deliverable_session", lambda _owner_id: deliverable),
+        (
+            "defer_local_job_if_retryable",
+            AsyncMock(side_effect=DeferredLocalJob("job-1", "later")),
+        ),
+    ):
+        monkeypatch.setattr(f"{job}.{name}", replacement)
+
+    if read_back_fails:
+        with pytest.raises(DeferredLocalJob):
+            await _run_suggestion_job(_payload())
+        # The requeued job finds the committed row and leaves it alone.
+        repository.get_suggestion.return_value = RepositoryResult(
+            data={"status": "success"}
+        )
+    await _run_suggestion_job(_payload())
+
+    assert repository.save_suggestion.await_count == int(deliverable)
+    if kept:
+        assert [path.name for path in artifacts_root.iterdir()] == ["draft.md"]
+    else:
+        assert not artifacts_root.exists()
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1284,8 @@ async def test_the_run_reads_activity_from_the_cursor_its_insight_committed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository, get_agent, gate = _readable_insight_job(
-        monkeypatch, process=AsyncMock(return_value=SimpleNamespace(status="success"))
+        monkeypatch,
+        process=AsyncMock(return_value=_SAVED),
     )
 
     await _run_suggestion_job(_payload())
@@ -1203,7 +1310,7 @@ async def test_a_revoked_activity_permit_publishes_nothing(
             # The next model call or step write is where the revocation lands.
             await asyncio.sleep(1)
         finished.append(True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     get_agent.return_value.process = _process
 
@@ -1227,7 +1334,7 @@ async def test_a_model_request_started_after_revocation_is_refused(
         # Before the cancel reaches this task, the next model send must not start.
         async with source_http_request("user-1"):
             sent.append(True)
-        return SimpleNamespace(status="success")
+        return _SAVED
 
     get_agent.return_value.process = _process
 

@@ -11,6 +11,7 @@ type RawOverlayLiveResume = {
 
 type RawOverlayBootstrapResponse = {
   suggestion_id: string;
+  artifacts_root: string;
   snapshot: OverlayBootstrapResponse['snapshot'];
   last_sequence: number;
   live_resume: RawOverlayLiveResume;
@@ -29,6 +30,7 @@ function normalizeLiveResume(raw: RawOverlayLiveResume): OverlayLiveResume {
 function normalizeBootstrapResponse(raw: RawOverlayBootstrapResponse): OverlayBootstrapResponse {
   return {
     suggestionId: raw.suggestion_id,
+    artifactsRoot: raw.artifacts_root,
     snapshot: raw.snapshot,
     lastSequence: raw.last_sequence,
     liveResume: normalizeLiveResume(raw.live_resume),

@@ -144,3 +144,7 @@ export function useAiConnectionController() {
     cancelSignIn,
   };
 }
+
+export type AiConnectionController = ReturnType<typeof useAiConnectionController>;
+/** The connection as main last reported it. */
+export type ConnectionState = NonNullable<AiConnectionController['state']>;

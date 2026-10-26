@@ -1,6 +1,7 @@
 """MockSuggestionAgentRepository の分離定義。"""
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -42,6 +43,7 @@ class MockSuggestionAgentRepository(
         response_text: str | None = None,
         request_images_count: int = 0,
         used_images_count: int = 0,
+        on_committed: Callable[[], None] | None = None,
     ) -> RepositoryResult[dict[str, Any]]:
         """サジェスチョンレスポンスを保存する。"""
 
@@ -77,6 +79,8 @@ class MockSuggestionAgentRepository(
         record["reserved_action_id"] = None
 
         await self.save_data("suggestions", record)
+        if on_committed is not None:
+            on_committed()
         return RepositoryResult(data=record)
 
     async def save_suggestion_run_step(

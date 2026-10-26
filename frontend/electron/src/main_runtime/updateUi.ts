@@ -340,6 +340,19 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
     if (refreshSequence !== captureStatusRefreshSequence) return;
     captureStatusSnapshot = nextSnapshot;
     rebuildTrayMenu();
+    const mainWindow = deps.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('recording:permissionRequiredChanged', isPermissionRequired());
+    }
+  };
+
+  /** Whether the recorder cannot run until macOS grants it a permission, as its status says. */
+  const isPermissionRequired = (): boolean => captureStatusSnapshot?.kind === 'permission_required';
+
+  /** Reads the recorder's status again, the read the tray makes, for the main window. */
+  const readPermissionRequired = async (): Promise<boolean> => {
+    await refreshCaptureStatus();
+    return isPermissionRequired();
   };
 
   return {
@@ -352,6 +365,7 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
     handleUpdateDownloaded,
     restartToUpdate,
     refreshCaptureStatus,
+    readPermissionRequired,
     rebuildAppMenu,
     rebuildTrayMenu,
   };

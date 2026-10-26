@@ -47,10 +47,10 @@ import {
   type RecordingStartResult,
 } from '../screenshot/screenshotSync';
 import {
-  holdsCaptureOsPermissions,
+  askForCapturePermission,
   holdsScreenRecording,
   openCapturePermissionSettings,
-  requestCapturePermissions,
+  readCapturePermissions,
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
 import { presentRecordingIntro } from '../windows/recordingIntroWindow';
@@ -58,6 +58,8 @@ import {
   createApprovalPreferenceFetcher,
   type ApprovalMode,
 } from '../settings/approvalPreferencesFetch';
+import type { OnboardingState } from '../ipc/schemas/onboarding';
+import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
@@ -118,6 +120,30 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     reportInvalid: (reason) => params.logger?.warn?.('OVERLAY_PLACEMENT_INVALID', { reason }),
   });
   params.notificationWindow.setOverlayPlacementGetter(overlayPlacement.get);
+  const onboarding = createOnboardingStateStore({
+    userDataDir: app.getPath('userData'),
+    report: (reason) => params.logger?.warn?.('ONBOARDING_STATE_INVALID', { reason }),
+  });
+  // Suggestion panels that would open over first-run setup wait for it to finish; History
+  // and the main window still receive them. They belong to the owner they arrived for.
+  const heldPanels: string[] = [];
+  const showNotification = (suggestionId: string): void => {
+    if (onboarding.get().status === 'in_progress') heldPanels.push(suggestionId);
+    else params.notificationWindow.showNotification(suggestionId);
+  };
+  const setOnboardingState = (state: OnboardingState): OnboardingState => {
+    const saved = onboarding.set(state);
+    if (saved.status !== 'completed') return saved;
+    for (const suggestionId of heldPanels.splice(0)) {
+      try {
+        params.notificationWindow.showNotification(suggestionId);
+      } catch (error) {
+        // Setup is already saved as finished; the Suggestion stays in History.
+        params.logger?.error?.('HELD_SUGGESTION_PANEL_ERR', { err: error });
+      }
+    }
+    return saved;
+  };
   const conversationOverlay = createConversationOverlayOwner({
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     openOverlay: params.notificationWindow.openStandaloneConversationOverlay,
@@ -129,7 +155,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     refreshAndResumeConversation: (actionId) =>
       orchestration.refreshAndResumeActionConversation(actionId),
     revealOverlay: params.notificationWindow.revealOverlayWindow,
-    holdsCaptureOsPermissions,
+    readCapturePermissions,
     // The main window is where the recording screen lives, and it reads the pending
     // request set just above — so a window the user closed is created rather than
     // sent to, and one already in front is told to re-read it.
@@ -164,7 +190,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   );
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
-    notificationWindow: params.notificationWindow,
+    notificationWindow: { ...params.notificationWindow, showNotification },
     createOrchestrationWS: params.createOrchestrationWS,
     getMainWindow: params.getMainWindow,
     getLocalApiToken: params.getLocalApiToken,
@@ -266,7 +292,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getMainWindow: params.getMainWindow,
     isBackendRuntimeReady: () => params.supabaseWiring.getLocalOwnerId() !== null,
     getManifestPath: params.desktopRuntime.getAppRuntimeManifestPath,
-    requestPermissions: requestCapturePermissions,
+    // A start asks for the first permission it is missing, as the setup checklist does.
+    requestPermissions: (missing) => askForCapturePermission(missing[0]),
     holdsScreenRecording,
     readSource: (userId) =>
       requestJson({
@@ -287,7 +314,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
-    // The runtime greets only an owner who has no data yet, so every start may ask.
+    // The runtime greets only an owner who has no data yet, so every start may ask — during
+    // setup too, so the runtime decides before anything is recorded.
     onRecordingStarted: (userId) => {
       const { accelerator, failure } = shortcutController.getState();
       // A failure means the accelerator is configured but not registered: it would not work.
@@ -450,7 +478,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         startScreenshots,
         readCaptureGateState: conversationOverlay.readGateState,
         dismissRecordingIntro: conversationOverlay.dismissIntro,
+        askForCapturePermission,
         openCapturePermissionSettings,
+        readCapturePermissionRequired: params.updateUi.readPermissionRequired,
+        onboarding: { getState: onboarding.get, setState: setOnboardingState },
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
         onCaptureSettingsChanged: () => void params.updateUi.refreshCaptureStatus(),
@@ -482,6 +513,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     applyLocalOwner,
     prepareOwnerChange: () => {
       params.notificationWindow.clearForOwnerChange();
+      heldPanels.length = 0;
       conversationOverlay.onOwnerChanged(null);
       latestActionPageReader.clear();
       orchestration.resetActionLive();
@@ -505,6 +537,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
     readActionConversationPage: actions.readConversationPage,
+    resolveOverlayBootstrap,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,
     startScreenshots,

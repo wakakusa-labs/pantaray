@@ -3,7 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
+import { RecordingChecklist } from '@/components/RecordingChecklist';
+import { useStartPermissions } from '@/components/useStartPermissions';
 import { useI18n } from '@/context/useI18n';
+import type { MessageKey } from '@/i18n/types';
+import type { CapturePermission } from '../../electron/src/context/zaneiProcess';
 import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
@@ -12,8 +16,10 @@ import { IntegrationSettings } from './settings/components/IntegrationSettings';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
+import { RecordingSwitch } from './settings/components/RecordingSwitch';
 import { ShortcutSection } from './settings/components/ShortcutSection';
 import type { Translate } from './settings/types';
+import { useCapturePermissionRequired } from './settings/useCapturePermissionRequired';
 import { useSettingsPageController } from './settings/useSettingsPageController';
 import './settings/settingsPage.css';
 
@@ -26,14 +32,15 @@ type SettingsSectionId =
   | 'overlay_position'
   | 'screenshots';
 
+// Setup's order first (AI, recording, apps), then what is changed less often.
 const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
-  'language',
-  'execution',
-  'integrations',
-  'shortcuts',
-  'overlay_position',
   'screenshots',
+  'integrations',
+  'execution',
+  'overlay_position',
+  'shortcuts',
+  'language',
 ];
 
 /**
@@ -43,10 +50,18 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
  */
 const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
 
+const PERMISSION_TITLES = {
+  read_accessibility_tree: 'settings.screenshotCapture.permission.accessibility',
+  observe_input: 'settings.screenshotCapture.permission.inputMonitoring',
+  capture_screen: 'settings.screenshotCapture.permission.screenRecording',
+  automate_browser: 'settings.screenshotCapture.permission.chrome',
+  automate_safari: 'settings.screenshotCapture.permission.safari',
+} as const satisfies Record<CapturePermission, MessageKey>;
+
 function getSectionFromSearch(value: string | null): SettingsSectionId {
   return SETTINGS_SECTIONS.includes(value as SettingsSectionId)
     ? (value as SettingsSectionId)
-    : 'language';
+    : SETTINGS_SECTIONS[0];
 }
 
 const SettingsPage: React.FC = () => {
@@ -212,45 +227,46 @@ function ScreenshotCaptureSection(props: {
   setScreenshotsEnabled: (enabled: boolean) => Promise<boolean>;
   t: Translate;
 }) {
-  const disabled =
-    props.isProcessing || (!props.isCapturingScreenshots && !props.isScreenshotCaptureAvailable);
-
+  const checks = useStartPermissions();
+  const permissionRequired = useCapturePermissionRequired();
+  // The switch shows whether recording runs. A missing permission keeps it off and the rows
+  // below are the way forward; the saved "on" stays, so recording comes back once granted.
+  const isRunning = props.isCapturingScreenshots && !permissionRequired;
+  const unavailable =
+    (!props.isScreenshotCaptureAvailable && !props.isCapturingScreenshots) ||
+    checks === 'unavailable';
   return (
     <div className="dashboard-section">
       <div className="settings-section-header">
         <div className="settings-section-heading">
           <h3 className="dashboard-section-title">{props.t('settings.screenshotCapture.title')}</h3>
           <div className="settings-section-status">
-            {props.isCapturingScreenshots ? props.t('common.active') : props.t('common.paused')}
+            {props.t(
+              permissionRequired
+                ? 'settings.screenshotCapture.permissionRequired'
+                : props.isCapturingScreenshots
+                  ? 'common.active'
+                  : 'common.paused'
+            )}
           </div>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={props.isCapturingScreenshots}
-          aria-label={props.t('settings.screenshotCapture.screenshotsLabel')}
-          className={[
-            'settings-toggle',
-            props.isCapturingScreenshots ? 'settings-toggle--on' : null,
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          disabled={disabled}
-          onClick={() => void props.setScreenshotsEnabled(!props.isCapturingScreenshots)}
-        >
-          <span className="settings-toggle-thumb" />
-          <span className="settings-toggle-label">
-            {props.isCapturingScreenshots ? props.t('common.on') : props.t('common.off')}
-          </span>
-        </button>
+        <RecordingSwitch
+          isCapturing={isRunning}
+          canStart={props.isScreenshotCaptureAvailable && !permissionRequired}
+          isProcessing={props.isProcessing}
+          onChange={props.setScreenshotsEnabled}
+        />
       </div>
       <p className="dashboard-section-description">
         {props.t('settings.screenshotCapture.description')}
       </p>
-      {!props.isScreenshotCaptureAvailable && !props.isCapturingScreenshots ? (
+      {unavailable ? (
         <p className="dashboard-section-description settings-section-error">
           {props.t('settings.screenshotCapture.unavailable')}
         </p>
+      ) : null}
+      {Array.isArray(checks) ? (
+        <RecordingChecklist t={props.t} checks={checks} titles={PERMISSION_TITLES} />
       ) : null}
     </div>
   );

@@ -52,6 +52,7 @@ def create_embedding_generation_storage(
         )
         """
     )
+    create_generation_entry_revision_index(connection, generation_id=generation_id)
     connection.execute(
         f"""
         CREATE VIRTUAL TABLE {vectors} USING vec0(
@@ -73,6 +74,25 @@ def create_embedding_generation_storage(
     )
 
 
+def create_generation_entry_revision_index(
+    connection: sqlite3.Connection, *, generation_id: int
+) -> None:
+    """Index the entries by revision, for semantic search and fragment deletes.
+
+    Semantic search reads the visible revisions' entries from this index alone,
+    so it carries every column that search reads. Its leading columns are the
+    fragment foreign key, so deleting a fragment finds its entries without a
+    scan of the table.
+    """
+    entries = generation_entry_table(generation_id)
+    connection.execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS {entries}_revision
+        ON {entries}(user_id, revision_id, fragment_id, fragment_content_sha256)
+        """
+    )
+
+
 def drop_embedding_generation_storage(
     connection: sqlite3.Connection,
     *,
@@ -87,6 +107,7 @@ def drop_embedding_generation_storage(
 
 __all__ = [
     "create_embedding_generation_storage",
+    "create_generation_entry_revision_index",
     "drop_embedding_generation_storage",
     "generation_entry_table",
     "generation_vector_table",

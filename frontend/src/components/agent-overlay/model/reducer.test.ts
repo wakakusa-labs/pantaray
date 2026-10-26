@@ -23,6 +23,7 @@ function snapshotPayload(
       reactionState: null,
       reactionTimestamp: null,
       dismissReason: null,
+      artifacts: [],
       actionPhase: 'idle',
       actionStatus: null,
       actionErrorCode: null,

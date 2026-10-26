@@ -5,7 +5,7 @@ import sqlite3
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -16,7 +16,7 @@ from pantaray_agents.agents.insight_agent.record_verification import (
     SourceRecordClaim,
     VerifiedRecord,
 )
-from pantaray_agents.local_runtime.activity_summary_schedule import iso_z
+from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse_iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import SourceControl
 from pantaray_agents.local_runtime.context.source_gate import (
@@ -27,8 +27,11 @@ from pantaray_agents.local_runtime.context.source_gate import (
 from pantaray_agents.local_runtime.context.source_protocol import (
     EvidenceReadRequest,
     EvidenceResponse,
+    GapResponse,
     PageReadRequest,
     PageResponse,
+    ReadResponse,
+    UnavailableResponse,
 )
 from pantaray_agents.local_runtime.integrations import change_probe, registry
 from pantaray_agents.local_runtime.integrations.contracts import ToolSucceeded
@@ -43,6 +46,7 @@ from pantaray_agents.local_runtime.runtime.activity_summary_scheduler import (
     calculate_summary_window,
 )
 from pantaray_agents.local_runtime.runtime.insight_queue import (
+    SHORT_INSIGHT_WINDOW_SECONDS,
     build_local_insight_enqueue_request,
     build_short_insight_job_payload,
     short_insight_window_start,
@@ -95,7 +99,7 @@ from .test_integration_change_probe import _account, _FakeGateway, _gmail
 USER = "user-1"
 RUN = "run-1"
 PERIOD_START = "2026-09-07T00:00:00Z"
-PERIOD_END = "2026-09-07T00:04:00Z"
+PERIOD_END = "2026-09-07T00:15:00Z"
 STORE_ID = "store-1"
 # One invented chat screen, and the record a run claims after reading it.
 SCREEN = "設計の相談\nおおたに りん  09:40\n配色の候補を 3 つ用意しました\n"
@@ -131,7 +135,9 @@ def _observation(sequence: int) -> dict[str, object]:
     }
 
 
-def _page(*, observations: int, next_cursor: str) -> PageResponse:
+def _page(
+    *, observations: int, next_cursor: str, has_more: bool = False
+) -> PageResponse:
     return PageResponse.model_validate(
         {
             "protocol_version": 1,
@@ -142,7 +148,7 @@ def _page(*, observations: int, next_cursor: str) -> PageResponse:
             ),
             "next_cursor": next_cursor,
             "upper_bound": "upper-1",
-            "has_more": False,
+            "has_more": has_more,
             "coverage": {"after": 0, "through": observations},
         }
     )
@@ -150,10 +156,10 @@ def _page(*, observations: int, next_cursor: str) -> PageResponse:
 
 @dataclass
 class _FakeReader:
-    pages: list[PageResponse]
+    pages: list[ReadResponse]
     requests: list[object] = field(default_factory=list)
 
-    async def read_page(self, _source: ActiveSource, request: object) -> PageResponse:
+    async def read_page(self, _source: ActiveSource, request: object) -> ReadResponse:
         self.requests.append(request)
         return self.pages.pop(0)
 
@@ -279,7 +285,9 @@ async def _run(
         user_id=user_id,
         run_id=run_id,
         period_start=period_start,
-        period_end=PERIOD_END,
+        period_end=iso_z(
+            parse_iso_z(period_start) + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS)
+        ),
         gate=gate,
         reader=reader,  # type: ignore[arg-type]
         agent=agent,  # type: ignore[arg-type]
@@ -329,24 +337,110 @@ def _stored(db_path: Path, *, run_id: str = RUN) -> dict[str, object]:
     }
 
 
-async def test_empty_period_still_updates_context_and_requests_memory_review(
-    db_path: Path,
+async def test_an_idle_window_asks_nothing_and_keeps_the_read_position(
+    db_path: Path, gmail: _FakeGateway
+) -> None:
+    """Nothing recorded: no probe, no model call, no Insight, Memory or Suggestion."""
+    _connect(db_path, gmail, "work")
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(
+        pages=[
+            _page(observations=0, next_cursor="cursor-1"),
+            _page(observations=1, next_cursor="cursor-2"),
+        ]
+    )
+    agent = _FakeAgent(output=_output())
+
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    assert gmail.executed == Counter()
+    assert agent.calls == 0
+    assert _stored(db_path) == {
+        "insight": None,
+        "activity": None,
+        "catalog": [],
+        "cursor": None,
+        "suggestions": [],
+        "jobs": [],
+        "triggers": [],
+        "records": [],
+    }
+
+    # Activity resumes: the next window reads from where the last run stopped.
+    await _run(
+        db_path=db_path,
+        gate=gate,
+        reader=reader,
+        agent=agent,
+        run_id="run-2",
+        period_start="2026-09-07T00:15:00Z",
+    )
+
+    assert [request.cursor for request in reader.requests] == [None, None]
+    assert agent.calls == 1
+    assert gmail.executed == Counter({"work": 1})
+    assert _stored(db_path, run_id="run-2")["cursor"] == "cursor-2"
+
+
+def _gap() -> GapResponse:
+    return GapResponse.model_validate(
+        {
+            "protocol_version": 1,
+            "kind": "gap",
+            "store_identity": STORE_ID,
+            "reason": "retention_or_deletion",
+            "affected_range": {"after": 0, "through": 5},
+            "resume_cursor": "cursor-resume",
+            "upper_bound": "upper-1",
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("first_page", "cursor"),
+    [
+        (_page(observations=0, next_cursor="cursor-1", has_more=True), "cursor-1"),
+        (_gap(), "cursor-resume"),
+    ],
+    ids=["further_page", "gap"],
+)
+async def test_a_read_that_does_not_prove_absence_runs_the_insight(
+    db_path: Path, first_page: ReadResponse, cursor: str
 ) -> None:
     gate = SourceGate()
-    source = await _active_source(gate)
-    reader = _FakeReader(pages=[_page(observations=0, next_cursor="cursor-1")])
+    await _active_source(gate)
+    reader = _FakeReader(pages=[first_page])
     agent = _FakeAgent(output=_output())
 
     await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
 
     assert agent.calls == 1
     stored = _stored(db_path)
-    assert stored["cursor"] == "cursor-1"
-    assert stored["insight"] is not None
-    assert stored["activity"] is not None
+    assert stored["cursor"] == cursor
     assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
-    assert stored["suggestions"] == []
-    assert source.binding.user_id == USER
+
+
+async def test_an_unreadable_timeline_fails_the_run_instead_of_skipping_it(
+    db_path: Path, gmail: _FakeGateway
+) -> None:
+    _connect(db_path, gmail, "work")
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(
+        pages=[
+            UnavailableResponse.model_validate(
+                {"protocol_version": 1, "kind": "unavailable", "reason": "store"}
+            )
+        ]
+    )
+    agent = _FakeAgent(output=_output())
+
+    with pytest.raises(RuntimeError, match="Zanei timeline unavailable"):
+        await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    assert agent.calls == 0
+    assert _stored(db_path)["insight"] is None
 
 
 async def test_successful_run_commits_outputs_catalog_and_cursor(
@@ -1017,6 +1111,60 @@ async def test_a_change_between_two_runs_is_inside_the_second_runs_period(
     first, second = (str(arguments["query"]) for arguments in gmail.arguments)
     assert int(second.removeprefix("after:")) <= arrived
     assert int(first.removeprefix("after:")) < int(second.removeprefix("after:"))
+
+
+def _probed_since(gateway: _FakeGateway) -> list[datetime]:
+    return [
+        datetime.fromtimestamp(int(str(arguments["query"]).removeprefix("after:")), UTC)
+        for arguments in gateway.arguments
+    ]
+
+
+@pytest.mark.parametrize(
+    ("previous_start", "expected_since"),
+    [
+        # Away from 09:30 to 12:00: what arrived meanwhile reaches the next run.
+        ("2026-09-07T09:15:00Z", datetime(2026, 9, 7, 9, 15, tzinfo=UTC)),
+        # Away for days: the reach stops a day before the window, plus the overlap.
+        ("2026-09-04T09:15:00Z", datetime(2026, 9, 6, 11, 45, tzinfo=UTC)),
+    ],
+    ids=["hours_away", "days_away"],
+)
+async def test_the_first_run_after_idle_windows_probes_back_over_them(
+    db_path: Path,
+    gmail: _FakeGateway,
+    previous_start: str,
+    expected_since: datetime,
+) -> None:
+    _connect(db_path, gmail, "work")
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(
+        pages=[
+            _page(observations=1, next_cursor="cursor-2"),
+            _page(observations=0, next_cursor="cursor-2"),
+            _page(observations=0, next_cursor="cursor-2"),
+            _page(observations=1, next_cursor="cursor-3"),
+        ]
+    )
+    for run_id, period_start in (
+        ("run-before", previous_start),
+        ("run-idle-1", "2026-09-07T11:30:00Z"),
+        ("run-idle-2", "2026-09-07T11:45:00Z"),
+        ("run-back", "2026-09-07T12:00:00Z"),
+    ):
+        await _run(
+            db_path=db_path,
+            gate=gate,
+            reader=reader,
+            agent=_FakeAgent(output=_output()),
+            run_id=run_id,
+            period_start=period_start,
+        )
+
+    first, back = _probed_since(gmail)
+    assert first == parse_iso_z(previous_start) - timedelta(minutes=15)
+    assert back == expected_since
 
 
 async def test_a_record_quoting_an_external_change_never_reaches_the_store(

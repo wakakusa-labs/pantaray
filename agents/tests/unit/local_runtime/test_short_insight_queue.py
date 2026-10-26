@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,11 @@ import pytest
 
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
-from pantaray_agents.local_runtime.context.source_gate import SourceInvalidated
+from pantaray_agents.local_runtime.context.source_gate import (
+    ActiveSource,
+    SourceInvalidated,
+)
+from pantaray_agents.local_runtime.context.source_protocol import PageResponse
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -38,11 +43,13 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     mark_configured,
     reset_desktop_session_store,
 )
+from pantaray_agents.local_runtime.runtime.short_insight import run_short_insight
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.schema.context_source import SourceBinding, SourceReady
+from pantaray_agents.tasks.types import InsightJobPayload
 
 from .migrated_db import prepare_test_database
 
@@ -311,3 +318,107 @@ async def test_upgrade_can_enqueue_after_a_completed_four_minute_window(
     assert new_job is not None and new_job["inserted_new"]
     assert new_job["job_id"] != old_job["job_id"]
     assert len(_jobs(db_path)) == 2
+
+
+class _EmptyTimeline:
+    """A recorder that holds nothing after the stored cursor."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+
+    async def read_page(self, _source: ActiveSource, _request: object) -> PageResponse:
+        self.reads += 1
+        return PageResponse.model_validate(
+            {
+                "protocol_version": 1,
+                "kind": "page",
+                "store_identity": "store-1",
+                "observations": (),
+                "next_cursor": "cursor-1",
+                "upper_bound": "upper-1",
+                "has_more": False,
+                "coverage": {"after": 0, "through": 0},
+            }
+        )
+
+
+class _NoModelCall:
+    async def generate(self, **_kwargs: object) -> None:
+        raise AssertionError("an idle window must not call the model")
+
+
+async def test_an_idle_window_runs_once_and_releases_the_next_window(
+    db_path: Path, active_source: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skipped run completes its job, so a later tick neither repeats nor waits."""
+    del active_source
+    import_desktop_session(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        desktop_access_token="header.payload.signature",
+        expires_at="2099-03-27T01:00:00Z",
+        session_version="1",
+    )
+    mark_configured()
+    timeline = _EmptyTimeline()
+
+    def _run_insight_job(payload: InsightJobPayload) -> None:
+        asyncio.run(
+            run_short_insight(
+                db_path=db_path,
+                busy_timeout_ms=1_000,
+                user_id=payload["user_id"],
+                run_id=payload["insight_id"],
+                period_start=payload["period_start"],
+                period_end=payload["period_end"],
+                gate=context_source_control.gate,
+                reader=timeline,  # type: ignore[arg-type]
+                agent=_NoModelCall(),  # type: ignore[arg-type]
+            )
+        )
+
+    monkeypatch.setattr(
+        "pantaray_agents.local_runtime.runtime.local_worker.run_insight_job",
+        _run_insight_job,
+    )
+
+    def _work() -> bool:
+        return run_next_local_job(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            claimed_by="test-local-worker",
+            specs=build_default_local_worker_specs(action_runner=lambda _: None),
+        )
+
+    now = datetime(2026, 10, 23, 19, 1, tzinfo=UTC)
+    first = await enqueue_due_short_insight_job(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, now=now
+    )
+    assert first is not None
+    assert await asyncio.to_thread(_work)
+
+    repeat = await enqueue_due_short_insight_job(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        now=now + timedelta(seconds=90),
+    )
+    assert repeat is not None and repeat["inserted_new"] is False
+    assert not await asyncio.to_thread(_work)
+    assert timeline.reads == 1
+
+    later = await enqueue_due_short_insight_job(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        now=now + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
+    )
+    assert later is not None and later["inserted_new"] is True
+    assert _jobs(db_path) == [
+        (first["job_id"], USER, "completed"),
+        (later["job_id"], USER, "queued"),
+    ]
+    with sqlite3.connect(db_path) as connection:
+        insights = connection.execute("SELECT COUNT(*) FROM agent_insights").fetchone()
+    assert insights == (0,)

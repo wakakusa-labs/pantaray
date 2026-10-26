@@ -159,7 +159,7 @@ async def _run(
         if steps is not None:
             steps.append(step)
 
-    return await run_suggestion_react(
+    result = await run_suggestion_react(
         user_id="user-1",
         suggestion_id="suggestion-1",
         context="initial context",
@@ -172,6 +172,7 @@ async def _run(
         record_step=record_step,
         past=past or PastSuggestions((), _NOW),
     )
+    return result.extraction
 
 
 def _results(request: ConversationRequest) -> dict[str, JSONValue]:

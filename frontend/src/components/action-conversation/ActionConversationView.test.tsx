@@ -1408,6 +1408,82 @@ describe('ActionConversationView', () => {
     expect(screen.queryByRole('button', { name: /^Open attached image/ })).toBeNull();
   });
 
+  describe('a reply that became the final answer', () => {
+    const note = (key: string, text: string) =>
+      ({ kind: 'assistant', key, visibility: 'always', text }) as const;
+    const answeredRun = (
+      lines: ActionConversationRunItem['lines'],
+      answer: string
+    ): ActionConversationRunItem => ({
+      kind: 'run',
+      runId: 'run-1',
+      status: 'success',
+      startedAt: '2026-08-30T00:00:00.000000Z',
+      completedAt: '2026-08-30T00:01:00.000000Z',
+      lines: [
+        canonicalUser('ask', 'Summarize'),
+        ...lines,
+        {
+          kind: 'final_output',
+          runId: 'run-1',
+          status: 'success',
+          visibility: 'always',
+          text: answer,
+        },
+      ],
+    });
+
+    it('shows a multi-message reply once, as the answer, with no work behind it', () => {
+      renderView(
+        viewWith(
+          [
+            answeredRun(
+              [note('reply-1', 'First part'), note('reply-2', 'Second part\n')],
+              'First part\n\nSecond part'
+            ),
+          ],
+          'success'
+        )
+      );
+
+      expect(screen.getAllByText('First part')).toHaveLength(1);
+      expect(screen.getAllByText('Second part')).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: /^Pantaray's work/ })).toBeNull();
+    });
+
+    it('keeps the other work and drops only the repeated reply', async () => {
+      renderView(
+        viewWith(
+          [
+            answeredRun(
+              [
+                note('note', 'Reading first'),
+                tool('read', 'Read files', 'success', 3),
+                note('reply', 'Done'),
+              ],
+              'Done'
+            ),
+          ],
+          'success'
+        )
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work/ }));
+      expect(screen.getByText('Reading first')).toBeVisible();
+      expect(screen.getByText('Read files')).toBeVisible();
+      expect(screen.getAllByText('Done')).toHaveLength(1);
+    });
+
+    it('keeps commentary that only starts with the answer', async () => {
+      renderView(
+        viewWith([answeredRun([note('reply', 'Done\n\nAlso checked the logs')], 'Done')], 'success')
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /^Pantaray's work/ }));
+      expect(screen.getByText('Also checked the logs')).toBeVisible();
+    });
+  });
+
   describe('per-answer copy', () => {
     const answered = (runId: string, text: string): ActionConversationRunItem => ({
       kind: 'run',

@@ -65,6 +65,7 @@ from .action_suggestion_adapter import (
     project_suggestion_action_start,
     validate_suggestion_action_start,
 )
+from .action_suggestion_files import ActionSuggestionFiles
 from .action_suggestion_reply import insert_suggestion_reply_message
 from .identity import verify_current_owner
 from .job_enqueue import enqueue_local_job
@@ -97,6 +98,7 @@ def submit_action_message(
         configure_connection(connection, busy_timeout_ms)
         with (
             ActionFileAttachmentLinks() as attachment_links,
+            ActionSuggestionFiles(db_path) as suggestion_files,
             immediate_transaction(connection),
         ):
             existing = _load_existing_submission(
@@ -121,6 +123,8 @@ def submit_action_message(
                     created_at=created_at,
                 )
             )
+            command = suggestion_files.copy(command, action_id, connection)
+            user_message_json = serialize_action_user_message(command.message)
             starts_run = process_disposition is None or (
                 process_disposition.disposition in {"idle", "normal_terminal"}
             )

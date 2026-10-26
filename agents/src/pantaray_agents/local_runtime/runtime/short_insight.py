@@ -64,6 +64,12 @@ NAMESPACE_SOURCE_RECORD: Final[uuid.UUID] = uuid.uuid5(
     uuid.NAMESPACE_URL, "pantaray:source_record:v1"
 )
 
+# How far back the first run after an absence asks connected apps for changes.
+# A night or a day away stays covered; past that, each probe returns at most a
+# handful of items (several services in no guaranteed order), so a longer reach
+# would trade the newest items for stale ones rather than add coverage.
+PROBE_MAX_LOOKBACK: Final = timedelta(hours=24)
+
 
 async def run_short_insight(
     *,
@@ -92,35 +98,56 @@ async def run_short_insight(
                 raise ValueError("short Insight run belongs to another user")
             return
         cursor = store.get_cursor(connection, source.binding)
+        # The activity log shares the Insight's id and commits with it, so its
+        # period end is where the previous run's window closed.
         previous = connection.execute(
-            "SELECT short_term_insight_data FROM agent_insights "
-            "WHERE user_id = ? AND status = 'success' "
-            "ORDER BY created_at DESC LIMIT 1",
+            "SELECT insights.short_term_insight_data, activity.period_end "
+            "FROM agent_insights AS insights "
+            "LEFT JOIN activity_logs AS activity "
+            "ON activity.log_id = insights.insight_id "
+            "WHERE insights.user_id = ? AND insights.status = 'success' "
+            "ORDER BY insights.created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
     try:
-        external_changes = await collect_external_changes(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=user_id,
-            run_id=run_id,
-            # The run starts just after its window does, so a probe bounded by
-            # `period_start` alone would miss what arrived during the previous
-            # run's window. Overlapping by one window closes that gap; a repeat
-            # is harmless because the run reads the previous Insight.
-            since=parse_iso_z(period_start)
-            - timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
-        )
         async with gate.track(source):
             with source_scope(gate, source):
                 page = await reader.read_page(
                     source,
                     PageReadRequest(cursor=cursor, upper_bound=None, limit=PAGE_LIMIT),
                 )
-                if not isinstance(page, (PageResponse, GapResponse)):
-                    raise RuntimeError(
-                        f"Zanei timeline unavailable: {type(page).__name__}"
-                    )
+            if not isinstance(page, (PageResponse, GapResponse)):
+                raise RuntimeError(f"Zanei timeline unavailable: {type(page).__name__}")
+            # Nothing was recorded since the last committed read: the user is
+            # away, so the window gets no Insight and therefore no Memory update
+            # or Suggestion, and connected apps are not asked either. The cursor
+            # stays put, and the job row for this window keeps it from running
+            # again. A gap or a further page is not proof of absence.
+            if (
+                isinstance(page, PageResponse)
+                and not page.observations
+                and not page.has_more
+            ):
+                logger.info(
+                    "Short Insight skipped: nothing recorded", extra={"run_id": run_id}
+                )
+                return
+            # Outside `source_scope`: the probe sends no raw activity.
+            external_changes = await collect_external_changes(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+                run_id=run_id,
+                since=_probe_since(
+                    period_start=parse_iso_z(period_start),
+                    previous_period_end=(
+                        None
+                        if previous is None or previous[1] is None
+                        else parse_iso_z(str(previous[1]))
+                    ),
+                ),
+            )
+            with source_scope(gate, source):
                 zanei = ZaneiTools(
                     reader=reader,
                     source=source,
@@ -189,6 +216,27 @@ async def run_short_insight(
         assert task is not None  # A coroutine driven by asyncio.run runs in a Task.
         task.uncancel()
         raise SourceInvalidated("context source was invalidated") from None
+
+
+def _probe_since(
+    *, period_start: datetime, previous_period_end: datetime | None
+) -> datetime:
+    """Start the probe where the last Insight that ran stopped looking.
+
+    The run starts just after its window does, so a probe bounded by the end of
+    the previous run's window alone would miss what arrived while that run was
+    probing. Overlapping by one window closes that gap; a repeat is harmless
+    because the run reads the previous Insight. After idle windows were skipped,
+    this reaches back over them, up to `PROBE_MAX_LOOKBACK`.
+    """
+    last_seen = (
+        period_start
+        if previous_period_end is None
+        else min(previous_period_end, period_start)
+    )
+    return max(last_seen, period_start - PROBE_MAX_LOOKBACK) - timedelta(
+        seconds=SHORT_INSIGHT_WINDOW_SECONDS
+    )
 
 
 def _persist_short_insight(

@@ -111,6 +111,17 @@ def _render_private_storage_deny_rules(request: BrokerToSandboxCommandRequest) -
                 "file-read*", _render_subpath_block(roots), readable
             ),
             _render_private_storage_deny("file-write*", write_denied, writable),
+            # The writable root itself is never removed or renamed: a symlink
+            # left in its place would resolve, for the next command, to a
+            # write root outside private storage. Its children stay writable.
+            *(
+                ()
+                if storage is None
+                else (
+                    "(deny file-write-unlink (literal "
+                    f'"{_escape_seatbelt_string(storage.workspace_root)}"))',
+                )
+            ),
         )
     )
 

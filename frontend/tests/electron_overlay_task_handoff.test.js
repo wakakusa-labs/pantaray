@@ -110,6 +110,28 @@ test('a suggestion no Action has taken yet is selected the same way, then the pa
   ]);
 });
 
+test("a suggestion file's chip opens the suggestion with that file, loaded or loading", async () => {
+  const steps = [];
+  await createHandoff(steps, { mainWindow: createMainWindow(steps) })({
+    kind: 'suggestion',
+    id: 'sug-1',
+    file: 'drafts/reply & notes.md',
+  });
+  const loadingSteps = [];
+  await createHandoff(loadingSteps, {
+    mainWindow: createMainWindow(loadingSteps, { loading: true }),
+  })({ kind: 'suggestion', id: 'sug-1', file: 'drafts/reply & notes.md' });
+
+  assert.deepEqual(steps[0], [
+    'history:showItem',
+    { item: 'suggestion:sug-1', file: 'drafts/reply & notes.md' },
+  ]);
+  assert.deepEqual(loadingSteps[0], [
+    'loadURL',
+    'file:///tmp/index.html#/history?item=suggestion:sug-1&file=drafts%2Freply%20%26%20notes.md',
+  ]);
+});
+
 test('a main window still loading loads on the task, then the panel closes', async () => {
   const steps = [];
   const openTask = createHandoff(steps, {

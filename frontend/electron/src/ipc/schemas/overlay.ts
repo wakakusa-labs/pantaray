@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import { OVERLAY_APPROVAL_DECISIONS } from '../../actions/actionApprovalDecisionFetch';
 import { CanonicalIdentitySchema } from '../../actions/actionContracts';
+import { MAX_PATH_LENGTH } from './limits';
 import { IdSchema } from './workspaceSettings';
 
 export const SubmitApprovalDecisionPayloadSchema = z
@@ -29,11 +30,15 @@ export const ActionApprovalModeUpdateSchema = z
   })
   .strict();
 
-/** The work a panel hands to the main window: an Action, or a suggestion no Action took up yet. */
+/**
+ * The work a panel hands to the main window: an Action, or a suggestion no Action took up yet,
+ * with one of the suggestion's files to preview when its chip was pressed.
+ */
 export const OverlayOpenTaskRequestSchema = z
   .object({
     kind: z.enum(['action', 'suggestion']),
     id: CanonicalIdentitySchema,
+    file: z.string().min(1).max(MAX_PATH_LENGTH).optional(),
   })
   .strict();
 

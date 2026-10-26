@@ -48,6 +48,21 @@ test('IPC sender guard allows overlay capabilities but rejects privacy operation
   );
 });
 
+test('Only the main window reads or changes first-run setup', () => {
+  const { mainEvent, security } = createSecurityHarness();
+  const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
+  security.registerWindow('overlay', overlayEvent.sender);
+
+  for (const channel of ['onboarding:getState', 'onboarding:setState']) {
+    assert.equal(security.authorize(channel, mainEvent), 'main');
+    assert.throws(
+      () => security.authorize(channel, overlayEvent),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
+    );
+  }
+});
+
 test('Overlay reads the workspace approval default but cannot write it', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
@@ -110,6 +125,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:attachFile',
     'action:discardAttachment',
     'actionImage:reveal',
+    'actionFile:openInApp',
   ]) {
     assert.equal(security.authorize(channel, mainEvent), 'main', channel);
     assert.equal(security.authorize(channel, overlayEvent), 'overlay', channel);
@@ -119,7 +135,6 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'suggestion:read',
     // Reads and opens workspace files: the main window's preview only.
     'actionFile:read',
-    'actionFile:openInApp',
     'actionFile:openWithApp',
     'actionFile:reveal',
     'actionFile:quickLook',
@@ -171,6 +186,21 @@ test('Only the main window uses the chat, and only the Overlay asks to show it',
     'chat:retryTurn',
     'chat:getTurnState',
   ]) {
+    assert.equal(security.authorize(channel, mainEvent), 'main');
+    assert.throws(
+      () => security.authorize(channel, overlayEvent),
+      (error) =>
+        error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
+    );
+  }
+});
+
+test('Only the main window asks macOS for recording permissions or opens their panes', () => {
+  const { mainEvent, security } = createSecurityHarness();
+  const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
+  security.registerWindow('overlay', overlayEvent.sender);
+
+  for (const channel of ['recording:askForPermission', 'recording:openPermissionSettings']) {
     assert.equal(security.authorize(channel, mainEvent), 'main');
     assert.throws(
       () => security.authorize(channel, overlayEvent),

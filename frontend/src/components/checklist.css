@@ -1,0 +1,90 @@
+/* A list of tasks, the same grid in every row: what to do, its state, and the one action. */
+.checklist {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+}
+
+/* Mark, title and action share the first line, so a row with a note under its title keeps them
+   level; the line is as tall as a control. */
+.check-item {
+  align-items: start;
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.check-item + .check-item {
+  border-top: 1px solid var(--border-color);
+}
+
+.check-item-mark {
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: grid;
+  height: 20px;
+  margin-top: 7px;
+  place-items: center;
+  width: 20px;
+}
+
+.check-item--done .check-item-mark {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  color: #cfe0f3;
+}
+
+.check-item--skipped .check-item-mark {
+  border-style: dashed;
+  color: var(--fog-text-3);
+}
+
+.check-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.check-item-title {
+  color: var(--fog-text);
+  font-size: 14px;
+  line-height: 34px;
+}
+
+.check-item--disabled .check-item-title {
+  color: var(--fog-text-3);
+}
+
+.check-item-note {
+  color: var(--fog-text-2);
+  font-size: 12px;
+}
+
+/* The title's line is as tall as a control; the first note sits right under its text. */
+.check-item-title + .check-item-note {
+  margin-top: -6px;
+}
+
+.check-item-note--problem {
+  color: var(--danger-color);
+}
+
+.check-item-action {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  min-height: 34px;
+}
+
+.check-item-state {
+  color: var(--fog-text-2);
+  font-size: 13px;
+}

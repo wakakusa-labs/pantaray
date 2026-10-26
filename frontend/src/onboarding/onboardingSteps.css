@@ -1,0 +1,114 @@
+/* The steps' own pieces. Every control inside keeps its Settings style. */
+
+.onb-lead {
+  color: var(--fog-text);
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0;
+  max-width: 60ch;
+}
+
+.onb-notes {
+  color: var(--fog-text-2);
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 10px;
+  max-width: 64ch;
+}
+
+.onb-notes p {
+  margin: 6px 0 0;
+}
+
+.onb-notes summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.onb-notes[open] summary {
+  margin-bottom: 2px;
+}
+
+.onb-guide summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.onb-guide ol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.6;
+  margin: 8px 0 4px;
+  padding-left: 18px;
+}
+
+.onb-scopes {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: grid;
+  font-size: 12px;
+  gap: 4px 18px;
+  grid-template-columns: max-content max-content;
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  width: fit-content;
+}
+
+.onb-scopes dt {
+  color: var(--fog-text-2);
+}
+
+.onb-scopes dd {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+  margin: 0;
+}
+
+.onb-key-form {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.onb-key-input {
+  width: 200px;
+}
+
+.onb-provider-select {
+  width: 128px;
+}
+
+.onb-model-select {
+  width: 168px;
+}
+
+.onb-services {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 2px;
+}
+
+.onb-service {
+  align-items: center;
+  color: var(--fog-text);
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* In a note line the logo sits with 12px text, so it is a little taller than the text. */
+.onb-service .integration-logo {
+  border-radius: 4px;
+  font-size: 10px;
+  height: 16px;
+  padding: 2px;
+  width: 16px;
+}
+
+.onb-after {
+  color: var(--fog-text-2);
+  font-size: 12px;
+  margin: 12px 0 0;
+}

@@ -87,6 +87,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
+)
 from pantaray_agents.schema.repository_errors import (
     is_retryable_repository_exception,
 )
@@ -786,6 +789,19 @@ def test_offline_user_erasure_removes_domain_graph_and_artifacts(
     retained_user_scratch.mkdir(parents=True)
     retained_file = retained_user_scratch / "keep.txt"
     retained_file.write_text("keep me", encoding="utf-8")
+    erased_suggestion_files = resolve_suggestion_artifacts_root(
+        db_path=db_path, user_id="user-1", suggestion_id="sug-1"
+    )
+    erased_suggestion_files.mkdir(parents=True)
+    (erased_suggestion_files / "draft.md").write_text("erase me", encoding="utf-8")
+    retained_suggestion_file = (
+        resolve_suggestion_artifacts_root(
+            db_path=db_path, user_id="user-2", suggestion_id="sug-2"
+        )
+        / "keep.md"
+    )
+    retained_suggestion_file.parent.mkdir(parents=True)
+    retained_suggestion_file.write_text("keep me", encoding="utf-8")
 
     result = erase_user_memory_offline(
         db_path=db_path,
@@ -799,6 +815,8 @@ def test_offline_user_erasure_removes_domain_graph_and_artifacts(
     assert not legacy_root.exists()
     assert not erased_user_scratch.exists()
     assert retained_file.read_text(encoding="utf-8") == "keep me"
+    assert not erased_suggestion_files.parent.exists()
+    assert retained_suggestion_file.read_text(encoding="utf-8") == "keep me"
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT user_id FROM users ORDER BY user_id"

@@ -38,6 +38,7 @@ const ToolkitStatusSchema = z.strictObject({
 const IntegrationsStatusSchema = z.discriminatedUnion('state', [
   z.strictObject({ state: z.literal('not_configured') }),
   z.object({ state: z.literal('configured'), toolkits: z.array(ToolkitStatusSchema) }),
+  z.strictObject({ state: z.literal('key_rejected') }),
 ]);
 
 const IntegrationToolSettingsSchema = z.array(

@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import ToolArgs
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.draft_final_answer import (
+    store_final_answer_draft,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
     ToolExecutionActor,
     ToolValidationError,
@@ -15,6 +18,9 @@ from pantaray_agents.agents.action_agent.runtime.state.types import ActionAgentS
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
     deserialize_memory_draft,
+)
+from pantaray_agents.local_runtime.memory_catalog.errors import (
+    MemoryLinkValidationError,
 )
 from pantaray_agents.local_runtime.runtime.action_final_gate import (
     ActionFinalizationBlockers,
@@ -167,24 +173,12 @@ def _require_settled_action_ownership(state: ActionAgentState) -> None:
     )
 
 
-async def run_submit_final_answer_tool(
-    _agent: object,
-    step_id: str,
-    tool_def: ToolDefinition,
-    _args: ToolArgs,
-    state: ActionAgentState,
-    *,
-    actor: ToolExecutionActor = "supervisor",
-) -> UnprojectedToolExecutionResult:
-    if actor != "supervisor":
-        raise ToolValidationError(
-            "submit_final_answer is only available to the Supervisor.",
-            details={
-                "path": ["tool_id"],
-                "message": "Goal Workers submit completion proposals to the Supervisor.",
-                "metadata": {"actor": actor},
-            },
-        )
+def submit_pending_final_answer(state: ActionAgentState) -> str:
+    """Make the pending draft the Action's final answer; return when it completed.
+
+    Raises ``ToolValidationError`` naming what must be settled first.
+    """
+
     if state.get("status") != "processing":
         raise ToolValidationError(
             "submit_final_answer requires the action to be processing.",
@@ -225,7 +219,42 @@ async def run_submit_final_answer_tool(
     state["next_action"] = None
     state.pop("supervisor_pending_final_answer", None)
     set_status_with_updated_at(state, status="success", updated_at=completed_at)
+    return completed_at
 
+
+def end_turn_with_reply(state: ActionAgentState, answer: str) -> str | None:
+    """Make a reply without tool calls the final answer, as the two tools would.
+
+    Returns why the turn could not end, for the model to settle first.
+    """
+
+    try:
+        store_final_answer_draft(state, answer.strip())
+        submit_pending_final_answer(state)
+    except (MemoryLinkValidationError, ToolValidationError) as exc:
+        return f"This reply did not end the turn: {exc}"
+    return None
+
+
+async def run_submit_final_answer_tool(
+    _agent: object,
+    step_id: str,
+    tool_def: ToolDefinition,
+    _args: ToolArgs,
+    state: ActionAgentState,
+    *,
+    actor: ToolExecutionActor = "supervisor",
+) -> UnprojectedToolExecutionResult:
+    if actor != "supervisor":
+        raise ToolValidationError(
+            "submit_final_answer is only available to the Supervisor.",
+            details={
+                "path": ["tool_id"],
+                "message": "Goal Workers submit completion proposals to the Supervisor.",
+                "metadata": {"actor": actor},
+            },
+        )
+    completed_at = submit_pending_final_answer(state)
     payload: SubmitFinalAnswerPayload = {"status": "final_answer_submitted"}
     return UnprojectedToolExecutionResult(
         step_id=step_id,
@@ -237,4 +266,8 @@ async def run_submit_final_answer_tool(
     )
 
 
-__all__ = ["run_submit_final_answer_tool"]
+__all__ = [
+    "end_turn_with_reply",
+    "run_submit_final_answer_tool",
+    "submit_pending_final_answer",
+]

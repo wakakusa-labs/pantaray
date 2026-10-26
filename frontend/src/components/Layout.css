@@ -230,6 +230,14 @@
   box-shadow: 0 0 6px 2px rgba(241, 245, 252, 0.3);
 }
 
+/* Recording waits on a macOS permission; drawn over the light's corner like the unread dot. */
+.app-recording-alert {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  color: var(--warning-color);
+}
+
 .app-recording-popover {
   position: absolute;
   left: calc(100% + 20px);

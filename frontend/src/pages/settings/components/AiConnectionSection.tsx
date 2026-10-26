@@ -67,10 +67,75 @@ export function AiConnectionSection({
     }
   }, [pendingOperation]);
 
-  const status = state.runtime.ok ? state.runtime.status : null;
-  const webSearchRoute = status?.webSearchRoute ?? null;
-  const cloudSession = status?.cloudSessionState ?? null;
+  const webSearchRoute = state.runtime.ok ? state.runtime.status.webSearchRoute : null;
+  const title = t('settings.aiConnection.title');
 
+  return (
+    <section className="dashboard-section ai-connection">
+      <h3 className="dashboard-section-title">{title}</h3>
+
+      {!state.canStoreSecrets ? (
+        <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
+      ) : null}
+
+      <p role="status" className={feedback?.isError ? 'settings-section-error' : 'ai-note'}>
+        {pendingOperation === 'sign_in_chatgpt'
+          ? t('settings.aiConnection.chatgpt.waiting')
+          : pendingOperation
+            ? t('settings.aiConnection.operation.running')
+            : ''}
+        {feedback?.message}
+      </p>
+      {pendingOperation === 'sign_in_chatgpt' ? (
+        <button
+          type="button"
+          className="settings-text-button"
+          ref={cancelButton}
+          onClick={actions.cancelChatgptSignIn}
+        >
+          {t('settings.aiConnection.chatgpt.cancel')}
+        </button>
+      ) : null}
+      <fieldset className="ai-controls" aria-label={title} disabled={pendingOperation !== null}>
+        <h4 className="ai-group">{t('settings.aiConnection.inferenceGroup')}</h4>
+        <InferenceRows
+          state={state}
+          actions={actions}
+          t={t}
+          pendingOperation={pendingOperation}
+          loginButton={loginButton}
+        />
+
+        <div className="ai-rule" />
+
+        <h4 className="ai-group">{t('settings.aiConnection.webSearch.title')}</h4>
+        <p className="ai-note ai-group-note">
+          {webSearchRoute === 'cloud'
+            ? t('settings.aiConnection.webSearch.cloudDescription')
+            : t('settings.aiConnection.webSearch.description')}
+        </p>
+        <WebSearchKeyRow
+          state={state}
+          actions={actions}
+          t={t}
+          pendingOperation={pendingOperation}
+        />
+      </fieldset>
+    </section>
+  );
+}
+
+type RowsProps = Pick<AiConnectionSectionProps, 'state' | 'actions' | 't' | 'pendingOperation'>;
+
+/** How Pantaray reaches a model: the method and what it needs. */
+function InferenceRows({
+  state,
+  actions,
+  t,
+  pendingOperation,
+  loginButton,
+}: RowsProps & { loginButton: React.RefObject<HTMLButtonElement> }): React.JSX.Element {
+  const cloudSession = state.runtime.ok ? state.runtime.status.cloudSessionState : null;
   const candidates = modelCandidates(state.method, state.apiKey.provider);
   const methodNoteId =
     state.method === 'cloud' && cloudSession === 'expired' ? 'ai-method-note' : undefined;
@@ -95,187 +160,151 @@ export function AiConnectionSection({
   }));
 
   return (
-    <section className="dashboard-section ai-connection">
-      <h3 className="dashboard-section-title">{t('settings.aiConnection.title')}</h3>
-
-      {!state.canStoreSecrets ? (
-        <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
-      ) : null}
-
-      <p role="status" className={feedback?.isError ? 'settings-section-error' : 'ai-note'}>
-        {pendingOperation === 'sign_in_chatgpt'
-          ? t('settings.aiConnection.chatgpt.waiting')
-          : pendingOperation
-            ? t('settings.aiConnection.operation.running')
-            : ''}
-        {feedback?.message}
-      </p>
-      {pendingOperation === 'sign_in_chatgpt' ? (
-        <button
-          type="button"
-          className="settings-text-button"
-          ref={cancelButton}
-          onClick={actions.cancelChatgptSignIn}
+    <>
+      <Row label={t('settings.aiConnection.methodTitle')}>
+        <MenuButton
+          label={`${t('settings.aiConnection.methodTitle')}: ${methodTitle}`}
+          align="start"
+          describedBy={methodNoteId}
+          items={methodItems}
         >
-          {t('settings.aiConnection.chatgpt.cancel')}
-        </button>
+          <span>{methodTitle}</span>
+          <span className="ai-caret" aria-hidden="true">
+            ▾
+          </span>
+        </MenuButton>
+        {methodNoteId ? (
+          <p className="ai-note ai-note--control" id={methodNoteId}>
+            {t('settings.aiConnection.status.expiredDetail')}
+          </p>
+        ) : null}
+      </Row>
+
+      {state.method === 'chatgpt' ? (
+        <>
+          <Row label={t('settings.aiConnection.chatgpt.account')}>
+            {state.chatgpt ? (
+              <div className="ai-inline">
+                {state.chatgpt.status === 'connected' ? (
+                  <span className="ai-value">{t('settings.aiConnection.chatgpt.connected')}</span>
+                ) : (
+                  <>
+                    <span className="ai-check ai-check--failed" role="status">
+                      {t('settings.aiConnection.chatgpt.reauthenticationRequired')}
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-text-button"
+                      disabled={!state.canStoreSecrets || pendingOperation !== null}
+                      ref={loginButton}
+                      onClick={actions.signInToChatgpt}
+                    >
+                      {t('settings.aiConnection.chatgpt.reauthenticate')}
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="settings-text-button"
+                  // 接続済みでは再ログインを出さないので、ログイン後のフォーカスはここに戻す。
+                  ref={state.chatgpt.status === 'connected' ? loginButton : undefined}
+                  onClick={actions.disconnectChatgpt}
+                >
+                  {t('settings.aiConnection.chatgpt.disconnect')}
+                </button>
+              </div>
+            ) : (
+              <div className="ai-inline">
+                <button
+                  type="button"
+                  className="settings-action-button"
+                  disabled={!state.canStoreSecrets || pendingOperation !== null}
+                  ref={loginButton}
+                  onClick={actions.signInToChatgpt}
+                >
+                  {t('settings.aiConnection.chatgpt.signIn')}
+                </button>
+                <span className="ai-note">{t('settings.aiConnection.chatgpt.signInHint')}</span>
+              </div>
+            )}
+          </Row>
+          <AiConnectionModelRow
+            key={`${state.method}:${state.apiKey.provider}`}
+            model={state.model}
+            candidates={candidates}
+            selectionOnly
+            onSave={actions.saveModel}
+            t={t}
+          />
+        </>
       ) : null}
-      <fieldset
-        className="ai-controls"
-        aria-label={t('settings.aiConnection.title')}
-        disabled={pendingOperation !== null}
-      >
-        <h4 className="ai-group">{t('settings.aiConnection.inferenceGroup')}</h4>
 
-        <Row label={t('settings.aiConnection.methodTitle')}>
-          <MenuButton
-            label={`${t('settings.aiConnection.methodTitle')}: ${methodTitle}`}
-            align="start"
-            describedBy={methodNoteId}
-            items={methodItems}
-          >
-            <span>{methodTitle}</span>
-            <span className="ai-caret" aria-hidden="true">
-              ▾
-            </span>
-          </MenuButton>
-          {methodNoteId ? (
-            <p className="ai-note ai-note--control" id={methodNoteId}>
-              {t('settings.aiConnection.status.expiredDetail')}
-            </p>
-          ) : null}
-        </Row>
-
-        {state.method === 'chatgpt' ? (
-          <>
-            <Row label={t('settings.aiConnection.chatgpt.account')}>
-              {state.chatgpt ? (
-                <div className="ai-inline">
-                  {state.chatgpt.status === 'connected' ? (
-                    <span className="ai-value">{t('settings.aiConnection.chatgpt.connected')}</span>
-                  ) : (
-                    <>
-                      <span className="ai-check ai-check--failed" role="status">
-                        {t('settings.aiConnection.chatgpt.reauthenticationRequired')}
-                      </span>
-                      <button
-                        type="button"
-                        className="settings-text-button"
-                        disabled={!state.canStoreSecrets || pendingOperation !== null}
-                        ref={loginButton}
-                        onClick={actions.signInToChatgpt}
-                      >
-                        {t('settings.aiConnection.chatgpt.reauthenticate')}
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="settings-text-button"
-                    // 接続済みでは再ログインを出さないので、ログイン後のフォーカスはここに戻す。
-                    ref={state.chatgpt.status === 'connected' ? loginButton : undefined}
-                    onClick={actions.disconnectChatgpt}
-                  >
-                    {t('settings.aiConnection.chatgpt.disconnect')}
-                  </button>
-                </div>
-              ) : (
-                <div className="ai-inline">
-                  <button
-                    type="button"
-                    className="settings-action-button"
-                    disabled={!state.canStoreSecrets || pendingOperation !== null}
-                    ref={loginButton}
-                    onClick={actions.signInToChatgpt}
-                  >
-                    {t('settings.aiConnection.chatgpt.signIn')}
-                  </button>
-                  <span className="ai-note">{t('settings.aiConnection.chatgpt.signInHint')}</span>
-                </div>
-              )}
-            </Row>
-            <AiConnectionModelRow
-              key={`${state.method}:${state.apiKey.provider}`}
-              model={state.model}
-              candidates={candidates}
-              selectionOnly
-              onSave={actions.saveModel}
-              t={t}
-            />
-          </>
-        ) : null}
-
-        {state.method === 'api_key' ? (
-          <>
-            <Row label={t('settings.aiConnection.providerLabel')} htmlFor="ai-provider">
-              <select
-                id="ai-provider"
-                className="history-filter-select"
-                value={state.apiKey.provider}
-                onChange={(event) => actions.selectProvider(event.target.value as ApiKeyProvider)}
-              >
-                {API_KEY_PROVIDERS.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {t(`settings.aiConnection.provider.${provider}`)}
-                  </option>
-                ))}
-              </select>
-            </Row>
-
-            <AiConnectionModelRow
-              key={`${state.method}:${state.apiKey.provider}`}
-              model={state.model}
-              candidates={candidates}
-              allowsOther={PROVIDER_MODELS[state.apiKey.provider].allowsOther}
-              onSave={actions.saveModel}
-              t={t}
-            />
-
-            <SecretRow
-              // プロバイダーを変えたら入力中のキーを持ち越さない。別の宛先へ送らないため。
-              key={state.apiKey.provider}
-              label={t('settings.aiConnection.key.label')}
-              inputId="ai-api-key"
-              disabled={!state.canStoreSecrets || pendingOperation !== null}
-              hasSavedKey={state.apiKey.hasSavedKey}
-              placeholder={t('settings.aiConnection.key.placeholder')}
-              onSave={actions.saveApiKey}
-              onClear={actions.clearApiKey}
-              t={t}
-            />
-          </>
-        ) : null}
-
-        <div className="ai-rule" />
-
-        <h4 className="ai-group">{t('settings.aiConnection.webSearch.title')}</h4>
-        <p className="ai-note ai-group-note">
-          {webSearchRoute === 'cloud'
-            ? t('settings.aiConnection.webSearch.cloudDescription')
-            : t('settings.aiConnection.webSearch.description')}
-        </p>
-
-        <SecretRow
-          label={t('settings.aiConnection.webSearch.keyLabel')}
-          inputId="ai-web-search-key"
-          disabled={!state.canStoreSecrets || pendingOperation !== null}
-          hasSavedKey={state.webSearchHasSavedKey}
-          placeholder={t('settings.aiConnection.webSearch.keyPlaceholder')}
-          onSave={actions.saveWebSearchKey}
-          onClear={actions.clearWebSearchKey}
-          hint={
-            <a
-              className="settings-inline-link"
-              href={TAVILY_KEYS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+      {state.method === 'api_key' ? (
+        <>
+          <Row label={t('settings.aiConnection.providerLabel')} htmlFor="ai-provider">
+            <select
+              id="ai-provider"
+              className="history-filter-select"
+              value={state.apiKey.provider}
+              onChange={(event) => actions.selectProvider(event.target.value as ApiKeyProvider)}
             >
-              {t('settings.aiConnection.webSearch.getKey')}
-            </a>
-          }
-          t={t}
-        />
-      </fieldset>
-    </section>
+              {API_KEY_PROVIDERS.map((provider) => (
+                <option key={provider} value={provider}>
+                  {t(`settings.aiConnection.provider.${provider}`)}
+                </option>
+              ))}
+            </select>
+          </Row>
+
+          <AiConnectionModelRow
+            key={`${state.method}:${state.apiKey.provider}`}
+            model={state.model}
+            candidates={candidates}
+            allowsOther={PROVIDER_MODELS[state.apiKey.provider].allowsOther}
+            onSave={actions.saveModel}
+            t={t}
+          />
+
+          <SecretRow
+            // プロバイダーを変えたら入力中のキーを持ち越さない。別の宛先へ送らないため。
+            key={state.apiKey.provider}
+            label={t('settings.aiConnection.key.label')}
+            inputId="ai-api-key"
+            disabled={!state.canStoreSecrets || pendingOperation !== null}
+            hasSavedKey={state.apiKey.hasSavedKey}
+            placeholder={t('settings.aiConnection.key.placeholder')}
+            onSave={actions.saveApiKey}
+            onClear={actions.clearApiKey}
+            t={t}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** The Tavily key that Action's web search uses. */
+function WebSearchKeyRow({ state, actions, t, pendingOperation }: RowsProps): React.JSX.Element {
+  return (
+    <SecretRow
+      label={t('settings.aiConnection.webSearch.keyLabel')}
+      inputId="ai-web-search-key"
+      disabled={!state.canStoreSecrets || pendingOperation !== null}
+      hasSavedKey={state.webSearchHasSavedKey}
+      placeholder={t('settings.aiConnection.webSearch.keyPlaceholder')}
+      onSave={actions.saveWebSearchKey}
+      onClear={actions.clearWebSearchKey}
+      hint={
+        <a
+          className="settings-inline-link"
+          href={TAVILY_KEYS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {t('settings.aiConnection.webSearch.getKey')}
+        </a>
+      }
+      t={t}
+    />
   );
 }

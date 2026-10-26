@@ -225,6 +225,8 @@ export async function launchElectronE2E(): Promise<{
   const settingsDir = path.join(userDataDir, 'settings', '__logged_out__');
   fs.mkdirSync(settingsDir, { recursive: true });
   fs.writeFileSync(path.join(settingsDir, 'ui-settings.json'), '{"ui_language":"ja"}\n');
+  // The flows start in the app, so first-run setup is already finished.
+  fs.writeFileSync(path.join(userDataDir, 'onboarding.json'), '{"status":"completed"}\n');
   const backendEnvPath = path.join(workDir, 'backend.env');
   const controlSocketPath = path.join(userDataDir, 'local-backend', 'control.sock');
 

@@ -1,0 +1,169 @@
+/* Setup's own frame; every control inside a step keeps its Settings style. */
+
+/* No rail during setup: the steps panel stands where the rail's neighbour would. */
+.onb-nav {
+  margin-left: 12px;
+  border-right: 1px solid var(--fog-line);
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+  flex-basis: 240px;
+}
+
+.onb-wordmark {
+  color: var(--fog-text-2);
+  font-size: 14px;
+  margin: 4px 0 18px 10px;
+}
+
+.onb-nav-title {
+  margin-bottom: 0;
+}
+
+.onb-progress {
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  margin: 0 0 10px 10px;
+}
+
+.onb-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.onb-step-item {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+}
+
+.onb-step-item:disabled,
+.onb-step-item:disabled:hover {
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: default;
+  opacity: 0.45;
+}
+
+.onb-marker {
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  box-sizing: border-box;
+  color: var(--fog-text-3);
+  display: grid;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  height: 22px;
+  place-items: center;
+  width: 22px;
+}
+
+.onb-marker--current {
+  border-color: rgba(var(--accent-rgb), 0.75);
+  color: var(--fog-text);
+}
+
+.onb-marker--done {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.52);
+  color: #cfe0f3;
+}
+
+.onb-marker--skipped {
+  border-style: dashed;
+}
+
+.onb-step-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.onb-step-meta {
+  color: var(--fog-text-3);
+  font-size: 11px;
+}
+
+/* The step scrolls; the action bar stays at the pane's bottom edge on every step. */
+.onb-detail {
+  gap: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+  padding-top: 64px;
+}
+
+/* Scrolls across the whole pane, so the wheel works beside the step too; the step keeps its width. */
+.onb-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+
+.onb-content > * {
+  max-width: 680px;
+}
+
+.onb-title {
+  align-items: center;
+  color: var(--fog-text);
+  display: flex;
+  font-size: 20px;
+  font-weight: var(--weight-bold);
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.onb-title:focus {
+  outline: none;
+}
+
+/* A label, not a control: no outline, so it does not read as a button. */
+.onb-tag {
+  color: var(--fog-text-2);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+}
+
+.onb-footer {
+  align-items: center;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex: none;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px 0 20px;
+}
+
+.onb-footer-end {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  /* Stacked above the step, the panel is as tall as its list. */
+  .onb-nav {
+    flex-basis: auto;
+    margin-left: 0;
+    border-radius: 0;
+  }
+
+  /* The page scrolls as one here, so the bar follows the step. */
+  .onb-detail {
+    overflow: visible;
+    padding-top: 24px;
+  }
+
+  .onb-content {
+    overflow: visible;
+  }
+}

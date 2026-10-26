@@ -15,6 +15,9 @@ from pantaray_agents.agents.action_agent.runtime.error_redaction import (
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.assistant_message import (
     prepare_llm_turn_commit,
 )
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.submit_final_answer import (
+    end_turn_with_reply,
+)
 from pantaray_agents.agents.action_agent.runtime.models.tool_call import (
     PendingToolBatchModel,
     PendingToolCallModel,
@@ -222,7 +225,7 @@ def _repair_may_reuse_think_identity(state: ActionAgentState) -> bool:
 def _think_result_line(
     *,
     parse_failed: bool,
-    batch_notice: str | None,
+    notice: str | None,
     window_rebuilt: bool,
 ) -> str | None:
     """THINK 行の結果行。リセットが起きたことは決定論的な 1 文で残す。"""
@@ -230,8 +233,8 @@ def _think_result_line(
     parts = [context_budget.CONTEXT_RESET_RESULT_LINE] if window_rebuilt else []
     if parse_failed:
         parts.append("Execution THINK output invalid")
-    elif batch_notice:
-        parts.append(batch_notice)
+    elif notice:
+        parts.append(notice)
     return " ".join(parts) or None
 
 
@@ -308,7 +311,7 @@ async def execution_think_step(  # noqa: C901
     accepted_fingerprint: str | None = None
 
     batch: PendingToolBatchModel | None = None
-    batch_notice: str | None = None
+    think_notice: str | None = None
     thinking = ""
 
     # 1 ターンで受け取れる呼び出し数。予算より多く要求しても実行できないので、
@@ -429,7 +432,7 @@ async def execution_think_step(  # noqa: C901
                 if plan.calls
                 else None
             )
-            batch_notice = _build_batch_notice(
+            think_notice = _build_batch_notice(
                 plan,
                 max_parallel=max_parallel_tool_calls,
                 provider_dropped_call_names=native_turn.dropped_call_names,
@@ -469,6 +472,11 @@ async def execution_think_step(  # noqa: C901
     decided_at = format_utc_iso(step_completed_at)
     adopted_state = state
     state = copy.deepcopy(state)
+    # A reply without tool calls ends the turn, its text the final answer.
+    if accepted_turn is not None and not accepted_turn.calls:
+        think_notice = end_turn_with_reply(
+            state, "\n\n".join(message.text for message in accepted_turn.messages)
+        )
     llm_turn = (
         prepare_llm_turn_commit(
             state,
@@ -525,7 +533,7 @@ async def execution_think_step(  # noqa: C901
             summary="" if batch is None else _batch_summary(batch),
             result_line=_think_result_line(
                 parse_failed=parse_failed,
-                batch_notice=batch_notice,
+                notice=think_notice,
                 window_rebuilt=window_rebuilt,
             ),
             tool_id=None if batch is None else batch.calls[0].call.tool_id,

@@ -35,17 +35,19 @@ role_rules:
     ## Response Mode
     You may return assistant messages with native phase `commentary`, provided tool calls, or both.
     Use tool calls to perform work; do not describe or simulate a call in text.
-    Commentary is shown before that response's tools run, except in responses containing `draft_final_answer`. A commentary-only response continues the task.
+    Commentary is shown before that response's tools run, except in responses containing `draft_final_answer`.
+    A response without tool calls ends your turn, and its commentary is shown to the user as your final answer. Send one only when the work is done or you need the user's reply.
 
     ## Progress Messages
     - Keep the user oriented without narrating. Send a short commentary (1-2 sentences) when you move to a distinct phase of work, learn something that changes the picture, change approach, or hit an obstacle. During long work, also send one when about 10 calls have passed since the last one. Say what you found and what you will do next.
     - Do not narrate individual routine calls, waits, or retries, or repeat Action History.
     - Use the user's language. A progress or language preference the user states, directly or in an AGENTS.md, takes precedence over these defaults.
     - Tools requested in this response have not run yet; report their results only after receiving them.
-    - Keep reasoning and `step_note` private. Use `draft_final_answer` and `submit_final_answer` for final answers or questions awaiting a user reply. Do not emit native `final_answer` messages.
+    - Keep reasoning and `step_note` private. Do not emit native `final_answer` messages.
 
     ## Final Answer Flow
-    - When the user-facing final response text is ready, call `draft_final_answer`.
+    - A final answer sent as a response without tool calls follows the same requirements as `draft_final_answer`'s `answer`. Use `draft_final_answer` and `submit_final_answer` instead for a long answer or one you link memories to.
+    - When drafting, call `draft_final_answer` once the user-facing final response text is ready.
     - Do not include commentary in a response that calls `draft_final_answer`; it will not be published. Put the response text only in `answer`.
     - The `answer` argument must contain only the final response shown to the user.
     - The stored draft is the `answer` of your latest `draft_final_answer` call since the latest user message.
@@ -57,8 +59,6 @@ role_rules:
     - Treat the user's request, including an accepted suggestion it carries, as the contract for the final answer.
     - Treat Suggestion Summary as the handoff note that grounds the accepted suggestion. Use it to keep the work tied to the intended organization, project, work surface, files, URLs, source context, expected action, and known ambiguity.
     - The final answer must answer that contract.
-    - If the user should open a workspace file, write a Markdown link with `pantaray-file:///` followed by a local absolute path under Workspace Roots.
-    - Plain text paths are not clickable. Do not invent paths outside Workspace Roots.
 
     ## Turn Context and Action History
     The context message shows the state when this Action started. A Turn Context message in Action History carries only what changed since, and a section it carries replaces the same section shown earlier.

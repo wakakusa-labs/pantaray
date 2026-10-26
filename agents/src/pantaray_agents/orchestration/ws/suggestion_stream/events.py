@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 from pantaray_agents.schema.events import OutboundEvent
@@ -76,6 +77,7 @@ class SuggestionStreamEventsMixin:
         has_suggestion: bool | None,
         kind: Literal["suggestion"],
         interaction_contract: str | None = None,
+        artifacts: Sequence[str] = (),
     ) -> bool:
         sent = await self._send(
             OutboundEvent.PROCESS_COMPLETED.value,
@@ -85,6 +87,7 @@ class SuggestionStreamEventsMixin:
                 has_suggestion=has_suggestion,
                 suggestion_id=suggestion_id,
                 interaction_contract=interaction_contract,
+                artifacts=list(artifacts),
                 status=status,
             ),
             process_id=process_id,

@@ -113,11 +113,13 @@ def build_read_only_file_tools(
     app_storage_roots: tuple[Path, ...],
     spill_root: Path,
     memory_folders: tuple[Path, ...] = (),
+    own_folder: Path | None = None,
 ) -> tuple[ReactToolDefinition, ...]:
     """The tools over ``folders`` and ``memory_folders``, which they only read.
 
     Paths are absolute: there is no current directory and no scratch workspace.
-    ``app_storage_roots`` stay hidden except ``memory_folders`` and
+    ``app_storage_roots`` stay hidden except ``memory_folders``, ``own_folder``
+    (what the run itself made, such as a Suggestion's artifact folder) and
     ``spill_root``, created here: the run's own folder, where a large result is
     written and read back from and drawn pages and converted documents are
     kept, all removed with it.
@@ -125,10 +127,12 @@ def build_read_only_file_tools(
 
     spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
     spill_path = spill_root.resolve(strict=True)
+    own = () if own_folder is None else (own_folder,)
     scope = ReadScope(
         # The spill root comes first: a registered folder may enclose app storage.
         manifest_roots=(
             _read_only_root("tool_results", spill_path),
+            *(_read_only_root("own", folder) for folder in own),
             *(
                 _read_only_root(f"memory:{index}", folder)
                 for index, folder in enumerate(memory_folders)
@@ -143,7 +147,7 @@ def build_read_only_file_tools(
         scratch_root_path=None,
         private_storage=PrivateAppStorage(
             storage_roots=app_storage_roots,
-            readable_roots=(spill_path, *memory_folders),
+            readable_roots=(spill_path, *own, *memory_folders),
         ),
     )
     memory_note = (

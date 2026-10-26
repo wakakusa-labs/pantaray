@@ -7,9 +7,10 @@ import type { IntegrationFlow, IntegrationFlowActions } from './IntegrationConne
 import { IntegrationFlowStatus } from './IntegrationFlowStatus';
 import { IntegrationLogo } from './IntegrationLogo';
 import { IntegrationServiceDetail } from './IntegrationServiceDetail';
-import type {
-  IntegrationAccountRowState,
-  IntegrationSettingsActions,
+import {
+  isAccountKey,
+  type IntegrationAccountRowState,
+  type IntegrationSettingsActions,
 } from './IntegrationSettingsController';
 import { SecretRow } from './SecretRow';
 import './aiConnection.css';
@@ -32,6 +33,8 @@ type Props = {
   integrationKey: IntegrationKeyState;
   /** Null until the backend reports a configured connection method. */
   toolkits: IntegrationToolkitStatus[] | null;
+  /** The saved key is refused: changing it is the fix, not loading again. */
+  keyRejected: boolean;
   loadFailed: boolean;
   onReload: () => void;
   rows: Record<string, IntegrationAccountRowState>;
@@ -52,6 +55,7 @@ export function IntegrationSettingsSection({
   t,
   integrationKey,
   toolkits,
+  keyRejected,
   loadFailed,
   onReload,
   rows,
@@ -134,6 +138,10 @@ export function IntegrationSettingsSection({
           placeholder={t('settings.integrations.key.placeholder')}
           onSave={integrationKey.onSave}
           onClear={integrationKey.onClear}
+          problem={keyRejected ? t('settings.integrations.key.rejected') : undefined}
+          draftProblem={(draft) =>
+            isAccountKey(draft) ? t('settings.integrations.key.accountKey') : undefined
+          }
           hint={
             integrationKey.hasSavedKey ? undefined : (
               <>

@@ -141,19 +141,25 @@ def extract_anthropic_tool_response(
         messages = _extract_action_messages(
             message=message,
             progress_updates=progress_updates,
-            error_context=error_context,
         )
         if not messages and not calls:
             raise _invalid_action_turn(
                 "The model provider returned no commentary or tool calls.",
                 error_context,
             )
-        return LlmActionTurnResponse(
-            mode="action_turn",
-            messages=messages,
-            calls=calls,
-            dropped_call_names=dropped_call_names,
-        )
+        try:
+            return LlmActionTurnResponse(
+                mode="action_turn",
+                messages=messages,
+                calls=calls,
+                dropped_call_names=dropped_call_names,
+            )
+        except ValidationError as exc:
+            raise _invalid_action_turn(
+                "The model provider returned Action commentary beside tool calls "
+                "over the commentary character limit.",
+                error_context,
+            ) from exc
     continuation = None
     if tool_use.continuation_mode == "stateless":
         continuation = AnthropicToolContinuation(
@@ -194,6 +200,7 @@ def _extract_tool_call(
             tool_name=block.name,
             argument_path=validation_failure.argument_path,
             schema_keyword=validation_failure.schema_keyword,
+            property_names=validation_failure.property_names,
         )
     return LlmToolCall(call_id=block.id, name=block.name, arguments=block.input)
 
@@ -202,28 +209,21 @@ def _extract_action_messages(
     *,
     message: AnthropicMessageResponse,
     progress_updates: bool,
-    error_context: ToolCallErrorContext,
 ) -> list[LlmCommentary]:
     messages: list[LlmCommentary] = []
     for index, block in enumerate(message.content):
         text = _spoken_text(block, progress_updates=progress_updates)
         if text is None:
             continue
-        try:
-            commentary = LlmCommentary(
+        messages.append(
+            LlmCommentary(
                 phase="commentary",
                 # Messages API は text ブロックに ID を付けない。呼び出し元は
                 # この値からターン内で一意な発話 ID を導くので、位置で識別する。
                 source_message_id=f"{message.id}:{index}",
                 text=text,
             )
-        except ValidationError as exc:
-            raise _invalid_action_turn(
-                "The model provider returned Action commentary outside the "
-                "commentary character limit.",
-                error_context,
-            ) from exc
-        messages.append(commentary)
+        )
     return messages
 
 

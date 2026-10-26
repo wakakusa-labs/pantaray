@@ -197,6 +197,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       state.interactionContract === 'action_offer' && state.reactionState === 'rejected'
         ? { reason: state.dismissReason }
         : null,
+    artifacts: currentView?.action ? [] : state.artifacts,
   };
   const canonicalPage =
     paging.currentPage?.action.action_id === conversationActionId ? paging.currentPage : null;
@@ -569,7 +570,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       approvalErrorMessage={approval.approvalErrorMessage}
       showBusyIndicator={showBusyIndicator}
       showThinking={showThinking}
-      fadeDurationMs={600}
       onToggleExpand={ctrl.onToggleExpand}
       onClose={ctrl.onClose}
       onDecideApproval={

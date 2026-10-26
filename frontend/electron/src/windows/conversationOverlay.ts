@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { CaptureGateState } from '../ipc/context';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
+import type { CapturePermissions } from './macosPermissions';
 
 type WindowOpenResult = 'created' | 'loading' | 'focused';
 
@@ -12,6 +13,10 @@ export type ConversationOverlayOpenResult = WindowOpenResult | 'initializing' | 
 type PendingOverlayRequest = { kind: 'new' } | { kind: 'action'; actionId: string };
 
 export class ConversationOverlayStateError extends Error {}
+
+/** The gate holds only with both: either one missing leaves the recorder unable to read. */
+const bothGranted = ({ accessibility, screenRecording }: CapturePermissions): boolean =>
+  accessibility && screenRecording;
 
 export function createConversationOverlayOwner(params: {
   getRuntimeState: () => LocalRuntimeState;
@@ -23,8 +28,8 @@ export function createConversationOverlayOwner(params: {
   refreshAndResumeConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
   /** Shows a window that waits for its conversation to be laid out. */
   revealOverlay: (overlayId: string) => void;
-  /** Whether macOS grants this app the permissions the recorder needs. */
-  holdsCaptureOsPermissions: () => boolean;
+  /** Which of the permissions the recorder needs macOS grants this app. */
+  readCapturePermissions: () => CapturePermissions;
   /** Brings the main window forward, where the recording screen is shown. */
   presentRecordingIntro: () => void;
   createOverlayId?: () => string;
@@ -32,16 +37,6 @@ export function createConversationOverlayOwner(params: {
   const ownedOverlayIds = new Set<string>();
   let boundSubject: string | null = null;
   let pendingRequest: PendingOverlayRequest | null = null;
-  // "Later" is answered once per app run, not once per window: the recording screen
-  // lives in the main window, which the user may close and reopen at will, and
-  // reopening it must not ask again. Nothing is stored, so a relaunch asks again.
-  let introDismissed = false;
-
-  // Both belong to the subject that answered the screen and deferred the request.
-  const forgetIntroState = (): void => {
-    pendingRequest = null;
-    introDismissed = false;
-  };
 
   // A conversation window is destroyed when the user closes it, so its id would
   // otherwise stay owned for the rest of the session.
@@ -56,7 +51,7 @@ export function createConversationOverlayOwner(params: {
     for (const overlayId of ownedOverlayIds) params.destroyOverlay(overlayId);
     ownedOverlayIds.clear();
     boundSubject = null;
-    forgetIntroState();
+    pendingRequest = null;
   };
 
   /**
@@ -69,7 +64,7 @@ export function createConversationOverlayOwner(params: {
    * may always start a conversation of their own.
    */
   const passesOsPermissionGate = (request: PendingOverlayRequest): boolean => {
-    if (params.holdsCaptureOsPermissions()) return true;
+    if (bothGranted(params.readCapturePermissions())) return true;
     pendingRequest = request;
     params.presentRecordingIntro();
     return false;
@@ -77,9 +72,9 @@ export function createConversationOverlayOwner(params: {
 
   const onOwnerChanged = (nextSubject: string | null): void => {
     if (boundSubject === nextSubject) return;
-    // The deferred request and the answered screen outlive every window: the gate
-    // opens no window at all, so destroying the owned ones would not clear them.
-    forgetIntroState();
+    // The deferred request outlives every window: the gate opens no window at all, so
+    // destroying the owned ones would not clear it.
+    pendingRequest = null;
     if (ownedOverlayIds.size > 0) destroyOwnedOverlays();
   };
 
@@ -169,19 +164,17 @@ export function createConversationOverlayOwner(params: {
    * all, then surprise the user in front of an unrelated start later.
    */
   const readGateState = (): CaptureGateState => {
-    const osPermissionsGranted = params.holdsCaptureOsPermissions();
-    if (osPermissionsGranted) openPendingRequest();
-    return { osPermissionsGranted, introRequested: pendingRequest !== null, introDismissed };
+    const permissions = params.readCapturePermissions();
+    if (bothGranted(permissions)) openPendingRequest();
+    return { permissions, introRequested: pendingRequest !== null };
   };
 
   /**
-   * The user answered the recording screen with "later": the deferred conversation
-   * is dropped, and the screen stops opening on its own until the app is relaunched
-   * or another conversation asks for it.
+   * The user answered the recording screen with "later": the deferred conversation is
+   * dropped, so a later grant or recording start does not open it unasked.
    */
   const dismissIntro = (): CaptureGateState => {
     pendingRequest = null;
-    introDismissed = true;
     return readGateState();
   };
 

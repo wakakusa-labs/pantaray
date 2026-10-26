@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from pantaray_agents.local_runtime.runtime.runtime_env import (
+    read_local_runtime_db_config,
+)
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_suggestion_artifacts_root,
+)
+
 
 class _Repo:
     def __init__(
@@ -24,7 +31,8 @@ class _Repo:
             or str(row.get("suggestion_id")) != suggestion_id
         ):
             return RepositoryResult(data=None)
-        return RepositoryResult(data=dict(row))
+        # The real repository always decodes the column, an empty list by default.
+        return RepositoryResult(data={"artifacts_json": [], **row})
 
     async def get_process_events_for_detail(self, *, user_id: str, suggestion_id: str):
         from pantaray_agents.schema.repositories.repository import RepositoryResult
@@ -148,6 +156,13 @@ def test_history_overlay_bootstrap_returns_history_snapshot() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["suggestion_id"] == "sug-123"
+    # Electron main resolves a Suggestion's files only under this folder.
+    db_path, _ = read_local_runtime_db_config()
+    assert payload["artifacts_root"] == str(
+        resolve_suggestion_artifacts_root(
+            db_path=db_path, user_id="user-123", suggestion_id="sug-123"
+        )
+    )
     assert payload["snapshot"]["suggestionText"] == "suggestion text"
     assert payload["snapshot"]["actionStatus"] == "success"
     assert payload["live_resume"]["kind"] == "none"

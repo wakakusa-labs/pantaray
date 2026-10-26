@@ -267,6 +267,8 @@ export type ProcessCompletedSuggestionEvent = OrchestrationEventWithMeta<
     has_suggestion?: boolean | null;
     suggestion_id?: string | null;
     interaction_contract?: SuggestionInteractionContract | null;
+    /** Absent on events persisted before Suggestions could make files. */
+    artifacts?: string[];
   },
   SuggestionLiveMeta
 >;

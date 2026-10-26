@@ -19,6 +19,9 @@ type SecurityEventRecorder = (
 
 const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'actionFile:open',
+  // A Suggestion's file chip in the Overlay opens the file in its app; main checks the file
+  // against its owner exactly as for the main window.
+  'actionFile:openInApp',
   // The Overlay binds read receipts to the same subject already broadcast to all windows.
   'auth:getState',
   // Read-only: the overlay's permission control opens on the Settings default

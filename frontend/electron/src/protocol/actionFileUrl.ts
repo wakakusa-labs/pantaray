@@ -1,10 +1,12 @@
-/** Privileged scheme that serves a PDF an Action names to the main window's preview. */
+import type { TaskFileTarget } from '../actions/actionFileAccess';
+
+/** Privileged scheme that serves a PDF an Action names or a Suggestion made to the preview. */
 export const ACTION_FILE_SCHEME = 'pantaray-action-file';
-/** `standard: true` schemes require a host; the Action and the path ride in the query. */
+/** `standard: true` schemes require a host; the owner and the path ride in the query. */
 export const ACTION_FILE_URL_HOST = 'local';
 
-/** The preview frame's URL for one file an Action names. */
-export function buildActionFileUrl(actionId: string, filePath: string): string {
-  const query = new URLSearchParams({ action: actionId, path: filePath });
+/** The preview frame's URL for one file of an Action or a Suggestion. */
+export function buildActionFileUrl(target: TaskFileTarget, filePath: string): string {
+  const query = new URLSearchParams({ kind: target.kind, id: target.id, path: filePath });
   return `${ACTION_FILE_SCHEME}://${ACTION_FILE_URL_HOST}/?${query.toString()}`;
 }

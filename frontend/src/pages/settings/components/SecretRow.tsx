@@ -1,3 +1,4 @@
+import { CircleAlert } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
 import type { Translate } from '../types';
@@ -13,6 +14,8 @@ export function SecretRow({
   disabled,
   onSave,
   onClear,
+  problem,
+  draftProblem,
   hint,
   t,
 }: {
@@ -23,6 +26,10 @@ export function SecretRow({
   disabled: boolean;
   onSave: (value: string) => Promise<void> | void;
   onClear: () => Promise<void> | void;
+  /** Why the saved key does not work; shown in place of "saved". */
+  problem?: string;
+  /** Why the typed key cannot be the right one; shown while typing and blocks saving. */
+  draftProblem?: (draft: string) => string | undefined;
   hint?: React.ReactNode;
   t: Translate;
 }): React.JSX.Element {
@@ -98,6 +105,8 @@ export function SecretRow({
     }
   };
 
+  const typedProblem = draftProblem?.(draft.trim());
+
   const feedback = (
     <span
       className={result?.endsWith('Failed') ? 'ai-check ai-check--failed' : 'ai-note'}
@@ -118,7 +127,11 @@ export function SecretRow({
       <Row label={label}>
         <div className="ai-inline">
           <span className="ai-secret-mask">••••••••••••</span>
-          <span className="ai-note">{t('settings.aiConnection.key.saved')}</span>
+          {problem ? (
+            <ProblemNote text={problem} />
+          ) : (
+            <span className="ai-note">{t('settings.aiConnection.key.saved')}</span>
+          )}
           <button
             type="button"
             className="settings-text-button"
@@ -168,7 +181,9 @@ export function SecretRow({
           type="button"
           className="settings-action-button"
           aria-label={`${label}: ${t('settings.aiConnection.key.save')}`}
-          disabled={disabled || saving || removing || draft.trim().length === 0}
+          disabled={
+            disabled || saving || removing || draft.trim().length === 0 || Boolean(typedProblem)
+          }
           onClick={() => void save()}
         >
           {t('settings.aiConnection.key.save')}
@@ -191,7 +206,17 @@ export function SecretRow({
         ) : null}
         {feedback}
       </div>
+      {typedProblem ? <ProblemNote text={typedProblem} /> : null}
       {hint}
     </Row>
+  );
+}
+
+function ProblemNote({ text }: { text: string }): React.JSX.Element {
+  return (
+    <span role="alert" className="ai-check ai-check--failed ai-secret-problem">
+      <CircleAlert size={15} strokeWidth={1.8} aria-hidden />
+      {text}
+    </span>
   );
 }

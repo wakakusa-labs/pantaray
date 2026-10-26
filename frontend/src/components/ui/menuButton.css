@@ -5,8 +5,8 @@
 
 .menu-button__trigger {
   align-items: center;
-  background: var(--surface-bg);
-  border: 1px solid var(--control-border);
+  background: var(--button-fill);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
   color: var(--text-primary);
   cursor: pointer;
@@ -24,7 +24,6 @@
 
 .menu-button__trigger--icon {
   background: transparent;
-  border-color: transparent;
   color: var(--text-secondary);
   padding: 4px 8px;
 }
@@ -35,8 +34,7 @@
 }
 
 .menu-button__trigger:hover:not([aria-disabled='true']) {
-  background: var(--surface-bg-hover);
-  border-color: var(--control-border-hover);
+  background: var(--button-fill-hover);
 }
 
 .menu-button__trigger:focus-visible,

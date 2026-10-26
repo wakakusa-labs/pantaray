@@ -6,7 +6,17 @@ function createCaptureApi({ ipcRenderer }) {
       stop: () => ipcRenderer.invoke('screenshot:stop'),
       getGateState: () => ipcRenderer.invoke('recording:getGateState'),
       dismissIntro: (ownerId) => ipcRenderer.invoke('recording:dismissIntro', ownerId),
-      openPermissionSettings: () => ipcRenderer.invoke('recording:openPermissionSettings'),
+      getPermissions: () => ipcRenderer.invoke('recording:getPermissions'),
+      askForPermission: (permission) =>
+        ipcRenderer.invoke('recording:askForPermission', permission),
+      openPermissionSettings: (permission) =>
+        ipcRenderer.invoke('recording:openPermissionSettings', permission),
+      getPermissionRequired: () => ipcRenderer.invoke('recording:getPermissionRequired'),
+      onPermissionRequiredChanged: (callback) => {
+        const listener = (_event, isRequired) => callback(isRequired);
+        ipcRenderer.on('recording:permissionRequiredChanged', listener);
+        return () => ipcRenderer.removeListener('recording:permissionRequiredChanged', listener);
+      },
       onStatusChanged: (callback) => {
         const listener = (_event, isEnabled) => callback(isEnabled);
         ipcRenderer.on('screenshot:statusChanged', listener);
@@ -27,8 +37,7 @@ function createCaptureApi({ ipcRenderer }) {
       listInstalledApps: () => ipcRenderer.invoke('privacy:listInstalledApps'),
       getIdeFileRules: () => ipcRenderer.invoke('privacy:getIdeFileRules'),
       updateIdeFileRules: (rules) => ipcRenderer.invoke('privacy:updateIdeFileRules', rules),
-      setCaptureEditing: (request) =>
-        ipcRenderer.invoke('privacy:setCaptureEditing', request),
+      setCaptureEditing: (request) => ipcRenderer.invoke('privacy:setCaptureEditing', request),
       onCaptureSettingsUpdated: (callback) => {
         const listener = (_event, settings) => callback(settings);
         ipcRenderer.on('privacy:captureSettingsUpdated', listener);

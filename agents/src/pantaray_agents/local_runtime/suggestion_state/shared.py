@@ -7,6 +7,7 @@ from pathlib import Path
 from pantaray_agents.local_runtime.runtime.process_events import (
     append_process_event_in_connection,
 )
+from pantaray_agents.schema.agent.suggestion import SUGGESTION_ARTIFACTS_ADAPTER
 from pantaray_agents.schema.repositories.repository import DBRow
 from pantaray_agents.suggestion_reactions import parse_stored_suggestion_user_reaction
 
@@ -84,6 +85,9 @@ def normalize_suggestion_row(row: sqlite3.Row) -> DBRow:
         else None
     )
     result["error"] = decode_json_object(error_json) if error_json is not None else None
+    result["artifacts_json"] = SUGGESTION_ARTIFACTS_ADAPTER.validate_json(
+        result["artifacts_json"]
+    )
     return result
 
 

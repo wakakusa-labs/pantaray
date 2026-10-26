@@ -154,6 +154,7 @@ async function installBridge(
             }),
             onStateChanged: () => noop,
           },
+          onboarding: { getState: async () => ({ status: 'completed' }) },
           // The connection notice stays out of the way: its state never arrives.
           aiConnection: { getState: () => new Promise(() => {}), onChanged: () => noop },
           shortcut: { getState: async () => ({ accelerator: 'Alt+Space', failure: null }) },

@@ -7,6 +7,7 @@ import { AiConnectionSection, type AiConnectionActions } from './AiConnectionSec
 
 export function AiConnectionSettingsSection() {
   const { t } = useI18n();
+  const title = t('settings.aiConnection.title');
   const controller = useAiConnectionController();
   const [showCloud, setShowCloud] = useState(true);
   const retryButton = useRef<HTMLButtonElement>(null);
@@ -91,7 +92,7 @@ export function AiConnectionSettingsSection() {
     <>
       {controller.loadError ? (
         <section className="dashboard-section">
-          <h3 className="dashboard-section-title">{t('settings.aiConnection.title')}</h3>
+          <h3 className="dashboard-section-title">{title}</h3>
           <p role="alert" className="settings-section-error">
             {t('settings.aiConnection.loadFailed')}{' '}
             {t(`settings.aiConnection.error.${controller.loadError}`)}
@@ -140,7 +141,7 @@ export function AiConnectionSettingsSection() {
       <div
         ref={content}
         role="region"
-        aria-label={t('settings.aiConnection.title')}
+        aria-label={title}
         tabIndex={-1}
         hidden={controller.loadError !== null}
       >

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from jsonschema import Draft7Validator  # type: ignore[import-untyped]
+from jsonschema import Draft7Validator, ValidationError  # type: ignore[import-untyped]
 from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
 
 from pantaray_llm.contracts.json_value import JSONValue
@@ -77,10 +78,18 @@ class ProviderSchemaCompilationError(ValueError):
 
 
 class ProviderSchemaDecodeError(ValueError):
-    def __init__(self, *, path: str, keyword: str, message: str) -> None:
+    def __init__(
+        self,
+        *,
+        path: str,
+        keyword: str,
+        message: str,
+        property_names: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(message)
         self.path = path
         self.keyword = keyword
+        self.property_names = property_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,13 +102,40 @@ class CompiledProviderSchema:
         decoded = _decode_openai_value(value, self.canonical_schema)
         error = next(Draft7Validator(self.canonical_schema).iter_errors(decoded), None)
         if error is not None:
-            path_parts = [str(part) for part in error.absolute_path]
             raise ProviderSchemaDecodeError(
-                path=".".join(path_parts) if path_parts else "$",
+                path=schema_error_path(error),
                 keyword=str(error.validator or "unknown"),
                 message=f"Provider output violates canonical schema: {error.message}",
+                property_names=schema_error_property_names(error),
             )
         return decoded
+
+
+def schema_error_path(error: ValidationError) -> str:
+    parts = [str(part) for part in error.absolute_path]
+    return ".".join(parts) if parts else "$"
+
+
+def schema_error_property_names(error: ValidationError) -> tuple[str, ...]:
+    """Name the properties a `required` or `additionalProperties` error is about.
+
+    jsonschema's `error.message` embeds the instance value for many keywords, so
+    text that reaches the model is composed from these names, never from it.
+    """
+    if error.validator == "required":
+        return tuple(
+            name for name in error.validator_value if name not in error.instance
+        )
+    if error.validator == "additionalProperties":
+        declared = error.schema.get("properties", {})
+        patterns = error.schema.get("patternProperties", {})
+        return tuple(
+            name
+            for name in error.instance
+            if name not in declared
+            and not any(re.search(pattern, name) for pattern in patterns)
+        )
+    return ()
 
 
 def compile_provider_schema(
@@ -528,4 +564,6 @@ __all__ = [
     "ProviderSchemaDecodeError",
     "SchemaUsage",
     "compile_provider_schema",
+    "schema_error_path",
+    "schema_error_property_names",
 ]

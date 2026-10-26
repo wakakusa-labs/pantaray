@@ -27,7 +27,34 @@
   background: rgba(125, 171, 220, 0.12);
 }
 
+/* A chip with its open-in-app button, where no preview with an Open menu is at hand. */
+.task-file-chip-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.task-file-chip__open {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.task-file-chip__open:hover {
+  background: var(--fog-mist);
+  color: var(--fog-text);
+}
+
 .task-file-chip:focus-visible,
+.task-file-chip__open:focus-visible,
 .task-file-preview button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -126,12 +153,21 @@
   gap: 5px;
   height: 28px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--surface-bg-hover);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
   color: var(--fog-text);
   font-size: 12px;
   cursor: pointer;
+}
+
+.task-file-preview__open:hover {
+  background: var(--button-fill-hover);
+}
+
+.task-file-preview__open:active {
+  background: var(--button-fill-active);
 }
 
 .task-file-preview__close {
@@ -148,7 +184,6 @@
   cursor: pointer;
 }
 
-.task-file-preview__open:hover,
 .task-file-preview__close:hover {
   background: var(--fog-mist-strong);
 }

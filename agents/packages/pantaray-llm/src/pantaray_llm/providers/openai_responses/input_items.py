@@ -31,8 +31,8 @@ from pantaray_llm.providers.openai_responses.settings import OpenAiLlmProfile
 from pantaray_llm.providers.openai_responses.tool_use import build_openai_blob_data_url
 from pantaray_llm.providers.uploaded_content import require_uploaded_blob
 
-# Every Action assistant message is commentary, and the API asks callers to send
-# the phase back: dropping it degrades the newer models that emit it.
+# Text without an OpenAI provider turn goes back as commentary: the API asks for
+# a phase on every assistant message, and dropping it degrades the newer models.
 _COMMENTARY_PHASE = "commentary"
 
 

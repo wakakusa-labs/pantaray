@@ -380,6 +380,29 @@ def test_a_failed_link_is_502_without_composio_text(
     assert "says" not in response.text
 
 
+def test_a_rejected_key_is_its_own_status_and_other_failures_stay_errors(
+    composio: FakeComposio, gateway: ComposioGateway
+) -> None:
+    # Composio's reply to a deleted key quotes part of it.
+    rejected = httpx2.Response(
+        401, json={"error": {"code": 801, "message": f"Invalid API key {API_KEY[:8]}"}}
+    )
+    composio.replies[("GET", "/connected_accounts")] = rejected
+    gateway.invalidate_accounts()
+    with _client() as client:
+        response = client.get(BASE)
+    assert response.status_code == 200
+    assert response.json() == {"state": "key_rejected"}
+
+    composio.replies[("GET", "/connected_accounts")] = _error(503, 0)
+    gateway.invalidate_accounts()
+    app = FastAPI()
+    app.include_router(integrations.router)
+    app.dependency_overrides[get_current_user_id_from_token] = lambda: USER_ID
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.get(BASE).status_code == 500
+
+
 @pytest.mark.parametrize(
     ("composio_status", "state"),
     [

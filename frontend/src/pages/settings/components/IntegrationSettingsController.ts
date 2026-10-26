@@ -53,10 +53,14 @@ type Loaded = {
   ownerId: string;
   /** Null while the backend has no connection method configured. */
   toolkits: IntegrationToolkitStatus[] | null;
+  /** The connection method refused the saved key; only a new key fixes it. */
+  keyRejected: boolean;
   rows: Record<string, IntegrationAccountRowState>;
   /** The last read failed; what was read before stays on screen. */
   loadFailed: boolean;
 };
+
+type StatusRead = Pick<Loaded, 'toolkits' | 'keyRejected' | 'loadFailed'>;
 
 const EMPTY_ROW: IntegrationAccountRowState = {
   busy: false,
@@ -75,6 +79,13 @@ export function denialText(t: Translate, reason: ApiDenial, service: string): st
   return t(`settings.integrations.denial.${reason.capability}`);
 }
 
+/** Composio's account-level keys start so; the backend needs a project API key (`ak_`). */
+export const isAccountKey = (key: string) => key.startsWith('ck_');
+
+/** Services with an account that works; one that needs reconnecting does not count. */
+export const connectedToolkits = (toolkits: IntegrationToolkitStatus[]) =>
+  toolkits.filter((toolkit) => toolkit.accounts.some((account) => account.health === 'ok'));
+
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 
@@ -85,11 +96,12 @@ export const integrationRow = (rows: Record<string, IntegrationAccountRowState>,
 function applyStatus(
   prev: Loaded | null,
   ownerId: string,
-  next: Pick<Loaded, 'toolkits' | 'loadFailed'>,
+  next: StatusRead,
   savedSinceRead: (account: string) => boolean
 ): Loaded {
   if (prev === null || prev.ownerId !== ownerId) return { ownerId, rows: {}, ...next };
-  if (next.loadFailed) return { ...prev, loadFailed: true };
+  // A refused key is not known to still be refused: the key may have just been replaced.
+  if (next.loadFailed) return { ...prev, keyRejected: false, loadFailed: true };
   const shown = new Map(
     (prev.toolkits ?? []).flatMap((toolkit) =>
       toolkit.accounts.map((account) => [account.account, account] as const)
@@ -112,12 +124,13 @@ function applyStatus(
         return keepAccess ? (shown.get(account.account) ?? account) : account;
       }),
     })) ?? null;
-  return { ownerId, toolkits, rows, loadFailed: false };
+  return { ownerId, toolkits, keyRejected: next.keyRejected, rows, loadFailed: false };
 }
 
 /** Loads the owner's toolkits and accounts; `toolkits` is null until the gateway is configured. */
 export function useIntegrationSettingsController(ownerId: string | null): {
   toolkits: IntegrationToolkitStatus[] | null;
+  keyRejected: boolean;
   loadFailed: boolean;
   rows: Record<string, IntegrationAccountRowState>;
   actions: IntegrationSettingsActions;
@@ -156,13 +169,14 @@ export function useIntegrationSettingsController(ownerId: string | null): {
         .getStatus()
         .then(
           // Accounts may have come or gone, and a reconnect can change what their tools allow.
-          (status): Pick<Loaded, 'toolkits' | 'loadFailed'> => ({
+          (status): StatusRead => ({
             toolkits: status.state === 'configured' ? status.toolkits : null,
+            keyRejected: status.state === 'key_rejected',
             loadFailed: false,
           }),
-          (error: unknown) => {
+          (error: unknown): StatusRead => {
             console.warn('Failed to load integration settings', error);
-            return { toolkits: null, loadFailed: true };
+            return { toolkits: null, keyRejected: false, loadFailed: true };
           }
         )
         .then((next) => {
@@ -381,9 +395,12 @@ export function useIntegrationSettingsController(ownerId: string | null): {
 
   return {
     toolkits: current?.toolkits ?? null,
+    keyRejected: current?.keyRejected ?? false,
     loadFailed: current?.loadFailed ?? false,
     rows: current?.rows ?? {},
     actions: { setAccess, recheckAccess, loadTools, setToolBlocked },
     reload,
   };
 }
+
+export type IntegrationSettingsController = ReturnType<typeof useIntegrationSettingsController>;

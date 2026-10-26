@@ -60,10 +60,10 @@
 
 .settings-select-button {
   align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-color);
+  background: var(--button-fill);
+  border: 1px solid transparent;
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   font: inherit;
@@ -73,6 +73,10 @@
   min-width: 160px;
   padding: 8px 12px;
   width: 100%;
+}
+
+.settings-select-button:hover {
+  background: var(--button-fill-hover);
 }
 
 .settings-select-button:focus-visible,
@@ -136,6 +140,13 @@
   padding-top: 0;
 }
 
+/* The recording filter follows the recording section, whose bottom border already divides them. */
+.dashboard-section + .dashboard-subsection {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: var(--space-xl);
+}
+
 .settings-page-content > .allowed-apps-section {
   border-top: 0;
 }
@@ -162,10 +173,11 @@
 
 .settings-action-button {
   align-items: center;
-  background: transparent;
-  border: 1px solid var(--border-color);
+  background: var(--button-fill);
+  border: 0;
   border-radius: 8px;
-  color: var(--text-secondary);
+  box-shadow: var(--button-face-highlight);
+  color: var(--text-primary);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -177,8 +189,11 @@
 }
 
 .settings-action-button:hover {
-  background: var(--surface-bg-hover);
-  color: var(--text-primary);
+  background: var(--button-fill-hover);
+}
+
+.settings-action-button:active {
+  background: var(--button-fill-active);
 }
 
 .settings-action-button:disabled {

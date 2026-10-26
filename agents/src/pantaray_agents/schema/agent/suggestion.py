@@ -1,8 +1,8 @@
 """提案エージェント関連のスキーマ定義"""
 
-from typing import Literal, TypedDict
+from typing import Annotated, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
 
 from pantaray_agents.schema.action_conversation import ActionStatus
 
@@ -11,6 +11,45 @@ from .base import AgentRequest, AgentResponse, JSONValue
 
 type SuggestionPayload = dict[str, JSONValue]
 type SuggestionInteractionContract = Literal["action_offer", "message_only"]
+
+# File chips one notice can show; a run that names more is refused, not trimmed.
+SUGGESTION_ARTIFACTS_MAX_COUNT = 20
+# macOS PATH_MAX in bytes; a longer relative path could not be opened anyway.
+SUGGESTION_ARTIFACT_PATH_MAX_LENGTH = 1024
+
+
+def _require_folder_relative_path(path: str) -> str:
+    """The model names its files; only a plain path inside the folder is stored."""
+    if (
+        len(path.encode()) > SUGGESTION_ARTIFACT_PATH_MAX_LENGTH
+        or "\\" in path
+        or "\0" in path
+        # An empty part also catches "", a leading "/", "//" and a trailing "/".
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+    ):
+        raise ValueError(
+            "an artifact path must be a normalized relative path inside the "
+            "Suggestion's artifact folder"
+        )
+    return path
+
+
+def _require_distinct_paths(paths: list[str]) -> list[str]:
+    if len(set(paths)) != len(paths):
+        raise ValueError("artifact paths must be distinct")
+    return paths
+
+
+type SuggestionArtifactPath = Annotated[
+    str, AfterValidator(_require_folder_relative_path)
+]
+# Ordered as the notice shows them; empty for a Suggestion without files.
+type SuggestionArtifacts = Annotated[
+    list[SuggestionArtifactPath],
+    Field(max_length=SUGGESTION_ARTIFACTS_MAX_COUNT),
+    AfterValidator(_require_distinct_paths),
+]
+SUGGESTION_ARTIFACTS_ADAPTER: TypeAdapter[list[str]] = TypeAdapter(SuggestionArtifacts)
 
 
 class SuggestionTargetContext(BaseModel):
@@ -88,6 +127,10 @@ class SuggestionAgentResponse(AgentResponse):
         default=None,
         description="ActionAgent に渡す対象 organization / project",
     )
+    artifacts: SuggestionArtifacts = Field(
+        default_factory=list,
+        description="Files the Suggestion made, relative to its artifact folder",
+    )
     user_id: str = Field(description="提案対象のユーザーのID")
 
 
@@ -119,6 +162,8 @@ class SuggestionExtraction(TypedDict):
     - decided: 判断が決めた伝える中身（提案なしの場合は None）。
     - has_suggestion: 提案有無（True: 提案あり, False: 提案なし）。
     - interaction_contract: 提案の操作契約（提案なしの場合は None）。
+    - artifacts: the files the make stage made, relative to the Suggestion's
+      artifact folder (empty when it made none).
     """
 
     thinking: str | None
@@ -130,6 +175,7 @@ class SuggestionExtraction(TypedDict):
     response_text: str
     has_suggestion: bool
     interaction_contract: SuggestionInteractionContract | None
+    artifacts: list[str]
 
 
 class SuggestionCandidate(BaseModel):

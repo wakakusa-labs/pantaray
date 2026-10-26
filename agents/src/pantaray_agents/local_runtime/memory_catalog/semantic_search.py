@@ -138,14 +138,15 @@ def _projected_entries(
     # text on each search; the caller still matches each returned candidate's
     # hash.
     #
-    # NOT INDEXED: one rowid-order scan beats fetching each row through the
-    # (user_id, ...) index and needs no sort for ORDER BY embedding_id.
-    # Design limit: it reads every entry, visible or not (about 70 ms at 150k
-    # entries); index revision_id when this read passes 300 ms.
+    # The revision index covers every column read here, so this reads only the
+    # visible revisions' index entries, never the table.
+    # Design limit: the read grows with the visible entries (about 0.1 s for
+    # 53k of 464k entries, where a table scan took 2.5 s); revisit when it
+    # passes 300 ms.
     rows = connection.execute(
         f"""
         SELECT embedding_id, fragment_id, fragment_content_sha256, revision_id
-        FROM {entries} NOT INDEXED
+        FROM {entries}
         WHERE user_id = ?
           AND revision_id IN (SELECT value FROM json_each(?))
         ORDER BY embedding_id

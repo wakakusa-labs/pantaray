@@ -19,6 +19,7 @@ from .epoch import build_memory_context_epoch, merge_memory_context_epochs
 from .fragment_visibility import (
     MEMORY_FRAGMENT_COLUMNS,
     VISIBLE_FRAGMENT_JOINS,
+    VISIBLE_FRAGMENTS_FROM_NODES,
     revision_visibility_predicate,
     visible_fragment_predicate,
 )
@@ -214,24 +215,48 @@ def _exact_hits(
         pinned_revisions=pinned_revisions,
     )
     placeholders = ", ".join("?" for _ in keywords)
+    # Each keyword is looked up as an identifier in each column through that
+    # column's index, and only the fragments named that way are tested for
+    # visibility. One OR across both tables could use no index and read every
+    # fragment of the user. CROSS JOIN keeps the named fragments the outer
+    # loop; rowid ends the order so a cut through equal paths is stable.
+    # Design limit: a path many records share (every inline record is
+    # body.md) reads each of their fragments, about 1 s for 30k; rank before
+    # reading the fragment columns if such a search passes 2 s.
     rows = connection.execute(
         f"""
+        WITH named(fragment_rowid) AS (
+            SELECT rowid FROM memory_fragments
+            WHERE user_id = ? AND fragment_id IN ({placeholders})
+            UNION
+            SELECT rowid FROM memory_fragments
+            WHERE user_id = ? AND revision_id IN ({placeholders})
+            UNION
+            SELECT rowid FROM memory_fragments
+            WHERE user_id = ? AND source_path IN ({placeholders})
+            UNION
+            SELECT fragments.rowid FROM {VISIBLE_FRAGMENTS_FROM_NODES}
+            WHERE nodes.user_id = ? AND nodes.node_id IN ({placeholders})
+            UNION
+            SELECT fragments.rowid FROM {VISIBLE_FRAGMENTS_FROM_NODES}
+            WHERE nodes.user_id = ? AND nodes.source_record_id IN ({placeholders})
+        )
         SELECT {MEMORY_FRAGMENT_COLUMNS}
-        FROM memory_fragments AS fragments
+        FROM named
+        CROSS JOIN memory_fragments AS fragments
+          ON fragments.rowid = named.fragment_rowid
         {VISIBLE_FRAGMENT_JOINS}
         WHERE {visibility}
-          AND (
-            fragments.fragment_id IN ({placeholders})
-            OR fragments.revision_id IN ({placeholders})
-            OR nodes.node_id IN ({placeholders})
-            OR nodes.source_record_id IN ({placeholders})
-            OR fragments.source_path IN ({placeholders})
-          )
         ORDER BY CASE WHEN fragments.fragment_id IN ({placeholders}) THEN 0 ELSE 1 END,
-                 fragments.source_path, fragments.block_index
+                 fragments.source_path, fragments.block_index, fragments.rowid
         LIMIT ?
         """,
-        (*visibility_parameters, *(keywords * 6), candidate_limit),
+        (
+            *((user_id, *keywords) * 5),
+            *visibility_parameters,
+            *keywords,
+            candidate_limit,
+        ),
     ).fetchall()
     return tuple(_candidate_hit(row=row, rank=rank) for rank, row in enumerate(rows))
 

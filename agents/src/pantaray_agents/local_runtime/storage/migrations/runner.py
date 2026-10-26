@@ -48,6 +48,7 @@ from .legacy_goal_worker_convergence import (
 from .legacy_memory_agent_cutover import apply_legacy_memory_agent_cutover
 from .legacy_memory_restore import apply_legacy_memory_schema_restore_migration
 from .memory_agent_triggers import apply_memory_agent_trigger_migration
+from .memory_search_indexes import apply_memory_search_indexes_migration
 from .phase3 import (
     apply_public_event_projection_alignment_migration,
     apply_remove_socket_resource_scope_migration,
@@ -472,6 +473,11 @@ def _execute_migration(
         return
     if migration.version == 102:
         apply_screenshot_era_agent_cutover(connection)
+        return
+    if migration.version == 132:
+        apply_memory_search_indexes_migration(
+            connection, migration_statements=prepared_script.statements
+        )
         return
     execute_sql_statements(connection, prepared_script.statements)
 

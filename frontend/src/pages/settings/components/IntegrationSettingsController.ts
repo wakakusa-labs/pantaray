@@ -79,6 +79,9 @@ export function denialText(t: Translate, reason: ApiDenial, service: string): st
   return t(`settings.integrations.denial.${reason.capability}`);
 }
 
+/** Composio's account-level keys start so; the backend needs a project API key (`ak_`). */
+export const isAccountKey = (key: string) => key.startsWith('ck_');
+
 export const integrationRow = (rows: Record<string, IntegrationAccountRowState>, account: string) =>
   rows[account] ?? EMPTY_ROW;
 
@@ -395,3 +398,5 @@ export function useIntegrationSettingsController(ownerId: string | null): {
     reload,
   };
 }
+
+export type IntegrationSettingsController = ReturnType<typeof useIntegrationSettingsController>;

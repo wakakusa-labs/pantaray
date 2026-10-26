@@ -4,9 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 
 import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { useI18n } from '@/context/useI18n';
 import SettingsPage from '../../SettingsPage';
-import { IntegrationSettings } from './IntegrationSettings';
 import type {
   IntegrationAccessUpdateResult,
   IntegrationAccountStatus,
@@ -211,40 +209,6 @@ describe('the Composio key', () => {
         apiKey: 'ak_project',
       })
     );
-  });
-
-  it('puts onboarding copy in place of the heading and the key hint', async () => {
-    keySaved = false;
-    function Onboarding() {
-      const { t } = useI18n();
-      return (
-        <IntegrationSettings
-          t={t}
-          onboarding={{ lead: <p>Lead copy</p>, keyGuide: <p>Key guide copy</p> }}
-        />
-      );
-    }
-    render(
-      <AuthContext.Provider value={auth}>
-        <UiLanguageProvider initialLanguage="en">
-          <Onboarding />
-        </UiLanguageProvider>
-      </AuthContext.Provider>
-    );
-
-    expect(await screen.findByText('Lead copy')).toBeInTheDocument();
-    // The guide's last step points down to the key field, so the guide comes first.
-    expect(
-      screen
-        .getByText('Key guide copy')
-        .compareDocumentPosition(screen.getByLabelText('Composio API key')) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Integrations' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Let Pantaray use the services you connect for its work.')
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open Composio' })).not.toBeInTheDocument();
   });
 
   it('asks for a new key when the key is refused, and offers a reload only for a failed read', async () => {

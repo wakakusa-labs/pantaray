@@ -4,6 +4,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { BrandWordmark } from '@/components/BrandWordmark';
 import { LocalOwnerBoundary } from '@/components/LocalOwnerBoundary';
 import { useI18n } from '@/context/useI18n';
+import { useAuth } from '@/hooks/useAuth';
+import { useIntegrationSettingsController } from '../pages/settings/components/IntegrationSettingsController';
 import { ConnectionLoadFailure } from '../pages/settings/components/ConnectionLoadFailure';
 import {
   useAiConnectionController,
@@ -41,10 +43,18 @@ export function OnboardingScreen({
   progress: OnboardingProgress;
 }) {
   const { t } = useI18n();
-  // The AI and web search steps change the connection through this controller; the apps step's
-  // Settings section has its own, and main announces each change to both.
+  // The steps change the connection through this controller.
   const connection = useAiConnectionController();
   const { state } = connection;
+  // The services are the owner's; without an owner none are read.
+  const { runtimeState } = useAuth();
+  const integrations = useIntegrationSettingsController(
+    runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null
+  );
+  const services =
+    (state?.settings.hasSavedIntegrationKey ? integrations.toolkits : null)?.filter(
+      (toolkit) => toolkit.accounts.length > 0
+    ) ?? [];
   const recording = useRecordingStep();
   const titleRef = useRef<HTMLHeadingElement>(null);
   const shownStep = useRef(step);
@@ -60,7 +70,7 @@ export function OnboardingScreen({
     ai: state !== null && state.runtime.ok && state.runtime.status.llmRoute !== 'unconfigured',
     recording: recording.isRecording === true,
     web_search: state?.settings.hasSavedWebSearchKey ?? false,
-    apps: state?.settings.hasSavedIntegrationKey ?? false,
+    apps: services.length > 0,
     done: false,
   };
   const index = STEPS.findIndex((s) => s.id === step);
@@ -173,13 +183,27 @@ export function OnboardingScreen({
                       <WebSearchStep t={t} connection={connection} state={read} />
                     ))
                   : null}
-                {step === 'apps' ? (
-                  <LocalOwnerBoundary>
-                    <AppsStep t={t} hasSavedKey={configured.apps} />
-                  </LocalOwnerBoundary>
-                ) : null}
+                {step === 'apps'
+                  ? withConnection((read) => (
+                      <LocalOwnerBoundary>
+                        <AppsStep
+                          t={t}
+                          connection={connection}
+                          state={read}
+                          integrations={integrations}
+                        />
+                      </LocalOwnerBoundary>
+                    ))
+                  : null}
                 {step === 'done' && state !== null ? (
-                  <DoneStep t={t} connection={state} isRecording={configured.recording} />
+                  <DoneStep
+                    t={t}
+                    state={state}
+                    aiConnected={configured.ai}
+                    isRecording={configured.recording}
+                    webSearchDone={configured.web_search}
+                    services={services}
+                  />
                 ) : null}
               </div>
 

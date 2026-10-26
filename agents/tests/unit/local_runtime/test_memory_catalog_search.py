@@ -1254,6 +1254,76 @@ def test_exact_fragment_id_is_single_and_record_results_use_source_order(
     assert [row["content"] for row in fragment_results] == ["First paragraph."]
 
 
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        ("fragment", ["New paragraph."]),
+        ("current_revision", ["Heading", "New paragraph."]),
+        ("old_revision", []),
+        ("node", ["Heading", "New paragraph."]),
+        ("record-b", ["Other paragraph."]),
+        # Every inline record's body is body.md: equal paths and block indexes
+        # keep the order the fragments were stored in.
+        ("body.md", ["Heading", "Other paragraph.", "New paragraph."]),
+        ("unmatched", []),
+    ],
+)
+def test_exact_lane_finds_each_identifier_only_in_visible_revisions(
+    tmp_path: Path, keyword: str, expected: list[str]
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        old = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="record-a",
+            content="Old paragraph.\n",
+        )
+        current = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="record-a",
+            content="# Heading\n\nNew paragraph.\n",
+        )
+        register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="record-b",
+            content="Other paragraph.\n",
+        )
+        new_paragraph = next(
+            item
+            for item in list_revision_fragments(
+                connection=connection,
+                user_id="user-1",
+                revision_id=current.revision_id,
+            )
+            if item.block_kind == "paragraph"
+        )
+        identifiers = {
+            "fragment": new_paragraph.fragment_id,
+            "current_revision": current.revision_id,
+            "old_revision": old.revision_id,
+            "node": current.node_id,
+        }
+        results, _ = search_memory_catalog(
+            connection=connection,
+            user_id="user-1",
+            run_id="exact-identifier-search",
+            keywords=(identifiers.get(keyword, keyword),),
+            semantic=None,
+            focus="stable_knowledge",
+            center_time=None,
+            radius_hours=None,
+            limit=8,
+        )
+
+    assert [row["content"] for row in results] == expected
+
+
 def test_semantic_search_rejects_a_candidate_projected_from_other_content(
     tmp_path: Path,
 ) -> None:

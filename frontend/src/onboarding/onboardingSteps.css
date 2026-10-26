@@ -111,3 +111,11 @@
 .onb-key-input {
   width: 200px;
 }
+
+.onb-provider-select {
+  width: 128px;
+}
+
+.onb-model-select {
+  width: 168px;
+}

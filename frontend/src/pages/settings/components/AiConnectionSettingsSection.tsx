@@ -3,18 +3,11 @@ import { useI18n } from '@/context/useI18n';
 import type { ConnectionCommand } from '../../../../electron/src/ipc/schemas/aiConnection';
 import { modelForTarget, type AiConnectionState } from '../aiConnectionModel';
 import { useAiConnectionController } from '../useAiConnectionController';
-import {
-  AiConnectionSection,
-  type AiConnectionActions,
-  type AiConnectionPart,
-} from './AiConnectionSection';
+import { AiConnectionSection, type AiConnectionActions } from './AiConnectionSection';
 
-export function AiConnectionSettingsSection({ part }: { part: AiConnectionPart }) {
+export function AiConnectionSettingsSection() {
   const { t } = useI18n();
-  const title =
-    part === 'web_search'
-      ? t('settings.aiConnection.webSearch.title')
-      : t('settings.aiConnection.title');
+  const title = t('settings.aiConnection.title');
   const controller = useAiConnectionController();
   const [showCloud, setShowCloud] = useState(true);
   const retryButton = useRef<HTMLButtonElement>(null);
@@ -99,7 +92,7 @@ export function AiConnectionSettingsSection({ part }: { part: AiConnectionPart }
     <>
       {controller.loadError ? (
         <section className="dashboard-section">
-          {part === 'all' ? <h3 className="dashboard-section-title">{title}</h3> : null}
+          <h3 className="dashboard-section-title">{title}</h3>
           <p role="alert" className="settings-section-error">
             {t('settings.aiConnection.loadFailed')}{' '}
             {t(`settings.aiConnection.error.${controller.loadError}`)}
@@ -154,7 +147,6 @@ export function AiConnectionSettingsSection({ part }: { part: AiConnectionPart }
       >
         {displayState && actions ? (
           <AiConnectionSection
-            part={part}
             state={displayState}
             actions={actions}
             t={t}

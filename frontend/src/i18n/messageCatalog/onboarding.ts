@@ -16,10 +16,12 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.skip': 'Skip',
     'onboarding.next': 'Next',
     'onboarding.keySaved': 'Saved',
+    'onboarding.aiMethod.apiKey': '{provider} API key',
     'onboarding.ai.lead':
       'Pantaray carries out what you ask, and suggests things before you ask. First, connect the AI it uses for that.',
-    'onboarding.ai.sub': 'Sign in with your ChatGPT account, or paste an API key.',
-    'onboarding.ai.blocked': 'Connect an AI to continue',
+    'onboarding.ai.useApiKey': 'Use an API key',
+    'onboarding.ai.useChatgpt': 'Use a ChatGPT account',
+    'onboarding.ai.signingIn': 'Sign in in your browser',
     'onboarding.webSearch.lead': 'Lets Pantaray search the web for work that needs research.',
     'onboarding.webSearch.keyTitle': 'Tavily API key',
     'onboarding.webSearch.getKey': 'Create a key at Tavily',
@@ -27,7 +29,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.done.lead':
       'Talk to Pantaray whenever you want something done. It may also suggest things before you ask.',
     'onboarding.done.ai': 'AI',
-    'onboarding.done.apiKey': 'API key ({provider})',
     'onboarding.done.recording': 'Recording',
     'onboarding.done.apps': 'Apps',
     'onboarding.done.keySaved': 'Composio key saved',
@@ -84,10 +85,12 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.skip': 'スキップ',
     'onboarding.next': '次へ',
     'onboarding.keySaved': '保存済み',
+    'onboarding.aiMethod.apiKey': '{provider} の API キー',
     'onboarding.ai.lead':
       'Pantaray は、頼んだことを進め、頼む前に提案もします。まず、そのときに使う AI をつなぎます。',
-    'onboarding.ai.sub': 'ChatGPT のアカウントでログインするか、API キーを貼り付けてください。',
-    'onboarding.ai.blocked': 'AI をつなぐと次へ進めます',
+    'onboarding.ai.useApiKey': 'API キーを使う',
+    'onboarding.ai.useChatgpt': 'ChatGPT アカウントを使う',
+    'onboarding.ai.signingIn': 'ブラウザでログインしてください',
     'onboarding.webSearch.lead':
       '調べものが要る作業で、Pantaray が Web を検索できるようになります。',
     'onboarding.webSearch.keyTitle': 'Tavily の API キー',
@@ -96,7 +99,6 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.done.lead':
       '頼みたいことは、いつでも話しかけてください。頼まれる前に、Pantaray から提案することもあります。',
     'onboarding.done.ai': 'AI',
-    'onboarding.done.apiKey': 'API キー（{provider}）',
     'onboarding.done.recording': '記録',
     'onboarding.done.apps': 'アプリ',
     'onboarding.done.keySaved': 'Composio のキーを保存しました',

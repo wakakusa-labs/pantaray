@@ -31,11 +31,7 @@ export type AiConnectionActions = {
   clearWebSearchKey: () => Promise<void> | void;
 };
 
-/** Settings shows the whole section; onboarding shows inference and web search as separate steps. */
-export type AiConnectionPart = 'all' | 'inference' | 'web_search';
-
 type AiConnectionSectionProps = {
-  part: AiConnectionPart;
   state: AiConnectionState;
   actions: AiConnectionActions;
   t: Translate;
@@ -50,7 +46,6 @@ const METHODS: readonly AiConnectionMethod[] = PANTARAY_ACCOUNT_LOGIN_ENABLED
   : ['chatgpt', 'api_key'];
 
 export function AiConnectionSection({
-  part,
   state,
   actions,
   t,
@@ -73,14 +68,11 @@ export function AiConnectionSection({
   }, [pendingOperation]);
 
   const webSearchRoute = state.runtime.ok ? state.runtime.status.webSearchRoute : null;
-  const title =
-    part === 'web_search'
-      ? t('settings.aiConnection.webSearch.title')
-      : t('settings.aiConnection.title');
+  const title = t('settings.aiConnection.title');
 
   return (
     <section className="dashboard-section ai-connection">
-      {part === 'all' ? <h3 className="dashboard-section-title">{title}</h3> : null}
+      <h3 className="dashboard-section-title">{title}</h3>
 
       {!state.canStoreSecrets ? (
         <p className="settings-section-error">{t('settings.aiConnection.secretsUnavailable')}</p>
@@ -105,39 +97,29 @@ export function AiConnectionSection({
         </button>
       ) : null}
       <fieldset className="ai-controls" aria-label={title} disabled={pendingOperation !== null}>
-        {part === 'all' ? (
-          <h4 className="ai-group">{t('settings.aiConnection.inferenceGroup')}</h4>
-        ) : null}
-        {part !== 'web_search' ? (
-          <InferenceRows
-            state={state}
-            actions={actions}
-            t={t}
-            pendingOperation={pendingOperation}
-            loginButton={loginButton}
-          />
-        ) : null}
+        <h4 className="ai-group">{t('settings.aiConnection.inferenceGroup')}</h4>
+        <InferenceRows
+          state={state}
+          actions={actions}
+          t={t}
+          pendingOperation={pendingOperation}
+          loginButton={loginButton}
+        />
 
-        {part === 'all' ? (
-          <>
-            <div className="ai-rule" />
+        <div className="ai-rule" />
 
-            <h4 className="ai-group">{t('settings.aiConnection.webSearch.title')}</h4>
-            <p className="ai-note ai-group-note">
-              {webSearchRoute === 'cloud'
-                ? t('settings.aiConnection.webSearch.cloudDescription')
-                : t('settings.aiConnection.webSearch.description')}
-            </p>
-          </>
-        ) : null}
-        {part !== 'inference' ? (
-          <WebSearchKeyRow
-            state={state}
-            actions={actions}
-            t={t}
-            pendingOperation={pendingOperation}
-          />
-        ) : null}
+        <h4 className="ai-group">{t('settings.aiConnection.webSearch.title')}</h4>
+        <p className="ai-note ai-group-note">
+          {webSearchRoute === 'cloud'
+            ? t('settings.aiConnection.webSearch.cloudDescription')
+            : t('settings.aiConnection.webSearch.description')}
+        </p>
+        <WebSearchKeyRow
+          state={state}
+          actions={actions}
+          t={t}
+          pendingOperation={pendingOperation}
+        />
       </fieldset>
     </section>
   );

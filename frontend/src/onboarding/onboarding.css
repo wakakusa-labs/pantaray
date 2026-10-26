@@ -131,16 +131,6 @@
   font-weight: var(--weight-medium);
 }
 
-.onb-sub {
-  color: var(--fog-text-2);
-  font-size: 13px;
-  margin: 4px 0 0;
-}
-
-.onb-settings-part .dashboard-section {
-  border-bottom: 0;
-}
-
 .onb-summary-value {
   align-items: center;
   color: var(--fog-text);

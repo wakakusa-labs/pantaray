@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from ..memory_catalog.cutover import run_memory_catalog_cutover
 from ..memory_catalog.erasure import resume_pending_user_erasures
-from ..storage.migrations import verify_database_integrity
 from .bootstrap import (
     LocalRuntimeBootstrapConfig,
     apply_local_runtime_schema,
@@ -46,11 +45,9 @@ def initialize_local_runtime() -> InitializedLocalRuntime:
             artifact_root=config.artifact_root,
             runtime_lock=lock_acquisition.runtime_lock,
         )
+        # No whole-file integrity_check here: it reads every page (135 s on a
+        # 4.9 GB store), past the window the app waits for this process.
         apply_local_runtime_schema(bootstrap_config=config)
-        verify_database_integrity(
-            db_path=config.db_path,
-            busy_timeout_ms=config.busy_timeout_ms,
-        )
         register_logged_out_owner(
             ensure_logged_out_owner(
                 db_path=config.db_path,

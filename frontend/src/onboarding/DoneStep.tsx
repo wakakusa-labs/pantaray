@@ -7,6 +7,7 @@ import type { IntegrationToolkitStatus } from '../../electron/src/settings/integ
 import { AiConnectionRow as Row } from '../pages/settings/components/AiConnectionRow';
 import { IntegrationLogo } from '../pages/settings/components/IntegrationLogo';
 import type { Translate } from '../pages/settings/types';
+import { aiConnectionLabel } from './aiConnectionLabel';
 
 type ConnectionState = Extract<ConnectionStateResult, { ok: true }>;
 
@@ -14,10 +15,7 @@ function aiLabel(t: Translate, { settings, runtime }: ConnectionState): string {
   if (runtime.ok && runtime.status.llmRoute === 'cloud') {
     return t('settings.aiConnection.method.cloud.title');
   }
-  const { method, provider } = settings.preferences;
-  return method === 'chatgpt'
-    ? t('settings.aiConnection.method.chatgpt.title')
-    : t('onboarding.done.apiKey', { provider: t(`settings.aiConnection.provider.${provider}`) });
+  return aiConnectionLabel(t, settings);
 }
 
 /** The owner's connected services; until (or unless) the read finds one, the saved key. */

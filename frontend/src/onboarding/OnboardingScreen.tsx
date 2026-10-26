@@ -41,8 +41,8 @@ export function OnboardingScreen({
   progress: OnboardingProgress;
 }) {
   const { t } = useI18n();
-  // The web search step changes the connection through this controller; the other steps'
-  // Settings sections have their own, and main announces each change to all of them.
+  // The AI and web search steps change the connection through this controller; the apps step's
+  // Settings section has its own, and main announces each change to both.
   const connection = useAiConnectionController();
   const { state } = connection;
   const recording = useRecordingStep();
@@ -71,8 +71,6 @@ export function OnboardingScreen({
   const requiredDoneBefore = (i: number) =>
     STEPS.slice(0, i).every((s) => !s.required || configured[s.id]);
   const next = () => progress.goTo(STEPS[index + 1].id);
-  // The recording step's checklist already shows what is missing.
-  const blockedHint = step === 'ai' && !configured.ai ? t('onboarding.ai.blocked') : null;
   // The connection steps need the connection read first.
   const withConnection = (render: (read: ConnectionState) => ReactNode) =>
     connection.loadError ? (
@@ -155,7 +153,16 @@ export function OnboardingScreen({
                   ) : null}
                 </h2>
 
-                {step === 'ai' ? <AiStep t={t} /> : null}
+                {step === 'ai'
+                  ? withConnection((read) => (
+                      <AiStep
+                        t={t}
+                        connection={connection}
+                        state={read}
+                        configured={configured.ai}
+                      />
+                    ))
+                  : null}
                 {step === 'recording' ? (
                   <LocalOwnerBoundary>
                     <RecordingStep t={t} recording={recording} />
@@ -189,7 +196,6 @@ export function OnboardingScreen({
                   <span />
                 )}
                 <div className="onb-footer-end">
-                  {blockedHint ? <span className="ai-note">{blockedHint}</span> : null}
                   {progress.finishing === 'failed' ? (
                     <span className="settings-section-error" role="alert">
                       {t('onboarding.finishFailed')}

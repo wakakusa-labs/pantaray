@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 
 import type { Translate } from '../pages/settings/types';
 
@@ -12,7 +12,6 @@ export function KeyField({
   saved,
   placeholder,
   disabled = false,
-  before,
   onSave,
   t,
 }: {
@@ -21,8 +20,6 @@ export function KeyField({
   placeholder: string;
   /** Another connection change is being applied. */
   disabled?: boolean;
-  /** Inputs that belong to the same key, such as its provider. */
-  before?: ReactNode;
   onSave: (value: string) => Promise<void>;
   t: Translate;
 }) {
@@ -69,7 +66,6 @@ export function KeyField({
         void save();
       }}
     >
-      {before}
       <input
         className="history-filter-input onb-key-input"
         type="password"

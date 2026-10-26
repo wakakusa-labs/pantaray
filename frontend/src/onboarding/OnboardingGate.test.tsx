@@ -90,7 +90,6 @@ describe('OnboardingGate', () => {
     renderGate();
     await screen.findByRole('heading', { name: /AI をつなぐ/ });
     expect(next()).toBeDisabled();
-    expect(screen.getByText('AI をつなぐと次へ進めます')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'スキップ' })).not.toBeInTheDocument();
     expect(steps().getByRole('button', { name: /Web 検索/ })).toBeDisabled();
 

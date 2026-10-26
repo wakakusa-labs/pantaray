@@ -115,7 +115,7 @@ const SettingsPage: React.FC = () => {
 
       <div className="app-split-detail settings-page-content">
         <AiConnectionNotice />
-        {activeSection === 'ai_connection' ? <AiConnectionSettingsSection part="all" /> : null}
+        {activeSection === 'ai_connection' ? <AiConnectionSettingsSection /> : null}
         {activeSection === 'language' ? (
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}

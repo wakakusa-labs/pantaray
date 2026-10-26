@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+import math
+import random
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -519,7 +522,9 @@ def test_semantic_chunks_return_unique_original_fragments(tmp_path: Path) -> Non
     assert long_item.item.content == long_content
 
 
-def test_semantic_search_filters_single_vector_before_knn_limit(tmp_path: Path) -> None:
+def test_semantic_search_ignores_closer_vectors_outside_visible_revisions(
+    tmp_path: Path,
+) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):
         visible = register_inline_domain_memory(
@@ -552,7 +557,11 @@ def test_semantic_search_filters_single_vector_before_knn_limit(tmp_path: Path) 
     assert actual[0].distance == pytest.approx(1.0)
 
 
-def test_semantic_search_batches_all_vectors_before_deduplication_and_limit(
+def _planar(x: float, y: float) -> tuple[float, ...]:
+    return (x, y, *([0.0] * (EMBEDDING_DIMENSIONS - 2)))
+
+
+def test_semantic_search_ranks_like_vec0_knn_per_fragment_and_query(
     tmp_path: Path,
 ) -> None:
     connection = _connection(tmp_path)
@@ -586,10 +595,10 @@ def test_semantic_search_batches_all_vectors_before_deduplication_and_limit(
             connection=connection,
             user_id="user-1",
             source="fact",
-            source_record_id="large-visible-memory",
+            source_record_id="visible-memory",
             content="\n\n".join(
                 ["x" * (MEMORY_EMBEDDING_MAX_TEXT_CHARS + 1)]
-                + [f"paragraph {index}" for index in range(4_096)]
+                + [f"paragraph {index}" for index in range(5)]
             ),
         )
         work = connection.execute(
@@ -605,60 +614,210 @@ def test_semantic_search_batches_all_vectors_before_deduplication_and_limit(
             """,
             (revision.revision_id,),
         ).fetchall()
-        assert len(work) == 4_098
+        assert len(work) == 7
         long_fragment_id = str(work[0]["fragment_id"])
         assert str(work[-1]["fragment_id"]) == long_fragment_id
-        for index, row in enumerate(work):
-            # The final batch improves the first fragment and contains tied hits.
-            vector = (
-                (0.6, 0.8, *([0.0] * (EMBEDDING_DIMENSIONS - 2)))
-                if index in (1, len(work) - 2, len(work) - 1)
-                else _vector(1)
-            )
+        # The long fragment's second chunk beats its first and ties two other
+        # fragments; one vector is left unnormalized to pin the cosine metric.
+        vectors = (
+            _planar(-0.6, 0.8),
+            _planar(0.6, 0.8),
+            _planar(0.6, 0.8),
+            _planar(0.8, 0.6),
+            _planar(3.0, 1.0),
+            _planar(0.28, 0.96),
+            _planar(0.6, 0.8),
+        )
+        generation_id = _scoped_generation_id(connection)
+        for row, vector in zip(work, vectors, strict=True):
             store_embedding_success(
                 connection,
                 user_id="user-1",
-                generation_id=_scoped_generation_id(connection),
+                generation_id=generation_id,
                 fragment_id=str(row["fragment_id"]),
                 chunk_index=int(row["chunk_index"]),
                 fragment_content_sha256=str(row["content_sha256"]),
                 vector=vector,
                 created_at="2026-07-18T00:00:00Z",
             )
-        query_blob = encode_embedding(_vector(0), dimensions=EMBEDDING_DIMENSIONS)
-        generation_id = _scoped_generation_id(connection)
-        expected = connection.execute(
-            f"""
-            SELECT entries.fragment_id, entries.fragment_content_sha256,
-                   MIN(vec_distance_cosine(vectors.embedding, ?)) AS distance
-            FROM memory_embedding_vectors_g{generation_id} AS vectors
-            JOIN memory_embedding_entries_g{generation_id} AS entries
-              ON entries.embedding_id = vectors.embedding_id
-            WHERE entries.user_id = 'user-1' AND entries.revision_id = ?
-            GROUP BY entries.fragment_id, entries.fragment_content_sha256
-            ORDER BY distance, entries.fragment_id
-            """,
-            (query_blob, revision.revision_id),
-        ).fetchall()
-        assert len(expected) == 4_097
-        assert long_fragment_id in {str(row[0]) for row in expected[:3]}
-        for limit in (24, len(expected)):
-            (actual,) = search_semantic_fragments(
+        queries = (_vector(0), _planar(0.0, -1.0))
+        expected = [
+            connection.execute(
+                f"""
+                WITH knn AS (
+                    SELECT embedding_id, distance
+                    FROM memory_embedding_vectors_g{generation_id}
+                    WHERE embedding MATCH ? AND k = 100 AND user_id = 'user-1'
+                )
+                SELECT entries.fragment_id, entries.fragment_content_sha256,
+                       MIN(knn.distance) AS distance
+                FROM knn
+                JOIN memory_embedding_entries_g{generation_id} AS entries
+                  ON entries.embedding_id = knn.embedding_id
+                WHERE entries.revision_id = ?
+                GROUP BY entries.fragment_id, entries.fragment_content_sha256
+                ORDER BY distance, entries.fragment_id
+                """,
+                (
+                    encode_embedding(query, dimensions=EMBEDDING_DIMENSIONS),
+                    revision.revision_id,
+                ),
+            ).fetchall()
+            for query in queries
+        ]
+        # Seven chunks, six fragments: the long fragment keeps its best chunk.
+        assert [len(rows) for rows in expected] == [6, 6]
+        # Three cuts inside a three-way distance tie, broken by fragment_id.
+        for limit in (3, 6):
+            lanes = search_semantic_fragments(
                 connection,
                 user_id="user-1",
                 visible_revision_ids=(
                     revision.revision_id,
                     hidden_revisions[1].revision_id,
                 ),
-                query_embeddings=(_vector(0),),
+                query_embeddings=queries,
                 embedding_generation=_active_generation(connection),
                 candidate_limit=limit,
             )
-            assert [(hit.fragment_id, hit.content_sha256) for hit in actual] == [
-                (str(row[0]), str(row[1])) for row in expected[:limit]
-            ]
-            assert [hit.distance for hit in actual] == pytest.approx(
-                [float(row[2]) for row in expected[:limit]], abs=1e-6
+            assert len(lanes) == len(queries)
+            for actual, rows in zip(lanes, expected, strict=True):
+                assert [(hit.fragment_id, hit.content_sha256) for hit in actual] == [
+                    (str(row[0]), str(row[1])) for row in rows[:limit]
+                ]
+                assert [hit.distance for hit in actual] == pytest.approx(
+                    [float(row[2]) for row in rows[:limit]], abs=1e-6
+                )
+
+
+def _near_duplicates(
+    count: int, *, seed: int, spread: float
+) -> list[tuple[float, ...]]:
+    generator = random.Random(seed)
+    base = [generator.gauss(0.0, 1.0) for _ in range(EMBEDDING_DIMENSIONS)]
+    vectors = []
+    for _ in range(count):
+        values = [value + generator.gauss(0.0, spread) for value in base]
+        norm = math.sqrt(sum(value * value for value in values))
+        vectors.append(tuple(value / norm for value in values))
+    return vectors
+
+
+def test_semantic_search_breaks_near_ties_exactly_like_vec0_knn(
+    tmp_path: Path,
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        revision = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="near-duplicates",
+            content="\n\n".join(f"paragraph {index}" for index in range(64)),
+        )
+        work = connection.execute(
+            """
+            SELECT work.fragment_id, work.chunk_index, fragments.content_sha256
+            FROM memory_embedding_work AS work
+            JOIN memory_fragments AS fragments
+              ON fragments.user_id = work.user_id
+             AND fragments.fragment_id = work.fragment_id
+            WHERE work.user_id = 'user-1'
+            ORDER BY work.fragment_id
+            """
+        ).fetchall()
+        assert len(work) == 64
+        # Distances this close differ in the last float32 bits between vec0
+        # and BLAS, which reorders near-ties and makes a lane's order depend
+        # on how many queries are scored with it.
+        *stored, first_query, second_query = _near_duplicates(66, seed=42, spread=1e-3)
+        generation_id = _scoped_generation_id(connection)
+        for row, vector in zip(work, stored, strict=True):
+            store_embedding_success(
+                connection,
+                user_id="user-1",
+                generation_id=generation_id,
+                fragment_id=str(row["fragment_id"]),
+                chunk_index=int(row["chunk_index"]),
+                fragment_content_sha256=str(row["content_sha256"]),
+                vector=vector,
+                created_at="2026-07-18T00:00:00Z",
+            )
+        _index_pending_fragments(connection)
+        generation = _active_generation(connection)
+
+        def lanes(
+            *queries: tuple[float, ...],
+        ) -> tuple[list[tuple[str, float]], ...]:
+            return tuple(
+                [(hit.fragment_id, hit.distance) for hit in lane]
+                for lane in search_semantic_fragments(
+                    connection,
+                    user_id="user-1",
+                    visible_revision_ids=(revision.revision_id,),
+                    query_embeddings=queries,
+                    embedding_generation=generation,
+                    candidate_limit=3,
+                )
+            )
+
+        def knn(query: tuple[float, ...]) -> list[tuple[str, float]]:
+            rows = connection.execute(
+                f"""
+                SELECT entries.fragment_id, knn.distance
+                FROM memory_embedding_vectors_g{generation_id} AS knn
+                JOIN memory_embedding_entries_g{generation_id} AS entries
+                  ON entries.embedding_id = knn.embedding_id
+                WHERE knn.embedding MATCH ? AND knn.k = 64
+                  AND knn.user_id = 'user-1'
+                ORDER BY knn.distance, entries.fragment_id
+                LIMIT 3
+                """,
+                (encode_embedding(query, dimensions=EMBEDDING_DIMENSIONS),),
+            ).fetchall()
+            return [(str(row[0]), float(row[1])) for row in rows]
+
+        (first_alone,) = lanes(first_query)
+        first_paired, second_paired = lanes(first_query, second_query)
+        (second_alone,) = lanes(second_query)
+
+    assert first_alone == knn(first_query)
+    assert second_alone == knn(second_query)
+    assert first_paired == first_alone
+    assert second_paired == second_alone
+
+
+def test_semantic_search_rejects_a_generation_whose_dimensions_disagree(
+    tmp_path: Path,
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        revision = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="projected",
+            content="projected fact",
+        )
+        _index_pending_fragments(connection)
+        generation = _active_generation(connection)
+        drifted = dataclasses.replace(
+            generation,
+            specification=dataclasses.replace(
+                generation.specification, dimensions=EMBEDDING_DIMENSIONS - 1
+            ),
+        )
+
+        with pytest.raises(
+            MemoryEmbeddingIndexUnavailableError, match="schema is unavailable"
+        ):
+            search_semantic_fragments(
+                connection,
+                user_id="user-1",
+                visible_revision_ids=(revision.revision_id,),
+                query_embeddings=(_vector(0)[:-1],),
+                embedding_generation=drifted,
+                candidate_limit=8,
             )
 
 
@@ -1136,8 +1295,36 @@ def test_semantic_search_rejects_a_candidate_projected_from_other_content(
             )
 
 
+def _drop_vectors(connection: sqlite3.Connection, table: str) -> None:
+    connection.execute(f"DELETE FROM {table}")
+
+
+def _restamp_vectors(connection: sqlite3.Connection, table: str) -> None:
+    # vec0 cannot UPDATE this metadata column, so rewrite each row instead.
+    rows = [
+        tuple(row)
+        for row in connection.execute(
+            f"SELECT embedding_id, embedding, user_id FROM {table}"
+        )
+    ]
+    connection.execute(f"DELETE FROM {table}")
+    connection.executemany(
+        f"""
+        INSERT INTO {table}(embedding_id, embedding, user_id, revision_id)
+        VALUES (?, ?, ?, 'other-revision')
+        """,
+        rows,
+    )
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [_drop_vectors, _restamp_vectors],
+    ids=["missing", "stale"],
+)
 def test_semantic_search_rejects_a_projected_entry_without_its_vector(
     tmp_path: Path,
+    corrupt: Callable[[sqlite3.Connection, str], None],
 ) -> None:
     connection = _connection(tmp_path)
     with immediate_transaction(connection):
@@ -1150,9 +1337,7 @@ def test_semantic_search_rejects_a_projected_entry_without_its_vector(
         )
         _index_pending_fragments(connection)
         generation = _active_generation(connection)
-        connection.execute(
-            f"DELETE FROM memory_embedding_vectors_g{generation.generation_id}"
-        )
+        corrupt(connection, f"memory_embedding_vectors_g{generation.generation_id}")
 
         with pytest.raises(
             MemoryEmbeddingIndexUnavailableError,

@@ -645,6 +645,40 @@ async def test_tool_contract_violations_are_returned_as_rejected_output(
     assert response.output == []
 
 
+@pytest.mark.parametrize(
+    ("tool_input", "expected_message"),
+    [
+        ({}, "The lookup call is missing required argument(s): id."),
+        (
+            {"id": "a", "private-key-name": "private value"},
+            "The lookup call has unexpected argument(s): private-key-name.",
+        ),
+        (
+            {"id": ["private value"]},
+            "The lookup call has arguments that do not match the declared schema "
+            "at id (type).",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_schema_mismatch_names_the_tool_and_argument_without_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_input: dict[str, object],
+    expected_message: str,
+) -> None:
+    content = [_tool_block(input=tool_input)]
+    _install(monkeypatch, _ok(_message(content=content, stop_reason="tool_use")))
+
+    response = await _execute(
+        _request(tool_use={"tools": [_TOOL], "continuation_mode": "disabled"})
+    )
+
+    assert response.model_error.violation_reason == "arguments_schema_mismatch"
+    # The model reads this message on the repair turn; it must say what to fix
+    # and must not echo argument values.
+    assert response.model_error.message == expected_message
+
+
 @pytest.mark.asyncio
 async def test_overlong_action_commentary_is_repairable(
     monkeypatch: pytest.MonkeyPatch,

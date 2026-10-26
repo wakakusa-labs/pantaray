@@ -331,6 +331,7 @@ def _extract_openai_tool_call(
             tool_name=call.name,
             argument_path=exc.path,
             schema_keyword=exc.keyword,
+            property_names=exc.property_names,
         ) from exc
     if not isinstance(restored_arguments, dict):
         raise AssertionError("object tool arguments must remain an object")
@@ -345,6 +346,7 @@ def _extract_openai_tool_call(
             tool_name=call.name,
             argument_path=validation_failure.argument_path,
             schema_keyword=validation_failure.schema_keyword,
+            property_names=validation_failure.property_names,
         )
     return LlmToolCall(
         call_id=call.call_id,

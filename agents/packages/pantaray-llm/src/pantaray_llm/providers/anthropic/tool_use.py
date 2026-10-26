@@ -200,6 +200,7 @@ def _extract_tool_call(
             tool_name=block.name,
             argument_path=validation_failure.argument_path,
             schema_keyword=validation_failure.schema_keyword,
+            property_names=validation_failure.property_names,
         )
     return LlmToolCall(call_id=block.id, name=block.name, arguments=block.input)
 

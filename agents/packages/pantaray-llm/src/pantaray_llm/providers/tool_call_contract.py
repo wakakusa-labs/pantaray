@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from jsonschema import (  # type: ignore[import-untyped]
     Draft7Validator,
     FormatChecker,
-    ValidationError,
 )
 
 from pantaray_llm.contracts.json_value import JSONValue
@@ -16,6 +15,10 @@ from pantaray_llm.errors import (
     LlmProvider,
     ProviderError,
     ToolCallViolationReason,
+)
+from pantaray_llm.providers.schema_compiler import (
+    schema_error_path,
+    schema_error_property_names,
 )
 
 _FORMAT_CHECKER = FormatChecker()
@@ -43,6 +46,7 @@ class ToolCallErrorContext:
 class ToolArgumentsValidationFailure:
     argument_path: str
     schema_keyword: str
+    property_names: tuple[str, ...]
 
 
 def find_declared_tool(
@@ -59,8 +63,9 @@ def validate_tool_arguments(
     if error is None:
         return None
     return ToolArgumentsValidationFailure(
-        argument_path=_argument_path(error),
+        argument_path=schema_error_path(error),
         schema_keyword=str(error.validator or "unknown"),
+        property_names=schema_error_property_names(error),
     )
 
 
@@ -73,6 +78,7 @@ def build_tool_call_contract_error(
     response_status: str | None = None,
     argument_path: str | None = None,
     schema_keyword: str | None = None,
+    property_names: tuple[str, ...] = (),
 ) -> ProviderError:
     details = context.details()
     details["tool_call_violation_reason"] = reason
@@ -95,6 +101,8 @@ def build_tool_call_contract_error(
             tool_name=tool_name,
             response_status=response_status,
             argument_path=argument_path,
+            schema_keyword=schema_keyword,
+            property_names=property_names,
         ),
         details=details,
     )
@@ -117,11 +125,6 @@ def build_invalid_tool_provider_response(
     )
 
 
-def _argument_path(error: ValidationError) -> str:
-    parts = [str(part) for part in error.absolute_path]
-    return ".".join(parts) if parts else "$"
-
-
 def _violation_message(
     *,
     reason: ToolCallViolationReason,
@@ -129,6 +132,8 @@ def _violation_message(
     tool_name: str | None,
     response_status: str | None,
     argument_path: str | None,
+    schema_keyword: str | None,
+    property_names: tuple[str, ...],
 ) -> str:
     # Every adapter shares these messages, and they reach the model through
     # `model_error.message` on the next turn, so they name no provider.
@@ -147,10 +152,18 @@ def _violation_message(
     if reason == "arguments_not_object":
         return "The model provider returned tool arguments that are not an object."
     if reason == "arguments_schema_mismatch":
+        # Names and schema keywords only: argument values can be long or private.
+        call = f"The {tool_name or '<missing>'} call"
         path = argument_path or "$"
+        location = "" if path == "$" else f" at {path}"
+        names = ", ".join(property_names)
+        if schema_keyword == "required":
+            return f"{call} is missing required argument(s){location}: {names}."
+        if schema_keyword == "additionalProperties":
+            return f"{call} has unexpected argument(s){location}: {names}."
         return (
-            "The model provider returned tool arguments that do not match the "
-            f"declared schema at {path}."
+            f"{call} has arguments that do not match the declared schema at "
+            f"{path} ({schema_keyword or 'unknown'})."
         )
     if reason == "response_incomplete":
         status = response_status or "incomplete"

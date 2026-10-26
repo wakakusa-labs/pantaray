@@ -14,6 +14,10 @@ in English and Japanese: one short sentence per change, saying what changed for 
   you know. Open it from the suggestion, and a task you start from there picks up from it.
 - When nothing was recorded since the last check, for example overnight, Pantaray no longer makes
   suggestions about nothing.
+- Suggestions are shorter and easier to read.
+- Pantaray now sees the mail you sent, so work you already answered by mail is no longer treated
+  as still open.
+- Pantaray now tells your own Slack messages apart from other people's.
 - Searching your memory is much faster.
 - A task that has answered you now stops there, instead of running on until you stop it, and its
   answer is shown once.
@@ -30,6 +34,9 @@ in English and Japanese: one short sentence per change, saying what changed for 
 - 設定の並びを、初回の設定と同じく AI、記録、アプリの順にしました。
 - 作業を提案するだけでなく、下書きや表などの成果物を先に作って知らせるようになりました。提案から開けて、そこから頼んだタスクはその成果物の続きから進めます。
 - 夜のあいだなど、前回から何も記録されていないときは、中身のない提案を出さないようにしました。
+- 提案が短く、読みやすくなりました。
+- 送信済みのメールも見るようになり、メールで返事を済ませた件をまだ終わっていない扱いにしなくなりました。
+- Slack で、自分のメッセージとほかの人のメッセージを見分けるようになりました。
 - 記憶の検索がずっと速くなりました。
 - 返事をしたタスクがそこで止まるようになりました。止めるまで動き続けることはなくなり、返事も 1 回だけ表示します。
 - AI が手順の一部を書き漏らしても、タスクがエラーで止まりにくくなりました。

@@ -2,6 +2,7 @@ import { useAuth } from '@/hooks/useAuth';
 import type { ConnectionCommand } from '../../../../electron/src/ipc/schemas/aiConnection';
 import type { Translate } from '../types';
 import { useAiConnectionController } from '../useAiConnectionController';
+import { ConnectionLoadFailure } from './ConnectionLoadFailure';
 import { useIntegrationConnectFlow } from './IntegrationConnectFlow';
 import { useIntegrationSettingsController } from './IntegrationSettingsController';
 import {
@@ -25,7 +26,7 @@ export function IntegrationSettings({
   const integrations = useIntegrationSettingsController(ownerId);
   const connection = useAiConnectionController();
   const { flow, actions: flowActions } = useIntegrationConnectFlow(ownerId, integrations.reload);
-  const { state, loadError, recovery } = connection;
+  const { state, loadError } = connection;
 
   async function saveKey(command: ConnectionCommand): Promise<void> {
     const saved = await connection.run(command);
@@ -42,31 +43,7 @@ export function IntegrationSettings({
         ) : (
           <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
         )}
-        <p role="alert" className="settings-section-error">
-          {t('settings.aiConnection.loadFailed')} {t(`settings.aiConnection.error.${loadError}`)}
-        </p>
-        <button
-          type="button"
-          className="settings-action-button"
-          onClick={() => void connection.refresh()}
-        >
-          {t('settings.aiConnection.retry')}
-        </button>
-        {recovery ? (
-          <button
-            type="button"
-            className="settings-text-button"
-            disabled={connection.pendingOperation !== null}
-            onClick={() => void connection.run(recovery)}
-          >
-            {t(
-              `settings.aiConnection.recovery.${recovery.operation}`,
-              recovery.operation === 'remove_api_key'
-                ? { provider: t(`settings.aiConnection.provider.${recovery.provider}`) }
-                : undefined
-            )}
-          </button>
-        ) : null}
+        <ConnectionLoadFailure t={t} connection={connection} error={loadError} />
       </div>
     );
   }

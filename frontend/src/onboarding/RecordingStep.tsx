@@ -1,5 +1,6 @@
 import type { CapturePermission } from '../../electron/src/context/zaneiProcess';
-import { CheckItem, RecordingChecklist } from '../components/RecordingChecklist';
+import { CheckItem } from '../components/Checklist';
+import { RecordingChecklist } from '../components/RecordingChecklist';
 import { useStartPermissions } from '../components/useStartPermissions';
 import type { MessageKey } from '../i18n/types';
 import type { Translate } from '../pages/settings/types';
@@ -50,12 +51,12 @@ export function RecordingStep({
       <RecordingChecklist t={t} checks={Array.isArray(checks) ? checks : []} titles={TITLES}>
         <CheckItem
           title={t('onboarding.recording.startTitle')}
-          note={startProblem ?? t('onboarding.recording.startNote')}
-          problem={startProblem !== null}
-          done={isRecording === true}
+          problem={startProblem}
+          note={startProblem === null ? t('onboarding.recording.startNote') : null}
+          status={isRecording === true ? 'done' : 'pending'}
           action={() =>
             isRecording ? (
-              <span className="recording-check-state">{t('onboarding.recording.recording')}</span>
+              <span className="check-item-state">{t('onboarding.recording.recording')}</span>
             ) : (
               <button
                 type="button"

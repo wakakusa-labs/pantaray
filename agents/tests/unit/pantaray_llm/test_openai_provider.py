@@ -1796,7 +1796,13 @@ async def test_openai_provider_restores_optional_null_to_omission(
         (
             _FakeToolResponses(arguments='{"reason":1}'),
             "arguments_schema_mismatch",
-            "declared schema",
+            "The completed call has arguments that do not match the declared "
+            "schema at reason (type).",
+        ),
+        (
+            _FakeToolResponses(arguments='{"note":"x"}'),
+            "arguments_schema_mismatch",
+            "The completed call has unexpected argument(s): note.",
         ),
         (
             _FakeToolResponses(tool_name="undeclared"),

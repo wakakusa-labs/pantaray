@@ -5,9 +5,6 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import numpy
-from numpy.typing import NDArray
-
 from pantaray_agents.schema.repository_errors import (
     is_retryable_repository_exception,
 )
@@ -22,9 +19,6 @@ from .semantic_index import (
     MemoryEmbeddingValidationError,
     encode_embedding,
 )
-
-# Little-endian float32, the layout sqlite-vec stores FLOAT[n] columns in.
-_FLOAT32 = numpy.dtype("<f4")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,14 +48,16 @@ def search_semantic_fragments(
     """One ranked match list per query embedding, in the order given."""
     if candidate_limit <= 0:
         raise ValueError("semantic candidate_limit must be positive")
-    dimensions = embedding_generation.specification.dimensions
     if not embedding_generation.specification.normalized:
         raise MemoryEmbeddingIndexUnavailableError(
             "active memory embedding generation is not normalized"
         )
     try:
         query_blobs = tuple(
-            encode_embedding(embedding, dimensions=dimensions)
+            encode_embedding(
+                embedding,
+                dimensions=embedding_generation.specification.dimensions,
+            )
             for embedding in query_embeddings
         )
     except MemoryEmbeddingValidationError as exc:
@@ -82,11 +78,11 @@ def search_semantic_fragments(
         )
         if not projected:
             return tuple(() for _ in query_blobs)
-        matrix = _projected_vectors(
+        scored = _score_projected_vectors(
             connection,
             vectors=vectors,
             projected=projected,
-            dimensions=dimensions,
+            query_blobs=query_blobs,
         )
     except sqlite3.OperationalError as exc:
         if is_retryable_repository_exception(exc):
@@ -94,52 +90,25 @@ def search_semantic_fragments(
         raise MemoryEmbeddingIndexUnavailableError(
             "memory embedding index schema is unavailable"
         ) from exc
-    queries = numpy.stack(
-        [numpy.frombuffer(blob, dtype=_FLOAT32) for blob in query_blobs]
-    )
-    distances = _cosine_distances(matrix, queries)
-    _, fragment_order = numpy.unique(
-        [entry.fragment_id for entry in projected], return_inverse=True
-    )
     return tuple(
-        _rank_matches(
-            projected,
-            distances=distances[:, column],
-            fragment_order=fragment_order,
-            candidate_limit=candidate_limit,
-        )
-        for column in range(len(query_blobs))
+        _rank_matches(scored, lane=lane, candidate_limit=candidate_limit)
+        for lane in range(len(query_blobs))
     )
-
-
-def _cosine_distances(
-    matrix: NDArray[numpy.float32], queries: NDArray[numpy.float32]
-) -> NDArray[numpy.float32]:
-    """sqlite-vec's cosine distance, 1 - cosine similarity, in float32."""
-    similarity = (matrix @ queries.T) / numpy.outer(_norms(matrix), _norms(queries))
-    distances: NDArray[numpy.float32] = 1.0 - similarity
-    return distances
-
-
-def _norms(rows: NDArray[numpy.float32]) -> NDArray[numpy.float32]:
-    # einsum avoids the full-size temporary numpy.linalg.norm squares into.
-    norms: NDArray[numpy.float32] = numpy.sqrt(numpy.einsum("ij,ij->i", rows, rows))
-    return norms
 
 
 def _rank_matches(
-    projected: Sequence[_ProjectedEmbedding],
+    scored: Sequence[tuple[_ProjectedEmbedding, tuple[float, ...]]],
     *,
-    distances: NDArray[numpy.float32],
-    fragment_order: NDArray[numpy.intp],
+    lane: int,
     candidate_limit: int,
 ) -> tuple[SemanticFragmentMatch, ...]:
     # Sorting every entry by (distance, fragment_id) makes each fragment's
     # first appearance its best chunk, already in final rank order.
     ranked: list[SemanticFragmentMatch] = []
     seen: set[str] = set()
-    for index in numpy.lexsort((fragment_order, distances)):
-        entry = projected[index]
+    for entry, distances in sorted(
+        scored, key=lambda item: (item[1][lane], item[0].fragment_id)
+    ):
         if entry.fragment_id in seen:
             continue
         seen.add(entry.fragment_id)
@@ -147,7 +116,7 @@ def _rank_matches(
             SemanticFragmentMatch(
                 fragment_id=entry.fragment_id,
                 content_sha256=entry.content_sha256,
-                distance=float(distances[index]),
+                distance=distances[lane],
             )
         )
         if len(ranked) == candidate_limit:
@@ -194,49 +163,49 @@ def _projected_entries(
     )
 
 
-def _projected_vectors(
+def _score_projected_vectors(
     connection: sqlite3.Connection,
     *,
     vectors: str,
     projected: Sequence[_ProjectedEmbedding],
-    dimensions: int,
-) -> NDArray[numpy.float32]:
-    """Each projected entry's vector, row-aligned with `projected`.
+    query_blobs: Sequence[bytes],
+) -> list[tuple[_ProjectedEmbedding, tuple[float, ...]]]:
+    """Each projected entry with its distance to every query, in query order.
 
-    Scoring the visible vectors here replaces a vec0 KNN query, which scans the
-    user's whole partition, older revisions included, once per query.
+    Scoring the visible vectors by id replaces a vec0 KNN query, which scans
+    the user's whole partition, older revisions included, once per query.
+    vec_distance_cosine is the function vec0 ranks with, so distances and
+    near-ties match vec0 exactly; a dimension mismatch raises
+    sqlite3.OperationalError.
     """
-    # Design limit: this reads and holds every visible vector (about 4 s and
-    # 80 MB at 53k 384-dim vectors, three quarters of it vec0 reading
+    # Design limit: this scores every visible vector (about 4 s at 53k
+    # 384-dim vectors and two queries, about 3 s of it vec0 reading
     # revision_id row by row); move to an approximate nearest-neighbour index
     # when this read passes 10 s.
-    rows_by_id = {entry.embedding_id: row for row, entry in enumerate(projected)}
-    matrix = numpy.empty((len(projected), dimensions), dtype=_FLOAT32)
-    filled = 0
-    for embedding_id, blob, revision_id in connection.execute(
+    by_id = {entry.embedding_id: entry for entry in projected}
+    distance_columns = ", ".join(
+        "vec_distance_cosine(embedding, ?)" for _ in query_blobs
+    )
+    rows = connection.execute(
         f"""
-        SELECT embedding_id, embedding, revision_id
+        SELECT embedding_id, revision_id, {distance_columns}
         FROM {vectors}
         WHERE embedding_id IN (SELECT value FROM json_each(?))
         """,
-        (json.dumps(list(rows_by_id)),),
+        (*query_blobs, json.dumps(list(by_id))),
+    ).fetchall()
+    # embedding_id is the vec0 primary key, so each projected entry comes back
+    # once with the revision it was projected from, or its vector is missing
+    # or stale.
+    if len(rows) != len(projected) or any(
+        by_id[int(row[0])].revision_id != str(row[1]) for row in rows
     ):
-        row = rows_by_id[int(embedding_id)]
-        if (
-            projected[row].revision_id != str(revision_id)
-            or len(blob) != dimensions * _FLOAT32.itemsize
-        ):
-            raise MemoryEmbeddingIndexUnavailableError(
-                "memory embedding index has missing or stale projected vectors"
-            )
-        matrix[row] = numpy.frombuffer(blob, dtype=_FLOAT32)
-        filled += 1
-    # Each embedding_id is the vec0 primary key, so one row per present vector.
-    if filled != len(projected):
         raise MemoryEmbeddingIndexUnavailableError(
             "memory embedding index has missing or stale projected vectors"
         )
-    return matrix
+    return [
+        (by_id[int(row[0])], tuple(float(value) for value in row[2:])) for row in rows
+    ]
 
 
 __all__ = ["SemanticFragmentMatch", "search_semantic_fragments"]

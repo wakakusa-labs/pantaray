@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+import math
+import random
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -685,6 +688,137 @@ def test_semantic_search_ranks_like_vec0_knn_per_fragment_and_query(
                 assert [hit.distance for hit in actual] == pytest.approx(
                     [float(row[2]) for row in rows[:limit]], abs=1e-6
                 )
+
+
+def _near_duplicates(
+    count: int, *, seed: int, spread: float
+) -> list[tuple[float, ...]]:
+    generator = random.Random(seed)
+    base = [generator.gauss(0.0, 1.0) for _ in range(EMBEDDING_DIMENSIONS)]
+    vectors = []
+    for _ in range(count):
+        values = [value + generator.gauss(0.0, spread) for value in base]
+        norm = math.sqrt(sum(value * value for value in values))
+        vectors.append(tuple(value / norm for value in values))
+    return vectors
+
+
+def test_semantic_search_breaks_near_ties_exactly_like_vec0_knn(
+    tmp_path: Path,
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        revision = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="near-duplicates",
+            content="\n\n".join(f"paragraph {index}" for index in range(64)),
+        )
+        work = connection.execute(
+            """
+            SELECT work.fragment_id, work.chunk_index, fragments.content_sha256
+            FROM memory_embedding_work AS work
+            JOIN memory_fragments AS fragments
+              ON fragments.user_id = work.user_id
+             AND fragments.fragment_id = work.fragment_id
+            WHERE work.user_id = 'user-1'
+            ORDER BY work.fragment_id
+            """
+        ).fetchall()
+        assert len(work) == 64
+        # Distances this close differ in the last float32 bits between vec0
+        # and BLAS, which reorders near-ties and makes a lane's order depend
+        # on how many queries are scored with it.
+        *stored, first_query, second_query = _near_duplicates(66, seed=42, spread=1e-3)
+        generation_id = _scoped_generation_id(connection)
+        for row, vector in zip(work, stored, strict=True):
+            store_embedding_success(
+                connection,
+                user_id="user-1",
+                generation_id=generation_id,
+                fragment_id=str(row["fragment_id"]),
+                chunk_index=int(row["chunk_index"]),
+                fragment_content_sha256=str(row["content_sha256"]),
+                vector=vector,
+                created_at="2026-07-18T00:00:00Z",
+            )
+        _index_pending_fragments(connection)
+        generation = _active_generation(connection)
+
+        def lanes(
+            *queries: tuple[float, ...],
+        ) -> tuple[list[tuple[str, float]], ...]:
+            return tuple(
+                [(hit.fragment_id, hit.distance) for hit in lane]
+                for lane in search_semantic_fragments(
+                    connection,
+                    user_id="user-1",
+                    visible_revision_ids=(revision.revision_id,),
+                    query_embeddings=queries,
+                    embedding_generation=generation,
+                    candidate_limit=3,
+                )
+            )
+
+        def knn(query: tuple[float, ...]) -> list[tuple[str, float]]:
+            rows = connection.execute(
+                f"""
+                SELECT entries.fragment_id, knn.distance
+                FROM memory_embedding_vectors_g{generation_id} AS knn
+                JOIN memory_embedding_entries_g{generation_id} AS entries
+                  ON entries.embedding_id = knn.embedding_id
+                WHERE knn.embedding MATCH ? AND knn.k = 64
+                  AND knn.user_id = 'user-1'
+                ORDER BY knn.distance, entries.fragment_id
+                LIMIT 3
+                """,
+                (encode_embedding(query, dimensions=EMBEDDING_DIMENSIONS),),
+            ).fetchall()
+            return [(str(row[0]), float(row[1])) for row in rows]
+
+        (first_alone,) = lanes(first_query)
+        first_paired, second_paired = lanes(first_query, second_query)
+        (second_alone,) = lanes(second_query)
+
+    assert first_alone == knn(first_query)
+    assert second_alone == knn(second_query)
+    assert first_paired == first_alone
+    assert second_paired == second_alone
+
+
+def test_semantic_search_rejects_a_generation_whose_dimensions_disagree(
+    tmp_path: Path,
+) -> None:
+    connection = _connection(tmp_path)
+    with immediate_transaction(connection):
+        revision = register_inline_domain_memory(
+            connection=connection,
+            user_id="user-1",
+            source="fact",
+            source_record_id="projected",
+            content="projected fact",
+        )
+        _index_pending_fragments(connection)
+        generation = _active_generation(connection)
+        drifted = dataclasses.replace(
+            generation,
+            specification=dataclasses.replace(
+                generation.specification, dimensions=EMBEDDING_DIMENSIONS - 1
+            ),
+        )
+
+        with pytest.raises(
+            MemoryEmbeddingIndexUnavailableError, match="schema is unavailable"
+        ):
+            search_semantic_fragments(
+                connection,
+                user_id="user-1",
+                visible_revision_ids=(revision.revision_id,),
+                query_embeddings=(_vector(0)[:-1],),
+                embedding_generation=drifted,
+                candidate_limit=8,
+            )
 
 
 def test_catalog_search_uses_semantic_backfill_for_japanese_paraphrase(

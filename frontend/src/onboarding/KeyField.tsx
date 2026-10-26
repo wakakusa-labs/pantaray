@@ -12,6 +12,8 @@ export function KeyField({
   saved,
   placeholder,
   disabled = false,
+  onDraftChange,
+  blocked = false,
   onSave,
   t,
 }: {
@@ -20,10 +22,18 @@ export function KeyField({
   placeholder: string;
   /** Another connection change is being applied. */
   disabled?: boolean;
+  /** Reports the typed key, trimmed, so the row can say what is wrong with it. */
+  onDraftChange?: (draft: string) => void;
+  /** The typed key cannot be the right one; the row's problem note says why. */
+  blocked?: boolean;
   onSave: (value: string) => Promise<void>;
   t: Translate;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState('');
+  const setDraft = (value: string) => {
+    setDraftState(value);
+    onDraftChange?.(value.trim());
+  };
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const replace = t('settings.aiConnection.key.replace');
@@ -82,7 +92,7 @@ export function KeyField({
       <button
         type="submit"
         className="settings-action-button"
-        disabled={disabled || saving || draft.trim().length === 0}
+        disabled={disabled || saving || blocked || draft.trim().length === 0}
       >
         {t(saving ? 'settings.aiConnection.key.saving' : 'settings.aiConnection.key.save')}
       </button>

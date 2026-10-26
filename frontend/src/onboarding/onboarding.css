@@ -131,30 +131,6 @@
   font-weight: var(--weight-medium);
 }
 
-.onb-summary-value {
-  align-items: center;
-  color: var(--fog-text);
-  display: inline-flex;
-  flex-wrap: wrap;
-  font-size: 13px;
-  gap: 6px;
-}
-
-.onb-summary-value--unset {
-  color: var(--fog-text-3);
-}
-
-.onb-summary-icon {
-  color: #9db7d4;
-}
-
-.onb-summary-app {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  margin-right: 8px;
-}
-
 .onb-footer {
   align-items: center;
   border-top: 1px solid var(--border-color);

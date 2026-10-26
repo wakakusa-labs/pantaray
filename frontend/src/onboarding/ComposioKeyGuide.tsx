@@ -14,39 +14,36 @@ const KEY_SCOPES = [
   ['Session tool execution', 'Write only'],
 ] as const;
 
-/** How to get a Composio project API key, shown above the key field until one is saved. */
+/** Composio's steps to a project API key, folded until asked for. */
 export function ComposioKeyGuide({ t }: { t: Translate }) {
   return (
-    <ol className="onb-guide">
-      <li>
-        <span className="onb-guide-title">{t('onboarding.apps.guide.signUp')}</span>
-        <ExternalLink href={COMPOSIO_SIGN_UP_URL} text={t('onboarding.apps.guide.signUpLink')} />
-      </li>
-      <li>
-        <span className="onb-guide-title">{t('onboarding.apps.guide.project')}</span>
-        <span className="ai-note">{t('onboarding.apps.guide.projectNote')}</span>
-        <ExternalLink
-          href={COMPOSIO_DASHBOARD_URL}
-          text={t('onboarding.apps.guide.dashboardLink')}
-        />
-      </li>
-      <li>
-        <span className="onb-guide-title">{t('onboarding.apps.guide.createKey')}</span>
-        <span className="ai-note">{t('onboarding.apps.guide.createKeyNote')}</span>
-        <dl className="onb-scopes">
-          {KEY_SCOPES.map(([scope, access]) => (
-            <Fragment key={scope}>
-              <dt>{scope}</dt>
-              <dd>{access}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      </li>
-      <li>
-        <span className="onb-guide-title">{t('onboarding.apps.guide.paste')}</span>
-        <span className="ai-note">{t('onboarding.apps.guide.pasteNote')}</span>
-      </li>
-    </ol>
+    <details className="onb-guide">
+      <summary>{t('onboarding.apps.guide.summary')}</summary>
+      <ol>
+        <li>
+          {t('onboarding.apps.guide.signUp')}{' '}
+          <ExternalLink href={COMPOSIO_SIGN_UP_URL} text={t('onboarding.apps.guide.signUpLink')} />
+        </li>
+        <li>
+          {t('onboarding.apps.guide.project')}{' '}
+          <ExternalLink
+            href={COMPOSIO_DASHBOARD_URL}
+            text={t('onboarding.apps.guide.dashboardLink')}
+          />
+        </li>
+        <li>
+          {t('onboarding.apps.guide.createKey')}
+          <dl className="onb-scopes">
+            {KEY_SCOPES.map(([scope, access]) => (
+              <Fragment key={scope}>
+                <dt>{scope}</dt>
+                <dd>{access}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </li>
+      </ol>
+    </details>
   );
 }
 

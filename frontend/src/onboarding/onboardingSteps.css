@@ -29,55 +29,18 @@
   margin-bottom: 2px;
 }
 
-.onb-apps .integration-settings {
-  border-bottom: 0;
+.onb-guide summary {
+  cursor: pointer;
+  width: fit-content;
 }
 
-/* Composio's four steps, numbered by the list itself. */
-.onb-guide {
-  counter-reset: onb-guide;
+.onb-guide ol {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-}
-
-.onb-guide > li {
-  counter-increment: onb-guide;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding-left: 34px;
-  position: relative;
-}
-
-.onb-guide > li::before {
-  border: 1px solid var(--control-border);
-  border-radius: 50%;
-  box-sizing: border-box;
-  color: var(--fog-text-2);
-  content: counter(onb-guide);
-  display: grid;
-  font-size: 11px;
-  font-weight: var(--weight-semibold);
-  height: 22px;
-  left: 0;
-  place-items: center;
-  position: absolute;
-  top: 0;
-  width: 22px;
-}
-
-.onb-guide > li > .settings-inline-link {
-  align-self: flex-start;
-}
-
-.onb-guide-title {
-  color: var(--fog-text);
-  font-size: 13px;
-  font-weight: var(--weight-semibold);
+  gap: 6px;
+  line-height: 1.6;
+  margin: 8px 0 4px;
+  padding-left: 18px;
 }
 
 .onb-scopes {
@@ -118,4 +81,34 @@
 
 .onb-model-select {
   width: 168px;
+}
+
+.onb-services {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 2px;
+}
+
+.onb-service {
+  align-items: center;
+  color: var(--fog-text);
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* In a note line the logo sits with 12px text, so it is a little taller than the text. */
+.onb-service .integration-logo {
+  border-radius: 4px;
+  font-size: 10px;
+  height: 16px;
+  padding: 2px;
+  width: 16px;
+}
+
+.onb-after {
+  color: var(--fog-text-2);
+  font-size: 12px;
+  margin: 12px 0 0;
 }

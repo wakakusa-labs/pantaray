@@ -5,22 +5,13 @@ import { useAiConnectionController } from '../useAiConnectionController';
 import { ConnectionLoadFailure } from './ConnectionLoadFailure';
 import { useIntegrationConnectFlow } from './IntegrationConnectFlow';
 import { useIntegrationSettingsController } from './IntegrationSettingsController';
-import {
-  IntegrationSettingsSection,
-  type IntegrationOnboardingCopy,
-} from './IntegrationSettingsSection';
+import { IntegrationSettingsSection } from './IntegrationSettingsSection';
 
 /**
  * The key belongs to the installation, like the other connection settings; the services and
  * accounts belong to the local owner.
  */
-export function IntegrationSettings({
-  t,
-  onboarding,
-}: {
-  t: Translate;
-  onboarding?: IntegrationOnboardingCopy;
-}) {
+export function IntegrationSettings({ t }: { t: Translate }) {
   const { runtimeState } = useAuth();
   const ownerId = runtimeState.status === 'ready' ? (runtimeState.owner?.id ?? null) : null;
   const integrations = useIntegrationSettingsController(ownerId);
@@ -38,11 +29,7 @@ export function IntegrationSettings({
   if (loadError) {
     return (
       <div className="dashboard-section">
-        {onboarding ? (
-          onboarding.lead
-        ) : (
-          <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
-        )}
+        <h3 className="dashboard-section-title">{t('settings.integrations.title')}</h3>
         <ConnectionLoadFailure t={t} connection={connection} error={loadError} />
       </div>
     );
@@ -67,7 +54,6 @@ export function IntegrationSettings({
       actions={integrations.actions}
       flow={flow}
       flowActions={flowActions}
-      onboarding={onboarding}
     />
   );
 }

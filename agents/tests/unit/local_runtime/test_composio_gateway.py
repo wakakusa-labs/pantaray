@@ -24,6 +24,9 @@ from pantaray_agents.local_runtime.integrations.composio.gateway import (
 from pantaray_agents.local_runtime.integrations.composio.mapping import (
     NEEDS_INPUT_DETAIL,
 )
+from pantaray_agents.local_runtime.integrations.composio.toolkits import (
+    TOOLKITS_BY_SLUG,
+)
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
     ToolFailed,
@@ -516,6 +519,146 @@ async def test_the_session_follows_the_connected_toolkits(
     assert sessions[0]["manage_connections"] == {"enable": False}
     sent = json.loads(composio.requests[-1].content)
     assert sent["account"] == GMAIL_ACCOUNT
+
+
+SLACK_ACCOUNT = "ca_slack_1"
+
+
+def _completed(data: JSONValue) -> httpx2.Response:
+    return httpx2.Response(
+        200, json={"data": data, "error": None, "result_type": "completed"}
+    )
+
+
+async def _ready_slack(composio: FakeComposio, gateway: ComposioGateway) -> None:
+    composio.accounts.append(_account(SLACK_ACCOUNT, toolkit="slack", scope=None))
+    composio.tools["slack"] = [
+        _tool("SLACK_SEARCH_MESSAGES", ["readOnlyHint"], toolkit="slack"),
+        _tool("SLACK_SEND_MESSAGE", ["createHint"], toolkit="slack"),
+    ]
+    await _ready(gateway)
+    await gateway.list_tools("slack")
+
+
+async def _run_slack(
+    gateway: ComposioGateway, slug: str = "SLACK_SEARCH_MESSAGES"
+) -> object:
+    return await gateway.execute(
+        slug=slug,
+        account=SLACK_ACCOUNT,
+        arguments={},
+        tool_request_id="req-1",
+    )
+
+
+def _sent_slugs(composio: FakeComposio) -> list[str]:
+    return [
+        json.loads(r.content)["tool_slug"]
+        for r in composio.requests
+        # Key probes post an empty body; they are not calls.
+        if r.url.path.endswith("/execute") and r.content != b"{}"
+    ]
+
+
+async def test_a_slack_accounts_own_id_is_asked_once_and_carried_by_each_result(
+    composio: FakeComposio, gateway: ComposioGateway
+) -> None:
+    await _ready_slack(composio, gateway)
+    composio.execute_replies += [
+        _completed({"messages": ["first"]}),
+        _completed({"ok": True, "user_id": "U0SELF", "team_id": "T0TEAM"}),
+        _completed({"messages": ["second"]}),
+        _completed({"messages": []}),
+    ]
+
+    first = await _run_slack(gateway)
+    second = await _run_slack(gateway)
+    mail = await _run(gateway)
+
+    assert first == ToolSucceeded(
+        data={"messages": ["first"]}, account_user_id="U0SELF"
+    )
+    assert second == ToolSucceeded(
+        data={"messages": ["second"]}, account_user_id="U0SELF"
+    )
+    assert mail == ToolSucceeded(data={"messages": []})
+    assert _sent_slugs(composio) == [
+        "SLACK_SEARCH_MESSAGES",
+        "SLACK_TEST_AUTH",
+        "SLACK_SEARCH_MESSAGES",
+        "GMAIL_FETCH_EMAILS",
+    ]
+    # The note tells the model to resolve IDs with a tool it is always listed.
+    slack = TOOLKITS_BY_SLUG["slack"]
+    assert slack.note is not None and "SLACK_FIND_USERS" in slack.note
+    assert "SLACK_FIND_USERS" in slack.core_tools
+
+
+async def test_a_write_returns_its_result_without_an_identity_lookup(
+    composio: FakeComposio, gateway: ComposioGateway
+) -> None:
+    await _ready_slack(composio, gateway)
+    composio.execute_replies += [
+        _completed({"ok": True, "ts": "1.2"}),
+        _completed({"ok": True, "user_id": "U0SELF"}),
+    ]
+
+    outcome = await _run_slack(gateway, "SLACK_SEND_MESSAGE")
+
+    assert outcome == ToolSucceeded(data={"ok": True, "ts": "1.2"})
+    assert _sent_slugs(composio) == ["SLACK_SEND_MESSAGE"]
+
+
+async def test_a_failed_identity_lookup_is_asked_again_by_a_later_call(
+    composio: FakeComposio, gateway: ComposioGateway
+) -> None:
+    await _ready_slack(composio, gateway)
+    composio.execute_replies += [
+        _completed({"messages": ["first"]}),
+        _error(503, 0),
+        _completed({"messages": ["second"]}),
+        _completed({"ok": True, "user_id": "U0SELF"}),
+    ]
+
+    first = await _run_slack(gateway)
+    second = await _run_slack(gateway)
+
+    assert first == ToolSucceeded(data={"messages": ["first"]})
+    assert second == ToolSucceeded(
+        data={"messages": ["second"]}, account_user_id="U0SELF"
+    )
+    assert _sent_slugs(composio).count("SLACK_TEST_AUTH") == 2
+
+
+async def test_a_cancelled_identity_lookup_does_not_block_the_next_one(
+    composio: FakeComposio,
+) -> None:
+    lookup_seen = asyncio.Event()
+
+    def hold_first_lookup(request: httpx2.Request) -> Awaitable[object] | None:
+        if b"SLACK_TEST_AUTH" not in request.content or lookup_seen.is_set():
+            return None
+        lookup_seen.set()
+        return asyncio.Event().wait()
+
+    held = _held(composio, hold_first_lookup)
+    await _ready_slack(composio, held)
+    composio.execute_replies += [
+        _completed({"messages": ["first"]}),
+        _completed({"messages": ["second"]}),
+        _completed({"ok": True, "user_id": "U0SELF"}),
+    ]
+    call = asyncio.create_task(_run_slack(held))
+    await lookup_seen.wait()
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+    outcome = await _run_slack(held)
+
+    assert outcome == ToolSucceeded(
+        data={"messages": ["second"]}, account_user_id="U0SELF"
+    )
 
 
 async def test_an_account_missing_a_scope_group_is_denied_the_tool(

@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft7Validator  # type: ignore[import-untyped]
 from tests.unit.local_runtime.broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ALLOWED_TOOL_IDS,
@@ -38,6 +39,7 @@ from pantaray_agents.agents.action_agent.tools import (
     SUPERVISOR_SINGLE_REACT_TOOL_IDS,
     select_supervisor_act_tool_ids,
 )
+from pantaray_agents.local_runtime.integrations.calls import RUN_RESULT_SCHEMA
 from pantaray_agents.local_runtime.integrations.contracts import (
     ApiDenial,
     GatewayLimits,
@@ -688,6 +690,22 @@ async def test_a_write_asks_every_time_and_runs_once_approved(
     # The approval covered that one request; the next send asks again.
     again = await _preflight(env, args, "send-again")
     assert isinstance(again.control, ApprovalRequiredToolControl)
+
+
+@pytest.mark.asyncio
+async def test_the_result_names_the_accounts_own_id_when_the_gateway_knows_it(
+    env: SimpleNamespace,
+) -> None:
+    env.gateway.outcome = ToolSucceeded(data={"id": "msg-1"}, account_user_id="U0SELF")
+
+    output = await _run(env, _args("GMAIL_FETCH_EMAILS", WORK.account, {}))
+
+    assert output["account"] == {
+        "account": WORK.account,
+        "label": WORK.label,
+        "user_id": "U0SELF",
+    }
+    Draft7Validator(RUN_RESULT_SCHEMA).validate(output)
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import Final
 
 import httpx2
@@ -35,6 +36,7 @@ from ..contracts import (
     ToolkitEntry,
     ToolkitSlug,
     ToolOutcome,
+    ToolSucceeded,
 )
 from ..registry import (
     get_integration_gateway,
@@ -52,6 +54,7 @@ from .client import (
     ComposioResponse,
 )
 from .connect import ComposioConnections
+from .identity import AccountIdentities
 from .limits import UNPROBED_LIMITS, probe_limits, warn_composio_failure
 from .mapping import (
     CODE_KEY_PERMISSION_DENIED,
@@ -125,6 +128,7 @@ class ComposioGateway:
         # Toolkits whose tools this gateway has put in the tool index.
         self._indexed: frozenset[ToolkitSlug] = frozenset()
         self._session: _Session | None = None
+        self._identities = AccountIdentities()
         # The one account read in flight, shared by callers on every thread.
         self._accounts_fetch: concurrent.futures.Future[_Accounts | None] | None = None
         # asyncio keeps only weak references to tasks.
@@ -244,7 +248,22 @@ class ComposioGateway:
             logger.warning(
                 "Composio tool failed", extra={"slug": slug, "kind": outcome.error.kind}
             )
-        return outcome
+            return outcome
+        if is_write:
+            # Never hold a completed write's result behind one more request: a
+            # stop while it waits would lose what the write did. The next read
+            # asks.
+            return outcome
+        user_id = await self._identities.user_id(
+            account=account,
+            toolkit=accounts.by_id[account].account.toolkit,
+            send=partial(
+                self._send, toolkits=accounts.toolkits, is_write=False, renew=False
+            ),
+        )
+        if user_id is None:
+            return outcome
+        return ToolSucceeded(data=outcome.data, account_user_id=user_id)
 
     def invalidate_accounts(self) -> None:
         """Make the next account read ask Composio (a connection was added or changed).

@@ -249,6 +249,11 @@ class ComposioGateway:
                 "Composio tool failed", extra={"slug": slug, "kind": outcome.error.kind}
             )
             return outcome
+        if is_write:
+            # Never hold a completed write's result behind one more request: a
+            # stop while it waits would lose what the write did. The next read
+            # asks.
+            return outcome
         user_id = await self._identities.user_id(
             account=account,
             toolkit=accounts.by_id[account].account.toolkit,

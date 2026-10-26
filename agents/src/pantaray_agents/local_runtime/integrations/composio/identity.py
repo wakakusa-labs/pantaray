@@ -2,8 +2,8 @@
 
 Slack results say "U…" for every person, so the model needs the ID that is the
 user's. Composio's connected account does not hold it, so it is asked of the
-service after the account's first successful call, when the session already
-holds the toolkit.
+service after a successful read call, when the session already holds the
+toolkit; never after a write, whose result must not wait on another request.
 """
 
 from __future__ import annotations

@@ -15,7 +15,7 @@
  * picture or font is missing.
  */
 
-import { BrowserWindow, session, type Session, type WebContents } from 'electron';
+import { BrowserWindow, session, type WebContents } from 'electron';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,14 +76,39 @@ const RENDER_PARTITION = 'html-render';
 /** The id becomes a file name, so it may not carry a separator or a dot segment. */
 const RENDER_REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const LOCAL_SCHEMES = new Set(['file:', 'data:', 'blob:', 'about:']);
+/**
+ * With the network off, every connection Chromium makes outside `webRequest` (WebRTC
+ * over TCP, preconnects) goes to a proxy nothing listens on, loopback included.
+ */
+const DEAD_PROXY = { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' };
+/** The types a deck loads; anything else is served without one and sniffed. */
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+};
 
 /**
- * `window.print()` would open the system print panel even for a hidden window, and
- * there is no main-process hook to refuse it. Every document gets a print that does
- * nothing and cannot be put back.
+ * Every local document is sandboxed without `allow-modals`, so `print()` and the
+ * other dialogs do nothing. The flags pass to every frame below it, including one
+ * Chromium runs in its own renderer (a sandboxed iframe), where no script injected
+ * from here would reach: `window.print()` there opens the system print panel even
+ * for a hidden window. Same-origin keeps local fonts and data loadable.
  */
-const DISABLE_PRINT_SCRIPT =
-  "Object.defineProperty(window, 'print', { value: () => {}, writable: false, configurable: false });";
+const DOCUMENT_SANDBOX = 'sandbox allow-scripts allow-same-origin';
 
 /**
  * Mirror of the runtime's `is_within_any` for one root: lexically below it, or below
@@ -124,10 +149,11 @@ export function decideFileAccess(
 /**
  * Whether a request may leave the machine. Local schemes are not network (file is
  * judged by `decideFileAccess`); with the network allowed only reads over http(s)
- * go out. Null allows it.
+ * go out, and never as a frame: a remote page embedded in the deck runs its own
+ * code in its own renderer and is no resource of the deck. Null allows it.
  */
 export function decideNetworkRequest(
-  request: { url: string; method: string },
+  request: { url: string; method: string; resourceType?: string },
   allowNetwork: boolean
 ): BlockedRequestReason | null {
   let protocol: string;
@@ -139,7 +165,8 @@ export function decideNetworkRequest(
   if (LOCAL_SCHEMES.has(protocol)) return null;
   if (!allowNetwork) return 'network_off';
   const isWeb = protocol === 'http:' || protocol === 'https:';
-  return isWeb && (request.method === 'GET' || request.method === 'HEAD') ? null : 'not_allowed';
+  const isRead = request.method === 'GET' || request.method === 'HEAD';
+  return isWeb && isRead && request.resourceType !== 'subFrame' ? null : 'not_allowed';
 }
 
 /** Where the PDF goes; the runtime derives the same path from the same id. */
@@ -173,31 +200,46 @@ function sameDirectoryOnDisk(left: string, right: string): boolean {
 }
 
 /**
- * Serves an allowed local file through Chromium's own file loader. A file that does
- * not exist fails the same way the loader would; a directory is never listed.
+ * Serves an allowed local file from the descriptor that was checked, so a link
+ * swapped after the check cannot serve another file. A file that does not exist
+ * fails as Chromium's loader would; a directory is never listed.
  */
 async function serveFile(
-  ses: Session,
   url: string,
   scope: FileAccessScope,
   block: (reason: BlockedRequestReason, url: string) => void
 ): Promise<Response> {
-  let realPath: string;
+  const requestedPath = fileURLToPath(url);
+  let file: fs.promises.FileHandle;
   try {
-    realPath = await fs.promises.realpath(fileURLToPath(url));
+    // Non-blocking, so a FIFO cannot hold the open.
+    file = await fs.promises.open(requestedPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch {
     return Response.error();
   }
-  const reason = decideFileAccess(realPath, scope, sameDirectoryOnDisk);
-  if (reason !== null) {
-    block(reason, url);
-    return Response.error();
+  try {
+    const opened = await file.stat();
+    const realPath = await fs.promises.realpath(requestedPath);
+    const reason = decideFileAccess(realPath, scope, sameDirectoryOnDisk);
+    const checked = await fs.promises.stat(realPath);
+    if (reason !== null || checked.dev !== opened.dev || checked.ino !== opened.ino) {
+      block(reason ?? 'outside_read_scope', url);
+      return Response.error();
+    }
+    if (!opened.isFile()) {
+      block('not_allowed', url);
+      return Response.error();
+    }
+    const contentType = CONTENT_TYPES[path.extname(realPath).toLowerCase()];
+    return new Response(await file.readFile(), {
+      headers: {
+        'Content-Security-Policy': DOCUMENT_SANDBOX,
+        ...(contentType === undefined ? {} : { 'Content-Type': contentType }),
+      },
+    });
+  } finally {
+    await file.close();
   }
-  if (!(await fs.promises.stat(realPath)).isFile()) {
-    block('not_allowed', url);
-    return Response.error();
-  }
-  return ses.fetch(pathToFileURL(realPath).href, { bypassCustomProtocolHandlers: true });
 }
 
 function createRenderWindow(): BrowserWindow {
@@ -222,14 +264,6 @@ function createRenderWindow(): BrowserWindow {
 }
 
 async function loadAndPrint(contents: WebContents, htmlPath: string): Promise<Buffer> {
-  // The protocol answers only once the window has a document, and the script is kept
-  // for the documents that follow only while the Page domain is enabled.
-  await contents.loadURL('about:blank');
-  contents.debugger.attach();
-  await contents.debugger.sendCommand('Page.enable');
-  await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
-    source: DISABLE_PRINT_SCRIPT,
-  });
   try {
     await contents.loadURL(pathToFileURL(htmlPath).href);
     // A web font is fetched only once text uses it, which can be after `load`.
@@ -279,7 +313,7 @@ async function renderHtml(
     if (blocked.length < MAX_BLOCKED_REPORTED) blocked.push({ reason, url });
   };
   const ses = session.fromPartition(RENDER_PARTITION);
-  ses.protocol.handle('file', (req) => serveFile(ses, req.url, request, block));
+  ses.protocol.handle('file', (req) => serveFile(req.url, request, block));
   ses.webRequest.onBeforeRequest((details, callback) => {
     const reason = decideNetworkRequest(details, request.allowNetwork);
     if (reason !== null) block(reason, details.url);
@@ -294,6 +328,10 @@ async function renderHtml(
   const window = createRenderWindow();
   try {
     const contents = window.webContents;
+    if (!request.allowNetwork) {
+      await ses.setProxy(DEAD_PROXY);
+      contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+    }
     // Replaces the app-wide handler, which would open web links in the browser.
     contents.setWindowOpenHandler(() => ({ action: 'deny' }));
     keepWindowOnItsDocument(contents);
@@ -323,7 +361,7 @@ async function renderHtml(
     ses.protocol.unhandle('file');
     ses.webRequest.onBeforeRequest(null);
     ses.removeListener('will-download', refuseDownload);
-    await Promise.all([ses.clearCache(), ses.clearStorageData()]);
+    await Promise.all([ses.setProxy({ mode: 'system' }), ses.clearCache(), ses.clearStorageData()]);
   }
 }
 

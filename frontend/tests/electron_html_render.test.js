@@ -16,7 +16,7 @@ const PDF = Buffer.from('%PDF-1.7 rendered');
 function fakeElectron({ load = async () => {}, print = async () => PDF } = {}) {
   const ses = new EventEmitter();
   Object.assign(ses, {
-    fetched: [],
+    proxies: [],
     cleared: [],
     protocol: {
       handle: (_scheme, handler) => (ses.fileHandler = { handler }),
@@ -26,10 +26,7 @@ function fakeElectron({ load = async () => {}, print = async () => PDF } = {}) {
     setPermissionRequestHandler: (handler) => (ses.permissionRequest = handler),
     setPermissionCheckHandler: (handler) => (ses.permissionCheck = handler),
     setDevicePermissionHandler: (handler) => (ses.devicePermission = handler),
-    fetch: async (url, init) => {
-      ses.fetched.push({ url, init });
-      return new Response('served');
-    },
+    setProxy: async (config) => ses.proxies.push(config),
     clearCache: async () => ses.cleared.push('cache'),
     clearStorageData: async () => ses.cleared.push('storage'),
   });
@@ -42,9 +39,8 @@ function fakeElectron({ load = async () => {}, print = async () => PDF } = {}) {
       Object.assign(contents, {
         getURL: () => 'file:///work/deck.html',
         setWindowOpenHandler: (handler) => (contents.openHandler = handler),
-        debugger: { attach: () => {}, sendCommand: async () => ({}) },
-        loadURL: (url) =>
-          url === 'about:blank' ? Promise.resolve() : load(url, { ses, contents }),
+        setWebRTCIPHandlingPolicy: (policy) => (contents.webRtcPolicy = policy),
+        loadURL: (url) => load(url, { ses, contents }),
         executeJavaScript: async () => undefined,
         printToPDF: async (options) => {
           contents.printOptions = options;
@@ -119,6 +115,7 @@ function assertTornDown(fake) {
   assert.equal(fake.ses.beforeRequest, null);
   assert.equal(fake.ses.listenerCount('will-download'), 0);
   assert.deepEqual(fake.ses.cleared.sort(), ['cache', 'storage']);
+  assert.deepEqual(fake.ses.proxies.at(-1), { mode: 'system' });
 }
 
 const notSameDirectory = () => false;
@@ -166,6 +163,8 @@ test('only http(s) reads leave the machine, and only with the network allowed', 
     ['https://fonts.googleapis.com/css2', 'GET', true, null],
     ['http://example.com/a.png', 'HEAD', true, null],
     ['https://example.com/api', 'POST', true, 'not_allowed'],
+    ['https://example.com/embed', 'GET', true, 'not_allowed', 'subFrame'],
+    ['data:text/html,<p>x</p>', 'GET', true, null, 'subFrame'],
     ['wss://example.com/', 'GET', true, 'not_allowed'],
     ['ftp://example.com/a', 'GET', true, 'not_allowed'],
     ['https://fonts.googleapis.com/css2', 'GET', false, 'network_off'],
@@ -174,8 +173,12 @@ test('only http(s) reads leave the machine, and only with the network allowed', 
     ['data:image/png;base64,AA==', 'GET', false, null],
     ['not a url', 'GET', true, 'not_allowed'],
   ];
-  for (const [url, method, allowNetwork, expected] of cases) {
-    assert.equal(decideNetworkRequest({ url, method }, allowNetwork), expected, `${method} ${url}`);
+  for (const [url, method, allowNetwork, expected, resourceType = 'image'] of cases) {
+    assert.equal(
+      decideNetworkRequest({ url, method, resourceType }, allowNetwork),
+      expected,
+      `${method} ${resourceType} ${url}`
+    );
   }
 });
 
@@ -201,13 +204,21 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
       const { handler } = ses.fileHandler;
       for (const file of ['deck.html', 'private/secret.html', '.', 'missing.png']) {
         const response = await handler({ url: pathToFileURL(path.join(work, file)).href });
-        served.push([file, response.type, await response.text()]);
+        served.push([
+          file,
+          response.type,
+          response.headers.get('content-type'),
+          response.headers.get('content-security-policy'),
+          await response.text(),
+        ]);
       }
-      for (const [url, method] of [
-        ['https://example.com/font.woff2', 'GET'],
-        ['https://example.com/api', 'POST'],
+      for (const [url, method, resourceType] of [
+        ['https://example.com/font.woff2', 'GET', 'font'],
+        ['https://example.com/api', 'POST', 'xhr'],
       ]) {
-        ses.beforeRequest({ url, method }, (decision) => served.push([url, decision]));
+        ses.beforeRequest({ url, method, resourceType }, (decision) =>
+          served.push([url, decision])
+        );
       }
       ses.emit('will-download', { preventDefault: () => served.push('download refused') });
       assert.equal(url, pathToFileURL(path.join(work, 'deck.html')).href);
@@ -257,20 +268,18 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
   assert.equal(h.ses.devicePermission(), false);
 
   assert.deepEqual(served, [
-    ['deck.html', 'default', 'served'],
-    ['private/secret.html', 'error', ''],
-    ['.', 'error', ''],
-    ['missing.png', 'error', ''],
+    // No allow-modals: print() and dialogs do nothing in this frame and every one below.
+    ['deck.html', 'default', 'text/html', 'sandbox allow-scripts allow-same-origin', '<p>deck</p>'],
+    ['private/secret.html', 'error', null, null, ''],
+    ['.', 'error', null, null, ''],
+    ['missing.png', 'error', null, null, ''],
     ['https://example.com/font.woff2', { cancel: false }],
     ['https://example.com/api', { cancel: true }],
     'download refused',
   ]);
-  assert.deepEqual(h.ses.fetched, [
-    {
-      url: pathToFileURL(path.join(work, 'deck.html')).href,
-      init: { bypassCustomProtocolHandlers: true },
-    },
-  ]);
+  // With the network allowed, connections go as the system routes them.
+  assert.deepEqual(h.ses.proxies, [{ mode: 'system' }]);
+  assert.equal(contents.webRtcPolicy, undefined);
   assert.deepEqual(h.posted, [
     {
       body: {
@@ -293,6 +302,46 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
     },
   ]);
   assert.deepEqual(fs.readFileSync(h.pdfPathOf('render-1')), PDF);
+  assertTornDown(h);
+});
+
+test('a file swapped after it was opened is not served', async (t) => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-swap-')));
+  fs.writeFileSync(path.join(work, 'chart.svg'), '<svg/>');
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-out-')));
+  fs.writeFileSync(path.join(outside, 'secret.svg'), 'SECRET');
+  const link = path.join(work, 'link.svg');
+  fs.symlinkSync(path.join(outside, 'secret.svg'), link);
+  // The link points outside when it is opened and back inside when it is checked.
+  const realpath = fs.promises.realpath;
+  t.mock.method(fs.promises, 'realpath', async (target) => {
+    if (target === link) {
+      fs.rmSync(link);
+      fs.symlinkSync(path.join(work, 'chart.svg'), link);
+    }
+    return realpath(target);
+  });
+  let response;
+  const h = harness({
+    load: async (_url, { ses }) => {
+      response = await ses.fileHandler.handler({ url: pathToFileURL(link).href });
+    },
+  });
+  await h.respond(request({ htmlPath: path.join(work, 'deck.html'), fileRoots: [work] }));
+  assert.equal(response.type, 'error');
+  assert.deepEqual(h.posted[0].body.result.blocked_requests, [
+    { reason: 'outside_read_scope', url: pathToFileURL(link).href },
+  ]);
+});
+
+test('with the network off, connections outside webRequest go to a dead proxy', async () => {
+  let proxiesAtLoad;
+  const h = harness({ load: async (_url, { ses }) => (proxiesAtLoad = [...ses.proxies]) });
+  await h.respond(request({ allowNetwork: false }));
+  assert.deepEqual(proxiesAtLoad, [
+    { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' },
+  ]);
+  assert.equal(h.windows[0].webContents.webRtcPolicy, 'disable_non_proxied_udp');
   assertTornDown(h);
 });
 

@@ -15,6 +15,7 @@ import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
+import type { HtmlRenderRequest } from '../render/htmlRender';
 import type {
   AcceptActionRequest,
   NotificationWindowApi,
@@ -28,6 +29,7 @@ import {
   isChatItemAppendedEvent,
   isChatTurnStateEvent,
   isScreenCaptureRequestedEvent,
+  isHtmlRenderRequestedEvent,
 } from './eventContracts';
 import {
   ActionFileAttachmentsSchema,
@@ -132,6 +134,8 @@ export function createOrchestrationManager(params: {
   latestActionPages: ActionLatestPages;
   /** Answers a screen capture request; absent means no desktop capture support. */
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
+  /** Prints an HTML file for the Action runtime; absent means no desktop rendering. */
+  respondToHtmlRender?: (request: HtmlRenderRequest) => Promise<void>;
   onStatus?: (payload: OrchestrationStatusPayload) => void;
   logger?: LoggerLike | null;
   timers?: TimerApi;
@@ -381,6 +385,21 @@ export function createOrchestrationManager(params: {
         processId: message.data.process_id,
         toolRequestId: message.data.tool_request_id,
         appName: message.data.app_name,
+      });
+      return;
+    }
+    if (isHtmlRenderRequestedEvent(message)) {
+      const data = message.data;
+      void params.respondToHtmlRender?.({
+        renderRequestId: data.render_request_id,
+        actionId: data.action_id,
+        processId: data.process_id,
+        toolRequestId: data.tool_request_id,
+        htmlPath: data.html_path,
+        fileRoots: data.file_roots,
+        privateRoots: data.private_roots,
+        privateRootExceptions: data.private_root_exceptions,
+        allowNetwork: data.allow_network,
       });
       return;
     }

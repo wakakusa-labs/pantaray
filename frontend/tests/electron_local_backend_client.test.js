@@ -179,13 +179,15 @@ test('local backend client は未許可 path/method を token 送信前に拒否
           error.message === 'Local backend route is not allowed.'
       );
     }
-    for (const method of ['GET', 'PUT', 'DELETE']) {
-      await assert.rejects(
-        () => client.requestJson({ path: '/local/action-screen-capture', method }),
-        (error) =>
-          error instanceof LocalBackendRequestError &&
-          error.message === 'Local backend route is not allowed.'
-      );
+    for (const path of ['/local/action-screen-capture', '/local/action-html-render']) {
+      for (const method of ['GET', 'PUT', 'DELETE']) {
+        await assert.rejects(
+          () => client.requestJson({ path, method }),
+          (error) =>
+            error instanceof LocalBackendRequestError &&
+            error.message === 'Local backend route is not allowed.'
+        );
+      }
     }
     assert.equal(fetchCalls, 0);
   } finally {
@@ -207,6 +209,7 @@ test('local backend client の route allowlist は現在の全 call site を許�
   });
   const routes = [
     ['/local/action-screen-capture', 'POST'],
+    ['/local/action-html-render', 'POST'],
     ['/v1/agents/users/user-1/suggestions/welcome', 'POST'],
     ['/api/agent/history', 'GET'],
     ['/api/agent/history/suggestion-1/overlay-bootstrap', 'GET'],

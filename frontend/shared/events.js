@@ -16,6 +16,7 @@ const OutboundEvent = Object.freeze({
   ACTION_STEP: 'action_step',
   PROCESS_PAUSED: 'process_paused',
   SCREEN_CAPTURE_REQUESTED: 'screen_capture_requested',
+  HTML_RENDER_REQUESTED: 'html_render_requested',
   PROCESS_COMPLETED: 'process_completed',
   SESSION_RESUMED: 'session_resumed',
   SESSION_EXPIRED: 'session_expired',

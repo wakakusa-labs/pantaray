@@ -3,7 +3,7 @@
  *
  * macOS ships `textutil`, which reads .docx, .doc, .rtf and .odt and writes HTML. It runs as a
  * child process with an argument vector (never a shell), a time limit and an output cap. The
- * HTML it writes is rendered like any other untrusted page: in an empty-sandbox frame.
+ * HTML it writes is rendered as untrusted content: in a frame sandboxed without script.
  */
 
 import fs from 'fs';

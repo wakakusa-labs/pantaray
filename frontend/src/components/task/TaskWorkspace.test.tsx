@@ -125,11 +125,8 @@ afterEach(() => {
 
 describe('TaskWorkspace', () => {
   it('opens a document beside the conversation and closes it, keeping the draft', async () => {
-    read.mockResolvedValue({
-      kind: 'text',
-      text: '<!DOCTYPE html><h1>御見積書</h1><script>parent.alert(1)</script>',
-      truncated: false,
-    });
+    const pdfUrl = 'pantaray-action-file://local/?kind=action&path=quote_v3.html&render=r1';
+    read.mockResolvedValue({ kind: 'pdf', url: pdfUrl });
     const { container } = await renderFinishedTask();
     const message = screen.getByRole('textbox', { name: 'メッセージ' });
     fireEvent.change(message, { target: { value: '単価をもう一度確認して' } });
@@ -144,18 +141,13 @@ describe('TaskWorkspace', () => {
     expect(chip('quote_v3.html').getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('.action-task--split')).not.toBeNull();
 
+    // The page as the PDF main printed of it.
     const frame = await waitFor(() => {
       const found = preview.querySelector('iframe');
       expect(found).not.toBeNull();
       return found as HTMLIFrameElement;
     });
-    // The app's origin lets the pane measure the page; scripts stay off.
-    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
-    const document = frame.getAttribute('srcdoc') ?? '';
-    expect(document).toMatch(
-      /^<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="default-src 'none';/
-    );
-    expect(document).toContain('<h1>御見積書</h1>');
+    expect(frame.getAttribute('src')).toBe(pdfUrl);
 
     // The conversation stayed mounted: the same composer still holds the draft.
     expect(screen.getByRole('textbox', { name: 'メッセージ' })).toBe(message);
@@ -337,7 +329,7 @@ describe('TaskWorkspace', () => {
   it('shows a Word document as the page textutil made of it, without scripts', async () => {
     read.mockResolvedValue({
       kind: 'html',
-      html: '<p>御見積書</p><script>parent.alert(1)</script>',
+      html: '<!DOCTYPE html><p>御見積書</p><script>parent.alert(1)</script>',
     });
     await renderFinishedTask();
     fireEvent.click(chip('memo.docx'));
@@ -349,7 +341,7 @@ describe('TaskWorkspace', () => {
     // The app's origin lets the pane measure the page; scripts stay off.
     expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
     expect(frame.getAttribute('srcdoc')).toMatch(
-      /^<meta http-equiv="Content-Security-Policy" content="default-src 'none';.*<p>御見積書<\/p>/
+      /^<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="default-src 'none';.*<p>御見積書<\/p>/
     );
 
     quickLook.mockResolvedValue({ kind: 'unavailable', reason: 'not_found' });

@@ -61,6 +61,7 @@ import type {
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { RunFile } from '../actions/actionDocumentHtml';
+import type { HtmlPreviewPdfs } from '../render/htmlPreview';
 import type { createActionFetcher } from '../actions/actionFetch';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
@@ -178,6 +179,8 @@ export type MainContext = {
     runFile: RunFile;
     /** Asks for an app in /Applications over the main window: its path, or null if cancelled. */
     chooseApp: () => Promise<string | null>;
+    /** Prints a vetted HTML file to PDF for the preview's frame. */
+    renderHtml: HtmlPreviewPdfs['render'];
   };
 
   clipboard: {

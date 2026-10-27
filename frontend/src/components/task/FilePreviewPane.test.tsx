@@ -11,6 +11,10 @@ const read = vi.fn<ActionFiles['read']>();
 
 function renderPreview(path: string, text: string) {
   read.mockResolvedValue({ kind: 'text', text, truncated: false });
+  renderPane(path);
+}
+
+function renderPane(path: string) {
   render(
     <UiLanguageProvider initialLanguage="en">
       <FilePreviewPane
@@ -81,5 +85,30 @@ describe('FilePreviewPane', () => {
     expect((await screen.findByText(/Notes on the change/)).tagName).toBe('PRE');
     expect(screen.getByText(/Notes on the change/).textContent).toBe(text);
     expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('shows an HTML file as the PDF main printed, loading until it is printed', async () => {
+    let answer: (result: Awaited<ReturnType<ActionFiles['read']>>) => void = () => {};
+    read.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderPane('/work/deck.html');
+
+    expect(screen.getByRole('status').textContent).toBe('Loading…');
+    const url =
+      'pantaray-action-file://local/?kind=action&id=act-1&path=%2Fwork%2Fdeck.html&render=r1';
+    answer({ kind: 'pdf', url });
+
+    const frame = await screen.findByTitle('deck.html');
+    expect(frame.getAttribute('src')).toBe(url);
+    // The PDF viewer is a plugin, which a sandboxed frame turns off.
+    expect(frame.hasAttribute('sandbox')).toBe(false);
+  });
+
+  it('says an HTML file could not be shown when it could not be printed, keeping Open', async () => {
+    read.mockResolvedValue({ kind: 'unavailable', reason: 'render_failed' });
+    renderPane('/work/deck.html');
+
+    expect(await screen.findByText("This page couldn't be shown.")).toBeTruthy();
+    expect(screen.queryByTitle('deck.html')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy();
   });
 });

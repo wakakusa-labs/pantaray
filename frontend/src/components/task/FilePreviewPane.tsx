@@ -29,6 +29,7 @@ const COPY = {
     truncated: 'Showing the beginning only.',
     appOnly: 'Open this file from the Open menu.',
     unavailable: "This file can't be shown here.",
+    renderFailed: "This page couldn't be shown.",
     openFailed: "Couldn't open the file.",
   },
   ja: {
@@ -45,6 +46,7 @@ const COPY = {
     truncated: '途中まで表示しています。',
     appOnly: 'このファイルは「開く」から見られます。',
     unavailable: 'このファイルはここでは表示できません。',
+    renderFailed: 'このページを表示できませんでした。',
     openFailed: 'ファイルを開けませんでした。',
   },
 } as const;
@@ -67,7 +69,7 @@ type ZoomablePreviewProps =
   | Readonly<{ kind: 'page'; title: string; html: string }>
   | Readonly<{ kind: 'image'; alt: string; url: string }>;
 
-/** A page or an image, fitted to the pane's width; a pinch zooms it. */
+/** A converted document or an image, fitted to the pane's width; a pinch zooms it. */
 function ZoomablePreview(props: ZoomablePreviewProps) {
   const { viewportRef, extentRef, boxRef, onFrameLoad, onImageLoad } = usePreviewZoom();
   return (
@@ -109,7 +111,9 @@ type Content =
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
   | Readonly<{ kind: 'page'; html: string }>
   | Readonly<{ kind: 'image'; url: string }>
-  | Readonly<{ kind: 'unavailable' }>;
+  /** An HTML file, printed to PDF by main so the charts its script draws show. */
+  | Readonly<{ kind: 'pdf'; url: string }>
+  | Readonly<{ kind: 'unavailable'; renderFailed: boolean }>;
 
 const READ_KINDS = new Set<TaskFile['kind']>([
   'markdown',
@@ -127,7 +131,7 @@ const READ_KINDS = new Set<TaskFile['kind']>([
 function useFileContent(target: TaskFileTarget, file: TaskFile, revision: string | null): Content {
   const read = READ_KINDS.has(file.kind) ? window.electron?.actionFiles?.read : undefined;
   const [content, setContent] = useState<Content>(() =>
-    read ? { kind: 'loading' } : { kind: 'unavailable' }
+    read ? { kind: 'loading' } : { kind: 'unavailable', renderFailed: false }
   );
   const { kind, id } = target;
   useEffect(() => {
@@ -144,13 +148,15 @@ function useFileContent(target: TaskFileTarget, file: TaskFile, revision: string
         } else if (result.kind === 'image') {
           imageUrl = URL.createObjectURL(new Blob([result.bytes], { type: result.mime }));
           setContent({ kind: 'image', url: imageUrl });
+        } else if (result.kind === 'pdf') {
+          setContent({ kind: 'pdf', url: result.url });
         } else {
-          setContent({ kind: 'unavailable' });
+          setContent({ kind: 'unavailable', renderFailed: result.reason === 'render_failed' });
         }
       },
       (error: unknown) => {
         console.error('Failed to read a file for preview', error);
-        if (active) setContent({ kind: 'unavailable' });
+        if (active) setContent({ kind: 'unavailable', renderFailed: false });
       }
     );
     return () => {
@@ -207,7 +213,11 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
     item(copy.openInApp, 'openInApp'),
     item(copy.openWithApp, 'openWithApp'),
   ];
-  const page = (html: string) => <ZoomablePreview kind="page" title={file.name} html={html} />;
+  const pdfFrame = (url: string) => (
+    // Not sandboxed: a sandboxed frame turns plugins off, and the PDF viewer is one. The scheme
+    // serves only a PDF of a file its owner names, from an origin of its own.
+    <iframe className="task-file-preview__frame" title={file.name} src={url} />
+  );
 
   return (
     <section className="task-file-preview" aria-labelledby={nameId}>
@@ -254,23 +264,23 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
       ) : null}
       <div className="task-file-preview__body">
         {file.kind === 'pdf' ? (
-          // Not sandboxed: a sandboxed frame turns plugins off, and the PDF viewer is one. The
-          // scheme serves only a PDF its owner names, from an origin of its own.
-          <iframe
-            className="task-file-preview__frame"
-            title={file.name}
-            src={pdfUrl(target, file.path, revision)}
-          />
+          pdfFrame(pdfUrl(target, file.path, revision))
         ) : content.kind === 'loading' ? (
           <p className="task-file-preview__status" role="status">
             {copy.loading}
           </p>
         ) : content.kind === 'unavailable' ? (
           <p className="task-file-preview__status">
-            {file.kind === 'app_only' ? copy.appOnly : copy.unavailable}
+            {file.kind === 'app_only'
+              ? copy.appOnly
+              : content.renderFailed
+                ? copy.renderFailed
+                : copy.unavailable}
           </p>
+        ) : content.kind === 'pdf' ? (
+          pdfFrame(content.url)
         ) : content.kind === 'page' ? (
-          page(content.html)
+          <ZoomablePreview kind="page" title={file.name} html={content.html} />
         ) : content.kind === 'image' ? (
           <ZoomablePreview kind="image" alt={file.name} url={content.url} />
         ) : (
@@ -278,9 +288,7 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
             {content.truncated ? (
               <p className="task-file-preview__status">{copy.truncated}</p>
             ) : null}
-            {file.kind === 'html' ? (
-              page(content.text)
-            ) : diffs !== null ? (
+            {diffs !== null ? (
               <div className="task-file-preview__diffs">
                 {diffs.map((diff, index) => (
                   <ToolDiffView key={index} diff={diff} label={diff.path} />

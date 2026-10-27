@@ -9,7 +9,13 @@ const { pathToFileURL } = require('node:url');
 const { test } = require('node:test');
 
 const MODULE_PATH = require.resolve('../electron/dist/render/htmlRender.js');
+const PREVIEW_MODULE_PATH = require.resolve('../electron/dist/render/htmlPreview.js');
 const { LocalBackendRequestError } = require('../electron/dist/localBackend/client.js');
+const { registerActionFileHandlers } = require('../electron/dist/ipc/handlers/actionFiles.js');
+const {
+  createActionFileProtocolHandler,
+} = require('../electron/dist/protocol/actionFileProtocol.js');
+const { buildActionFileUrl } = require('../electron/dist/protocol/actionFileUrl.js');
 const PDF = Buffer.from('%PDF-1.7 rendered');
 
 /** A fake session and window factory; `load` and `print` script each render. */
@@ -58,20 +64,24 @@ function fakeElectron({ load = async () => {}, print = async () => PDF } = {}) {
   return { ses, windows, electron: { BrowserWindow, session: { fromPartition: () => ses } } };
 }
 
-function loadHtmlRender(electron) {
-  delete require.cache[MODULE_PATH];
+/** A fresh copy of the module, and of the render core it imports, on the fake Electron. */
+function loadWithElectron(electron, modulePath = MODULE_PATH) {
+  const fresh = () => [MODULE_PATH, PREVIEW_MODULE_PATH].forEach((p) => delete require.cache[p]);
+  fresh();
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === 'electron') return electron;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
-    return require(MODULE_PATH);
+    return require(modulePath);
   } finally {
     Module._load = originalLoad;
-    delete require.cache[MODULE_PATH];
+    fresh();
   }
 }
+
+const loadHtmlRender = (electron) => loadWithElectron(electron);
 
 const { decideFileAccess, decideNetworkRequest, htmlRenderPdfPath, isWithinRoot } = loadHtmlRender(
   fakeElectron().electron
@@ -427,4 +437,134 @@ test('the answer is posted once; only a 404 deletes the PDF', async () => {
     assert.equal(fs.existsSync(h.pdfPathOf('render-1')), kept, `status ${status}`);
     assert.equal(h.logged[0].name, 'HTML_RENDER_REQUEST_ERR');
   }
+});
+
+/**
+ * The preview of an Action whose answer links `linked`: `actionFile:read` and the
+ * `pantaray-action-file` protocol over one set of rendered PDFs.
+ */
+function previewHarness({ linked, ...scripts }) {
+  const fake = fakeElectron(scripts);
+  const userDataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-user-')));
+  const { createHtmlPreviewPdfs } = loadWithElectron(fake.electron, PREVIEW_MODULE_PATH);
+  const pdfs = createHtmlPreviewPdfs({ userDataDir });
+  const finalOutput = linked.map((file) => `[f](pantaray-file://${encodeURI(file)})`).join('\n');
+  const sources = {
+    readConversationPage: async ({ actionId }) => {
+      if (actionId !== 'act-1') throw new Error('Action not found');
+      return {
+        action: { action_id: actionId },
+        runs: [{ run_id: 'run-1', final_output: finalOutput, entries: [] }],
+        next_cursor: null,
+      };
+    },
+    readSuggestionBootstrap: async () => null,
+    getCurrentSubjectId: () => 'user-1',
+  };
+  const handlers = new Map();
+  registerActionFileHandlers(
+    {
+      actions: sources,
+      overlay: { resolveOverlayBootstrap: sources.readSuggestionBootstrap },
+      actionFiles: { renderHtml: pdfs.render },
+    },
+    { handle: (channel, handler) => handlers.set(channel, handler) }
+  );
+  const protocol = createActionFileProtocolHandler({
+    ...sources,
+    readRenderedPdf: pdfs.readRendered,
+  });
+  return {
+    ...fake,
+    read: (file) =>
+      handlers.get('actionFile:read')({}, { target: { kind: 'action', id: 'act-1' }, path: file }),
+    fetch: (url) => protocol({ url }),
+  };
+}
+
+test('an owned HTML file previews as its PDF, loading its own folder and no network', async () => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-preview-')));
+  const deck = path.join(work, 'deck', 'deck.html');
+  fs.mkdirSync(path.dirname(deck));
+  fs.writeFileSync(deck, '<p>deck</p>');
+  fs.writeFileSync(path.join(work, 'deck', 'chart.png'), 'png');
+  fs.writeFileSync(path.join(work, 'secret.txt'), 'secret');
+  const unowned = path.join(work, 'deck', 'other.html');
+  fs.writeFileSync(unowned, '<p>other</p>');
+  const loads = [];
+  const h = previewHarness({
+    linked: [deck],
+    load: async (url, { ses }) => {
+      loads.push(['proxies', [...ses.proxies]]);
+      for (const file of ['deck/deck.html', 'deck/chart.png', 'secret.txt']) {
+        const response = await ses.fileHandler.handler({
+          url: pathToFileURL(path.join(work, file)).href,
+        });
+        loads.push([file, response.type]);
+      }
+      ses.beforeRequest({ url: 'https://cdn.example.com/chart.js', method: 'GET' }, (decision) =>
+        loads.push(['https', decision])
+      );
+      assert.equal(url, pathToFileURL(deck).href);
+    },
+  });
+
+  const result = await h.read(deck);
+  assert.equal(result.kind, 'pdf');
+  const renderId = new URL(result.url).searchParams.get('render');
+  assert.equal(result.url, buildActionFileUrl({ kind: 'action', id: 'act-1' }, deck, renderId));
+  assert.deepEqual(loads, [
+    ['proxies', [{ proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' }]],
+    ['deck/deck.html', 'default'],
+    ['deck/chart.png', 'default'],
+    ['secret.txt', 'error'],
+    ['https', { cancel: true }],
+  ]);
+
+  // The viewer may ask again; the PDF is served from memory, not printed twice.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await h.fetch(result.url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/pdf');
+    assert.equal(response.headers.get('accept-ranges'), null);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), PDF);
+  }
+  assert.equal(h.windows.length, 1);
+
+  // The render id serves only the file it was printed from, for its owner.
+  const swapped = buildActionFileUrl({ kind: 'action', id: 'act-1' }, unowned, renderId);
+  assert.equal((await h.fetch(swapped)).status, 404);
+  const otherOwner = buildActionFileUrl({ kind: 'action', id: 'act-2' }, deck, renderId);
+  assert.equal((await h.fetch(otherOwner)).status, 404);
+  assert.deepEqual(await h.read(unowned), { kind: 'unavailable', reason: 'not_found' });
+  assert.equal(h.windows.length, 1);
+});
+
+test('a preview whose render fails reads as render_failed', async () => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-preview-')));
+  const deck = path.join(work, 'deck.html');
+  fs.writeFileSync(deck, '<p>deck</p>');
+  const h = previewHarness({ linked: [deck], load: async () => Promise.reject(new Error('x')) });
+  assert.deepEqual(await h.read(deck), { kind: 'unavailable', reason: 'render_failed' });
+  assertTornDown(h);
+});
+
+test('the preview loads its own folder in private storage, and no private storage below it', () => {
+  const { previewFileScope } = loadWithElectron(fakeElectron().electron, PREVIEW_MODULE_PATH);
+  const privateRoots = ['/Users/me/Library/Pantaray', '/Users/me/Library/Caches/temp'];
+  const workspace = '/Users/me/Library/Pantaray/actions/u/a/workspace';
+  const inWorkspace = previewFileScope(`${workspace}/deck.html`, privateRoots, notSameDirectory);
+  assert.deepEqual(inWorkspace, {
+    fileRoots: [workspace],
+    privateRoots,
+    privateRootExceptions: [workspace],
+  });
+  const decide = (scope, target) => decideFileAccess(target, scope, notSameDirectory);
+  assert.equal(decide(inWorkspace, `${workspace}/img/chart.png`), null);
+  assert.equal(decide(inWorkspace, '/Users/me/Library/Pantaray/db.sqlite3'), 'outside_read_scope');
+
+  const inHome = previewFileScope('/Users/me/deck.html', privateRoots, notSameDirectory);
+  assert.deepEqual(inHome.privateRootExceptions, []);
+  assert.equal(decide(inHome, '/Users/me/img/chart.png'), null);
+  assert.equal(decide(inHome, '/Users/me/Library/Pantaray/db.sqlite3'), 'outside_read_scope');
 });

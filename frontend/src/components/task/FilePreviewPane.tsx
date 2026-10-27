@@ -11,6 +11,7 @@ import { useI18n } from '@/context/useI18n';
 
 import { FileOpenMenu, type FileOpenMenuItem } from './FileOpenMenu';
 import { offersQuickLook, type TaskFile } from './taskFiles';
+import { htmlPreviewDocument, usePreviewZoom } from './previewZoom';
 import './taskFiles.css';
 
 const COPY = {
@@ -62,21 +63,38 @@ function middleEllipsis(path: string): string {
 
 type OpenWay = 'reveal' | 'quickLook' | 'openInApp' | 'openWithApp';
 
-/*
- * The document is untrusted content. The empty sandbox runs no script and gives the frame an
- * opaque origin, and this policy stops it loading anything over the network: only inline
- * styles and data: images render. A policy can only be tightened by a later one, so the
- * document's own <meta> tags cannot loosen it.
- */
-const HTML_PREVIEW_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
-const POLICY_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_POLICY}">`;
-const LEADING_DOCTYPE = /^\s*<!doctype[^>]*>/i;
+type ZoomablePreviewProps =
+  | Readonly<{ kind: 'page'; title: string; html: string }>
+  | Readonly<{ kind: 'image'; alt: string; url: string }>;
 
-/** The policy goes first so it applies before any element; after a doctype, to keep standards mode. */
-function htmlPreviewDocument(html: string): string {
-  const doctype = LEADING_DOCTYPE.exec(html)?.[0] ?? '';
-  return `${doctype}${POLICY_META}${html.slice(doctype.length)}`;
+/** A page or an image, fitted to the pane's width; a pinch zooms it. */
+function ZoomablePreview(props: ZoomablePreviewProps) {
+  const { viewportRef, extentRef, boxRef, onFrameLoad, onImageLoad } = usePreviewZoom();
+  return (
+    <div ref={viewportRef} className="task-file-zoom">
+      <div ref={extentRef} className="task-file-zoom__extent">
+        <div ref={boxRef} className="task-file-zoom__box">
+          {props.kind === 'page' ? (
+            <iframe
+              className="task-file-zoom__frame"
+              title={props.title}
+              // Never with allow-scripts: see previewZoom.
+              sandbox="allow-same-origin"
+              srcDoc={htmlPreviewDocument(props.html)}
+              onLoad={onFrameLoad}
+            />
+          ) : (
+            <img
+              className="task-file-zoom__image"
+              src={props.url}
+              alt={props.alt}
+              onLoad={onImageLoad}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** A new revision changes the URL, so the frame loads the PDF again instead of keeping it. */
@@ -189,14 +207,7 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
     item(copy.openInApp, 'openInApp'),
     item(copy.openWithApp, 'openWithApp'),
   ];
-  const page = (html: string) => (
-    <iframe
-      className="task-file-preview__frame"
-      title={file.name}
-      sandbox=""
-      srcDoc={htmlPreviewDocument(html)}
-    />
-  );
+  const page = (html: string) => <ZoomablePreview kind="page" title={file.name} html={html} />;
 
   return (
     <section className="task-file-preview" aria-labelledby={nameId}>
@@ -261,7 +272,7 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
         ) : content.kind === 'page' ? (
           page(content.html)
         ) : content.kind === 'image' ? (
-          <img className="task-file-preview__image" src={content.url} alt={file.name} />
+          <ZoomablePreview kind="image" alt={file.name} url={content.url} />
         ) : (
           <>
             {content.truncated ? (

@@ -282,8 +282,33 @@
   max-height: none;
 }
 
-.task-file-preview__image {
-  max-width: 100%;
-  height: auto;
-  align-self: center;
+/* The pane scrolls the scaled content, which starts at its top-left corner, so every side of it
+   can be scrolled to. */
+.task-file-zoom {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 10px;
+}
+
+/* The scaled size; the box inside keeps the content's own size for layout. */
+.task-file-zoom__extent {
+  overflow: clip;
+}
+
+.task-file-zoom__box {
+  transform-origin: 0 0;
+}
+
+.task-file-zoom__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+.task-file-zoom__image {
+  display: block;
+  margin: 0 auto;
 }

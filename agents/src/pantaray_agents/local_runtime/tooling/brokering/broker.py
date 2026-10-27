@@ -12,16 +12,10 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.discovery import run_glob, run_grep, run_list
-from pantaray_agents.tools.files.read_contract import (
-    GlobToolArgs,
-    GrepToolArgs,
-    ListToolArgs,
-    ReadToolArgs,
-)
 from pantaray_agents.tools.files.read_scope import ReadScope
 from pantaray_agents.tools.files.render_pages import (
-    RenderHtmlPageToolArgs,
     RenderPdfPageToolArgs,
+    SaveHtmlAsPdfToolArgs,
 )
 
 from ..resources.resource_tracking import (
@@ -47,6 +41,7 @@ from .broker_common import (
     APPLY_PATCH_TOOL_ID,
     BASH_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
+    SAVE_HTML_AS_PDF_TOOL_ID,
     ApprovalDecisionError,
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
@@ -66,6 +61,10 @@ from .broker_direct import (
 from .broker_direct_read import run_read_executor
 from .broker_direct_render_html import run_render_html_page_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
+from .broker_direct_save_pdf import (
+    build_validated_save_pdf_request,
+    run_save_html_as_pdf_executor,
+)
 from .broker_failure_finalization import (
     finalize_broker_invocation_error,
     finalize_canceled_broker_invocation,
@@ -79,6 +78,7 @@ from .broker_outcome import (
 from .broker_protocol import (
     ApplyPatchToolArgs,
     BashToolArgs,
+    BrokerExecutionPath,
     BrokerManagedToolDefinition,
     BrokerToolArgs,
     BrokerToolRequest,
@@ -91,6 +91,7 @@ from .broker_protocol import (
     ValidatedReadRequest,
     ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
+    ValidatedSaveHtmlAsPdfRequest,
 )
 from .broker_registry import (
     BROKER_MODEL_REGISTRY,
@@ -110,6 +111,24 @@ class BrokerCompletionPersistenceError(RuntimeError):
 
 
 BROKER_TOOL_ARGS_INVALID = "BROKER_TOOL_ARGS_INVALID"
+_APPROVAL_GATED_TOOL_IDS = frozenset(
+    {APPLY_PATCH_TOOL_ID, SAVE_HTML_AS_PDF_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
+)
+# Read-only requests that carry their parsed arguments as they are.
+_ARGS_REQUESTS: dict[
+    BrokerExecutionPath,
+    type[ValidatedReadRequest]
+    | type[ValidatedRenderHtmlPageRequest]
+    | type[ValidatedListRequest]
+    | type[ValidatedGlobRequest]
+    | type[ValidatedGrepRequest],
+] = {
+    "broker_direct_read": ValidatedReadRequest,
+    "broker_direct_render_html": ValidatedRenderHtmlPageRequest,
+    "broker_direct_list": ValidatedListRequest,
+    "broker_direct_glob": ValidatedGlobRequest,
+    "broker_direct_grep": ValidatedGrepRequest,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +138,7 @@ def _effective_tool_request_id(
     tool_id: str,
     tool_request_id: str | None,
 ) -> str:
-    if tool_id in {APPLY_PATCH_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}:
+    if tool_id in _APPROVAL_GATED_TOOL_IDS:
         if tool_request_id is None or not tool_request_id.strip():
             raise BrokerPolicyError(
                 "tool_request_id is required for approval-gated tools"
@@ -137,7 +156,7 @@ def _effective_tool_invocation_id(
 ) -> str | None:
     if invocation_id is not None and invocation_id.strip():
         return invocation_id
-    if tool_id in {APPLY_PATCH_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}:
+    if tool_id in _APPROVAL_GATED_TOOL_IDS:
         if preflight_only:
             return None
         return f"{tool_id}:{tool_request_id}"
@@ -169,6 +188,7 @@ def _validate_request(
     | ValidatedGlobRequest
     | ValidatedGrepRequest
     | ValidatedPatchRequest
+    | ValidatedSaveHtmlAsPdfRequest
     | ValidatedCommandRequest,
 ]:
     validate_broker_registry()
@@ -207,16 +227,19 @@ def _validate_request(
         preflight_only=preflight_only,
     )
     effective_requested_at = request.requested_at or "unknown"
-    if definition.execution_path == "broker_direct_read":
-        assert isinstance(request.args, ReadToolArgs)
-        return context, ValidatedReadRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            args=request.args,
+    args_request = _ARGS_REQUESTS.get(definition.execution_path)
+    if args_request is not None:
+        # The model refuses arguments parsed for another tool.
+        return context, args_request.model_validate(
+            {
+                "tool_invocation_id": effective_invocation_id,
+                "manifest_id": request.manifest_id,
+                "execution_session_id": request.execution_session_id,
+                "action_id": context.execution_session.action_id or "unknown",
+                "tool_request_id": effective_tool_request_id,
+                "requested_at": effective_requested_at,
+                "args": request.args,
+            }
         )
     if definition.execution_path == "broker_direct_render_pdf":
         assert isinstance(request.args, RenderPdfPageToolArgs)
@@ -230,53 +253,19 @@ def _validate_request(
             path=request.args.path,
             pages=request.args.pages,
         )
-    if definition.execution_path == "broker_direct_render_html":
-        assert isinstance(request.args, RenderHtmlPageToolArgs)
-        return context, ValidatedRenderHtmlPageRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            args=request.args,
-        )
-    if definition.execution_path == "broker_direct_list":
-        assert isinstance(request.args, ListToolArgs)
-        return context, ValidatedListRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            args=request.args,
-        )
-    if definition.execution_path == "broker_direct_glob":
-        assert isinstance(request.args, GlobToolArgs)
-        return context, ValidatedGlobRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            args=request.args,
-        )
-    if definition.execution_path == "broker_direct_grep":
-        assert isinstance(request.args, GrepToolArgs)
-        return context, ValidatedGrepRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            args=request.args,
-        )
     if definition.execution_path == "broker_direct_patch":
         assert isinstance(request.args, ApplyPatchToolArgs)
         return context, _build_validated_patch_request(
+            context=context,
+            args=request.args,
+            tool_invocation_id=effective_invocation_id,
+            tool_request_id=effective_tool_request_id,
+            requested_at=effective_requested_at,
+            preflight_only=preflight_only,
+        )
+    if definition.execution_path == "broker_direct_save_pdf":
+        assert isinstance(request.args, SaveHtmlAsPdfToolArgs)
+        return context, build_validated_save_pdf_request(
             context=context,
             args=request.args,
             tool_invocation_id=effective_invocation_id,
@@ -409,6 +398,11 @@ async def execute_broker_tool(
                 "applied_paths": list(validated.patch_paths),
             },
         )
+    if (
+        isinstance(validated, ValidatedSaveHtmlAsPdfRequest)
+        and validated.preflight_only
+    ):
+        return BrokerPreflightOutcome(status="success", output={"status": "success"})
     if isinstance(validated, ValidatedCommandRequest) and validated.preflight_only:
         return BrokerPreflightOutcome(
             status="success",
@@ -454,6 +448,10 @@ async def execute_broker_tool(
             )
         elif isinstance(validated, ValidatedRenderHtmlPageRequest):
             outcome = await run_render_html_page_executor(
+                context=context, request=validated
+            )
+        elif isinstance(validated, ValidatedSaveHtmlAsPdfRequest):
+            outcome = await run_save_html_as_pdf_executor(
                 context=context, request=validated
             )
         elif isinstance(validated, ValidatedListRequest):

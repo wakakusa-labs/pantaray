@@ -101,6 +101,13 @@ class RenderHtmlPageToolArgs(BaseModel):
     pages: PageNumbers | None = None
 
 
+class SaveHtmlAsPdfToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str = Field(min_length=1, pattern=r"\S")
+    pdf_path: str = Field(pattern=r"\S.*\.[Pp][Dd][Ff]$")
+
+
 @dataclass(frozen=True, slots=True)
 class DrawnDocument:
     """The pages drawn of one file the read scope reached."""
@@ -367,6 +374,7 @@ __all__ = [
     "RenderHtmlPageToolArgs",
     "RenderPdfPageToolArgs",
     "RendererPreparing",
+    "SaveHtmlAsPdfToolArgs",
     "draw_document_pages",
     "draw_pdf",
 ]

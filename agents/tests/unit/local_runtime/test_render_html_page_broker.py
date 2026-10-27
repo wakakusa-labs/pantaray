@@ -59,8 +59,11 @@ def runtime(
     artifact_root.mkdir()
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifact_root))
     read_access_scope = getattr(request, "param", "workspace")
+    # save_html_as_pdf prints through the same relay and shares this runtime.
     db_path, context = _bootstrap_runtime_db(
-        tmp_path, read_access_scope=read_access_scope, allowed_tool_ids=(_TOOL_ID,)
+        tmp_path,
+        read_access_scope=read_access_scope,
+        allowed_tool_ids=(_TOOL_ID, "save_html_as_pdf"),
     )
     # The relay announces on the runtime's own database, as in the app.
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))

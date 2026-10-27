@@ -179,6 +179,17 @@ const TOOL_DISPLAY_NAMES = {
     enDone: 'Looked at pages of {subject}',
     enRunning: 'Looking at pages of {subject}',
   },
+  save_html_as_pdf: {
+    agentName: 'Save HTML As PDF',
+    icon: FileText,
+    ja: 'HTML を PDF に保存',
+    en: 'Save HTML as PDF',
+    // subject は保存先の PDF。
+    jaDone: '{subject} を保存しました',
+    jaRunning: '{subject} を保存しています',
+    enDone: 'Saved {subject}',
+    enRunning: 'Saving {subject}',
+  },
   list: {
     agentName: 'List Local Directory',
     icon: Folder,

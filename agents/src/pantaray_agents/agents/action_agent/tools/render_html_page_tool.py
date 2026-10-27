@@ -65,7 +65,8 @@ RENDER_HTML_PAGE_TOOL = ToolDefinition.from_spec(
             when=(
                 "Use to check the look of HTML you wrote or edited, such as a "
                 "slide deck, a quote or a report. Use this instead of starting "
-                "Chrome or another browser through bash."
+                "Chrome or another browser through bash; save_html_as_pdf saves "
+                "the same pages as a PDF file."
             ),
             pitfalls=(
                 "Scripts run, but dialogs and window.print() do nothing. Local "

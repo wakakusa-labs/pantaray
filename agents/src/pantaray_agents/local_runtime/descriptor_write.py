@@ -1,4 +1,4 @@
-"""Atomic text writes below an already authorized directory descriptor."""
+"""Atomic file writes below an already authorized directory descriptor."""
 
 from __future__ import annotations
 
@@ -75,6 +75,23 @@ def write_text_at_descriptor(
     replacement_mode: int | None,
     exclusive: bool,
 ) -> None:
+    write_bytes_at_descriptor(
+        parent_descriptor=parent_descriptor,
+        destination_name=destination_name,
+        data=text.encode("utf-8"),
+        replacement_mode=replacement_mode,
+        exclusive=exclusive,
+    )
+
+
+def write_bytes_at_descriptor(
+    *,
+    parent_descriptor: int,
+    destination_name: str,
+    data: bytes,
+    replacement_mode: int | None,
+    exclusive: bool,
+) -> None:
     temp_name = f"{FILE_WRITE_TEMP_PREFIX}{uuid.uuid4().hex}.tmp"
     temp_descriptor: int | None = None
     committed = False
@@ -86,9 +103,9 @@ def write_text_at_descriptor(
                 0o666,
                 dir_fd=parent_descriptor,
             )
-            with os.fdopen(temp_descriptor, "w", encoding="utf-8") as handle:
+            with os.fdopen(temp_descriptor, "wb") as handle:
                 temp_descriptor = None
-                handle.write(text)
+                handle.write(data)
                 if replacement_mode is not None:
                     os.fchmod(handle.fileno(), replacement_mode)
                 handle.flush()

@@ -24,6 +24,7 @@ from pantaray_agents.tools.files.read_contract import (
 from pantaray_agents.tools.files.render_pages import (
     RenderHtmlPageToolArgs,
     RenderPdfPageToolArgs,
+    SaveHtmlAsPdfToolArgs,
 )
 
 from ..models import BrokerNetworkPolicy
@@ -36,6 +37,7 @@ BrokerExecutionPath = Literal[
     "broker_direct_glob",
     "broker_direct_grep",
     "broker_direct_patch",
+    "broker_direct_save_pdf",
     "broker_sandbox_command",
     "broker_sandbox_python",
 ]
@@ -233,6 +235,18 @@ class RenderHtmlPageOutput(BaseModel):
     attachments: list[RenderedPdfPageAttachment]
 
 
+class SaveHtmlAsPdfOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: Literal["saved"]
+    path: str
+    pdf_path: str
+    byte_size: int
+    replaced: bool
+    blocked_requests: list[HtmlBlockedRequest]
+    message: str
+
+
 class DiscoveryEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -354,6 +368,7 @@ type BrokerToolArgs = (
     ReadToolArgs
     | RenderPdfPageToolArgs
     | RenderHtmlPageToolArgs
+    | SaveHtmlAsPdfToolArgs
     | ListToolArgs
     | GlobToolArgs
     | GrepToolArgs
@@ -461,6 +476,22 @@ class ValidatedPatchRequest(BaseModel):
     approval_source: Literal["settings", "prompt"] | None = None
     changes: list[ApplyPatchChange]
     patch_paths: list[str]
+    command_summary_json: dict[str, JSONValue]
+    tool_request_id: str
+    requested_at: str
+    preflight_only: bool
+
+
+class ValidatedSaveHtmlAsPdfRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_invocation_id: str
+    manifest_id: str
+    execution_session_id: str
+    action_id: str
+    approval_session_id: str | None = None
+    approval_source: Literal["settings", "prompt"] | None = None
+    args: SaveHtmlAsPdfToolArgs
     command_summary_json: dict[str, JSONValue]
     tool_request_id: str
     requested_at: str

@@ -42,6 +42,7 @@ from .render_pdf_page_tool import (
     RENDER_PDF_PAGE_TOOL_ID,
 )
 from .run_python_tool import RUN_PYTHON_TOOL
+from .save_html_as_pdf_tool import SAVE_HTML_AS_PDF_TOOL
 from .session_memory_tool import (
     SESSION_MEMORY_MAX_BYTES,
     WRITE_SESSION_MEMORY_TOOL,
@@ -153,6 +154,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         READ_TOOL,
         RENDER_PDF_PAGE_TOOL,
         RENDER_HTML_PAGE_TOOL,
+        SAVE_HTML_AS_PDF_TOOL,
         LIST_TOOL,
         GLOB_TOOL,
         GREP_TOOL,
@@ -193,6 +195,7 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     READ_TOOL.tool_id,
     RENDER_PDF_PAGE_TOOL.tool_id,
     RENDER_HTML_PAGE_TOOL.tool_id,
+    SAVE_HTML_AS_PDF_TOOL.tool_id,
     LIST_TOOL.tool_id,
     GLOB_TOOL.tool_id,
     GREP_TOOL.tool_id,

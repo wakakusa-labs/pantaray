@@ -18,6 +18,7 @@ import type { LocalOwner } from '../auth/localRuntimeState';
 import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
+import { createHtmlRenderResponder } from '../render/htmlRender';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
@@ -207,6 +208,12 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       localArtifactRoot: params.localArtifactRoot,
       postAnswer: (body) =>
         requestJson({ method: 'POST', path: '/local/action-screen-capture', body }),
+      logger: params.logger,
+    }),
+    respondToHtmlRender: createHtmlRenderResponder({
+      localArtifactRoot: params.localArtifactRoot,
+      postAnswer: (body) =>
+        requestJson({ method: 'POST', path: '/local/action-html-render', body }),
       logger: params.logger,
     }),
     logger: params.logger,

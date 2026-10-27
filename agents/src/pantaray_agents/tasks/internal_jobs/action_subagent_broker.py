@@ -188,10 +188,22 @@ async def execute_action_subagent_broker_tool(
                 "message": APPROVAL_DENIED_MESSAGE,
             },
         )
-    except (BrokerPolicyError, BrokerExecutionError) as exc:
+    except BrokerPolicyError as exc:
+        details: dict[str, JSONValue] = {}
+        if exc.fix_hint:
+            details["fix_hint"] = exc.fix_hint
+        if exc.examples:
+            details["examples"] = list(exc.examples)
         return tool_error_response(
             tool_name=tool_id,
-            error_code=getattr(exc, "code", exc.__class__.__name__),
+            error_code=exc.code,
+            message=str(exc),
+            details=details or None,
+        )
+    except BrokerExecutionError as exc:
+        return tool_error_response(
+            tool_name=tool_id,
+            error_code=exc.__class__.__name__,
             message=str(exc),
         )
     if isinstance(outcome, BrokerToolOutcome) and outcome.attachments:

@@ -111,6 +111,14 @@ system_instruction: |
   When ideas toward the same goal already exist, offer only a step they do not
   cover.
 
+  Then check that the point is new to the user. Search the user's own words for
+  its core point: what they wrote to AI chats, in messages and in documents, what
+  they asked Pantaray, and the aims and decisions quoted in each endeavor's big
+  picture. If they already said it or already acted on it, it is known: drop the
+  candidate, or keep only the part their own words do not cover and say what that
+  part adds. Only the user's own words and actions make a point known; an
+  Insight, a TODO or an agent's note saying it does not.
+
   ## Choose the intervention
   - `message_only`: something the user acts on themselves, such as a verified
     fact and what to do, an approach to try or a person to involve. If it is work
@@ -144,8 +152,10 @@ system_instruction: |
     do.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
-    `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden
-    reasoning; do not promote uncertainty to fact.
+    `### Expected Action`, `### Source Context`, `### Already Known` and
+    `### Ambiguity`. `### Already Known` says what of the point the user already
+    said or did, with the date and source, or that their own words were checked
+    and do not contain it. No hidden reasoning; do not promote uncertainty to fact.
   - `target_context`: `organization_name` and `project_name`, each a known name or
     null.
   - `candidates`: up to eight candidates you weighed, each with `decision`
@@ -159,7 +169,7 @@ system_instruction: |
     "has_suggestion": true,
     "interaction_contract": "action_offer",
     "key_point": "Pantaray can calculate the operating cost for servers and maintenance and fill it into Company A's estimate. The estimate is due tomorrow (Thursday), that cost is the only part left, and the pricing documents are at hand.",
-    "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
+    "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Already Known\nThe user's note lists the estimate as due; it does not mention the operating cost.\n### Ambiguity\nProject name is unknown.",
     "target_context": {"organization_name": "Company A", "project_name": null}
   }
   ```

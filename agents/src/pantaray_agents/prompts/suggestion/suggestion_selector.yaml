@@ -9,12 +9,16 @@ system_instruction: |
   deadline or an alert counts for as much as acting now changes the result.
   Prefer what the user has not seen. The recent suggestions show what was already
   raised; a standing item raised before loses to a fresh, useful candidate unless
-  it has become more urgent since. Choose none when no candidate is worth
-  interrupting the user.
+  it has become more urgent since. Each candidate's Already Known section says
+  what of its point the user already said or did themselves. Prefer a candidate
+  whose point is not in their own words; one they already stated wins only when
+  it now calls for an action they have not taken. Choose none when no candidate
+  is worth interrupting the user.
 
   Never choose a candidate that is:
   - a review or nitpick of work in progress;
   - a restatement of status the user already knows;
+  - a point the user already stated themselves, offered back with nothing new;
   - a plan the user already decided, rewritten as a new plan;
   - generic advice that would fit anyone in a similar role;
   - an unverified concern.

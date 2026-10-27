@@ -42,6 +42,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     GREP_TOOL_ID,
     LIST_TOOL_ID,
     READ_TOOL_ID,
+    RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
 )
 from pantaray_agents.local_runtime.tooling.invocation_audit import BROKERED_TOOL_IDS
@@ -110,7 +111,14 @@ from .zanei import run_zanei_query_tool, run_zanei_timeline_tool
 
 logger = logging.getLogger(__name__)
 NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
-    {READ_TOOL_ID, RENDER_PDF_PAGE_TOOL_ID, LIST_TOOL_ID, GLOB_TOOL_ID, GREP_TOOL_ID}
+    {
+        READ_TOOL_ID,
+        RENDER_PDF_PAGE_TOOL_ID,
+        RENDER_HTML_PAGE_TOOL_ID,
+        LIST_TOOL_ID,
+        GLOB_TOOL_ID,
+        GREP_TOOL_ID,
+    }
 )
 PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS = (
     BROKERED_TOOL_IDS - NON_PREFLIGHT_BROKERED_TOOL_IDS

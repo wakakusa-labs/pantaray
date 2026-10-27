@@ -31,6 +31,7 @@ from .broker_protocol import (
     ValidatedListRequest,
     ValidatedPatchRequest,
     ValidatedReadRequest,
+    ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
 )
 from .direct_execution_start import (
@@ -131,6 +132,8 @@ def claim_broker_execution_start(
     validated: (
         ValidatedReadRequest
         | ValidatedRenderPdfPageRequest
+        | ValidatedRenderHtmlPageRequest
+        | ValidatedRenderHtmlPageRequest
         | ValidatedListRequest
         | ValidatedGlobRequest
         | ValidatedGrepRequest

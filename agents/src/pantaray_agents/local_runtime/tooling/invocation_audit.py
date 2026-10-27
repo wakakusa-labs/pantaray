@@ -17,6 +17,7 @@ from .brokering.broker_common import (
     GREP_TOOL_ID,
     LIST_TOOL_ID,
     READ_TOOL_ID,
+    RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
 )
@@ -44,6 +45,7 @@ BROKERED_TOOL_IDS = frozenset(
     {
         READ_TOOL_ID,
         RENDER_PDF_PAGE_TOOL_ID,
+        RENDER_HTML_PAGE_TOOL_ID,
         LIST_TOOL_ID,
         GLOB_TOOL_ID,
         GREP_TOOL_ID,

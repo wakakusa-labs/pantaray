@@ -71,8 +71,6 @@ class SuggestionHistoryItem(_ConversationHistoryModel):
     title: NonBlankText
     updated_at: ConversationHistoryTimestamp
     status: Literal["approval_pending", "idle"]
-    # What follows the suggestion's opening sentence, which the title shows.
-    status_line: ConversationHistoryStatusLine | None
     # The names of the files the suggestion made.
     artifact_names: tuple[NonBlankText, ...]
 

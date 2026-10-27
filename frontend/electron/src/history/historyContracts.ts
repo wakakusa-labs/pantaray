@@ -65,7 +65,6 @@ const SuggestionHistoryItemSchema = z
     title: nonBlankTextSchema,
     updated_at: canonicalTimestampSchema,
     status: z.enum(['approval_pending', 'idle']),
-    status_line: statusLineSchema,
     artifact_names: artifactNamesSchema,
   })
   .strict();

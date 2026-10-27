@@ -44,7 +44,6 @@ def test_page_discriminates_minimal_strict_items() -> None:
                     "title": "Review this",
                     "updated_at": "2026-08-29T23:00:00.000Z",
                     "status": "approval_pending",
-                    "status_line": "It is due today.",
                     "artifact_names": ("outline.md",),
                 },
             ),
@@ -63,7 +62,6 @@ def test_page_discriminates_minimal_strict_items() -> None:
             title="Review this",
             updated_at="2026-08-30T00:00:00.000Z",
             status="running",  # type: ignore[arg-type]
-            status_line=None,
             artifact_names=(),
         )
 

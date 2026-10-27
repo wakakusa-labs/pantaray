@@ -60,7 +60,6 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
         title: 'Suggestion',
         updated_at: '2026-08-30T01:02:03.000Z',
         status: 'idle',
-        status_line: null,
         artifact_names: [],
       },
     ],
@@ -257,7 +256,6 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
     title: id,
     updated_at: updatedAt.toISOString(),
     status: 'idle' as const,
-    status_line: null,
     artifact_names: [],
   });
   mocks.itemsOverride = [
@@ -466,7 +464,6 @@ it('確認待ちの会話と返事待ちの提案はチップ、未読の完了�
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
-      status_line: null,
       artifact_names: [],
     },
     {
@@ -475,7 +472,6 @@ it('確認待ちの会話と返事待ちの提案はチップ、未読の完了�
       title: 'Decided',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
-      status_line: null,
       artifact_names: [],
     },
   ];
@@ -553,7 +549,6 @@ it('行はタイトルの下に今の状況と作ったファイルを1行ずつ
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
-      status_line: 'The deadline is Friday.',
       artifact_names: ['outline.md'],
     },
     {
@@ -580,7 +575,8 @@ it('行はタイトルの下に今の状況と作ったファイルを1行ずつ
     ];
   };
   expect(linesOf('Done')).toEqual(['Summary ready', 'report.md history.row.moreFiles {"count":2}']);
-  expect(linesOf('Offer')).toEqual(['The deadline is Friday.', 'outline.md']);
+  // A suggestion's title is its text already, so it has no line; only its files.
+  expect(linesOf('Offer')).toEqual([null, 'outline.md']);
   expect(linesOf('Bare')).toEqual([null, null]);
   expect(rowOf('Done').querySelector('.history-item-files svg')).not.toBeNull();
   // Seen under the title, heard after it: the row keeps its name.
@@ -589,7 +585,7 @@ it('行はタイトルの下に今の状況と作ったファイルを1行ずつ
     'Summary ready report.md history.row.moreFiles {"count":2}'
   );
   expect(rowOf('Offer')).toHaveAccessibleName('Offer history.attention.suggestion');
-  expect(rowOf('Offer')).toHaveAccessibleDescription('The deadline is Friday. outline.md');
+  expect(rowOf('Offer')).toHaveAccessibleDescription('outline.md');
   expect(rowOf('Bare')).not.toHaveAttribute('aria-describedby');
   expect(container.querySelector('.history-item-line')).toHaveAttribute('aria-hidden', 'true');
   expect(HISTORY_MESSAGES.ja['history.row.moreFiles']).toBe('ほか {count} 件');
@@ -780,7 +776,6 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     title: id,
     updated_at: updatedAt.toISOString(),
     status: 'idle' as const,
-    status_line: null,
     artifact_names: [],
   });
   mocks.itemsOverride = [
@@ -881,7 +876,6 @@ it('表示中の行を削除すると、選択を次の行へ、無ければチ�
       title: 'Suggestion',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
-      status_line: null,
       artifact_names: [],
     },
   ];
@@ -956,7 +950,6 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
-      status_line: null,
       artifact_names: [],
     },
   ];

@@ -242,17 +242,17 @@ def test_rows_show_the_latest_answer_and_every_linked_document(
     assert (unanswered.status_line, unanswered.artifact_names) == (None, ())
 
 
-def test_suggestion_rows_carry_on_after_the_title_and_name_their_files() -> None:
+def test_suggestion_rows_name_their_files_and_no_line() -> None:
     suggestion = replace(
         _SUGGESTION,
         answer="来週の資料を準備しましょうか？先週の議事録に宿題が残っています。",
         artifacts_json='["drafts/outline.md","notes.txt"]',
     )
     item = _project((suggestion,)).items[0]
-    assert item.status_line == "先週の議事録に宿題が残っています。"
+    # Its title is its text already; a line under it would only carry it on.
+    assert "status_line" not in item.model_dump()
     assert item.artifact_names == ("outline.md", "notes.txt")
-    one_sentence = _project((_SUGGESTION,)).items[0]
-    assert (one_sentence.status_line, one_sentence.artifact_names) == (None, ())
+    assert _project((_SUGGESTION,)).items[0].artifact_names == ()
 
 
 @pytest.mark.parametrize("artifacts_json", [None, "{}", "[1]", "not json"])

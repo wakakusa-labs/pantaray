@@ -586,7 +586,6 @@ test('a suggestion the user has not answered has a chip and opens in the detail 
       title: '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？',
       updated_at: at(9, 40),
       status: 'approval_pending',
-      status_line: '構成案はもうできていて、登壇は金曜です。',
       artifact_names: ['構成案.md'],
     },
     ...HISTORY,
@@ -594,13 +593,11 @@ test('a suggestion the user has not answered has a chip and opens in the detail 
   const sidebar = sidebarOf(page);
   const row = sidebar.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
   await expect(row.getByRole('img', { name: '返事待ちの提案' })).toHaveText('提案');
-  // Under the title: what follows it, and the file the suggestion made; heard as its description.
+  // Under the title: the file the suggestion made, heard as its description.
   await expect(row).toHaveAccessibleName(
     '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？ 返事待ちの提案'
   );
-  await expect(row).toHaveAccessibleDescription(
-    '構成案はもうできていて、登壇は金曜です。 構成案.md'
-  );
+  await expect(row).toHaveAccessibleDescription('構成案.md');
   // A running Action needs nothing from the user, so it has no chip or dot.
   await expect(
     sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ }).getByRole('img')

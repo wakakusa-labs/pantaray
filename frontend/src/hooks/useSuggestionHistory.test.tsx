@@ -171,7 +171,6 @@ describe('useSuggestionHistory', () => {
       title: 'Suggestion',
       updated_at: CURRENT_ITEM.updated_at,
       status: 'idle' as const,
-      status_line: null,
       artifact_names: [],
     };
     await act(async () => pending[5].resolve(historyResult([refreshed, suggestion], null)));

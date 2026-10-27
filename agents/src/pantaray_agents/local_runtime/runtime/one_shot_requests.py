@@ -1,9 +1,10 @@
 """One-shot rendezvous between an Action tool and Electron main.
 
-The Action runtime and the local backend HTTP app share one uvicorn process, so a
-request the desktop app has to fulfil is held in memory: the tool opens a request,
-the runtime announces its id to Electron over the orchestration WebSocket, and
-Electron answers it with a ``POST /local/...`` endpoint.
+The Action runtime, the local backend HTTP app and the orchestration WebSocket
+share one process, so a request the desktop app has to fulfil is held in memory:
+the tool opens a request, hands its id to the owner's live WebSocket session
+(``deliver_desktop_request``), and Electron answers it with a
+``POST /local/...`` endpoint.
 
 A request id is consumed exactly once. A second answer is rejected rather than
 overwriting the first, so a replayed POST cannot swap a result a tool already
@@ -17,23 +18,9 @@ that never answers.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
-
-from pantaray_agents.schema.agent.base import JSONValue
-
-from ..storage.migrations import MigrationError
-from ..storage.migrations.connection import configure_connection
-from .process_events import append_local_process_event
-
-_ROOT_PROCESS_SQL = """
-SELECT COALESCE(process.parent_process_id, process.process_id) AS root_process_id
-FROM processes AS process
-WHERE process.process_id = :process_id AND process.user_id = :user_id
-"""
 
 type OneShotAnswerStatus = Literal[
     "accepted",
@@ -102,55 +89,7 @@ class OneShotRequests[T]:
             pending.outcome.cancel()
 
 
-def announce_on_root_process_stream(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    process_id: str,
-    event_type: str,
-    payload: dict[str, JSONValue],
-) -> None:
-    """Publish a desktop request on the stream Electron actually reads.
-
-    Only the root Action process is forwarded to the desktop client, so a
-    subagent's request is announced on its parent's stream.
-    """
-
-    append_local_process_event(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        process_id=_resolve_root_process_id(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=user_id,
-            process_id=process_id,
-        ),
-        event_type=event_type,
-        payload=payload,
-    )
-
-
-def _resolve_root_process_id(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    process_id: str,
-) -> str:
-    with sqlite3.connect(db_path) as connection:
-        configure_connection(connection, busy_timeout_ms)
-        row = connection.execute(
-            _ROOT_PROCESS_SQL,
-            {"process_id": process_id, "user_id": user_id},
-        ).fetchone()
-    if row is None:
-        raise MigrationError(f"desktop request has no owning process: {process_id}")
-    return str(row[0])
-
-
 __all__ = [
     "OneShotAnswerStatus",
     "OneShotRequests",
-    "announce_on_root_process_stream",
 ]

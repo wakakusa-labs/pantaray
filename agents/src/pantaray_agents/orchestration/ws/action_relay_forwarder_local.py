@@ -13,15 +13,9 @@ from pantaray_agents.local_runtime.runtime.action_malformed_stream_terminal impo
     ActionMalformedStreamTerminalRepository,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
-from pantaray_agents.local_runtime.runtime.html_render_relay import (
-    HTML_RENDER_REQUESTED_EVENT,
-)
 from pantaray_agents.local_runtime.runtime.process_events import (
     PROCESS_STATUS_PAUSED,
     read_local_process_events_after,
-)
-from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    SCREEN_CAPTURE_REQUESTED_EVENT,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
@@ -37,10 +31,8 @@ from pantaray_agents.schema.action_conversation import parse_action_step_event
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.schema.websocket.server_messages import (
-    HtmlRenderRequestedMessage,
     PhysicalActionRunCompletedMessage,
     ProcessPausedMessage,
-    ScreenCaptureRequestedMessage,
 )
 from pantaray_agents.utils.metrics import record_action_job_completed
 from pantaray_agents.utils.public_error import public_ws_error
@@ -55,24 +47,6 @@ from .action_relay_shared import (
 from .base import PublicProcessEventPersistenceError
 
 _PROCESS_PAUSED_EVENT = "process_paused"
-
-# Requests the desktop client fulfils, each relayed as its own WebSocket message.
-_DESKTOP_REQUEST_MESSAGES: dict[
-    str,
-    tuple[
-        OutboundEvent,
-        type[ScreenCaptureRequestedMessage] | type[HtmlRenderRequestedMessage],
-    ],
-] = {
-    SCREEN_CAPTURE_REQUESTED_EVENT: (
-        OutboundEvent.SCREEN_CAPTURE_REQUESTED,
-        ScreenCaptureRequestedMessage,
-    ),
-    HTML_RENDER_REQUESTED_EVENT: (
-        OutboundEvent.HTML_RENDER_REQUESTED,
-        HtmlRenderRequestedMessage,
-    ),
-}
 
 _PAUSE_ANCHOR_STILL_HOLDS_SQL = """
 SELECT EXISTS (
@@ -244,24 +218,6 @@ async def _forward_action_events_from_local_runtime(
                     event_id=str(event.event_id),
                     store_in_session_store=False,
                     persisted_sequence_override=persisted_sequence,
-                )
-                if not sent:
-                    return
-                last_cursor = event.cursor
-                continue
-            if event_name in _DESKTOP_REQUEST_MESSAGES:
-                # A control message for the desktop client, not conversation
-                # history: it is never persisted and never replayed, because a
-                # request that arrives late has nothing left to answer.
-                outbound_event, message_type = _DESKTOP_REQUEST_MESSAGES[event_name]
-                sent = await self._send(
-                    outbound_event.value,
-                    message_type.model_validate({**event.payload, "kind": "action"}),
-                    process_id=process_id,
-                    meta=dict(meta),
-                    event_id=str(event.event_id),
-                    store_in_session_store=False,
-                    persist_public_event=False,
                 )
                 if not sent:
                     return

@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import sqlite3
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 from tests.unit.local_runtime.broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
-    _bootstrap_runtime_db,
+    RecordingDesktopSession,
+    desktop_session,
 )
 
 from pantaray_agents.local_runtime.runtime import html_render_relay as relay_module
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
-    HTML_RENDER_REQUESTED_EVENT,
     BlockedRequest,
     HtmlRenderAnswer,
     HtmlRenderClaimed,
@@ -23,6 +22,7 @@ from pantaray_agents.local_runtime.runtime.html_render_relay import (
     HtmlRenderOutcome,
 )
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
+from pantaray_agents.schema.events import OutboundEvent
 
 PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 PDF_SHA256 = hashlib.sha256(PDF_BYTES).hexdigest()
@@ -31,35 +31,26 @@ CLAIMED = HtmlRenderClaimed(
     byte_size=len(PDF_BYTES), sha256=PDF_SHA256, blocked_requests=BLOCKED
 )
 
-type Runtime = tuple[Path, Path, OneShotRequests[HtmlRenderAnswer]]
+type Runtime = tuple[RecordingDesktopSession, Path, OneShotRequests[HtmlRenderAnswer]]
 
 
 @pytest.fixture
-def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Runtime:
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
+async def runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[Runtime]:
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
-    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
-    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifact_root))
     broker = OneShotRequests[HtmlRenderAnswer]()
     monkeypatch.setattr(relay_module, "html_render_broker", lambda: broker)
-    return db_path, artifact_root, broker
-
-
-def _announced(db_path: Path) -> list[tuple[str, dict[str, object]]]:
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            "SELECT process_id, payload_json FROM process_events WHERE event_name = ?",
-            (HTML_RENDER_REQUESTED_EVENT,),
-        ).fetchall()
-    return [(str(row[0]), json.loads(row[1])) for row in rows]
+    with desktop_session() as desktop:
+        yield desktop, artifact_root, broker
 
 
 async def _start_render(runtime: Runtime, data: bytes | None):
     """Start a render, then write the PDF where Electron would once it is asked."""
 
-    db_path, artifact_root, _ = runtime
+    desktop, artifact_root, _ = runtime
     render = asyncio.ensure_future(
         relay_module.request_html_render(
             user_id="user-1",
@@ -73,9 +64,9 @@ async def _start_render(runtime: Runtime, data: bytes | None):
             allow_network=False,
         )
     )
-    while not _announced(db_path):
+    while not desktop.requests:
         await asyncio.sleep(0.005)
-    render_request_id = str(_announced(db_path)[0][1]["render_request_id"])
+    render_request_id = str(desktop.requests[0]["render_request_id"])
     temp_pdf = artifact_root / ".tmp" / "html-renders" / f"{render_request_id}.pdf"
     if data is not None:
         temp_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -106,9 +97,10 @@ async def test_a_rendered_pdf_is_verified_returned_and_removed(
     outcome = await _render(runtime, data=PDF_BYTES, answer=CLAIMED)
 
     assert outcome == HtmlRendered(pdf=PDF_BYTES, blocked_requests=BLOCKED)
-    [(stream, payload)] = _announced(runtime[0])
-    assert stream == BROKER_ACTOR_PROCESS_ID
+    assert runtime[0].events == [OutboundEvent.HTML_RENDER_REQUESTED]
+    [payload] = runtime[0].requests
     assert payload == {
+        "kind": "action",
         "action_id": "action-1",
         "process_id": BROKER_ACTOR_PROCESS_ID,
         "tool_request_id": "action-1:step-1:1",
@@ -164,7 +156,7 @@ async def test_an_unanswered_render_times_out_and_drops_a_late_file(
     assert isinstance(outcome, HtmlRenderFailed)
     assert outcome.code == "HTML_RENDER_RELAY_TIMED_OUT"
     # The request is closed, so Electron's late answer is told nobody waits.
-    render_request_id = str(_announced(runtime[0])[0][1]["render_request_id"])
+    render_request_id = str(runtime[0].requests[0]["render_request_id"])
     late = runtime[2].answer(
         request_id=render_request_id, user_id="user-1", outcome=CLAIMED
     )

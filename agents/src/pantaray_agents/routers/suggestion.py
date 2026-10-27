@@ -16,6 +16,9 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    owner_has_deliverable_session,
+)
 from pantaray_agents.local_runtime.runtime.identity import (
     OwnerMismatchError,
     verify_current_owner,
@@ -24,9 +27,6 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.runtime.welcome_suggestion import (
     WELCOME_SUGGESTION_MAX_CHARS,
     record_welcome_suggestion,
-)
-from pantaray_agents.orchestration.ws.deliverable_sessions import (
-    owner_has_deliverable_session,
 )
 from pantaray_agents.schema.agent.base import ErrorType
 from pantaray_agents.schema.agent.suggestion import (

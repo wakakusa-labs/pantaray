@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.websocket.server_messages import (
+    ScreenCaptureRequestedMessage,
+)
 
-from .one_shot_requests import OneShotRequests, announce_on_root_process_stream
-
-SCREEN_CAPTURE_REQUESTED_EVENT = "screen_capture_requested"
+from .deliverable_sessions import deliver_desktop_request
+from .one_shot_requests import OneShotRequests
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +62,8 @@ class ScreenCaptureRefused:
 type ScreenCaptureOutcome = ScreenCaptureCaptured | ScreenCaptureRefused
 
 
-def announce_screen_capture_request(
+async def announce_screen_capture_request(
     *,
-    db_path: Path,
-    busy_timeout_ms: int,
     user_id: str,
     action_id: str,
     process_id: str,
@@ -72,25 +71,22 @@ def announce_screen_capture_request(
     capture_request_id: str,
     app_name: str,
 ) -> None:
-    """Announce the request to Electron on the root Action process stream.
+    """Ask the owner's desktop app for the capture.
 
-    The payload names the approved app and carries no capture policy: what may be
+    The message names the approved app and carries no capture policy: what may be
     captured is decided in Electron main, against settings the runtime never sees.
     """
 
-    announce_on_root_process_stream(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        user_id=user_id,
-        process_id=process_id,
-        event_type=SCREEN_CAPTURE_REQUESTED_EVENT,
-        payload={
-            "action_id": action_id,
-            "process_id": process_id,
-            "tool_request_id": tool_request_id,
-            "capture_request_id": capture_request_id,
-            "app_name": app_name,
-        },
+    await deliver_desktop_request(
+        user_id,
+        ScreenCaptureRequestedMessage(
+            kind="action",
+            process_id=process_id,
+            action_id=action_id,
+            tool_request_id=tool_request_id,
+            capture_request_id=capture_request_id,
+            app_name=app_name,
+        ),
     )
 
 
@@ -104,7 +100,6 @@ def screen_capture_broker() -> OneShotRequests[ScreenCaptureOutcome]:
 
 
 __all__ = [
-    "SCREEN_CAPTURE_REQUESTED_EVENT",
     "ScreenCaptureCaptured",
     "ScreenCaptureOutcome",
     "ScreenCaptureRefusalCode",

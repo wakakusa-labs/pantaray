@@ -12,6 +12,9 @@ from pantaray_agents.local_runtime.context.source_control import context_source_
 from pantaray_agents.local_runtime.context.source_gate import SourceInvalidated
 from pantaray_agents.local_runtime.context.source_transport import source_scope
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    owner_has_deliverable_session,
+)
 from pantaray_agents.local_runtime.runtime.job_control import DeferredLocalJob
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     job_owner_changed,
@@ -42,9 +45,6 @@ from pantaray_agents.local_runtime.tooling.suggestion_research import (
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     discard_run_tool_results,
-)
-from pantaray_agents.orchestration.ws.deliverable_sessions import (
-    owner_has_deliverable_session,
 )
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import SuggestionAgentRequest

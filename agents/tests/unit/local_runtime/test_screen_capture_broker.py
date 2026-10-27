@@ -1,109 +1,68 @@
 from __future__ import annotations
 
-import json
-import sqlite3
-from pathlib import Path
-
 import pytest
-from tests.unit.local_runtime.broker_test_support import (
-    BROKER_ACTOR_PROCESS_ID,
-    _bootstrap_runtime_db,
-)
+from tests.unit.local_runtime.broker_test_support import desktop_session
 
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    SCREEN_CAPTURE_REQUESTED_EVENT,
     ScreenCaptureOutcome,
     ScreenCaptureRefused,
     announce_screen_capture_request,
 )
-from pantaray_agents.local_runtime.storage.migrations import MigrationError
+from pantaray_agents.schema.events import OutboundEvent
 
-TIMESTAMP = "2026-09-08T00:00:00Z"
-CHILD_PROCESS_ID = "process:action-1:child"
+SUBAGENT_PROCESS_ID = "process:action-1:child"
 APP_NAME = "Google Chrome"
 
 
-def _announce(db_path: Path, *, process_id: str) -> None:
-    announce_screen_capture_request(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
+async def _announce(*, user_id: str = "user-1") -> None:
+    await announce_screen_capture_request(
+        user_id=user_id,
         action_id="action-1",
-        process_id=process_id,
+        process_id=SUBAGENT_PROCESS_ID,
         tool_request_id="action-1:step-1:1",
         capture_request_id="capture-1",
         app_name=APP_NAME,
     )
 
 
-def _announced(db_path: Path) -> list[tuple[str, str]]:
-    """Each announcement's stream, and the app Electron is asked to capture."""
+async def test_a_request_reaches_the_owners_desktop_whichever_process_asked() -> None:
+    """No session follows a chat-launched Action or a subagent, and both still ask."""
 
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            "SELECT process_id, payload_json FROM process_events WHERE event_name = ?",
-            (SCREEN_CAPTURE_REQUESTED_EVENT,),
-        ).fetchall()
-    return [(str(row[0]), json.loads(row[1])["app_name"]) for row in rows]
+    with desktop_session() as desktop:
+        await _announce()
 
-
-def _insert_child_process(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as connection, connection:
-        connection.execute(
-            """
-            INSERT INTO processes(
-                process_id, user_id, kind, status, action_id, started_at,
-                updated_at, heartbeat_at, next_event_seq, parent_process_id
-            ) VALUES (?, 'user-1', 'action_subagent', 'running', 'action-1',
-                      ?, ?, ?, 1, ?)
-            """,
-            (
-                CHILD_PROCESS_ID,
-                TIMESTAMP,
-                TIMESTAMP,
-                TIMESTAMP,
-                BROKER_ACTOR_PROCESS_ID,
-            ),
-        )
+    assert desktop.events == [OutboundEvent.SCREEN_CAPTURE_REQUESTED]
+    assert desktop.requests == [
+        {
+            "kind": "action",
+            "process_id": SUBAGENT_PROCESS_ID,
+            "action_id": "action-1",
+            "tool_request_id": "action-1:step-1:1",
+            "capture_request_id": "capture-1",
+            "app_name": APP_NAME,
+        }
+    ]
 
 
-def test_a_subagent_request_is_announced_on_the_root_process_stream(
-    tmp_path: Path,
-) -> None:
-    """Only the root Action stream reaches the desktop client."""
+async def test_only_the_newest_session_that_can_send_is_asked() -> None:
+    """Each delivery is one capture, so two sessions must not both be asked."""
 
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
-    _insert_child_process(db_path)
+    with desktop_session() as older, desktop_session() as newer:
+        await _announce()
+        assert (len(older.requests), len(newer.requests)) == (0, 1)
 
-    _announce(db_path, process_id=CHILD_PROCESS_ID)
-
-    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
-
-
-def test_a_root_request_is_announced_on_its_own_stream(tmp_path: Path) -> None:
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
-
-    _announce(db_path, process_id=BROKER_ACTOR_PROCESS_ID)
-
-    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
+        # A session whose send failed can never send again.
+        newer.open = False
+        await _announce()
+        assert (len(older.requests), len(newer.requests)) == (1, 1)
 
 
-def test_a_request_from_another_users_process_is_refused(tmp_path: Path) -> None:
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
+async def test_another_owners_session_is_not_asked() -> None:
+    with desktop_session(owner_id="user-2") as other:
+        await _announce(user_id="user-1")
 
-    with pytest.raises(MigrationError):
-        announce_screen_capture_request(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            user_id="user-2",
-            action_id="action-1",
-            process_id=BROKER_ACTOR_PROCESS_ID,
-            tool_request_id="action-1:step-1:1",
-            capture_request_id="capture-1",
-            app_name=APP_NAME,
-        )
-    assert _announced(db_path) == []
+    assert other.requests == []
 
 
 @pytest.mark.asyncio

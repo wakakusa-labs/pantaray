@@ -21,11 +21,14 @@ from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     open_regular_file_descriptor,
 )
+from pantaray_agents.schema.websocket.server_messages import (
+    HtmlRenderRequestedMessage,
+)
 
-from .one_shot_requests import OneShotRequests, announce_on_root_process_stream
-from .runtime_env import read_local_runtime_artifact_root, read_local_runtime_db_config
+from .deliverable_sessions import deliver_desktop_request
+from .one_shot_requests import OneShotRequests
+from .runtime_env import read_local_runtime_artifact_root
 
-HTML_RENDER_REQUESTED_EVENT = "html_render_requested"
 HTML_RENDER_TEMP_DIRECTORY = ".tmp/html-renders"
 # Electron gives itself 20 s per render; the rest covers queueing behind another
 # render and the answer's round trip.
@@ -110,31 +113,25 @@ async def request_html_render(
     ``allow_network`` is the user's command network setting.
     """
 
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
     artifact_root = read_local_runtime_artifact_root()
     broker = html_render_broker()
     render_request_id = broker.open(user_id=user_id)
     relative_pdf_path = f"{HTML_RENDER_TEMP_DIRECTORY}/{render_request_id}.pdf"
     try:
-        announce_on_root_process_stream(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=user_id,
-            process_id=process_id,
-            event_type=HTML_RENDER_REQUESTED_EVENT,
-            payload={
-                "action_id": action_id,
-                "process_id": process_id,
-                "tool_request_id": tool_request_id,
-                "render_request_id": render_request_id,
-                "html_path": str(html_path),
-                "file_roots": [str(root) for root in file_roots],
-                "private_roots": [str(root) for root in private_roots],
-                "private_root_exceptions": [
-                    str(root) for root in private_root_exceptions
-                ],
-                "allow_network": allow_network,
-            },
+        await deliver_desktop_request(
+            user_id,
+            HtmlRenderRequestedMessage(
+                kind="action",
+                process_id=process_id,
+                action_id=action_id,
+                tool_request_id=tool_request_id,
+                render_request_id=render_request_id,
+                html_path=str(html_path),
+                file_roots=[str(root) for root in file_roots],
+                private_roots=[str(root) for root in private_roots],
+                private_root_exceptions=[str(root) for root in private_root_exceptions],
+                allow_network=allow_network,
+            ),
         )
         answer = await broker.wait(
             request_id=render_request_id,
@@ -160,7 +157,7 @@ async def request_html_render(
             claimed=answer,
         )
     finally:
-        # Closing is idempotent; it matters when the announcement itself failed.
+        # Closing is idempotent; it matters when the delivery itself failed.
         broker.close(request_id=render_request_id)
         (artifact_root / relative_pdf_path).unlink(missing_ok=True)
 
@@ -202,7 +199,6 @@ def _read_claimed_pdf(
 
 
 __all__ = [
-    "HTML_RENDER_REQUESTED_EVENT",
     "HTML_RENDER_TEMP_DIRECTORY",
     "HTML_RENDER_TIMEOUT_SECONDS",
     "BlockedRequest",

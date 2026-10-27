@@ -18,6 +18,7 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
+from pantaray_agents.local_runtime.runtime import deliverable_sessions
 from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
     ReconsideredInsight,
 )
@@ -35,7 +36,6 @@ from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.mock.suggestion_research import (
     build_mock_suggestion_research_tools,
 )
-from pantaray_agents.orchestration.ws import deliverable_sessions
 from pantaray_agents.schema.agent.suggestion import SuggestionStructuredOutput
 from pantaray_agents.schema.repositories.repository import RepositoryResult
 from pantaray_agents.tasks.internal_jobs import suggestion as suggestion_job

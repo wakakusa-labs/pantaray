@@ -21,16 +21,16 @@ from typing import Final, NamedTuple
 from starlette.websockets import WebSocketState
 
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    register_deliverable_session,
+    unregister_deliverable_session,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.orchestration.common.errors import error_from_payload
 from pantaray_agents.orchestration.ws.background_task import spawn_ws_background_task
-from pantaray_agents.orchestration.ws.deliverable_sessions import (
-    register_deliverable_session,
-    unregister_deliverable_session,
-)
 from pantaray_agents.orchestration.ws.error_meta import build_suggestion_error_meta
 from pantaray_agents.orchestration.ws.suggestion_stream.events import (
     SuggestionStreamEventsMixin,

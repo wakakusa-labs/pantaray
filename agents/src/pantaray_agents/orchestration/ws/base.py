@@ -14,6 +14,9 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketState
 
 import pantaray_agents.dependencies as deps
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    DesktopRequestMessage,
+)
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws.error_meta import (
     normalize_error_meta_kind,
@@ -389,6 +392,21 @@ class BaseWSHandler:
             meta=meta,
             persist_public_event=persist_public_event,
             persisted_sequence_override=persisted_sequence_override,
+        )
+
+    async def send_desktop_request(
+        self, event: OutboundEvent, message: DesktopRequestMessage
+    ) -> bool:
+        """Send a control message only the desktop client acts on.
+
+        It is neither kept for resume nor persisted for replay: a request that
+        arrives late has nothing left to answer.
+        """
+        return await self._send(
+            event.value,
+            message,
+            store_in_session_store=False,
+            persist_public_event=False,
         )
 
     async def send_error(

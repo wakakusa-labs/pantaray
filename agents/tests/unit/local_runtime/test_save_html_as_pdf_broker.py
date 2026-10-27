@@ -49,7 +49,7 @@ from .test_render_html_page_broker import (
 
 
 async def _save(env: Runtime, pdf_path: str, *, request_id: str = "req-1") -> object:
-    db_path, _, context = env
+    db_path, _, context, _ = env
     return await execute_broker_tool(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -145,7 +145,7 @@ async def test_outside_the_workspace_asks_even_under_always_allow(
             },
         )
     ]
-    assert _announced(runtime[0]) == []
+    assert _announced(runtime) == []
     assert not pdf.exists()
 
     _decide(runtime[0], asked.value, "req-1", "approved_once")
@@ -237,7 +237,7 @@ async def test_refused_before_the_user_or_electron_is_asked(
 
     assert caught.value.code == expected
     assert _approval_rows(runtime[0]) == []
-    assert _announced(runtime[0]) == []
+    assert _announced(runtime) == []
     assert notes.read_text() == "keep me"
     assert not (runtime[0].parent / "deck.pdf").exists()
 

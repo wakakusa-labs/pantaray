@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sqlite3
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,8 +13,10 @@ import pytest
 from tests.unit.local_runtime.broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ALLOWED_TOOL_IDS,
+    RecordingDesktopSession,
     _bootstrap_runtime_db,
     _grant_workspace_full_access,
+    desktop_session,
 )
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
@@ -29,7 +31,6 @@ from pantaray_agents.agents.action_agent.runtime.state import create_initial_sta
 from pantaray_agents.agents.action_agent.tools import CAPTURE_SCREEN_TOOL
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    SCREEN_CAPTURE_REQUESTED_EVENT,
     ScreenCaptureCaptured,
     ScreenCaptureOutcome,
     ScreenCaptureRefusalCode,
@@ -147,13 +148,12 @@ def _grant_screen_capture(db_path: Path) -> None:
     )
 
 
-def _capture_request_events(db_path: Path) -> list[dict[str, object]]:
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            "SELECT payload_json FROM process_events WHERE event_name = ?",
-            (SCREEN_CAPTURE_REQUESTED_EVENT,),
-        ).fetchall()
-    return [json.loads(row[0]) for row in rows]
+@pytest.fixture
+async def desktop() -> AsyncIterator[RecordingDesktopSession]:
+    """The user's desktop app, connected; no session follows the Action itself."""
+
+    with desktop_session() as session:
+        yield session
 
 
 async def _preflight(state: dict[str, object]):
@@ -227,7 +227,10 @@ async def _run(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action_mode", [None, "always_allow"])
 async def test_prompt_each_time_pauses_before_any_capture_is_requested(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action_mode: ApprovalMode | None
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    action_mode: ApprovalMode | None,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     if action_mode is not None:
@@ -256,7 +259,7 @@ async def test_prompt_each_time_pauses_before_any_capture_is_requested(
     assert pending.command_summary_json["app_name"] == APP_NAME
     # The capture is what needs consent, so nothing may have been asked of the
     # desktop client before the user answered.
-    assert _capture_request_events(db_path) == []
+    assert desktop.requests == []
 
 
 @pytest.mark.asyncio
@@ -274,7 +277,9 @@ async def test_workspace_grant_alone_still_prompts_for_a_capture(
 
 @pytest.mark.asyncio
 async def test_denied_approval_reports_the_call_as_skipped(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _bind(monkeypatch, db_path=db_path)
@@ -286,7 +291,7 @@ async def test_denied_approval_reports_the_call_as_skipped(
 
     assert isinstance(preparation.control, ApprovalDeniedToolControl)
     assert preparation.result.output["executed"] is False
-    assert _capture_request_events(db_path) == []
+    assert desktop.requests == []
 
 
 @pytest.mark.asyncio
@@ -315,7 +320,9 @@ async def test_screen_capture_grant_authorizes_without_a_prompt(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tokyo_local_zone")
 async def test_captured_image_becomes_a_verified_tool_attachment(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _grant_screen_capture(db_path)
@@ -325,7 +332,7 @@ async def test_captured_image_becomes_a_verified_tool_attachment(
 
     result = await _answer_with(
         broker,
-        db_path=db_path,
+        desktop=desktop,
         run=_run(_state(context), db_path, context),
         outcome=_captured(),
     )
@@ -364,7 +371,10 @@ async def test_captured_image_becomes_a_verified_tool_attachment(
 @pytest.mark.parametrize("payload", (None, PNG_BYTES + b"replaced"))
 @pytest.mark.asyncio
 async def test_a_file_that_is_not_what_was_reported_fails_the_capture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: bytes | None
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    payload: bytes | None,
+    desktop: RecordingDesktopSession,
 ) -> None:
     """Electron's sha256 and byte_size are claims; the file on disk decides."""
 
@@ -378,7 +388,7 @@ async def test_a_file_that_is_not_what_was_reported_fails_the_capture(
 
     result = await _answer_with(
         broker,
-        db_path=db_path,
+        desktop=desktop,
         run=_run(_state(context), db_path, context),
         outcome=_captured(),
     )
@@ -390,7 +400,9 @@ async def test_a_file_that_is_not_what_was_reported_fails_the_capture(
 
 @pytest.mark.asyncio
 async def test_refusal_reaches_the_model_with_its_code_and_no_attachment(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _grant_screen_capture(db_path)
@@ -398,7 +410,7 @@ async def test_refusal_reaches_the_model_with_its_code_and_no_attachment(
 
     result = await _answer_with(
         broker,
-        db_path=db_path,
+        desktop=desktop,
         run=_run(_state(context), db_path, context),
         outcome=ScreenCaptureRefused(
             code="CAPTURE_REFUSED_PASSWORD_MANAGER",
@@ -423,7 +435,9 @@ def test_every_refusal_code_carries_its_own_guidance() -> None:
 
 @pytest.mark.asyncio
 async def test_unanswered_request_times_out_instead_of_waiting_forever(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _grant_screen_capture(db_path)
@@ -433,14 +447,51 @@ async def test_unanswered_request_times_out_instead_of_waiting_forever(
     result = await _run(_state(context), db_path, context)
 
     assert result.output["error"]["error_type"] == "CAPTURE_TIMED_OUT"
-    event = _capture_request_events(db_path)[0]
+    event = desktop.requests[0]
     assert event["capture_request_id"]
     assert event["app_name"] == APP_NAME
 
 
 @pytest.mark.asyncio
+async def test_a_stop_while_the_request_is_being_sent_leaves_no_request_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
+) -> None:
+    """A late answer to a stopped capture must find nothing, not a dead loop."""
+
+    db_path, context = _bootstrap(tmp_path)
+    _grant_screen_capture(db_path)
+    broker = _bind(monkeypatch, db_path=db_path)
+    sending = asyncio.Event()
+
+    async def _send_that_never_finishes(event: str, message: object) -> bool:
+        await RecordingDesktopSession.send_desktop_request(desktop, event, message)  # type: ignore[arg-type]
+        sending.set()
+        await asyncio.Event().wait()
+        return True
+
+    desktop.send_desktop_request = _send_that_never_finishes  # type: ignore[method-assign]
+    run = asyncio.ensure_future(_run(_state(context), db_path, context))
+    await asyncio.wait_for(sending.wait(), timeout=5)
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    late = broker.answer(
+        request_id=str(desktop.requests[0]["capture_request_id"]),
+        user_id="user-1",
+        outcome=_captured(),
+    )
+    assert late == "unknown_request"
+
+
+@pytest.mark.asyncio
 async def test_an_approved_capture_is_spent_and_cannot_run_a_second_time(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     """One consent is one capture, even if the Action replays the same step."""
 
@@ -452,7 +503,7 @@ async def test_an_approved_capture_is_spent_and_cannot_run_a_second_time(
 
     first = await _answer_with(
         broker,
-        db_path=db_path,
+        desktop=desktop,
         run=_run(_state(context), db_path, context),
         outcome=_captured(),
     )
@@ -474,12 +525,14 @@ async def test_an_approved_capture_is_spent_and_cannot_run_a_second_time(
     assert replayed.status == "error"
     assert replayed.output["error"]["error_type"] == "CAPTURE_APPROVAL_STATE_CHANGED"
     # The replay must not reach the desktop client at all.
-    assert len(_capture_request_events(db_path)) == 1
+    assert len(desktop.requests) == 1
 
 
 @pytest.mark.asyncio
 async def test_consent_withdrawn_between_preflight_and_call_fails_without_capturing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _bind(monkeypatch, db_path=db_path)
@@ -491,7 +544,7 @@ async def test_consent_withdrawn_between_preflight_and_call_fails_without_captur
 
     assert result.status == "error"
     assert result.output["error"]["error_type"] == "CAPTURE_APPROVAL_STATE_CHANGED"
-    assert _capture_request_events(db_path) == []
+    assert desktop.requests == []
 
 
 def _captured() -> ScreenCaptureCaptured:
@@ -510,20 +563,19 @@ def _captured() -> ScreenCaptureCaptured:
 async def _answer_with(
     broker: OneShotRequests[ScreenCaptureOutcome],
     *,
-    db_path: Path,
+    desktop: RecordingDesktopSession,
     run,
     outcome,
 ):
-    """Run the tool and answer the request it announces, as Electron would."""
+    """Run the tool and answer the request it sends the desktop, as Electron would."""
 
     task = asyncio.ensure_future(run)
     for _ in range(200):
         await asyncio.sleep(0.005)
-        events = _capture_request_events(db_path)
-        if not events:
+        if not desktop.requests:
             continue
         answered = broker.answer(
-            request_id=str(events[0]["capture_request_id"]),
+            request_id=str(desktop.requests[0]["capture_request_id"]),
             user_id="user-1",
             outcome=outcome,
         )

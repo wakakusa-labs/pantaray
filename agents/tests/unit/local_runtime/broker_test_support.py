@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    DesktopRequestMessage,
+    register_deliverable_session,
+    unregister_deliverable_session,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
@@ -48,6 +55,37 @@ from .migrated_db import prepare_test_database
 
 BROKER_ACTOR_PROCESS_ID = "process:action-1"
 BROKER_ACTOR_TIMESTAMP = "2026-03-23T00:00:00Z"
+
+
+class RecordingDesktopSession:
+    """The desktop app's live WebSocket session, keeping every request it is sent."""
+
+    def __init__(self) -> None:
+        self.open = True
+        self.events: list[str] = []
+        self.requests: list[dict[str, object]] = []
+
+    def can_deliver(self) -> bool:
+        return self.open
+
+    async def send_desktop_request(
+        self, event: str, message: DesktopRequestMessage
+    ) -> bool:
+        self.events.append(event)
+        self.requests.append(message.model_dump(mode="json"))
+        return True
+
+
+@contextmanager
+def desktop_session(owner_id: str = "user-1") -> Iterator[RecordingDesktopSession]:
+    """Connect a desktop session for the owner; call it inside the test's loop."""
+
+    session = RecordingDesktopSession()
+    register_deliverable_session(owner_id, session)
+    try:
+        yield session
+    finally:
+        unregister_deliverable_session(owner_id, session)
 
 
 def _seed_broker_actor_process(

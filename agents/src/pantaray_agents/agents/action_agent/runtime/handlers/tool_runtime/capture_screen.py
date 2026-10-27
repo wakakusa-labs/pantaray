@@ -266,13 +266,10 @@ async def run_capture_screen_tool(
                 f"was taken ({type(exc).__name__}). Request the capture again."
             ),
         )
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
     broker = screen_capture_broker()
     capture_request_id = broker.open(user_id=identity.user_id)
     try:
-        announce_screen_capture_request(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
+        await announce_screen_capture_request(
             user_id=identity.user_id,
             action_id=identity.action_id,
             process_id=identity.process_id,
@@ -280,13 +277,14 @@ async def run_capture_screen_tool(
             capture_request_id=capture_request_id,
             app_name=app_name,
         )
-    except Exception:
+        outcome = await broker.wait(
+            request_id=capture_request_id,
+            timeout_seconds=_CAPTURE_TIMEOUT_SECONDS,
+        )
+    finally:
+        # Idempotent after ``wait``; it matters when the send failed or a Stop
+        # cancelled it, so no request outlives the loop that waits for it.
         broker.close(request_id=capture_request_id)
-        raise
-    outcome = await broker.wait(
-        request_id=capture_request_id,
-        timeout_seconds=_CAPTURE_TIMEOUT_SECONDS,
-    )
 
     if outcome is None:
         return _error_result(

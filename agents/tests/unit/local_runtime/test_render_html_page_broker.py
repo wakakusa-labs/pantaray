@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import sqlite3
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -22,7 +21,6 @@ from pantaray_agents.agents.action_agent.tools import (
 )
 from pantaray_agents.local_runtime.runtime import html_render_relay as relay_module
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
-    HTML_RENDER_REQUESTED_EVENT,
     HTML_RENDER_TEMP_DIRECTORY,
     BlockedRequest,
     HtmlRenderClaimed,
@@ -41,20 +39,25 @@ from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from .broker_test_support import BROKER_ACTOR_PROCESS_ID, _bootstrap_runtime_db
+from .broker_test_support import (
+    BROKER_ACTOR_PROCESS_ID,
+    RecordingDesktopSession,
+    _bootstrap_runtime_db,
+    desktop_session,
+)
 from .test_pdf_page_render import write_pdf
 
 _USER_ID = "user-1"
 _TOOL_ID = "render_html_page"
 _BLOCKED = (BlockedRequest(reason="network_off", url="https://cdn.example/a.css"),)
 
-type Runtime = tuple[Path, Path, object]
+type Runtime = tuple[Path, Path, object, RecordingDesktopSession]
 
 
 @pytest.fixture
-def runtime(
+async def runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> Runtime:
+) -> AsyncIterator[Runtime]:
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifact_root))
@@ -65,10 +68,10 @@ def runtime(
         read_access_scope=read_access_scope,
         allowed_tool_ids=(_TOOL_ID, "save_html_as_pdf"),
     )
-    # The relay announces on the runtime's own database, as in the app.
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
-    return db_path, artifact_root, context
+    with desktop_session(_USER_ID) as desktop:
+        yield db_path, artifact_root, context, desktop
 
 
 def _workspace(runtime: Runtime) -> Path:
@@ -76,7 +79,7 @@ def _workspace(runtime: Runtime) -> Path:
 
 
 async def _render(runtime: Runtime, args: dict) -> object:
-    db_path, _, context = runtime
+    db_path, _, context, _ = runtime
     return await execute_broker_tool(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -90,13 +93,10 @@ async def _render(runtime: Runtime, args: dict) -> object:
     )
 
 
-def _announced(db_path: Path) -> list[dict[str, object]]:
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            "SELECT payload_json FROM process_events WHERE event_name = ?",
-            (HTML_RENDER_REQUESTED_EVENT,),
-        ).fetchall()
-    return [json.loads(row[0]) for row in rows]
+def _announced(runtime: Runtime) -> list[dict[str, object]]:
+    """What the desktop app has been asked to render."""
+
+    return runtime[3].requests
 
 
 async def _electron(
@@ -104,10 +104,10 @@ async def _electron(
 ) -> dict[str, object]:
     """Answer the one announced render as Electron main would."""
 
-    db_path, artifact_root, _ = runtime
-    while not _announced(db_path):
+    artifact_root = runtime[1]
+    while not _announced(runtime):
         await asyncio.sleep(0.005)
-    [payload] = _announced(db_path)
+    [payload] = _announced(runtime)
     render_request_id = str(payload["render_request_id"])
     if failure is None:
         pdf_path = (
@@ -140,7 +140,7 @@ async def _electron(
 async def test_render_prints_in_electron_and_draws_the_pages_it_has(
     runtime: Runtime, pages: list[int] | None, drawn: list[int], past_the_end: str
 ) -> None:
-    db_path, artifact_root, _ = runtime
+    db_path, artifact_root, _, _ = runtime
     html = _workspace(runtime) / "deck.html"
     html.write_text("<h1>Deck</h1>")
     args: dict[str, object] = {"path": "deck.html"}
@@ -264,7 +264,7 @@ async def test_render_refuses_before_electron_is_asked(
         await _render(runtime, {"path": requested})
 
     assert caught.value.code == expected
-    assert _announced(db_path) == []
+    assert _announced(runtime) == []
 
 
 def test_render_is_offered_to_the_root_action_alone() -> None:

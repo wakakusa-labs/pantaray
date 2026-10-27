@@ -20,6 +20,7 @@ from pantaray_agents.schema.conversation_history import (
         ("- item", "item"),
         ("12. step", "step"),
         ("__bold__ and [the report](pantaray-file:///a/b.md)", "bold and the report"),
+        ("See pantaray-file:///a/%E8%A8%88%E7%94%BB.md.", "See 計画.md."),
         ("   ", ""),
     ],
 )

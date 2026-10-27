@@ -45,7 +45,25 @@ def first_line(text: str) -> str:
 
     line = next((candidate for candidate in text.split("\n") if candidate.strip()), "")
     line = _LEADING_BLOCK_MARKER.sub("", line.strip(), count=1)
-    return _INLINE_EMPHASIS.sub("", _MARKDOWN_LINK.sub(r"\1", line)).strip()
+    line = _INLINE_EMPHASIS.sub("", _MARKDOWN_LINK.sub(r"\1", line))
+    return _bare_file_urls_as_names(line).strip()
+
+
+def _bare_file_urls_as_names(line: str) -> str:
+    """A file linked by its bare URL shows as its name, as its chip does."""
+
+    parts: list[str] = []
+    cursor = 0
+    start = line.find(_FILE_URL_START)
+    while start != -1:
+        url = _bare_file_url_at(line, start)
+        path = _local_path(url)
+        parts.append(line[cursor:start])
+        parts.append(_name(path) if path is not None else url)
+        cursor = start + len(url)
+        start = line.find(_FILE_URL_START, cursor)
+    parts.append(line[cursor:])
+    return "".join(parts)
 
 
 def _fit(line: str) -> str | None:

@@ -233,7 +233,7 @@ def test_rows_show_the_latest_answer_and_every_linked_document(
     running = _project((_ACTION,), (_ACTIVE,), answers={"a": answers}).items[0]
     assert [(item.status_line, item.artifact_names) for item in page.items] == [
         ("Summary is ready", ("plan.md", "deck.pdf")),
-        ("Wrote the plan from pantaray-file:///Users/me/app.py", ("plan.md",)),
+        ("Wrote the plan from app.py", ("plan.md",)),
     ]
     # The live stage is a running task's line; its files are already listed.
     assert running.status_line is None

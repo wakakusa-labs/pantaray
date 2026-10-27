@@ -11,6 +11,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AGENT_EXPERIENCE_ENTRIES_ROOT,
@@ -52,6 +53,9 @@ from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
 )
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
+)
+from pantaray_agents.local_runtime.runtime.time_allocations import (
+    render_time_by_endeavor,
 )
 from pantaray_agents.local_runtime.storage.chat_messages import (
     ChatMessage,
@@ -210,6 +214,9 @@ def prepare_memory_update_run(
                 suggestion_ids=tuple(payload.get("dismissed_suggestion_ids", ())),
             )
         )
+        time_by_endeavor = render_time_by_endeavor(
+            connection, user_id=user_id, now=datetime.now(UTC)
+        )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
             user_id=user_id,
@@ -296,6 +303,7 @@ def prepare_memory_update_run(
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         facts_index=_index_text(router.draft.documents, FACTS_INDEX_PATH),
         insights_index=_index_text(router.draft.documents, INSIGHTS_INDEX_PATH),
+        time_by_endeavor=time_by_endeavor,
         overview_request=_overview_request(router.draft.documents),
         workspace_context_prompt=load_workspace_structure_prompt(
             db_path=runtime.db_path,

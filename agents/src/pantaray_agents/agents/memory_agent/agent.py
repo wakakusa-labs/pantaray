@@ -154,6 +154,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
             memory_file_manifest=context.memory_file_manifest,
             facts_index=context.facts_index or "- none",
             insights_index=context.insights_index or "- none",
+            time_by_endeavor=context.time_by_endeavor or "- none",
             overview_request=context.overview_request,
             workspace_context_prompt=context.workspace_context_prompt or "- none",
             new_experience_ids="\n".join(

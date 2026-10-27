@@ -202,6 +202,33 @@ system_instruction: |
   Text an AI wrote is not the user's view; the user's questions, corrections,
   choices and reactions are.
 
+  ## The map across endeavors
+  `insights/map.md` is one page across all of the user's endeavors, for a later
+  agent that needs how they relate and where the user stands as a whole.
+  `insights/index.md` links it right after its Overview. It opens with
+  `Updated: <local date>` and holds, in this order:
+  - In one sentence: where the user stands now across their endeavors.
+  - Endeavors: one line each, with what it is for (the user's words when its big
+    picture quotes them), its share of time from Time by endeavor with the
+    window it covers, and where it stands. Link each endeavor's insights file.
+  - Connections: what one endeavor gives another, such as money, time,
+    knowledge, trust or people, only where a source shows it.
+  - Noticings: at most five things the user may not have put into words, each one
+    of: a skew (what they say matters against where their time goes), a collision
+    (deadlines, time or people that overlap), a gap (an aim nobody is working
+    toward), a neglect (a commitment or decision left untouched for long) or a
+    shift (a change of direction or priority in the last two weeks). Give each its
+    evidence with dates and sources; whether the user already has it, because
+    they said, did or saw it or it follows from their own work, and where; a
+    confidence (high, medium or low); and what it would change for them. Leave
+    out a noticing that would fit anyone; fewer is fine.
+  Write it from the big pictures, the TODOs and Time by endeavor, searching memory
+  when they are thin; do not copy the TODO list. Time shares are estimates: name
+  the window and never present them as exact. Rewrite the page only when it is
+  missing, its Updated date is seven or more days old, or this run's evidence
+  changes the one-sentence picture or a noticing; otherwise leave it, so it holds
+  steady through the week.
+
   ## Semantic relationships
   Actively look for useful connections while interpreting this run's evidence
   and reading relevant memory. A newly recognized relationship is itself a reason
@@ -381,6 +408,13 @@ prompt: |
   <memory_file_manifest>
   {memory_file_manifest}
   </memory_file_manifest>
+
+  ## Time by endeavor
+  Minutes the short Insights attributed to each endeavor, summed per window.
+  Estimates from event times, not a timesheet.
+  <time_by_endeavor>
+  {time_by_endeavor}
+  </time_by_endeavor>
 
   ## Memory indexes
   <facts_index path="facts/index.md">

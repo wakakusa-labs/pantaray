@@ -26,6 +26,9 @@ class MemoryUpdateContext(BaseModel):
     memory_file_manifest: str = Field(min_length=1)
     facts_index: str
     insights_index: str
+    # Estimated minutes per endeavor over recent windows, rendered; empty when
+    # no short Insight has recorded any.
+    time_by_endeavor: str = ""
     overview_request: str
     workspace_context_prompt: str
     new_experience_ids: tuple[str, ...]

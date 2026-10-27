@@ -3,18 +3,24 @@
 import asyncio
 import json
 import logging
+import math
 import sqlite3
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
-from pantaray_agents.agents.insight_agent.agent import InsightAgent, ShortInsightOutput
+from pantaray_agents.agents.insight_agent.agent import (
+    InsightAgent,
+    ShortInsightOutput,
+    TimeShareClaim,
+)
 from pantaray_agents.agents.insight_agent.record_verification import (
     VerifiedRecord,
     verify_source_records,
 )
-from pantaray_agents.local_runtime.activity_summary_schedule import parse_iso_z
+from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse_iso_z
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_gate import (
     SourceGate,
@@ -63,6 +69,25 @@ logger = logging.getLogger(__name__)
 NAMESPACE_SOURCE_RECORD: Final[uuid.UUID] = uuid.uuid5(
     uuid.NAMESPACE_URL, "pantaray:source_record:v1"
 )
+NAMESPACE_TIME_ALLOCATION: Final[uuid.UUID] = uuid.uuid5(
+    uuid.NAMESPACE_URL, "pantaray:activity_time_allocation:v1"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TimeAllocation:
+    endeavor: str
+    organization: str | None
+    project: str | None
+    minutes: int
+
+
+@dataclass(frozen=True, slots=True)
+class TimeAllocations:
+    observed_start: str
+    observed_end: str
+    entries: tuple[TimeAllocation, ...]
+
 
 # How far back the first run after an absence asks connected apps for changes.
 # A night or a day away stays covered; past that, each probe returns at most a
@@ -200,6 +225,13 @@ async def run_short_insight(
                             run_id=run_id,
                             output=output,
                             records=verification.accepted,
+                            allocations=bound_time_allocations(
+                                output.time_allocation,
+                                observed=[
+                                    observation.ts
+                                    for observation in zanei.observations.values()
+                                ],
+                            ),
                             period_start=period_start,
                             period_end=period_end,
                         )
@@ -248,6 +280,7 @@ def _persist_short_insight(
     run_id: str,
     output: ShortInsightOutput,
     records: tuple[VerifiedRecord, ...],
+    allocations: TimeAllocations | None,
     period_start: str,
     period_end: str,
 ) -> None:
@@ -312,6 +345,33 @@ def _persist_short_insight(
                 for record in records
             ),
         )
+        if allocations is not None:
+            connection.executemany(
+                """INSERT INTO activity_time_allocations(allocation_id, user_id,
+                   run_id, observed_start, observed_end, endeavor, organization_name,
+                   project_name, minutes, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    (
+                        str(
+                            uuid.uuid5(
+                                NAMESPACE_TIME_ALLOCATION,
+                                json.dumps([run_id, index], ensure_ascii=False),
+                            )
+                        ),
+                        binding.user_id,
+                        run_id,
+                        allocations.observed_start,
+                        allocations.observed_end,
+                        entry.endeavor,
+                        entry.organization,
+                        entry.project,
+                        entry.minutes,
+                        now,
+                    )
+                    for index, entry in enumerate(allocations.entries)
+                ),
+            )
         register_source_records_memory(
             connection=connection, user_id=binding.user_id, run_id=run_id
         )
@@ -334,6 +394,47 @@ def _persist_short_insight(
             source_id=run_id,
             created_at=now,
         )
+
+
+def bound_time_allocations(
+    claims: list[TimeShareClaim], *, observed: list[str]
+) -> TimeAllocations | None:
+    """Merge the run's estimates per endeavor and fit them inside what it read.
+
+    The minutes are the model's estimate, so their total may not exceed the span
+    between the first and last event the run read, or one window when the events
+    are closer together than that. An estimate over it is scaled down, never
+    trusted as more time than was observed.
+    """
+    if not claims or not observed:
+        return None
+    times = sorted(parse_iso_z(value) for value in observed)
+    span_minutes = math.ceil((times[-1] - times[0]).total_seconds() / 60)
+    budget = max(span_minutes, SHORT_INSIGHT_WINDOW_SECONDS // 60)
+    merged: dict[tuple[str, str | None, str | None], int] = {}
+    for claim in claims:
+        key = (
+            claim.endeavor.strip(),
+            (claim.organization or "").strip() or None,
+            (claim.project or "").strip() or None,
+        )
+        if key[0]:
+            merged[key] = merged.get(key, 0) + claim.minutes
+    total = sum(merged.values())
+    scale = min(1.0, budget / total) if total else 0.0
+    entries = tuple(
+        TimeAllocation(endeavor, organization, project, minutes)
+        for (endeavor, organization, project), raw in sorted(
+            merged.items(),
+            key=lambda item: (item[0][0], item[0][1] or "", item[0][2] or ""),
+        )
+        if (minutes := math.floor(raw * scale)) > 0
+    )
+    if not entries:
+        return None
+    return TimeAllocations(
+        observed_start=iso_z(times[0]), observed_end=iso_z(times[-1]), entries=entries
+    )
 
 
 def _source_record_id(*, run_id: str, record: VerifiedRecord) -> str:

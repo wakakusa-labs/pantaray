@@ -51,6 +51,11 @@ _TABLE_GUIDE = "\n".join(
         "needs the exact time something was observed, use source_records.",
         "- activity_summaries: aggregated activity summaries; key columns summary_id, summary_type, period_start, period_end, summary, status. "
         f"summary_type is one of {', '.join(get_args(SummaryType))}.",
+        "- activity_time_allocations: estimated minutes the user spent on each endeavor; key columns run_id "
+        "(the activity_logs.log_id that wrote it), observed_start and observed_end (the observed range the run read), "
+        "endeavor (as the user would name it), organization_name and project_name (registered names, or NULL), minutes. "
+        "Sum minutes over observed_start to see where time went in a period; the figures are estimates from event times, "
+        "not a timesheet. It has no status column.",
         "- source_records: verbatim screen quotes checked against the recording; key columns record_id, run_id "
         "(the activity_logs.log_id that wrote it), observed_at (when the screen showed it), app_name, window_title, source "
         "(the displayed document, page, or conversation header), speaker, shown_time (the time displayed with the quote, "

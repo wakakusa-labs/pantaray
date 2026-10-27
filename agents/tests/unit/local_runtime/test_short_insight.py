@@ -11,7 +11,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from pantaray_agents.agents.insight_agent.agent import ShortInsightOutput
+from pantaray_agents.agents.insight_agent.agent import (
+    ShortInsightOutput,
+    TimeShareClaim,
+)
 from pantaray_agents.agents.insight_agent.record_verification import (
     SourceRecordClaim,
     VerifiedRecord,
@@ -65,7 +68,9 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     mark_configured,
 )
 from pantaray_agents.local_runtime.runtime.short_insight import (
+    TimeAllocation,
     _source_record_id,
+    bound_time_allocations,
     run_short_insight,
 )
 from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
@@ -1195,3 +1200,95 @@ async def test_a_record_quoting_an_external_change_never_reaches_the_store(
     (block,) = agent.external_changes
     assert block is not None and mail_body in block
     assert [record[-1] for record in _stored(db_path)["records"]] == [QUOTE]
+
+
+def _share(endeavor: str, minutes: int, **overrides: str | None) -> TimeShareClaim:
+    return TimeShareClaim.model_validate(
+        {"endeavor": endeavor, "minutes": minutes, **overrides}
+    )
+
+
+def test_time_estimates_merge_per_endeavor_and_fit_the_observed_range() -> None:
+    window_minutes = SHORT_INSIGHT_WINDOW_SECONDS // 60
+    bounded = bound_time_allocations(
+        [
+            _share("見積", 10, organization="A社"),
+            _share(" 見積 ", 5, organization="A社 "),
+            _share("論文", 20),
+            _share("  ", 30),
+        ],
+        observed=["2026-09-07T00:01:00Z", "2026-09-07T00:01:00Z"],
+    )
+
+    assert bounded is not None
+    assert bounded.observed_start == bounded.observed_end == "2026-09-07T00:01:00Z"
+    # 35 claimed minutes inside a single window are scaled down to it.
+    assert sum(entry.minutes for entry in bounded.entries) <= window_minutes
+    assert bounded.entries == (
+        TimeAllocation("見積", "A社", None, 15 * window_minutes // 35),
+        TimeAllocation("論文", None, None, 20 * window_minutes // 35),
+    )
+
+
+def test_time_estimates_inside_a_long_range_are_kept_as_given() -> None:
+    bounded = bound_time_allocations(
+        [_share("見積", 40), _share("論文", 20)],
+        observed=["2026-09-07T00:00:00Z", "2026-09-07T01:30:00Z"],
+    )
+
+    assert bounded is not None
+    assert [entry.minutes for entry in bounded.entries] == [40, 20]
+
+
+def test_nothing_is_kept_without_estimates_or_events() -> None:
+    assert bound_time_allocations([], observed=["2026-09-07T00:01:00Z"]) is None
+    assert bound_time_allocations([_share("見積", 5)], observed=[]) is None
+
+
+def test_malformed_time_estimates_never_block_the_outputs() -> None:
+    output = ShortInsightOutput.model_validate(
+        {
+            "activity": "a",
+            "insight": "i",
+            "reconsideration_reason": None,
+            "time_allocation": [
+                {"endeavor": "見積", "minutes": 5},
+                {"endeavor": "", "minutes": 5},
+                {"endeavor": "論文", "minutes": 2.5},
+            ],
+        }
+    )
+
+    assert output.time_allocation == [_share("見積", 5)]
+
+
+async def test_time_estimates_commit_beside_the_activity_log(db_path: Path) -> None:
+    gate = SourceGate()
+    await _active_source(gate)
+    reader = _FakeReader(pages=[_page(observations=2, next_cursor="cursor-2")])
+    output = _output()
+    output.time_allocation = [
+        _share("見積", 4, organization="A社"),
+        _share("論文", 3),
+    ]
+    agent = _FakeAgent(output=output)
+
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+    await _run(db_path=db_path, gate=gate, reader=reader, agent=agent)
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT run_id, observed_start, observed_end, endeavor, "
+            "organization_name, project_name, minutes "
+            "FROM activity_time_allocations ORDER BY endeavor"
+        ).fetchall()
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("DELETE FROM activity_logs WHERE log_id = ?", (RUN,))
+        remaining = connection.execute(
+            "SELECT count(*) FROM activity_time_allocations"
+        ).fetchone()
+    assert rows == [
+        (RUN, "2026-09-07T00:01:00Z", "2026-09-07T00:01:00Z", "見積", "A社", None, 4),
+        (RUN, "2026-09-07T00:01:00Z", "2026-09-07T00:01:00Z", "論文", None, None, 3),
+    ]
+    assert remaining == (0,)

@@ -77,6 +77,50 @@ _INVALID_COMPLETION = (
 )
 
 
+class TimeShareClaim(BaseModel):
+    """Minutes of the read range the user spent on one endeavor, as estimated."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    endeavor: str = Field(
+        min_length=1,
+        max_length=120,
+        description="The endeavor as the user would name it, such as a client or project.",
+    )
+    organization: str | None = Field(
+        default=None,
+        max_length=120,
+        description="The registered organization it belongs to, or null.",
+    )
+    project: str | None = Field(
+        default=None,
+        max_length=120,
+        description="The registered project it belongs to, or null.",
+    )
+    minutes: int = Field(
+        ge=1, le=24 * 60, description="Whole minutes, estimated from event times."
+    )
+
+
+def _keep_valid[Claim: BaseModel](
+    value: object, model: type[Claim], message: str
+) -> list[Claim]:
+    # This is untrusted completion input. Invalid secondary items must not
+    # prevent the activity, Insight and read cursor from being committed.
+    kept: list[Claim] = []
+    invalid = 0
+    if isinstance(value, list):
+        for item in value:
+            try:
+                kept.append(model.model_validate(item))
+            except ValidationError:
+                invalid += 1
+    else:
+        invalid = 1
+    if invalid:
+        logger.warning(message, extra={"invalid_items": invalid})
+    return kept
+
+
 class ShortInsightOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     activity: str = Field(
@@ -98,32 +142,34 @@ class ShortInsightOutput(BaseModel):
             "evidence, each tied to its event. Empty when this run read none."
         ),
     )
+    # Optional for the same reason as records: the host bounds the minutes by
+    # the range the run read, and nothing else depends on them.
+    time_allocation: list[TimeShareClaim] = Field(
+        default_factory=list,
+        description=(
+            "Minutes of the read range the user spent on each endeavor, estimated "
+            "from event times. Empty when the range shows no identifiable work."
+        ),
+    )
 
     @field_validator("records", mode="before")
     @classmethod
     def discard_malformed_records(cls, value: object) -> list[SourceRecordClaim]:
-        # This is untrusted completion input. Invalid secondary records must not
-        # prevent the activity, Insight and read cursor from being committed.
-        records: list[SourceRecordClaim] = []
-        invalid = 0
-        if isinstance(value, list):
-            for item in value:
-                try:
-                    records.append(SourceRecordClaim.model_validate(item))
-                except ValidationError:
-                    invalid += 1
-        else:
-            invalid = 1
-        if invalid:
-            logger.warning(
-                "Malformed source records discarded", extra={"invalid_records": invalid}
-            )
-        return records
+        return _keep_valid(
+            value, SourceRecordClaim, "Malformed source records discarded"
+        )
+
+    @field_validator("time_allocation", mode="before")
+    @classmethod
+    def discard_malformed_time_allocation(cls, value: object) -> list[TimeShareClaim]:
+        return _keep_valid(
+            value, TimeShareClaim, "Malformed time allocation entries discarded"
+        )
 
 
 class InsightAgent(LlmToolUseMixin, ToolLlmRunner):
     PROMPT_NAME = "insight"
-    PROMPT_VERSION = "2.5"
+    PROMPT_VERSION = "2.6"
 
     def __init__(
         self,

@@ -60,6 +60,16 @@ system_instruction: |
   The host checks the excerpt, source boundary and any supplied speaker/time against
   the fetched text. Return an empty list when no relevant evidence was read.
 
+  Time: besides the outputs above, return `time_allocation`: how many minutes of
+  the range you read the user spent on each endeavor, estimated from the event
+  times. An endeavor is what the user works toward, named as they would name it:
+  a client, a product, a paper, a personal matter. Give its registered
+  organization and project when the workspace structure or the evidence ties it
+  to one, else null. Count only time the events show the user working on it; time
+  in an app that belongs to no identifiable endeavor, such as idle browsing, is
+  left out rather than guessed. Merge time on one endeavor into a single entry.
+  Return an empty list when the range shows no identifiable work.
+
   Set reconsideration_reason only when a concrete change makes a new suggestion
   useful: a changed goal, new blocker, completed task, or materially new opportunity,
   including one reported under external service changes.

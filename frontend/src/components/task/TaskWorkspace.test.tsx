@@ -149,7 +149,8 @@ describe('TaskWorkspace', () => {
       expect(found).not.toBeNull();
       return found as HTMLIFrameElement;
     });
-    expect(frame.getAttribute('sandbox')).toBe('');
+    // The app's origin lets the pane measure the page; scripts stay off.
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
     const document = frame.getAttribute('srcdoc') ?? '';
     expect(document).toMatch(
       /^<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="default-src 'none';/
@@ -345,7 +346,8 @@ describe('TaskWorkspace', () => {
       target: { kind: 'action', id: 'act-1' },
       path: '/work/quote/memo.docx',
     });
-    expect(frame.getAttribute('sandbox')).toBe('');
+    // The app's origin lets the pane measure the page; scripts stay off.
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
     expect(frame.getAttribute('srcdoc')).toMatch(
       /^<meta http-equiv="Content-Security-Policy" content="default-src 'none';.*<p>御見積書<\/p>/
     );

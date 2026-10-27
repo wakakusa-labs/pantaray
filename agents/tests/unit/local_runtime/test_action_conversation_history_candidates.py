@@ -10,10 +10,12 @@ from pantaray_agents.local_runtime.action_conversation.cursor_codec import (
     OpaqueCursorError,
 )
 from pantaray_agents.local_runtime.action_conversation.history_candidates import (
+    _ANSWERS_SQL,
     ActionHistoryCandidate,
     ConversationHistoryCandidatePage,
     SuggestionHistoryCandidate,
     _candidate_query,
+    read_conversation_history_answers_in_connection,
     read_conversation_history_candidates_in_connection,
     register_conversation_history_casefold_sqlite,
 )
@@ -271,6 +273,67 @@ def test_search_keeps_one_deterministic_canonical_proof(
     assert both_match.matched_user is not None
     assert both_match.matched_user.step_id == "step-terminal-match"
     assert both_match.matched_terminal_root_run_id is None
+
+
+def test_answers_are_each_completed_run_once_in_run_order(
+    history_connection: sqlite3.Connection,
+) -> None:
+    later_at = "2026-08-30T00:05:00.123Z"
+    history_connection.executescript(
+        f"""
+        INSERT INTO processes(process_id,user_id,kind,status,action_id,started_at,updated_at,completed_at,heartbeat_at,terminal_event_id,next_event_seq) VALUES
+          ('run-later','user-1','action','completed','action-terminal','{later_at}','{later_at}','{later_at}','{later_at}','event-later',2),
+          ('run-failed','user-1','action','failed','action-terminal','{later_at}','{later_at}','{later_at}','{later_at}','event-failed',2);
+        INSERT INTO jobs(job_id,user_id,job_type,process_id,status,scheduled_at,started_at,completed_at,logical_key) VALUES
+          ('job-later','user-1','execute_action','run-later','completed','{later_at}','{later_at}','{later_at}','action-terminal'),
+          ('job-failed','user-1','execute_action','run-failed','failed','{later_at}','{later_at}','{later_at}','action-terminal');
+        INSERT INTO process_events(process_id,event_seq,event_id,event_name,payload_json,created_at) VALUES
+          ('run-later',1,'event-later','stream_end','{{"final_output":"Later answer"}}','{later_at}'),
+          ('run-failed',1,'event-failed','stream_end','{{"final_output":"Not an answer"}}','{later_at}');
+        """
+    )
+    # A steer adopted into the later run is not another answer.
+    history_connection.executemany(
+        """INSERT INTO agent_action_steps(
+               step_id,action_id,user_id,step_number,local_step_number,short_step_id,
+               step_type,step_name,status,goal_handle,user_message_id,user_message_json,
+               user_request_text,accepted_sequence,adopted_process_id,created_at)
+           VALUES (?,'action-terminal','user-1',?,?,?,'user_request','user_request',
+                   'success','S',?,'{}','text',?,?,?)""",
+        tuple(
+            (f"step-{number}", number, number, f"S-{number}-USER", f"m-{number}")
+            + (number, run_id, later_at)
+            for number, run_id in (
+                (5, "run-later"),
+                (6, "run-later"),
+                (3, "run-failed"),
+            )
+        ),
+    )
+
+    page = _read(history_connection)
+    answers = read_conversation_history_answers_in_connection(
+        connection=history_connection, user_id="user-1", candidates=page.candidates
+    )
+    assert answers == {
+        "act-1": (),
+        "action-terminal": ("Terminal Needle RÉSUMÉ", "Later answer"),
+    }
+    assert read_conversation_history_answers_in_connection(
+        connection=history_connection, user_id="user-2", candidates=page.candidates
+    ) == {"act-1": (), "action-terminal": ()}
+    # One read for the page, driven by the listed conversations' runs.
+    details = [
+        str(row[3])
+        for row in history_connection.execute(
+            "EXPLAIN QUERY PLAN " + _ANSWERS_SQL,
+            {"user_id": "user-1", "action_ids": '["action-terminal"]'},
+        )
+    ]
+    scans = [row for row in details if row.startswith("SCAN")]
+    assert len(scans) == 2 and scans[0].startswith("SCAN json_each")
+    assert scans[1] == "SCAN run"
+    assert any(row.startswith("SEARCH answer USING INDEX") for row in details)
 
 
 def test_requires_caller_owned_transaction() -> None:

@@ -104,6 +104,8 @@ const ITEMS: ConversationHistoryListItem[] = [
     updated_at: '2026-10-10T01:00:00.000Z',
     status: 'idle',
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   },
   {
     kind: 'suggestion',
@@ -111,6 +113,8 @@ const ITEMS: ConversationHistoryListItem[] = [
     title: '請求書を作りましょうか',
     updated_at: '2026-10-10T00:00:00.000Z',
     status: 'approval_pending',
+    status_line: null,
+    artifact_names: [],
   },
 ];
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);

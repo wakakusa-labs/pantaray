@@ -53,6 +53,8 @@ const CURRENT_ITEM = {
   updated_at: '2026-08-30T01:02:03.456Z',
   status: 'idle' as const,
   latest_completion_event_id: 'completion-current',
+  status_line: null,
+  artifact_names: [],
 };
 
 describe('useSuggestionHistory', () => {
@@ -169,6 +171,8 @@ describe('useSuggestionHistory', () => {
       title: 'Suggestion',
       updated_at: CURRENT_ITEM.updated_at,
       status: 'idle' as const,
+      status_line: null,
+      artifact_names: [],
     };
     await act(async () => pending[5].resolve(historyResult([refreshed, suggestion], null)));
     expect(result.current.items).toEqual([refreshed, suggestion]);

@@ -26,6 +26,8 @@ _PAGE = history.ConversationHistoryPage(
             updated_at="2026-08-30T00:00:00.000Z",
             status="idle",
             latest_completion_event_id="event-1",
+            status_line="Done",
+            artifact_names=("report.md",),
         ),
     ),
     next_cursor="next-page",

@@ -85,7 +85,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
     match tool_id:
         case "read":
             return _read_detail(body)
-        case "render_pdf_page":
+        case "render_pdf_page" | "render_html_page":
             if body.get("kind") == RENDERER_PREPARING_OUTPUT_KIND:
                 return ["no pages yet, viewer preparing"]
             return [_count(body, "attachments", "page", "pages")]

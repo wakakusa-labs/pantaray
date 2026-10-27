@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
+from typing import cast
 
 from pydantic import ValidationError
 
@@ -18,7 +19,10 @@ from pantaray_agents.tools.files.read_contract import (
     ReadToolArgs,
 )
 from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
+from pantaray_agents.tools.files.render_pages import (
+    RenderHtmlPageToolArgs,
+    RenderPdfPageToolArgs,
+)
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -42,11 +46,6 @@ from .broker_command_validation import (
 from .broker_common import (
     APPLY_PATCH_TOOL_ID,
     BASH_TOOL_ID,
-    GLOB_TOOL_ID,
-    GREP_TOOL_ID,
-    LIST_TOOL_ID,
-    READ_TOOL_ID,
-    RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
     ApprovalDecisionError,
     BrokerApprovalDeniedError,
@@ -65,6 +64,7 @@ from .broker_direct import (
     run_apply_patch_executor,
 )
 from .broker_direct_read import run_read_executor
+from .broker_direct_render_html import run_render_html_page_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
 from .broker_failure_finalization import (
     finalize_broker_invocation_error,
@@ -79,6 +79,8 @@ from .broker_outcome import (
 from .broker_protocol import (
     ApplyPatchToolArgs,
     BashToolArgs,
+    BrokerManagedToolDefinition,
+    BrokerToolArgs,
     BrokerToolRequest,
     RunPythonToolArgs,
     ValidatedCommandRequest,
@@ -87,9 +89,14 @@ from .broker_protocol import (
     ValidatedListRequest,
     ValidatedPatchRequest,
     ValidatedReadRequest,
+    ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
 )
-from .broker_registry import BROKER_TOOL_REGISTRY, validate_broker_registry
+from .broker_registry import (
+    BROKER_MODEL_REGISTRY,
+    BROKER_TOOL_REGISTRY,
+    validate_broker_registry,
+)
 from .broker_structured_patch import extract_structured_patch_paths
 from .execution_start import claim_broker_execution_start
 
@@ -157,6 +164,7 @@ def _validate_request(
     BrokerContext,
     ValidatedReadRequest
     | ValidatedRenderPdfPageRequest
+    | ValidatedRenderHtmlPageRequest
     | ValidatedListRequest
     | ValidatedGlobRequest
     | ValidatedGrepRequest
@@ -182,7 +190,7 @@ def _validate_request(
         user_id=user_id,
         manifest_id=manifest_id,
         execution_session_id=execution_session_id,
-        args=_parse_args(tool_id=tool_id, args=args),
+        args=_parse_args(definition=definition, args=args),
         invocation_id=invocation_id,
         tool_request_id=tool_request_id,
         requested_at=requested_at,
@@ -221,6 +229,17 @@ def _validate_request(
             requested_at=effective_requested_at,
             path=request.args.path,
             pages=request.args.pages,
+        )
+    if definition.execution_path == "broker_direct_render_html":
+        assert isinstance(request.args, RenderHtmlPageToolArgs)
+        return context, ValidatedRenderHtmlPageRequest(
+            tool_invocation_id=effective_invocation_id,
+            manifest_id=request.manifest_id,
+            execution_session_id=request.execution_session_id,
+            action_id=context.execution_session.action_id or "unknown",
+            tool_request_id=effective_tool_request_id,
+            requested_at=effective_requested_at,
+            args=request.args,
         )
     if definition.execution_path == "broker_direct_list":
         assert isinstance(request.args, ListToolArgs)
@@ -291,42 +310,17 @@ def _validate_request(
 
 
 def _parse_args(
-    *,
-    tool_id: str,
-    args: dict[str, JSONValue],
-) -> (
-    ReadToolArgs
-    | RenderPdfPageToolArgs
-    | ListToolArgs
-    | GlobToolArgs
-    | GrepToolArgs
-    | ApplyPatchToolArgs
-    | BashToolArgs
-    | RunPythonToolArgs
-):
+    *, definition: BrokerManagedToolDefinition, args: dict[str, JSONValue]
+) -> BrokerToolArgs:
+    model = BROKER_MODEL_REGISTRY.input_models[definition.input_model_ref]
     try:
-        if tool_id == READ_TOOL_ID:
-            return ReadToolArgs.model_validate(args)
-        if tool_id == RENDER_PDF_PAGE_TOOL_ID:
-            return RenderPdfPageToolArgs.model_validate(args)
-        if tool_id == LIST_TOOL_ID:
-            return ListToolArgs.model_validate(args)
-        if tool_id == GLOB_TOOL_ID:
-            return GlobToolArgs.model_validate(args)
-        if tool_id == GREP_TOOL_ID:
-            return GrepToolArgs.model_validate(args)
-        if tool_id == APPLY_PATCH_TOOL_ID:
-            return ApplyPatchToolArgs.model_validate(args)
-        if tool_id == BASH_TOOL_ID:
-            return BashToolArgs.model_validate(args)
-        if tool_id == RUN_PYTHON_TOOL_ID:
-            return RunPythonToolArgs.model_validate(args)
+        return cast(BrokerToolArgs, model.model_validate(args))
     except ValidationError as exc:
         raise BrokerPolicyError(
-            f"{BROKER_TOOL_ARGS_INVALID}: invalid {tool_id} arguments: {exc}",
+            f"{BROKER_TOOL_ARGS_INVALID}: invalid {definition.tool_id} arguments: "
+            f"{exc}",
             code=BROKER_TOOL_ARGS_INVALID,
         ) from exc
-    raise BrokerPolicyError(f"unsupported broker tool: {tool_id}")
 
 
 def _build_validated_patch_request(
@@ -457,6 +451,10 @@ async def execute_broker_tool(
             outcome = await run_render_pdf_page_executor(
                 context=context,
                 request=validated,
+            )
+        elif isinstance(validated, ValidatedRenderHtmlPageRequest):
+            outcome = await run_render_html_page_executor(
+                context=context, request=validated
             )
         elif isinstance(validated, ValidatedListRequest):
             outcome = read_tool_outcome(

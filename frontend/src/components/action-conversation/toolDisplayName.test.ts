@@ -20,6 +20,7 @@ const REGISTERED_TOOL_IDS = [
   'web_crawl',
   'read',
   'render_pdf_page',
+  'render_html_page',
   'list',
   'glob',
   'grep',
@@ -73,6 +74,7 @@ describe('resolveToolDisplay', () => {
     // PDF だけでなく Office 文書のページも描くので、名前は「PDF」に限らない。
     ['render_pdf_page', 'ページを見る', 'Look at pages'],
     ['Look At Document Pages', 'ページを見る', 'Look at pages'],
+    ['Look At HTML Pages', 'HTML のページを見る', 'Look at HTML pages'],
   ])('resolves %s to the same tool in both languages', (label, ja, en) => {
     expect(resolveToolDisplay(label, 'ja')).toEqual({
       key: expect.any(String),

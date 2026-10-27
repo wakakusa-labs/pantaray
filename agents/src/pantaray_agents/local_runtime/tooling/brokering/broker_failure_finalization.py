@@ -9,6 +9,7 @@ from typing import cast
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
+from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ..sandbox.command_sandbox_client import canceled_command_output
 from ..tool_result_finalization import (
@@ -21,6 +22,26 @@ from ..tool_result_finalization import (
 BROKER_CANCELED_MESSAGE = "canceled before completion"
 
 
+def broker_error_output(error: BaseException) -> dict[str, JSONValue]:
+    """The tool output of a broker call that raised, as the model reads it.
+
+    A policy refusal keeps its code and repair guidance beside the message, so
+    the model can correct the call instead of only learning that it failed.
+    """
+
+    output = build_runtime_tool_error_output(
+        error_type=error.__class__.__name__, message=str(error)
+    )
+    if isinstance(error, BrokerPolicyError):
+        error_payload = cast(dict[str, JSONValue], output["error"])
+        error_payload["code"] = error.code
+        if error.fix_hint:
+            error_payload["fix_hint"] = error.fix_hint
+        if error.examples:
+            error_payload["examples"] = list(error.examples)
+    return output
+
+
 def finalize_broker_invocation_error(
     *,
     db_path: Path,
@@ -28,9 +49,7 @@ def finalize_broker_invocation_error(
     invocation_id: str,
     error: BaseException,
 ) -> FinalizedToolOutput:
-    output = build_runtime_tool_error_output(
-        error_type=error.__class__.__name__, message=str(error)
-    )
+    output = broker_error_output(error)
     error_payload = cast(dict[str, JSONValue], output["error"])
     error_payload["traceback"] = "".join(traceback.format_exception(error))
     return finalize_local_tool_result(

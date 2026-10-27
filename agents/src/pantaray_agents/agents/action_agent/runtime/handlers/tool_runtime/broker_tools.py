@@ -28,13 +28,15 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     READ_TOOL_ID,
     load_broker_context,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_failure_finalization import (
+    broker_error_output,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     BrokerPreflightOutcome,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
 )
-from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.utils.trace_context import get_trace_context
 
@@ -63,20 +65,6 @@ def _build_error_preparation(
     effective_error = (
         error.cause if isinstance(error, FinalizedBrokerPolicyError) else error
     )
-    error_payload: dict[str, JSONValue] = {
-        "type": effective_error.__class__.__name__,
-        "message": str(effective_error),
-    }
-    code = getattr(effective_error, "code", None)
-    if isinstance(code, str) and code:
-        error_payload["code"] = code
-    fix_hint = getattr(effective_error, "fix_hint", None)
-    if isinstance(fix_hint, str) and fix_hint:
-        error_payload["fix_hint"] = fix_hint
-    examples = getattr(effective_error, "examples", None)
-    if isinstance(examples, tuple) and all(isinstance(item, str) for item in examples):
-        error_payload["examples"] = list(examples)
-    raw_output: dict[str, JSONValue] = {"error": error_payload}
     finalized_output: FinalizedToolOutput | None = None
     tool_invocation_id = getattr(error, "tool_invocation_id", None)
     if isinstance(error, (BrokerExecutionError, FinalizedBrokerPolicyError)):
@@ -95,7 +83,9 @@ def _build_error_preparation(
         status="error",
         started_at=completed_at,
         completed_at=completed_at,
-        output=raw_output,
+        # Used only when the broker finalized nothing: a finalized output is the
+        # one the model reads, and the broker builds it from the same shape.
+        output=broker_error_output(effective_error),
         tool_invocation_id=(
             tool_invocation_id if isinstance(tool_invocation_id, str) else None
         ),

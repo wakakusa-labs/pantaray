@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, type SyntheticEvent } from 'react';
 
 /*
- * The document is untrusted content. The sandbox runs no script, and this policy stops it loading
- * anything over the network: only inline styles and data: images render. A policy can only be
- * tightened by a later one, so the document's own <meta> tags cannot loosen it.
+ * The document is textutil's web page of a word-processor file (an HTML file is printed to PDF in
+ * main instead), so its text and styles come from that file. The sandbox runs no script, and this
+ * policy stops it loading anything over the network: only inline styles and data: images render.
+ * A policy can only be tightened by a later one, so the document's own <meta> tags cannot loosen
+ * it.
  *
  * The sandbox keeps the app's origin (allow-same-origin, never with allow-scripts) so the pane can
  * measure the laid-out page and hear a pinch over it. Without script the document cannot use that
@@ -32,7 +34,7 @@ const MAX_SCALE = 8;
 
 /**
  * The width content is laid out at: the pane's, or the content's narrowest width when that is
- * wider (a slide fixed at 1280px). Laid out any narrower, centered content spills past the left
+ * wider (a table fixed at 1280px). Laid out any narrower, centered content spills past the left
  * edge, where no scrolling reaches.
  */
 export function layoutWidth(paneWidth: number, minContentWidth: number): number {
@@ -76,15 +78,10 @@ function pageLayout(frame: HTMLIFrameElement, box: HTMLElement, pane: Size): Lay
   root.style.width = 'min-content';
   const width = layoutWidth(pane.width, root.getBoundingClientRect().width);
   root.style.width = inline;
-  const paneHeight = (pane.height * width) / pane.width;
   box.style.width = `${width}px`;
-  box.style.height = `${paneHeight}px`;
-  const height = root.scrollHeight;
-  box.style.height = `${height}px`;
-  // A page sized by the viewport's height (a 100vh section) grows with the frame, so it keeps
-  // the pane's height and scrolls inside, as a browser shows it.
-  const sizedByViewport = root.scrollHeight > height;
-  return withFit(pane, { width, height: sizedByViewport ? paneHeight : height });
+  // From the pane's height, so a page that got shorter is not held at the frame's old height.
+  box.style.height = `${(pane.height * width) / pane.width}px`;
+  return withFit(pane, { width, height: root.scrollHeight });
 }
 
 function imageLayout(image: HTMLImageElement, pane: Size): Layout {

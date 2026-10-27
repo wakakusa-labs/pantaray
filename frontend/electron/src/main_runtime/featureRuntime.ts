@@ -19,6 +19,7 @@ import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createHtmlRenderResponder } from '../render/htmlRender';
+import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
@@ -178,6 +179,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       }
     },
   });
+  const htmlPreviewPdfs = createHtmlPreviewPdfs({ userDataDir: app.getPath('userData') });
   const resolveOverlayBootstrap = async (suggestionId: string) => {
     const normalizedSuggestionId = String(suggestionId || '').trim();
     return normalizedSuggestionId ? overlayBootstrapFetch(normalizedSuggestionId) : null;
@@ -405,6 +407,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           runFile: async (file, args, options) =>
             (await execFileAsync(file, [...args], { ...options, encoding: 'utf8' })).stdout,
           chooseApp,
+          renderHtml: htmlPreviewPdfs.render,
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
         update: {
@@ -544,6 +547,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
     readActionConversationPage: actions.readConversationPage,
+    readRenderedPdf: htmlPreviewPdfs.readRendered,
     resolveOverlayBootstrap,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,

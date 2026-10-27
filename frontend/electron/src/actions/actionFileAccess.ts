@@ -56,9 +56,11 @@ export type ActionFileReadResult =
   | Readonly<{ kind: 'image'; bytes: Uint8Array<ArrayBuffer>; mime: ActionImageMimeType }>
   /** A word-processor document converted to a web page by macOS `textutil`. */
   | Readonly<{ kind: 'html'; html: string }>
+  /** An HTML file printed to PDF, at its `pantaray-action-file` URL (`htmlPreview`). */
+  | Readonly<{ kind: 'pdf'; url: string }>
   | Readonly<{
       kind: 'unavailable';
-      reason: 'not_found' | 'binary' | 'too_large' | 'conversion_failed';
+      reason: 'not_found' | 'binary' | 'too_large' | 'conversion_failed' | 'render_failed';
     }>;
 
 type ActionFileUnavailable = Readonly<{

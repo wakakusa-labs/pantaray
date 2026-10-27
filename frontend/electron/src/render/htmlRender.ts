@@ -1,5 +1,6 @@
 /**
- * Printing one HTML file to PDF for the Action runtime's HTML tools.
+ * Printing one HTML file to PDF, for the Action runtime's HTML tools and for the task
+ * preview (`htmlPreview`).
  *
  * The runtime cannot start a browser inside the command sandbox; it asks here, the
  * Chromium shipped with the app prints the page in a hidden window, and the PDF is
@@ -11,7 +12,7 @@
  * script must print), so everything around it is closed: a fresh window per render
  * in an in-memory session, no Node, no preload, no new windows or navigation away,
  * no downloads, permissions or dialogs, and only the local files and network the
- * runtime allowed. Each refused request is reported so the agent can see why a
+ * caller allowed. Each refused request is reported so the agent can see why a
  * picture or font is missing.
  */
 
@@ -25,17 +26,25 @@ import { writeFileAtomic } from '../atomicFile';
 import { LocalBackendRequestError } from '../localBackend/client';
 import { keepWindowOnItsDocument } from '../security/windowOpenPolicy';
 
-export type HtmlRenderRequest = {
+/** The local files a page may load: under a file root, and not in private app storage. */
+export type FileAccessScope = {
+  fileRoots: string[];
+  privateRoots: string[];
+  privateRootExceptions: string[];
+};
+
+/** One page to print and what it may load. */
+export type HtmlRenderInput = FileAccessScope & {
+  /** Realpath of the page, already authorized by the caller. */
+  htmlPath: string;
+  allowNetwork: boolean;
+};
+
+export type HtmlRenderRequest = HtmlRenderInput & {
   renderRequestId: string;
   actionId: string;
   processId: string;
   toolRequestId: string;
-  /** Realpath of the page, already validated by the runtime. */
-  htmlPath: string;
-  fileRoots: string[];
-  privateRoots: string[];
-  privateRootExceptions: string[];
-  allowNetwork: boolean;
 };
 
 export type BlockedRequestReason = 'outside_read_scope' | 'network_off' | 'not_allowed';
@@ -58,11 +67,10 @@ export type HtmlRenderAnswer =
       blocked_requests: BlockedRequest[];
     };
 
-/** The local files a page may load, as the runtime's read scope and private storage allow. */
-export type FileAccessScope = Pick<
-  HtmlRenderRequest,
-  'fileRoots' | 'privateRoots' | 'privateRootExceptions'
->;
+/** The answer, with the PDF when one was printed. */
+export type HtmlRenderOutcome =
+  | { answer: Extract<HtmlRenderAnswer, { status: 'rendered' }>; pdf: Buffer }
+  | { answer: Extract<HtmlRenderAnswer, { status: 'failed' }>; pdf: null };
 
 /** Whether two paths name the same existing directory. */
 export type SameDirectory = (left: string, right: string) => boolean;
@@ -186,7 +194,7 @@ class RenderFailure extends Error {
   }
 }
 
-function sameDirectoryOnDisk(left: string, right: string): boolean {
+export function sameDirectoryOnDisk(left: string, right: string): boolean {
   const a = fs.statSync(left, { throwIfNoEntry: false });
   const b = fs.statSync(right, { throwIfNoEntry: false });
   return (
@@ -305,9 +313,7 @@ function withinBudget(contents: WebContents, work: Promise<Buffer>): Promise<Buf
   return Promise.race([work, stopped]).finally(() => clearTimeout(timer));
 }
 
-async function renderHtml(
-  request: HtmlRenderRequest
-): Promise<{ answer: HtmlRenderAnswer; pdf: Buffer | null }> {
+async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> {
   const blocked: BlockedRequest[] = [];
   const block = (reason: BlockedRequestReason, url: string) => {
     if (blocked.length < MAX_BLOCKED_REPORTED) blocked.push({ reason, url });
@@ -365,8 +371,19 @@ async function renderHtml(
   }
 }
 
+/** Every render shares the partition's session and its one `file` handler. */
+let renderQueue: Promise<unknown> = Promise.resolve();
+
+/** Prints one page after every render asked for before it has finished. */
+export function renderHtmlToPdf(input: HtmlRenderInput): Promise<HtmlRenderOutcome> {
+  const rendered = renderQueue.then(() => renderHtml(input));
+  // The caller gets the failure; the next render still runs.
+  renderQueue = rendered.catch(() => undefined);
+  return rendered;
+}
+
 /**
- * Answers `html_render_requested`, one render at a time.
+ * Answers `html_render_requested`.
  *
  * An unexpected failure posts nothing; the waiting tool times out and reports that
  * no PDF was made, rather than an invented reason.
@@ -376,12 +393,10 @@ export function createHtmlRenderResponder(params: {
   postAnswer: (body: { render_request_id: string; result: HtmlRenderAnswer }) => Promise<unknown>;
   logger?: { error?: (name: string, payload?: unknown) => void } | null;
 }): (request: HtmlRenderRequest) => Promise<void> {
-  let queue: Promise<void> = Promise.resolve();
-
-  async function respond(request: HtmlRenderRequest): Promise<void> {
+  return async (request) => {
     try {
       const pdfPath = htmlRenderPdfPath(params.localArtifactRoot, request.renderRequestId);
-      const { answer, pdf } = await renderHtml(request);
+      const { answer, pdf } = await renderHtmlToPdf(request);
       if (pdf !== null) writeFileAtomic(pdfPath, path.dirname(pdfPath), pdf);
       // Sent once, never retried: the runtime takes the first answer and reads the
       // PDF after it, so only a 404 (the tool already gave up) leaves it unread.
@@ -399,10 +414,5 @@ export function createHtmlRenderResponder(params: {
         err: error,
       });
     }
-  }
-
-  return (request) => {
-    queue = queue.then(() => respond(request));
-    return queue;
   };
 }

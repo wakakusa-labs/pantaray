@@ -2,9 +2,9 @@ import type { ActionConversationView } from '../../../electron/src/actions/actio
 import { pantarayFilePaths } from '../../../electron/src/actions/pantarayFileLinks';
 
 /**
- * How the preview shows a file: rendered from its text (Markdown, a web page, a diff, or plain
- * text), as a web page converted from a word-processor document, drawn as an image or by the PDF
- * viewer, or left to Quick Look and its app.
+ * How the preview shows a file: rendered from its text (Markdown, a diff, or plain text), as a web
+ * page converted from a word-processor document, drawn as an image or by the PDF viewer (a web
+ * page is printed to PDF first), or left to Quick Look and its app.
  */
 export type TaskFileKind =
   | 'markdown'

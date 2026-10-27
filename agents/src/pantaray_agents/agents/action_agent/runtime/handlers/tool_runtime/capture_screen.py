@@ -277,13 +277,14 @@ async def run_capture_screen_tool(
             capture_request_id=capture_request_id,
             app_name=app_name,
         )
-    except Exception:
+        outcome = await broker.wait(
+            request_id=capture_request_id,
+            timeout_seconds=_CAPTURE_TIMEOUT_SECONDS,
+        )
+    finally:
+        # Idempotent after ``wait``; it matters when the send failed or a Stop
+        # cancelled it, so no request outlives the loop that waits for it.
         broker.close(request_id=capture_request_id)
-        raise
-    outcome = await broker.wait(
-        request_id=capture_request_id,
-        timeout_seconds=_CAPTURE_TIMEOUT_SECONDS,
-    )
 
     if outcome is None:
         return _error_result(

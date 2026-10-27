@@ -453,6 +453,41 @@ async def test_unanswered_request_times_out_instead_of_waiting_forever(
 
 
 @pytest.mark.asyncio
+async def test_a_stop_while_the_request_is_being_sent_leaves_no_request_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    desktop: RecordingDesktopSession,
+) -> None:
+    """A late answer to a stopped capture must find nothing, not a dead loop."""
+
+    db_path, context = _bootstrap(tmp_path)
+    _grant_screen_capture(db_path)
+    broker = _bind(monkeypatch, db_path=db_path)
+    sending = asyncio.Event()
+
+    async def _send_that_never_finishes(event: str, message: object) -> bool:
+        await RecordingDesktopSession.send_desktop_request(desktop, event, message)  # type: ignore[arg-type]
+        sending.set()
+        await asyncio.Event().wait()
+        return True
+
+    desktop.send_desktop_request = _send_that_never_finishes  # type: ignore[method-assign]
+    run = asyncio.ensure_future(_run(_state(context), db_path, context))
+    await asyncio.wait_for(sending.wait(), timeout=5)
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    late = broker.answer(
+        request_id=str(desktop.requests[0]["capture_request_id"]),
+        user_id="user-1",
+        outcome=_captured(),
+    )
+    assert late == "unknown_request"
+
+
+@pytest.mark.asyncio
 async def test_an_approved_capture_is_spent_and_cannot_run_a_second_time(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

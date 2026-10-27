@@ -53,6 +53,17 @@ export function zoomAt(view: ZoomView, factor: number, pointer: Point, fit: numb
   };
 }
 
+/**
+ * The scale after measuring again for a resized pane: a view at the fit follows the new fit, and a
+ * zoomed one keeps its scale unless that is now below the fit.
+ */
+export function refitScale(
+  previous: Readonly<{ scale: number; fit: number }>,
+  fit: number
+): number {
+  return previous.scale === previous.fit ? fit : Math.max(previous.scale, fit);
+}
+
 function withFit(pane: Size, natural: Size): Layout {
   return { natural, fit: pane.width / natural.width };
 }
@@ -86,7 +97,7 @@ function imageLayout(image: HTMLImageElement, pane: Size): Layout {
 /**
  * Shows a page or an image laid out at its own size, scaled to fit the pane's width. A pinch
  * (Chromium's ctrl+wheel) zooms at the pointer, and the viewport scrolls the scaled content, so
- * every side stays reachable. New content, and a resize while not zoomed in, fit it again.
+ * every side stays reachable. New content fits again; a resize measures again and keeps the zoom.
  *
  * The viewport holds the extent (the scaled size), which holds the box (the content's own size,
  * scaled); the frame or image fills the box.
@@ -111,19 +122,30 @@ export function usePreviewZoom() {
     extent.style.height = `${height * scale}px`;
   }, []);
 
-  const fit = useCallback(() => {
-    const viewport = viewportRef.current;
-    const layout = viewport
-      ? measureRef.current?.({ width: viewport.clientWidth, height: viewport.clientHeight })
-      : null;
-    if (!viewport || !layout) return;
-    const previous = zoomRef.current;
-    zoomRef.current = { layout, scale: layout.fit };
-    show(layout, layout.fit);
-    viewport.scrollLeft = 0;
-    // Same place, at the new scale, when a new revision or a resize fits it again.
-    viewport.scrollTop = previous ? (viewport.scrollTop * layout.fit) / previous.scale : 0;
-  }, [show]);
+  // New content starts at the fit; a resize measures again and keeps any zoom (refitScale).
+  const layOut = useCallback(
+    (keepZoom: boolean) => {
+      const viewport = viewportRef.current;
+      const layout = viewport
+        ? measureRef.current?.({ width: viewport.clientWidth, height: viewport.clientHeight })
+        : null;
+      if (!viewport || !layout) return;
+      const previous = zoomRef.current;
+      const scale =
+        keepZoom && previous
+          ? refitScale({ scale: previous.scale, fit: previous.layout.fit }, layout.fit)
+          : layout.fit;
+      // Same place at the new scale; read before resizing, which clamps the offsets.
+      const ratio = previous ? scale / previous.scale : 0;
+      const left = viewport.scrollLeft * ratio;
+      const top = viewport.scrollTop * ratio;
+      zoomRef.current = { layout, scale };
+      show(layout, scale);
+      viewport.scrollLeft = left;
+      viewport.scrollTop = top;
+    },
+    [show]
+  );
 
   const zoomBy = useCallback(
     (event: WheelEvent, pointer: Point) => {
@@ -168,16 +190,13 @@ export function usePreviewZoom() {
       zoomBy(event, { x: event.clientX - rect.left, y: event.clientY - rect.top });
     };
     viewport.addEventListener('wheel', onWheel, { passive: false });
-    const observer = new ResizeObserver(() => {
-      const zoom = zoomRef.current;
-      if (zoom && zoom.scale === zoom.layout.fit) fit();
-    });
+    const observer = new ResizeObserver(() => layOut(true));
     observer.observe(viewport);
     return () => {
       viewport.removeEventListener('wheel', onWheel);
       observer.disconnect();
     };
-  }, [fit, zoomBy]);
+  }, [layOut, zoomBy]);
 
   const onFrameLoad = useCallback(
     (event: SyntheticEvent<HTMLIFrameElement>) => {
@@ -186,18 +205,18 @@ export function usePreviewZoom() {
       if (!box) return;
       measureRef.current = (pane) => pageLayout(frame, box, pane);
       frame.contentWindow?.addEventListener('wheel', onFrameWheel, { passive: false });
-      fit();
+      layOut(false);
     },
-    [fit, onFrameWheel]
+    [layOut, onFrameWheel]
   );
 
   const onImageLoad = useCallback(
     (event: SyntheticEvent<HTMLImageElement>) => {
       const image = event.currentTarget;
       measureRef.current = (pane) => imageLayout(image, pane);
-      fit();
+      layOut(false);
     },
-    [fit]
+    [layOut]
   );
 
   return { viewportRef, extentRef, boxRef, onFrameLoad, onImageLoad };

@@ -13,6 +13,14 @@ from pantaray_agents.utils.timestamps import normalize_iso8601_utc_z_millisecond
 
 type ConversationHistoryStatus = Literal["running", "approval_pending", "idle"]
 
+# A row's status line is one line of the sidebar, cut with an ellipsis to fit.
+CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS = 120
+
+# What a row shows under its title: one plain line of where the task stands.
+type ConversationHistoryStatusLine = Annotated[
+    NonBlankText, Field(max_length=CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS)
+]
+
 
 def _require_canonical_history_timestamp(value: str) -> str:
     try:
@@ -51,6 +59,10 @@ class ConversationHistoryItem(_ConversationHistoryModel):
     updated_at: ConversationHistoryTimestamp
     status: ConversationHistoryStatus
     latest_completion_event_id: ActionConversationIdentity | None
+    # The latest answer's first line; None while running, or with no answer yet.
+    status_line: ConversationHistoryStatusLine | None
+    # The names of the files its answers link, in the order they first appear.
+    artifact_names: tuple[NonBlankText, ...]
 
 
 class SuggestionHistoryItem(_ConversationHistoryModel):
@@ -59,6 +71,10 @@ class SuggestionHistoryItem(_ConversationHistoryModel):
     title: NonBlankText
     updated_at: ConversationHistoryTimestamp
     status: Literal["approval_pending", "idle"]
+    # What follows the suggestion's opening sentence, which the title shows.
+    status_line: ConversationHistoryStatusLine | None
+    # The names of the files the suggestion made.
+    artifact_names: tuple[NonBlankText, ...]
 
 
 type ConversationHistoryListItem = Annotated[
@@ -73,6 +89,7 @@ class ConversationHistoryPage(_ConversationHistoryModel):
 
 
 __all__ = [
+    "CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS",
     "ConversationHistoryItem",
     "ConversationHistoryListItem",
     "ConversationHistoryPage",

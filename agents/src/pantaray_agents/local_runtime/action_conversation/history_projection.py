@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Literal, cast
 
 from pydantic import ValidationError
@@ -29,6 +31,12 @@ from .history_candidates import (
     ConversationHistoryCandidate,
     ConversationHistoryCandidatePage,
     SuggestionHistoryCandidate,
+)
+from .history_row_summary import (
+    answer_status_line,
+    artifact_names,
+    linked_document_names,
+    suggestion_status_line,
 )
 from .repository import ActionConversationIntegrityError
 from .terminal_projection import project_action_run_terminal
@@ -64,7 +72,11 @@ def project_conversation_history_page(
     user_id: str,
     normalized_search: str,
     authorities: tuple[ActionLogicalRunAuthority, ...],
+    answers: Mapping[str, tuple[str, ...]],
 ) -> ConversationHistoryPage:
+    """``answers`` holds each listed conversation's completed runs' answers,
+    oldest first."""
+
     selections = required_history_run_selections(candidate_page.candidates)
     authority_by_selection = {
         ActionLogicalRunSelection(
@@ -76,6 +88,14 @@ def project_conversation_history_page(
         frozenset(authority_by_selection) == selections
         and len(authority_by_selection) == len(authorities)
     )
+    _require(
+        frozenset(answers)
+        == frozenset(
+            candidate.action_id
+            for candidate in candidate_page.candidates
+            if isinstance(candidate, ActionHistoryCandidate)
+        )
+    )
 
     try:
         items = tuple(
@@ -84,6 +104,7 @@ def project_conversation_history_page(
                 user_id=user_id,
                 normalized_search=normalized_search,
                 authorities=authority_by_selection,
+                answers=answers[candidate.action_id],
             )
             if isinstance(candidate, ActionHistoryCandidate)
             else _project_suggestion(candidate, normalized_search=normalized_search)
@@ -127,7 +148,21 @@ def _project_suggestion(
         title=title,
         updated_at=candidate.updated_at,
         status=expected_status,
+        status_line=suggestion_status_line(title),
+        artifact_names=artifact_names(_suggestion_artifacts(candidate.artifacts_json)),
     )
+
+
+def _suggestion_artifacts(artifacts_json: str | None) -> list[str]:
+    _require(isinstance(artifacts_json, str))
+    try:
+        artifacts = json.loads(cast("str", artifacts_json))
+    except json.JSONDecodeError:
+        artifacts = None
+    _require(
+        isinstance(artifacts, list) and all(isinstance(path, str) for path in artifacts)
+    )
+    return cast("list[str]", artifacts)
 
 
 def _project_action(
@@ -136,6 +171,7 @@ def _project_action(
     user_id: str,
     normalized_search: str,
     authorities: _AuthorityMap,
+    answers: tuple[str, ...],
 ) -> ConversationHistoryItem:
     expected_suggestion = (
         (None, None, None)
@@ -241,6 +277,13 @@ def _project_action(
         updated_at=candidate.updated_at,
         status=history_status,
         latest_completion_event_id=completion_event_id,
+        # A running task's line is its live stage, which the renderer follows.
+        status_line=(
+            None
+            if history_status == "running" or not answers
+            else answer_status_line(answers[-1])
+        ),
+        artifact_names=linked_document_names(answers),
     )
 
 

@@ -66,7 +66,7 @@ _ACTION = history_candidates.ActionHistoryCandidate(
     None,
 )
 _SUGGESTION = history_candidates.SuggestionHistoryCandidate(
-    "suggestion-1", "Approve this", "action_offer", None, "approval_pending", _AT
+    "suggestion-1", "Approve this", "action_offer", None, "approval_pending", _AT, "[]"
 )
 
 
@@ -74,6 +74,7 @@ def _project(
     candidates: tuple[history_candidates.ConversationHistoryCandidate, ...],
     authorities: tuple[authority.ActionLogicalRunAuthority, ...] = (),
     search: str = "",
+    answers: dict[str, tuple[str, ...]] | None = None,
 ) -> ConversationHistoryPage:
     return project_conversation_history_page(
         candidate_page=history_candidates.ConversationHistoryCandidatePage(
@@ -82,6 +83,15 @@ def _project(
         user_id="user-1",
         normalized_search=search,
         authorities=authorities,
+        answers=(
+            {
+                candidate.action_id: ()
+                for candidate in candidates
+                if isinstance(candidate, history_candidates.ActionHistoryCandidate)
+            }
+            if answers is None
+            else answers
+        ),
     )
 
 
@@ -188,3 +198,72 @@ def test_a_task_the_chat_started_in_its_own_words_takes_them_as_its_title() -> N
     )
     page = _project((replace(_ACTION, initial_user=row),), (_ACTIVE,))
     assert page.items[0].title == "List the customers from that history"
+
+
+def test_rows_show_the_latest_answer_and_every_linked_document(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    terminal = terminal_projection.ActionRunTerminalProjection(
+        "success", _AT, "Done", None
+    )
+    monkeypatch.setattr(
+        history_projection, "project_action_run_terminal", Mock(return_value=terminal)
+    )
+    answers = (
+        "Wrote the [plan](pantaray-file:///Users/me/plan.md) from "
+        "pantaray-file:///Users/me/app.py",
+        "## **Summary** is `ready`\n\nSee pantaray-file:///Users/me/plan.md and "
+        "pantaray-file:///Users/me/deck.pdf.",
+    )
+    finished = replace(
+        _ACTION,
+        action_status="success",
+        status_hint="idle",
+        latest_completion_event_id="e",
+    )
+    waiting = replace(_ACTION, action_id="b", status_hint="approval_pending")
+    paused = replace(
+        _ACTIVE, action_id="b", process_status="paused", job_status="paused"
+    )
+    page = _project(
+        (finished, waiting),
+        (_TERMINAL, paused),
+        answers={"a": answers, "b": answers[:1]},
+    )
+    running = _project((_ACTION,), (_ACTIVE,), answers={"a": answers}).items[0]
+    assert [(item.status_line, item.artifact_names) for item in page.items] == [
+        ("Summary is ready", ("plan.md", "deck.pdf")),
+        ("Wrote the plan from pantaray-file:///Users/me/app.py", ("plan.md",)),
+    ]
+    # The live stage is a running task's line; its files are already listed.
+    assert running.status_line is None
+    assert running.artifact_names == ("plan.md", "deck.pdf")
+    unanswered = _project((finished,), (_TERMINAL,)).items[0]
+    assert (unanswered.status_line, unanswered.artifact_names) == (None, ())
+
+
+def test_suggestion_rows_carry_on_after_the_title_and_name_their_files() -> None:
+    suggestion = replace(
+        _SUGGESTION,
+        answer="来週の資料を準備しましょうか？先週の議事録に宿題が残っています。",
+        artifacts_json='["drafts/outline.md","notes.txt"]',
+    )
+    item = _project((suggestion,)).items[0]
+    assert item.status_line == "先週の議事録に宿題が残っています。"
+    assert item.artifact_names == ("outline.md", "notes.txt")
+    one_sentence = _project((_SUGGESTION,)).items[0]
+    assert (one_sentence.status_line, one_sentence.artifact_names) == (None, ())
+
+
+@pytest.mark.parametrize("artifacts_json", [None, "{}", "[1]", "not json"])
+def test_malformed_suggestion_files_fail_closed(artifacts_json: str | None) -> None:
+    with pytest.raises(repository.ActionConversationIntegrityError):
+        _project((replace(_SUGGESTION, artifacts_json=artifacts_json),))
+
+
+@pytest.mark.parametrize("answers", [{}, {"a": (), "other": ()}])
+def test_answers_must_cover_exactly_the_listed_conversations(
+    answers: dict[str, tuple[str, ...]],
+) -> None:
+    with pytest.raises(repository.ActionConversationIntegrityError):
+        _project((_ACTION,), (_ACTIVE,), answers=answers)

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const HISTORY_MAX_PAGE_SIZE = 100;
 const HISTORY_MAX_SEARCH_CODE_POINTS = 256;
+const HISTORY_STATUS_LINE_MAX_CODE_POINTS = 120;
 
 const canonicalIdentitySchema = z
   .string()
@@ -14,6 +15,16 @@ export const canonicalTimestampSchema = z
     const parsed = new Date(value);
     return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
   }, 'Invalid canonical timestamp.');
+
+/** One plain line under a row's title, cut to fit by the runtime. */
+const statusLineSchema = nonBlankTextSchema
+  .refine(
+    (value) => [...value].length <= HISTORY_STATUS_LINE_MAX_CODE_POINTS,
+    'Status line is too long.'
+  )
+  .nullable();
+/** The names of the files a row's task made or linked, in the order it shows them. */
+const artifactNamesSchema = z.array(nonBlankTextSchema);
 
 export const ConversationHistoryStatusSchema = z.enum(['running', 'approval_pending', 'idle']);
 
@@ -42,6 +53,8 @@ const ConversationHistoryItemSchema = z
     updated_at: canonicalTimestampSchema,
     status: ConversationHistoryStatusSchema,
     latest_completion_event_id: canonicalIdentitySchema.nullable(),
+    status_line: statusLineSchema,
+    artifact_names: artifactNamesSchema,
   })
   .strict();
 
@@ -52,6 +65,8 @@ const SuggestionHistoryItemSchema = z
     title: nonBlankTextSchema,
     updated_at: canonicalTimestampSchema,
     status: z.enum(['approval_pending', 'idle']),
+    status_line: statusLineSchema,
+    artifact_names: artifactNamesSchema,
   })
   .strict();
 

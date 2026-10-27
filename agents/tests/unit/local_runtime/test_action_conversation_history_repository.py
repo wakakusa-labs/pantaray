@@ -257,7 +257,9 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
             ("suggestion", "Pending Suggestion ÜBER", "approval_pending"),
         ]
         assert items[2].model_dump()["latest_completion_event_id"] == ("event-terminal")
-        assert [(item.status_line, item.artifact_names) for item in items] == [
+        assert [
+            (getattr(item, "status_line", None), item.artifact_names) for item in items
+        ] == [
             (None, ()),
             (None, ()),
             ("Terminal Needle", ("report.md",)),

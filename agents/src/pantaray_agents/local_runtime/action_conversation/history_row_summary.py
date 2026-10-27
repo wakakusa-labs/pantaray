@@ -22,8 +22,6 @@ _LEADING_BLOCK_MARKER = re.compile(r"^(?:#{1,6}|>|[-*+]|\d+\.)\s+")
 _INLINE_EMPHASIS = re.compile(r"\*\*|__|`")
 # A link shows as its text: an answer often opens by linking the file it made.
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-# Where a suggestion's opening sentence ends, in Japanese or in a spaced language.
-_SENTENCE_END = re.compile(r"[。！？]|[.!?](?=\s)|\n")
 _ELLIPSIS = "…"
 
 _FILE_URL_START = "pantaray-file:///"
@@ -79,18 +77,6 @@ def answer_status_line(answer: str) -> str | None:
     """A conversation's line: the first line of its latest answer."""
 
     return _fit(first_line(answer))
-
-
-def suggestion_status_line(answer: str) -> str | None:
-    """A suggestion's line: what follows its opening sentence.
-
-    The suggestion's text is its title, and it leads with what it suggests, so
-    the line carries on with why. A one-sentence suggestion has no line.
-    """
-
-    text = answer.strip()
-    end = _SENTENCE_END.search(text)
-    return None if end is None else _fit(first_line(text[end.end() :]))
 
 
 def _bare_file_url_at(text: str, start: int) -> str:
@@ -162,5 +148,4 @@ __all__ = [
     "artifact_names",
     "first_line",
     "linked_document_names",
-    "suggestion_status_line",
 ]

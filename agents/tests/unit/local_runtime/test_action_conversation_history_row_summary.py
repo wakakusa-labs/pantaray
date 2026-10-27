@@ -5,7 +5,6 @@ from pantaray_agents.local_runtime.action_conversation.history_row_summary impor
     artifact_names,
     first_line,
     linked_document_names,
-    suggestion_status_line,
 )
 from pantaray_agents.schema.conversation_history import (
     CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS,
@@ -37,25 +36,6 @@ def test_status_line_fits_one_row_and_omits_an_empty_answer() -> None:
         "y" * CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS
     ) == ("y" * CONVERSATION_HISTORY_STATUS_LINE_MAX_CODEPOINTS)
     assert answer_status_line("**\n\n") is None
-
-
-@pytest.mark.parametrize(
-    ("answer", "expected"),
-    [
-        (
-            "Shall I draft it? The deadline is Friday. It is short.",
-            "The deadline is Friday. It is short.",
-        ),
-        ("会議の資料を作りましょうか。明日が締め切りです。", "明日が締め切りです。"),
-        ("Draft the summary\n\nIt is due today.", "It is due today."),
-        ("Version 1.2 is out.", None),
-        ("One sentence only", None),
-    ],
-)
-def test_suggestion_line_carries_on_after_the_opening_sentence(
-    answer: str, expected: str | None
-) -> None:
-    assert suggestion_status_line(answer) == expected
 
 
 def test_linked_documents_follow_the_renderer_file_chips() -> None:

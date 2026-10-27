@@ -326,8 +326,10 @@ export function HistorySidebar({
                 const chip = attentionChip(item);
                 const liveStage =
                   item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
-                // A running task's line is its live stage; the stored line is for the rest.
-                const statusLine = liveStage ? null : item.status_line;
+                // A running task's line is its live stage; the stored line is for the rest. A
+                // suggestion has none: its title is its text already.
+                const statusLine =
+                  item.kind === 'conversation' && !liveStage ? item.status_line : null;
                 const described = [
                   statusLine ? statusLineId(identity) : null,
                   item.artifact_names.length > 0 ? artifactLineId(identity) : null,

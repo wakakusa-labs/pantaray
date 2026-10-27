@@ -113,7 +113,6 @@ const ITEMS: ConversationHistoryListItem[] = [
     title: '請求書を作りましょうか',
     updated_at: '2026-10-10T00:00:00.000Z',
     status: 'approval_pending',
-    status_line: null,
     artifact_names: [],
   },
 ];

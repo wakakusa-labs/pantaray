@@ -195,7 +195,6 @@ it('labels a suggestion’s card as a suggestion, as the task list does', async 
         title: '請求書の下書きを作る',
         updated_at: at(0),
         status: 'approval_pending',
-        status_line: null,
         artifact_names: [],
       },
     ],

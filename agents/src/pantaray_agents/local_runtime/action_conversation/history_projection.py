@@ -36,7 +36,6 @@ from .history_row_summary import (
     answer_status_line,
     artifact_names,
     linked_document_names,
-    suggestion_status_line,
 )
 from .repository import ActionConversationIntegrityError
 from .terminal_projection import project_action_run_terminal
@@ -148,7 +147,6 @@ def _project_suggestion(
         title=title,
         updated_at=candidate.updated_at,
         status=expected_status,
-        status_line=suggestion_status_line(title),
         artifact_names=artifact_names(_suggestion_artifacts(candidate.artifacts_json)),
     )
 

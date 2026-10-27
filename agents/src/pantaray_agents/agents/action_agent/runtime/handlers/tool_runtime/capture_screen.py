@@ -281,10 +281,10 @@ async def run_capture_screen_tool(
             app_name=app_name,
         )
     except Exception:
-        broker.close(capture_request_id=capture_request_id)
+        broker.close(request_id=capture_request_id)
         raise
     outcome = await broker.wait(
-        capture_request_id=capture_request_id,
+        request_id=capture_request_id,
         timeout_seconds=_CAPTURE_TIMEOUT_SECONDS,
     )
 

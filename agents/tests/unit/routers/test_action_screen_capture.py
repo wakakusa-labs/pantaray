@@ -6,9 +6,10 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    ScreenCaptureBroker,
     ScreenCaptureCaptured,
+    ScreenCaptureOutcome,
     ScreenCaptureRefused,
 )
 from pantaray_agents.routers import action_screen_capture as router_module
@@ -34,17 +35,17 @@ def _captured_body(capture_request_id: str) -> dict[str, object]:
     }
 
 
-def _bind(monkeypatch: pytest.MonkeyPatch) -> ScreenCaptureBroker:
-    broker = ScreenCaptureBroker()
+def _bind(monkeypatch: pytest.MonkeyPatch) -> OneShotRequests[ScreenCaptureOutcome]:
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     monkeypatch.setattr(router_module, "screen_capture_broker", lambda: broker)
     return broker
 
 
-def _waiter(broker: ScreenCaptureBroker, capture_request_id: str):
+def _waiter(broker: OneShotRequests[ScreenCaptureOutcome], capture_request_id: str):
     """Stand in for the tool that is blocked on this request."""
 
     return asyncio.ensure_future(
-        broker.wait(capture_request_id=capture_request_id, timeout_seconds=5)
+        broker.wait(request_id=capture_request_id, timeout_seconds=5)
     )
 
 

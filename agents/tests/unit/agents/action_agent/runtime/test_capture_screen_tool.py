@@ -27,10 +27,11 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools import CAPTURE_SCREEN_TOOL
+from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     SCREEN_CAPTURE_REQUESTED_EVENT,
-    ScreenCaptureBroker,
     ScreenCaptureCaptured,
+    ScreenCaptureOutcome,
     ScreenCaptureRefusalCode,
     ScreenCaptureRefused,
 )
@@ -89,10 +90,10 @@ def _bind(
     *,
     db_path: Path,
     artifact_root: Path | None = None,
-) -> ScreenCaptureBroker:
+) -> OneShotRequests[ScreenCaptureOutcome]:
     """Point the tool at this test's database, artifact root, and broker."""
 
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     monkeypatch.setattr(
         capture_screen_module,
         "read_local_runtime_db_config",
@@ -507,7 +508,7 @@ def _captured() -> ScreenCaptureCaptured:
 
 
 async def _answer_with(
-    broker: ScreenCaptureBroker,
+    broker: OneShotRequests[ScreenCaptureOutcome],
     *,
     db_path: Path,
     run,
@@ -522,7 +523,7 @@ async def _answer_with(
         if not events:
             continue
         answered = broker.answer(
-            capture_request_id=str(events[0]["capture_request_id"]),
+            request_id=str(events[0]["capture_request_id"]),
             user_id="user-1",
             outcome=outcome,
         )

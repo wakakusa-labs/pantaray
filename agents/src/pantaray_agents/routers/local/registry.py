@@ -7,6 +7,7 @@ from pantaray_agents.routers import (
     action,
     action_approval,
     action_approval_mode,
+    action_html_render,
     action_messages,
     action_screen_capture,
     action_tool_output,
@@ -30,6 +31,7 @@ def register_local_routers(app: FastAPI) -> None:
     app.include_router(action_messages.router)
     app.include_router(action_tool_output.router)
     app.include_router(action_screen_capture.router)
+    app.include_router(action_html_render.router)
     app.include_router(approval_preferences.router)
     app.include_router(workspace_settings.router)
     app.include_router(integrations.router)

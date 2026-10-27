@@ -9,6 +9,9 @@ import pytest
 from pantaray_agents.local_runtime.runtime.action_approval_projection import (
     ACTION_APPROVAL_SNAPSHOT_EVENT,
 )
+from pantaray_agents.local_runtime.runtime.html_render_relay import (
+    HTML_RENDER_REQUESTED_EVENT,
+)
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     SCREEN_CAPTURE_REQUESTED_EVENT,
 )
@@ -397,3 +400,37 @@ async def test_a_capture_request_reaches_the_desktop_client_with_its_app(
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_render_request_reaches_the_desktop_client_with_its_read_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Electron enforces what the page may load, so the whole scope must arrive."""
+
+    handler = _FakeHandler()
+    payload: dict[str, object] = {
+        "action_id": "act-1",
+        "process_id": ROOT_PROCESS_ID,
+        "tool_request_id": "request-1",
+        "render_request_id": "render-1",
+        "html_path": "/work/deck.html",
+        "file_roots": ["/work"],
+        "private_roots": ["/app-data"],
+        "private_root_exceptions": ["/app-data/attachments"],
+        "allow_network": True,
+    }
+    request = _FakeEvent(
+        cursor=1,
+        event_id="event-render",
+        event_type=HTML_RENDER_REQUESTED_EVENT,
+        payload=payload,
+    )
+
+    await _forward(monkeypatch, handler, [[request]])
+
+    [(event, data, kwargs)] = handler.sent
+    assert event == OutboundEvent.HTML_RENDER_REQUESTED.value
+    assert data == {"kind": "action", **payload}
+    assert kwargs["persist_public_event"] is False
+    assert kwargs["store_in_session_store"] is False

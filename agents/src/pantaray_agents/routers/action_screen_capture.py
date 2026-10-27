@@ -77,7 +77,7 @@ async def answer_action_screen_capture(
     user_id: str = Depends(get_current_user_id_from_token),
 ) -> ActionScreenCaptureResponse:
     answer = screen_capture_broker().answer(
-        capture_request_id=request.capture_request_id,
+        request_id=request.capture_request_id,
         user_id=str(user_id),
         outcome=_build_outcome(request.result),
     )

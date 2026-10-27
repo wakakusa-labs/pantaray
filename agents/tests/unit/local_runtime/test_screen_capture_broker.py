@@ -10,9 +10,10 @@ from tests.unit.local_runtime.broker_test_support import (
     _bootstrap_runtime_db,
 )
 
+from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     SCREEN_CAPTURE_REQUESTED_EVENT,
-    ScreenCaptureBroker,
+    ScreenCaptureOutcome,
     ScreenCaptureRefused,
     announce_screen_capture_request,
 )
@@ -107,26 +108,25 @@ def test_a_request_from_another_users_process_is_refused(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_a_request_is_answered_once_and_then_forgotten() -> None:
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
     refusal = ScreenCaptureRefused(code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={})
 
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=refusal,
         )
         == "accepted"
     )
     assert (
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=1)
-        is refusal
+        await broker.wait(request_id=capture_request_id, timeout_seconds=1) is refusal
     )
     # The waiter took the request with it, so a late answer has nothing to resolve.
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=refusal,
         )
@@ -136,15 +136,14 @@ async def test_a_request_is_answered_once_and_then_forgotten() -> None:
 
 @pytest.mark.asyncio
 async def test_an_unanswered_request_times_out_and_is_dropped() -> None:
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
 
     assert (
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=0.01)
-        is None
+        await broker.wait(request_id=capture_request_id, timeout_seconds=0.01) is None
     )
     with pytest.raises(KeyError):
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=0.01)
+        await broker.wait(request_id=capture_request_id, timeout_seconds=0.01)
 
 
 @pytest.mark.asyncio
@@ -153,10 +152,10 @@ async def test_a_stopped_waiter_closes_its_request_before_electron_answers() -> 
 
     import asyncio
 
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
     waiter = asyncio.ensure_future(
-        broker.wait(capture_request_id=capture_request_id, timeout_seconds=60)
+        broker.wait(request_id=capture_request_id, timeout_seconds=60)
     )
     await asyncio.sleep(0)
     waiter.cancel()
@@ -165,7 +164,7 @@ async def test_a_stopped_waiter_closes_its_request_before_electron_answers() -> 
 
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=ScreenCaptureRefused(
                 code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={}

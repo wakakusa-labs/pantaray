@@ -66,7 +66,7 @@ _ACTION = history_candidates.ActionHistoryCandidate(
     None,
 )
 _SUGGESTION = history_candidates.SuggestionHistoryCandidate(
-    "suggestion-1", "Approve this", "action_offer", None, "approval_pending", _AT
+    "suggestion-1", "Approve this", "action_offer", None, "approval_pending", _AT, "[]"
 )
 
 
@@ -74,6 +74,7 @@ def _project(
     candidates: tuple[history_candidates.ConversationHistoryCandidate, ...],
     authorities: tuple[authority.ActionLogicalRunAuthority, ...] = (),
     search: str = "",
+    answers: dict[str, tuple[str, ...]] | None = None,
 ) -> ConversationHistoryPage:
     return project_conversation_history_page(
         candidate_page=history_candidates.ConversationHistoryCandidatePage(
@@ -82,6 +83,15 @@ def _project(
         user_id="user-1",
         normalized_search=search,
         authorities=authorities,
+        answers=(
+            {
+                candidate.action_id: ()
+                for candidate in candidates
+                if isinstance(candidate, history_candidates.ActionHistoryCandidate)
+            }
+            if answers is None
+            else answers
+        ),
     )
 
 
@@ -188,3 +198,86 @@ def test_a_task_the_chat_started_in_its_own_words_takes_them_as_its_title() -> N
     )
     page = _project((replace(_ACTION, initial_user=row),), (_ACTIVE,))
     assert page.items[0].title == "List the customers from that history"
+
+
+def _ended(
+    monkeypatch: pytest.MonkeyPatch, status: str, final_output: str | None
+) -> history_candidates.ActionHistoryCandidate:
+    monkeypatch.setattr(
+        history_projection,
+        "project_action_run_terminal",
+        Mock(
+            return_value=terminal_projection.ActionRunTerminalProjection(
+                status, _AT, final_output, None
+            )
+        ),
+    )
+    return replace(
+        _ACTION,
+        action_status=status,
+        status_hint="idle",
+        latest_completion_event_id="e",
+    )
+
+
+def test_rows_show_the_latest_runs_answer_and_every_linked_document(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = (
+        "Wrote the [plan](pantaray-file:///Users/me/plan.md) from "
+        "pantaray-file:///Users/me/app.py",
+        "## **Summary** is `ready`\n\nSee pantaray-file:///Users/me/plan.md and "
+        "pantaray-file:///Users/me/deck.pdf.",
+    )
+    finished = _ended(monkeypatch, "success", answers[-1])
+    page = _project((finished,), (_TERMINAL,), answers={"a": answers})
+    assert (page.items[0].status_line, page.items[0].artifact_names) == (
+        "Summary is ready",
+        ("plan.md", "deck.pdf"),
+    )
+    # A run still going or waiting for approval has no answer of its own yet: the
+    # live stage or the chip says where it is, and an earlier answer's files stay.
+    waiting = replace(_ACTION, status_hint="approval_pending")
+    paused = replace(_ACTIVE, process_status="paused", job_status="paused")
+    for candidate, latest in ((_ACTION, _ACTIVE), (waiting, paused)):
+        row = _project((candidate,), (latest,), answers={"a": answers}).items[0]
+        assert (row.status_line, row.artifact_names) == (None, ("plan.md", "deck.pdf"))
+
+
+@pytest.mark.parametrize("status", ["error", "canceled"])
+def test_a_run_that_did_not_finish_hides_the_earlier_answer(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    # A follow-up that failed after a finished run: the row must not read as done.
+    ended = _ended(monkeypatch, status, "")
+    row = _project(
+        (ended,), (_TERMINAL,), answers={"a": ("Sent pantaray-file:///Users/me/q.pdf",)}
+    ).items[0]
+    assert (row.status_line, row.artifact_names) == (None, ("q.pdf",))
+
+
+def test_suggestion_rows_name_their_files_and_no_line() -> None:
+    suggestion = replace(
+        _SUGGESTION,
+        answer="来週の資料を準備しましょうか？先週の議事録に宿題が残っています。",
+        artifacts_json='["drafts/outline.md","notes.txt"]',
+    )
+    item = _project((suggestion,)).items[0]
+    # Its title is its text already; a line under it would only carry it on.
+    assert "status_line" not in item.model_dump()
+    assert item.artifact_names == ("outline.md", "notes.txt")
+    assert _project((_SUGGESTION,)).items[0].artifact_names == ()
+
+
+@pytest.mark.parametrize("artifacts_json", [None, "{}", "[1]", "not json"])
+def test_malformed_suggestion_files_fail_closed(artifacts_json: str | None) -> None:
+    with pytest.raises(repository.ActionConversationIntegrityError):
+        _project((replace(_SUGGESTION, artifacts_json=artifacts_json),))
+
+
+@pytest.mark.parametrize("answers", [{}, {"a": (), "other": ()}])
+def test_answers_must_cover_exactly_the_listed_conversations(
+    answers: dict[str, tuple[str, ...]],
+) -> None:
+    with pytest.raises(repository.ActionConversationIntegrityError):
+        _project((_ACTION,), (_ACTIVE,), answers=answers)

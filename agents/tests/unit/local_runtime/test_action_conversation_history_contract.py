@@ -26,6 +26,8 @@ def _conversation(**updates: object) -> dict[str, object]:
         "updated_at": "2026-08-30T00:00:00.000Z",
         "status": "running",
         "latest_completion_event_id": None,
+        "status_line": None,
+        "artifact_names": (),
     }
     payload.update(updates)
     return payload
@@ -42,6 +44,7 @@ def test_page_discriminates_minimal_strict_items() -> None:
                     "title": "Review this",
                     "updated_at": "2026-08-29T23:00:00.000Z",
                     "status": "approval_pending",
+                    "artifact_names": ("outline.md",),
                 },
             ),
             "next_cursor": "opaque",
@@ -59,6 +62,7 @@ def test_page_discriminates_minimal_strict_items() -> None:
             title="Review this",
             updated_at="2026-08-30T00:00:00.000Z",
             status="running",  # type: ignore[arg-type]
+            artifact_names=(),
         )
 
 
@@ -74,6 +78,9 @@ def test_page_discriminates_minimal_strict_items() -> None:
         {"updated_at": "2026-08-30T00:00:00.123000Z"},
         {"updated_at": "2026-08-30T09:00:00.123+09:00"},
         {"status": 1},
+        {"status_line": " "},
+        {"status_line": "x" * 121},
+        {"artifact_names": (" ",)},
     ],
 )
 def test_public_item_rejects_private_and_noncanonical_fields(

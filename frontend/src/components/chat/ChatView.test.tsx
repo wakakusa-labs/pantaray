@@ -85,6 +85,8 @@ const work = (action_id: string, title: string, status: 'running' | 'idle') =>
     updated_at: at(0),
     status,
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   }) satisfies ConversationHistoryListItem;
 
 let pages: ChatItemPage[];
@@ -193,6 +195,7 @@ it('labels a suggestion’s card as a suggestion, as the task list does', async 
         title: '請求書の下書きを作る',
         updated_at: at(0),
         status: 'approval_pending',
+        artifact_names: [],
       },
     ],
     nextCursor: null,

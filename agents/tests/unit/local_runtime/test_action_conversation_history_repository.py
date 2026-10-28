@@ -90,7 +90,7 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
         accepted_at=_TERMINAL_STARTED_AT,
         completed_at=_TERMINAL_RECENCY_AT,
         action_status="success",
-        final_output="Terminal Needle",
+        final_output="Terminal Needle\n\nIn pantaray-file:///Users/me/report.md",
     )
     terminal_payload = dict(terminal.process_completed_payload["data"])
     terminal_payload["persisted_sequence"] = 7
@@ -105,9 +105,11 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
               user_reaction='accepted',created_at='{_PAUSED_AT}',updated_at='{_PAUSED_AT}'
             WHERE suggestion_id='sug-1';
             INSERT INTO agent_suggestions(suggestion_id,user_id,status,answer,
-              has_suggestion,interaction_contract,user_reaction,created_at,updated_at)
+              has_suggestion,interaction_contract,user_reaction,artifacts_json,
+              created_at,updated_at)
             VALUES ('suggestion-pending','{_USER_ID}','success','Pending Suggestion ÜBER',
-              1,'action_offer',NULL,'{_SUGGESTION_AT}','{_SUGGESTION_AT}');
+              1,'action_offer',NULL,'["plan/outline.md"]',
+              '{_SUGGESTION_AT}','{_SUGGESTION_AT}');
             UPDATE agent_actions SET initial_user_message_id='{linked_message.message_id}',
               status='processing',created_at='{_PAUSED_AT}',updated_at='{_PAUSED_AT}'
             WHERE action_id='act-1';
@@ -255,6 +257,14 @@ def test_composes_candidates_and_bulk_authority_into_public_history(
             ("suggestion", "Pending Suggestion ÜBER", "approval_pending"),
         ]
         assert items[2].model_dump()["latest_completion_event_id"] == ("event-terminal")
+        assert [
+            (getattr(item, "status_line", None), item.artifact_names) for item in items
+        ] == [
+            (None, ()),
+            (None, ()),
+            ("Terminal Needle", ("report.md",)),
+            (None, ("outline.md",)),
+        ]
         # One row by its key, as the list shows it; an accepted suggestion is its task.
         for item, expected_row in (
             (("conversation", "action-terminal"), items[2]),

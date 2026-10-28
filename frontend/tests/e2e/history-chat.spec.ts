@@ -107,6 +107,8 @@ const HISTORY: ConversationHistoryListItem[] = [
     updated_at: at(9, 33),
     status: 'running',
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   },
   {
     kind: 'conversation',
@@ -115,6 +117,8 @@ const HISTORY: ConversationHistoryListItem[] = [
     updated_at: at(9, 3),
     status: 'running',
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   },
 ];
 
@@ -572,7 +576,7 @@ test('a first run marks the existing chat read instead of showing it all as unre
   );
 });
 
-test('a suggestion the user has not answered has a dot and opens in the detail pane', async ({
+test('a suggestion the user has not answered has a chip and opens in the detail pane', async ({
   page,
 }, info) => {
   await installBridge(page, CHAT, [
@@ -582,16 +586,19 @@ test('a suggestion the user has not answered has a dot and opens in the detail p
       title: '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？',
       updated_at: at(9, 40),
       status: 'approval_pending',
+      artifact_names: ['構成案.md'],
     },
     ...HISTORY,
   ]);
   const sidebar = sidebarOf(page);
   const row = sidebar.getByRole('button', { name: /^来週の登壇資料、構成案から/ });
-  await expect(row.getByRole('img', { name: '返事待ちの提案' })).toBeVisible();
-  await expect(row).toHaveText(
-    '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？'
+  await expect(row.getByRole('img', { name: '返事待ちの提案' })).toHaveText('提案');
+  // Under the title: the file the suggestion made, heard as its description.
+  await expect(row).toHaveAccessibleName(
+    '来週の登壇資料、構成案からスライドの下書きを作っておきましょうか？ 返事待ちの提案'
   );
-  // A running Action needs nothing from the user, so it has no dot.
+  await expect(row).toHaveAccessibleDescription('構成案.md');
+  // A running Action needs nothing from the user, so it has no chip or dot.
   await expect(
     sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ }).getByRole('img')
   ).toHaveCount(0);

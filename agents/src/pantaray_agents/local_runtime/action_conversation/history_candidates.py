@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import ClassVar, Final, Literal, cast
@@ -55,6 +56,8 @@ class SuggestionHistoryCandidate:
     user_reaction: str | None
     status_hint: ConversationHistoryStatus
     updated_at: str
+    # The stored JSON array of the files it made, relative to its artifact folder.
+    artifacts_json: str | None
     kind: ClassVar[Literal["suggestion"]] = "suggestion"
 
     @property
@@ -236,7 +239,7 @@ WITH action_source AS (
     step_name,matched_user_step_name,
     CASE WHEN matched_user_step_id IS NULL AND matched_terminal_root_run_id IS NULL
       THEN matched_assistant_text END AS matched_assistant_text,
-    opening_suggestion_text
+    opening_suggestion_text,NULL AS artifacts_json
   FROM action_source
 ), suggestion_evidence AS (
   SELECT 'suggestion' AS kind,suggestion.suggestion_id AS stable_id,
@@ -262,7 +265,7 @@ WITH action_source AS (
         CASE WHEN typeof(suggestion.answer)='text' THEN suggestion.answer ELSE '' END)
         LIKE :search_pattern ESCAPE '\' AS search_match,
     NULL AS step_name,NULL AS matched_user_step_name,NULL AS matched_assistant_text,
-    NULL AS opening_suggestion_text
+    NULL AS opening_suggestion_text,suggestion.artifacts_json
   FROM agent_suggestions AS suggestion
     INDEXED BY idx_agent_suggestions_user_history_recency
   LEFT JOIN agent_actions AS linked
@@ -295,7 +298,8 @@ SELECT kind,stable_id,raw_updated_at,status_hint,action_id,suggestion_id,status,
  matched_user_message_id,matched_user_message_json,matched_user_request_text,
  matched_user_adopted_process_id,matched_user_expected_process_id,
  matched_user_adoption_canceled_at,matched_terminal_root_run_id,
- step_name,matched_user_step_name,matched_assistant_text,opening_suggestion_text
+ step_name,matched_user_step_name,matched_assistant_text,opening_suggestion_text,
+ artifacts_json
 FROM candidates
 ORDER BY raw_updated_at DESC,kind,stable_id LIMIT :fetch_limit
 """
@@ -359,6 +363,58 @@ def read_conversation_history_candidates_in_connection(
     return ConversationHistoryCandidatePage(candidates, next_cursor)
 
 
+# Each logical run's answer once: the steers it adopted are further USER rows of
+# the same process. Runs are ordered as the list picks the latest, by their last
+# USER step. CROSS JOIN keeps the listed conversations' runs the outer loop.
+_ANSWERS_SQL = """
+SELECT run.action_id,json_extract(answer.payload_json,'$.final_output')
+FROM (SELECT action_id,adopted_process_id,MAX(step_number) AS run_order
+  FROM agent_action_steps
+  WHERE user_id=:user_id AND action_id IN (SELECT value FROM json_each(:action_ids))
+    AND step_type='user_request' AND status='success'
+    AND adopted_process_id IS NOT NULL AND step_number IS NOT NULL
+  GROUP BY action_id,adopted_process_id) AS run
+CROSS JOIN processes AS process
+  ON process.process_id=run.adopted_process_id AND process.user_id=:user_id
+ AND process.kind='action' AND process.action_id=run.action_id
+CROSS JOIN jobs AS job ON job.job_id=(SELECT job_id
+  FROM jobs INDEXED BY idx_jobs_process_id
+  WHERE process_id=process.process_id AND job_type='execute_action'
+  ORDER BY job_id LIMIT 1)
+CROSS JOIN process_events AS answer
+  ON answer.process_id=process.process_id AND answer.event_id=process.terminal_event_id
+ AND answer.event_name='stream_end'
+WHERE process.status='completed' AND job.status='completed'
+  AND json_type(answer.payload_json,'$.final_output')='text'
+ORDER BY run.action_id,run.run_order,run.adopted_process_id
+"""
+
+
+def read_conversation_history_answers_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    candidates: tuple[ConversationHistoryCandidate, ...],
+) -> dict[str, tuple[str, ...]]:
+    """The final answers of each listed conversation's completed runs, oldest
+    first, read for the whole page at once."""
+
+    if not connection.in_transaction:
+        raise MigrationError("Conversation history requires a caller-owned transaction")
+    action_ids = [
+        candidate.action_id
+        for candidate in candidates
+        if isinstance(candidate, ActionHistoryCandidate)
+    ]
+    answers: dict[str, list[str]] = {action_id: [] for action_id in action_ids}
+    if action_ids:
+        for action_id, answer in connection.execute(
+            _ANSWERS_SQL, {"user_id": user_id, "action_ids": json.dumps(action_ids)}
+        ):
+            answers[cast("str", action_id)].append(cast("str", answer))
+    return {action_id: tuple(texts) for action_id, texts in answers.items()}
+
+
 def _candidate(row: tuple[object, ...]) -> ConversationHistoryCandidate:
     if row[0] == "suggestion":
         return SuggestionHistoryCandidate(
@@ -368,6 +424,7 @@ def _candidate(row: tuple[object, ...]) -> ConversationHistoryCandidate:
             user_reaction=cast("str | None", row[10]),
             status_hint=cast("ConversationHistoryStatus", row[3]),
             updated_at=cast("str", row[2]),
+            artifacts_json=cast("str | None", row[37]),
         )
     initial_user = None
     if row[11] is not None:
@@ -423,6 +480,7 @@ __all__ = [
     "ConversationHistoryCandidatePage",
     "ConversationHistoryItemKey",
     "SuggestionHistoryCandidate",
+    "read_conversation_history_answers_in_connection",
     "read_conversation_history_candidates_in_connection",
     "register_conversation_history_casefold_sqlite",
 ]

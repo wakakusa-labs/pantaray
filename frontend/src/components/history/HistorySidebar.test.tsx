@@ -51,6 +51,8 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
         updated_at: '2026-08-30T01:02:03.000Z',
         status: 'idle',
         latest_completion_event_id: 'C1',
+        status_line: null,
+        artifact_names: [],
       },
       {
         kind: 'suggestion',
@@ -58,6 +60,7 @@ vi.mock('@/hooks/useSuggestionHistory', async (importOriginal) => ({
         title: 'Suggestion',
         updated_at: '2026-08-30T01:02:03.000Z',
         status: 'idle',
+        artifact_names: [],
       },
     ],
     loading: mocks.loading,
@@ -253,6 +256,7 @@ it('行は最終更新の日ごとに、今日・昨日・日付の見出しの�
     title: id,
     updated_at: updatedAt.toISOString(),
     status: 'idle' as const,
+    artifact_names: [],
   });
   mocks.itemsOverride = [
     row('T1', new Date(2026, 9, 2, 8)),
@@ -409,7 +413,7 @@ it('検索に応答する', async () => {
   await waitFor(() => expect(mocks.setSearchText).toHaveBeenCalledWith('😀'.repeat(256)));
 });
 
-it('行はバッジを出さず、確認待ち・返事待ちの提案・未読の完了にだけ理由つきの点を出す', () => {
+it('確認待ちの会話と返事待ちの提案はチップ、未読の完了だけ点で示し、どれも理由で読み上げる', () => {
   window.electron = {} as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = 'A-unread';
@@ -421,6 +425,8 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'running',
       latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'conversation',
@@ -429,6 +435,8 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
       latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'conversation',
@@ -437,6 +445,8 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
       latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'conversation',
@@ -445,6 +455,8 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
       latest_completion_event_id: 'C1',
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'suggestion',
@@ -452,6 +464,7 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
+      artifact_names: [],
     },
     {
       kind: 'suggestion',
@@ -459,13 +472,24 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
       title: 'Decided',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
+      artifact_names: [],
     },
   ];
   const { container } = render(<Sidebar />, {
     wrapper: SidebarWrapper,
   });
 
-  expect(container.querySelector('.badge')).toBeNull();
+  expect(
+    [...container.querySelectorAll('.badge')].map((chip) => [chip.className, chip.textContent])
+  ).toEqual([
+    ['badge badge--warning', 'history.row.approvalNeeded'],
+    ['badge badge--info', 'history.status.suggestion'],
+  ]);
+  expect(
+    [...container.querySelectorAll('.history-item-unread')].map((dot) =>
+      dot.getAttribute('aria-label')
+    )
+  ).toEqual(['history.unread']);
   const dotOf = (title: string) =>
     screen
       .getByRole('button', { name: new RegExp(`^${title}`) })
@@ -484,8 +508,13 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
     ['Offer', 'history.attention.suggestion'],
     ['Decided', null],
   ]);
-  // A row shows its title alone; the reason, and that a task is running, are heard.
-  expect(screen.getByRole('button', { name: /^Approval/ })).toHaveTextContent(/^Approval$/);
+  // A chip shows what waits in a word and is heard with its reason, as the dot was.
+  expect(screen.getByRole('button', { name: /^Approval/ })).toHaveTextContent(
+    /^Approvalhistory\.row\.approvalNeeded$/
+  );
+  expect(screen.getByRole('button', { name: /^Approval/ })).toHaveAccessibleName(
+    'Approval history.status.approvalPending'
+  );
   expect(screen.getByRole('button', { name: /^Running/ })).toHaveAccessibleName(
     'Running history.status.running'
   );
@@ -494,6 +523,73 @@ it('行はバッジを出さず、確認待ち・返事待ちの提案・未読�
     'Offer history.attention.suggestion'
   );
   expect(HISTORY_MESSAGES.ja['history.attention.suggestion']).toBe('返事待ちの提案');
+  expect(HISTORY_MESSAGES.ja['history.row.approvalNeeded']).toBe('承認待ち');
+  expect(HISTORY_MESSAGES.ja['history.status.suggestion']).toBe('提案');
+  expect(HISTORY_MESSAGES.en['history.row.approvalNeeded']).toBe('Approval needed');
+});
+
+it('行はタイトルの下に今の状況と作ったファイルを1行ずつ出し、名前を変えず説明として伝える', () => {
+  window.electron = {} as unknown as Window['electron'];
+  mocks.error = null;
+  mocks.unreadActionId = null;
+  mocks.itemsOverride = [
+    {
+      kind: 'conversation',
+      action_id: 'A-done',
+      title: 'Done',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'idle',
+      latest_completion_event_id: 'C1',
+      status_line: 'Summary ready',
+      artifact_names: ['report.md', 'deck.pdf', 'notes.txt'],
+    },
+    {
+      kind: 'suggestion',
+      suggestion_id: 'S-offer',
+      title: 'Offer',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'approval_pending',
+      artifact_names: ['outline.md'],
+    },
+    {
+      kind: 'conversation',
+      action_id: 'A-bare',
+      title: 'Bare',
+      updated_at: '2026-08-30T01:02:03.000Z',
+      status: 'idle',
+      latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
+    },
+  ];
+  const { container } = render(<Sidebar />, {
+    wrapper: SidebarWrapper,
+  });
+
+  const rowOf = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}`) });
+  const linesOf = (title: string) => {
+    const row = rowOf(title);
+    return [
+      row.querySelector('.history-item-line')?.textContent ?? null,
+      row.querySelector('.history-item-files')?.textContent ?? null,
+    ];
+  };
+  expect(linesOf('Done')).toEqual(['Summary ready', 'report.md history.row.moreFiles {"count":2}']);
+  // A suggestion's title is its text already, so it has no line; only its files.
+  expect(linesOf('Offer')).toEqual([null, 'outline.md']);
+  expect(linesOf('Bare')).toEqual([null, null]);
+  expect(rowOf('Done').querySelector('.history-item-files svg')).not.toBeNull();
+  // Seen under the title, heard after it: the row keeps its name.
+  expect(rowOf('Done')).toHaveAccessibleName('Done');
+  expect(rowOf('Done')).toHaveAccessibleDescription(
+    'Summary ready report.md history.row.moreFiles {"count":2}'
+  );
+  expect(rowOf('Offer')).toHaveAccessibleName('Offer history.attention.suggestion');
+  expect(rowOf('Offer')).toHaveAccessibleDescription('outline.md');
+  expect(rowOf('Bare')).not.toHaveAttribute('aria-describedby');
+  expect(container.querySelector('.history-item-line')).toHaveAttribute('aria-hidden', 'true');
+  expect(HISTORY_MESSAGES.ja['history.row.moreFiles']).toBe('ほか {count} 件');
+  expect(HISTORY_MESSAGES.en['history.row.moreFiles']).toBe('and {count} more');
 });
 
 it('チャットの行は表示中として示し、未読の件数を数字と説明で伝える', () => {
@@ -589,6 +685,8 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
     updated_at: '2026-08-30T01:02:03.000Z',
     status: 'running',
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   });
   mocks.itemsOverride = [conversation('A1'), conversation('A2')];
   const { container } = render(<Sidebar />, {
@@ -644,7 +742,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
   expect(screen.getByRole('button', { name: /^A1/ })).toBe(row);
   expect(row).toHaveFocus();
 
-  // While an approval is pending the dot says so; the line would only repeat it.
+  // While an approval is pending the chip says so; the line would only repeat it.
   publish(
     liveUpdate(found, [
       {
@@ -678,6 +776,7 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
     title: id,
     updated_at: updatedAt.toISOString(),
     status: 'idle' as const,
+    artifact_names: [],
   });
   mocks.itemsOverride = [
     row('Y1', new Date(2026, 9, 1, 8)),
@@ -777,6 +876,7 @@ it('表示中の行を削除すると、選択を次の行へ、無ければチ�
       title: 'Suggestion',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'idle',
+      artifact_names: [],
     },
   ];
   rerender(<Sidebar />);
@@ -831,6 +931,8 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'running',
       latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'conversation',
@@ -839,6 +941,8 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
       latest_completion_event_id: null,
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'suggestion',
@@ -846,6 +950,7 @@ it('実行中・確認待ちの会話は削除できず、返事待ちの提案�
       title: 'Offer',
       updated_at: '2026-08-30T01:02:03.000Z',
       status: 'approval_pending',
+      artifact_names: [],
     },
   ];
   render(<Sidebar />, { wrapper: SidebarWrapper });

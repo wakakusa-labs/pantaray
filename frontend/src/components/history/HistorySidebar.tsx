@@ -1,8 +1,9 @@
-import { MessageCircle, PictureInPicture2, SquarePen, Trash2 } from 'lucide-react';
+import { FileText, MessageCircle, PictureInPicture2, SquarePen, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
+import { badgeClassName } from '@/components/history/statusTokens';
 import { acceleratorKeycaps, ariaKeyShortcuts } from '@/components/shortcut/acceleratorKeycaps';
 import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
@@ -21,6 +22,8 @@ import { useLiveStageText } from './liveStageText';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
+const statusLineId = (identity: string) => `history-line:${identity}`;
+const artifactLineId = (identity: string) => `history-files:${identity}`;
 export const HISTORY_SIDEBAR_ID = 'history-sidebar';
 const CHAT_UNREAD_ID = 'history-chat-unread';
 const NEW_TASK_BUTTON_ID = 'history-new-task';
@@ -39,8 +42,9 @@ function LiveStageLine({ stage }: { stage: HistoryLiveStage }) {
 }
 
 /**
- * Why a row needs the user's eye, for its dot: an Action waiting for approval, a suggestion waiting
- * for an answer, or a completion not viewed yet. Null for a row that needs nothing.
+ * Why a row needs the user's eye, as its chip or dot is heard: an Action waiting for approval, a
+ * suggestion waiting for an answer, or a completion not viewed yet. Null for a row that needs
+ * nothing.
  */
 function attentionLabelKey(
   item: ConversationHistoryListItem,
@@ -51,6 +55,42 @@ function attentionLabelKey(
       ? 'history.attention.suggestion'
       : 'history.status.approvalPending';
   return completionUnread ? 'history.unread' : null;
+}
+
+/** What waits on the user is a chip; only an unviewed completion keeps the dot. */
+function attentionChip(
+  item: ConversationHistoryListItem
+): { labelKey: MessageKey; tone: 'info' | 'warning' } | null {
+  if (item.status !== 'approval_pending') return null;
+  return item.kind === 'suggestion'
+    ? { labelKey: 'history.status.suggestion', tone: 'info' }
+    : { labelKey: 'history.row.approvalNeeded', tone: 'warning' };
+}
+
+/** Its files under a row: the first by name, and how many more. Described, not named. */
+function ArtifactLine({
+  id,
+  names,
+  t,
+}: {
+  id: string;
+  names: readonly string[];
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+}) {
+  return (
+    <span id={id} className="history-item-files" aria-hidden="true">
+      <FileText size={12} strokeWidth={1.8} aria-hidden="true" />
+      <span className="history-item-files__name">{names[0]}</span>
+      {names.length > 1 ? (
+        <>
+          {' '}
+          <span className="history-item-files__more">
+            {t('history.row.moreFiles', { count: names.length - 1 })}
+          </span>
+        </>
+      ) : null}
+    </span>
+  );
 }
 
 /**
@@ -283,8 +323,17 @@ export function HistorySidebar({
                 const identity = itemIdentity(item);
                 const selection = historyItemSelection(item);
                 const attention = attentionLabelKey(item, isUnread(item));
+                const chip = attentionChip(item);
                 const liveStage =
                   item.kind === 'conversation' ? liveStages.get(item.action_id) : undefined;
+                // A running task's line is its live stage; the stored line is for the rest. A
+                // suggestion has none: its title is its text already.
+                const statusLine =
+                  item.kind === 'conversation' && !liveStage ? item.status_line : null;
+                const described = [
+                  statusLine ? statusLineId(identity) : null,
+                  item.artifact_names.length > 0 ? artifactLineId(identity) : null,
+                ].filter((id) => id !== null);
                 const content = (
                   <>
                     <span className="history-item-head">
@@ -293,7 +342,16 @@ export function HistorySidebar({
                         // Heard, not seen: the live line shows the running task, out of hearing.
                         <span className="history-item-status">{t('history.status.running')}</span>
                       ) : null}
-                      {attention ? (
+                      {attention && chip ? (
+                        // Heard as the dot was, with its reason; seen as a word.
+                        <span
+                          className={badgeClassName(chip.tone)}
+                          role="img"
+                          aria-label={t(attention)}
+                        >
+                          {t(chip.labelKey)}
+                        </span>
+                      ) : attention ? (
                         <span
                           className="history-item-unread"
                           role="img"
@@ -302,6 +360,22 @@ export function HistorySidebar({
                       ) : null}
                     </span>
                     {liveStage ? <LiveStageLine stage={liveStage} /> : null}
+                    {statusLine ? (
+                      <span
+                        id={statusLineId(identity)}
+                        className="history-item-line"
+                        aria-hidden="true"
+                      >
+                        {statusLine}
+                      </span>
+                    ) : null}
+                    {item.artifact_names.length > 0 ? (
+                      <ArtifactLine
+                        id={artifactLineId(identity)}
+                        names={item.artifact_names}
+                        t={t}
+                      />
+                    ) : null}
                   </>
                 );
 
@@ -312,6 +386,8 @@ export function HistorySidebar({
                       id={openButtonId(identity)}
                       className="history-item-button"
                       aria-current={selection === selected ? 'true' : undefined}
+                      // The lines under the title describe the row; its name stays the title.
+                      aria-describedby={described.length > 0 ? described.join(' ') : undefined}
                       onClick={() => onSelect(selection)}
                     >
                       {content}

@@ -11,6 +11,8 @@ const ROW = {
   updated_at: '2026-10-11T00:00:00.000Z',
   status: 'idle',
   latest_completion_event_id: null,
+  status_line: null,
+  artifact_names: [],
 };
 
 function readerOver(respond) {

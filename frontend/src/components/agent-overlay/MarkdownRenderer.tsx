@@ -28,6 +28,12 @@ const MarkdownWrapper = styled.div`
     font-feature-settings: 'palt' 1;
   }
 
+  /* Thick strokes in the body colour read brighter than the text around them, so bold
+     keeps its weight but drops a little of the colour. */
+  strong {
+    color: color-mix(in srgb, currentColor 88%, transparent);
+  }
+
   p {
     margin: 0 0 0.45em 0;
   }

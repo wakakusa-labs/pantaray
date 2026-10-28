@@ -1,10 +1,6 @@
-const TRANSPARENT_APP_STYLES = `
-  html, body, #root {
-    background-color: transparent !important;
-  }
-
-  /* Glass fields belong to the transparent overlay (notification.html); the main window's
-     fields use their own styles. */
+/* Glass fields belong to the transparent overlay (notification.html); the main window's fields
+   use their own styles. The overlay's own transparency is in index.css (body.overlay-window). */
+const OVERLAY_FIELD_STYLES = `
   body.overlay-window input,
   body.overlay-window select {
     background-color: rgba(255, 255, 255, 0.2) !important;
@@ -21,15 +17,8 @@ const TRANSPARENT_APP_STYLES = `
 
 function installDomBootstrap({ windowRef, documentRef, logError }) {
   windowRef.addEventListener('DOMContentLoaded', () => {
-    documentRef.documentElement.style.backgroundColor = 'transparent';
-    documentRef.body.style.backgroundColor = 'transparent';
-    const root = documentRef.getElementById('root');
-    if (root) {
-      root.classList.add('electron-app');
-      root.style.backgroundColor = 'transparent';
-    }
     const style = documentRef.createElement('style');
-    style.textContent = TRANSPARENT_APP_STYLES;
+    style.textContent = OVERLAY_FIELD_STYLES;
     documentRef.head.appendChild(style);
   });
 

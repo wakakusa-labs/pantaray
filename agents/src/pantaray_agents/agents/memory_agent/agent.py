@@ -217,8 +217,6 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         tool_definitions: tuple[ReactToolDefinition, ...],
         now: str,
     ) -> tuple[JudgedOutcome, ...]:
-        """Continue the published update to judge what ``due`` changed."""
-
         return await judge_outcomes(
             conversation,
             due,

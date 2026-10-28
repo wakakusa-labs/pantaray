@@ -5,11 +5,13 @@ what delivered suggestions changed, and ends with ``record_outcomes``.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
-from typing import get_args
+from typing import cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from pantaray_agents.agents.artifact_react import COMPLETED_TOOL_NAME
 from pantaray_agents.agents.memory_file_editor.runner import MemoryEditorConversation
 from pantaray_agents.conversation.loop import Continue, Finish, IdleTurn
 from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
@@ -68,12 +70,9 @@ def record_outcomes_tool(due: tuple[DueOutcome, ...]) -> LlmToolDefinition:
     evidence: dict[str, JSONValue] = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["source", "ref", "observed_at", "note"],
+        "required": list[JSONValue](OutcomeEvidence.__annotations__),
         "properties": {
-            "source": {"type": "string"},
-            "ref": {"type": "string"},
-            "observed_at": {"type": "string"},
-            "note": {"type": "string"},
+            key: {"type": "string"} for key in OutcomeEvidence.__annotations__
         },
     }
     return LlmToolDefinition(
@@ -118,7 +117,7 @@ def parse_outcomes(
 ) -> tuple[JudgedOutcome, ...]:
     """The verdicts, one per due item; ValueError says what to fix.
 
-    Verdicts are never rewritten, so every evidence ref has to appear verbatim
+    Verdicts are never rewritten, so every evidence ref has to appear whole
     in ``observed``: the tool results the run received.
     """
 
@@ -147,7 +146,7 @@ def parse_outcomes(
             entry.ref
             for item in outcomes
             for entry in item.evidence
-            if entry.ref not in observed
+            if not _appears_whole(entry.ref, observed)
         }
     )
     if unseen:
@@ -199,21 +198,31 @@ def _due_item(item: DueOutcome) -> JSONValue:
             {
                 "checkpoint_days": verdict.checkpoint_days,
                 "verdict": verdict.verdict,
-                "evidence": [
-                    {
-                        "source": entry["source"],
-                        "ref": entry["ref"],
-                        "observed_at": entry["observed_at"],
-                        "note": entry["note"],
-                    }
-                    for entry in verdict.evidence
-                ],
+                # Every field of an evidence item is a string.
+                "evidence": cast(list[JSONValue], list(verdict.evidence)),
                 "reason": verdict.reason,
                 "judged_at": describe_utc_timestamp(verdict.judged_at),
             }
             for verdict in item.earlier_verdicts
         ],
     }
+
+
+def _read_result(item: LlmTurnToolResultItem) -> str:
+    """A tool's result as the model read it, or "" when it shows no record: an
+    ending's answer, or an error, which can quote a ref the model only wrote."""
+
+    error = isinstance(item.output, dict) and item.output.get("status") == "error"
+    if error or item.name in (COMPLETED_TOOL_NAME, RECORD_OUTCOMES_TOOL_NAME):
+        return ""
+    return item.model_dump_json()
+
+
+def _appears_whole(ref: str, observed: str) -> bool:
+    """Whether ``ref`` is a whole token: not part of a longer id, name or path."""
+
+    pattern = rf"(?<![\w-])(?<![\w-][./]){re.escape(ref)}(?![\w-]|[./][\w-])"
+    return re.search(pattern, observed) is not None
 
 
 async def judge_outcomes(
@@ -226,16 +235,14 @@ async def judge_outcomes(
 ) -> tuple[JudgedOutcome, ...]:
     """Continue the published update to its accepted ``record_outcomes``."""
 
-    # What the model received from tools, in both stages; the due list is not
-    # a tool result, so citing it alone proves nothing.
     observed = [
-        entry.item.model_dump_json()
+        _read_result(entry.item)
         for entry in conversation.history
         if isinstance(entry.item, LlmTurnToolResultItem)
     ]
 
     def observe(item: LlmTurnToolResultItem) -> None:
-        observed.append(item.model_dump_json())
+        observed.append(_read_result(item))
 
     def decide(turn: IdleTurn) -> Finish[tuple[JudgedOutcome, ...]] | Continue:
         if turn.ending_call is None:

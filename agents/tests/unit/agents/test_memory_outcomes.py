@@ -16,6 +16,11 @@ from pantaray_agents.agents.memory_agent.outcomes import (
 from pantaray_agents.agents.memory_file_editor.runner import run_memory_file_editor
 from pantaray_agents.local_runtime.runtime.suggestion_outcomes import DueOutcome
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.tools.contract import (
+    ReactToolDefinition,
+    ReactToolResult,
+    tool_error_response,
+)
 from pantaray_llm.contracts.conversation import (
     LlmTurnAssistantItem,
     LlmTurnToolResultItem,
@@ -35,8 +40,22 @@ _EVIDENCE: dict[str, JSONValue] = {
     "observed_at": "2026-02-25",
     "note": "Reviews closed within a day.",
 }
-# What a tool returned that cites summary-1, as the run received it.
 _OBSERVED = '{"output": {"summary_id": "summary-1"}}'
+
+
+def _failing_tool() -> ReactToolDefinition:
+    async def execute(_call: object, _step_number: int) -> ReactToolResult:
+        return tool_error_response(
+            tool_name="lookup", error_code="NOT_FOUND", message="no summary-1 here"
+        )
+
+    return ReactToolDefinition(
+        name="lookup",
+        description="Look a record up.",
+        request_schema={"type": "object"},
+        response_schema={"type": "object"},
+        execute=execute,
+    )
 
 
 def _due(suggestion_id: str, checkpoint_days: int = 7) -> DueOutcome:
@@ -82,7 +101,11 @@ def _outcome(
         ([_outcome("s-1"), _outcome("s-2", verdict="helpful")], "verdict"),
         ([_outcome("s-1"), _outcome("s-2", evidence=[])], "needs evidence"),
         (
-            [_outcome("s-1"), _outcome("s-2", evidence=[{**_EVIDENCE, "ref": "s…"}])],
+            # A prefix of an id a tool returned is not that id.
+            [
+                _outcome("s-1"),
+                _outcome("s-2", evidence=[{**_EVIDENCE, "ref": "summary"}]),
+            ],
             "not found",
         ),
     ],
@@ -155,7 +178,10 @@ async def test_the_instruction_survives_omission_and_refs_must_have_been_read(
     send, requests = _scripted(
         _reply(("read_memory", {"path": "facts.md"})),
         _reply(("completed", {})),
-        # summary-1 is only in the due list's earlier text, never a tool result.
+        # summary-1 is in the due list, an error and then the refusal, which
+        # quotes it: none of them shows the record, so a resend is refused too.
+        _reply(("lookup", {})),
+        _reply((RECORD_OUTCOMES_TOOL_NAME, {"outcomes": [_outcome("s-1")]})),
         _reply((RECORD_OUTCOMES_TOOL_NAME, {"outcomes": [_outcome("s-1")]})),
         _reply(("read_memory", {"path": "summaries"})),
         _reply((RECORD_OUTCOMES_TOOL_NAME, {"outcomes": [_outcome("s-1")]})),
@@ -173,7 +199,7 @@ async def test_the_instruction_survives_omission_and_refs_must_have_been_read(
     judged = await judge_outcomes(
         omitted,
         (due,),
-        tools=(_read_tool("summary-1 closed in a day"),),
+        tools=(_read_tool("summary-1 closed in a day"), _failing_tool()),
         instruction="Judge each due suggestion.",
         now="2026-03-01 12:00 +00:00",
     )
@@ -184,6 +210,7 @@ async def test_the_instruction_survives_omission_and_refs_must_have_been_read(
     assert isinstance(instruction, LlmTurnUserItem)
     text = str(instruction.content[0])
     assert "Judge each due suggestion." in text and '"s-1"' in text
-    rejected = requests[3].conversation[-1]
-    assert isinstance(rejected, LlmTurnToolResultItem)
-    assert "not found" in str(rejected.output)
+    for refused in (requests[4], requests[5]):
+        rejected = refused.conversation[-1]
+        assert isinstance(rejected, LlmTurnToolResultItem)
+        assert "not found" in str(rejected.output)

@@ -210,12 +210,9 @@ async def _judge_suggestion_outcomes(
     conversation: MemoryEditorConversation,
     tool_definitions: tuple[ReactToolDefinition, ...],
 ) -> None:
-    """Judge the due suggestions in the published update's conversation.
-
-    The update is complete by now, so a failure here is reported and dropped:
-    the memory stays published, nothing is stored, and the next update finds
-    the same suggestions due.
-    """
+    """Judge the due suggestions in the published update's conversation. The
+    update is complete by now: a failure is logged and stores nothing, and the
+    same suggestions stay due for the next update."""
 
     user_id = payload["user_id"]
     now = utc_now()

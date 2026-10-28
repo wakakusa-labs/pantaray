@@ -202,7 +202,7 @@ async def run_memory_file_editor(
         ),
         store=store,
         decide=decide,
-        observe=_see_nothing,
+        observe=lambda _item: None,
         max_turns=run_input.max_turns,
         max_tool_calls=run_input.max_tool_calls,
     )
@@ -279,10 +279,6 @@ async def _converse[T](
         )
     )
     return ended, ending[-1]
-
-
-def _see_nothing(_item: LlmTurnToolResultItem) -> None:
-    return None
 
 
 async def _nothing_arrives() -> Sequence[LlmTurnItem]:

@@ -108,6 +108,7 @@ class _ScriptedMemoryAgent:
         self.applied_memory_request_ids = applied_memory_request_ids
         self.contexts: list[MemoryUpdateContext] = []
         self.judged: list[tuple[DueOutcome, ...]] = []
+        self.judging_fails = False
 
     async def update(
         self,
@@ -155,6 +156,8 @@ class _ScriptedMemoryAgent:
     ) -> tuple[JudgedOutcome, ...]:
         del conversation, tool_definitions, now
         self.judged.append(due)
+        if self.judging_fails:
+            raise ConversationTurnsExhausted("no record_outcomes")
         return tuple(
             JudgedOutcome(
                 suggestion_id=item.suggestion_id,
@@ -309,19 +312,6 @@ def _builder(agent: MemoryUpdateWorkerAgent) -> object:
     return build
 
 
-class _AgentWhoseJudgingFails(_ScriptedMemoryAgent):
-    async def judge_outcomes(
-        self,
-        conversation: MemoryEditorConversation,
-        due: tuple[DueOutcome, ...],
-        *,
-        tool_definitions: tuple[ReactToolDefinition, ...],
-        now: str,
-    ) -> tuple[JudgedOutcome, ...]:
-        self.judged.append(due)
-        raise ConversationTurnsExhausted("no record_outcomes")
-
-
 def _deliver_suggestion(runtime: LocalMemoryFileEditorRuntime) -> None:
     """A suggestion delivered two days ago, due at its first checkpoint."""
 
@@ -345,22 +335,22 @@ def _deliver_suggestion(runtime: LocalMemoryFileEditorRuntime) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("agent_type", "verdicts"),
-    [
-        (_ScriptedMemoryAgent, [("suggestion-1", 1, "unknown")]),
-        (_AgentWhoseJudgingFails, []),
-    ],
+    ("fails", "verdicts"),
+    [(False, [("suggestion-1", 1, "unknown")]), (True, [])],
 )
 async def test_judging_follows_the_published_update_and_cannot_undo_it(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    agent_type: type[_ScriptedMemoryAgent],
+    fails: bool,
     verdicts: list[tuple[str, int, str]],
 ) -> None:
     runtime = _bootstrap(tmp_path)
     _deliver_suggestion(runtime)
     payload = _claimed_payload(runtime)
-    agent = agent_type((("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),))
+    agent = _ScriptedMemoryAgent(
+        (("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),)
+    )
+    agent.judging_fails = fails
 
     await execute_memory_update_job(
         payload=payload, runtime=runtime, build_agent=_builder(agent)

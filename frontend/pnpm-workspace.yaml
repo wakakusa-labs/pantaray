@@ -6,7 +6,8 @@ minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - fast-uri@3.1.6
   - qs@6.16.0
-  - electron@44.5.1
+  # Chromium 152.0.7977.169 security fixes; only this Electron release bypasses the wait.
+  - electron@44.10.0
   - vite@6.4.4
 
 overrides:

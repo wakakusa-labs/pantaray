@@ -4,6 +4,7 @@ what delivered suggestions changed, and ends with ``record_outcomes``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import get_args
 
@@ -20,6 +21,7 @@ from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ReactToolDefinition
 from pantaray_agents.utils.local_time import describe_utc_timestamp
+from pantaray_llm.contracts.conversation import LlmTurnToolResultItem
 from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
 OUTCOMES_PROMPT_NAME = "memory_update_outcomes"
@@ -112,9 +114,13 @@ def record_outcomes_tool(due: tuple[DueOutcome, ...]) -> LlmToolDefinition:
 
 
 def parse_outcomes(
-    arguments: Mapping[str, object], due: tuple[DueOutcome, ...]
+    arguments: Mapping[str, object], due: tuple[DueOutcome, ...], *, observed: str
 ) -> tuple[JudgedOutcome, ...]:
-    """The verdicts, one per due item; ValueError says what to fix."""
+    """The verdicts, one per due item; ValueError says what to fix.
+
+    Verdicts are never rewritten, so every evidence ref has to appear verbatim
+    in ``observed``: the tool results the run received.
+    """
 
     outcomes = _Outcomes.model_validate(arguments).outcomes
     keys = [(item.suggestion_id, item.checkpoint_days) for item in outcomes]
@@ -135,6 +141,20 @@ def parse_outcomes(
         raise ValueError(
             f"{unsupported}: a verdict other than unknown needs evidence; "
             "cite the records or judge it unknown"
+        )
+    unseen = sorted(
+        {
+            entry.ref
+            for item in outcomes
+            for entry in item.evidence
+            if entry.ref not in observed
+        }
+    )
+    if unseen:
+        raise ValueError(
+            f"refs {unseen} were not found in any tool result you received; "
+            "cite each id or path exactly as a tool returned it, with no "
+            "abbreviation or ellipsis, or judge the suggestion unknown"
         )
     return tuple(
         JudgedOutcome(
@@ -206,26 +226,41 @@ async def judge_outcomes(
 ) -> tuple[JudgedOutcome, ...]:
     """Continue the published update to its accepted ``record_outcomes``."""
 
+    # What the model received from tools, in both stages; the due list is not
+    # a tool result, so citing it alone proves nothing.
+    observed = [
+        entry.item.model_dump_json()
+        for entry in conversation.history
+        if isinstance(entry.item, LlmTurnToolResultItem)
+    ]
+
+    def observe(item: LlmTurnToolResultItem) -> None:
+        observed.append(item.model_dump_json())
+
     def decide(turn: IdleTurn) -> Finish[tuple[JudgedOutcome, ...]] | Continue:
         if turn.ending_call is None:
             return Continue(_RECORD_REQUIRED)
         try:
-            return Finish(parse_outcomes(turn.ending_call.arguments, due))
+            return Finish(
+                parse_outcomes(
+                    turn.ending_call.arguments, due, observed="\n".join(observed)
+                )
+            )
         except (ValidationError, ValueError) as exc:
             return Continue(
                 f"{RECORD_OUTCOMES_TOOL_NAME} was rejected: {str(exc)[:1200]}"
             )
 
+    due_json = json.dumps(
+        [_due_item(item) for item in due], ensure_ascii=False, indent=1
+    )
     return await conversation.continue_with(
-        answer={
-            "status": "published",
-            "instruction": instruction,
-            "now": now,
-            "due": [_due_item(item) for item in due],
-        },
+        answer={"status": "published"},
+        message=f"{instruction}\n\nNow: {now}\n\n<due>\n{due_json}\n</due>",
         tools=tools,
         ending_tool=record_outcomes_tool(due),
         decide=decide,
+        observe=observe,
         max_turns=OUTCOMES_MAX_LLM_TURNS,
         max_tool_calls=OUTCOMES_MAX_TOOL_CALLS,
     )

@@ -123,31 +123,42 @@ class MemoryEditorConversation:
         self,
         *,
         answer: JSONValue,
+        message: str,
         tools: tuple[ReactToolDefinition, ...],
         ending_tool: LlmToolDefinition,
         decide: Callable[[IdleTurn], Finish[T] | Continue],
+        observe: Callable[[LlmTurnToolResultItem], None],
         max_turns: int,
         max_tool_calls: int,
     ) -> T:
-        """Answer ``completed`` with ``answer`` and carry on to ``decide``'s end."""
+        """Answer ``completed`` with ``answer``, then go on from ``message`` to
+        ``decide``'s end; ``observe`` sees each tool result as it is sent.
 
-        opening = ConversationEntry(
-            LlmTurnToolResultItem(
-                type="tool_result",
-                call_id=self.ending_call.call_id,
-                name=self.ending_call.name,
-                output=answer,
-            )
+        The window omits older tool outputs but never a user item, so what the
+        stage must keep in view goes in ``message``.
+        """
+
+        opening = (
+            ConversationEntry(
+                LlmTurnToolResultItem(
+                    type="tool_result",
+                    call_id=self.ending_call.call_id,
+                    name=self.ending_call.name,
+                    output=answer,
+                )
+            ),
+            ConversationEntry(_user_text(message)),
         )
         ended, _ = await _converse(
             self.run_input,
             tools=tools,
             ending_tool=ending_tool,
-            history=(*self.history, opening),
+            history=(*self.history, *opening),
             images=self.images,
             window=self.window,
             store=self.turn_store,
             decide=decide,
+            observe=observe,
             max_turns=max_turns,
             max_tool_calls=max_tool_calls,
         )
@@ -191,6 +202,7 @@ async def run_memory_file_editor(
         ),
         store=store,
         decide=decide,
+        observe=_see_nothing,
         max_turns=run_input.max_turns,
         max_tool_calls=run_input.max_tool_calls,
     )
@@ -215,6 +227,7 @@ async def _converse[T](
     window: WindowState,
     store: ProviderTurnStore,
     decide: Callable[[IdleTurn], Finish[T] | Continue],
+    observe: Callable[[LlmTurnToolResultItem], None],
     max_turns: int,
     max_tool_calls: int,
 ) -> tuple[Ended[T], LlmToolCall]:
@@ -231,12 +244,14 @@ async def _converse[T](
     async def on_result(
         call: LlmToolCall, result: ReactToolResult
     ) -> LlmTurnToolResultItem:
-        return LlmTurnToolResultItem(
+        item = LlmTurnToolResultItem(
             type="tool_result",
             call_id=call.call_id,
             name=call.name,
             output=await asyncio.to_thread(run_input.save_result, result.output),
         )
+        observe(item)
+        return item
 
     ended = await run_conversation_to_end(
         ConversationRun(
@@ -264,6 +279,10 @@ async def _converse[T](
         )
     )
     return ended, ending[-1]
+
+
+def _see_nothing(_item: LlmTurnToolResultItem) -> None:
+    return None
 
 
 async def _nothing_arrives() -> Sequence[LlmTurnItem]:

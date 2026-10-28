@@ -1,6 +1,6 @@
-# What answers the Memory update's `completed` when delivered suggestions are
-# due for an outcome verdict: the same run continues, its memory work done, to
-# judge what each suggestion changed.
+# What follows the Memory update's `completed`, as a user message, when
+# delivered suggestions are due for an outcome verdict: the same run continues,
+# its memory work done, to judge what each suggestion changed.
 prompt: |
   The memory update is published. Now judge what each suggestion in `due`
   changed. Your memory edits are done: the tools here only read.
@@ -25,9 +25,10 @@ prompt: |
 
   Every verdict but `unknown` cites evidence: each item names its `source`
   (such as activity_log, activity_summary, memory_file, action, suggestion,
-  chat), a `ref` you actually read and that exists (an id, or a memory file
-  path), when it was observed, and what it shows. `earlier_verdicts` are what
-  earlier checkpoints found; judge this checkpoint on its own records.
+  chat), a `ref` copied exactly as a tool returned it (a full id or memory
+  file path, never shortened or with an ellipsis), when it was observed, and
+  what it shows. `earlier_verdicts` are what earlier checkpoints found; judge
+  this checkpoint on its own records.
 
   Then call `record_outcomes` once with one outcome per item in `due`, in your
   `reason` saying in one or two sentences what changed and why that verdict.

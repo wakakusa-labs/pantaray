@@ -5,7 +5,7 @@ from typing import Literal
 
 from .llm import (
     OPENAI_GPT_6_LUNA_MODEL,
-    OPENAI_GPT_56_SOL_MODEL,
+    OPENAI_GPT_61_SOL_MODEL,
     ReasoningEffort,
 )
 
@@ -30,10 +30,10 @@ SUBAGENT_MODEL_SETTINGS = (
         recommendation="Recommended for all subagent work outside the explicit Sol recovery cases.",
     ),
     SubagentModelSettings(
-        selector="gpt-5.6-sol",
+        selector="gpt-6.1-sol",
         profile_id="action.subagent.sol",
         provider="openai",
-        model=OPENAI_GPT_56_SOL_MODEL,
+        model=OPENAI_GPT_61_SOL_MODEL,
         reasoning_effort="high",
         recommendation=(
             "Recommended only after observed looping or non-progress, or material "

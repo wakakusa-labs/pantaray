@@ -179,7 +179,7 @@ test('IPC accepts a Codex picker model and keeps API key model names configurabl
   const f = fixture(t);
   for (const preferences of [
     { method: 'chatgpt', provider: 'openai', model: 'gpt-6-astra' },
-    { method: 'chatgpt', provider: 'openai', model: 'gpt-5.6-luna' },
+    { method: 'chatgpt', provider: 'openai', model: 'gpt-6.1-terra' },
     { method: 'api_key', provider: 'openai', model: 'custom-api-model' },
   ]) {
     assert.deepEqual(

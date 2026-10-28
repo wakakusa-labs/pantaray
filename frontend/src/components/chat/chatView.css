@@ -110,7 +110,7 @@
 
 .chat-row--mine .chat-bubble {
   background: var(--chat-user-bubble);
-  color: #fff;
+  color: var(--fog-text);
 }
 
 .chat-bubble__text {

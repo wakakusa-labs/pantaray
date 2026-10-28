@@ -309,7 +309,7 @@ it('saves each model choice as it is made and settles on the last one', async ()
     await waitFor(() => expect(picker).toBeEnabled());
   };
   await choose('gpt-6-sol');
-  await choose('gpt-5.5');
+  await choose('gpt-6.1-terra');
   expect(api.update.mock.calls.map(([command]) => command)).toEqual([
     {
       operation: 'save_preferences',
@@ -317,10 +317,10 @@ it('saves each model choice as it is made and settles on the last one', async ()
     },
     {
       operation: 'save_preferences',
-      preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-5.5' },
+      preferences: { method: 'chatgpt', provider: 'openai', model: 'gpt-6.1-terra' },
     },
   ]);
-  expect(picker).toHaveValue('gpt-5.5');
+  expect(picker).toHaveValue('gpt-6.1-terra');
   expect(screen.getByText('settings.aiConnection.model.saved')).toBeInTheDocument();
 });
 

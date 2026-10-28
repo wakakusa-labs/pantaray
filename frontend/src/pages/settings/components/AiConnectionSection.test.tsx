@@ -152,7 +152,6 @@ it('offers only selectable Codex models for ChatGPT', () => {
     'gpt-6-astra',
     'gpt-6-sol',
     'gpt-6.1-terra',
-    'gpt-5.5',
   ]);
   expect(screen.queryByRole('button', { name: /model/ })).toBeNull();
   fireEvent.change(picker, { target: { value: 'gpt-6-sol' } });

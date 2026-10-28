@@ -10,7 +10,6 @@ export const CHATGPT_MODEL_CANDIDATES: readonly string[] = [
   'gpt-6-astra',
   'gpt-6-sol',
   'gpt-6.1-terra',
-  'gpt-5.5',
 ];
 
 /** An empty model represents unfinished settings and cannot configure a runtime route. */

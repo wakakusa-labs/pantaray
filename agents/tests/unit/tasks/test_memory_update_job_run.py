@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
+from pantaray_agents.agents.memory_file_editor.runner import MemoryEditorConversation
+from pantaray_agents.conversation.loop import ConversationTurnsExhausted
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
@@ -56,6 +59,14 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     import_desktop_session,
     mark_configured,
 )
+from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
+    DueOutcome,
+    JudgedOutcome,
+)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import (
+    format_utc_iso,
+    utc_now,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -81,6 +92,8 @@ BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
 TRIGGER_AT = "2026-01-05T00:00:00Z"
 DISPATCH_AT = datetime(2026, 1, 5, 1, 0, tzinfo=UTC)
+# The scripted agents judge without continuing a real conversation.
+_NO_CONVERSATION = cast(MemoryEditorConversation, object())
 
 
 class _ScriptedMemoryAgent:
@@ -94,6 +107,8 @@ class _ScriptedMemoryAgent:
         self._edits = edits
         self.applied_memory_request_ids = applied_memory_request_ids
         self.contexts: list[MemoryUpdateContext] = []
+        self.judged: list[tuple[DueOutcome, ...]] = []
+        self.judging_fails = False
 
     async def update(
         self,
@@ -128,6 +143,30 @@ class _ScriptedMemoryAgent:
             draft_revision = str(result.output["draft_revision"])
         return MemoryUpdateAgentResult(
             applied_memory_request_ids=self.applied_memory_request_ids,
+            conversation=_NO_CONVERSATION,
+        )
+
+    async def judge_outcomes(
+        self,
+        conversation: MemoryEditorConversation,
+        due: tuple[DueOutcome, ...],
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        now: str,
+    ) -> tuple[JudgedOutcome, ...]:
+        del conversation, tool_definitions, now
+        self.judged.append(due)
+        if self.judging_fails:
+            raise ConversationTurnsExhausted("no record_outcomes")
+        return tuple(
+            JudgedOutcome(
+                suggestion_id=item.suggestion_id,
+                checkpoint_days=item.checkpoint_days,
+                verdict="unknown",
+                evidence=(),
+                reason="The records do not reach the change.",
+            )
+            for item in due
         )
 
 
@@ -249,6 +288,8 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
     assert json.loads(str(completed[0][0])) == {
         "published_sources": ["agent_experience", "fact", "long_term_insight"]
     }
+    # No suggestion was delivered, so the run does not go on to judge any.
+    assert agent.judged == []
 
 
 def _experience_content(experience_id: str) -> AgentExperienceContent:
@@ -271,10 +312,79 @@ def _builder(agent: MemoryUpdateWorkerAgent) -> object:
     return build
 
 
-class _AgentThatReplacesTheRoute:
+def _deliver_suggestion(runtime: LocalMemoryFileEditorRuntime) -> None:
+    """A suggestion delivered two days ago, due at its first checkpoint."""
+
+    delivered = format_utc_iso(utc_now() - timedelta(days=2))
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer,
+              has_suggestion, interaction_contract, created_at, updated_at)
+              VALUES ('suggestion-1', ?, 'success', 'Try the checklist.', 1,
+              'message_only', ?, ?)""",
+            (USER_ID, delivered, delivered),
+        )
+        connection.execute(
+            """INSERT INTO processes(process_id, user_id, kind, status, suggestion_id,
+              started_at, updated_at, completed_at, heartbeat_at, next_event_seq)
+              VALUES ('process-s1', ?, 'suggestion', 'success', 'suggestion-1',
+              ?, ?, ?, ?, 1)""",
+            (USER_ID, *[delivered] * 4),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fails", "verdicts"),
+    [(False, [("suggestion-1", 1, "unknown")]), (True, [])],
+)
+async def test_judging_follows_the_published_update_and_cannot_undo_it(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    fails: bool,
+    verdicts: list[tuple[str, int, str]],
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    _deliver_suggestion(runtime)
+    payload = _claimed_payload(runtime)
+    agent = _ScriptedMemoryAgent(
+        (("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),)
+    )
+    agent.judging_fails = fails
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    with sqlite3.connect(runtime.db_path) as connection:
+        heads = connection.execute(
+            """SELECT nodes.source_type FROM memory_nodes AS nodes
+               JOIN memory_revisions AS revisions
+                 ON revisions.revision_id = nodes.current_revision_id"""
+        ).fetchall()
+        completed = connection.execute(
+            """SELECT COUNT(*) FROM process_events
+               WHERE process_id = ? AND event_name = 'memory_update_completed'""",
+            (payload["process_id"],),
+        ).fetchone()
+        stored = connection.execute(
+            """SELECT suggestion_id, checkpoint_days, verdict, job_id
+               FROM suggestion_outcome_verdicts"""
+        ).fetchall()
+    assert [[item.suggestion_id for item in due] for due in agent.judged] == [
+        ["suggestion-1"]
+    ]
+    assert heads == [("fact",)]
+    assert completed == (1,)
+    assert stored == [(*verdict, payload["job_id"]) for verdict in verdicts]
+    assert ("SUGGESTION_OUTCOMES_FAILED" in caplog.text) == (not verdicts)
+
+
+class _AgentThatReplacesTheRoute(_ScriptedMemoryAgent):
     """Ends its run on a different account than it started on."""
 
     def __init__(self, db_path: Path) -> None:
+        super().__init__(())
         self._db_path = db_path
 
     async def update(
@@ -295,7 +405,9 @@ class _AgentThatReplacesTheRoute:
             expires_at="2099-08-16T00:00:00Z",
             session_version="2",
         )
-        return MemoryUpdateAgentResult(applied_memory_request_ids=())
+        return MemoryUpdateAgentResult(
+            applied_memory_request_ids=(), conversation=_NO_CONVERSATION
+        )
 
 
 @pytest.mark.asyncio

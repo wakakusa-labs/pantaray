@@ -200,46 +200,60 @@ def test_a_task_the_chat_started_in_its_own_words_takes_them_as_its_title() -> N
     assert page.items[0].title == "List the customers from that history"
 
 
-def test_rows_show_the_latest_answer_and_every_linked_document(
+def _ended(
+    monkeypatch: pytest.MonkeyPatch, status: str, final_output: str | None
+) -> history_candidates.ActionHistoryCandidate:
+    monkeypatch.setattr(
+        history_projection,
+        "project_action_run_terminal",
+        Mock(
+            return_value=terminal_projection.ActionRunTerminalProjection(
+                status, _AT, final_output, None
+            )
+        ),
+    )
+    return replace(
+        _ACTION,
+        action_status=status,
+        status_hint="idle",
+        latest_completion_event_id="e",
+    )
+
+
+def test_rows_show_the_latest_runs_answer_and_every_linked_document(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    terminal = terminal_projection.ActionRunTerminalProjection(
-        "success", _AT, "Done", None
-    )
-    monkeypatch.setattr(
-        history_projection, "project_action_run_terminal", Mock(return_value=terminal)
-    )
     answers = (
         "Wrote the [plan](pantaray-file:///Users/me/plan.md) from "
         "pantaray-file:///Users/me/app.py",
         "## **Summary** is `ready`\n\nSee pantaray-file:///Users/me/plan.md and "
         "pantaray-file:///Users/me/deck.pdf.",
     )
-    finished = replace(
-        _ACTION,
-        action_status="success",
-        status_hint="idle",
-        latest_completion_event_id="e",
+    finished = _ended(monkeypatch, "success", answers[-1])
+    page = _project((finished,), (_TERMINAL,), answers={"a": answers})
+    assert (page.items[0].status_line, page.items[0].artifact_names) == (
+        "Summary is ready",
+        ("plan.md", "deck.pdf"),
     )
-    waiting = replace(_ACTION, action_id="b", status_hint="approval_pending")
-    paused = replace(
-        _ACTIVE, action_id="b", process_status="paused", job_status="paused"
-    )
-    page = _project(
-        (finished, waiting),
-        (_TERMINAL, paused),
-        answers={"a": answers, "b": answers[:1]},
-    )
-    running = _project((_ACTION,), (_ACTIVE,), answers={"a": answers}).items[0]
-    assert [(item.status_line, item.artifact_names) for item in page.items] == [
-        ("Summary is ready", ("plan.md", "deck.pdf")),
-        ("Wrote the plan from app.py", ("plan.md",)),
-    ]
-    # The live stage is a running task's line; its files are already listed.
-    assert running.status_line is None
-    assert running.artifact_names == ("plan.md", "deck.pdf")
-    unanswered = _project((finished,), (_TERMINAL,)).items[0]
-    assert (unanswered.status_line, unanswered.artifact_names) == (None, ())
+    # A run still going or waiting for approval has no answer of its own yet: the
+    # live stage or the chip says where it is, and an earlier answer's files stay.
+    waiting = replace(_ACTION, status_hint="approval_pending")
+    paused = replace(_ACTIVE, process_status="paused", job_status="paused")
+    for candidate, latest in ((_ACTION, _ACTIVE), (waiting, paused)):
+        row = _project((candidate,), (latest,), answers={"a": answers}).items[0]
+        assert (row.status_line, row.artifact_names) == (None, ("plan.md", "deck.pdf"))
+
+
+@pytest.mark.parametrize("status", ["error", "canceled"])
+def test_a_run_that_did_not_finish_hides_the_earlier_answer(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    # A follow-up that failed after a finished run: the row must not read as done.
+    ended = _ended(monkeypatch, status, "")
+    row = _project(
+        (ended,), (_TERMINAL,), answers={"a": ("Sent pantaray-file:///Users/me/q.pdf",)}
+    ).items[0]
+    assert (row.status_line, row.artifact_names) == (None, ("q.pdf",))
 
 
 def test_suggestion_rows_name_their_files_and_no_line() -> None:

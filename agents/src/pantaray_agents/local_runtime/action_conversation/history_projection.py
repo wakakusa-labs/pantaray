@@ -212,6 +212,10 @@ def _project_action(
         "idle",
     )
     completion_event_id = None
+    # The row's line is the latest run's own answer: a run still going or
+    # waiting has none yet, and a failed or canceled one ends with none, so an
+    # earlier run's answer never stands in for where the task is now.
+    latest_answer = ""
     if history_status == "running":
         _require(action.status in {"queued", "processing"})
     elif history_status == "approval_pending":
@@ -222,6 +226,7 @@ def _project_action(
         )
         _require(terminal.status == action.status)
         completion_event_id = latest_authority.terminal_event_id
+        latest_answer = terminal.final_output or ""
     _require(
         candidate.status_hint == history_status
         and candidate.latest_completion_event_id == completion_event_id
@@ -275,12 +280,7 @@ def _project_action(
         updated_at=candidate.updated_at,
         status=history_status,
         latest_completion_event_id=completion_event_id,
-        # A running task's line is its live stage, which the renderer follows.
-        status_line=(
-            None
-            if history_status == "running" or not answers
-            else answer_status_line(answers[-1])
-        ),
+        status_line=answer_status_line(latest_answer),
         artifact_names=linked_document_names(answers),
     )
 

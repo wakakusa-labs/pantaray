@@ -59,7 +59,8 @@ class ConversationHistoryItem(_ConversationHistoryModel):
     updated_at: ConversationHistoryTimestamp
     status: ConversationHistoryStatus
     latest_completion_event_id: ActionConversationIdentity | None
-    # The latest answer's first line; None while running, or with no answer yet.
+    # The first line of the latest run's answer; None while it runs or waits for
+    # approval, and when it failed or was canceled.
     status_line: ConversationHistoryStatusLine | None
     # The names of the files its answers link, in the order they first appear.
     artifact_names: tuple[NonBlankText, ...]

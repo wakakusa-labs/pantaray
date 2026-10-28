@@ -42,6 +42,11 @@ _TABLE_GUIDE = "\n".join(
         "suggestion, so keep interaction_contract IS NOT NULL to list suggestions), "
         "user_reaction (accepted, rejected for a dismissed suggestion, or NULL when the user has not answered), accepted_at, "
         "rejected_at, dismiss_reason (the user's own words when dismissing, or NULL).",
+        "- suggestion_outcome_verdicts: what a delivered suggestion changed, judged afterward from how the user's and the "
+        "environment's state moved; key columns suggestion_id, checkpoint_days (days after delivery: 1, 7 or 30), verdict "
+        "(improved, no_effect, worse, unknown), reason, evidence_json (a JSON array of source, ref, observed_at, note), "
+        "judged_at. One row per suggestion and checkpoint; join agent_suggestions on suggestion_id for what was suggested. "
+        "It has no status column.",
         "- agent_actions: executed action results; key columns action_id, suggestion_id, user_id, final_output, status, created_at, updated_at.",
         "- agent_insights: short-term insight rows; key columns insight_id, source_activity_summary_id, short_term_insight_data, status, created_at, updated_at.",
         "- agent_facts: structured fact generation rows; key columns fact_id, user_id, structured_fact_sha256, status, created_at, updated_at.",

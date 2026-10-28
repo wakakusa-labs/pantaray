@@ -29,7 +29,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     load_default_migrations,
 )
-from pantaray_agents.tasks.memory_update_context import _render_chat_messages
+from pantaray_agents.tasks.memory_update_evidence import render_chat_messages
 
 from .migrated_db import prepare_test_database
 
@@ -204,7 +204,7 @@ def test_a_run_reads_and_names_only_the_messages_of_its_range(
         messages = read_chat_messages(
             connection, user_id="user-1", after=before, through=answered
         )
-    rendered = _render_chat_messages(messages)
+    rendered = render_chat_messages(messages)
 
     assert [message.sequence for message in messages] == [asked, answered]
     assert f"### chat item {messages[0].item_id}, user (" in rendered

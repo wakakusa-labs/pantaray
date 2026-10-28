@@ -66,7 +66,6 @@ from pantaray_agents.tasks.memory_update_context import (
 )
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
 from pantaray_agents.tools.contract import ReactToolDefinition
-from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.utils.local_time import describe_utc_timestamp
 from pantaray_agents.utils.structured_logging import log_structured_event
 
@@ -226,14 +225,7 @@ async def _judge_suggestion_outcomes(
         outcomes = await agent.judge_outcomes(
             conversation,
             due,
-            tool_definitions=(
-                *tool_definitions,
-                MemorySqlSession(
-                    db_path=runtime.db_path,
-                    busy_timeout_ms=runtime.busy_timeout_ms,
-                    user_id=user_id,
-                ).definition(),
-            ),
+            tool_definitions=tool_definitions,
             now=describe_utc_timestamp(format_utc_iso(now)),
         )
         await require_current_route_identity()

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, TypedDict
 
+from pantaray_agents.local_runtime.runtime.job_types import MEMORY_PROCESS_KIND
 from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     format_utc_iso,
     parse_utc_iso,
@@ -47,6 +48,15 @@ class EarlierVerdict:
     evidence: tuple[OutcomeEvidence, ...]
     reason: str
     judged_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecentVerdict:
+    """A verdict the previous Memory update recorded, with what was suggested."""
+
+    suggestion_id: str
+    message: str
+    verdict: EarlierVerdict
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,16 +191,60 @@ def _verdicts_by_suggestion(
     ).fetchall()
     grouped: dict[str, list[EarlierVerdict]] = {}
     for row in rows:
-        grouped.setdefault(str(row["suggestion_id"]), []).append(
-            EarlierVerdict(
-                checkpoint_days=int(row["checkpoint_days"]),
-                verdict=row["verdict"],
-                evidence=tuple(json.loads(str(row["evidence_json"]))),
-                reason=str(row["reason"]),
-                judged_at=str(row["judged_at"]),
-            )
-        )
+        grouped.setdefault(str(row["suggestion_id"]), []).append(_earlier_verdict(row))
     return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _earlier_verdict(row: sqlite3.Row) -> EarlierVerdict:
+    return EarlierVerdict(
+        checkpoint_days=int(row["checkpoint_days"]),
+        verdict=row["verdict"],
+        evidence=tuple(json.loads(str(row["evidence_json"]))),
+        reason=str(row["reason"]),
+        judged_at=str(row["judged_at"]),
+    )
+
+
+def read_verdicts_since_last_run(
+    connection: sqlite3.Connection, *, user_id: str, enqueued_at: str
+) -> tuple[RecentVerdict, ...]:
+    """The verdicts judged between the previous Memory update's enqueue and this
+    one's, oldest first.
+
+    A run judges at its end, and the next run is enqueued only after it ends,
+    so these are the previous run's verdicts, which no run's context has shown.
+    The same enqueue boundary hands each run its chat and dismissals.
+    """
+
+    rows = connection.execute(
+        """
+        SELECT verdicts.suggestion_id, suggestions.answer, verdicts.checkpoint_days,
+               verdicts.verdict, verdicts.evidence_json, verdicts.reason,
+               verdicts.judged_at
+        FROM suggestion_outcome_verdicts AS verdicts
+        JOIN agent_suggestions AS suggestions
+          ON suggestions.user_id = verdicts.user_id
+         AND suggestions.suggestion_id = verdicts.suggestion_id
+        WHERE verdicts.user_id = ? AND verdicts.judged_at < ?
+          AND verdicts.judged_at >= COALESCE(
+              (
+                  SELECT MAX(started_at) FROM processes
+                  WHERE user_id = ? AND kind = ? AND started_at < ?
+              ),
+              ''
+          )
+        ORDER BY verdicts.judged_at, verdicts.suggestion_id, verdicts.checkpoint_days
+        """,
+        (user_id, enqueued_at, user_id, MEMORY_PROCESS_KIND, enqueued_at),
+    ).fetchall()
+    return tuple(
+        RecentVerdict(
+            suggestion_id=str(row["suggestion_id"]),
+            message=str(row["answer"]),
+            verdict=_earlier_verdict(row),
+        )
+        for row in rows
+    )
 
 
 def record_outcome_verdicts(
@@ -248,7 +302,9 @@ __all__ = [
     "JudgedOutcome",
     "OutcomeEvidence",
     "OutcomeVerdictValue",
+    "RecentVerdict",
     "latest_due_checkpoint",
     "load_due_outcomes",
+    "read_verdicts_since_last_run",
     "record_outcome_verdicts",
 ]

@@ -310,6 +310,46 @@ def test_execute_memory_sql_scopes_source_records_to_current_user(
     ]
 
 
+def test_execute_memory_sql_scopes_outcome_verdicts_to_current_user(
+    tmp_path: Path,
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
+        for user_id, suggestion_id, reason in (
+            ("user-1", "sug-1", "current user verdict"),
+            ("user-2", "sug-2", "other user verdict"),
+        ):
+            connection.execute(
+                """INSERT INTO suggestion_outcome_verdicts(verdict_id, user_id,
+                suggestion_id, checkpoint_days, verdict, evidence_json, reason,
+                judged_at, job_id, prompt_name, prompt_version)
+                VALUES (?, ?, ?, 7, 'improved', '[]', ?, '2026-04-08T00:00:00Z',
+                'job-1', 'memory_update_outcomes', '1.0')""",
+                (f"verdict-{suggestion_id}", user_id, suggestion_id, reason),
+            )
+
+    result = execute_memory_sql(
+        db_path=str(db_path),
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        sql=(
+            "SELECT suggestion_id, verdict, reason FROM suggestion_outcome_verdicts "
+            "ORDER BY judged_at"
+        ),
+        limit=20,
+    )
+
+    assert result.error is None
+    assert result.data is not None
+    assert result.data["rows"] == [
+        {
+            "suggestion_id": "sug-1",
+            "verdict": "improved",
+            "reason": "current user verdict",
+        }
+    ]
+
+
 def test_execute_memory_sql_rejects_main_table_bypass(tmp_path: Path) -> None:
     db_path = _bootstrap_db(tmp_path)
 
@@ -696,13 +736,14 @@ def test_execute_memory_sql_limits_result_columns(tmp_path: Path) -> None:
 
     all_tables_joined = run(
         "SELECT * FROM activity_logs, activity_summaries, agent_actions, "
-        "agent_facts, agent_insights, agent_suggestions, source_records"
+        "agent_facts, agent_insights, agent_suggestions, source_records, "
+        "suggestion_outcome_verdicts"
     )
     too_many_columns = run(f"SELECT {', '.join(['log_id'] * 201)} FROM activity_logs")
 
     assert all_tables_joined.error is None
     assert all_tables_joined.data is not None
-    assert len(all_tables_joined.data["columns"]) == 137
+    assert len(all_tables_joined.data["columns"]) == 148
     assert too_many_columns.data is None
     assert too_many_columns.error is not None
     assert "too many columns" in too_many_columns.error

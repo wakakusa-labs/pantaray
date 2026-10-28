@@ -22,6 +22,7 @@ class MemoryUpdateContext(BaseModel):
     session_memories: str
     chat_messages: str
     dismissed_suggestions: str
+    outcome_verdicts: str
     local_time_note: str = Field(min_length=1)
     memory_file_manifest: str = Field(min_length=1)
     facts_index: str

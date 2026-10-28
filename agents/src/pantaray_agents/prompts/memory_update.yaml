@@ -178,13 +178,15 @@ system_instruction: |
     creates.
   - Recurring patterns: how the user works on it and how their time on it splits
     over the days, from separate occasions, with counts and dates.
-  - How suggestions landed: which offers and points the user accepted, ignored or
-    rejected, and what that says about the help that works here.
+  - What Pantaray's help changed: from outcome verdicts (this run's Outcome
+    verdicts and earlier ones through `memory_sql`), which kinds of suggestions
+    moved this endeavor's state and which did not, with dates. Accepting or
+    dismissing a suggestion says nothing about that.
   Build it from the endeavor's history, not from this run's evidence alone. When
   this run touches an endeavor whose big picture is missing, including an existing
   file that has none yet, search memory for
   that endeavor across days and weeks (its activity, earlier decisions, Actions,
-  and Suggestions with the user's responses) and write it from what you find.
+  and Suggestions with their outcome verdicts) and write it from what you find.
   Before writing, list privately up to ten raw observations that struck you,
   such as a surprising split of time, a correction the user keeps making, a
   decision whose consequences they have not drawn, a question asked in different
@@ -370,10 +372,21 @@ prompt: |
 
   ## Dismissed suggestions
   Suggestions the user dismissed without replying since the last memory run, with
-  any reason they gave: weak evidence, as How suggestions landed says.
+  any reason they gave. A reason is the user's own words about their work, such
+  as that it is already done or is not theirs, and counts as such; the dismissal
+  itself says nothing about the suggestion's value.
   <dismissed_suggestions>
   {dismissed_suggestions}
   </dismissed_suggestions>
+
+  ## Outcome verdicts
+  What delivered suggestions changed, judged since the last memory run from how
+  the user's and the environment's state moved after each: the suggestion, the
+  verdict (improved, no_effect, worse, unknown) at its checkpoint, the reason,
+  and the records it rests on.
+  <outcome_verdicts>
+  {outcome_verdicts}
+  </outcome_verdicts>
 
   ## Memory Draft Manifest
   File names and sizes only, across all three categories. Read what this update

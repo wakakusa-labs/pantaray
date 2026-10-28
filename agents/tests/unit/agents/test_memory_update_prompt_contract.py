@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,8 @@ from pantaray_agents.agents.memory_file_editor.runner import MemoryFileEditorRun
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     parse_agent_experience_markdown,
 )
+from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
+from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.utils.prompt_loader import PromptLoader, load_config, prompt_loader
 
 _ENTRY_HEADER = "# Agent Experience"
@@ -141,3 +144,52 @@ async def test_editing_the_facts_definition_changes_the_consolidation_too(
     )
 
     assert "## What facts hold\nEdited definition.\n" in sent
+
+
+async def test_the_update_reads_its_outcome_verdicts_and_can_query_earlier_ones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sent: list[MemoryFileEditorRunInput] = []
+
+    async def capture(run_input: MemoryFileEditorRunInput) -> object:
+        sent.append(run_input)
+        return SimpleNamespace(applied_memory_request_ids=())
+
+    monkeypatch.setattr(memory_agent_module, "run_memory_file_editor", capture)
+    verdicts = "### suggestion s-1: improved 7 days after delivery"
+    await MemoryUpdateAgent(client=object(), llm_config={}).update(
+        MemoryUpdateContext(
+            user_id="user-1",
+            run_id="run",
+            short_term_insights="",
+            activity_summaries="",
+            action_turns="",
+            memory_requests="",
+            memory_request_ids=(),
+            session_memories="",
+            chat_messages="",
+            dismissed_suggestions="",
+            outcome_verdicts=verdicts,
+            local_time_note="Times are local (UTC).",
+            memory_file_manifest="- facts/index.md (0 chars)",
+            facts_index="",
+            insights_index="",
+            overview_request="",
+            workspace_context_prompt="",
+            new_experience_ids=(),
+            draft_revision="sha256:0",
+        ),
+        tool_definitions=(
+            MemorySqlSession(
+                db_path=tmp_path / "runtime.sqlite3",
+                busy_timeout_ms=1_000,
+                user_id="user-1",
+            ).definition(),
+        ),
+        tool_results_path=tmp_path,
+        db_path=tmp_path / "runtime.sqlite3",
+    )
+
+    (run_input,) = sent
+    assert f"<outcome_verdicts>\n{verdicts}\n</outcome_verdicts>" in run_input.prompt
+    assert [tool.name for tool in run_input.tool_definitions] == ["memory_sql"]

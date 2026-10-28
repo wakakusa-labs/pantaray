@@ -36,7 +36,7 @@ MEMORY_SQL_MAX_SECONDS = 10.0
 MEMORY_SQL_MAX_VALUE_BYTES = 4 * 1024 * 1024
 # SQLite materializes a whole result row, so the worst row is this many columns
 # times MEMORY_SQL_MAX_VALUE_BYTES. The largest legitimate row, SELECT * over all
-# seven allowed tables joined, has 136 columns.
+# eight allowed tables joined, has 148 columns.
 MEMORY_SQL_MAX_COLUMNS = 200
 # Bytes. The progress handler cannot interrupt a row's expressions between jumps,
 # so this caps how many heavy calls one statement can chain and keeps that overrun
@@ -53,6 +53,7 @@ MEMORY_SQL_ALLOWED_TABLES = frozenset(
         "agent_insights",
         "agent_suggestions",
         "source_records",
+        "suggestion_outcome_verdicts",
     }
 )
 
@@ -65,6 +66,7 @@ _MEMORY_SQL_USER_SCOPED_TABLES = frozenset(
         "agent_insights",
         "agent_suggestions",
         "source_records",
+        "suggestion_outcome_verdicts",
     }
 )
 

@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, TypedDict
 
+from pantaray_agents.local_runtime.runtime.job_types import MEMORY_PROCESS_KIND
+from pantaray_agents.local_runtime.runtime.memory_update_progress import (
+    MEMORY_UPDATE_COMPLETED_EVENT,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     format_utc_iso,
     parse_utc_iso,
@@ -47,6 +51,15 @@ class EarlierVerdict:
     evidence: tuple[OutcomeEvidence, ...]
     reason: str
     judged_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecentVerdict:
+    """A verdict the previous Memory update recorded, with what was suggested."""
+
+    suggestion_id: str
+    message: str
+    verdict: EarlierVerdict
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,16 +194,72 @@ def _verdicts_by_suggestion(
     ).fetchall()
     grouped: dict[str, list[EarlierVerdict]] = {}
     for row in rows:
-        grouped.setdefault(str(row["suggestion_id"]), []).append(
-            EarlierVerdict(
-                checkpoint_days=int(row["checkpoint_days"]),
-                verdict=row["verdict"],
-                evidence=tuple(json.loads(str(row["evidence_json"]))),
-                reason=str(row["reason"]),
-                judged_at=str(row["judged_at"]),
-            )
-        )
+        grouped.setdefault(str(row["suggestion_id"]), []).append(_earlier_verdict(row))
     return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _earlier_verdict(row: sqlite3.Row) -> EarlierVerdict:
+    return EarlierVerdict(
+        checkpoint_days=int(row["checkpoint_days"]),
+        verdict=row["verdict"],
+        evidence=tuple(json.loads(str(row["evidence_json"]))),
+        reason=str(row["reason"]),
+        judged_at=str(row["judged_at"]),
+    )
+
+
+def read_verdicts_since_last_run(
+    connection: sqlite3.Connection, *, user_id: str, enqueued_at: str
+) -> tuple[RecentVerdict, ...]:
+    """The verdicts judged since the last completed Memory update started and
+    before this one was enqueued, oldest first.
+
+    A completed run showed its context to the model, and a run judges only
+    after it completes, so every verdict from then on is one no context has
+    shown. A run that failed before completing showed nothing and does not
+    move the boundary; a retry of this job keeps the same range.
+    """
+
+    rows = connection.execute(
+        """
+        SELECT verdicts.suggestion_id, suggestions.answer, verdicts.checkpoint_days,
+               verdicts.verdict, verdicts.evidence_json, verdicts.reason,
+               verdicts.judged_at
+        FROM suggestion_outcome_verdicts AS verdicts
+        JOIN agent_suggestions AS suggestions
+          ON suggestions.user_id = verdicts.user_id
+         AND suggestions.suggestion_id = verdicts.suggestion_id
+        WHERE verdicts.user_id = ? AND verdicts.judged_at < ?
+          AND verdicts.judged_at >= COALESCE(
+              (
+                  SELECT MAX(processes.started_at) FROM processes
+                  JOIN process_events AS completed
+                    ON completed.process_id = processes.process_id
+                   AND completed.event_name = ?
+                  WHERE processes.user_id = ? AND processes.kind = ?
+                    AND processes.started_at < ?
+              ),
+              ''
+          )
+        ORDER BY verdicts.judged_at, verdicts.suggestion_id, verdicts.checkpoint_days
+        """,
+        (
+            user_id,
+            enqueued_at,
+            MEMORY_UPDATE_COMPLETED_EVENT,
+            user_id,
+            MEMORY_PROCESS_KIND,
+            enqueued_at,
+        ),
+    ).fetchall()
+    return tuple(
+        RecentVerdict(
+            suggestion_id=str(row["suggestion_id"]),
+            message=str(row["answer"]),
+            verdict=_earlier_verdict(row),
+        )
+        for row in rows
+    )
 
 
 def record_outcome_verdicts(
@@ -248,7 +317,9 @@ __all__ = [
     "JudgedOutcome",
     "OutcomeEvidence",
     "OutcomeVerdictValue",
+    "RecentVerdict",
     "latest_due_checkpoint",
     "load_due_outcomes",
+    "read_verdicts_since_last_run",
     "record_outcome_verdicts",
 ]

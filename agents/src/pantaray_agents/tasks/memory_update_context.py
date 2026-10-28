@@ -133,6 +133,7 @@ class PreparedMemoryUpdateRun:
             or self.context.action_turns
             or self.context.chat_messages
             or self.context.dismissed_suggestions
+            or self.context.outcome_verdicts
         )
 
     def base_draft(self, source: MemorySource) -> MemoryDraftCheckpoint:

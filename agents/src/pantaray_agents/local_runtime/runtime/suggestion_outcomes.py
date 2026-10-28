@@ -16,6 +16,9 @@ from datetime import datetime, timedelta
 from typing import Literal, TypedDict
 
 from pantaray_agents.local_runtime.runtime.job_types import MEMORY_PROCESS_KIND
+from pantaray_agents.local_runtime.runtime.memory_update_progress import (
+    MEMORY_UPDATE_COMPLETED_EVENT,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     format_utc_iso,
     parse_utc_iso,
@@ -208,12 +211,13 @@ def _earlier_verdict(row: sqlite3.Row) -> EarlierVerdict:
 def read_verdicts_since_last_run(
     connection: sqlite3.Connection, *, user_id: str, enqueued_at: str
 ) -> tuple[RecentVerdict, ...]:
-    """The verdicts judged between the previous Memory update's enqueue and this
-    one's, oldest first.
+    """The verdicts judged since the last completed Memory update started and
+    before this one was enqueued, oldest first.
 
-    A run judges at its end, and the next run is enqueued only after it ends,
-    so these are the previous run's verdicts, which no run's context has shown.
-    The same enqueue boundary hands each run its chat and dismissals.
+    A completed run showed its context to the model, and a run judges only
+    after it completes, so every verdict from then on is one no context has
+    shown. A run that failed before completing showed nothing and does not
+    move the boundary; a retry of this job keeps the same range.
     """
 
     rows = connection.execute(
@@ -228,14 +232,25 @@ def read_verdicts_since_last_run(
         WHERE verdicts.user_id = ? AND verdicts.judged_at < ?
           AND verdicts.judged_at >= COALESCE(
               (
-                  SELECT MAX(started_at) FROM processes
-                  WHERE user_id = ? AND kind = ? AND started_at < ?
+                  SELECT MAX(processes.started_at) FROM processes
+                  JOIN process_events AS completed
+                    ON completed.process_id = processes.process_id
+                   AND completed.event_name = ?
+                  WHERE processes.user_id = ? AND processes.kind = ?
+                    AND processes.started_at < ?
               ),
               ''
           )
         ORDER BY verdicts.judged_at, verdicts.suggestion_id, verdicts.checkpoint_days
         """,
-        (user_id, enqueued_at, user_id, MEMORY_PROCESS_KIND, enqueued_at),
+        (
+            user_id,
+            enqueued_at,
+            MEMORY_UPDATE_COMPLETED_EVENT,
+            user_id,
+            MEMORY_PROCESS_KIND,
+            enqueued_at,
+        ),
     ).fetchall()
     return tuple(
         RecentVerdict(

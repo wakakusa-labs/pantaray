@@ -31,6 +31,7 @@ from pantaray_agents.local_runtime.runtime.job_types import (
 )
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     append_memory_category_published_in_connection,
+    append_memory_update_completed_in_connection,
 )
 from pantaray_agents.local_runtime.runtime.memory_update_queue import (
     build_local_memory_update_enqueue_request,
@@ -727,6 +728,27 @@ def _verdict(
     )
 
 
+def _memory_run(
+    connection: sqlite3.Connection, process_id: str, started_at: str
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO processes(
+            process_id, user_id, kind, status, started_at, updated_at,
+            heartbeat_at, next_event_seq
+        ) VALUES (?, ?, 'memory', 'success', ?, ?, ?, 1)
+        """,
+        (process_id, USER_ID, started_at, started_at, started_at),
+    )
+    if process_id != "process-failed":
+        append_memory_update_completed_in_connection(
+            connection=connection,
+            process_id=process_id,
+            published_sources=(),
+            created_at=started_at,
+        )
+
+
 def test_the_run_reads_the_verdicts_judged_since_the_previous_run(
     tmp_path: Path,
 ) -> None:
@@ -740,15 +762,11 @@ def test_the_run_reads_the_verdicts_judged_since_the_previous_run(
             """,
             (NOW, NOW),
         )
-        previous_run = "2026-09-06T00:00:00.000Z"
+        _memory_run(connection, "process-0", "2026-09-06T00:00:00.000Z")
+        # Failed before completing: it showed nothing and moves no boundary.
+        _memory_run(connection, "process-failed", "2026-09-06T12:00:00.000Z")
         connection.execute(
-            """
-            INSERT INTO processes(
-                process_id, user_id, kind, status, started_at, updated_at,
-                heartbeat_at, next_event_seq
-            ) VALUES ('process-0', ?, 'memory', 'completed', ?, ?, ?, 1)
-            """,
-            (USER_ID, previous_run, previous_run, previous_run),
+            "UPDATE processes SET status = 'error' WHERE process_id = 'process-failed'"
         )
         # The previous run's context already showed this one.
         _verdict(
@@ -805,3 +823,29 @@ def test_the_run_reads_the_verdicts_judged_since_the_previous_run(
         "Evidence: action action-9"
     )
     assert "### suggestion" not in context.outcome_verdicts[1:]
+
+
+def test_verdicts_alone_are_evidence_for_the_model(tmp_path: Path) -> None:
+    # The run's other inputs were deleted from history after it was queued.
+    runtime = _runtime(tmp_path)
+    _bootstrap(runtime.db_path)
+    with sqlite3.connect(runtime.db_path) as connection:
+        _verdict(
+            connection,
+            user_id=USER_ID,
+            suggestion_id="s-new",
+            answer="Shall I draft the reply?",
+            judged_at="2026-09-06T00:30:00.000Z",
+        )
+    payload = _payload()
+    payload["short_insight_ids"] = ["insight-deleted"]
+    payload["summary_ids"] = ["summary-deleted"]
+
+    with MemoryRunWorkspaceScope() as scope:
+        prepared = prepare_memory_update_run(
+            runtime=runtime, payload=payload, workspace_scope=scope
+        )
+
+    assert prepared.context.short_term_insights == ""
+    assert prepared.context.activity_summaries == ""
+    assert prepared.has_evidence

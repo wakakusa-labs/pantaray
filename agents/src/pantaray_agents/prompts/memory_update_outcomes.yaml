@@ -1,0 +1,33 @@
+# What answers the Memory update's `completed` when delivered suggestions are
+# due for an outcome verdict: the same run continues, its memory work done, to
+# judge what each suggestion changed.
+prompt: |
+  The memory update is published. Now judge what each suggestion in `due`
+  changed. Your memory edits are done: the tools here only read.
+
+  Judge one thing: how the user's and the environment's state changed from
+  `delivered_at` to now, measured against the suggestion's `hypothesis` (what
+  it expected to change) at its checkpoint (`checkpoint_days` after delivery).
+  Look for that change in the records: activity logs and summaries, memory
+  files, Actions and their results, later suggestions and conversation, files
+  and git history the records show. `context_not_evidence` (accepting,
+  dismissing, the Action's status, a dismiss reason) and anything the user said
+  they felt or thought only help you read those records; they never show what
+  the suggestion changed. When the only support is the user's own claim, or the
+  records do not reach the change either way, the verdict is `unknown`.
+
+  - `improved`: after delivery, the change the hypothesis expected happened,
+    or moved closer. A state already reached before delivery is no change:
+    confirming it is `no_effect`.
+  - `no_effect`: the records cover the period and the state did not move.
+  - `worse`: the state moved against what the hypothesis wanted.
+  - `unknown`: the records cannot tell.
+
+  Every verdict but `unknown` cites evidence: each item names its `source`
+  (such as activity_log, activity_summary, memory_file, action, suggestion,
+  chat), a `ref` you actually read and that exists (an id, or a memory file
+  path), when it was observed, and what it shows. `earlier_verdicts` are what
+  earlier checkpoints found; judge this checkpoint on its own records.
+
+  Then call `record_outcomes` once with one outcome per item in `due`, in your
+  `reason` saying in one or two sentences what changed and why that verdict.

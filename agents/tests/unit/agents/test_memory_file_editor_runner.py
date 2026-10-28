@@ -146,11 +146,11 @@ async def test_a_large_text_is_saved_and_read_on_from_its_hint(tmp_path: Path) -
         _reply(("read_memory", {"path": "facts.md"})), *([read_next] * 8)
     )
 
-    applied = await run_memory_file_editor(
+    ended = await run_memory_file_editor(
         _run_input(tmp_path, send, tools=(_read_tool(large_text),))
     )
 
-    assert applied == ()
+    assert ended.applied_memory_request_ids == ()
     assert "".join(read_back) == large_text
     assert all(large_text not in str(request.conversation) for request in requests)
     tool_names = {tool.name for tool in requests[0].tools}
@@ -183,11 +183,11 @@ async def test_completed_reports_the_requests_applied_after_a_rejected_report(
         _reply(("completed", {"applied_memory_requests": ["R2"]})),
     )
 
-    applied = await run_memory_file_editor(
+    ended = await run_memory_file_editor(
         _run_input(tmp_path, send, memory_request_ids=("R1", "R2"))
     )
 
-    assert applied == ("R2",)
+    assert ended.applied_memory_request_ids == ("R2",)
     completed = next(tool for tool in requests[0].tools if tool.name == "completed")
     assert completed.parameters["required"] == ["applied_memory_requests"]
     asked = requests[1].conversation[-1]

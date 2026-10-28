@@ -10,7 +10,12 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
 )
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
+from pantaray_agents.agents.memory_agent.outcomes import (
+    OUTCOMES_PROMPT_NAME,
+    judge_outcomes,
+)
 from pantaray_agents.agents.memory_file_editor.runner import (
+    MemoryEditorConversation,
     MemoryFileEditorRunInput,
     run_memory_file_editor,
 )
@@ -25,6 +30,10 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     WRITE_FILE_TOOL_NAME,
 )
 from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
+from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
+    DueOutcome,
+    JudgedOutcome,
+)
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
     LIST_ACTION_STEPS_TOOL_NAME,
@@ -44,6 +53,7 @@ from pantaray_agents.tools.memory.retrieval import (
     GET_MEMORY_REFERENCE_TOOL_NAME,
     MEMORY_SEARCH_TOOL_NAME,
 )
+from pantaray_agents.tools.memory.sql_tool import MEMORY_SQL_TOOL_NAME
 from pantaray_agents.utils.prompt_loader import PromptConfig, prompt_loader
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 
@@ -71,6 +81,7 @@ _WHAT_FACTS_HOLD_HEADING = "## What facts hold\n"
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
     applied_memory_request_ids: tuple[str, ...]
+    conversation: MemoryEditorConversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +124,14 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         LIST_ACTION_STEPS_TOOL_NAME,
         SEARCH_ACTION_STEPS_TOOL_NAME,
         HISTORY_FETCH_TOOL_NAME,
+    )
+    # Judging outcomes only reads: memory edits are published by then.
+    OUTCOME_TOOL_IDS = (
+        READ_FILE_TOOL_NAME,
+        SEARCH_FILES_TOOL_NAME,
+        MEMORY_SEARCH_TOOL_NAME,
+        GET_MEMORY_REFERENCE_TOOL_NAME,
+        MEMORY_SQL_TOOL_NAME,
     )
 
     def __init__(
@@ -169,7 +188,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         save_result, read_saved_results = saved_results_for_run(
             tool_results_path=tool_results_path, db_path=db_path
         )
-        applied = await run_memory_file_editor(
+        conversation = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
                 save_result=save_result,
@@ -185,7 +204,30 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
                 memory_request_ids=context.memory_request_ids,
             )
         )
-        return MemoryUpdateAgentResult(applied_memory_request_ids=applied)
+        return MemoryUpdateAgentResult(
+            applied_memory_request_ids=conversation.applied_memory_request_ids,
+            conversation=conversation,
+        )
+
+    async def judge_outcomes(
+        self,
+        conversation: MemoryEditorConversation,
+        due: tuple[DueOutcome, ...],
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        now: str,
+    ) -> tuple[JudgedOutcome, ...]:
+        """Continue the published update to judge what ``due`` changed."""
+
+        return await judge_outcomes(
+            conversation,
+            due,
+            tools=resolve_react_tool_definitions(
+                definitions=tool_definitions, tool_ids=self.OUTCOME_TOOL_IDS
+            ),
+            instruction=prompt_loader.load_config(OUTCOMES_PROMPT_NAME).prompt.strip(),
+            now=now,
+        )
 
     async def consolidate(
         self,

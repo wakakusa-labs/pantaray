@@ -151,10 +151,7 @@ it('offers only selectable Codex models for ChatGPT', () => {
     'gpt-6-luna',
     'gpt-6-astra',
     'gpt-6-sol',
-    'gpt-5.6-sol',
     'gpt-6.1-terra',
-    'gpt-5.6-terra',
-    'gpt-5.6-luna',
     'gpt-5.5',
   ]);
   expect(screen.queryByRole('button', { name: /model/ })).toBeNull();
@@ -202,13 +199,10 @@ it('shows a saved Anthropic model that is no longer offered until another is cho
 });
 
 it('lists every OpenAI model and offers to type another, saved on Enter', async () => {
-  const actions = renderSection({ model: 'gpt-5.6' });
+  const actions = renderSection({ model: 'gpt-6-luna' });
   const picker = screen.getByRole('combobox', MODEL_PICKER);
   expect(optionLabels(picker)).toEqual([
     'gpt-6.1-sol',
-    'gpt-5.6',
-    'gpt-5.6-sol',
-    'gpt-5.6-terra',
     'gpt-6-luna',
     'settings.aiConnection.modelOther',
   ]);

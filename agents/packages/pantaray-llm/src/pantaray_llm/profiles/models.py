@@ -48,6 +48,8 @@ MODEL_CATALOG = {
             for model in (
                 "gpt-6.1-sol",
                 "gpt-6-luna",
+                # No longer offered in settings, but still served, and a saved
+                # connection may name them.
                 "gpt-5.6-terra",
                 "gpt-5.6-sol",
                 "gpt-5.6",
@@ -62,11 +64,13 @@ MODEL_CATALOG = {
                 "gpt-6-astra",
                 "gpt-6.1-sol",
                 "gpt-6-sol",
-                "gpt-5.6-sol",
                 "gpt-6.1-terra",
+                "gpt-5.5",
+                # No longer offered in settings, but still served, and a saved
+                # connection may name them.
+                "gpt-5.6-sol",
                 "gpt-5.6-terra",
                 "gpt-5.6-luna",
-                "gpt-5.5",
             )
         ),
         *(

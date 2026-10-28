@@ -364,7 +364,7 @@ export type ScreenCaptureRequestedEvent = OrchestrationEventEnvelope<
 export type HtmlRenderRequestedEvent = OrchestrationEventEnvelope<
   'html_render_requested',
   {
-    kind: 'action';
+    kind: 'action' | 'suggestion';
     process_id: string;
     action_id: string;
     tool_request_id: string;

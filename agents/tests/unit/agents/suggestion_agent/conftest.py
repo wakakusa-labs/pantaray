@@ -14,6 +14,7 @@ from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionStableMemoryContext,
 )
+from pantaray_agents.agents.suggestion_agent.make import MAKE_STAGE_TOOL_IDS
 from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_TOOL_IDS
 from pantaray_agents.agents.suggestion_agent.research import (
     FixedSuggestionResearchTools,
@@ -98,7 +99,7 @@ def mock_llm_client() -> MockLLMClient:
 @pytest.fixture
 def fixed_suggestion_research_tools(tmp_path) -> FixedSuggestionResearchTools:
     definitions = tuple(_research_tool(tool_id) for tool_id in SUGGESTION_TOOL_IDS)
-    make = (*definitions, _research_tool("apply_patch"))
+    make = tuple(_research_tool(tool_id) for tool_id in MAKE_STAGE_TOOL_IDS)
     return FixedSuggestionResearchTools(
         definitions, SuggestionMakeTools(make, tmp_path / "artifacts")
     )

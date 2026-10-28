@@ -30,7 +30,7 @@ from pantaray_agents.conversation.window import (
     lay_out,
 )
 from pantaray_agents.local_runtime.llm_proxy.request_builder import build_llm_request
-from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
+from pantaray_agents.tools.files.read_only_tools import read_only_file_tools
 from pantaray_agents.utils.llm_types import types
 from pantaray_llm.contracts.action_turn import (
     LlmActionTurnRequest,
@@ -76,13 +76,13 @@ async def _run(tmp_path: Path, *, omit_before: int) -> list[ConversationRequest]
     folder = (tmp_path / "home").resolve()
     folder.mkdir()
     (folder / "chart.png").write_bytes(PIXEL_PNG)
-    tools = build_read_only_file_tools(
+    tools = read_only_file_tools(
         db_path=tmp_path / "runtime.sqlite3",
         folders=(folder,),
         read_access_scope="workspace",
         app_storage_roots=(),
         spill_root=tmp_path / "spill",
-    )
+    ).definitions()
     read = LlmToolCall(
         call_id="c1", name="read", arguments={"path": str(folder / "chart.png")}
     )

@@ -97,6 +97,7 @@ def html_render_broker() -> OneShotRequests[HtmlRenderAnswer]:
 async def request_html_render(
     *,
     user_id: str,
+    kind: Literal["action", "suggestion"],
     action_id: str,
     process_id: str,
     tool_request_id: str,
@@ -121,7 +122,7 @@ async def request_html_render(
         await deliver_desktop_request(
             user_id,
             HtmlRenderRequestedMessage(
-                kind="action",
+                kind=kind,
                 process_id=process_id,
                 action_id=action_id,
                 tool_request_id=tool_request_id,

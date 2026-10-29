@@ -29,8 +29,9 @@ OUTCOME_CHECKPOINT_DAYS = (1, 7, 30)
 OUTCOME_WINDOW_DAYS = 45
 # Design limit: one run looks back on at most this many, earliest checkpoint
 # first, so the look-back stays a small part of the update. An item beyond the
-# cap is not revisited at that checkpoint; raise the cap when runs regularly
-# have more due than this.
+# cap, or in a look-back that failed (logged), is not revisited at that
+# checkpoint; raise the cap when runs regularly have more due than this, and
+# carry failed items over when MEMORY_OUTCOMES_LOOK_BACK_FAILED recurs.
 MAX_OUTCOMES_PER_RUN = 5
 # A hypothesis section a suggestion's summary opens; older ones have none.
 _HYPOTHESIS_HEADING = "### Hypothesis"

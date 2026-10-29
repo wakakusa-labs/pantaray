@@ -149,6 +149,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0131_suggestion_artifacts.sql",
         "0132_memory_search_indexes.sql",
         "0133_suggestion_outcome_verdicts.sql",
+        "0134_drop_suggestion_outcome_verdicts.sql",
     )
     return tuple(
         MigrationSpec(

@@ -7,7 +7,6 @@ import sqlite3
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
     DismissedSuggestion,
 )
-from pantaray_agents.local_runtime.runtime.suggestion_outcomes import RecentVerdict
 from pantaray_agents.local_runtime.storage.chat_messages import ChatMessage
 from pantaray_agents.utils.local_time import describe_utc_timestamp, local_period
 
@@ -107,28 +106,9 @@ def render_activity_summaries(
     )
 
 
-def render_outcome_verdicts(verdicts: tuple[RecentVerdict, ...]) -> str:
-    entries: list[str] = []
-    for item in verdicts:
-        verdict = item.verdict
-        refs = ", ".join(
-            f"{evidence['source']} {evidence['ref']}" for evidence in verdict.evidence
-        )
-        entries.append(
-            f"### suggestion {item.suggestion_id}: {verdict.verdict} "
-            f"{verdict.checkpoint_days} days after delivery "
-            f"(judged {describe_utc_timestamp(verdict.judged_at)})\n"
-            f"{item.message}\n\n"
-            f"Reason: {verdict.reason}\n"
-            f"Evidence: {refs or 'none'}"
-        )
-    return "\n\n".join(entries)
-
-
 __all__ = [
     "render_activity_summaries",
     "render_chat_messages",
     "render_dismissed_suggestions",
-    "render_outcome_verdicts",
     "render_short_insights",
 ]

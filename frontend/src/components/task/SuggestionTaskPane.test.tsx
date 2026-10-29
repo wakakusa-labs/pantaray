@@ -373,7 +373,7 @@ describe('SuggestionTaskPane', () => {
         processId: 'run-1',
       })
     );
-    expect(onStarted).toHaveBeenCalledWith('act-1');
+    expect(onStarted).toHaveBeenCalledWith('act-1', null);
     expect(onStarted).toHaveBeenCalledTimes(1);
   });
 
@@ -570,7 +570,7 @@ describe('SuggestionTaskPane', () => {
         },
       })
     );
-    expect(onStarted).toHaveBeenCalledWith('act-reply');
+    expect(onStarted).toHaveBeenCalledWith('act-reply', null);
   });
 
   it('answers a dismissed suggestion with a reply that starts a new Action', async () => {
@@ -624,7 +624,7 @@ describe('SuggestionTaskPane', () => {
         },
       })
     );
-    expect(onStarted).toHaveBeenCalledWith('act-reply');
+    expect(onStarted).toHaveBeenCalledWith('act-reply', null);
   });
 
   it('hands over to the reply the other window sent for a dismissed suggestion', async () => {
@@ -634,7 +634,7 @@ describe('SuggestionTaskPane', () => {
 
     await publish(suggestion({ reactionState: 'rejected', actionId: 'act-reply' }));
 
-    expect(onStarted).toHaveBeenCalledWith('act-reply');
+    expect(onStarted).toHaveBeenCalledWith('act-reply', null);
     expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
   });
 
@@ -646,7 +646,7 @@ describe('SuggestionTaskPane', () => {
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Also this' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
 
-    expect(onStarted).toHaveBeenCalledWith('act-existing');
+    expect(onStarted).toHaveBeenCalledWith('act-existing', null);
   });
 
   it('hands over at once when the suggestion already has an Action', async () => {
@@ -655,7 +655,7 @@ describe('SuggestionTaskPane', () => {
     );
     await renderPane();
 
-    expect(onStarted).toHaveBeenCalledWith('act-9');
+    expect(onStarted).toHaveBeenCalledWith('act-9', null);
     // No decision is offered; only the header's buttons remain.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
@@ -711,6 +711,20 @@ describe('SuggestionTaskPane', () => {
         'aria-pressed',
         'true'
       );
+    });
+
+    it('hands the open file over to the Action that takes the pane over', async () => {
+      read.mockResolvedValue(suggestion({ artifacts: ['drafts/reply.md'] }));
+      await renderPane();
+      fireEvent.click(within(filesGroup()!).getByRole('button', { name: /reply\.md/ }));
+      expect(await screen.findByRole('heading', { name: 'reply.md' })).toBeInTheDocument();
+
+      await publish(suggestion({ artifacts: ['drafts/reply.md'], actionId: 'act-1' }));
+
+      expect(onStarted).toHaveBeenCalledWith('act-1', {
+        target: { kind: 'suggestion', id: 'sug-1' },
+        file: { path: 'drafts/reply.md', name: 'reply.md', kind: 'markdown', label: 'MD' },
+      });
     });
 
     it('opens the preview of the file an Overlay chip asked for', async () => {

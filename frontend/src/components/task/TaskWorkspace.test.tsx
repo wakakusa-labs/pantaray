@@ -281,6 +281,29 @@ describe('TaskWorkspace', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('keeps open the file its suggestion had open, read from the suggestion', async () => {
+    read.mockResolvedValue({ kind: 'text', text: '# Reply', truncated: false });
+    render(
+      <UiLanguageProvider initialLanguage="ja">
+        <TaskWorkspace
+          actionId="act-1"
+          title="見積書を作り直す"
+          initialPreview={{
+            target: { kind: 'suggestion', id: 'sug-1' },
+            file: { path: 'drafts/reply.md', name: 'reply.md', kind: 'markdown', label: 'MD' },
+          }}
+          onAddProject={() => {}}
+        />
+      </UiLanguageProvider>
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Reply' })).toBeInTheDocument();
+    expect(read).toHaveBeenCalledWith({
+      target: { kind: 'suggestion', id: 'sug-1' },
+      path: 'drafts/reply.md',
+    });
+  });
+
   it('opens a file an answer links in the preview, as its chip does', async () => {
     read.mockResolvedValue({ kind: 'text', text: '# 送付メール', truncated: false });
     await renderFinishedTask();

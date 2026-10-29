@@ -101,13 +101,20 @@ const SuggestionHistoryPage = () => {
   const sidebarToggleLabel = t(sidebarHidden ? 'history.sidebar.show' : 'history.sidebar.hide');
 
   // The file open beside a suggestion stays open in the Action that takes the pane over from it.
-  // Selecting anything drops it, so the Action shown again later opens as the user left it.
+  // Showing anything else drops it, however the address changed, so the Action shown again
+  // later opens as the user left it.
   const [handedPreview, setHandedPreview] = useState<{
+    from: HistorySelection;
     actionId: string;
     preview: TaskPreview;
   } | null>(null);
-  const select = (next: HistorySelection, options?: { replace: true }) => {
+  if (
+    handedPreview &&
+    selection !== handedPreview.from &&
+    selection !== `action:${handedPreview.actionId}`
+  )
     setHandedPreview(null);
+  const select = (next: HistorySelection, options?: { replace: true }) => {
     // The chat already shown goes back to its newest message instead.
     if (next === 'chat' && selection === 'chat') {
       chatView.current?.showNewest();
@@ -174,7 +181,7 @@ const SuggestionHistoryPage = () => {
         requestedFile={requestedFile}
         onStarted={(actionId, preview) => {
           select(`action:${actionId}`, { replace: true });
-          if (preview) setHandedPreview({ actionId, preview });
+          if (preview) setHandedPreview({ from: selection, actionId, preview });
         }}
         onAddProject={addProject}
       />

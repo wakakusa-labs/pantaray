@@ -187,6 +187,9 @@ function LocationProbe() {
       <button type="button" onClick={() => navigate(-1)}>
         back
       </button>
+      <button type="button" onClick={() => navigate(1)}>
+        forward
+      </button>
     </>
   );
 }
@@ -294,6 +297,20 @@ it('keeps the file open beside a suggestion open in its Action, until the select
   // Shown again later, the Action opens as the user left it.
   await userEvent.click(await screen.findByRole('button', { name: /^見積書を直す/ }));
   await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
+});
+
+it('drops the handed-over file when the address moves away without a selection', async () => {
+  renderPage(['/history?item=chat', '/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=chat');
+  await userEvent.click(screen.getByRole('button', { name: 'forward' }));
   expect(location()).toHaveTextContent('/history?item=action:A9');
   expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
 });

@@ -22,6 +22,7 @@ from pydantic import BaseModel, ValidationError
 from pantaray_agents.local_runtime.tooling.documents import (
     MAX_RENDERED_PAGES,
     RENDERED_PAGE_MEDIA_TYPE,
+    RENDERED_PAGE_SUFFIX,
     RenderedPage,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
@@ -440,7 +441,7 @@ class ReadOnlyFileTools:
         for page in pages:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
-            name = f"page-{page.number}-{attachment_id}.png"
+            name = f"page-{page.number}-{attachment_id}{RENDERED_PAGE_SUFFIX}"
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
